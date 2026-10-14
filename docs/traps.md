@@ -16062,11 +16062,33 @@ draws each sheet's window over the activity's, the runner deletes the leg's
 verb trace before launch, and a Compose expect_safe failure ends with `the
 pan:` (the field, the room, the pan, the sheet's content top, handle and
 SheetState offset); the ring alone is not enough, since the step's own retries
-overran it (626 dropped on the forced red). The SwiftUI pan has the same bottom-
-only aim and strict dead zone (swift/KayaSwiftUI.swift kayaPanEvaluate) and no
-reading of it has been taken. GUARD: tools/lib/safearea_routes.py, "Compose's
-pan brings a field that fits back below its room's top" and "Compose's
-expect_safe failure names the pan's inputs"; tools/check-flightrec.py NA5, NA6.
+overran it (626 dropped on the forced red). The SwiftUI pan (swift/KayaSwiftUI.swift
+kayaPanEvaluate) had the same bottom-only aim and strict dead zone, measured its
+room from the status bar rather than the root's clipped top, and was read only
+0.35 s and 0.7 s after a keyboard or focus notification, so a layout that moved
+later went unread: a forced late move (the autofill form's content 24 pt down
+1.6 s after the second field's focus) was red on both autofillkeyboard legs
+(`entry@note is covered by the keyboard`) and green with the fix. It now takes
+its room from the root's top, re-aims a field that fits and sits above that top
+whatever the dead zone says (to its top if the bottom's aim would leave it
+above), and is re-read after any recorded frame moves while a keyboard is up,
+with no clock. A first draft re-read it on the main queue's next turn and ran
+away on autofillkeyboardland once in 30 legs: three evaluations within 10 ms
+read the field at the same frame and took the pan 0 -> 291 -> 583 -> 874, the
+field 458 pt above the window (`the pan:` named it). The UITextField's frame
+answers a pan several run-loop turns after SwiftUI's geometry does, even read
+from an observer ordered after Core Animation's commit (up to nine turns
+measured), so the pan now remembers the field's top it was aimed from and is
+not re-read until the field has moved off it; a move inside the dead zone that
+leaves a field above its room cannot be reached by any iOS scene today (the pan
+engages only on the autofill form, whose panned field sits 75 pt and more below
+its room's top), so that half is held by the route alone. A SwiftUI expect_safe
+failure also ends with `the pan:`, and each pan move is in the verb trace.
+GUARD: tools/lib/safearea_routes.py, "Compose's pan brings a field that fits
+back below its room's top", "Compose's expect_safe failure names the pan's
+inputs", the pan block's `above` clause, "the pan's room", "the pan's queue",
+the three readers re-reading the pan and "SwiftUI's expect_safe failure names
+the pan's inputs"; tools/check-flightrec.py NA5, NA6.
 
 ## A Compose effect keyed on a node's fields, not the node, misses a restamped row (measured 2026-10-13)
 

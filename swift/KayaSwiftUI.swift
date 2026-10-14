@@ -9514,7 +9514,7 @@ private func kayaRunScript(_ script: String) {
                 } else if let gotSafe = safeRead.word {
                     failures.append("\(parts[1]) reads \(gotSafe), wanted \(wantSafe): \(safeRead.why)")
                 } else {
-                    failures.append(safeRead.why)
+                    failures.append(safeRead.why + (DispatchQueue.main.sync { kayaPanReading() } ?? ""))
                 }
             case "expect_insets":
                 // harness.rs Step::ExpectInsets.
@@ -14104,6 +14104,7 @@ private struct KayaTrackReader: View {
     private func apply(_ size: CGSize, _ frame: CGRect) {
         kayaTrackSizes[id] = size
         kayaNodeFrames[id] = frame
+        kayaFrameMoved()
         kayaMainExtents[id] = Double(vertical ? size.height : size.width)
         if let tableGeneration {
             kayaTableTrackSizes[id] = KayaTableTrackObservation(
@@ -14241,6 +14242,7 @@ private struct KayaCellReader: View {
         kayaDrawnExtents[id] = Double(vertical ? frame.height : frame.width)
         kayaNodeFrames[id] = global
         kayaDrainRowScrolls()
+        kayaFrameMoved()
     }
 }
 
@@ -21504,7 +21506,10 @@ struct KayaRootFrameReader: View {
         GeometryReader { geo in
             Color.clear
                 .onAppear { kayaRootFrames[id] = geo.frame(in: .global) }
-                .onChange(of: geo.frame(in: .global)) { _, f in kayaRootFrames[id] = f }
+                .onChange(of: geo.frame(in: .global)) { _, f in
+                    kayaRootFrames[id] = f
+                    kayaFrameMoved()
+                }
         }
     }
 }
@@ -21628,6 +21633,8 @@ struct KayaRootFrameReader: View {
     /// No software keyboard on this platform (docs/safe-area-plan.md A13).
     @MainActor func kayaKeyboardInWindow() -> CGRect? { nil }
     @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? { nil }
+    @MainActor func kayaFrameMoved() {}
+    @MainActor func kayaPanReading() -> String? { nil }
 #else
     /// The software keyboard's end frame in screen space, from UIKit's own
     /// notification; zero while none is up.
@@ -21638,6 +21645,7 @@ struct KayaRootFrameReader: View {
     @MainActor func kayaWatchKeyboard() {
         guard !kayaKeyboardWatching else { return }
         kayaKeyboardWatching = true
+        kayaPanAfterCommit()
         let center = NotificationCenter.default
         center.addObserver(
             forName: UIResponder.keyboardWillChangeFrameNotification, object: nil, queue: .main
@@ -21671,12 +21679,36 @@ struct KayaRootFrameReader: View {
         return hit.isNull || hit.height <= 0 ? nil : hit
     }
 
-    /// The pan is re-read after the keyboard's animation and SwiftUI's own
-    /// scroll to the focused field have settled.
+    @MainActor private var kayaPanQueued = false
+    @MainActor private var kayaPanAimed: (pan: CGFloat, fieldTop: CGFloat)?
+
+    /// The pan is re-read after anything it reads moved (the keyboard, the
+    /// focus, a laid-out frame), once Core Animation has committed the turn's
+    /// layout, and never while the field still sits where it was read before
+    /// the last pan (docs/traps.md, the quick-add field panned above its
+    /// sheet's top).
     @MainActor func kayaKeyboardMoved() {
-        for delay in [0.35, 0.7] {
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { kayaPanEvaluate() }
+        kayaPanQueued = true
+        CFRunLoopWakeUp(CFRunLoopGetMain())
+    }
+
+    @MainActor func kayaPanAfterCommit() {
+        let observer = CFRunLoopObserverCreateWithHandler(
+            nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_001_100
+        ) { _, _ in
+            MainActor.assumeIsolated {
+                guard kayaPanQueued else { return }
+                kayaPanQueued = false
+                kayaPanEvaluate()
+            }
         }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+    }
+
+    /// A recorded frame moved after its layout (docs/traps.md, the quick-add
+    /// field panned above its sheet's top).
+    @MainActor func kayaFrameMoved() {
+        if kayaKeyboardScreenFrame.height > 0 || !kayaScene.keyboardPan.isEmpty { kayaKeyboardMoved() }
     }
 
     /// The focused text control, its frame and its caret line in window space.
@@ -21748,7 +21780,8 @@ struct KayaRootFrameReader: View {
         }
         kayaRevealInScroll(rects.view, above: keyboard, in: rects.window)
         let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
-        let room = keyboard.minY - rects.window.safeAreaInsets.top
+        let roomTop = kayaPanRoomTop(root, rects.window)
+        let room = keyboard.minY - roomTop
         let margin: CGFloat = 8
         // A20: a focused textarea shrinks to the room above the keyboard, down
         // to one line, and scrolls its own text.
@@ -21767,15 +21800,47 @@ struct KayaRootFrameReader: View {
         let target = rects.field.height <= room ? rects.field : rects.caret
         let covered = target.maxY - keyboard.minY
         let current = kayaScene.keyboardPan[root] ?? 0
+        if let aimed = kayaPanAimed, abs(aimed.pan - current) < 0.5, abs(aimed.fieldTop - rects.field.minY) < 0.5 {
+            kayaPanQueued = true
+            return
+        }
+        kayaPanAimed = nil
         var next = current
+        let above = rects.field.height <= room && rects.field.minY < roomTop - 0.5
         if covered > 0.5 {
             next = current + covered + margin
+        } else if current > 0, above {
+            next = max(0, current + min(covered + margin, rects.field.minY - roomTop))
         } else if current > 0, covered < -2 * margin {
             next = max(0, current + covered + margin)
         }
         if abs(next - current) > 0.5 {
+            KayaVTrace.attempt(
+                "pan", 0, "pan \(Int(current)) -> \(Int(next))\(above ? " (the field's top above its room)" : ""): "
+                    + kayaPanInputs(root, rects.field, roomTop, keyboard.minY))
             kayaScene.keyboardPan = [root: next]
+            kayaPanAimed = (next, rects.field.minY)
+            CFRunLoopWakeUp(CFRunLoopGetMain())
         }
+    }
+
+    /// The top of the room the focused field's root leaves it: below the
+    /// status bar and the root's own top, where its pan is clipped.
+    @MainActor func kayaPanRoomTop(_ root: UInt64, _ window: UIWindow) -> CGFloat {
+        max(window.safeAreaInsets.top, kayaRootFrames[root]?.minY ?? 0)
+    }
+
+    @MainActor func kayaPanInputs(_ root: UInt64, _ field: CGRect, _ roomTop: CGFloat, _ keyboardTop: CGFloat) -> String {
+        "field \(kayaScene.focusedId.map { "\($0)" } ?? "none") frame \(kayaRectText(field)), room "
+            + "\(Int(roomTop))..\(Int(keyboardTop)), pan \(Int(kayaScene.keyboardPan[root] ?? 0)) on root \(root), "
+            + "root frame \(kayaRootFrames[root].map(kayaRectText) ?? "unrecorded")"
+    }
+
+    /// The focused field's pan inputs, for an expect_safe failure.
+    @MainActor func kayaPanReading() -> String? {
+        guard let keyboard = kayaKeyboardInWindow(), let rects = kayaFocusedFieldRects() else { return nil }
+        let root = kayaScene.focusedId.map(kayaRootOf) ?? kayaScene.root?.id ?? 0
+        return "; the pan: " + kayaPanInputs(root, rects.field, kayaPanRoomTop(root, rects.window), keyboard.minY)
     }
 
     /// A9's wall (docs/safe-area-plan.md): after a key reached a focused text
