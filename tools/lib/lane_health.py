@@ -347,6 +347,330 @@ def mac_report(lane, when):
     host, ms = host_line()
     say(lane, when, host)
     say(lane, when, f"the reading took {ms} ms")
+    t0 = time.monotonic()
+    if when == "start":
+        MAC_APPS.root = pathlib.Path(__file__).resolve().parents[2]
+        say(lane, when, MAC_APPS.start())
+    else:
+        for sentence in MAC_APPS.end():
+            say(lane, when, sentence)
+    say(lane, when, f"the app reading took {int((time.monotonic() - t0) * 1000)} ms")
+
+
+# ------------------------------------------- applications that appear on the host
+
+# docs/traps.md, the Preview a Go guest's checkin relaunched: an app no lane
+# code launches came up mid-lane and nothing recorded it.
+APP_TYPES = ("Foreground", "UIElement")
+APP_HEAD = re.compile(r'^\s*\d+\) "(.*)" (ASN:\S+?):?\s*$')
+# (label, how the executable is matched, the lane file that launches it, the
+# text there that launches it). check-flightrec holds each text to its file.
+LANE_APPS = (
+    ("a binary built in the tree", "under-root", "",
+     "tools/lib/lanes/mac.py", "def leg_argv(scene, lang, hs_bin):"),
+    ("python3", "name", r"[Pp]ython(?:3(?:\.\d+)?)?",
+     "tools/lib/lanes/mac.py", 'return ["python3", f"guests/python/{stem}.py"]'),
+    ("node", "name", r"node",
+     "tools/lib/lanes/mac.py", 'return ["node", f"guests/js/{stem}.ts"]'),
+    ("dotnet", "name", r"dotnet",
+     "tools/lib/lanes/mac.py", 'return ["dotnet", "exec", CS_GUEST]'),
+    ("java", "name", r"java",
+     "tools/lib/lanes/mac.py", 'return ["java", "-XstartOnFirstThread", "-cp",'),
+)
+LANE_BUNDLE = re.compile(r"dev\.kaya(?:\.|$)")
+BUNDLE_ID = re.compile(r"^[A-Za-z0-9_.\-]+$")
+LOG_LINE = re.compile(r"^\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d\.\d+) \S+ +(.+?)\[(\d+):[0-9a-f]+\] "
+                      r"(?:\[[^\]]*\] )?(.*)$")
+
+
+def apps_text():
+    return _run(["lsappinfo", "list"], timeout=10)
+
+
+def _local_epoch(text):
+    try:
+        return time.mktime(time.strptime(text, "%Y/%m/%d %H:%M:%S"))
+    except ValueError:
+        return None
+
+
+def parse_apps(text):
+    """lsappinfo list's records: name, asn, bundle, exe, pid, type, parent,
+    when (launch time, else checkin time) and its spelling."""
+    apps, cur = [], None
+    for line in text.splitlines():
+        m = APP_HEAD.match(line)
+        if m:
+            cur = {"name": m.group(1), "asn": m.group(2).rstrip(":"), "bundle": None,
+                   "exe": "", "pid": None, "type": "", "parent": "",
+                   "when": None, "stamp": ""}
+            apps.append(cur)
+            continue
+        if cur is None:
+            continue
+        s = line.strip()
+        if s.startswith("bundleID="):
+            b = re.match(r'bundleID="(.*)"', s)
+            cur["bundle"] = b.group(1) if b else None
+        elif s.startswith("executable path="):
+            cur["exe"] = s[len('executable path="'):-1] if s.endswith('"') else ""
+        elif s.startswith("pid = "):
+            p = re.match(r"pid = (\d+)", s)
+            t = re.search(r'type="(\w+)"', s)
+            cur["pid"] = int(p.group(1)) if p else None
+            cur["type"] = t.group(1) if t else ""
+        elif s.startswith("parentASN="):
+            p = re.match(r'parentASN="(.*?)" (ASN:\S+?):?\s*(\(inferred\))?$', s)
+            if p:
+                cur["parent"] = p.group(1) + (" (inferred)" if p.group(3) else "")
+        elif s.startswith(("launch time =", "checkin time =")):
+            w = re.search(r"(\d{4}/\d\d/\d\d \d\d:\d\d:\d\d)", s)
+            if w and (s.startswith("launch") or cur["when"] is None):
+                cur["when"], cur["stamp"] = _local_epoch(w.group(1)), w.group(1)
+    return [a for a in apps if a["pid"] is not None]
+
+
+def lane_owner(app, root):
+    """The LANE_APPS label owning this executable, or None."""
+    exe = app["exe"]
+    for label, how, pattern, _rel, _needle in LANE_APPS:
+        if how == "under-root":
+            if root and exe.startswith(str(root).rstrip("/") + "/"):
+                return label
+        elif re.fullmatch(pattern, pathlib.PurePosixPath(exe).name):
+            return label
+    return None
+
+
+def legs_at(legs, t):
+    """Legs whose [began, ended] holds the whole second t (lsappinfo's
+    resolution); a leg still running has ended None."""
+    return [name for name, began, ended in legs
+            if began < t + 1 and (ended is None or ended >= t)]
+
+
+def requester_predicate(bundle):
+    return (f'(process == "runningboardd" AND eventMessage CONTAINS "LS launch {bundle}") '
+            f'OR (process == "talagentd" AND eventMessage CONTAINS "{bundle}") '
+            f'OR (process == "launchservicesd" AND eventMessage CONTAINS "CHECKIN:" '
+            f'AND eventMessage CONTAINS "{bundle}") '
+            f'OR (process == "WindowServer" AND eventMessage CONTAINS "STUB process") '
+            f'OR eventMessage BEGINSWITH "CHECKIN: pid="')
+
+
+REQUESTER_BEFORE, REQUESTER_AFTER = 5, 2
+
+
+def requester_log(bundle, t):
+    span = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(x))
+            for x in (t - REQUESTER_BEFORE, t + REQUESTER_AFTER)]
+    return _run(["/usr/bin/log", "show", "--style", "compact", "--start", span[0],
+                 "--end", span[1], "--predicate", requester_predicate(bundle)], timeout=60)
+
+
+def requester_clauses(text, bundle, name, pid):
+    """What the unified log says asked for this app, one clause per line read."""
+    names, out = {}, []
+    rows = [m.groups() for m in map(LOG_LINE.match, text.splitlines()) if m]
+    for _at, proc, ppid, _msg in rows:
+        names.setdefault(ppid, proc)
+    for at, proc, _ppid, msg in rows:
+        if proc == "runningboardd":
+            m = re.search(r'from originator \[(.+?)\] with description '
+                          r'<RBSAssertionDescriptor\| "LS launch ' + re.escape(bundle) + '"', msg)
+            if m:
+                out.append(f"LaunchServices launched it at {at} for {m.group(1)}")
+        elif proc == "talagentd" and bundle in msg:
+            out.append(f"talagentd at {at}: {msg.lstrip('- ').strip()}")
+        elif proc == "launchservicesd":
+            m = re.search(r"CHECKIN:(\S+) (\d+) " + re.escape(bundle) + r"\b", msg)
+            if m and int(m.group(2)) != pid:
+                who = names.get(m.group(2), "a process the log names nowhere else")
+                out.append(f"pid {m.group(2)} ({who}) checked in under {bundle}'s ASN "
+                           f"{m.group(1)} at {at}")
+        elif proc == "WindowServer":
+            m = re.search(r"STUB process (\S+) \((.+?)\) is migrating to real process.*?"
+                          r"updating pid 0 -> (\d+)", msg)
+            if m and (m.group(2) == name or int(m.group(3)) == pid):
+                who = names.get(m.group(3), "a process the log names nowhere else")
+                out.append(f"WindowServer moved {m.group(2)}'s stub {m.group(1)} to pid "
+                           f"{m.group(3)} ({who}) at {at}")
+    return out
+
+
+def requester_sentence(app, text, problem):
+    bundle = app["bundle"]
+    if not bundle:
+        return "no bundle id, so the log was not asked for a requester"
+    if not BUNDLE_ID.match(bundle):
+        return f"bundle id {bundle!r} cannot be spelled in a log predicate; the log was not asked"
+    if problem:
+        return f"the unified log could not be read ({problem})"
+    found = requester_clauses(text, bundle, app["name"], app["pid"])
+    if not found:
+        return (f"the unified log names no requester (runningboardd's LS launch, talagentd, "
+                f"launchservicesd's checkins and WindowServer's stub moves, read "
+                f"{REQUESTER_BEFORE}s before to {REQUESTER_AFTER}s after the launch)")
+    return "the log: " + "; ".join(found)
+
+
+def window_sentence(pid, text, problem):
+    if problem:
+        return f"its windows unreadable ({problem})"
+    own = [m for m in (re.match(r"win=\d+ pid=(\d+) layer=(-?\d+) bounds=(\S+) app=\".*\" "
+                                r"title=(.*)$", ln) for ln in text.splitlines())
+           if m and int(m.group(1)) == pid]
+    if not own:
+        tail = [ln for ln in text.splitlines() if ln.startswith("flightrec-winlist:")]
+        return (f"no window of its own on screen when first seen "
+                f"({tail[-1] if tail else 'the window list printed no count'})")
+    shown = ", ".join(f"layer {m.group(2)} {m.group(4)} at {m.group(3)}" for m in own[:4])
+    return f"{len(own)} window(s) of its own on screen when first seen: {shown}"
+
+
+def parent_sentence(pid, text, problem):
+    if problem:
+        return f"its parent process unreadable ({problem})"
+    rows = {r["pid"]: r for r in parse_ps(text)}
+    me = rows.get(pid)
+    if me is None:
+        return "gone before its parent process could be read"
+    up = rows.get(me["ppid"])
+    return f"parent process {up['name'] if up else 'unlisted'} (pid {me['ppid']})"
+
+
+def _windows(pid, root):
+    import flightrec_lane
+    binp = flightrec_lane.winlist_bin(root)
+    if not binp:
+        return "", "tools/mac/flightrec-winlist.swift would not build"
+    return _run([binp, str(pid)], timeout=20)
+
+
+class MacApps:
+    """The GUI applications that appear on the mac host while the lane runs.
+
+    Read at the lane's start, after every leg and at its end; every reader
+    is an argument so selftest drives each sentence from doctored text."""
+
+    def __init__(self, read=apps_text, log=requester_log, windows=_windows,
+                 ps=host_ps_text, clock=time.time):
+        self.read, self.log, self.windows, self.ps, self.clock = read, log, windows, ps, clock
+        self.root = None
+        self.lock = threading.Lock()
+        self.base = None
+        self.base_problem = ""
+        self.began = None
+        self.legs = []
+        self.seen = {}
+        self.excluded = {}
+        self.readings = 0
+        self.failed = []
+
+    def start(self):
+        self.began = self.clock()
+        text, problem = self.read()
+        self.readings = 1
+        if problem:
+            self.base_problem = problem
+            return f"app list unreadable at the lane's start ({problem}); no app can be called new"
+        apps = [a for a in parse_apps(text) if a["type"] in APP_TYPES]
+        self.base = {a["pid"] for a in apps}
+        return f"{len(apps)} GUI applications running at the lane's start (lsappinfo)"
+
+    def leg_began(self, name):
+        entry = [name, self.clock(), None]
+        with self.lock:
+            self.legs.append(entry)
+        return entry
+
+    def leg_ended(self, entry):
+        entry[2] = self.clock()
+        self.sample(f"after {entry[0]}")
+
+    def sample(self, where):
+        if self.base is None:
+            return set()
+        text, problem = self.read()
+        with self.lock:
+            self.readings += 1
+            if problem:
+                self.failed.append(f"{where}: {problem}")
+                return set()
+        now = set()
+        for app in parse_apps(text):
+            if app["type"] not in APP_TYPES:
+                continue
+            now.add(app["pid"])
+            if app["pid"] in self.base or (app["when"] is not None
+                                           and app["when"] < self.began - 1):
+                continue
+            with self.lock:
+                if app["pid"] in self.seen or app["pid"] in self.excluded:
+                    continue
+            owner = lane_owner(app, self.root)
+            if owner and (not app["bundle"] or LANE_BUNDLE.match(app["bundle"])):
+                with self.lock:
+                    self.excluded[app["pid"]] = owner
+                continue
+            first = {"app": app, "owner": owner, "where": where}
+            first["windows"] = window_sentence(app["pid"], *self.windows(app["pid"], self.root))
+            first["parent"] = parent_sentence(app["pid"], *self.ps())
+            with self.lock:
+                self.seen.setdefault(app["pid"], first)
+        return now
+
+    def end(self):
+        if self.base is None:
+            return [f"app list unreadable at the lane's start ({self.base_problem}); "
+                    f"no app appearing during the lane can be named"]
+        alive = self.sample("at the lane's end")
+        out = []
+        for pid, first in sorted(self.seen.items()):
+            out.append(self.sentence(first, pid in alive))
+        counts = {}
+        for label in self.excluded.values():
+            counts[label] = counts.get(label, 0) + 1
+        kept = (", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
+                if counts else "none")
+        head = (f"{len(self.seen)} GUI application(s) appeared during the lane"
+                if self.seen else "no GUI application appeared during the lane")
+        tail = ""
+        if self.failed:
+            tail = (f"; the app list was unreadable at {len(self.failed)} of them "
+                    f"(first: {self.failed[0]})")
+        out.append(f"{head} ({self.readings} readings across {len(self.legs)} legs; the "
+                   f"lane's own apps excluded by name: {kept}){tail}")
+        return out
+
+    def sentence(self, first, alive):
+        app = first["app"]
+        t = app["when"]
+        if t is None:
+            when, during = "at a time lsappinfo did not give,", "so the legs running then are unknown"
+        else:
+            running = legs_at(self.legs, t)
+            when = f"launched {app['stamp']}"
+            during = (f"while {', '.join(running)} ran" if running
+                      else "while no leg of this lane was running")
+        owner = (f"; its executable is the lane's own ({first['owner']}) but it checked "
+                 f"in as {app['bundle']}" if first["owner"] else "")
+        parent = (f"lsappinfo's parent {app['parent']}" if app["parent"]
+                  else "lsappinfo names no parent")
+        if t is None:
+            asked = "the log was not asked: no launch time"
+        else:
+            asked = requester_sentence(app, *(self.log(app["bundle"], t)
+                                              if app["bundle"] and BUNDLE_ID.match(app["bundle"])
+                                              else ("", None)))
+        state = "still running at the lane's end" if alive else "gone by the lane's end"
+        return (f"APP APPEARED: {app['name']} ({app['bundle'] or 'no bundle id'}, pid "
+                f"{app['pid']}, {app['type']}, {app['exe']}) {when} {during}{owner}; "
+                f"first seen {first['where']}; {parent}; {first['parent']}; {asked}; "
+                f"{first['windows']}; {state}")
+
+
+MAC_APPS = MacApps()
 
 
 # --------------------------------------------------------- the windows guest
@@ -832,6 +1156,85 @@ def _legs(pairs):
     return "".join(f"{k}: PASS ({v}s)\n" for k, v in pairs.items())
 
 
+def _app(n, name, asn, bundle, exe, pid, kind, launch="", checkin="2026/10/14 09:00:00",
+         parent=""):
+    b = f'bundleID="{bundle}"' if bundle else "bundleID=[ NULL ] "
+    lines = [f'{n:>2}) "{name}" {asn}: ', f"    {b}", f'    executable path="{exe}"',
+             f'    pid = {pid} type="{kind}" flavor=3 Version="1" Arch=ARM64 ']
+    if parent:
+        lines.append(f'    parentASN="{parent}" ASN:0x0-0x10010: ')
+    if launch:
+        lines.append(f"    launch time =  {launch} ( 1 minutes ago )")
+    lines.append(f"    checkin time = {checkin} ( 1 minutes ago )")
+    return "\n".join(lines) + "\n"
+
+
+APPS_START = (_app(1, "Finder", "ASN:0x0-0x1a01a", "com.apple.finder",
+                   "/System/Library/CoreServices/Finder.app/Contents/MacOS/Finder", 704,
+                   "Foreground")
+              + _app(2, "Terminal", "ASN:0x0-0x760760", "com.apple.Terminal",
+                     "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+                     72377, "Foreground", launch="2026/09/20 19:09:59", parent="Dock"))
+PREVIEW = _app(3, "Preview", "ASN:0x0-0x25e44f00", "com.apple.Preview",
+               "/System/Applications/Preview.app/Contents/MacOS/Preview", 84150, "Foreground",
+               launch="2026/10/14 16:00:38", checkin="2026/10/14 16:00:39")
+HIJACK = _app(4, "Preview", "ASN:0x0-0x25e44e1f", "com.apple.Preview",
+              "/repo/target/go-guests/kaya-go", 84118, "Foreground",
+              checkin="2026/10/14 16:00:38")
+PY_GUEST = _app(5, "python3.13", "ASN:0x0-0x2a2a2a", "", "/nix/store/x-python3/bin/python3.13",
+                900, "UIElement", checkin="2026/10/14 16:00:31")
+DAEMON = _app(6, "helperd", "ASN:0x0-0x3b3b3b", "com.example.helperd", "/usr/libexec/helperd",
+              901, "BackgroundOnly", checkin="2026/10/14 16:00:32")
+LONER = _app(7, "Calculator", "ASN:0x0-0x4c4c4c", "com.apple.calculator",
+             "/System/Applications/Calculator.app/Contents/MacOS/Calculator", 902, "Foreground",
+             launch="2026/10/14 16:00:50", parent="Terminal")
+NOBUNDLE = _app(8, "a.out", "ASN:0x0-0x5d5d5d", "", "/tmp/a.out", 903, "Foreground",
+                checkin="2026/10/14 16:00:33")
+ODD = _app(9, "Odd", "ASN:0x0-0x6e6e6e", 'com.x"y', "/Applications/Odd.app/Contents/MacOS/Odd",
+           904, "Foreground", checkin="2026/10/14 16:00:34")
+SIGHTING_LOG = """Timestamp               Ty Process[PID:TID]
+2026-10-14 16:00:38.593 Df kaya-go[84118:10d9b379] [com.apple.processmanager:front-35286506] CHECKIN: pid=84118
+2026-10-14 16:00:38.599 Df launchservicesd[384:10d97cfb] [com.apple.launchservices:cas] CHECKIN:0x0-0x25e44e1f 84118 com.apple.Preview
+2026-10-14 16:00:38.876 Df WindowServer[414:1390] [com.apple.SkyLight.processes:Lifecycle] 9cae53[CreateApplication]: Process update: STUB process 0x0-0x25e44e1f (Preview) is migrating to real process, updating connectionID 0x97ac0f -> 0x9cae53, updating pid 0 -> 84118 in session 0x101
+2026-10-14 16:00:38.900 Df talagentd[27914:10d9bf86] [com.apple.talagent:log] - com.apple.Preview: Relaunching due to app activation or Dock menu command
+2026-10-14 16:00:38.929 Df runningboardd[422:10d97bb4] [com.apple.runningboard:ttl] Acquiring assertion targeting app<application.com.apple.Preview.1.2(501)> from originator [osservice<com.apple.coreservices.uiagent(501)>:652] with description <RBSAssertionDescriptor| "LS launch com.apple.Preview" ID:422-652-1326377 target:app<application.com.apple.Preview.1.2(501)> attributes:[
+2026-10-14 16:00:38.940 Df launchservicesd[384:10d97cfb] [com.apple.launchservices:cas] CHECKIN:0x0-0x25e44f00 84150 com.apple.Preview
+"""
+WINLIST = ('win=12 pid=84150 layer=0 bounds=0,25,800,600 app="Preview" title="Open"\n'
+           'win=13 pid=700 layer=25 bounds=0,0,10,10 app="Dock" title=""\n'
+           "flightrec-winlist: 2 window(s)\n")
+APPS_PS = ("    1     0 05-10:00:00   9:00.00   0.0 /sbin/launchd\n"
+           "84150     1 00:05   0:01.00   3.0 /System/Applications/Preview.app/Contents/MacOS/Preview\n"
+           "  902 72377 00:15   0:01.00   0.0 /System/Applications/Calculator.app/Contents/MacOS/Calculator\n"
+           "72377     1 20:00:00   1:00.00   0.0 /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal\n")
+
+
+def _apps_run(listings, legs=(), log=(SIGHTING_LOG, None), windows=(WINLIST, None),
+              ps=(APPS_PS, None)):
+    """[the start's sentence, the end's sentences...] over doctored readers:
+    `listings` is (text, problem) for the start, each leg's end, and the end."""
+    queue = list(listings)
+    apps = MacApps(read=lambda: queue.pop(0), log=lambda b, t: log,
+                   windows=lambda pid, root: windows, ps=lambda: ps,
+                   clock=lambda: _local_epoch("2026/10/14 16:00:00"))
+    apps.root = "/repo"
+    said = [apps.start()]
+    apps.legs = [[n, _local_epoch(a), _local_epoch(b)] for n, a, b in legs]
+    while len(queue) > 1:
+        apps.sample("after a leg")
+    return said + apps.end()
+
+
+SIGHTING_LEGS = (("scroll-go-swiftui", "2026/10/14 16:00:30", "2026/10/14 16:00:40"),
+                 ("scrollto-rust-swiftui", "2026/10/14 16:00:37", "2026/10/14 16:00:39"),
+                 ("canvas-rust-swiftui", "2026/10/14 15:59:00", "2026/10/14 16:00:20"),
+                 ("ended-before", "2026/10/14 16:00:10", "2026/10/14 16:00:37"),
+                 ("began-after", "2026/10/14 16:00:39", "2026/10/14 16:00:45"))
+NOTIME = ' 10) "Ghost" ASN:0x0-0x7f7f7f: \n    bundleID="com.example.ghost"\n' \
+         '    executable path="/Applications/Ghost.app/Contents/MacOS/Ghost"\n' \
+         '    pid = 905 type="Foreground" flavor=3 Arch=ARM64 \n'
+
+
 def drive():
     """Every branch's sentence from a doctored transcript: (label, wanted
     fragment, sentences)."""
@@ -985,6 +1388,75 @@ def drive():
                   windows_sentences("", "ssh exited 255: Connection refused")))
     cases.append(("guest printed nothing", "guest reading failed: the guest printed nothing",
                   windows_sentences("\n", None)))
+
+    seen = _apps_run([(APPS_START, None),
+                      (APPS_START + PREVIEW + HIJACK + PY_GUEST + DAEMON, None),
+                      (APPS_START + PREVIEW + PY_GUEST, None)], SIGHTING_LEGS)
+    for label, want in (
+            ("apps at start", "2 GUI applications running at the lane's start (lsappinfo)"),
+            ("app appeared", "APP APPEARED: Preview (com.apple.Preview, pid 84150, Foreground, "
+             "/System/Applications/Preview.app/Contents/MacOS/Preview) launched 2026/10/14 "
+             "16:00:38 while scroll-go-swiftui, scrollto-rust-swiftui ran; first seen after "
+             "a leg; lsappinfo names no parent; parent process launchd (pid 1)"),
+            ("LaunchServices requester", "LaunchServices launched it at 16:00:38.929 for "
+             "osservice<com.apple.coreservices.uiagent(501)>:652"),
+            ("TAL relaunch", "talagentd at 16:00:38.900: com.apple.Preview: Relaunching due "
+             "to app activation or Dock menu command"),
+            ("foreign checkin", "pid 84118 (kaya-go) checked in under com.apple.Preview's "
+             "ASN 0x0-0x25e44e1f at 16:00:38.599"),
+            ("stub moved", "WindowServer moved Preview's stub 0x0-0x25e44e1f to pid 84118 "
+             "(kaya-go) at 16:00:38.876"),
+            ("window on screen", "1 window(s) of its own on screen when first seen: layer 0 "
+             "\"Open\" at 0,25,800,600; still running at the lane's end"),
+            ("lane binary under another id", "launched 2026/10/14 16:00:38 while "
+             "scroll-go-swiftui, scrollto-rust-swiftui ran; its executable is the lane's own "
+             "(a binary built in the tree) but it checked in as com.apple.Preview"),
+            ("no window", "no window of its own on screen when first seen "
+             "(flightrec-winlist: 2 window(s))"),
+            ("gone by the end", "no window of its own on screen when first seen "
+             "(flightrec-winlist: 2 window(s)); gone by the lane's end"),
+            ("parent gone", "gone before its parent process could be read"),
+            ("summary", "2 GUI application(s) appeared during the lane (3 readings across 5 "
+             "legs; the lane's own apps excluded by name: python3 1)")):
+        cases.append((label, want, seen))
+    alone = _apps_run([(APPS_START, None),
+                       (APPS_START + LONER + NOBUNDLE + ODD + NOTIME, None),
+                       (APPS_START + LONER, None)],
+                      SIGHTING_LEGS, log=("Timestamp\n", None),
+                      windows=("", "flightrec-winlist exited 1: x"))
+    for label, want in (
+            ("no leg running", "launched 2026/10/14 16:00:50 while no leg of this lane was "
+             "running; first seen"),
+            ("lsappinfo parent", "lsappinfo's parent Terminal; parent process Terminal "
+             "(pid 72377)"),
+            ("no requester", "the unified log names no requester (runningboardd's LS launch, "
+             "talagentd, launchservicesd's checkins and WindowServer's stub moves, read 5s "
+             "before to 2s after the launch)"),
+            ("no bundle", "APP APPEARED: a.out (no bundle id, pid 903"),
+            ("no bundle not asked", "no bundle id, so the log was not asked for a requester"),
+            ("odd bundle", "bundle id 'com.x\"y' cannot be spelled in a log predicate"),
+            ("no launch time", "Ghost (com.example.ghost, pid 905, Foreground, "
+             "/Applications/Ghost.app/Contents/MacOS/Ghost) at a time lsappinfo did not give, "
+             "so the legs running then are unknown"),
+            ("no launch time not asked", "the log was not asked: no launch time"),
+            ("windows unreadable", "its windows unreadable (flightrec-winlist exited 1: x)")):
+        cases.append((label, want, alone))
+    cases.append(("nothing appeared", "no GUI application appeared during the lane (3 readings "
+                  "across 0 legs; the lane's own apps excluded by name: none)",
+                  _apps_run([(APPS_START, None), (APPS_START + DAEMON, None),
+                             (APPS_START, None)])))
+    blind = _apps_run([("", "lsappinfo exited 1: x")])
+    cases.append(("start unreadable", "app list unreadable at the lane's start (lsappinfo "
+                  "exited 1: x); no app can be called new", blind))
+    cases.append(("end without a start", "no app appearing during the lane can be named", blind))
+    cases.append(("reading failed mid-lane", "the app list was unreadable at 1 of them (first: "
+                  "after a leg: lsappinfo did not answer within 10s)",
+                  _apps_run([(APPS_START, None), ("", "lsappinfo did not answer within 10s"),
+                             (APPS_START, None)])))
+    dark = _apps_run([(APPS_START, None), (APPS_START + PREVIEW, None)],
+                     log=("", "log exited 1: y"), ps=("", "ps exited 1: z"))
+    cases.append(("log unreadable", "the unified log could not be read (log exited 1: y)", dark))
+    cases.append(("ps unreadable", "its parent process unreadable (ps exited 1: z)", dark))
 
     then = {f"leg{i}": 10 for i in range(20)}
     slow = {f"leg{i}": 15 for i in range(20)}

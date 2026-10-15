@@ -1017,8 +1017,16 @@ in docs/deferred.md.
    and before the start reading, counts them in each framework's `ngen
    display`, drains a pending queue with executeQueuedItems and refuses,
    naming the command, if any stay; the windows reading adds one PowerShell
-   start's CPU and the counts. Nine cuts watched.
-   Two hundred and four watched negatives, counts printed),
+   start's CPU and the counts. Nine cuts watched. AND AN APP THAT APPEARS
+   ON THE MAC HOST NAMES ITSELF since 2026-10-14 (docs/traps.md, the Preview
+   a Go guest's checkin relaunched): the mac lane reads lsappinfo at its
+   start, after every leg and at its end, and prints one sentence per GUI
+   application that appeared (pid, launch time, the legs running that
+   second, lsappinfo's parent, what runningboardd, talagentd,
+   launchservicesd and WindowServer logged around the launch, its windows
+   when first seen), its own apps excluded only by the launch lines
+   lane_health.LANE_APPS holds the lane to; nine cuts watched.
+   Two hundred and thirteen watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

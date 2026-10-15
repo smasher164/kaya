@@ -629,6 +629,14 @@ def _leg_worker(name, argv, env, scene=None):
 
 
 def _run_leg(name, argv, env, scene=None):
+    entry = lane_health.MAC_APPS.leg_began(name)
+    try:
+        _leg_body(name, argv, env, scene)
+    finally:
+        lane_health.MAC_APPS.leg_ended(entry)
+
+
+def _leg_body(name, argv, env, scene=None):
     log = LEGS_DIR / f"{name}.log"
     t0 = time.monotonic()
     if os.environ.get("KAYA_RECORD"):
@@ -771,8 +779,10 @@ def queue_leg(name, argv, env, scene=None):
         leg_env.setdefault("KAYA_SELFTEST", "1")
         scratch = FLIGHTREC_SCRATCH / name
         log = LEGS_DIR / f"{name}.log"
+        entry = lane_health.MAC_APPS.leg_began(name)
         with open(log, "w", encoding="utf-8", errors="replace") as lf:
             rc = FR.watched_leg(scratch, argv, leg_env, lf, echo=sys.stdout)
+        lane_health.MAC_APPS.leg_ended(entry)
         secs = int(time.monotonic() - t0)
         verdict = "PASS" if rc == 0 else "FAIL"
         front = ("" if rc == 0

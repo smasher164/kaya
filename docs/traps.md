@@ -16764,3 +16764,27 @@ answers 5 s or more late (it used to say "every one answered" for this
 leg). The 60 s wait itself needs that microsecond overlap and did not recur
 in three forced tries; the ledger's naming did. GUARD: check-flightrec, the
 attach-order census and NL9, NH15 to NH18.
+
+## The Preview a Go guest's checkin relaunched (read 2026-10-14)
+
+During the second clean matrix of 2026-10-14 Preview (pid 84150, PPID 1)
+came up at 16:00:38 on its own Open panel and stayed there; nothing in the
+lane recorded it. The unified log for that second, read afterwards, names
+the chain. Preview had been auto-terminated by the system (TAL) and kept as
+a stub under its ASN 0x0-0x25e44e1f. At 16:00:38.599 the mac lane's Go guest
+`target/go-guests/kaya-go` (pid 84118) checked in with LaunchServices UNDER
+THAT ASN (`CHECKIN:0x0-0x25e44e1f 84118 com.apple.Preview`), WindowServer
+moved Preview's stub to pid 84118 at .876, the guest came frontmost as
+"Preview", and talagentd answered at .900 with `com.apple.Preview:
+Relaunching due to app activation or Dock menu command`; runningboardd's
+`LS launch com.apple.Preview` (originator CoreServicesUIAgent) started the
+real Preview at .929, and talagentd's kill of the old serial number failed
+(-54). The only stub move and TAL relaunch in that day's log (08:00-18:10).
+WHY an unbundled guest was handed another app's stub ASN is NOT NAMED (one
+sighting). The lane now records the next one: lane_health.MacApps reads
+`lsappinfo list` (about 40 ms) at the start, after every leg and at the end,
+and prints one `APP APPEARED:` sentence per new GUI application with the
+legs running in its launch second, lsappinfo's parent, and those four log
+sources over 5 s before to 2 s after the launch; a lane binary that checks
+in under a bundle id other than kaya's is reported, not excluded. GUARD:
+check-flightrec AP1-AP9 and the lane health drive.

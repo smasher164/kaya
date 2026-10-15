@@ -81,6 +81,7 @@ LANE_HEALTH = "tools/lib/lane_health.py"
 VALIDATE_ALL = "tools/validate-all.py"
 MAC_RUNNER = "tools/validate-mac.py"
 LINUX_HOST = "tools/validate-linux.py"
+MAC_LANE = "tools/lib/lanes/mac.py"
 # Each lane reads its health at start and at end, the end before its verdict
 # (docs/traps.md, the windows lane slowed by a rebooted VM's Defender).
 HEALTH_CALLS = {
@@ -109,7 +110,7 @@ def sources():
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
-             LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST)}
+             LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE)}
 
 
 def census_android_app_shot(src):
@@ -2056,6 +2057,47 @@ def census_lane_health(src):
     return found
 
 
+def census_mac_apps(src):
+    """docs/traps.md, the Preview a Go guest's checkin relaunched: the mac
+    lane reads the host's applications at its start, after every leg and at
+    its end, and its own apps are excluded only by names it still launches."""
+    found = []
+    runner = src[MAC_RUNNER]
+    pooled = py_block(runner, "_run_leg")
+    if not re.search(r"entry = lane_health\.MAC_APPS\.leg_began\(name\)\n +try:\n"
+                     r" +_leg_body\(name, argv, env, scene\)\n +finally:\n"
+                     r" +lane_health\.MAC_APPS\.leg_ended\(entry\)\n", pooled):
+        found.append(f"{MAC_RUNNER}: _run_leg no longer reads the apps at a pooled leg's "
+                     f"start and end (leg_began, then leg_ended in a finally)")
+    serial = py_block(runner, "queue_leg")
+    serial = serial[serial.find("if JOBS == 1"):]
+    began = serial.find("entry = lane_health.MAC_APPS.leg_began(name)")
+    ran = serial.find("rc = FR.watched_leg(")
+    ended = serial.find("lane_health.MAC_APPS.leg_ended(entry)")
+    if not (0 <= began < ran < ended):
+        found.append(f"{MAC_RUNNER}: the serial path no longer reads the apps around its leg")
+    health = src[LANE_HEALTH]
+    report = py_block(health, "mac_report")
+    for needle in ("MAC_APPS.start()", "MAC_APPS.end()"):
+        if needle not in report:
+            found.append(f"{LANE_HEALTH}: mac_report no longer takes the app reading "
+                         f"(`{needle}`)")
+    if "self.sample(" not in py_block(health, "leg_ended"):
+        found.append(f"{LANE_HEALTH}: a leg's end no longer reads the apps")
+    scope = {"__name__": "lane_health_shadow"}
+    exec(compile(health, LANE_HEALTH, "exec"), scope)
+    named = scope["LANE_APPS"]
+    gate.counted("the mac lane's own apps excluded by name", list(named), floor=5)
+    for label, _how, _pattern, rel, needle in named:
+        if rel not in src:
+            found.append(f"{LANE_HEALTH}: the exclusion `{label}` names {rel}, which this "
+                         f"gate does not read")
+        elif needle not in src[rel]:
+            found.append(f"{LANE_HEALTH}: the exclusion `{label}` is no longer named by the "
+                         f"lane: {rel} lacks `{needle}`")
+    return found
+
+
 # docs/deferred.md, the iOS varied-python entry: the synthesized tier's park
 # writes its own account into the verb trace a red bundle carries.
 PARK_LINKS = (
@@ -2176,7 +2218,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("linux leg ceiling", census_leg_ceiling),
             ("iOS ceiling stacks", census_ios_stacks),
             ("iOS app log", census_ios_app_log),
-            ("iOS hang record", census_ios_hang_record))
+            ("iOS hang record", census_ios_hang_record),
+            ("mac host apps", census_mac_apps))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -3026,6 +3069,41 @@ for label, pattern, repl, want in (
     changed = doctored(SWIFTUI, pattern, repl, label)
     gate.negative(label, lambda: census_ios_park(changed), want=want)
 
-gate.negatives_ran(199 + (5 if DRIVES else 0))
+for label, rel, pattern, repl, want, check in (
+        ("AP1 a pooled leg's end without the app reading", MAC_RUNNER,
+         r"^( +)lane_health\.MAC_APPS\.leg_ended\(entry\)\n\n\n", r"\1pass\n\n\n",
+         "_run_leg no longer reads the apps", census_mac_apps),
+        ("AP2 the serial leg's end without the app reading", MAC_RUNNER,
+         r"^( +)lane_health\.MAC_APPS\.leg_ended\(entry\)\n( +)secs = ", r"\2secs = ",
+         "the serial path no longer reads the apps", census_mac_apps),
+        ("AP3 the lane's end reading without its apps", LANE_HEALTH,
+         r"for sentence in MAC_APPS\.end\(\):", "for sentence in []:",
+         "mac_report no longer takes the app reading", census_mac_apps),
+        ("AP4 the java guest launched by another spelling", MAC_LANE,
+         r'"-XstartOnFirstThread", "-cp",', '"-XstartOnFirstThread", "-classpath",',
+         "the exclusion `java` is no longer named", census_mac_apps),
+        ("AP5 a leg's end that reads nothing", LANE_HEALTH,
+         r'self\.sample\(f"after \{entry\[0\]\}"\)', "pass",
+         "a leg's end no longer reads the apps", census_mac_apps),
+        ("AP6 talagentd's relaunch unread", LANE_HEALTH,
+         r'elif proc == "talagentd" and bundle in msg:', "elif False:",
+         "branch `TAL relaunch` did not print", lane_health_checks),
+        ("AP7 legs a second away counted as running", LANE_HEALTH,
+         r"if began < t \+ 1 and \(ended is None or ended >= t\)",
+         "if began <= t + 1 and (ended is None or ended >= t - 1)",
+         "branch `app appeared` did not print", lane_health_checks),
+        ("AP8 a lane binary under another app's id excluded", LANE_HEALTH,
+         r'if owner and \(not app\["bundle"\] or LANE_BUNDLE\.match\(app\["bundle"\]\)\):',
+         "if owner:", "branch `lane binary under another id` did not print",
+         lane_health_checks),
+        ("AP9 the new app's windows unread", LANE_HEALTH,
+         r'first\["windows"\] = window_sentence\(app\["pid"\], '
+         r'\*self\.windows\(app\["pid"\], self\.root\)\)',
+         'first["windows"] = "windows not read"', "branch `window on screen` did not print",
+         lane_health_checks)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+
+gate.negatives_ran(208 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
