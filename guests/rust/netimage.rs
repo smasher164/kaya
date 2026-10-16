@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::sync::mpsc;
 
-use kaya::{Fit, ImagePhase, PathKey};
+use kaya::{Fit, ImagePhase, PathKey, Shape};
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Track {
@@ -89,8 +89,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     row.row(|t| {
                         let image = t.image(Track::art());
                         t.fit(image, Fit::Cover);
-                        t.max_width(image, 20.0);
-                        t.max_height(image, 20.0);
+                        t.max_width(image, 40.0);
+                        t.max_height(image, 40.0);
+                        t.shape(image, Shape::Rounded);
                         t.phase(image, Track::phase());
                         t.a11y_id(image, "art");
                         node = Some(image);

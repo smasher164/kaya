@@ -17350,9 +17350,18 @@ private struct KayaNativeTable: View {
             refresh()
             layoutColumns()
             reparkAnchor()
+            // The first report waits for the realized rows' own heights, or a
+            // band sized at the floor's presumption narrows on the correction
+            // and releases loading rows nobody scrolled past (docs/traps.md,
+            // the mac table's first band at the floor).
+            let presumed = visibleRows()
+            if reported == nil, KayaHost.rowExtent(node.id, presumed.location) == 0 {
+                measureRows(presumed)
+            }
             let visible = visibleRows()
             if reported.map({ !NSEqualRanges($0, visible) }) ?? true {
                 reported = visible
+                KayaVTrace.attempt("band#\(node.id)", 0, "-> window_moved first=\(visible.location) count=\(visible.length) viewport=\(kayaRectText(visibleRect())) scroll=\(kayaRectText(scrollView.frame))")
                 KayaHost.windowMoved(node.id, visible.location, visible.length)
             }
             measureRows(visible)
@@ -17409,16 +17418,27 @@ private struct KayaNativeTable: View {
         /// note-heights round trip below from repeating forever.
         private func measureRows(_ visible: NSRange) {
             guard visible.length > 0 else { return }
-            var heights: [Double] = []
+            // Only a row whose copy is stamped and whose cells AppKit has made
+            // has a height to tell; any other measures the floor
+            // (docs/traps.md, the mac table's first band at the floor).
+            var runs: [(first: Int, heights: [Double])] = []
             var moved = false
             for offset in 0..<visible.length {
                 let row = visible.location + offset
-                let height = Double(measuredHeight(row))
-                heights.append(height)
+                guard self.row(at: row) != nil, let measured = measuredHeight(row) else { continue }
+                let height = Double(measured)
+                if let last = runs.last, last.first + last.heights.count == row {
+                    runs[runs.count - 1].heights.append(height)
+                } else {
+                    runs.append((row, [height]))
+                }
                 if KayaHost.rowExtent(node.id, row) != height { moved = true }
             }
             guard moved else { return }
-            KayaHost.rowsMeasured(node.id, visible.location, heights)
+            for run in runs {
+                KayaVTrace.attempt("band#\(node.id)", 0, "-> rows_measured first=\(run.first) \(run.heights.map { Int($0) })")
+                KayaHost.rowsMeasured(node.id, run.first, run.heights)
+            }
             // A height correction moves the clip as AppKit re-fits the
             // document, which is not the user's scroll: the anchor stays and
             // is re-parked on the corrected rows, or a scroll to a tall
@@ -17436,17 +17456,19 @@ private struct KayaNativeTable: View {
         /// floored by the tier's own row height. The FLOOR is why uniform
         /// single-line rows never leave the exact path, and the max is why
         /// a structurally taller row moves its For onto the corrected one.
-        private func measuredHeight(_ row: Int) -> CGFloat {
+        private func measuredHeight(_ row: Int) -> CGFloat? {
             var height = kayaNativeRowHeight
+            var asked = false
             for column in tableView.tableColumns.indices {
                 guard
                     let cell = tableView.view(atColumn: column, row: row, makeIfNecessary: false)
                         as? KayaTableCellView
                 else { continue }
+                asked = true
                 let content = cell.contentHeight
                 height = max(height, content > kayaNativeRowHeight ? content + kayaNativeRowPadding : content)
             }
-            return height.rounded(.up)
+            return asked ? height.rounded(.up) : nil
         }
 
         /// docs/traps.md, the mac table's divider moved with the rows on screen.
@@ -20076,7 +20098,22 @@ let kayaSkinTolerance = 0.06
 /// time: a table cell's SwiftUI frame is not told when the table scrolls or
 /// reuses the cell, so a recorded frame went stale under the reads (measured
 /// 2026-10-16, a striped row's art read 17 points off).
-@MainActor var kayaSkinAnchors: [UInt64: KayaWeakView] = [:]
+@MainActor var kayaSkinAnchors: [UInt64: [KayaWeakView]] = [:]
+
+/// Every live view a node is drawn in: a native table cell that AppKit
+/// reuses for another row releases its view after the row's new cell has
+/// registered, so one slot per node answered a released view, and a reused
+/// view leaves the node it drew before (docs/traps.md, the mac table's first
+/// band at the floor).
+@MainActor func kayaHoldAnchor(_ id: UInt64, _ view: KayaWeakView) {
+    if kayaSkinAnchors[id]?.last?.view === view.view { return }
+    for (other, views) in kayaSkinAnchors where other != id && views.contains(where: { $0.view === view.view }) {
+        kayaSkinAnchors[other] = views.filter { $0.view != nil && $0.view !== view.view }
+    }
+    var held = (kayaSkinAnchors[id] ?? []).filter { $0.view != nil && $0.view !== view.view }
+    held.append(view)
+    kayaSkinAnchors[id] = held
+}
 
 final class KayaWeakView {
     #if os(macOS)
@@ -20093,10 +20130,10 @@ final class KayaWeakView {
         let id: UInt64
         func makeNSView(context: Context) -> NSView {
             let view = NSView()
-            kayaSkinAnchors[id] = KayaWeakView(view)
+            kayaHoldAnchor(id, KayaWeakView(view))
             return view
         }
-        func updateNSView(_ view: NSView, context: Context) { kayaSkinAnchors[id] = KayaWeakView(view) }
+        func updateNSView(_ view: NSView, context: Context) { kayaHoldAnchor(id, KayaWeakView(view)) }
     }
 #else
     struct KayaSkinFrameReader: UIViewRepresentable {
@@ -20104,16 +20141,27 @@ final class KayaWeakView {
         func makeUIView(context: Context) -> UIView {
             let view = UIView()
             view.isUserInteractionEnabled = false
-            kayaSkinAnchors[id] = KayaWeakView(view)
+            kayaHoldAnchor(id, KayaWeakView(view))
             return view
         }
-        func updateUIView(_ view: UIView, context: Context) { kayaSkinAnchors[id] = KayaWeakView(view) }
+        func updateUIView(_ view: UIView, context: Context) { kayaHoldAnchor(id, KayaWeakView(view)) }
     }
 #endif
 
 /// The anchor's frame in window points, top-left origin, now.
+/// Why kayaAnchoredFrame answered nil, for the reader's failure sentence.
+@MainActor func kayaAnchorState(_ id: UInt64) -> String {
+    guard let held = kayaSkinAnchors[id], !held.isEmpty else {
+        return "no anchor was ever registered for node \(id) (\(kayaSkinAnchors.count) nodes anchored)"
+    }
+    let alive = held.compactMap(\.view)
+    let shown = alive.filter { $0.window != nil }
+    return "node \(id) holds \(held.count) anchor(s), \(alive.count) alive, \(shown.count) in a window"
+}
+
 @MainActor func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {
-    guard let view = kayaSkinAnchors[id]?.view, view.window != nil else { return nil }
+    guard let view = kayaSkinAnchors[id]?.reversed().lazy.compactMap(\.view).first(where: { $0.window != nil })
+    else { return nil }
     #if os(macOS)
         return kayaHarnessRect(view.bounds, in: view)
     #else
@@ -20186,7 +20234,7 @@ final class KayaWeakView {
 @MainActor func kayaShapeRead(_ node: KayaNode) -> String {
     let frames = [kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]].compactMap { $0 }
     guard let frame = frames.first, frame.width > 12, frame.height > 12 else {
-        return "<no laid-out frame: \(frames.count) recorded \(frames)>"
+        return "<no laid-out frame: \(frames.count) recorded \(frames); \(kayaAnchorState(node.id))>"
     }
     guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
     // What the image sits on is read 4 units left of it at its middle (a

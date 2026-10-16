@@ -193,7 +193,8 @@ def check(gtk, winui, swiftui, compose):
     # here and nowhere else renders a blue chart red, and a scene
     # sampling a grey cannot see it.
     FORMATS = [
-        ("gtk", r"MemoryFormat::R8g8b8a8Premultiplied",
+        ("gtk", r"MemoryTexture::new\(\s*width as i32,\s*height as i32,\s*"
+                r"gtk4::gdk::MemoryFormat::R8g8b8a8Premultiplied",
          "GdkMemoryTexture takes the core's premultiplied RGBA8 layout verbatim — "
          "R at byte 0, A at byte 3 — so the GTK arm swizzles nothing"),
         ("swiftui", r"CGImageAlphaInfo\.premultipliedLast",
@@ -446,6 +447,16 @@ def check(gtk, winui, swiftui, compose):
             f"{paths['gtk']}: `mod gtk_media {{` is gone, so this clause's "
             f"one exemption names nothing; move it with the video view")
         canvas_side = gtk_body
+    # An image ground is a picture covering its container (docs/styling-pass-plan.md Y3).
+    ground_opener = ("fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, "
+                     "change: impl FnOnce(&mut skin::Ground)) {")
+    ground_side = without_block(canvas_side, ground_opener)
+    if ground_side is None:
+        bad.append(
+            f"{paths['gtk']}: `{ground_opener}` is gone, so the image ground's "
+            f"exemption names nothing; move it with the ground's picture")
+    else:
+        canvas_side = ground_side
     m = re.search(r"\bContentFit\b", canvas_side)
     if m:
         n = canvas_side.count("\n", 0, m.start()) + 1
@@ -634,8 +645,9 @@ def negatives():
     # N2: THE PIXEL FORMAT, changed to the other plausible one. This
     # is the perturbation a scene sampling a grey would pass.
     s = g.perturb("N2 (the GTK texture format swapped to BGRA)", GTK,
+                  r"(MemoryTexture::new\(\s*width as i32,\s*height as i32,\s*gtk4::gdk::)"
                   r"MemoryFormat::R8g8b8a8Premultiplied",
-                  "MemoryFormat::B8g8r8a8Premultiplied", flags=re.S)
+                  r"\1MemoryFormat::B8g8r8a8Premultiplied", flags=re.S)
     g.negative("a GTK arm handing over the wrong format",
                lambda p=s: check(str(p), WINUI, SWIFTUI, COMPOSE),
                want="no longer names the pixel format")
@@ -757,6 +769,13 @@ def negatives():
                lambda p=s: check(str(p), WINUI, SWIFTUI, COMPOSE),
                want="`mod gtk_media {` is gone")
 
+    s = g.perturb("N4e3 (the image ground's exemption renamed)",
+                  GTK, r"fn set_ground\(core: &mut CoreState,",
+                  "fn set_backdrop(core: &mut CoreState,", flags=re.S)
+    g.negative("a ContentFit exemption whose ground function is gone",
+               lambda p=s: check(str(p), WINUI, SWIFTUI, COMPOSE),
+               want="the image ground's exemption names nothing")
+
     # N4f: THE COMPOSE TRACK REPORT REMOVED — the same silent-inert
     # state as N4c, one interpreter over.
     s = g.perturb("N4f (the Compose canvas track report removed)",
@@ -839,7 +858,7 @@ def negatives():
                lambda p=s: check_canonical(str(p), CARGO),
                want="no longer switches threads on by size")
 
-    g.negatives_ran(27)
+    g.negatives_ran(28)
 
 
 negatives()

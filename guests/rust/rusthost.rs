@@ -187,6 +187,16 @@ mod safearea;
 mod netimage;
 #[path = "netimage_http.rs"]
 mod netimage_http;
+#[path = "grounds.rs"]
+mod grounds;
+#[path = "shapes.rs"]
+mod shapes;
+#[path = "cards.rs"]
+mod cards;
+#[path = "tracks.rs"]
+mod tracks;
+#[path = "dock.rs"]
+mod dock;
 
 #[cfg(target_os = "android")]
 #[path = "tasks.rs"]
@@ -284,6 +294,11 @@ fn app(ctx: kaya::AppCtx) {
         Ok("safearea") => safearea::app(ctx),
         Ok("netimage") => netimage::app(ctx),
         Ok("netimage_http") => netimage_http::app(ctx),
+        Ok("grounds") => grounds::app(ctx),
+        Ok("shapes") => shapes::app(ctx),
+        Ok("cards") => cards::app(ctx),
+        Ok("tracks") => tracks::app(ctx),
+        Ok("dock") => dock::app(ctx),
         Ok("tasks") => tasks::app(ctx),
         Ok("taskspersist") => tasks::app(ctx),
         // The same app under KAYA_LOCALE=ar-EG (tools/scenes/tasksrtl.steps).

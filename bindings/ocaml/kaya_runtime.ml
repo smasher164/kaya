@@ -515,6 +515,17 @@ let register_blob data =
   Unsigned.UInt64.to_int64
     (kaya_blob_register s (Unsigned.Size_t.of_int (String.length s)))
 
+(* An image's dominant colour as 0xRRGGBB, the core's one quantizer
+   (docs/styling-pass-plan.md Y2); [None] when the bytes do not decode. *)
+let kaya_image_dominant =
+  foreign ~from:lib "kaya_image_dominant" (string @-> size_t @-> ptr uint32_t @-> returning uint8_t)
+
+let image_dominant data =
+  let s = Bytes.to_string data in
+  let rgb = allocate uint32_t Unsigned.UInt32.zero in
+  if Unsigned.UInt8.to_int (kaya_image_dominant s (Unsigned.Size_t.of_int (String.length s)) rgb) = 0 then None
+  else Some (Unsigned.UInt32.to_int !@rgb)
+
 (* An open asset. A RECORD rather than a bare int64: [Gc.finalise]
    refuses an immediate, it needs a heap block to attach to. *)
 type asset = { handle : int64; mutable live : bool }

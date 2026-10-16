@@ -101,7 +101,7 @@ NATIVE = [
     (COMPOSE, "Compose's pane takes the keyboard's side while the bar is under it",
      "KayaContentBox(topConsumed, bottomConsumed = !imeShown, rides = kayaRidesNow(shown), root = shown)"),
     (COMPOSE, "Compose's single surface rides by the same rule",
-     "KayaContentBox(topConsumed, bottomConsumed = false, rides = kayaRidesNow(shown),\n"
+     "KayaContentBox(topConsumed, bottomConsumed = docked, rides = kayaRidesNow(shown),\n"
      " root = shown.takeIf { KayaSceneModel.panes < 2 })"),
     (COMPOSE, "Compose's content takes what the bars left",
      ".windowInsetsPadding(pads.content)\n .onGloballyPositioned {\n kayaContentTop = it.positionInWindow().y\n"

@@ -70,6 +70,9 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         // docs/network-images-plan.md N2.
         "image_phase" => Some("ImagePhase"),
         "content_type" => Some("ContentType"),
+        // docs/styling-pass-plan.md Y6, Y7.
+        "tint" => Some("Tint"),
+        "shape" => Some("Shape"),
         _ => None,
     }
 }

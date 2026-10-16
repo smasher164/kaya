@@ -69,6 +69,8 @@ public final class KayaRecords {
             if (t == KayaApp.Player.class) return KayaWire.VALUE_I64;
             // An image's phase (docs/network-images-plan.md N2).
             if (t == KayaApp.ImagePhase.class) return KayaWire.VALUE_I64;
+            // A label's tint (docs/styling-pass-plan.md Y7).
+            if (t == KayaApp.Tint.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -176,7 +178,7 @@ public final class KayaRecords {
             }
             if (value instanceof LocalDate || value instanceof LocalTime
                     || value instanceof KayaApp.Color || value instanceof KayaApp.Player
-                    || value instanceof KayaApp.ImagePhase) {
+                    || value instanceof KayaApp.ImagePhase || value instanceof KayaApp.Tint) {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -227,6 +229,8 @@ public final class KayaRecords {
                     args[at] = playerOf(fields.get(wire));
                 } else if (want == KayaApp.ImagePhase.class) {
                     args[at] = KayaApp.ImagePhase.ofWire((Long) fields.get(wire));
+                } else if (want == KayaApp.Tint.class) {
+                    args[at] = KayaApp.Tint.ofWire((Long) fields.get(wire));
                 } else if (want == KayaApp.Document.class) {
                     // A restored Document field is the blob's BYTES,
                     // redeemed by KayaWire.parseValue
@@ -783,6 +787,9 @@ public final class KayaRecords {
         if (v instanceof KayaApp.ImagePhase p) {
             return (long) p.wire;
         }
+        if (v instanceof KayaApp.Tint t) {
+            return t.wire;
+        }
         // A signal of bytes: handles are single-submit, so every write
         // registers its own copy (docs/traps.md, a blob signal).
         if (v instanceof byte[] bytes) {
@@ -823,6 +830,7 @@ public final class KayaRecords {
         if (t == LocalTime.class) return DEFAULT_TIME;
         if (t == KayaApp.Color.class) return DEFAULT_COLOR;
         if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.SHOWN;
+        if (t == KayaApp.Tint.class) return KayaApp.Tint.NONE;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -838,6 +846,7 @@ public final class KayaRecords {
         if (t == KayaApp.Color.class) return SENTINEL_COLOR;
         if (t == KayaApp.Player.class) return SENTINEL_PLAYER;
         if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.FAILED;
+        if (t == KayaApp.Tint.class) return KayaApp.Tint.OVERLAY;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 

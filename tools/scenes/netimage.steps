@@ -45,9 +45,11 @@ expect_safe button@retarget
 expect label@band "band: partial"
 expect label@released "released: none"
 expect_image_phase image@art[t000] loading
-expect_image_size image@art[t000] "20x20"
+expect_image_size image@art[t000] "40x40"
+expect_shape image@art[t000] rounded
 click button@rows
 expect_image_phase image@art[t000] shown
+expect_shape image@art[t001] rounded
 expect image@art[t000] "600x600"
 expect image@art[t001] "320x320"
 expect image@art[t002] "1000x1000"

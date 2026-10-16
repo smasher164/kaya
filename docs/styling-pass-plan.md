@@ -2,7 +2,8 @@
 
 Status: RULED 2026-10-15 (the maintainer: "accept all"), Y1-Y11 as recommended
 (§8). DEPTH BUILT 2026-10-16 on the mac and iOS with the Rust binding
-(docs/deferred.md's styling pass BUILD entry); the breadth is open. The roadmap card (docs/roadmap/editorial.toml,
+(docs/deferred.md's styling pass BUILD entry); BREADTH BUILT 2026-10-16 on GTK, WinUI and
+Compose with the eight other bindings and the C floor; the demo (§6 step 4) is open. The roadmap card (docs/roadmap/editorial.toml,
 "A styling pass toward an app-skinned look") carries his ask of 2026-10-08,
 after seeing a Spotify client written in egui: "push kaya as far as possible
 towards being able to style it like that." The same day he described what he
@@ -892,10 +893,26 @@ Gates that grow:
   user's own events drop it. The dark material under the 40% black reads 361C17 over the red
   cover in both appearances: dark, but carrying the art's hue, so
   `expect_fill overlay` reads the panel against the picture behind it.
+- MEASURED AT THE BREADTH 2026-10-16 (GTK 4.24.0, libadwaita 1.9.2, the linux
+  lane's image, x11 and wayland alike): libadwaita's own rules, read out of its
+  gresource, are `.card.activatable:hover` currentColor 3% (`:active` 8%),
+  `row.activatable:hover` 4% (`:active` 8%), `row:selected` the accent at 25%
+  and `.osd` black at 70%; a GtkBox matches no `row` rule, so the GTK arm spells
+  the row values on its own class and a card takes libadwaita's. `overflow:
+  hidden` with a border-radius clips a GtkPicture's own paintable, but a table
+  cell stretches the picture to its column (netimage's art cell 361x40), so a
+  boxed picture is clipped where its paintable draws; a whole-window render of
+  tracks' 60 rounded rows takes 1-2 ms. GTK's gradient interpolates in sRGB:
+  the dark header's middle reads 4B4A46 between 747166 and 222226, white text
+  8.9:1; the light one F7F4E9, black text 11.6:1. On headless sway a virtual
+  pointer leaves the seat when its client exits and GTK ends the hover, so the
+  wayland `hover` holds its injector as the guest's child. libadwaita's `.osd`
+  over a white picture reads luminance 0.073, so the GTK overlay reading's
+  ceiling is 0.08 where SwiftUI's material holds 0.06.
 - Still to measure at the breadth: the quaternary fill's read-back on macOS
-  13 (the depth ran on 14 and later); that GTK's
-  rounded clip on a wrapper reaches the `GtkPicture`'s paintable on x11 and
-  wayland, and its cost at 60 rows; the WinUI `ImageBrush` route's decode
+  13 (the depth ran on 14 and later); ~~that GTK's rounded clip on a wrapper
+  reaches the `GtkPicture`'s paintable on x11 and wayland, and its cost at 60
+  rows~~ (measured above: GTK's half of the gradient's space too); the WinUI `ImageBrush` route's decode
   sharing with the cache (N10's shared `BitmapImage`); the gradient's
   interpolation space per platform against the midpoint probe; `image_dominant`
   on the 600-pixel art (a coarse histogram over the decoded pixels should be

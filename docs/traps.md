@@ -16816,3 +16816,82 @@ legs running in its launch second, lsappinfo's parent, and those four log
 sources over 5 s before to 2 s after the launch; a lane binary that checks
 in under a bundle id other than kaya's is reported, not excluded. GUARD:
 check-flightrec AP1-AP9 and the lane health drive.
+
+## Compose's `Modifier.paint` fills bounded constraints, and the dark scheme's inverseOnSurface is dark (measured 2026-10-16)
+
+An image ground first drawn with `Modifier.paint(painter, sizeToIntrinsics =
+false, contentScale = ContentScale.Crop)` made the grounds scene's hero column
+141x608 px on a 360x800 phone: PainterNode answers constraints bounded on both
+axes with their MAXIMUM (`minWidth = maxWidth, minHeight = maxHeight`) whenever
+it does not size to the painter, so the column took the whole height its parent
+offered and squeezed the last column to 0 px (`"Plain" overflows its 31x0px box`).
+The ground is drawn behind the children with `drawBehind` and
+`ContentScale.Crop.computeScaleFactor` instead. GUARD: tools/lib/skin_compose.py's
+"the image ground through paint" cut.
+
+The `overlay` tint's foreground cannot be `inverseOnSurface` alone: Material's
+inverse roles swap with the scheme, so in the dark scheme it is the DARK one
+(322F35) over a scrim that is black in both. The light foreground is
+`inverseOnSurface` in the light scheme and `onSurface` in the dark, SwiftUI's
+forced dark environment one platform over. And a 60% scrim over the cover's
+cream reads 625E55 (WCAG luminance 0.11), legible at 6.5:1 under white text
+but above SwiftUI's absolute 0.06 overlay threshold, so Compose's overlay reading
+asks for 4.5:1 against the overlay's own foreground. GUARD:
+tools/lib/skin_compose.py's "the overlay's text dark in the dark" cut and the
+expect_fill skin reading's door.
+
+A park clamped at a windowed table's end yielded for good, and the rows the
+band realized at the presumed pitch were then corrected taller (the tracks
+scene's 40 dp art), so `scroll_to_row t60` left the last row 8 px under the
+viewport's foot (row 59 at 2874..2922, viewport 2392..2914), the mac native
+table's tall-rows class one tier over. A park clamped at the end now re-parks
+whenever the end moves, and yields only to a scroll that moved while the end
+did not. GUARD: tools/lib/skin_compose.py's re-park cut.
+
+## The mac table's first band at the floor, and a reused cell's anchor (measured 2026-10-16)
+
+With netimage's art at 40 pt the mac native table released loading rows nobody
+had scrolled past ("released: some" before any scroll). The driver's own trace
+(KayaVTrace `band#<id>`, added for this) showed the viewport fixed at 276 pt while
+the reported count hunted 6, 9, 11, 6 after every click: `measureRows` measured
+visible rows whose cells AppKit had not made yet (or whose copy was unstamped),
+and `measuredHeight` answered the 24 pt floor for them, so the band grew on the
+false heights and shrank on the true 48 pt ones, tearing down loading rows. Only a
+row whose copy is stamped and whose cells exist is measured now, and the first
+report measures the realized rows before it tells the core the visible range.
+
+The shape reader then read a stamped picture as "anchor view was released": AppKit
+reuses a cell's view for another row, and the view that later went away had taken
+the node's single anchor slot from the live one; once a reused view stayed in its
+old node's slot too, `tracks` read another row's art (rect for rounded, one run in
+four). A node now holds every live view it is drawn in, a registering view leaves
+every other node's list, and the readers take the newest one still in a window.
+GUARD: tools/lib/skin_routes.py's four CALLS and three cuts beside them
+("an unmade row measured at the floor", "the first band sized at the floor",
+"a reused view kept by the node it drew before").
+
+## WinUI's cover image over-reports its size, and ItemContainer hears its own press (measured 2026-10-16)
+
+An `Image` under `Stretch.UniformToFill` with a declared 48x48 box reports the
+SCALED PICTURE's extent as its `ActualWidth`: a 4:3 photo read 64x48 while the
+window drew it clipped to 48x48 (shapes.steps' `image@wide`, a circle that the
+core gives `fit cover`). Square covers hide it. `image_drawn` reads the box, the
+smaller of the actual and the declared size, on every image.
+
+A standalone `ListViewItem` draws the selection indicator and the selected fill,
+but its peer is `ListViewItemAutomationPeer`, which carries NO SelectionItem;
+only the data peer a `ListView` makes for its items does. A standalone
+`ItemContainer`'s peer does. Its template (generic.xaml in the Windows App SDK
+package) draws the PointerOver and Pressed fill as a Rectangle OVER the child,
+so a state layer shows over a card's fill, and its selection as a 3-unit ring in
+`ItemContainerSelectionVisualBackground` over a transparent fill. It hears its
+own press: a `Tapped` handler on the item or on its child never runs, its
+`ItemInvoked` is internal, and a user press toggles its own `IsSelected`. The
+press reaches kaya as the child's `PointerPressed` then its `PointerReleased` (or
+the item's `PointerCaptureLost`), with the cursor still inside, and an unfilled
+child needs a (transparent) background or the press goes through it to the item.
+Measured with real taps (SetCursorPos and mouse_event) on the lane's VM.
+GUARD: tools/lib/skin_winui.py (the activatable host's door, "a release outside
+the item taken as a click", "the unfilled child's box left to the item",
+"kaya keeps the item's own selection").
+

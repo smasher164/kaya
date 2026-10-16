@@ -418,6 +418,17 @@ static partial class Kaya
     public static ulong RegisterBlob(byte[] data) =>
         kaya_blob_register(data, (nuint)data.Length);
 
+    [DllImport("kaya")]
+    static extern byte kaya_image_dominant(byte[] bytes, nuint len, out uint rgb);
+
+    /// The dominant colour of a PNG or JPEG, the one quantizer every binding
+    /// reaches (docs/styling-pass-plan.md Y2), or null for bytes that do not
+    /// decode: a gradient ground's usual colour.
+    public static Color? ImageDominant(byte[] bytes) =>
+        kaya_image_dominant(bytes, (nuint)bytes.Length, out uint rgb) == 1
+            ? new Color((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb)
+            : null;
+
     // The asset table (docs/assets-plan.md). No mode argument anywhere on
     // this floor: assets are read-only structurally.
     [DllImport("kaya")]

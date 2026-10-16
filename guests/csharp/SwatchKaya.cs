@@ -496,6 +496,40 @@ sealed class SwatchRow
 
     public void SetAspect(Node n, int width, int height) =>
         t.SetAspect(n, width, height);
+
+    public void SetGroundGradient(Node n, Color color) =>
+        t.SetGroundGradient(n, color);
+
+    public void SetGroundGradient(Node n, Signal s) => t.SetGroundGradient(n, s);
+
+    public void SetGroundGradient(Node n, Field<Color> f, uint level = 0) =>
+        t.SetGroundGradient(n, f, level);
+
+    public void SetGroundImage(Node n, byte[] bytes) => t.SetGroundImage(n, bytes);
+
+    public void SetGroundImage(Node n, Signal s) => t.SetGroundImage(n, s);
+
+    public void SetGroundImage(Node n, Field<byte[]> f, uint level = 0) =>
+        t.SetGroundImage(n, f, level);
+
+    public void SetShape(Node n, Shape shape) => t.SetShape(n, shape);
+
+    public void SetTint(Node n, Tint tint) => t.SetTint(n, tint);
+
+    public void SetTint(Node n, Signal s) => t.SetTint(n, s);
+
+    public void SetTint(Node n, Field<Tint> f, uint level = 0) =>
+        t.SetTint(n, f, level);
+
+    public void SetSelected(Node n, bool on) => t.SetSelected(n, on);
+
+    public void SetSelected(Node n, Signal s) => t.SetSelected(n, s);
+
+    public void SetSelected(Node n, Field<bool> f, uint level = 0) =>
+        t.SetSelected(n, f, level);
+
+    public void OnActivate(Node n, System.Action<Tx, System.Collections.Generic.List<object>> handler) =>
+        t.OnActivate(n, handler);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

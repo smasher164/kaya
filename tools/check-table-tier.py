@@ -1073,8 +1073,8 @@ static_negative(
 
 static_negative(
     "no-height-report",
-    r"            KayaHost\.rowsMeasured\(node\.id, "
-    r"visible\.location, heights\)\n", "",
+    r"                KayaHost\.rowsMeasured\(node\.id, "
+    r"run\.first, run\.heights\)\n", "",
     "the measured-extent report removed",
     "struct KayaNativeTable > class KayaTableDriver > "
     "func measureRows",

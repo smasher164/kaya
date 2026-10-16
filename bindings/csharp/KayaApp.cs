@@ -687,6 +687,19 @@ enum Tint : long
     Warning = KayaWire.TintWarning,
     Critical = KayaWire.TintCritical,
     Neutral = KayaWire.TintNeutral,
+    /// A label's untinted text (docs/styling-pass-plan.md Y7).
+    None = KayaWire.TintNone,
+    /// The platform's panel over media (docs/styling-pass-plan.md Y3).
+    Overlay = KayaWire.TintOverlay,
+}
+
+/// An image's clip (docs/styling-pass-plan.md Y6): Rounded is the
+/// platform's own medium corner, Circle the inscribed circle, covering.
+enum Shape : long
+{
+    Rect = KayaWire.ShapeRect,
+    Rounded = KayaWire.ShapeRounded,
+    Circle = KayaWire.ShapeCircle,
 }
 
 /// A container's arrangement axis (docs/adaptive-layout-plan.md D1/D2).
@@ -1323,6 +1336,7 @@ abstract record Occurrence(ulong Id, List<object> Keys)
 }
 
 sealed record ButtonClicked(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+sealed record Activated(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record TextChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
 
@@ -1919,6 +1933,8 @@ sealed class KayaApp
     // app (DESIGN.md, Binding conventions).
     ulong signals, widgets, collections, menuItems;
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
+    readonly Dictionary<ulong, Action<Tx>> widgetActivates = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>>> nodeActivates = new();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     readonly Dictionary<ulong, Action<Tx, uint>> sortHandlers = new();
@@ -2305,6 +2321,12 @@ sealed class KayaApp
     }
 
     public void OnClick(Widget w, Action<Tx> handler) => widgetHandlers[w.Id] = handler;
+
+    // Private to the binding: declaring the container activatable and
+    // registering its handler are one act (Tx.OnActivate, Tpl.OnActivate).
+    internal void OnActivate(Widget w, Action<Tx> handler) => widgetActivates[w.Id] = handler;
+
+    internal void OnActivate(Node n, Action<Tx, List<object>> handler) => nodeActivates[n.Id] = handler;
 
     Task<T> RequestAsync<T>(Action<Tx, Action<T>> send)
     {
@@ -3467,6 +3489,7 @@ sealed class KayaApp
         switch (kind)
         {
             case KayaWire.OccKindButtonClicked: return new ButtonClicked(id, keys);
+            case KayaWire.OccKindActivated: return new Activated(id, keys);
             case KayaWire.OccKindTextChanged:
                 return new TextChanged(id, keys, payload as string ?? "");
             case KayaWire.OccKindSubmitted:
@@ -3688,6 +3711,14 @@ sealed class KayaApp
                 case ButtonClicked clickRow
                     when nodeHandlers.TryGetValue(clickRow.Id, out var onClickRow):
                     Dispatch(tx => onClickRow(tx, clickRow.Keys));
+                    break;
+                case Activated { Live: true } activeLive
+                    when widgetActivates.TryGetValue(activeLive.Id, out var onActivate):
+                    Dispatch(onActivate);
+                    break;
+                case Activated activeRow
+                    when nodeActivates.TryGetValue(activeRow.Id, out var onActivateRow):
+                    Dispatch(tx => onActivateRow(tx, activeRow.Keys));
                     break;
                 case TextChanged { Live: true } textLive
                     when widgetChanges.TryGetValue(textLive.Id, out var onText):
@@ -4290,6 +4321,64 @@ sealed class Tx : IDisposable
     public void SetFilled(Widget w, Tint tint) =>
         Records.Add(KayaWire.TxSetFilled(w.Id, (long)tint));
 
+    /// A row or column's ground fading from `color`, clamped by the core for
+    /// the appearance's text, into the platform's window ground
+    /// (docs/styling-pass-plan.md Y2); Kaya.ImageDominant is the usual colour.
+    public void SetGroundGradient(Widget w, Color color)
+    {
+        Records.Add(KayaWire.TxSetGround(w.Id, KayaWire.GroundGradient));
+        Records.Add(KayaWire.TxSetColor(w.Id, color.R, color.G, color.B, color.A));
+    }
+
+    public void SetGroundGradient(Widget w, Signal s)
+    {
+        Records.Add(KayaWire.TxSetGround(w.Id, KayaWire.GroundGradient));
+        Records.Add(KayaWire.TxBindColor(w.Id, s.Id));
+    }
+
+    /// A row or column covered by a picture (docs/styling-pass-plan.md Y3);
+    /// text over it sits inside a container filled with Tint.Overlay.
+    public void SetGroundImage(Widget w, byte[] bytes)
+    {
+        Records.Add(KayaWire.TxSetGround(w.Id, KayaWire.GroundImage));
+        SetSource(w, bytes);
+    }
+
+    public void SetGroundImage(Widget w, Signal s)
+    {
+        Records.Add(KayaWire.TxSetGround(w.Id, KayaWire.GroundImage));
+        BindSource(w, s);
+    }
+
+    /// An image's clip (docs/styling-pass-plan.md Y6).
+    public void SetShape(Widget image, Shape shape) =>
+        Records.Add(KayaWire.TxSetShape(image.Id, (long)shape));
+
+    /// A label in a tint's standalone colour (docs/styling-pass-plan.md Y7).
+    public void SetTint(Widget label, Tint tint) =>
+        Records.Add(KayaWire.TxSetTint(label.Id, (long)tint));
+
+    public void SetTint(Widget label, Signal s) =>
+        Records.Add(KayaWire.TxBindTint(label.Id, s.Id));
+
+    /// An activatable container's selected surface: the app's state,
+    /// written where it wants it (docs/styling-pass-plan.md Y4).
+    public void SetSelected(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetSelected(w.Id, on));
+
+    public void SetSelected(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindSelected(w.Id, s.Id));
+
+    /// This row or column takes a click as a whole (docs/styling-pass-plan.md
+    /// Y4): a button to assistive technology, the platform's press, hover
+    /// and selected surface. Declaring it and registering the handler are
+    /// one act.
+    public void OnActivate(Widget w, Action<Tx> handler)
+    {
+        Records.Add(KayaWire.TxSetActivatable(w.Id, true));
+        App.OnActivate(w, handler);
+    }
+
     /// A textarea one line tall at rest that grows with its text to `lines`
     /// lines, then scrolls (docs/grow-lines-plan.md).
     public void SetMaxLines(Widget w, int lines) =>
@@ -4704,7 +4793,7 @@ sealed class Tx : IDisposable
     /// font size. `rich: true` draws the label's attribute runs over the
     /// role's own font, read-only (docs/rich-text-plan.md R8, §15).
     public Widget Label(string? text = null, Signal? bind = null, double? grow = null,
-        Role? role = null, bool rich = false)
+        Role? role = null, bool rich = false, Tint? tint = null)
     {
         var w = Widget(KayaWire.KindLabel);
         if (text != null) SetText(w, text);
@@ -4712,6 +4801,7 @@ sealed class Tx : IDisposable
         if (grow is double g) SetGrow(w, g);
         if (role is Role r) SetRole(w, r);
         if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
+        if (tint is Tint t) SetTint(w, t);
         return w;
     }
 
@@ -5327,9 +5417,10 @@ sealed class Tx : IDisposable
     /// follows a signal is SetPhase(image, signal).
     public Widget Image(byte[]? source = null, Signal? bind = null, double? grow = null,
         Fit? fit = null, double? maxWidth = null, double? maxHeight = null,
-        ImagePhase? phase = null)
+        ImagePhase? phase = null, Shape? shape = null)
     {
         var w = Widget(KayaWire.KindImage);
+        if (shape is Shape clip) SetShape(w, clip);
         if (source != null) SetSource(w, source);
         if (bind is Signal s) BindSource(w, s);
         if (grow is double g) SetGrow(w, g);
@@ -5369,14 +5460,18 @@ sealed class Tx : IDisposable
     /// ambient stack). `inset:` is this container's own padding.
     public void Column(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, Tint? filled = null) =>
+        double? inset = null, Tint? filled = null, Color? groundGradient = null,
+        byte[]? groundImage = null, Action<Tx>? onActivate = null) =>
         ContainerOf<object?>(KayaWire.KindColumn, c => { body(c); return null; },
-            grow, spacing, align, inset, filled: filled);
+            grow, spacing, align, inset, filled: filled, groundGradient: groundGradient,
+            groundImage: groundImage, onActivate: onActivate);
 
     public T Column<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, Tint? filled = null) =>
-        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset, filled: filled);
+        double? inset = null, Tint? filled = null, Color? groundGradient = null,
+        byte[]? groundImage = null, Action<Tx>? onActivate = null) =>
+        ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset, filled: filled,
+            groundGradient: groundGradient, groundImage: groundImage, onActivate: onActivate);
 
     /// `stackWhen:` stacks this row's children vertically while the
     /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
@@ -5387,19 +5482,23 @@ sealed class Tx : IDisposable
     public void Row(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
-        Role? role = null) =>
+        Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
+        Action<Tx>? onActivate = null) =>
         Row<object?>(c => { body(c); return null; },
-            grow, spacing, align, inset, stackWhen, filled, role);
+            grow, spacing, align, inset, stackWhen, filled, role, groundGradient, groundImage,
+            onActivate);
 
     public T Row<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
-        Role? role = null) =>
+        Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
+        Action<Tx>? onActivate = null) =>
         ContainerOf(KayaWire.KindRow, c =>
         {
             if (role is Role r) SetRole(c, r);
             return body(c);
-        }, grow, spacing, align, inset, stackWhen, filled);
+        }, grow, spacing, align, inset, stackWhen, filled, groundGradient, groundImage,
+            onActivate);
 
     /// A scroll viewport over EXACTLY ONE child. Pass grow: so the
     /// enclosing track CONSTRAINS it — an unconstrained viewport hugs its
@@ -5532,13 +5631,17 @@ sealed class Tx : IDisposable
     T ContainerOf<T>(
         uint kind, Func<Widget, T> body, double? grow = null, double? spacing = null,
         Align? align = null, double? inset = null, SizeClass? stackWhen = null,
-        Tint? filled = null)
+        Tint? filled = null, Color? groundGradient = null, byte[]? groundImage = null,
+        Action<Tx>? onActivate = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (align is Align a) SetAlign(parent, a);
         if (filled is Tint t) SetFilled(parent, t);
+        if (groundGradient is Color top) SetGroundGradient(parent, top);
+        if (groundImage != null) SetGroundImage(parent, groundImage);
+        if (onActivate != null) OnActivate(parent, onActivate);
         if (inset is double pad) SetInset(parent, pad);
         if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
@@ -6745,6 +6848,21 @@ sealed class Tx : IDisposable
     public void MountIn(ulong window, Widget root) =>
         Records.Add(KayaWire.TxMount(window, root.Id));
 
+    /// The window's DOCK, the surface under every pane and above a phone's
+    /// tab bar (docs/styling-pass-plan.md Y8): `dock` is a fresh surface id
+    /// and `body` builds the root it shows, returning it with a value that
+    /// comes back out. One per window.
+    public T Dock<T>(ulong dock, Func<(Widget Root, T Value)> body, ulong window = 0)
+    {
+        Records.Add(KayaWire.TxAttachDock(window, dock));
+        var (root, value) = body();
+        MountIn(dock, root);
+        return value;
+    }
+
+    public void Dock(ulong dock, Func<Widget> body, ulong window = 0) =>
+        Dock<object?>(dock, () => (body(), null), window);
+
     public void Mount(Widget root) => Records.Add(KayaWire.TxMount(0, root.Id));
 }
 
@@ -6970,6 +7088,76 @@ sealed class Tpl
     /// chat thread's bubbles are stamped rows.
     public void SetFilled(Node n, Tint tint) =>
         tx.Records.Add(KayaWire.TxSetFilled(n.Id, (long)tint));
+
+    /// A stamped container's gradient ground (Tx.SetGroundGradient); a row
+    /// field gives each copy its album's colour.
+    public void SetGroundGradient(Node n, Color color)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundGradient));
+        tx.Records.Add(KayaWire.TxSetColor(n.Id, color.R, color.G, color.B, color.A));
+    }
+
+    public void SetGroundGradient(Node n, Signal s)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundGradient));
+        tx.Records.Add(KayaWire.TxBindColor(n.Id, s.Id));
+    }
+
+    public void SetGroundGradient(Node n, Field<Color> f, uint level = 0)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundGradient));
+        BindColorField(n, level, f);
+    }
+
+    /// A stamped container's image ground (Tx.SetGroundImage).
+    public void SetGroundImage(Node n, byte[] bytes)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundImage));
+        tx.Records.Add(KayaWire.TxSetSource(n.Id, Kaya.RegisterBlob(bytes)));
+    }
+
+    public void SetGroundImage(Node n, Signal s)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundImage));
+        tx.Records.Add(KayaWire.TxBindSource(n.Id, s.Id));
+    }
+
+    public void SetGroundImage(Node n, Field<byte[]> f, uint level = 0)
+    {
+        tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundImage));
+        BindSourceField(n, level, f);
+    }
+
+    /// A stamped image's clip (Tx.SetShape).
+    public void SetShape(Node n, Shape shape) =>
+        tx.Records.Add(KayaWire.TxSetShape(n.Id, (long)shape));
+
+    /// A stamped label's tint (Tx.SetTint): one for all, a signal, or the
+    /// row's own Tint field.
+    public void SetTint(Node n, Tint tint) =>
+        tx.Records.Add(KayaWire.TxSetTint(n.Id, (long)tint));
+
+    public void SetTint(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindTint(n.Id, s.Id));
+
+    public void SetTint(Node n, Field<Tint> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindTintElement(n.Id, level, f.Index));
+
+    /// A stamped container's selected surface (Tx.SetSelected).
+    public void SetSelected(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetSelected(n.Id, on));
+
+    public void SetSelected(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindSelected(n.Id, s.Id));
+
+    public void SetSelected(Node n, Field<bool> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindSelectedElement(n.Id, level, f.Index));
+
+    /// Every stamped copy of this container takes a click as a whole, the
+    /// handler handed the copy's keys (Tx.OnActivate).
+    public void OnActivate(Node n, Action<Tx, List<object>> handler)
+    {
+        tx.Records.Add(KayaWire.TxSetActivatable(n.Id, true));
+        tx.App.OnActivate(n, handler);
+    }
 
     /// A stamped image's bound (Tx.SetMaxWidth, Tx.SetMaxHeight).
     public void SetMaxWidth(Node n, double points) =>

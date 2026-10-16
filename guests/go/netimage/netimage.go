@@ -111,8 +111,9 @@ func App() *kaya.App {
 				row.Row(func() {
 					image := row.Image(row.Art())
 					row.SetFit(image, kaya.FitCover)
-					row.SetMaxWidth(image, 20)
-					row.SetMaxHeight(image, 20)
+					row.SetMaxWidth(image, 40)
+					row.SetMaxHeight(image, 40)
+					row.SetShape(image, kaya.ShapeRounded)
 					row.BindPhase(image, row.Phase())
 					row.SetA11yID(image, "art")
 					image.OnNeeded(func(tx *kaya.Tx, keys []any) {

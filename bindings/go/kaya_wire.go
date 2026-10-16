@@ -229,19 +229,19 @@ const (
 	SizeClassNone = 0
 	SizeClassCompact = 1
 	SizeClassRegular = 2
-	TintNone = 0
-	TintAccent = 1
-	TintSuccess = 2
-	TintWarning = 3
-	TintCritical = 4
-	TintNeutral = 5
-	TintOverlay = 6
+	TintNone Tint = 0
+	TintAccent Tint = 1
+	TintSuccess Tint = 2
+	TintWarning Tint = 3
+	TintCritical Tint = 4
+	TintNeutral Tint = 5
+	TintOverlay Tint = 6
 	GroundNone = 0
 	GroundGradient = 1
 	GroundImage = 2
-	ShapeRect = 0
-	ShapeRounded = 1
-	ShapeCircle = 2
+	ShapeRect Shape = 0
+	ShapeRounded Shape = 1
+	ShapeCircle Shape = 2
 	RoleDestructive Role = 1
 	RoleProminent Role = 2
 	RoleHeading Role = 3
@@ -761,6 +761,38 @@ func (a Axis) String() string {
 		return "vertical"
 	}
 	return "Axis(" + strconv.FormatInt(int64(a), 10) + ")"
+}
+
+func (t Tint) String() string {
+	switch t {
+	case TintNone:
+		return "none"
+	case TintAccent:
+		return "accent"
+	case TintSuccess:
+		return "success"
+	case TintWarning:
+		return "warning"
+	case TintCritical:
+		return "critical"
+	case TintNeutral:
+		return "neutral"
+	case TintOverlay:
+		return "overlay"
+	}
+	return "Tint(" + strconv.FormatInt(int64(t), 10) + ")"
+}
+
+func (s Shape) String() string {
+	switch s {
+	case ShapeRect:
+		return "rect"
+	case ShapeRounded:
+		return "rounded"
+	case ShapeCircle:
+		return "circle"
+	}
+	return "Shape(" + strconv.FormatInt(int64(s), 10) + ")"
 }
 
 func (r Role) String() string {

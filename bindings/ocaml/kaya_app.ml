@@ -707,6 +707,42 @@ end
 let pack_image_phase p = Int64.of_int (Image_phase.wire p)
 let image_phase_of_packed n = Image_phase.of_wire (Int64.to_int n)
 
+(* What a filled container's surface means (docs/tints-plan.md T1), and a
+   label's standalone colour (docs/styling-pass-plan.md Y7); its own module
+   because [Warning] is already a symbol. *)
+module Tint = struct
+  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay
+
+  let all = [ None; Accent; Success; Warning; Critical; Neutral; Overlay ]
+
+  let wire = function
+    | None -> Int64.of_int Kaya_wire.tint_none
+    | Accent -> Int64.of_int Kaya_wire.tint_accent
+    | Success -> Int64.of_int Kaya_wire.tint_success
+    | Warning -> Int64.of_int Kaya_wire.tint_warning
+    | Critical -> Int64.of_int Kaya_wire.tint_critical
+    | Neutral -> Int64.of_int Kaya_wire.tint_neutral
+    | Overlay -> Int64.of_int Kaya_wire.tint_overlay
+
+  let of_wire n =
+    match List.find_opt (fun t -> wire t = n) all with
+    | Some t -> t
+    | Option.None -> failwith (Printf.sprintf "kaya: tint %Ld is not one this build knows" n)
+end
+
+(* A [Tint.t] row field's wire form, for the ppx's generated code. *)
+let pack_tint = Tint.wire
+let tint_of_packed = Tint.of_wire
+
+(* An image's clip (docs/styling-pass-plan.md Y6): [`Rounded] is the
+   platform's own medium corner, [`Circle] the inscribed circle. *)
+type shape = [ `Rect | `Rounded | `Circle ]
+
+let shape_wire : shape -> int64 = function
+  | `Rect -> Int64.of_int Kaya_wire.shape_rect
+  | `Rounded -> Int64.of_int Kaya_wire.shape_rounded
+  | `Circle -> Int64.of_int Kaya_wire.shape_circle
+
 (* What a credential field holds (docs/autofill-plan.md A2): the passwords
    on a secure field only, username, email and phone on an entry only, a
    one-time code on either (A3), refused at the root otherwise. [None]
@@ -1692,6 +1728,12 @@ end
 type color = Color.t
 
 let string_of_color = Color.to_string
+
+(* The colour an album's header fades from (docs/styling-pass-plan.md Y2):
+   the core's one quantizer over the decoded picture, [None] for bytes that
+   do not decode. *)
+let image_dominant data =
+  Option.map (fun rgb -> Color.of_hex ((rgb lsl 8) lor 0xFF)) (Kaya_runtime.image_dominant data)
 let pack_color c = Int64.of_int (Color.hex c)
 
 let color_of_packed packed =
@@ -1838,6 +1880,7 @@ module Scalar = struct
     | Color : color t
     | Bytes : bytes t
     | Image_phase : Image_phase.t t
+    | Tint : Tint.t t
 end
 
 let signal : type a. a Scalar.t -> a -> a signal =
@@ -1852,6 +1895,7 @@ let signal : type a. a Scalar.t -> a -> a signal =
   | Scalar.Color -> signal_of (fun c -> Kaya_wire.I64 (pack_color c)) initial
   | Scalar.Bytes -> signal_of (fun d -> Kaya_wire.Blob (Kaya_runtime.register_blob d)) initial
   | Scalar.Image_phase -> signal_of (fun p -> Kaya_wire.I64 (pack_image_phase p)) initial
+  | Scalar.Tint -> signal_of (fun t -> Kaya_wire.I64 (pack_tint t)) initial
 
 let write (s : 'a signal) (v : 'a) : unit =
   emit (the_tx ()) (Kaya_wire.tx_write_signal s.sig_id (s.sig_enc v))
@@ -2002,20 +2046,43 @@ let align_wire = function
 
 let set_align (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_align id (align_wire a))
 
-(* What a filled container's surface means (docs/tints-plan.md T1); its own
-   module because [Warning] is already a symbol. *)
-module Tint = struct
-  type t = Accent | Success | Warning | Critical | Neutral
-
-  let wire = function
-    | Accent -> 1L
-    | Success -> 2L
-    | Warning -> 3L
-    | Critical -> 4L
-    | Neutral -> 5L
-end
-
 let set_filled (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_filled id (Tint.wire t))
+
+(* A row or column's ground (docs/styling-pass-plan.md Y2, Y3): a gradient
+   from [color], clamped by the core, into the platform's window ground, or
+   a picture covering it, text over which sits in an [Overlay] fill. *)
+let set_ground_gradient (Widget id) (c : color) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
+  emit tx (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a)
+
+let bind_ground_gradient (Widget id) (s : color signal) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
+  emit tx (Kaya_wire.tx_bind_color id s.sig_id)
+
+let set_ground_image (Widget id) data =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
+  emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
+
+let bind_ground_image (Widget id) (s : bytes signal) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
+  emit tx (Kaya_wire.tx_bind_source id s.sig_id)
+
+(* An image's clip (Y6). *)
+let set_shape (Widget id) (s : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire s))
+
+(* A label in a tint's standalone colour (Y7). *)
+let set_tint (Widget id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
+
+let bind_tint (Widget id) (s : Tint.t signal) = emit (the_tx ()) (Kaya_wire.tx_bind_tint id s.sig_id)
+
+(* An activatable container's selected surface: the app's state (Y4). *)
+let set_selected (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_selected id on)
+
+let bind_selected (Widget id) (s : bool signal) = emit (the_tx ()) (Kaya_wire.tx_bind_selected id s.sig_id)
 
 (* A textarea one line tall at rest that grows with its text to [lines]
    lines, then scrolls (docs/grow-lines-plan.md). *)
@@ -2618,7 +2685,8 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   Option.iter (Hashtbl.replace tx.app.widget_formats id) on_format;
   w
 
-let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?rich ?href ?href_bind ?text ?bind () =
+let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?rich ?href ?href_bind ?tint
+    ?tint_bind ?text ?bind () =
   let w = widget Kaya_wire.kind_label in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -2630,6 +2698,8 @@ let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   Option.iter (fun v -> set_rich w v) rich;
   Option.iter (fun u -> set_href w u) href;
   Option.iter (fun s -> bind_href w s) href_bind;
+  Option.iter (fun t -> set_tint w t) tint;
+  Option.iter (fun s -> bind_tint w s) tint_bind;
   Option.iter (fun t -> set_text w t) text;
   Option.iter (fun s -> bind_text w s) bind;
   w
@@ -2637,13 +2707,13 @@ let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
 (* A label wearing [Heading], in one word (the h1 tradition): the
    platform's heading text style AND the trait assistive users skim by,
    and on a grouped screen the section-header seat. *)
-let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
-  label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Heading ?text ?bind ()
+let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?tint ?tint_bind ?text ?bind () =
+  label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Heading ?tint ?tint_bind ?text ?bind ()
 
 (* The heading's counterpart in one word: the platform's footnote tier
    under the content it explains, and the section-footer seat. *)
-let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?text ?bind () =
-  label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?text ?bind ()
+let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?tint ?tint_bind ?text ?bind () =
+  label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?tint ?tint_bind ?text ?bind ()
 
 let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit () =
   let tx = the_tx () in
@@ -3301,7 +3371,7 @@ let time_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    renders the placeholder, never a crash. [~source] ships the bytes and
    [~source_asset] names the picture instead (the bytes never enter the
    OCaml heap). The two are EXCLUSIVE. *)
-let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?fit ?phase ?phase_bind ?max_width ?max_height ?(bleed = false) () =
+let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?fit ?phase ?phase_bind ?max_width ?max_height ?shape ?(bleed = false) () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
@@ -3320,6 +3390,7 @@ let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
   Option.iter (fun s -> bind_phase w s) phase_bind;
   Option.iter (fun v -> set_max_width w v) max_width;
   Option.iter (fun v -> set_max_height w v) max_height;
+  Option.iter (fun sh -> set_shape w sh) shape;
   declare_bleed w bleed;
   w
 
@@ -3440,7 +3511,8 @@ let draw (Widget id) body =
    child list literal only allocates closures and the container realizes
    them left to right ([List.iter]'s specified order IS document order).
    Props are labeled optional arguments, the lablgtk idiom. *)
-let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled kind children () =
+let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
   Option.iter (fun v -> set_fill parent v) fill;
@@ -3449,6 +3521,21 @@ let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?h
   Option.iter (fun a -> set_align parent a) align;
   Option.iter (fun p -> set_inset parent p) inset;
   Option.iter (fun t -> set_filled parent t) filled;
+  Option.iter (fun c -> set_ground_gradient parent c) ground_gradient;
+  Option.iter (fun s -> bind_ground_gradient parent s) ground_gradient_bind;
+  Option.iter (fun d -> set_ground_image parent d) ground_image;
+  Option.iter (fun s -> bind_ground_image parent s) ground_image_bind;
+  (* Registering the handler and declaring the container activatable are
+     one act (docs/styling-pass-plan.md Y4). *)
+  (match on_activate with
+  | Some handler ->
+      let (Widget id) = parent in
+      let tx = the_tx () in
+      Hashtbl.replace tx.app.widget_handlers id handler;
+      emit tx (Kaya_wire.tx_set_activatable id true)
+  | None -> ());
+  Option.iter (fun on -> set_selected parent on) selected;
+  Option.iter (fun s -> bind_selected parent s) selected_bind;
   List.iter (fun child -> add_child parent (child ())) children;
   parent
 
@@ -3537,9 +3624,10 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled children =
-  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_column
-    children
+let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind children =
+  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind Kaya_wire.kind_column children
 
 (* A scroll viewport over EXACTLY ONE child (the signature says so; the
    scene enforces it too). Pass [~grow] so the enclosing track CONSTRAINS
@@ -3560,10 +3648,11 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled ?role ?stack_when ?wrap children () =
+let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind ?role ?stack_when ?wrap children () =
   let parent =
-    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled Kaya_wire.kind_row
-      children ()
+    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
+      ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind Kaya_wire.kind_row children ()
   in
   (* [Composer] (docs/composer-plan.md §4). *)
   Option.iter (fun r -> set_role parent r) role;
@@ -3774,6 +3863,10 @@ let blob_field index : ('a, bytes) field =
 
 let image_phase_field index : ('a, Image_phase.t) field =
   { fd_index = index; fd_to_value = (fun p -> Kaya_wire.I64 (pack_image_phase p)) }
+
+(* A row's tint (docs/styling-pass-plan.md Y7): the playing track's title. *)
+let tint_field index : ('a, Tint.t) field =
+  { fd_index = index; fd_to_value = (fun t -> Kaya_wire.I64 (pack_tint t)) }
 
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
@@ -4124,6 +4217,17 @@ let destroy_window id = emit (the_tx ()) (Kaya_wire.tx_destroy_window id)
 
 (* Mount a root into a specific window; mounting presents. *)
 let mount_in window (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount window root)
+
+(* [window]'s DOCK, the surface under every pane and above a phone's tab bar
+   (docs/styling-pass-plan.md Y8): [dock] is a fresh surface id, and [body]
+   builds its root, answering [(root, value)]; the value comes back out. One
+   per window. *)
+let dock ?(window = 0L) dock (body : unit -> widget * 'a) : 'a =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_attach_dock window dock);
+  let Widget root, value = body () in
+  emit tx (Kaya_wire.tx_mount dock root);
+  value
 
 (* Push a navigation entry onto the primary surface's stack (entry ids are
    guest-allocated in the shared surface namespace, the [create_window]
@@ -5545,6 +5649,49 @@ module Tpl = struct
   let set_accepts n kinds = Floor.set_accepts n kinds
   let set_align n a = Floor.set_align n a
   let set_filled n t = Floor.set_filled n t
+
+  (* The skin's template twins (docs/styling-pass-plan.md Y2-Y7, Y10): a row
+     field gives each copy its own colour, picture, tint or selection. *)
+  let set_ground_gradient (Node id) (c : color) =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
+    emit tx (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a)
+
+  let bind_ground_gradient_field ?(level = 0) (Node id) (fd : (_, color) field) =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
+    emit tx (Kaya_wire.tx_bind_color_element ~level ~field:fd.fd_index id)
+
+  let set_ground_image (Node id) data =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
+    emit tx (Kaya_wire.tx_set_source id (Kaya_runtime.register_blob data))
+
+  let bind_ground_image_field ?(level = 0) (Node id) (fd : (_, bytes) field) =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
+    emit tx (Kaya_wire.tx_bind_source_element ~level ~field:fd.fd_index id)
+
+  let set_shape (Node id) (sh : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire sh))
+  let set_tint (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
+
+  let bind_tint_field ?(level = 0) (Node id) (fd : (_, Tint.t) field) =
+    emit (the_tx ()) (Kaya_wire.tx_bind_tint_element ~level ~field:fd.fd_index id)
+
+  let set_selected (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_selected id on)
+
+  let bind_selected_field ?(level = 0) (Node id) (fd : (_, bool) field) =
+    emit (the_tx ()) (Kaya_wire.tx_bind_selected_element ~level ~field:fd.fd_index id)
+
+  (* Every stamped copy takes a click as a whole, the handler handed that
+     copy's keys; registering and declaring are one act (Y4). *)
+  let on_activate (Node id) (handler : key list -> unit) =
+    let tx = the_tx () in
+    Hashtbl.replace tx.app.node_handlers id (fun keys -> handler (List.map key_of_wire keys));
+    emit tx (Kaya_wire.tx_set_activatable id true)
+
+  let activate_node = on_activate
+
   let set_max_width n points = Floor.set_max_width n points
   let set_max_height n points = Floor.set_max_height n points
 
@@ -5637,7 +5784,7 @@ module Tpl = struct
 
   let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?role ?href
-      ?href_bind ?href_field ?text ?bind ?bind_field
+      ?href_bind ?href_field ?tint ?tint_field ?text ?bind ?bind_field
       ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_label in
     Option.iter (fun g -> Floor.set_grow n g) grow;
@@ -5650,6 +5797,8 @@ module Tpl = struct
     Option.iter (fun u -> Floor.set_href n u) href;
     Option.iter (fun s -> Floor.bind_href n s) href_bind;
     Option.iter (fun fd -> Floor.bind_href_field ~level n fd) href_field;
+    Option.iter (fun t -> set_tint n t) tint;
+    Option.iter (fun fd -> bind_tint_field ~level n fd) tint_field;
     Option.iter (fun x -> Floor.set_text n x) text;
     Option.iter (fun s -> Floor.bind_text n s) bind;
     Option.iter (fun fd -> Floor.bind_text_field ~level n fd) bind_field;
@@ -5658,19 +5807,19 @@ module Tpl = struct
   (* A stamped label wearing [Heading], in one word: the section title of
      a row, styled and announced as a heading. *)
   let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?text ?bind ?bind_field ?level
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?tint ?tint_field ?text ?bind ?bind_field ?level
       ?a11y_level () =
     label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Heading ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Heading ?tint ?tint_field ?text ?bind ?bind_field
       ?level ?a11y_level ()
 
   (* Its counterpart: the stamped row's footnote, under the content it
      explains. *)
   let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?text ?bind ?bind_field ?level
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?tint ?tint_field ?text ?bind ?bind_field ?level
       ?a11y_level () =
     label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Caption ?text ?bind ?bind_field
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ~role:Caption ?tint ?tint_field ?text ?bind ?bind_field
       ?level ?a11y_level ()
 
   (* A single-line text field per stamped copy. UNCONTROLLED as its live
@@ -6165,7 +6314,7 @@ module Tpl = struct
 
   let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?source ?bind ?bind_field
-      ?fit ?phase ?phase_bind ?phase_field ?max_width ?max_height ?on_needed ?on_released
+      ?fit ?phase ?phase_bind ?phase_field ?max_width ?max_height ?shape ?on_needed ?on_released
       ?(level = 0) ?(a11y_level = level) () =
     let n = Floor.widget Kaya_wire.kind_image in
     Option.iter (fun g -> Floor.set_grow n g) grow;
@@ -6183,6 +6332,7 @@ module Tpl = struct
     Option.iter (bind_phase_field ~level n) phase_field;
     Option.iter (fun v -> Floor.set_max_width n v) max_width;
     Option.iter (fun v -> Floor.set_max_height n v) max_height;
+    Option.iter (set_shape n) shape;
     Option.iter
       (fun handler ->
         Hashtbl.replace tx.app.node_needed id (fun keys -> handler (List.map key_of_wire keys)))
@@ -6244,8 +6394,8 @@ module Tpl = struct
      applied creators ([unit -> node] thunks), realized left to
      right; [()] realizes, omitting it nominates a child. *)
   let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?inset kind children ()
-      =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?(level = 0) ?inset
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field kind children () =
     let parent = Floor.widget kind in
     Option.iter (fun g -> Floor.set_grow parent g) grow;
     Option.iter (fun v -> Floor.set_fill parent v) fill;
@@ -6254,6 +6404,13 @@ module Tpl = struct
     (* Every stamped copy's own padding. [~spacing] and [~align] stay
        floor-only on template containers, in every binding alike. *)
     Option.iter (fun p -> Floor.set_inset parent p) inset;
+    Option.iter (fun c -> set_ground_gradient parent c) ground_gradient;
+    Option.iter (fun fd -> bind_ground_gradient_field ~level parent fd) ground_gradient_field;
+    Option.iter (fun d -> set_ground_image parent d) ground_image;
+    Option.iter (fun fd -> bind_ground_image_field ~level parent fd) ground_image_field;
+    Option.iter (fun h -> activate_node parent h) on_activate;
+    Option.iter (fun on -> set_selected parent on) selected;
+    Option.iter (fun fd -> bind_selected_field ~level parent fd) selected_field;
     List.iter (fun child -> Floor.add_child parent (child ())) children;
     parent
 
@@ -6338,10 +6495,11 @@ module Tpl = struct
      supplied, so [container kind_column] would have defaulted every prop
      and swallowed the caller's. *)
   let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset children =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field children =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset
-      Kaya_wire.kind_column children
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field Kaya_wire.kind_column children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE child.
      Pass [~grow] so the enclosing track CONSTRAINS it. CAUTION: the scene
@@ -6358,11 +6516,12 @@ module Tpl = struct
      exactly as it does live: the root admits the prop on Column, Row and
      Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset ?wrap children () =
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field ?wrap children () =
     let parent =
       container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?inset Kaya_wire.kind_row
-        children ()
+        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
+        ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field Kaya_wire.kind_row children ()
     in
     Option.iter (fun v -> Floor.set_wrap parent v) wrap;
     parent

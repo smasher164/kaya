@@ -412,6 +412,10 @@ end
 type color = Color.t
 
 val string_of_color : color -> string
+
+(* The colour an album's header fades from (docs/styling-pass-plan.md Y2):
+   the core's one quantizer, [None] for bytes that do not decode. *)
+val image_dominant : bytes -> color option
 val pack_color : color -> int64
 val color_of_packed : int64 -> color
 
@@ -468,6 +472,19 @@ end
 (* An [Image_phase.t] row field's wire form, for the ppx's generated code. *)
 val pack_image_phase : Image_phase.t -> int64
 val image_phase_of_packed : int64 -> Image_phase.t
+
+(* What a filled container's surface means (docs/tints-plan.md T1). *)
+module Tint : sig
+  type t = None | Accent | Success | Warning | Critical | Neutral | Overlay
+end
+
+(* A [Tint.t] row field's wire form, for the ppx's generated code. *)
+val pack_tint : Tint.t -> int64
+val tint_of_packed : int64 -> Tint.t
+
+(* An image's clip (docs/styling-pass-plan.md Y6): [`Rounded] is the
+   platform's own medium corner, [`Circle] the inscribed circle. *)
+type shape = [ `Rect | `Rounded | `Circle ]
 
 (* What a credential field holds (docs/autofill-plan.md A2): the passwords
    on a secure field only, username, email and phone on an entry only, a
@@ -732,6 +749,7 @@ module Scalar : sig
     | Color : color t
     | Bytes : bytes t
     | Image_phase : Image_phase.t t
+    | Tint : Tint.t t
 end
 
 (* A signal of the witnessed type — the phantom carries the wire
@@ -759,11 +777,6 @@ val set_max_lines : widget -> int -> unit
 (* An image's bound in points (docs/photo-attach-plan.md §2). *)
 val set_max_width : widget -> float -> unit
 val set_max_height : widget -> float -> unit
-
-(* What a filled container's surface means (docs/tints-plan.md T1). *)
-module Tint : sig
-  type t = Accent | Success | Warning | Critical | Neutral
-end
 
 (* A container's ARRANGEMENT AXIS (docs/adaptive-layout-plan.md D1/D2). *)
 type axis = Horizontal | Vertical
@@ -934,6 +947,8 @@ val label :
   ?rich:bool ->
   ?href:string ->
   ?href_bind:string signal ->
+  ?tint:Tint.t ->
+  ?tint_bind:Tint.t signal ->
   ?text:string -> ?bind:string signal -> unit -> widget
 
 val heading :
@@ -945,6 +960,8 @@ val heading :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
+  ?tint:Tint.t ->
+  ?tint_bind:Tint.t signal ->
   ?text:string -> ?bind:string signal -> unit -> widget
 
 val caption :
@@ -956,6 +973,8 @@ val caption :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
+  ?tint:Tint.t ->
+  ?tint_bind:Tint.t signal ->
   ?text:string -> ?bind:string signal -> unit -> widget
 
 val entry :
@@ -1414,6 +1433,7 @@ val image :
   ?phase_bind:Image_phase.t signal ->
   ?max_width:float ->
   ?max_height:float ->
+  ?shape:shape ->
   ?bleed:bool ->
   unit ->
   widget
@@ -1422,6 +1442,19 @@ val image :
    loading or failed image declares its box: [fit] and both bounds (N3). *)
 val set_phase : widget -> Image_phase.t -> unit
 val bind_phase : widget -> Image_phase.t signal -> unit
+
+(* The skin's dynamic paths (docs/styling-pass-plan.md Y2-Y7); the labelled
+   arguments on [column], [row], [label] and [image] are the declarative
+   spelling. *)
+val set_ground_gradient : widget -> color -> unit
+val bind_ground_gradient : widget -> color signal -> unit
+val set_ground_image : widget -> bytes -> unit
+val bind_ground_image : widget -> bytes signal -> unit
+val set_shape : widget -> shape -> unit
+val set_tint : widget -> Tint.t -> unit
+val bind_tint : widget -> Tint.t signal -> unit
+val set_selected : widget -> bool -> unit
+val bind_selected : widget -> bool signal -> unit
 
 (* --- THE CANVAS VOCABULARY (docs/canvas-plan.md §3.3, §3.4) --------- *)
 
@@ -1522,7 +1555,15 @@ val column :
   ?help:string ->
   ?help_bind:string signal ->
   ?spacing:float ->
-  ?align:align -> ?inset:float -> ?filled:Tint.t -> (unit -> widget) list -> unit -> widget
+  ?align:align -> ?inset:float -> ?filled:Tint.t ->
+  ?ground_gradient:color ->
+  ?ground_gradient_bind:color signal ->
+  ?ground_image:bytes ->
+  ?ground_image_bind:bytes signal ->
+  ?on_activate:(unit -> unit) ->
+  ?selected:bool ->
+  ?selected_bind:bool signal ->
+  (unit -> widget) list -> unit -> widget
 
 val scroll :
   ?grow:float ->
@@ -1551,6 +1592,13 @@ val row :
   ?align:align ->
   ?inset:float ->
   ?filled:Tint.t ->
+  ?ground_gradient:color ->
+  ?ground_gradient_bind:color signal ->
+  ?ground_image:bytes ->
+  ?ground_image_bind:bytes signal ->
+  ?on_activate:(unit -> unit) ->
+  ?selected:bool ->
+  ?selected_bind:bool signal ->
   ?role:role ->
   ?stack_when:size_class ->
   ?wrap:bool -> (unit -> widget) list -> unit -> widget
@@ -1622,6 +1670,9 @@ val player_field : int -> ('a, player) field
 (* A blob field's MODEL value carries the guest's own bytes. *)
 val blob_field : int -> ('a, bytes) field
 val image_phase_field : int -> ('a, Image_phase.t) field
+
+(* A row's tint (docs/styling-pass-plan.md Y7): the playing track's title. *)
+val tint_field : int -> ('a, Tint.t) field
 
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
@@ -1737,6 +1788,12 @@ val destroy_window : int64 -> unit
 
 (* Mount a root into a specific window; mounting presents. *)
 val mount_in : int64 -> widget -> unit
+
+(* [~window]'s DOCK, the surface under every pane and above a phone's tab
+   bar (docs/styling-pass-plan.md Y8): the int64 is a fresh surface id, the
+   body builds its root answering [(root, value)], and the value comes back
+   out. One per window. *)
+val dock : ?window:int64 -> int64 -> (unit -> widget * 'a) -> 'a
 
 (* Push a navigation entry onto the primary surface's stack. *)
 val push_entry :
@@ -2114,6 +2171,22 @@ module Tpl : sig
   val set_accepts : node -> string list -> unit
   val set_align : node -> align -> unit
   val set_filled : node -> Tint.t -> unit
+
+  (* The skin's template twins (docs/styling-pass-plan.md Y10): a row field
+     gives each copy its own colour, picture, tint or selection. *)
+  val set_ground_gradient : node -> color -> unit
+  val bind_ground_gradient_field : ?level:int -> node -> ('e, color) field -> unit
+  val set_ground_image : node -> bytes -> unit
+  val bind_ground_image_field : ?level:int -> node -> ('e, bytes) field -> unit
+  val set_shape : node -> shape -> unit
+  val set_tint : node -> Tint.t -> unit
+  val bind_tint_field : ?level:int -> node -> ('e, Tint.t) field -> unit
+  val set_selected : node -> bool -> unit
+  val bind_selected_field : ?level:int -> node -> ('e, bool) field -> unit
+
+  (* Every stamped copy takes a click as a whole, the handler handed that
+     copy's keys; registering and declaring are one act (Y4). *)
+  val on_activate : node -> (key list -> unit) -> unit
   val set_max_width : node -> float -> unit
   val set_max_height : node -> float -> unit
   val when_ : bool signal -> (unit -> 'a) -> unit -> node * 'a
@@ -2182,6 +2255,8 @@ module Tpl : sig
     ?href:string ->
     ?href_bind:string signal ->
     ?href_field:('d, string) field ->
+    ?tint:Tint.t ->
+    ?tint_field:('f, Tint.t) field ->
     ?text:string ->
     ?bind:string signal ->
     ?bind_field:('e, string) field ->
@@ -2199,6 +2274,8 @@ module Tpl : sig
     ?help:string ->
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
+    ?tint:Tint.t ->
+    ?tint_field:('f, Tint.t) field ->
     ?text:string ->
     ?bind:string signal ->
     ?bind_field:('d, string) field ->
@@ -2216,6 +2293,8 @@ module Tpl : sig
     ?help:string ->
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
+    ?tint:Tint.t ->
+    ?tint_field:('f, Tint.t) field ->
     ?text:string ->
     ?bind:string signal ->
     ?bind_field:('d, string) field ->
@@ -2643,6 +2722,7 @@ module Tpl : sig
     ?phase_field:('e, Image_phase.t) field ->
     ?max_width:float ->
     ?max_height:float ->
+    ?shape:shape ->
     ?on_needed:(key list -> unit) ->
     ?on_released:(key list -> unit) ->
     ?level:int -> ?a11y_level:int -> unit -> node
@@ -2678,7 +2758,16 @@ module Tpl : sig
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
     ?a11y_level:int ->
-    ?inset:float -> int -> (unit -> node) list -> unit -> node
+    ?level:int ->
+    ?inset:float ->
+    ?ground_gradient:color ->
+    ?ground_gradient_field:('g, color) field ->
+    ?ground_image:bytes ->
+    ?ground_image_field:('h, bytes) field ->
+    ?on_activate:(key list -> unit) ->
+    ?selected:bool ->
+    ?selected_field:('i, bool) field ->
+    int -> (unit -> node) list -> unit -> node
 
   val grid :
     columns:int ->
@@ -2756,7 +2845,15 @@ module Tpl : sig
     ?help:string ->
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
-    ?a11y_level:int -> ?inset:float -> (unit -> node) list -> unit -> node
+    ?a11y_level:int -> ?level:int -> ?inset:float ->
+    ?ground_gradient:color ->
+    ?ground_gradient_field:('g, color) field ->
+    ?ground_image:bytes ->
+    ?ground_image_field:('h, bytes) field ->
+    ?on_activate:(key list -> unit) ->
+    ?selected:bool ->
+    ?selected_field:('i, bool) field ->
+    (unit -> node) list -> unit -> node
 
   val scroll :
     ?grow:float ->
@@ -2785,7 +2882,16 @@ module Tpl : sig
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
     ?a11y_level:int ->
-    ?inset:float -> ?wrap:bool -> (unit -> node) list -> unit -> node
+    ?level:int ->
+    ?inset:float ->
+    ?ground_gradient:color ->
+    ?ground_gradient_field:('g, color) field ->
+    ?ground_image:bytes ->
+    ?ground_image_field:('h, bytes) field ->
+    ?on_activate:(key list -> unit) ->
+    ?selected:bool ->
+    ?selected_field:('i, bool) field ->
+    ?wrap:bool -> (unit -> node) list -> unit -> node
 
   (* A context menu on a template node: the same item vocabulary,
      attached from an unanchored [context_catalog]. *)

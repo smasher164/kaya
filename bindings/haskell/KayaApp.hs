@@ -257,6 +257,10 @@ module KayaApp
     setSymbol,
     Align (..),
     Tint (..),
+    Shape (..),
+    signalTint,
+    imageDominant,
+    dock,
     Axis (..),
     ContentType (..),
     SizeClass (..),
@@ -1232,6 +1236,17 @@ destroyWindow n = emitB (W.txDestroyWindow n)
 -- | Mount a root into a specific window; mounting presents.
 mountIn :: Word64 -> Widget -> Build ()
 mountIn window (Widget n) = emitB (W.txMount window n)
+
+-- | A window's DOCK, the surface under every pane and above a phone's tab
+-- bar (docs\/styling-pass-plan.md Y8): the window, a fresh surface id, and
+-- the body building its root, answering @(root, value)@; the value comes
+-- back out. One per window.
+dock :: Word64 -> Word64 -> Build (Widget, a) -> Build a
+dock window surface body = do
+  emitB (W.txAttachDock window surface)
+  (root, value) <- body
+  mountIn surface root
+  return value
 
 -- | Navigation-entry construction attributes — the config-list
 -- spelling. 'EOnPopped' fires when the user's back affordance pops THIS
@@ -2744,21 +2759,67 @@ setAlign :: Widget -> Align -> Build ()
 setAlign (Widget w) a = emitB (W.txSetAlign w (alignWire a))
 
 -- | What a filled container's surface means (docs\/tints-plan.md T1): each
--- backend draws it in the platform's own fill and foreground pair.
+-- backend draws it in the platform's own fill and foreground pair. On a
+-- label it is the tint's standalone colour, 'TintNone' its untinted text
+-- (docs\/styling-pass-plan.md Y7); 'TintOverlay' is the platform's panel
+-- over media (Y3).
 data Tint
-  = TintAccent
+  = TintNone
+  | TintAccent
   | TintSuccess
   | TintWarning
   | TintCritical
   | TintNeutral
-  deriving (Eq, Show)
+  | TintOverlay
+  deriving (Eq, Show, Enum, Bounded)
 
 tintWire :: Tint -> Int64
-tintWire TintAccent = 1
-tintWire TintSuccess = 2
-tintWire TintWarning = 3
-tintWire TintCritical = 4
-tintWire TintNeutral = 5
+tintWire t = fromIntegral $ case t of
+  TintNone -> W.tintNone
+  TintAccent -> W.tintAccent
+  TintSuccess -> W.tintSuccess
+  TintWarning -> W.tintWarning
+  TintCritical -> W.tintCritical
+  TintNeutral -> W.tintNeutral
+  TintOverlay -> W.tintOverlay
+
+tintOfWire :: Int64 -> Tint
+tintOfWire n = case filter ((== n) . tintWire) [minBound .. maxBound] of
+  t : _ -> t
+  [] -> error ("kaya: tint " ++ show n ++ " is not one this build knows")
+
+instance KayaValue Tint where
+  toWire = W.VI64 . tintWire
+  fromWire v = case v of W.VI64 n -> tintOfWire n; _ -> error "kaya: value is not a tint"
+
+-- | A row's tint (Y7): the playing track's title.
+instance KayaFieldType Tint where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . tintWire
+  fromFieldValue v = case v of W.VI64 n -> tintOfWire n; _ -> error "kaya: field is not a tint"
+
+-- | A tint signal, for a label's 'TintBound'.
+signalTint :: Tint -> Build (Signal Tint)
+signalTint = newSignal
+
+-- | An image's clip (docs\/styling-pass-plan.md Y6): 'ShapeRounded' is the
+-- platform's own medium corner, 'ShapeCircle' the inscribed circle.
+data Shape = ShapeRect | ShapeRounded | ShapeCircle
+  deriving (Eq, Show)
+
+shapeWire :: Shape -> Int64
+shapeWire sh = fromIntegral $ case sh of
+  ShapeRect -> W.shapeRect
+  ShapeRounded -> W.shapeRounded
+  ShapeCircle -> W.shapeCircle
+
+-- | The colour an album's header fades from (Y2): the core's one quantizer,
+-- 'Nothing' for bytes that do not decode.
+imageDominant :: BS.ByteString -> Maybe Color
+imageDominant bytes = toColor <$> R.imageDominantRaw bytes
+  where
+    toColor rgb = Color (byte 16 rgb) (byte 8 rgb) (byte 0 rgb) 255
+    byte k rgb = fromIntegral ((rgb `div` (2 ^ (k :: Int))) `mod` 256)
 
 -- | A row or column filled with a platform tint: kaya chooses the fill, the
 -- corner radius, the inset (unless one was set) and the foreground of what
@@ -3020,6 +3081,20 @@ data Attr (c :: WClass) where
   Align :: Align -> Attr 'BoxW
   -- | This container filled with a platform tint. Containers only.
   Filled :: Tint -> Attr 'BoxW
+  -- | This row or column's ground (docs\/styling-pass-plan.md Y2, Y3): a
+  -- gradient from the colour, clamped by the core, into the platform's
+  -- window ground, or a picture covering it, text over which sits in a
+  -- 'TintOverlay' fill.
+  GroundGradient :: Color -> Attr 'BoxW
+  GroundGradientBound :: Signal Color -> Attr 'BoxW
+  GroundImage :: BS.ByteString -> Attr 'BoxW
+  GroundImageBound :: Signal BS.ByteString -> Attr 'BoxW
+  -- | This row or column takes a click as a whole (Y4): registering the
+  -- handler and declaring the container activatable are one act.
+  OnActivate :: IO () -> Attr 'BoxW
+  -- | An activatable container's selected surface, the app's state (Y4).
+  Selected :: Bool -> Attr 'BoxW
+  SelectedBound :: Signal Bool -> Attr 'BoxW
   -- | This scroll keeps its end in view while its content grows, until the
   -- user scrolls away (docs\/follow-end-plan.md).
   FollowsEnd :: Attr 'BoxW
@@ -3107,6 +3182,11 @@ data Attr (c :: WClass) where
   -- its box: 'FitAs' and both bounds (N3).
   Phase :: ImagePhase -> Attr 'LeafW
   PhaseBound :: Signal ImagePhase -> Attr 'LeafW
+  -- | An image's clip (Y6).
+  ShapeAs :: Shape -> Attr 'LeafW
+  -- | A label in a tint's standalone colour (Y7).
+  TintAs :: Tint -> Attr 'LeafW
+  TintBound :: Signal Tint -> Attr 'LeafW
   -- | The width:height ratio of a video view's box, whatever its picture's
   -- own shape; 'FitAs' places the picture in it.
   AspectAs :: Int -> Int -> Attr 'LeafW
@@ -3162,6 +3242,26 @@ applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
 applyAttr (Align a) w = setAlign w a
 applyAttr (Filled t) w = setFilled w t
+applyAttr (GroundGradient c) (Widget n) = do
+  emitB (W.txSetGround n (fromIntegral W.groundGradient))
+  emitB (W.txSetColor n (fromIntegral c.r) (fromIntegral c.g) (fromIntegral c.b) (fromIntegral c.a))
+applyAttr (GroundGradientBound (Signal s)) (Widget n) = do
+  emitB (W.txSetGround n (fromIntegral W.groundGradient))
+  emitB (W.txBindColor n s)
+applyAttr (GroundImage bytes) (Widget n) = do
+  emitB (W.txSetGround n (fromIntegral W.groundImage))
+  emitBIO (W.txSetSource n <$> registerBlob bytes)
+applyAttr (GroundImageBound (Signal s)) (Widget n) = do
+  emitB (W.txSetGround n (fromIntegral W.groundImage))
+  emitB (W.txBindSource n s)
+applyAttr (OnActivate handler) (Widget n) = do
+  emitB (W.txSetActivatable n True)
+  pendB (PClick n handler)
+applyAttr (Selected on) (Widget n) = emitB (W.txSetSelected n on)
+applyAttr (SelectedBound (Signal s)) (Widget n) = emitB (W.txBindSelected n s)
+applyAttr (ShapeAs sh) (Widget n) = emitB (W.txSetShape n (shapeWire sh))
+applyAttr (TintAs t) (Widget n) = emitB (W.txSetTint n (tintWire t))
+applyAttr (TintBound (Signal s)) (Widget n) = emitB (W.txBindTint n s)
 applyAttr FollowsEnd (Widget w) = emitB (W.txSetFollowsEnd w True)
 applyAttr (Axis a) w = setAxis w a
 applyAttr (StackWhen when) w = stackWhen w when
@@ -3217,6 +3317,11 @@ applyAttr (MaxHeight points) (Widget w) = emitB (W.txSetMaxHeight w points)
 applyAttr (Accepts kinds) w = setAccepts w kinds
 applyAttr (Draggable clip ops) w = setDragSource w clip ops
 applyAttr (DropTarget ops) w = setDropTarget w ops
+
+-- The ground kind first: the root refuses a colour or source on a container
+-- that declares no ground.
+groundT :: Node -> Word32 -> Tpl () -> Tpl ()
+groundT (Node n) kind source = emitT (W.txSetGround n (fromIntegral kind)) >> source
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do
@@ -4532,6 +4637,24 @@ data TplAttr where
   TplPhase :: ImagePhase -> TplAttr
   TplPhaseBound :: Signal ImagePhase -> TplAttr
   TplPhaseField :: KField ImagePhase -> TplAttr
+  -- | The skin's template twins (docs\/styling-pass-plan.md Y10): a row
+  -- field gives each copy its own colour, picture, tint or selection.
+  TplGroundGradient :: Color -> TplAttr
+  TplGroundGradientBound :: Signal Color -> TplAttr
+  TplGroundGradientField :: KField Color -> TplAttr
+  TplGroundImage :: BS.ByteString -> TplAttr
+  TplGroundImageBound :: Signal BS.ByteString -> TplAttr
+  TplGroundImageField :: KField BS.ByteString -> TplAttr
+  -- | Every stamped copy takes a click as a whole, the handler handed that
+  -- copy's keys; registering and declaring are one act (Y4).
+  TplOnActivate :: ([Key] -> IO ()) -> TplAttr
+  TplSelected :: Bool -> TplAttr
+  TplSelectedBound :: Signal Bool -> TplAttr
+  TplSelectedField :: KField Bool -> TplAttr
+  TplShapeAs :: Shape -> TplAttr
+  TplTintAs :: Tint -> TplAttr
+  TplTintBound :: Signal Tint -> TplAttr
+  TplTintField :: KField Tint -> TplAttr
   -- | A stamped video view's box ratio, constant across the copies.
   TplAspectAs :: Int -> Int -> TplAttr
   -- | What this stamped copy takes from a paste — the closed kinds by
@@ -4560,6 +4683,22 @@ applyTplAttr (TplGrow weight) n = setGrow n weight
 applyTplAttr (TplFill on) n = setFill n on
 applyTplAttr (TplAlign a) n = setAlignWire n (alignWire a)
 applyTplAttr (TplFilled t) n = setFilledWire n (tintWire t)
+applyTplAttr (TplGroundGradient c) n = groundT n W.groundGradient (bindColorSource n c)
+applyTplAttr (TplGroundGradientBound src) n = groundT n W.groundGradient (bindColorSource n src)
+applyTplAttr (TplGroundGradientField src) n = groundT n W.groundGradient (bindColorSource n src)
+applyTplAttr (TplGroundImage bytes) n = groundT n W.groundImage (bindImageSource n bytes)
+applyTplAttr (TplGroundImageBound src) n = groundT n W.groundImage (bindImageSource n src)
+applyTplAttr (TplGroundImageField src) n = groundT n W.groundImage (bindImageSource n src)
+applyTplAttr (TplOnActivate handler) (Node n) = do
+  emitT (W.txSetActivatable n True)
+  pendT (PActivateNode n handler)
+applyTplAttr (TplSelected on) (Node n) = emitT (W.txSetSelected n on)
+applyTplAttr (TplSelectedBound (Signal s)) (Node n) = emitT (W.txBindSelected n s)
+applyTplAttr (TplSelectedField (KField i)) (Node n) = emitT (W.txBindSelectedElement n 0 i)
+applyTplAttr (TplShapeAs sh) (Node n) = emitT (W.txSetShape n (shapeWire sh))
+applyTplAttr (TplTintAs t) (Node n) = emitT (W.txSetTint n (tintWire t))
+applyTplAttr (TplTintBound (Signal s)) (Node n) = emitT (W.txBindTint n s)
+applyTplAttr (TplTintField (KField i)) (Node n) = emitT (W.txBindTintElement n 0 i)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplWrap on) n = setWrap n on
 applyTplAttr (TplInset pad) n = setNodeInset n pad
@@ -5130,6 +5269,7 @@ register app pending = case pending of
   PValue n handler -> modifyIORef' (app.appWidgetValues) (Map.insert n handler)
   PCommit n handler -> modifyIORef' (app.appWidgetCommits) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (app.appNodeToggles) (Map.insert n handler)
+  PActivateNode n handler -> modifyIORef' (app.appNodeHandlers) (Map.insert n handler)
   PDocumentBind n cid i level ->
     modifyIORef' (app.appDocumentBinds) (Map.insert n (cid, i, level))
   PEditNode n handler -> modifyIORef' (app.appNodeEdits) (Map.insert n handler)

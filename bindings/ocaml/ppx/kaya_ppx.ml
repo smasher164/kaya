@@ -7,7 +7,7 @@
 
 open Ppxlib
 
-type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time | Color | Player | Phase
+type wire = Str | Bool | I64 | F64 | Blob | Doc | Date | Time | Color | Player | Phase | Tint
 
 let wire_of_core_type (ct : core_type) =
   match ct with
@@ -36,12 +36,15 @@ let wire_of_core_type (ct : core_type) =
   | [%type: Kaya_app.player] -> Some Player
   | [%type: Image_phase.t] -> Some Phase
   | [%type: Kaya_app.Image_phase.t] -> Some Phase
+  (* A label's tint (docs/styling-pass-plan.md Y7). *)
+  | [%type: Tint.t] -> Some Tint
+  | [%type: Kaya_app.Tint.t] -> Some Tint
   | _ -> None
 
 let tag_expr ~loc = function
   | Str -> [%expr Kaya_wire.value_str]
   | Bool -> [%expr Kaya_wire.value_bool]
-  | I64 | Date | Time | Color | Player | Phase -> [%expr Kaya_wire.value_i64]
+  | I64 | Date | Time | Color | Player | Phase | Tint -> [%expr Kaya_wire.value_i64]
   | F64 -> [%expr Kaya_wire.value_f64]
   | Blob | Doc -> [%expr Kaya_wire.value_blob]
 
@@ -51,7 +54,7 @@ let tag_expr ~loc = function
 let value_ctor = function
   | Str -> "Str"
   | Bool -> "Bool"
-  | I64 | Date | Time | Color | Player | Phase -> "I64"
+  | I64 | Date | Time | Color | Player | Phase | Tint -> "I64"
   | F64 -> "F64"
   | Blob | Doc -> "Str"
 
@@ -65,6 +68,7 @@ let to_model_expr ~loc w e =
   | Color -> [%expr Kaya_app.pack_color [%e e]]
   | Player -> [%expr Kaya_app.pack_player [%e e]]
   | Phase -> [%expr Kaya_app.pack_image_phase [%e e]]
+  | Tint -> [%expr Kaya_app.pack_tint [%e e]]
   | _ -> e
 
 (* Wrap a model value's bound variable back to the record field. *)
@@ -77,6 +81,7 @@ let of_model_expr ~loc w e =
   | Color -> [%expr Kaya_app.color_of_packed [%e e]]
   | Player -> [%expr Kaya_app.player_of_packed [%e e]]
   | Phase -> [%expr Kaya_app.image_phase_of_packed [%e e]]
+  | Tint -> [%expr Kaya_app.tint_of_packed [%e e]]
   | _ -> e
 
 let field_ctor = function
@@ -91,6 +96,7 @@ let field_ctor = function
   | Color -> "color_field"
   | Player -> "player_field"
   | Phase -> "image_phase_field"
+  | Tint -> "tint_field"
 
 let generate ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -105,8 +111,8 @@ let generate ~ctxt (_rec_flag, type_decls) =
             | None ->
                 Location.raise_errorf ~loc:ld.pld_loc
                   "kaya: field %s is not wire-typed (string, bool, int64, \
-                   float, bytes, document, date, time, color, player, or \
-                   Image_phase.t)"
+                   float, bytes, document, date, time, color, player, \
+                   Image_phase.t or Tint.t)"
                   ld.pld_name.txt)
           labels
       in

@@ -13,6 +13,7 @@ import (
 	"dev.kaya/guests/go/autofill"
 	"dev.kaya/guests/go/background"
 	"dev.kaya/guests/go/capture"
+	"dev.kaya/guests/go/cards"
 	"dev.kaya/guests/go/chat"
 	"dev.kaya/guests/go/clipboard"
 	"dev.kaya/guests/go/colorpicker"
@@ -20,6 +21,7 @@ import (
 	"dev.kaya/guests/go/confirm"
 	"dev.kaya/guests/go/dirty"
 	"dev.kaya/guests/go/dnd"
+	"dev.kaya/guests/go/dock"
 	"dev.kaya/guests/go/editor"
 	"dev.kaya/guests/go/entry"
 	"dev.kaya/guests/go/expander"
@@ -29,6 +31,7 @@ import (
 	"dev.kaya/guests/go/fullscreen"
 	"dev.kaya/guests/go/gallery"
 	"dev.kaya/guests/go/grid"
+	"dev.kaya/guests/go/grounds"
 	"dev.kaya/guests/go/grow"
 	"dev.kaya/guests/go/identity"
 	"dev.kaya/guests/go/layout"
@@ -61,6 +64,7 @@ import (
 	"dev.kaya/guests/go/secure"
 	"dev.kaya/guests/go/segmented"
 	selectscene "dev.kaya/guests/go/select"
+	"dev.kaya/guests/go/shapes"
 	"dev.kaya/guests/go/sheet"
 	"dev.kaya/guests/go/sizepolicy"
 	"dev.kaya/guests/go/sliders"
@@ -75,6 +79,7 @@ import (
 	"dev.kaya/guests/go/todos"
 	"dev.kaya/guests/go/toolbar"
 	"dev.kaya/guests/go/tooltips"
+	"dev.kaya/guests/go/tracks"
 	"dev.kaya/guests/go/typeface"
 	"dev.kaya/guests/go/undo"
 	"dev.kaya/guests/go/window"
@@ -125,6 +130,11 @@ var scenes = map[string]func() *kaya.App{
 	"menus":            menus.App,
 	"nav":              nav.App,
 	"netimage":         netimage.App,
+	"grounds":          grounds.App,
+	"shapes":           shapes.App,
+	"cards":            cards.App,
+	"tracks":           tracks.App,
+	"dock":             dock.App,
 	"netimage_http":    netimagehttp.App,
 	"timecode":         timecode.App,
 	"numberfield":      numberfield.App,

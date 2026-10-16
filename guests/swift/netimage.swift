@@ -119,8 +119,9 @@ KayaApp.run { app in
             let table = songEach(tx, songs) { row in
                 row.row {
                     let image = row.image(row.art, fit: .cover, phase: row.phase)
-                    row.t.setMaxWidth(image, 20)
-                    row.t.setMaxHeight(image, 20)
+                    row.t.setMaxWidth(image, 40)
+                    row.t.setMaxHeight(image, 40)
+                    row.t.setShape(image, .rounded)
                     row.t.setA11yId(image, "art")
                     artNode = image
                     row.label(row.title)

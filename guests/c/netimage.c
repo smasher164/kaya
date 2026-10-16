@@ -278,9 +278,10 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, N_ART, KAYA_KIND_IMAGE);
     /* `level` 0: the element of the For this node sits directly inside. */
     kaya_tx_bind_source_element(&tx, N_ART, 0, F_ART);
-    kaya_tx_set_max_width(&tx, N_ART, 20.0);
-    kaya_tx_set_max_height(&tx, N_ART, 20.0);
+    kaya_tx_set_max_width(&tx, N_ART, 40.0);
+    kaya_tx_set_max_height(&tx, N_ART, 40.0);
     kaya_tx_set_fit(&tx, N_ART, KAYA_FIT_COVER);
+    kaya_tx_set_shape(&tx, N_ART, KAYA_SHAPE_ROUNDED);
     kaya_tx_bind_phase_element(&tx, N_ART, 0, F_PHASE);
     kaya_tx_set_a11y_id(&tx, N_ART, "art");
     kaya_tx_create_widget(&tx, N_TITLE, KAYA_KIND_LABEL);

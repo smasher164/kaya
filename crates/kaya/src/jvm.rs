@@ -171,6 +171,8 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
             NativeMethod { name: "tr".into(), sig: "([B[BI)[B".into(), fn_ptr: ring_tr as *mut _ },
             // The capability query (docs/media-plan.md §8 ruling 1).
             NativeMethod { name: "canPlay".into(), sig: "([B[B)Z".into(), fn_ptr: ring_can_play as *mut _ },
+            // The one quantizer (docs/styling-pass-plan.md Y2).
+            NativeMethod { name: "imageDominant".into(), sig: "([B)I".into(), fn_ptr: ring_image_dominant as *mut _ },
             // The reader's two pulls (docs/media-plan.md §8 ruling 4).
             NativeMethod { name: "readerPeaks".into(), sig: "(JJ)[S".into(), fn_ptr: ring_reader_peaks as *mut _ },
             NativeMethod { name: "imagePixels".into(), sig: "(J[I)[B".into(), fn_ptr: ring_image_pixels as *mut _ },
@@ -539,6 +541,17 @@ extern "system" fn ring_can_play<'a>(
     let mime = env.convert_byte_array(&mime).expect("kaya: reading the mime type failed");
     let codecs = env.convert_byte_array(&codecs).expect("kaya: reading the codecs failed");
     unsafe { crate::capi::kaya_can_play(mime.as_ptr(), mime.len(), codecs.as_ptr(), codecs.len()) }
+}
+
+/// KayaRing.imageDominant: 0xRRGGBB, or -1 for bytes that do not decode.
+extern "system" fn ring_image_dominant<'a>(env: JNIEnv<'a>, _class: JClass<'a>, bytes: JByteArray<'a>) -> jint {
+    let bytes = env.convert_byte_array(&bytes).expect("kaya: reading the image bytes failed");
+    let mut rgb = 0u32;
+    if unsafe { crate::capi::kaya_image_dominant(bytes.as_ptr(), bytes.len(), &mut rgb) } == 1 {
+        rgb as jint
+    } else {
+        -1
+    }
 }
 
 extern "system" fn ring_catalog<'a>(env: JNIEnv<'a>, _class: JClass<'a>, app: JByteArray<'a>) {

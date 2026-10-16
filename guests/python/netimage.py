@@ -147,8 +147,9 @@ with app.window(title="netimage", width=820, height=640):
         for track in tracks.columns("Art", "Title", grow=1, a11y_id="tracks"):
             with kaya.row():
                 kaya.image(track.art, fit=kaya.Fit.COVER, phase=track.phase,
+                           shape=kaya.Shape.ROUNDED,
                            on_needed=on_needed, on_released=on_released) \
-                    .max_width(20).max_height(20).a11y_id("art")
+                    .max_width(40).max_height(40).a11y_id("art")
                 kaya.label(bind=track.title)
     for i in range(ROWS):
         tracks.insert(f"t{i:03}", Track(title=f"Track {i}", art_url=f"u/{i}",

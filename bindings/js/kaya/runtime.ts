@@ -60,6 +60,9 @@ type Floor = {
   // premultiplied RGBA8 and size, null for an image holding none.
   readerPeaks?(reader: number, read: number): Int16Array;
   imagePixels?(image: number): { width: number; height: number; bytes: Uint8Array } | null;
+  // kaya_image_dominant (docs/styling-pass-plan.md Y2): 0xRRGGBB, null for
+  // bytes that do not decode.
+  imageDominant?(bytes: Uint8Array): number | null;
   catalog(app: string): void;
   tr(key: string, args: [string, number, number, number, string][]): string;
   openPicked(handle: number, mode: number): { raw: number; seekable: boolean };
@@ -329,7 +332,7 @@ export function canPlay(mime: string, codecs: string): boolean {
   return lib.canPlay(mime, codecs);
 }
 
-function addonEntry<K extends "readerPeaks" | "imagePixels">(name: K, c: string): NonNullable<Floor[K]> {
+function addonEntry<K extends "readerPeaks" | "imagePixels" | "imageDominant">(name: K, c: string): NonNullable<Floor[K]> {
   const f = lib[name];
   if (typeof f !== "function") {
     throw new Error(`kaya: this libkaya's node addon has no ${name} — crates/kaya/src/node.rs exports ${c} under that name, so rebuild the library from this tree`);
@@ -348,6 +351,12 @@ export function readerPeaks(reader: number, read: number): Int16Array {
  * image holding none. */
 export function imagePixels(image: number): { width: number; height: number; bytes: Uint8Array } | null {
   return addonEntry("imagePixels", "kaya_image_pixels")(image);
+}
+
+/** The core's dominant colour of encoded bytes as 0xRRGGBB, null when they
+ * do not decode. */
+export function imageDominant(bytes: Uint8Array): number | null {
+  return addonEntry("imageDominant", "kaya_image_dominant")(bytes);
 }
 
 export function catalog(app: string): void {

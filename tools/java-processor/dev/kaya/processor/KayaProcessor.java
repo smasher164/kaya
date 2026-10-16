@@ -236,6 +236,8 @@ public final class KayaProcessor extends AbstractProcessor {
             case "dev.kaya.KayaApp.Player" -> "dev.kaya.KayaApp.Player";
             // docs/network-images-plan.md N2.
             case "dev.kaya.KayaApp.ImagePhase" -> "dev.kaya.KayaApp.ImagePhase";
+            // docs/styling-pass-plan.md Y7.
+            case "dev.kaya.KayaApp.Tint" -> "dev.kaya.KayaApp.Tint";
             default -> null;
         };
     }

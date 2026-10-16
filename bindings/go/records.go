@@ -287,6 +287,8 @@ func scalarWire(v any) any {
 		return int64(d.id)
 	case ImagePhase:
 		return int64(d)
+	case Tint:
+		return int64(d)
 	}
 	if rv := reflect.ValueOf(v); rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
 		return blobWire(v)
@@ -488,6 +490,8 @@ func (info *recordInfo) encode(field uint32, v any) any {
 	case Player:
 		return int64(d.id)
 	case ImagePhase:
+		return int64(d)
+	case Tint:
 		return int64(d)
 	}
 	return v

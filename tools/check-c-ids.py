@@ -365,12 +365,12 @@ after = sum(1 for line in census(s)[0]
             if line.startswith("check-c-ids:   "))
 print(f"check-c-ids: self-test N3 removed one guest from the copy-set: "
       f"roster {before} -> {after}")
-if not (before == 12 and after == 11):
+if not (before == 16 and after == 15):
     g.refuse(f"SELF-TEST BROKEN (N3 roster {before} -> {after}, "
-             f"expected 12 -> 11)")
+             f"expected 16 -> 15)")
 s = shadow("n3b")
 for name in ("undo.c", "todos.c", "menus.c", "milestone2.c", "toast.c", "expander.c",
-             "netimage.c"):
+             "netimage.c", "shapes.c", "cards.c", "tracks.c", "dock.c"):
     (s / "guests" / "c" / name).unlink()
 print("check-c-ids: self-test N3b gutted the copy-set to 5 guests")
 refused(s, "under the floor of 6",

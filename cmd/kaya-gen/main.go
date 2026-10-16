@@ -42,6 +42,8 @@ var wireTypes = map[string]bool{
 	"kaya.Document": true,
 	// An image's phase (docs/network-images-plan.md N2): an I64.
 	"kaya.ImagePhase": true,
+	// A label's tint (docs/styling-pass-plan.md Y7): an I64.
+	"kaya.Tint": true,
 }
 
 // wireTypeName names a field's declared type in the wire vocabulary: a
@@ -487,6 +489,15 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	// its token would collide.
 	w("func (r %sRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }", lowerFirst(name))
 	w("func (r %sRow) SetAspect(n kaya.Node, width, height int) { r.t.SetAspect(n, width, height) }", lowerFirst(name))
+	w("func (r %sRow) SetShape(n kaya.Node, shape kaya.Shape) { r.t.SetShape(n, shape) }", lowerFirst(name))
+	w("func (r %sRow) SetTint(n kaya.Node, tint kaya.Tint) { r.t.SetTint(n, tint) }", lowerFirst(name))
+	w("func (r %sRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint]) { r.t.BindTint(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetSelected(n kaya.Node, on bool) { r.t.SetSelected(n, on) }", lowerFirst(name))
+	w("func (r %sRow) BindSelected(n kaya.Node, f kaya.Field[bool]) { r.t.BindSelected(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetGroundGradient(n kaya.Node, color kaya.Color) { r.t.SetGroundGradient(n, color) }", lowerFirst(name))
+	w("func (r %sRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) { r.t.BindGroundGradient(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetGroundImage(n kaya.Node, source []byte) { r.t.SetGroundImage(n, source) }", lowerFirst(name))
+	w("func (r %sRow) BindGroundImage(n kaya.Node, f kaya.Field[[]byte]) { r.t.BindGroundImage(n, f) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetMinGap(n kaya.Node, gap float64) { r.t.SetMinGap(n, gap) }", lowerFirst(name))
 	w("func (r %sRow) SetLowLabel(n kaya.Node, label string) { r.t.SetLowLabel(n, label) }", lowerFirst(name))

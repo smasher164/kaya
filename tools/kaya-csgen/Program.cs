@@ -98,7 +98,7 @@ static class Program
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]", "Document",
-            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?", "ImagePhase" };
+            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?", "ImagePhase", "Tint" };
 
     // The generated files carry no usings of their own — every type
     // Program.cs emits is spelled fully, the two picker types included,
@@ -579,6 +579,20 @@ static class Program
         Set("SetPhase", ["Node n", "Signal s"], "n, s");
         Set("SetPhase", ["Node n", "Field<ImagePhase> f", "uint level = 0"], "n, f, level");
         Set("SetAspect", ["Node n", "int width", "int height"], "n, width, height");
+        Set("SetGroundGradient", ["Node n", "Color color"], "n, color");
+        Set("SetGroundGradient", ["Node n", "Signal s"], "n, s");
+        Set("SetGroundGradient", ["Node n", "Field<Color> f", "uint level = 0"], "n, f, level");
+        Set("SetGroundImage", ["Node n", "byte[] bytes"], "n, bytes");
+        Set("SetGroundImage", ["Node n", "Signal s"], "n, s");
+        Set("SetGroundImage", ["Node n", "Field<byte[]> f", "uint level = 0"], "n, f, level");
+        Set("SetShape", ["Node n", "Shape shape"], "n, shape");
+        Set("SetTint", ["Node n", "Tint tint"], "n, tint");
+        Set("SetTint", ["Node n", "Signal s"], "n, s");
+        Set("SetTint", ["Node n", "Field<Tint> f", "uint level = 0"], "n, f, level");
+        Set("SetSelected", ["Node n", "bool on"], "n, on");
+        Set("SetSelected", ["Node n", "Signal s"], "n, s");
+        Set("SetSelected", ["Node n", "Field<bool> f", "uint level = 0"], "n, f, level");
+        Set("OnActivate", ["Node n", "System.Action<Tx, System.Collections.Generic.List<object>> handler"], "n, handler");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

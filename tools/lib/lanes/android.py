@@ -190,6 +190,9 @@ LEGS = {
         # Network images (docs/network-images-plan.md §5): the affordance
         # scene, and the row helper against the lane's server.
         "netimage-compose", "netimage_http-compose",
+        # The skin (docs/styling-pass-plan.md §5), the gradient in the dark too.
+        "grounds-compose", "groundsdark-compose", "shapes-compose", "cards-compose",
+        "tracks-compose", "dock-compose",
         # The capture (docs/capture-plan.md §7): the emulator's own cameras
         # and microphone carrying the synthetic devices
         # (tools/lib/emulator_capture.py).
@@ -217,6 +220,7 @@ LEGS = {
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
         "netimage-jvm", "netimage_http-jvm",
+        "grounds-jvm", "shapes-jvm", "cards-jvm", "tracks-jvm", "dock-jvm",
         "capture-jvm", "capture_denied-jvm",
     ],
     "go": [
@@ -244,6 +248,7 @@ LEGS = {
         "media_formats-go", "media_delivery-go", "media_session-go",
         "media_tracks-go", "media_feed-go", "media_reader-go",
         "netimage-go", "netimage_http-go",
+        "grounds-go", "shapes-go", "cards-go", "tracks-go", "dock-go",
         "capture-go", "capture_denied-go",
     ],
     "python": [
@@ -319,6 +324,7 @@ FLAGS = {
     # lane re-run (check-appearance holds the leg here).
     "canvasdark-compose": {"scene": "canvas", "appearance": "dark"},
     "tintsdark-compose": {"scene": "tints", "appearance": "dark"},
+    "groundsdark-compose": {"scene": "grounds", "appearance": "dark"},
     # The one leg on the 1280dp tablet, and the two appended claims the
     # shared file may not carry — the split literal, and the BACK rule
     # (with both panes on screen back reveals nothing, so it must not
@@ -415,6 +421,9 @@ MODS = {
     )},
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},
+    # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
+    # ends at its first hover.
+    "cards": {"cut": ("hover", "expect_selected expect_ax", "")},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),
     # so the file drop and the one assertion it feeds do not run here;
     # every drag between this app's own widgets does.

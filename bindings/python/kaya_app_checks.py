@@ -5559,4 +5559,82 @@ try:
 finally:
     kaya.runtime.submit = _ni_real_submit
 
+
+# THE SKIN (docs/styling-pass-plan.md Y2-Y8): each wall the binding holds
+# itself, and the records a sugar spelling sends.
+sk_app = kaya.App()
+kaya._app_thread = threading.get_ident()
+sk_shipped = []
+_sk_real_submit = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: sk_shipped.append(list(records))
+try:
+    sk_art = kaya.asset("covers/cover-600.jpg").bytes()
+    sk_colour = kaya.image_dominant(sk_art)
+    check("image_dominant answers the core's colour for the cover",
+          isinstance(sk_colour, kaya.Color) and sk_colour.a == 0xFF)
+    check("image_dominant answers None for bytes that do not decode",
+          kaya.image_dominant(b"not an image") is None)
+    for sk_name, sk_call in [
+            ("a gradient ground refuses a colour name",
+             lambda: kaya.column(ground_gradient="red")),  # type: ignore[arg-type]
+            ("an image ground refuses text",
+             lambda: kaya.column(ground_image="cover.jpg")),  # type: ignore[arg-type]
+            ("selected refuses a non-bool",
+             lambda: kaya.row(selected="yes", on_activate=lambda: None)),  # type: ignore[arg-type]
+            ("a label's tint refuses a number",
+             lambda: kaya.label("x", tint=3.5)),  # type: ignore[arg-type]
+            ("a tint name outside the vocabulary is refused",
+             lambda: kaya.label("x", tint="purple")),
+            ("a shape outside the vocabulary is refused",
+             lambda: kaya.image(sk_art, shape="oval"))]:
+        try:
+            with sk_app.build():
+                sk_call()
+            check(sk_name, False)
+        except (kaya.KayaTypeError, kaya.KayaValueError):
+            check(sk_name, True)
+
+    @dataclass
+    class SkRow:
+        title: str
+        tint: kaya.Tint
+        on: bool
+        art: bytes
+        colour: kaya.Color
+
+    sk_shipped.clear()
+    with sk_app.window():
+        sk_rows = kaya.collection(SkRow)
+        with kaya.column() as sk_root:
+            for sk_r in sk_rows:
+                with kaya.row(selected=sk_r.on, on_activate=lambda row: None,
+                              ground_gradient=sk_r.colour) as sk_line:
+                    kaya.label(bind=sk_r.title, tint=sk_r.tint)
+                    kaya.image(sk_r.art, shape="circle")
+        with sk_app.dock(40):
+            with kaya.column() as sk_dock_root:
+                kaya.label("now playing")
+        sk_rows.insert("r1", SkRow("a", kaya.Tint.ACCENT, True, sk_art, sk_colour or kaya.Color(0, 0, 0)))
+    try:
+        with sk_app.build():
+            sk_bad = kaya.collection(SkRow)
+            with kaya.column():
+                for sk_r in sk_bad:
+                    kaya.label(bind=sk_r.title, tint=sk_r.title)
+        check("a label's tint refuses a str field", False)
+    except kaya.KayaTypeError:
+        check("a label's tint refuses a str field", True)
+    sk_flat = [r for batch in sk_shipped for r in batch]
+    check("a stamped row sends activatable, its selected field and its gradient's colour field",
+          kaya.wire.tx_set_activatable(sk_line.id, True) in sk_flat
+          and kaya.wire.tx_bind_selected_element(sk_line.id, 0, 2) in sk_flat
+          and kaya.wire.tx_set_ground(sk_line.id, kaya.wire.GROUND_GRADIENT) in sk_flat
+          and kaya.wire.tx_bind_color_element(sk_line.id, 0, 4) in sk_flat)
+    check("the dock attaches to the primary window and mounts its root",
+          kaya.wire.tx_attach_dock(0, 40) in sk_flat
+          and kaya.wire.tx_mount(40, sk_dock_root.id) in sk_flat
+          and kaya.wire.tx_mount(0, sk_root.id) in sk_flat)
+finally:
+    kaya.runtime.submit = _sk_real_submit
+
 sys.exit(1 if failures else 0)

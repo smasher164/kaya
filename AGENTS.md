@@ -651,6 +651,16 @@ in docs/deferred.md.
    kaya_capture_on_samples; Java's rows read KayaRing.captureOnFrame and
    captureOnSamples, its JNI pair), Rust the reference row, green in all
    nine since the breadth slice, a fake-name census firing every row,
+   counts printed.
+   AND THE SKIN SINCE 2026-10-16 (docs/styling-pass-plan.md Y2-Y8, Y10;
+   tools/lib/skin_surface.py): both grounds, an image's shape, a label's
+   tint, `selected` and `on_activate` in both zones in each family's own
+   spelling (Go's on the handle), the dock in the window construct, the
+   binding's dispatch of `activated`, image_dominant and the Tint
+   none/overlay and Shape vocabularies, 168 rows across all nine with Rust
+   the reference, a fake-name census firing every row, a rename in a copy
+   per row and a withheld row refused; tpl-surfaces holds the six template
+   props in every zone's own block (prop probes d8-d15 watched red),
    counts printed),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
@@ -1264,7 +1274,9 @@ in docs/deferred.md.
    rasterizes it like every other op, and the reader's frame conversion is
    held to the premultiplied RGBA8 the core keeps — straight alpha or BGRA
    read identically on the opaque greys a scene probes. Two more watched
-   negatives),
+   negatives. GtkContentFit's two exemptions are the video view's module
+   and the image ground's `set_ground` (docs/styling-pass-plan.md Y3),
+   each refused by name once gone, each cut watched),
    `tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
    ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
    PROCESS adopt an appearance through each platform's own supported
@@ -1425,6 +1437,17 @@ in docs/deferred.md.
    report sending the core's asks (docs/network-images-plan.md N8-N15); 72
    SwiftUI clauses and 73 cuts across the four arms, each watched red, and a
    backend's row withheld refused.
+   The skin arms are held by tools/lib/skin_routes.py and one module per
+   widget backend (skin_gtk, skin_winui, skin_compose): each gradient's two
+   stops from a token and the core's clamped data colour, never a literal
+   brush (WinUI's through {ThemeResource}, High Contrast flat), the hover and
+   selected surfaces from the platform's tokens (the mac's quaternary fill
+   the one named exception), `overlay` the platform's material, the shape on
+   the picture and on its loading and failed looks, the dock's ground to the
+   edge, and every skin reader answering from pixels or the tree, never the
+   node (docs/styling-pass-plan.md §3, §5); 129 SwiftUI and core clauses and
+   the arms' 20, 31 and 21 cuts, each watched red, and a backend's row
+   withheld refused.
    THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
    the constant sweep now reads a TYPE as well as a prefix: draw_op,
    paint, fill_rule, text_align and text_baseline ride the op stream as

@@ -103,8 +103,9 @@ public final class Netimage {
                     row.row(() -> {
                         KayaApp.Node image = row.image(row.art);
                         row.setFit(image, KayaApp.Fit.COVER);
-                        row.setMaxWidth(image, 20);
-                        row.setMaxHeight(image, 20);
+                        row.setMaxWidth(image, 40);
+                        row.setMaxHeight(image, 40);
+                        row.setShape(image, KayaApp.Shape.ROUNDED);
                         row.setPhase(image, row.phase);
                         row.setA11yId(image, "art");
                         app.onNeeded(image, (t, keys) -> {

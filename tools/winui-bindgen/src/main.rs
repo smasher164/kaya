@@ -400,6 +400,19 @@ fn main() {
         // resources.pri, so ms-appx never resolves there).
         "Microsoft.UI.Xaml.Media.SolidColorBrush".to_string(),
         "Microsoft.UI.Xaml.Media.Brush".to_string(),
+        // The skin (docs/styling-pass-plan.md §3's WinUI row): an image ground
+        // and a shaped picture paint the decoded BitmapImage through an
+        // ImageBrush; an activatable container is a ListViewItem, whose
+        // presenter draws Fluent's hover, press and selected states and whose
+        // peer carries SelectionItem, taking its click from Tapped.
+        "Microsoft.UI.Xaml.CornerRadius".to_string(),
+        "Microsoft.UI.Xaml.Media.ImageBrush".to_string(),
+        "Microsoft.UI.Xaml.Media.TileBrush".to_string(),
+        "Microsoft.UI.Xaml.Media.AlignmentX".to_string(),
+        "Microsoft.UI.Xaml.Media.AlignmentY".to_string(),
+        "Microsoft.UI.Xaml.Controls.ListViewItem".to_string(),
+        "Microsoft.UI.Xaml.Input.TappedEventHandler".to_string(),
+        "Microsoft.UI.Xaml.Input.TappedRoutedEventArgs".to_string(),
         "Windows.UI.Color".to_string(),
         // The progress bar: RangeBase descendant like Slider;
         // IsIndeterminate is the activity mode.

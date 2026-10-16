@@ -30,7 +30,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13).
@@ -1688,6 +1688,75 @@ for proto in x11 wayland; do
     run "$proto" netimage_http-haskell env KAYA_SELFTEST=netimage_http "$(hs_bin netimage_http)"
     run "$proto" netimage_http-java env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE SKIN (docs/styling-pass-plan.md §5): grounds and cards read the
+    # accessibility tree (expect_ax, expect_selected), so they run through
+    # a11y-leg.sh; hover moves the leg's own pointer (tools/linux/dragdrive.py).
+    run "$proto" grounds-rust env KAYA_SELFTEST=grounds \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/grounds"
+    run "$proto" grounds-python env KAYA_SELFTEST=grounds KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/grounds.py
+    run "$proto" grounds-js env KAYA_SELFTEST=grounds KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/grounds.ts
+    run "$proto" grounds-go env KAYA_SELFTEST=grounds tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" grounds-csharp env KAYA_SELFTEST=grounds KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" grounds-ocaml env KAYA_SELFTEST=grounds KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/grounds.exe
+    run "$proto" grounds-haskell env KAYA_SELFTEST=grounds tools/linux/a11y-leg.sh "$(hs_bin grounds)"
+    run "$proto" grounds-java env KAYA_SELFTEST=grounds KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" grounds-c env KAYA_SELFTEST=grounds tools/linux/a11y-leg.sh /tmp/c-guests/grounds
+    # The clamp in the dark (docs/styling-pass-plan.md Y2), the mac lane's
+    # groundsdark leg.
+    run "$proto" groundsdark-rust env KAYA_APPEARANCE=dark KAYA_SELFTEST=grounds \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/grounds"
+    run "$proto" shapes-rust env KAYA_SELFTEST=shapes "$CARGO_TARGET_DIR/debug/examples/shapes"
+    run "$proto" shapes-python env KAYA_SELFTEST=shapes KAYA_LIB="$LIB" python3 guests/python/shapes.py
+    run "$proto" shapes-js env KAYA_SELFTEST=shapes KAYA_LIB="$LIB" node guests/js/shapes.ts
+    run "$proto" shapes-go env KAYA_SELFTEST=shapes /tmp/go-guests/kaya-go
+    run "$proto" shapes-csharp env KAYA_SELFTEST=shapes KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" shapes-ocaml env KAYA_SELFTEST=shapes KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/shapes.exe
+    run "$proto" shapes-haskell env KAYA_SELFTEST=shapes "$(hs_bin shapes)"
+    run "$proto" shapes-java env KAYA_SELFTEST=shapes KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" shapes-c env KAYA_SELFTEST=shapes /tmp/c-guests/shapes
+    run "$proto" cards-rust env KAYA_SELFTEST=cards \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/cards"
+    run "$proto" cards-python env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/cards.py
+    run "$proto" cards-js env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/cards.ts
+    run "$proto" cards-go env KAYA_SELFTEST=cards tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" cards-csharp env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" cards-ocaml env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/cards.exe
+    run "$proto" cards-haskell env KAYA_SELFTEST=cards tools/linux/a11y-leg.sh "$(hs_bin cards)"
+    run "$proto" cards-java env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" cards-c env KAYA_SELFTEST=cards tools/linux/a11y-leg.sh /tmp/c-guests/cards
+    run "$proto" tracks-rust env KAYA_SELFTEST=tracks "$CARGO_TARGET_DIR/debug/examples/tracks"
+    run "$proto" tracks-python env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" python3 guests/python/tracks.py
+    run "$proto" tracks-js env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" node guests/js/tracks.ts
+    run "$proto" tracks-go env KAYA_SELFTEST=tracks /tmp/go-guests/kaya-go
+    run "$proto" tracks-csharp env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" tracks-ocaml env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
+        _build-linux/default/guests/ocaml/tracks.exe
+    run "$proto" tracks-haskell env KAYA_SELFTEST=tracks "$(hs_bin tracks)"
+    run "$proto" tracks-java env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" tracks-c env KAYA_SELFTEST=tracks /tmp/c-guests/tracks
+    run "$proto" dock-rust env KAYA_SELFTEST=dock "$CARGO_TARGET_DIR/debug/examples/dock"
+    run "$proto" dock-python env KAYA_SELFTEST=dock KAYA_LIB="$LIB" python3 guests/python/dock.py
+    run "$proto" dock-js env KAYA_SELFTEST=dock KAYA_LIB="$LIB" node guests/js/dock.ts
+    run "$proto" dock-go env KAYA_SELFTEST=dock /tmp/go-guests/kaya-go
+    run "$proto" dock-csharp env KAYA_SELFTEST=dock KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" dock-ocaml env KAYA_SELFTEST=dock KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/dock.exe
+    run "$proto" dock-haskell env KAYA_SELFTEST=dock "$(hs_bin dock)"
+    run "$proto" dock-java env KAYA_SELFTEST=dock KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" dock-c env KAYA_SELFTEST=dock /tmp/c-guests/dock
     # The content type (docs/autofill-plan.md), read off the GtkText.
     run "$proto" autofill-rust env KAYA_SELFTEST=autofill "$CARGO_TARGET_DIR/debug/examples/autofill"
     run "$proto" autofill-python env KAYA_SELFTEST=autofill KAYA_LIB="$LIB" python3 guests/python/autofill.py

@@ -2032,8 +2032,8 @@ def check_role_sugar(snake, pascal, camel, findings=None):
               findings)
     want_role("ocaml-live", "bindings/ocaml/kaya_app.ml", snake,
               f"^let {snake} \\?grow \\?fill \\?a11y_id \\?a11y_id_bind "
-              f"\\?a11y_label \\?a11y_label_bind \\?help \\?help_bind \\?text "
-              f"\\?bind \\(\\)", findings)
+              f"\\?a11y_label \\?a11y_label_bind \\?help \\?help_bind \\?tint \\?tint_bind "
+              f"\\?text \\?bind \\(\\)", findings)
     want_role("ocaml-tpl", "bindings/ocaml/kaya_app.ml", snake,
               f"^  let {snake} \\?grow \\?fill \\?a11y_id \\?a11y_id_bind",
               findings)
@@ -3106,7 +3106,7 @@ MEDIA_SURFACES = [
     ("js", "bindings/js/kaya/index.ts", "player object", "player",
      r"^export function {0}\(opts: PlayerOptions = \{{\}}\): Player \{{"),
     ("js", "bindings/js/kaya/index.ts", "player field", "Player",
-     r"token === Color \|\| token === {0}\) return wire\.VALUE_I64;"),
+     r"token === Color \|\| token === {0}\b[^\n]*\) return wire\.VALUE_I64;"),
     ("js", "bindings/js/kaya/index.ts", "video", "video",
      r"^export function {0}\(source: Player \| FieldRef \| null, opts: VideoOptions = \{{\}}\): W"
      r"idget \{{"),
@@ -3731,7 +3731,7 @@ BLEED_SURFACES = [
      [r"pub fn {0}\(self\) -> Self", r"pub fn {0}\(&mut self, widget: WidgetId\)"]),
     ("python", "bindings/python/kaya/__init__.py",
      [r"^def _{0}\(handle: Widget, {0}: bool\) -> None:",
-      r"^def image\(source[^)]*\b{0}: bool = False\) -> Widget:",
+      r"^def image\(source[^)]*\b{0}: bool = False(?:,[^)]*)?\) -> Widget:",
       r"capture: Capture \| None = None,\n\s*{0}: bool = False\) -> Widget:",
       r"on_tick: Callable\[\[Draw, tuple\[float, float\], float\], object\] \| None = None,\n"
       r"\s*{0}: bool = False\) -> Widget:"]),
@@ -7175,7 +7175,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:26 rc:1 named:True"""
+swift-census-floor=applied:29 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7940,7 +7940,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 22")
+        if n == 1 else src, n, "typed-row reader found only 25")
     return "\n".join(lines)
 
 
@@ -8303,6 +8303,45 @@ def prop_probe():
     # negative passing for the wrong reason.
     probe_starved("d7", JS, "export class Handle {",
                   "js's prop reader found only")
+    # d8..d15 — THE SKIN in each zone's own block (docs/styling-pass-plan.md
+    # Y10): a member renamed out of the zone, the Go handler moved off the
+    # Node, the js option writer taught to ask which zone it is in.
+    probe("d8", "crates/kaya/src/app.rs",
+          "    pub fn shape(&mut self, node: TemplateNodeId, shape: Shape) {\n"
+          "        self.set(node, Prop::Shape, shape.wire());",
+          "    pub fn shape_gone(&mut self, node: TemplateNodeId, shape: Shape) {\n"
+          "        self.set(node, Prop::Shape, shape.wire());",
+          "rust's TEMPLATE zone cannot spell shape")
+    probe("d9", "bindings/go/skin.go",
+          "func (n Node) OnActivate(fn func(*Tx, []any)) Node {",
+          "func (n Node) OnActivated(fn func(*Tx, []any)) Node {",
+          "go's TEMPLATE zone cannot spell on_activate")
+    probe("d10", "bindings/csharp/KayaApp.cs",
+          "    public void OnActivate(Node n, Action<Tx, List<object>> handler)",
+          "    public void OnActivated(Node n, Action<Tx, List<object>> handler)",
+          "csharp's TEMPLATE zone cannot spell on_activate")
+    probe("d11", "bindings/java/dev/kaya/KayaApp.java",
+          "        public void onActivate(Node n, BiConsumer<Tx, List<Object>> handler) {\n"
+          "            tx.emit(KayaWire.txSetActivatable(n.id, true));",
+          "        public void onActivated(Node n, BiConsumer<Tx, List<Object>> handler) {\n"
+          "            tx.emit(KayaWire.txSetActivatable(n.id, true));",
+          "java's TEMPLATE zone cannot spell on_activate")
+    probe("d12", "bindings/swift/KayaApp.swift",
+          "public func onActivate(_ n: KayaNodeHandle,",
+          "public func onActivated(_ n: KayaNodeHandle,",
+          "swift's TEMPLATE zone cannot spell on_activate")
+    probe("d13", "bindings/ocaml/kaya_app.ml",
+          "  let on_activate (Node id) (handler : key list -> unit) =",
+          "  let on_activated (Node id) (handler : key list -> unit) =",
+          "ocaml's TEMPLATE zone cannot spell on_activate")
+    probe("d14", "bindings/haskell/KayaApp.hs",
+          "  TplShapeAs :: Shape -> TplAttr\n", "",
+          "haskell's TEMPLATE zone cannot spell shape")
+    probe("d15", JS,
+          "function setSkin(handle: Handle, opts: SkinOptions): void {",
+          "function setSkin(handle: Handle, opts: SkinOptions): void {\n"
+          "  if ((handle as Widget).isNode) return;",
+          "js's TEMPLATE zone cannot spell ground_gradient")
     return "\n".join(lines)
 
 
@@ -8313,7 +8352,15 @@ d3=applied:1 rc:1 named:True
 d4=applied:1 rc:1 named:True
 d5=applied:1 rc:1 named:True
 d6=applied:1 rc:1 named:True
-d7=starved rc:1 named:True"""
+d7=starved rc:1 named:True
+d8=applied:1 rc:1 named:True
+d9=applied:1 rc:1 named:True
+d10=applied:1 rc:1 named:True
+d11=applied:1 rc:1 named:True
+d12=applied:1 rc:1 named:True
+d13=applied:1 rc:1 named:True
+d14=applied:1 rc:1 named:True
+d15=applied:1 rc:1 named:True"""
 if prop != WANT_PROP:
     print("check-sugar-surface: SELF-TEST FAIL (the template PROP "
           "census did not catch a perturbation it must catch). "
@@ -11656,6 +11703,11 @@ if check_timecode_surface():
 from netimage_surface import run as check_netimage_surface
 
 if check_netimage_surface():
+    status = 1
+
+from skin_surface import run as check_skin_surface
+
+if check_skin_surface():
     status = 1
 
 check_scene_sugar()

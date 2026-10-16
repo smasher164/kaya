@@ -12,6 +12,7 @@ mod capture;
 mod media;
 mod reader;
 mod order;
+mod skin;
 
 use order::{track_of, ChildOrder};
 
@@ -210,6 +211,7 @@ impl NativeWidget {
     /// wrapped it, the control itself otherwise.
     fn element(&self) -> windows_core::Result<UIElement> {
         let inner = self.inner_element()?;
+        let inner = skin::host_of(&inner).unwrap_or(inner);
         Ok(swipe_host_of(&inner).unwrap_or(inner))
     }
 
@@ -3342,7 +3344,8 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
 fn flush_tracks(core: &mut CoreState) -> windows_core::Result<()> {
     flush_container_tracks(core)?;
     refresh_bleeds(core)?;
-    images::serve_requested(core)
+    images::serve_requested(core)?;
+    skin::sync(core)
 }
 
 /// The sides a bled widget touches the root's content edge on, as
@@ -8799,7 +8802,8 @@ fn set_window_content(
         None => window_ground(&winui_window(core, window)?)?.Children()?,
     };
     children.Clear()?;
-    children.Append(element)
+    children.Append(element)?;
+    skin::keep_dock(core, window)
 }
 
 /// THE WINDOW'S GROUND, minted on first use and never replaced: this is the
@@ -8818,7 +8822,7 @@ fn set_window_content(
 fn window_surface(window: &Window) -> windows_core::Result<FrameworkElement> {
     let ground = window_ground(window)?;
     let children = ground.Children()?;
-    if children.Size()? == 1 {
+    if children.Size()? == 1 || (children.Size()? == 2 && skin::is_dock_host(&children.GetAt(1)?)) {
         return windows_core::Interface::cast(&children.GetAt(0)?);
     }
     windows_core::Interface::cast(&ground)
@@ -16392,6 +16396,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             images::forget(core, id);
+            skin::forget(core, id);
             if matches!(widget, NativeWidget::Video { .. }) {
                 media::destroy_video(core, id.0);
             }
@@ -16642,7 +16647,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
-        ApplyOp::AttachDock { .. } => crate::depth_stub("dock"),
+        ApplyOp::AttachDock { window, dock } => skin::attach_dock(core, window.0, dock.0)?,
         ApplyOp::PresentSheet { parent, sheet } => {
             // Built hidden; the mount opens it (docs/sheet-plan.md U1).
             let smoke: Grid = XamlReader::Load(&HSTRING::from(SHEET_SMOKE_XAML))?.cast()?;
@@ -17452,6 +17457,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 return Ok(());
             }
+            // docs/styling-pass-plan.md §3's WinUI row (winui/skin.rs).
+            if skin::set_prop(core, id, prop, &value)? {
+                return Ok(());
+            }
             // Fill likewise lands on the parent's next reindex
             // (docs/layout-knobs-plan.md §1).
             if let (Prop::Fill, Value::Bool(on)) = (prop, &value) {
@@ -17690,15 +17699,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         core.follow_tokens.insert(id, token);
                     }
                 }
-                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Filled, Value::I64(6))
-                | (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Ground | Prop::Color | Prop::Source, _) => {
-                    crate::depth_stub("grounds")
-                }
-                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Activatable | Prop::Selected, _) => {
-                    crate::depth_stub("cards")
-                }
-                (NativeWidget::Image { .. }, Prop::Shape, _) => crate::depth_stub("shapes"),
-                (NativeWidget::Label { .. }, Prop::Tint, _) => crate::depth_stub("tracks"),
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
                     ensure_accent_surface()?;
                     grid.SetStyle(&filled_style(tint)?)?;
@@ -18390,6 +18390,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // size, weight and line height are the platform's
                     // scale — picking numbers out of it is what D4 refuses.
                     label.SetStyle(&theme_resource::<Style>("SubtitleTextBlockStyle")?)?;
+                    skin::role_style(id, "SubtitleTextBlockStyle");
+                    skin::paint_tint(core, id)?;
                 }
                 (NativeWidget::Label { block: label, .. }, Prop::Role, Value::I64(4)) => {
                     // The caption role: Fluent's own caption step of the
@@ -18402,6 +18404,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         Some("CaptionTextBlockStyle"),
                         "TextFillColorSecondaryBrush",
                     )?)?;
+                    skin::role_style(id, "CaptionTextBlockStyle");
+                    skin::paint_tint(core, id)?;
                 }
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
@@ -18751,6 +18755,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             } else if core.sheets.contains_key(&window.0) {
                 mount_sheet(core, window.0, root, element)?;
+            } else if skin::is_dock(window.0) {
+                skin::mount_dock(core, window.0, root, &element)?;
             } else if core.nav_entries.contains_key(&window.0) {
                 mount_entry(core, window.0, element)?;
             } else if window.0 == 0 {
@@ -23113,6 +23119,7 @@ impl crate::harness::Stage for WinUiStage {
                     Some(e) => e,
                     None => return Ok("<no such target>".to_owned()),
                 };
+            let element = skin::ax_element(&element);
             let fe: bindings::Microsoft::UI::Xaml::FrameworkElement = element.cast()?;
             // FromElement returns an EXISTING peer; a plain container (Row and
             // Column are Grids) has none until one is made, so it reported
@@ -24254,6 +24261,18 @@ impl crate::harness::Stage for WinUiStage {
                         Err(_) => focus_told(core, "number_field", i, &core.number_fields[i])?,
                     }
                 }
+                crate::harness::TargetKind::Row | crate::harness::TargetKind::Column => {
+                    // The item's own route (docs/styling-pass-plan.md Y4): an
+                    // activatable container reports `activated` with its tag.
+                    let Some(id) = target_widget_id(core, t) else {
+                        eprintln!("kaya: click {t:?}: no such container");
+                        return Ok(());
+                    };
+                    match skin::activation_tag(core, WidgetId(id)) {
+                        Some(tag) => core.occurrences.send_activated_tag(&tag),
+                        None => eprintln!("kaya: click {t:?}: the container is not activatable"),
+                    }
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.occurrences.send_click_tag(&core.buttons[i]);
@@ -24999,10 +25018,13 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok("<no such target>".to_string());
             };
             let image = &core.images[i];
+            // The box, not the picture's overflow (docs/traps.md, WinUI's
+            // cover image over-reports its size).
+            let side = |actual: f64, declared: f64| if declared.is_finite() { actual.min(declared) } else { actual };
             Ok(format!(
                 "{}x{}",
-                image.ActualWidth()?.round() as i64,
-                image.ActualHeight()?.round() as i64
+                side(image.ActualWidth()?, image.Width()?).round() as i64,
+                side(image.ActualHeight()?, image.Height()?).round() as i64
             ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
@@ -25100,12 +25122,42 @@ impl crate::harness::Stage for WinUiStage {
             for row in rows {
                 let children = row.Children()?;
                 let mut cells: Vec<(i32, String)> = Vec::new();
+                // A NESTED CELL reads its labels joined by `/` in layout
+                // order (docs/styling-pass-plan.md Y5): the art-and-two-lines
+                // title is one cell.
+                fn nested(core: &CoreState, grid: &Grid, out: &mut Vec<String>) -> windows_core::Result<()> {
+                    let children = grid.Children()?;
+                    let mut placed: Vec<(i32, i32, UIElement)> = Vec::new();
+                    for at in 0..children.Size()? {
+                        let child = children.GetAt(at)?;
+                        let fe: FrameworkElement = child.cast()?;
+                        placed.push((Grid::GetRow(&fe)?, Grid::GetColumn(&fe)?, child));
+                    }
+                    placed.sort_by_key(|(r, c, _)| (*r, *c));
+                    for (_, _, child) in placed {
+                        if let Ok(block) = child.cast::<TextBlock>() {
+                            if core.labels.iter().any(|l| l == &block) {
+                                out.push(block.Text()?.to_string());
+                            }
+                        } else if let Ok(inner) = child.cast::<Grid>() {
+                            nested(core, &inner, out)?;
+                        }
+                    }
+                    Ok(())
+                }
                 for at in 0..children.Size()? {
                     let child = children.GetAt(at)?;
                     if let Ok(block) = child.cast::<TextBlock>() {
                         if core.labels.iter().any(|l| l == &block) {
                             let column = Grid::GetColumn(&block.cast::<FrameworkElement>()?)?;
                             cells.push((column, block.Text()?.to_string()));
+                        }
+                    } else if let Ok(inner) = child.cast::<Grid>() {
+                        let mut words = Vec::new();
+                        nested(core, &inner, &mut words)?;
+                        if !words.is_empty() {
+                            let column = Grid::GetColumn(&inner.cast::<FrameworkElement>()?)?;
+                            cells.push((column, words.join("/")));
                         }
                     }
                 }
@@ -25949,23 +26001,55 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    fn hover(&self, _: crate::harness::Target) {
-        crate::depth_stub("cards")
+    /// REAL INPUT on the VM's pointer (docs/styling-pass-plan.md §5): no
+    /// in-process route reaches the ListViewItem's own PointerOver state, so
+    /// the cursor moves onto the target's centre and the presenter answers as
+    /// it answers a user; the hover legs are EXCLUSIVE (tools/lib/lanes/win.py).
+    fn hover(&self, t: crate::harness::Target) {
+        Self::foreground_guest("hover");
+        let aim = Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, t) else { return Ok(None) };
+            Ok(widget_screen_rect(core, id))
+        });
+        let Ok(Some((x, y, w, h))) = aim else {
+            eprintln!("kaya: winui hover {t:?}: no laid-out box ({aim:?})");
+            return;
+        };
+        let (cx, cy) = ((x + w / 2.0) as i32, (y + h / 2.0) as i32);
+        eprintln!("kaya: winui hover {t:?} at ({cx},{cy})");
+        const MOVE: u32 = 0x0001;
+        const ABSOLUTE: u32 = 0x8000;
+        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+        for (dx, dy) in [(-6, -3), (0, 0)] {
+            let (px, py) = (cx + dx, cy + dy);
+            unsafe {
+                mouse_event(
+                    MOVE | ABSOLUTE,
+                    ((i64::from(px) * 65535) / width) as u32,
+                    ((i64::from(py) * 65535) / height) as u32,
+                    0,
+                    0,
+                );
+                SetCursorPos(px, py);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
     }
-    fn ground_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("grounds")
+    fn ground_read(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| skin::read::ground(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn shape_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("shapes")
+    fn shape_read(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| skin::read::shape(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn selected_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("cards")
+    fn selected_read(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| skin::read::selected(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
-    fn label_tint(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("tracks")
+    fn label_tint(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| skin::read::tint(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn dock_read(&self) -> String {
-        crate::depth_stub("dock")
+        Self::on_ui_read(skin::read::dock).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
@@ -26017,11 +26101,75 @@ impl crate::harness::Stage for WinUiStage {
                 let over = |k: usize| c[k] * a + ground[k] * (1.0 - a);
                 candidates.push((name, [over(0), over(1), over(2)]));
             }
+            // The skin's surfaces (docs/styling-pass-plan.md Y4): the item's
+            // PointerOver layer, which its template draws over its child,
+            // over the bare ground and over a neutral card.
+            let layered = |key: &str, under: [f64; 3]| -> windows_core::Result<[f64; 3]> {
+                let c = resolve(key)?;
+                let a = c[3] / 255.0;
+                Ok([0, 1, 2].map(|k| c[k] * a + under[k] * (1.0 - a)))
+            };
+            let bare = [ground[0], ground[1], ground[2]];
+            let card = candidates.iter().find(|(n, _)| *n == "neutral").map_or(bare, |(_, c)| *c);
+            candidates.push(("hovered", layered("ItemContainerPointerOverBackground", bare)?));
+            candidates.push(("hovered", layered("ItemContainerPointerOverBackground", card)?));
             let dist = |c: &[f64; 3]| (0..3).map(|k| (c[k] - got[k]).powi(2)).sum::<f64>();
             candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
             let hex = |c: &[f64; 3]| {
                 format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
             };
+            let probe = (element.ActualWidth()? - 4.0, element.ActualHeight()? / 2.0);
+            let id = target_widget_id(core, t).map(WidgetId);
+            let shot = skin::read::Shot::take(core);
+            // THE OVERLAY (Y3) is a material, with no one colour to rank
+            // against: it reads as overlay when the sample is dark and under
+            // half as bright as the picture its image ground draws behind it.
+            if let (Some(id), Ok(shot)) = (id, &shot) {
+                if let Some(pictured) = skin::read::pictured_ancestor(core, id) {
+                    let behind: UIElement = core.widgets[&pictured].inner_element()?;
+                    let mine: UIElement = element.cast()?;
+                    let (Some(m), Some(b)) = (shot.frame(&mine), shot.frame(&behind)) else {
+                        return Ok("<the overlay's frames are not laid out>".to_owned());
+                    };
+                    let px = got.map(|v| v / 255.0);
+                    if let Some(art) =
+                        skin::read::picture_at(pictured, m.0 + probe.0 - b.0, m.1 + probe.1 - b.1, b.2, b.3)
+                    {
+                        let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
+                        if own < 0.06 && own < theirs / 2.0 {
+                            return Ok(format!(
+                                "overlay (sampled {} at ({x},{y}), luminance {own:.3} over the picture's {} at {theirs:.3})",
+                                hex(&got),
+                                skin::read::hex(art)
+                            ));
+                        }
+                    }
+                }
+            }
+            // A SELECTED item is ItemContainer's selection ring, the accent
+            // drawn 3 units wide around the item, over a fill left
+            // transparent: read off both side edges at the middle.
+            if let (Some(_), Ok(shot)) = (id, &shot) {
+                let ring = resolve("ItemContainerSelectionVisualBackground")?;
+                let ring = [ring[0] / 255.0, ring[1] / 255.0, ring[2] / 255.0];
+                let mine: UIElement = skin::ax_element(&element.cast()?);
+                if let Some((fx, fy, fw, fh)) = shot.frame(&mine) {
+                    let edge = |x: f64| shot.at(x, fy + fh / 2.0);
+                    let (left, right) = (edge(fx + 1.0), edge(fx + fw - 1.5));
+                    if let (Some(l), Some(r)) = (left, right) {
+                        if skin::read::gap(l, ring) <= 0.12 && skin::read::gap(r, ring) <= 0.12 {
+                            return Ok(format!(
+                                "selected (the selection ring {} at both edges, {} and {}; sampled {} at ({x},{y}), {})",
+                                skin::read::hex(ring),
+                                skin::read::hex(l),
+                                skin::read::hex(r),
+                                hex(&got),
+                                if dark { "dark" } else { "light" }
+                            ));
+                        }
+                    }
+                }
+            }
             Ok(format!(
                 "{} (sampled {} at ({x},{y}) of a {}x{} print, {}; {})",
                 candidates[0].0,
@@ -27453,7 +27601,12 @@ impl crate::harness::Stage for WinUiStage {
             let Some(root) = core.mounted_roots.get(&0).and_then(|r| core.widgets.get(r)) else {
                 return read(format!("{spec}: nothing is mounted in the window"));
             };
-            let root: FrameworkElement = root.element()?.cast()?;
+            // A docked control is read against the whole window, which the
+            // dock shares with the content (docs/styling-pass-plan.md Y8).
+            let root: FrameworkElement = match skin::docked_in(core, id) {
+                Some(window) => window_ground(&winui_window(core, window)?)?.cast()?,
+                None => root.element()?.cast()?,
+            };
             let element: FrameworkElement = widget.element()?.cast()?;
             let at = element
                 .TransformToVisual(&root)?
@@ -27680,9 +27833,6 @@ impl crate::harness::Stage for WinUiStage {
             let Some(id) = container_id(core, t) else {
                 return Ok("<no such target>".to_string());
             };
-            if TABLES.with_borrow(|tables| tables.contains_key(&id)) {
-                return Ok("a table; expect_window reads a windowed tier".to_string());
-            }
             let Some((_, copy)) = core.scene.row_copy(id, &Value::Str(key.clone())) else {
                 return Ok(format!("no row keyed {key:?} in a For this container hosts"));
             };
@@ -31699,6 +31849,9 @@ mod images {
         arm.decoding = None;
         arm.undecodable = undecodable;
         arm.picture = picture;
+        if super::skin::shaped(id) {
+            return super::skin::reshape(core, id);
+        }
         refresh_look(core, id)
     }
 
@@ -31717,11 +31870,13 @@ mod images {
             && (arm.phase == crate::wire::IMAGE_PHASE_LOADING || arm.pending);
         if loading && arm.loading.is_none() {
             let look = look(arm.width, arm.height)?;
+            look.SetCornerRadius(super::skin::look_corner(id, arm.width, arm.height)?)?;
             host.Children()?.Append(&look)?;
             arm.loading = Some(look);
         }
         if failed && arm.failed.is_none() {
             let look = look(arm.width, arm.height)?;
+            look.SetCornerRadius(super::skin::look_corner(id, arm.width, arm.height)?)?;
             let glyph = FontIcon::new()?;
             glyph.SetGlyph(&windows_core::HSTRING::from(missing_glyph()))?;
             glyph.SetFontSize(GLYPH)?;
@@ -31741,7 +31896,87 @@ mod images {
             look.SetVisibility(shown(failed))?;
             glyph.SetVisibility(shown(arm.width.min(arm.height) >= 2.0 * GLYPH))?;
         }
-        image.SetOpacity(if failed { 0.0 } else { 1.0 })
+        image.SetOpacity(if failed || super::skin::shaped(id) { 0.0 } else { 1.0 })
+    }
+
+    /// The box an image declared and its fit, for the skin's shaped picture.
+    pub(super) fn arm_box(core: &CoreState, id: WidgetId) -> (f64, f64, Option<i64>) {
+        core.image_arms.get(&id).map_or((0.0, 0.0, None), |arm| {
+            if arm.boxed() { (arm.width, arm.height, arm.fit) } else { (0.0, 0.0, arm.fit) }
+        })
+    }
+
+    /// The loading and failed looks an image has mounted.
+    pub(super) fn looks(core: &CoreState, id: WidgetId) -> Vec<Border> {
+        core.image_arms.get(&id).map_or_else(Vec::new, |arm| {
+            arm.loading.iter().cloned().chain(arm.failed.iter().map(|(look, _)| look.clone())).collect()
+        })
+    }
+
+    pub(super) fn refresh(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
+        refresh_look(core, id)
+    }
+
+    /// Bytes decoded through the same door and cache an image's picture comes
+    /// through (N9, N10), at their natural size, for the skin's image ground.
+    pub(super) fn picture(
+        core: &mut CoreState,
+        bytes: Arc<[u8]>,
+        then: impl FnOnce(&mut CoreState, Option<BitmapImage>) -> windows_core::Result<()> + Send + 'static,
+    ) -> windows_core::Result<()> {
+        let key = (crate::content_id::of(&bytes), 0);
+        if let Some(hit) = PICTURES.with_borrow_mut(|cache| cache.get(key)) {
+            return then(core, Some(hit));
+        }
+        let then = Arc::new(std::sync::Mutex::new(Some(then)));
+        written(bytes, move |stream| {
+            on_ui(move |_| {
+                let finish = move |core: &mut CoreState, picture: Option<BitmapImage>| -> windows_core::Result<()> {
+                    match then.lock().ok().and_then(|mut f| f.take()) {
+                        Some(f) => f(core, picture),
+                        None => Ok(()),
+                    }
+                };
+                let Ok(stream) = stream else {
+                    return on_ui_now(move |core| finish(core, None));
+                };
+                let bitmap = BitmapImage::new()?;
+                let opened = finish.clone();
+                bitmap.ImageOpened(&RoutedEventHandler::new(move |sender, _| {
+                    let Some(bitmap) = sender.as_ref().and_then(|s| s.cast::<BitmapImage>().ok()) else { return Ok(()) };
+                    let opened = opened.clone();
+                    on_ui(move |core| {
+                        if key.0 != 0 {
+                            let (w, h) = (bitmap.PixelWidth()?.max(1) as u64, bitmap.PixelHeight()?.max(1) as u64);
+                            PICTURES.with_borrow_mut(|cache| cache.put(key, bitmap.clone(), w * h * 4));
+                        }
+                        watch_memory();
+                        opened(core, Some(bitmap))
+                    });
+                    Ok(())
+                }))?;
+                let failed = finish.clone();
+                bitmap.ImageFailed(&ExceptionRoutedEventHandler::new(move |_, _| {
+                    let failed = failed.clone();
+                    on_ui(move |core| failed(core, None));
+                    Ok(())
+                }))?;
+                bitmap.SetSourceAsync(&stream)?;
+                HELD.with_borrow_mut(|held| held.push(bitmap));
+                Ok(())
+            })
+        });
+        Ok(())
+    }
+
+    thread_local! {
+        /// A ground's bitmap while it decodes, so nothing drops it first.
+        static HELD: RefCell<Vec<BitmapImage>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn on_ui_now(f: impl FnOnce(&mut CoreState) -> windows_core::Result<()> + Send + 'static) -> windows_core::Result<()> {
+        on_ui(f);
+        Ok(())
     }
 
     fn missing_glyph() -> String {
@@ -31807,7 +32042,13 @@ mod images {
             .ok()
             .and_then(|source| source.cast::<BitmapImage>().ok())
             .is_some_and(|bitmap| bitmap.PixelWidth().unwrap_or(0) > 0);
-        Ok(if opened && image.Opacity()? > 0.0 { "shown" } else { "empty" }.into())
+        let drawn = image.Opacity()? > 0.0
+            || core.widgets.iter().find_map(|(id, w)| match w {
+                NativeWidget::Image { image: i, .. } if i == image => super::skin::shaper_of(*id),
+                _ => None,
+            })
+            .is_some_and(|shaper| shaper.Visibility().is_ok_and(|v| v == Visibility::Visible));
+        Ok(if opened && drawn { "shown" } else { "empty" }.into())
     }
 
     /// The decode size: whether the longer side is the width, and that side in
@@ -31916,7 +32157,7 @@ mod images {
     }
 
     /// Run `f` on the UI thread with the core, from any thread.
-    fn on_ui(f: impl FnOnce(&mut CoreState) -> windows_core::Result<()> + Send + 'static) {
+    pub(super) fn on_ui(f: impl FnOnce(&mut CoreState) -> windows_core::Result<()> + Send + 'static) {
         let Some(dispatcher) = DISPATCHER.get() else { return };
         let cell = std::sync::Mutex::new(Some(f));
         let handler = DispatcherQueueHandler::new(move || {

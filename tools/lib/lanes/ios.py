@@ -49,6 +49,8 @@ SWIFT_ENTRIES = [
     "safearea",
     # Network images (docs/network-images-plan.md §6).
     "netimage", "netimage_http",
+    # The skin (docs/styling-pass-plan.md §5).
+    "grounds", "shapes", "cards", "tracks", "dock",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -73,6 +75,7 @@ GO_SCENES = [
     "toast",
     "safearea",
     "netimage", "netimage_http",
+    "grounds", "shapes", "cards", "tracks", "dock",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -178,7 +181,7 @@ RUST_SCENES = [
     "safearea", "taskskeyboard", "autofillkeyboard",
     # Network images (docs/network-images-plan.md §6).
     "netimage", "netimage_http",
-    # The skin (docs/styling-pass-plan.md §5): rust-only at depth.
+    # The skin (docs/styling-pass-plan.md §5).
     "grounds", "shapes", "cards", "tracks", "dock",
 ]
 
@@ -236,6 +239,8 @@ MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
     # ends at its first hover.
     ("rust-swiftui", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
+    ("swift", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
+    ("go", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
     # The declared NAME is read off an auxiliary window this host does
     # not have; the icon reads survive (docs/app-identity-plan.md
     # ruling 3).

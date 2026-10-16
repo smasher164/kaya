@@ -155,6 +155,9 @@ public final class KayaRing {
     /** kaya_can_play (docs/media-plan.md §8 ruling 1): any thread. */
     public static native boolean canPlay(byte[] mime, byte[] codecs);
 
+    /** The dominant colour, 0xRRGGBB, or -1 (docs/styling-pass-plan.md Y2). */
+    public static native int imageDominant(byte[] bytes);
+
     /** kaya_reader_peaks: a finished peaks read's pairs, pair-major i16
      * (min then max per channel); null for none. */
     public static native short[] readerPeaks(long reader, long read);

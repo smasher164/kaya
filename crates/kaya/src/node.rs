@@ -184,6 +184,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("canPlay", can_play),
         ("readerPeaks", reader_peaks),
         ("imagePixels", image_pixels),
+        ("imageDominant", image_dominant),
         ("catalog", catalog),
         ("tr", tr),
         // The capture worker's two listeners and their teardown
@@ -637,6 +638,18 @@ unsafe extern "C" fn image_pixels(env: Env, info: CbInfo) -> Value {
         (api.napi_set_named_property)(env, out, c"bytes".as_ptr(), uint8array(env, &buf[..got]));
     }
     out
+}
+
+/// `imageDominant(bytes)`: kaya_image_dominant as 0xRRGGBB, null for bytes
+/// that do not decode (docs/styling-pass-plan.md Y2).
+unsafe extern "C" fn image_dominant(env: Env, info: CbInfo) -> Value {
+    let [b] = unsafe { args::<1>(env, info) };
+    let bytes = try_or_throw!(env, unsafe { bytes_arg(env, b, "imageDominant") });
+    let mut rgb = 0u32;
+    if unsafe { capi::kaya_image_dominant(bytes.as_ptr(), bytes.len(), &mut rgb) } == 0 {
+        return unsafe { null(env) };
+    }
+    unsafe { number(env, f64::from(rgb)) }
 }
 
 unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {

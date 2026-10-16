@@ -66,7 +66,7 @@ ROWS = [
     ("go default fetch", GO, r"func FetchHTTP\(ctx context\.Context, url string\)", "FetchHTTP"),
 
     ("csharp phase type", CS, r"^enum ImagePhase : long", "ImagePhase"),
-    ("csharp live phase", CS, r"public Widget Image\(byte\[\]\? source = null[^)]*ImagePhase\? phase = null\)", "phase"),
+    ("csharp live phase", CS, r"public Widget Image\(byte\[\]\? source = null[^)]*ImagePhase\? phase = null[,)]", "phase"),
     ("csharp live phase bound", CS, r"public void SetPhase\(Widget image, Signal s\)", "SetPhase"),
     ("csharp template phase field", CS, r"public void SetPhase\(Node n, Field<ImagePhase> f, uint level = 0\)", "SetPhase"),
     ("csharp conditional write", CSR, r"public bool PatchIf<G>\(Tx tx, object key, Field<G> guard, G expected,", "PatchIf"),
@@ -136,7 +136,7 @@ def run():
     texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for _, rel, _, _ in ROWS}
     baseline = findings(texts)
     for problem in baseline:
-        gate.fail(problem)
+        gate.finding(problem)
     if baseline:
         print("check-netimage-surface: FINDINGS ABOVE")
         return gate.status
@@ -145,7 +145,7 @@ def run():
     fired = sum(1 for line in findings(texts, fake_rows) if " absent in " in line)
     print(f"check-netimage-surface: fake names fired {fired}/{len(ROWS)}")
     if fired != len(ROWS):
-        gate.fail(f"check-netimage-surface: {len(ROWS) - fired} fake-name rows still matched — a pattern "
+        gate.finding(f"check-netimage-surface: {len(ROWS) - fired} fake-name rows still matched — a pattern "
                   f"that does not depend on its own name holds nothing")
     for label, rel, pattern, token in ROWS:
         count = len(re.findall(pattern, texts[rel], re.M))

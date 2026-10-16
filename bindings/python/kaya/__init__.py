@@ -4678,12 +4678,35 @@ def _align_value(align: Align | str | int) -> Align:
 
 class Tint(enum.IntEnum):
     """What a filled container's surface means (docs/tints-plan.md T1):
-    each backend draws it in the platform's own fill and foreground pair."""
+    each backend draws it in the platform's own fill and foreground pair.
+    A label takes the tint's standalone colour instead, NONE its untinted
+    text (docs/styling-pass-plan.md Y7); OVERLAY is the platform's panel
+    over media (Y3)."""
+    NONE = wire.TINT_NONE
     ACCENT = wire.TINT_ACCENT
     SUCCESS = wire.TINT_SUCCESS
     WARNING = wire.TINT_WARNING
     CRITICAL = wire.TINT_CRITICAL
     NEUTRAL = wire.TINT_NEUTRAL
+    OVERLAY = wire.TINT_OVERLAY
+
+
+_WIRE_TYPES.append((Tint, wire.VALUE_I64))
+_FIELD_ENCODERS[Tint] = int
+_FIELD_DECODERS[Tint] = Tint
+
+
+class Shape(enum.IntEnum):
+    """An image's clip (docs/styling-pass-plan.md Y6): ROUNDED is the
+    platform's own medium corner, CIRCLE the inscribed circle, covering.
+    Plain names accepted too — `shape="circle"`."""
+    RECT = wire.SHAPE_RECT
+    ROUNDED = wire.SHAPE_ROUNDED
+    CIRCLE = wire.SHAPE_CIRCLE
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "an image's shape", "kaya.Shape.CIRCLE")
 
 
 def _tint_value(tint: Tint | str) -> Tint:
@@ -4692,8 +4715,8 @@ def _tint_value(tint: Tint | str) -> Tint:
     if isinstance(tint, str) and tint.upper() in Tint.__members__:
         return Tint[tint.upper()]
     raise KayaTypeError(
-        f"kaya: filled takes kaya.Tint.ACCENT or its name "
-        f"(accent, success, warning, critical, neutral), not {tint!r}"
+        f"kaya: a tint is kaya.Tint.ACCENT or its name "
+        f"(none, accent, success, warning, critical, neutral, overlay), not {tint!r}"
     )
 
 
@@ -4701,6 +4724,85 @@ def _set_filled(handle: _Handle, tint: Tint | str | None) -> None:
     if tint is None:
         return
     _records().append(wire.tx_set_filled(handle.id, _tint_value(tint)))
+
+
+def _set_skin(handle: _Handle, ground_gradient: Color | Source | None,
+              ground_image: bytes | bytearray | memoryview | Asset | Source | None,
+              selected: FlagSource | None, on_activate: Handler | None) -> None:
+    """A container's ground, activation and selected surface
+    (docs/styling-pass-plan.md Y2-Y4)."""
+    if ground_gradient is not None:
+        _records().append(wire.tx_set_ground(handle.id, wire.GROUND_GRADIENT))
+        if isinstance(ground_gradient, Signal):
+            _records().append(wire.tx_bind_color(handle.id, ground_gradient.id))
+        elif isinstance(ground_gradient, FieldRef):
+            _picker_field("a gradient ground", ground_gradient, Color)
+            _records().append(wire.tx_bind_color_element(
+                handle.id, ground_gradient._level(), ground_gradient._index))
+        elif isinstance(ground_gradient, Color):
+            c = ground_gradient
+            _records().append(wire.tx_set_color(handle.id, c.r, c.g, c.b, c.a))
+        else:
+            raise KayaTypeError(
+                "kaya: a gradient ground takes a kaya.Color (kaya.image_dominant's "
+                f"answer), a Signal or a Color field, not {type(ground_gradient).__name__}")
+    if ground_image is not None:
+        _records().append(wire.tx_set_ground(handle.id, wire.GROUND_IMAGE))
+        if isinstance(ground_image, Signal):
+            _records().append(wire.tx_bind_source(handle.id, ground_image.id))
+        elif isinstance(ground_image, FieldRef):
+            _records().append(wire.tx_bind_source_element(
+                handle.id, ground_image._level(), ground_image._index))
+        elif isinstance(ground_image, (Asset, bytes, bytearray, memoryview)):
+            _records().append(wire.tx_set_source(handle.id, _blob_of(ground_image)))
+        else:
+            raise KayaTypeError(
+                "kaya: an image ground takes encoded bytes, an asset, a Signal "
+                f"or a bytes field, not {type(ground_image).__name__}")
+    if on_activate is not None:
+        _records().append(wire.tx_set_activatable(handle.id, True))
+        _app._register(handle, wire.OCC_ACTIVATED, on_activate)
+    if selected is not None:
+        if isinstance(selected, Signal):
+            _records().append(wire.tx_bind_selected(handle.id, selected.id))
+        elif isinstance(selected, FieldRef):
+            _picker_field("a container's selected surface", selected, bool)
+            _records().append(wire.tx_bind_selected_element(
+                handle.id, selected._level(), selected._index))
+        elif isinstance(selected, bool):
+            _records().append(wire.tx_set_selected(handle.id, selected))
+        else:
+            raise KayaTypeError(
+                "kaya: selected takes a bool, a Signal or a bool field, not "
+                f"{type(selected).__name__}")
+
+
+def _set_label_tint(handle: _Handle, tint: Tint | str | Source | None) -> None:
+    """A label in a tint's standalone colour (docs/styling-pass-plan.md Y7)."""
+    if tint is None:
+        return
+    if isinstance(tint, Signal):
+        _records().append(wire.tx_bind_tint(handle.id, tint.id))
+    elif isinstance(tint, FieldRef):
+        _picker_field("a label's tint", tint, Tint)
+        _records().append(wire.tx_bind_tint_element(handle.id, tint._level(), tint._index))
+    elif isinstance(tint, (Tint, str)):
+        _records().append(wire.tx_set_tint(handle.id, _tint_value(tint)))
+    else:
+        raise KayaTypeError(
+            "kaya: a label's tint takes a kaya.Tint or its name, a Signal or a "
+            f"row's Tint field, not {type(tint).__name__}")
+
+
+def image_dominant(data: bytes | bytearray | memoryview | Asset) -> Color | None:
+    """The dominant colour of encoded image bytes, the usual colour of a
+    gradient ground (docs/styling-pass-plan.md Y2): the core's one
+    quantizer, so every binding answers the same colour for the same art.
+    None when the bytes do not decode."""
+    if isinstance(data, Asset):
+        data = data.bytes()
+    rgb = runtime.image_dominant(bytes(data))
+    return None if rgb is None else Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
 
 
 class Role(enum.IntEnum):
@@ -4987,16 +5089,28 @@ def spacer(grow: float = 1.0) -> Widget:
 def column(*, grow: float | None = None, spacing: float | None = None,
            align: Align | str | None = None,
            inset: float | None = None,
-           filled: Tint | str | None = None) -> _Container:
+           filled: Tint | str | None = None,
+           ground_gradient: Color | Source | None = None,
+           ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
+           selected: FlagSource | None = None,
+           on_activate: Handler | None = None) -> _Container:
     """A column container: parents everything declared inside it. `grow`
     is its flex weight; `spacing` its inter-child gap (main axis, DIP,
-    default 8); `inset` its own padding; `filled` a platform tint."""
+    default 8); `inset` its own padding; `filled` a platform tint.
+
+    `ground_gradient` fades from a colour, clamped by the core, into the
+    window's ground; `ground_image` covers it with a picture, text over
+    which sits in a row `filled="overlay"`. `on_activate` makes the whole
+    container take a click (template copies getting their `Row`), and
+    `selected` then wears the platform's selected surface
+    (docs/styling-pass-plan.md Y2-Y4)."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
+    _set_skin(handle, ground_gradient, ground_image, selected, on_activate)
     return _Container(handle)
 
 
@@ -5051,7 +5165,11 @@ def row(*, grow: float | None = None, spacing: float | None = None,
         align: Align | str | None = None, inset: float | None = None,
         stack_when: SizeClass | None = None,
         filled: Tint | str | None = None,
-        role: Role | str | None = None) -> _Container:
+        role: Role | str | None = None,
+        ground_gradient: Color | Source | None = None,
+        ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
+        selected: FlagSource | None = None,
+        on_activate: Handler | None = None) -> _Container:
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding; `filled` a platform tint (a chat thread's
@@ -5089,6 +5207,7 @@ def row(*, grow: float | None = None, spacing: float | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
+    _set_skin(handle, ground_gradient, ground_image, selected, on_activate)
     if role is not None:
         handle.role(role)
     return _Container(handle)
@@ -5631,7 +5750,7 @@ def secure_field(text: str | None = None, *,
 
 def label(text: str | None = None, bind: TextSource | None = None, *,
           grow: float | None = None, href: TextSource | None = None,
-          rich: bool = False) -> Widget:
+          rich: bool = False, tint: Tint | str | Source | None = None) -> Widget:
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed). `href=` with
     `role="link"` is the destination the platform opens
@@ -5665,23 +5784,24 @@ def label(text: str | None = None, bind: TextSource | None = None, *,
         handle.rich(True)
     if href is not None:
         handle.href(href)
+    _set_label_tint(handle, tint)
     _set_grow(handle, grow)
     return handle
 
 
 def heading(text: str | None = None, bind: TextSource | None = None, *,
-            grow: float | None = None) -> Widget:
+            grow: float | None = None, tint: Tint | str | Source | None = None) -> Widget:
     """A label wearing the heading role: the platform's heading text
     style AND the accessibility heading trait, and on a grouped screen
     the section-header seat (docs/styling-plan.md D4)."""
-    return label(text=text, bind=bind, grow=grow).role("heading")
+    return label(text=text, bind=bind, grow=grow, tint=tint).role("heading")
 
 
 def caption(text: str | None = None, bind: TextSource | None = None, *,
-            grow: float | None = None) -> Widget:
+            grow: float | None = None, tint: Tint | str | Source | None = None) -> Widget:
     """A label wearing the caption role: the platform's footnote text
     tier, and on a grouped screen the section-footer seat."""
-    return label(text=text, bind=bind, grow=grow).role("caption")
+    return label(text=text, bind=bind, grow=grow, tint=tint).role("caption")
 
 
 def _bleed(handle: Widget, bleed: bool) -> None:
@@ -5702,7 +5822,8 @@ def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
           fit: Fit | str | int | None = None,
           on_needed: Handler | None = None,
           on_released: Handler | None = None,
-          grow: float | None = None, bleed: bool = False) -> Widget:
+          grow: float | None = None, bleed: bool = False,
+          shape: Shape | str | None = None) -> Widget:
     """An image displaying encoded bytes: the toolkit decodes natively,
     and a decode failure renders the placeholder, never a crash. `source`
     is encoded bytes, an `Asset`, a Signal, or an element field.
@@ -5744,6 +5865,8 @@ def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
             )
     if fit is not None:
         _records().append(wire.tx_set_fit(handle.id, int(Fit(fit))))
+    if shape is not None:
+        _records().append(wire.tx_set_shape(handle.id, int(Shape(shape))))
     if phase is not None:
         _records().append(_phase_source(handle, phase))
     if on_needed is not None:
@@ -6079,7 +6202,8 @@ class _TxScope:
                  intercept_dismiss: bool | None = None,
                  detent: Detent | str | int | None = None,
                  on_dismissed: Callable[[], object] | None = None,
-                 on_dismiss_requested: Callable[[], object] | None = None) -> None:
+                 on_dismiss_requested: Callable[[], object] | None = None,
+                 dock: bool = False) -> None:
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -6117,6 +6241,7 @@ class _TxScope:
         self._detent = None if detent is None else Detent(detent)
         self._on_dismissed = on_dismissed
         self._on_dismiss_requested = on_dismiss_requested
+        self._dock = dock
 
     def __del__(self) -> None:
         # A construct BUILT AND NEVER ENTERED emits nothing and says
@@ -6198,6 +6323,18 @@ class _TxScope:
                 self._app._dismiss_requested[self._window] = (
                     self._on_dismiss_requested)
             return self
+        if self._dock:
+            # A dock's scene scope (docs/styling-pass-plan.md Y8): the body's
+            # root mounts INTO the dock on exit.
+            self._nested = _tx is not None
+            if not self._nested:
+                _tx = []
+                _journal = {}
+            self._outer = (_recording, _pending_root)
+            _recording = True
+            _pending_root = None
+            _records().append(wire.tx_attach_dock(self._parent, self._window))
+            return self
         if self._push:
             # UNLIKE EVERY OTHER SCOPE this one NESTS inside an open
             # transaction — pushes happen from click handlers — so the
@@ -6242,7 +6379,7 @@ class _TxScope:
     def __exit__(self, exc_type: Any, exc: Any,
                  tb: Any) -> Literal[False]:
         global _tx, _recording, _journal, _pending_root
-        if self._section or self._push or self._sheet:
+        if self._section or self._push or self._sheet or self._dock:
             # Submit only if this scope opened its own transaction:
             # inside a handler the ambient build owns commit and
             # rollback.
@@ -6255,7 +6392,7 @@ class _TxScope:
                 return False
             if root is None:
                 raise KayaStateError(
-                    "kaya: push_entry()/add_section()/sheet() body declared "
+                    "kaya: push_entry()/add_section()/sheet()/dock() body declared "
                     "no root container")
             _records().append(wire.tx_mount(self._window, root.id))
             if not self._nested:
@@ -7987,6 +8124,14 @@ class App:
             parent=parent, title=title, intercept_dismiss=intercept_dismiss,
             detent=detent, on_dismissed=on_dismissed,
             on_dismiss_requested=on_dismiss_requested)
+
+    def dock(self, dock_id: int, *, window: int = 0) -> _TxScope:
+        """A window's DOCK scope (docs/styling-pass-plan.md Y8): the surface
+        under every pane and above a phone's tab bar, hosting the body's
+        single top-level container, which mounts INTO IT on exit. Dock ids
+        are guest-allocated in the shared surface namespace; one per window.
+        A dock whose root holds no widget collapses."""
+        return _TxScope(self, mount_on_exit=True, window=dock_id, parent=window, dock=True)
 
     def add_section(self, section_id: int, *, title: str | None = None,
                     symbol: Symbol | str | None = None,

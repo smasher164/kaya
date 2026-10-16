@@ -70,7 +70,7 @@ let () =
               Tpl.(
                 row
                   [
-                    image ~bind_field:track_art ~fit:Fit.Cover ~max_width:20.0 ~max_height:20.0
+                    image ~bind_field:track_art ~fit:Fit.Cover ~max_width:40.0 ~max_height:40.0 ~shape:`Rounded
                       ~phase_field:track_phase ~a11y_id:"art" ~on_needed ~on_released;
                     label ~bind_field:track_title;
                   ]

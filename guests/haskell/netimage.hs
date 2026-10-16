@@ -56,8 +56,9 @@ main = kayaMain $ \app -> do
       n <-
         withTplAttrs
           [ TplFitAs FitCover,
-            TplMaxWidth 20,
-            TplMaxHeight 20,
+            TplMaxWidth 40,
+            TplMaxHeight 40,
+            TplShapeAs ShapeRounded,
             TplPhaseField (field @"phase" @Track),
             TplA11yId "art"
           ]

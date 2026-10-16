@@ -151,9 +151,11 @@ export type ImagePhaseToken = typeof ImagePhase;
 /** A stamped copy's document is a FIELD of its row: a Blob carrying the
  * document's own value list (docs/rich-text-plan.md §19). */
 export type DocumentToken = typeof Document;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken | ImagePhaseToken;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken | ImagePhaseToken | TintToken;
 export type Schema = { readonly [name: string]: Token };
-type FieldOf<T> = T extends PlayerToken
+type FieldOf<T> = T extends TintToken
+  ? TintValue
+  : T extends PlayerToken
   ? Player | null
   : T extends ImagePhaseToken
   ? ImagePhase
@@ -199,7 +201,7 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
-  if (token === CivilDate || token === CivilTime || token === ImagePhase || token === Color || token === Player) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime || token === ImagePhase || token === Color || token === Player || token === Tint) return wire.VALUE_I64;
   if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
     `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Player, kaya.ImagePhase, kaya.Document or Uint8Array per field`,
@@ -1364,6 +1366,13 @@ export class Widget extends Handle {
     return this;
   }
 
+  /** This label's standalone tint, rewritten (docs/styling-pass-plan.md Y7). */
+  tint(tint: TintValue | TintName): this {
+    this._live("tint()");
+    records().push(wire.tx_set_tint(this.id, tintValue(tint)));
+    return this;
+  }
+
   /** This container's arrangement direction (kaya.Axis or its name) —
    * the user-driven orientation toggle (docs/adaptive-layout-plan.md
    * D2) — or the direction a scroll scrolls (docs/hscroll-plan.md). */
@@ -1571,6 +1580,7 @@ function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === CivilTime) return (v) => civilTime(v as number);
   if (token === Color) return (v) => Color.fromHex(v as number);
   if (token === ImagePhase) return (v) => ImagePhase._of(Number(v));
+  if (token === Tint) return (v) => Number(v);
   // A row's player (docs/media-plan.md §7b): its id, 0 for none.
   if (token === Player) return (v) => (Number(v) === 0 ? null : (app()._players.get(Number(v)) ?? new Player(Number(v))));
   if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
@@ -1585,6 +1595,7 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   if (token === CivilTime) return (v, name) => new wire.I64(wire.pack_time(...timeParts(`${type}.${name}`, v)));
   if (token === Color) return (v, name) => (v instanceof Color ? new wire.I64(v.hex()) : refuse(v, name, "kaya.Color"));
   if (token === ImagePhase) return (v, name) => (v instanceof ImagePhase ? new wire.I64(v._wire) : refuse(v, name, "kaya.ImagePhase"));
+  if (token === Tint) return (v, name) => (typeof v === "number" && Object.values(Tint).includes(v as TintValue) ? new wire.I64(v) : refuse(v, name, "kaya.Tint"));
   if (token === Player) return (v, name) => (v === null ? new wire.I64(0) : v instanceof Player ? new wire.I64(v.id) : refuse(v, name, "kaya.Player or null"));
   // A Document field IS a Blob field carrying `documentBytes`' list (§19).
   if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
@@ -4206,16 +4217,30 @@ export type AlignValue = (typeof Align)[keyof typeof Align];
 export type AlignName = "start" | "center" | "end" | "stretch" | "baseline";
 const ALIGN_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Align).map(([k, v]) => [k.toLowerCase(), v]));
 
-/** What a filled container's surface means (docs/tints-plan.md T1). */
+/** What a filled container's surface means (docs/tints-plan.md T1). A
+ * label takes the tint's standalone colour instead, NONE its untinted text
+ * (docs/styling-pass-plan.md Y7); OVERLAY is the platform's panel over
+ * media (Y3). The object is also the schema token: a row field of
+ * `kaya.Tint` gives each stamped label its own. */
 export const Tint = Object.freeze({
+  NONE: wire.TINT_NONE,
   ACCENT: wire.TINT_ACCENT,
   SUCCESS: wire.TINT_SUCCESS,
   WARNING: wire.TINT_WARNING,
   CRITICAL: wire.TINT_CRITICAL,
   NEUTRAL: wire.TINT_NEUTRAL,
+  OVERLAY: wire.TINT_OVERLAY,
 });
 export type TintValue = (typeof Tint)[keyof typeof Tint];
-export type TintName = "accent" | "success" | "warning" | "critical" | "neutral";
+export type TintName = "none" | "accent" | "success" | "warning" | "critical" | "neutral" | "overlay";
+export type TintToken = typeof Tint;
+
+/** An image's clip (docs/styling-pass-plan.md Y6): ROUNDED is the
+ * platform's own medium corner, CIRCLE the inscribed circle, covering. */
+export const Shape = Object.freeze({ RECT: wire.SHAPE_RECT, ROUNDED: wire.SHAPE_ROUNDED, CIRCLE: wire.SHAPE_CIRCLE });
+export type ShapeValue = (typeof Shape)[keyof typeof Shape];
+export type ShapeName = "rect" | "rounded" | "circle";
+const SHAPE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Shape).map(([k, v]) => [k.toLowerCase(), v]));
 const TINT_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Tint).map(([k, v]) => [k.toLowerCase(), v]));
 
 export const Axis = Object.freeze({ HORIZONTAL: wire.AXIS_HORIZONTAL, VERTICAL: wire.AXIS_VERTICAL });
@@ -4243,7 +4268,11 @@ function alignValue(align: unknown): number {
 }
 
 function tintValue(tint: unknown): number {
-  return vocab(TINT_NAMES, "filled", tint, "kaya.Tint.ACCENT");
+  return vocab(TINT_NAMES, "a tint", tint, "kaya.Tint.ACCENT");
+}
+
+function shapeValue(shape: unknown): number {
+  return vocab(SHAPE_NAMES, "an image's shape", shape, "kaya.Shape.CIRCLE");
 }
 
 /** SEMANTIC EMPHASIS, the closed vocabulary (docs/styling-plan.md D4). */
@@ -4373,6 +4402,67 @@ function setLayout(handle: Handle, opts: ContainerOptions): void {
   if (opts.filled !== undefined) records().push(wire.tx_set_filled(handle.id, tintValue(opts.filled)));
 }
 
+/** A row's or column's ground, activation and selected surface
+ * (docs/styling-pass-plan.md Y2-Y4): `groundGradient` fades from a colour,
+ * clamped by the core, into the window's ground; `groundImage` covers the
+ * container with a picture, text over which sits in a row filled
+ * "overlay"; `onActivate` makes the whole container take a click (a
+ * stamped copy's handler getting its row), and `selected` then wears the
+ * platform's selected surface. */
+export type SkinOptions = {
+  groundGradient?: Color | Signal<Color> | FieldRef;
+  groundImage?: ImageSource;
+  selected?: boolean | Signal<boolean> | FieldRef;
+  onActivate?: Handler;
+};
+
+function setSkin(handle: Handle, opts: SkinOptions): void {
+  const color = opts.groundGradient;
+  if (color !== undefined) {
+    records().push(wire.tx_set_ground(handle.id, wire.GROUND_GRADIENT));
+    if (color instanceof Signal) records().push(wire.tx_bind_color(handle.id, color.id));
+    else if (color instanceof FieldRef) {
+      pickerField("a gradient ground", color, Color, "kaya.Color");
+      records().push(wire.tx_bind_color_element(handle.id, color._level(), color._index));
+    } else if (color instanceof Color) records().push(wire.tx_set_color(handle.id, color.r, color.g, color.b, color.a));
+    else throw new TypeError(`kaya: a gradient ground takes a kaya.Color (kaya.imageDominant's answer), a Signal or a Color field, not ${runtime.describe(color)}`);
+  }
+  const picture = opts.groundImage;
+  if (picture !== undefined) {
+    records().push(wire.tx_set_ground(handle.id, wire.GROUND_IMAGE));
+    records().push(sourceRecord("an image ground", handle, picture));
+  }
+  if (opts.onActivate !== undefined) {
+    records().push(wire.tx_set_activatable(handle.id, true));
+    app()._register(handle, wire.OCC_ACTIVATED, opts.onActivate);
+  }
+  const on = opts.selected;
+  if (on !== undefined) {
+    if (on instanceof Signal) records().push(wire.tx_bind_selected(handle.id, on.id));
+    else if (on instanceof FieldRef) records().push(wire.tx_bind_selected_element(handle.id, on._level(), on._index));
+    else if (typeof on === "boolean") records().push(wire.tx_set_selected(handle.id, on));
+    else throw new TypeError(`kaya: selected takes a boolean, a Signal or one of the row's fields, not ${runtime.describe(on)}`);
+  }
+}
+
+function sourceRecord(what: string, handle: Handle, source: ImageSource): Uint8Array {
+  if (source instanceof Signal) return wire.tx_bind_source(handle.id, source.id);
+  if (source instanceof FieldRef) return wire.tx_bind_source_element(handle.id, source._level(), source._index);
+  if (source instanceof Asset || source instanceof Uint8Array) return wire.tx_set_source(handle.id, blobOf(source));
+  throw new TypeError(
+    `kaya: ${what} takes encoded bytes, an asset the app's build shipped (kaya.asset('icons/...')), a Signal or an element field, not ${runtime.describe(source)} — text belongs on kaya.label`,
+  );
+}
+
+/** The dominant colour of encoded image bytes, the usual colour of a
+ * gradient ground (docs/styling-pass-plan.md Y2): the core's one
+ * quantizer, so every binding answers the same colour for the same art.
+ * null when the bytes do not decode. */
+export function imageDominant(bytes: Uint8Array | Asset): Color | null {
+  const rgb = runtime.imageDominant(bytes instanceof Asset ? bytes.bytes() : bytes);
+  return rgb === null ? null : new Color((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+}
+
 function setGrow(handle: Handle, opts: GrowOption): void {
   if (opts.grow !== undefined) records().push(wire.tx_set_grow(handle.id, Number(opts.grow)));
 }
@@ -4397,6 +4487,8 @@ export function scroll<T = void>(optsOrBody?: ScrollOptions | ((scroll: Widget) 
 }
 
 export type GridOptions = ContainerOptions & { columnsWhen?: [SizeClass, number] };
+
+export type DockOptions = { window?: number };
 
 /** A grid container laying its children out row-major into `columns`
  * columns, each at its NATURAL width, aligned across rows. `columnsWhen`
@@ -4472,15 +4564,18 @@ export function spacer(opts: GrowOption = {}): Widget {
   return handle;
 }
 
+export type ColumnOptions = ContainerOptions & SkinOptions;
+
 /** A column container: parents everything declared inside its body. */
-export function column<T = void>(optsOrBody?: ContainerOptions | ((column: Widget) => T), body?: (column: Widget) => T): T {
-  const [opts, run] = optsAndOptionalBody<ContainerOptions, Widget, T>(optsOrBody, body);
+export function column<T = void>(optsOrBody?: ColumnOptions | ((column: Widget) => T), body?: (column: Widget) => T): T {
+  const [opts, run] = optsAndOptionalBody<ColumnOptions, Widget, T>(optsOrBody, body);
   const handle = widget(wire.KIND_COLUMN);
   setLayout(handle, opts);
+  setSkin(handle, opts);
   return new Container(handle).run(run);
 }
 
-export type RowOptions = ContainerOptions & { stackWhen?: SizeClass; role?: RoleValue | RoleName };
+export type RowOptions = ContainerOptions & SkinOptions & { stackWhen?: SizeClass; role?: RoleValue | RoleName };
 
 /** A row container: column turned sideways. `stackWhen` stacks the
  * children vertically while the window's SIZE CLASS is the named one —
@@ -4500,6 +4595,7 @@ export function row<T = void>(optsOrBody?: RowOptions | ((row: Widget) => T), bo
     records().push(wire.tx_create_breakpoint(0, new I64(wire.SIZE_CLASS_COMPACT), 1, [new I64(handle.id), new I64(wire.PROP_AXIS), new I64(wire.AXIS_VERTICAL)]));
   }
   setLayout(handle, opts);
+  setSkin(handle, opts);
   if (opts.role !== undefined) records().push(wire.tx_set_role(handle.id, roleValue(opts.role)));
   return new Container(handle).run(run);
 }
@@ -4927,7 +5023,9 @@ export function secureField(opts: SecureFieldOptions = {}): Widget {
   return handle;
 }
 
-export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean };
+/** `tint` draws the label in a tint's standalone colour — a constant or,
+ * in a template, the row's kaya.Tint field (docs/styling-pass-plan.md Y7). */
+export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean; tint?: TintValue | TintName | FieldRef };
 
 /** A label: a constant, or `{bind}` for a Signal or the enclosing For's
  * element or field.
@@ -4945,6 +5043,12 @@ export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
   if (opts.bind !== undefined) bindText("label", handle, opts.bind);
   if (opts.rich === true) handle.rich(true);
   if (opts.href !== undefined) handle.href(opts.href);
+  if (opts.tint !== undefined) {
+    if (opts.tint instanceof FieldRef) {
+      pickerField("a label's tint", opts.tint, Tint, "kaya.Tint");
+      records().push(wire.tx_bind_tint_element(handle.id, opts.tint._level(), opts.tint._index));
+    } else records().push(wire.tx_set_tint(handle.id, tintValue(opts.tint)));
+  }
   setGrow(handle, opts);
   return handle;
 }
@@ -4989,6 +5093,9 @@ export type ImageOptions = GrowOption &
      * its box, `fit` with maxWidth and maxHeight (N2, N3). */
     phase?: ImagePhase | Signal<ImagePhase> | FieldRef;
     fit?: Fit;
+    /** Its clip, on the picture and on the loading and failed looks
+     * (docs/styling-pass-plan.md Y6). */
+    shape?: ShapeValue | ShapeName;
     /** A stamped copy was realized loading with no bytes: its row (N8). */
     onNeeded?: Handler;
     /** That copy went while still loading: its row (N8). */
@@ -5016,17 +5123,9 @@ export function image(source?: ImageSource, opts: ImageOptions = {}): Widget {
       "kaya: onNeeded and onReleased belong to a stamped image — the core says when a ROW's copy needs its bytes, and a live image is written through its own signal (docs/network-images-plan.md N8)",
     );
   }
-  if (source !== undefined) {
-    if (source instanceof Signal) records().push(wire.tx_bind_source(handle.id, source.id));
-    else if (source instanceof FieldRef) records().push(wire.tx_bind_source_element(handle.id, source._level(), source._index));
-    else if (source instanceof Asset || source instanceof Uint8Array) records().push(wire.tx_set_source(handle.id, blobOf(source)));
-    else {
-      throw new TypeError(
-        `kaya: image source takes encoded bytes, an asset the app's build shipped (kaya.asset('icons/...')), a Signal or an element field, not ${runtime.describe(source)} — text belongs on kaya.label`,
-      );
-    }
-  }
+  if (source !== undefined) records().push(sourceRecord("image source", handle, source));
   if (opts.fit !== undefined) records().push(wire.tx_set_fit(handle.id, fitValue(opts.fit)));
+  if (opts.shape !== undefined) records().push(wire.tx_set_shape(handle.id, shapeValue(opts.shape)));
   if (opts.phase !== undefined) records().push(phaseRecord(handle, opts.phase));
   if (opts.onNeeded !== undefined) app()._register(handle, wire.OCC_IMAGE_NEEDED, opts.onNeeded);
   if (opts.onReleased !== undefined) app()._register(handle, wire.OCC_IMAGE_RELEASED, opts.onReleased);
@@ -5404,7 +5503,7 @@ function windowProps(window: number, p: WindowProps): void {
   }
 }
 
-type ScopeKind = "window" | "build" | "push" | "section" | "sheet";
+type ScopeKind = "window" | "build" | "push" | "section" | "sheet" | "dock";
 
 /** One scene scope: a transaction with a mount on exit (window, entry,
  * section) or without one (build). Entries and sections NEST inside an
@@ -5419,7 +5518,7 @@ function runScope<T>(
   open: () => void,
 ): T | undefined {
   requireAppThread();
-  if (kind === "push" || kind === "section" || kind === "sheet") {
+  if (kind === "push" || kind === "section" || kind === "sheet" || kind === "dock") {
     const nested = _tx !== null;
     if (!nested) {
       _tx = [];
@@ -5450,7 +5549,7 @@ function runScope<T>(
             _tx = null;
             _journal = null;
           }
-          throw new Error("kaya: pushEntry()/addSection()/sheet() body declared no root container");
+          throw new Error("kaya: pushEntry()/addSection()/sheet()/dock() body declared no root container");
         }
         _tx!.push(wire.tx_mount(surface, root.id));
         if (!nested) {
@@ -6854,6 +6953,21 @@ export class App {
       if (detent !== null) records().push(wire.tx_set_sheet_detent(sheetId, detent));
       if (opts.onDismissed !== undefined) this._sheetDismissed.set(sheetId, opts.onDismissed);
       if (opts.onDismissRequested !== undefined) this._dismissRequested.set(sheetId, opts.onDismissRequested);
+    });
+  }
+
+  /** A window's DOCK scope (docs/styling-pass-plan.md Y8): the surface
+   * under every pane and above a phone's tab bar, and the body's root
+   * mounts INTO IT on exit, its value coming back out. Dock ids are
+   * guest-allocated in the shared surface namespace; one per window,
+   * `window` the primary (0) unless given. A dock whose root holds no
+   * widget collapses. Nests inside the window's scene scope. */
+  dock<T = void>(dockId: number, optsOrBody: DockOptions | (() => T), body?: () => T): T {
+    const [opts, run] = typeof optsOrBody === "function" ? [{} as DockOptions, optsOrBody] : [optsOrBody, body];
+    if (run === undefined) throw new TypeError("kaya: dock(id, opts, body) declares the dock's root in its body");
+    const host = opts.window ?? 0;
+    return runScope<T>("dock", run, dockId, () => {
+      records().push(wire.tx_attach_dock(host, dockId));
     });
   }
 

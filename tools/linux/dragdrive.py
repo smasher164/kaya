@@ -11,6 +11,7 @@ runs it.
     dragdrive.py (wayland|x11) PID TX TY X0 Y0 X1 Y1 [INJECTOR]
     dragdrive.py click (wayland|x11) PID TX TY X Y [INJECTOR]
     dragdrive.py move (wayland|x11) PID TX TY X Y [INJECTOR]
+    dragdrive.py locate (wayland|x11) PID TX TY X Y
 
 The second form is ONE CLICK at one widget point, the number field's
 `nudge` (docs/number-field-plan.md §5): press and release inside
@@ -270,8 +271,30 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
     return origin, start, end, "; ".join(line.strip() for line in gate)
 
 
+def locate_main(argv):
+    """`locate (wayland|x11) PID TX TY X Y`: the screen point a move would
+    take and the injector that would take it, injecting nothing — the
+    harness's `hover` holds a wayland pointer there itself, since a virtual
+    pointer leaves the seat when its client exits and GTK then sees the
+    pointer leave (docs/styling-pass-plan.md §5)."""
+    if len(argv) != 7 or argv[1] not in ("wayland", "x11"):
+        print("usage: dragdrive.py locate (wayland|x11) PID TX TY X Y", file=sys.stderr)
+        return 2
+    proto, pid = argv[1], int(argv[2])
+    tx, ty, x, y = (int(v) for v in argv[3:7])
+    try:
+        origin = screen_origin(proto, pid, (tx, ty))
+    except DragDriveError as e:
+        print(f"dragdrive: {e}", file=sys.stderr)
+        return 1
+    print(f"{int(origin[0] + x)} {int(origin[1] + y)} {default_injector(proto)}", flush=True)
+    return 0
+
+
 def main():
     argv = list(sys.argv)
+    if len(argv) >= 2 and argv[1] == "locate":
+        return locate_main(argv[1:])
     if len(argv) >= 2 and argv[1] == "click":
         return click_main(argv[1:])
     if len(argv) >= 2 and argv[1] == "move":

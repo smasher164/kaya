@@ -246,6 +246,9 @@ type App struct {
 	// The stamped-copy twin: a nested For's node id, the copy's keys.
 	nodeSorts map[uint64]func(*Tx, []any, uint32)
 	nodeHandlers   map[uint64]func(*Tx, []any)
+	// The activatable containers (docs/styling-pass-plan.md Y4).
+	widgetActivates map[uint64]func(*Tx)
+	nodeActivates   map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
 	widgetSubmits  map[uint64]func(*Tx, string)
@@ -403,6 +406,8 @@ func NewApp() *App {
 		windowClosed:   make(map[uint64]func(*Tx)),
 		fullscreenChanged: make(map[uint64]func(*Tx, bool)),
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
+		widgetActivates: make(map[uint64]func(*Tx)),
+		nodeActivates:   make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
 		widgetSubmits:  make(map[uint64]func(*Tx, string)),
@@ -1086,9 +1091,10 @@ func (w Widget) MaxHeight(points float64) Widget {
 	return w
 }
 
-// Tint is what a filled container's surface means (TintAccent..TintNeutral;
-// docs/tints-plan.md T1): each backend draws it in the platform's own fill
-// and foreground pair.
+// Tint is what a filled container's surface means (TintAccent..TintNeutral,
+// TintOverlay; docs/tints-plan.md T1), drawn in the platform's own fill and
+// foreground pair, and a label's standalone colour (TintNone untinted;
+// docs/styling-pass-plan.md Y7).
 type Tint int64
 
 // SetFilled fills a row or column with a platform tint: kaya chooses the
@@ -7109,6 +7115,14 @@ func (a *App) Serve() {
 			}
 		case kind == occButtonClicked:
 			if fn := a.nodeHandlers[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys) })
+			}
+		case kind == occActivated && len(keys) == 0:
+			if fn := a.widgetActivates[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occActivated:
+			if fn := a.nodeActivates[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys) })
 			}
 		case kind == occTextChanged && len(keys) == 0:

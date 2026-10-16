@@ -111,8 +111,9 @@ static class NetimageScene
                     {
                         var image = row.Image(row.Art);
                         row.SetFit(image, Fit.Cover);
-                        row.SetMaxWidth(image, 20);
-                        row.SetMaxHeight(image, 20);
+                        row.SetMaxWidth(image, 40);
+                        row.SetMaxHeight(image, 40);
+                        row.SetShape(image, Shape.Rounded);
                         row.SetPhase(image, row.Phase);
                         row.SetA11yId(image, "art");
                         artNode = image;

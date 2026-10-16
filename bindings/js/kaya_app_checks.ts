@@ -2899,6 +2899,66 @@ if (isMainThread) {
     check("a running fetch nobody waits on any more is aborted", slow !== undefined && slow.aborted);
   }
 
+  // --------------------------------------------------------------- skin
+  // docs/styling-pass-plan.md Y2-Y8: each wall the binding holds itself,
+  // and the records a sugar spelling sends.
+  {
+    const same = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+    const sent = (from: number, want: Uint8Array): boolean => shipped.slice(from).flat().some((r) => same(r, want));
+    const art = kaya.asset("covers/cover-600.jpg").bytes();
+    const colour = kaya.imageDominant(art);
+    check("imageDominant answers the core's colour for the cover", colour instanceof kaya.Color && colour.a === 0xff);
+    check("imageDominant answers null for bytes that do not decode", kaya.imageDominant(new TextEncoder().encode("not an image")) === null);
+    const refusals: [string, () => void, RegExp][] = [
+      ["a gradient ground refuses a colour name", () => kaya.column({ groundGradient: "red" as unknown as K.Color }), /gradient ground takes/],
+      ["an image ground refuses text", () => kaya.column({ groundImage: "cover.jpg" as unknown as Uint8Array }), /image ground takes/],
+      ["selected refuses a non-boolean", () => kaya.row({ selected: "yes" as unknown as boolean, onActivate: () => {} }), /selected takes/],
+      ["a tint name outside the vocabulary is refused", () => kaya.label("x", { tint: "purple" as K.TintName }), /a tint must be one of/],
+      ["a tint number outside the vocabulary is refused", () => kaya.label("x", { tint: 9 as K.TintValue }), /is not a a tint|vocabulary/],
+      ["a shape outside the vocabulary is refused", () => kaya.image(art, { shape: "oval" as K.ShapeName }), /shape must be one of/],
+    ];
+    for (const [name, fn, pattern] of refusals) check(name, throws(() => app.build(fn), pattern));
+    const SkRow = kaya.record({ title: String, tint: kaya.Tint, on: Boolean, art: Uint8Array, colour: kaya.Color }, "SkRow");
+    check("a label's tint refuses a String field", throws(() => app.window({}, () => {
+      const bad = kaya.collection(SkRow);
+      kaya.column(() => {
+        for (const r of bad) kaya.label({ bind: r.title, tint: r.title });
+      });
+    }), /binds a kaya.Tint field/));
+    check("a Tint field refuses a value outside the vocabulary", throws(() => app.build(() => {
+      const bad = kaya.collection(SkRow);
+      bad.insert("x", SkRow({ title: "x", tint: 9 as K.TintValue, on: false, art, colour: colour! }));
+    }), /is a kaya.Tint field/));
+    const from = shipped.length;
+    let line!: K.Widget;
+    let root!: K.Widget;
+    app.window({}, () => {
+      const rows = kaya.collection(SkRow);
+      kaya.column(() => {
+        for (const r of rows) {
+          kaya.row({ selected: r.on, onActivate: () => {}, groundGradient: r.colour }, (w) => {
+            line = w;
+            kaya.label({ bind: r.title, tint: r.tint });
+            kaya.image(r.art, { shape: "circle" });
+          });
+        }
+      });
+      rows.insert("r1", SkRow({ title: "a", tint: kaya.Tint.ACCENT, on: true, art, colour: colour! }));
+    });
+    check("a stamped row sends activatable, its selected field and its gradient's colour field",
+      sent(from, wire.tx_set_activatable(line.id, true)) && sent(from, wire.tx_bind_selected_element(line.id, 0, 2))
+        && sent(from, wire.tx_set_ground(line.id, wire.GROUND_GRADIENT)) && sent(from, wire.tx_bind_color_element(line.id, 0, 4)));
+    const dockFrom = shipped.length;
+    app.dock(40, () => {
+      kaya.column((w) => {
+        root = w;
+        kaya.label("now playing");
+      });
+    });
+    check("the dock attaches to the primary window and mounts its root",
+      sent(dockFrom, wire.tx_attach_dock(0, 40)) && sent(dockFrom, wire.tx_mount(40, root.id)));
+  }
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

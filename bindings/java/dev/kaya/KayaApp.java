@@ -113,11 +113,36 @@ public final class KayaApp {
     public enum Tint {
         ACCENT(KayaWire.TINT_ACCENT), SUCCESS(KayaWire.TINT_SUCCESS),
         WARNING(KayaWire.TINT_WARNING), CRITICAL(KayaWire.TINT_CRITICAL),
-        NEUTRAL(KayaWire.TINT_NEUTRAL);
+        NEUTRAL(KayaWire.TINT_NEUTRAL),
+        /** A label's untinted text (docs/styling-pass-plan.md Y7). */
+        NONE(KayaWire.TINT_NONE),
+        /** The platform's panel over media (docs/styling-pass-plan.md Y3). */
+        OVERLAY(KayaWire.TINT_OVERLAY);
 
         final long wire;
 
         Tint(long wire) {
+            this.wire = wire;
+        }
+
+        static Tint ofWire(long wire) {
+            for (Tint t : values()) {
+                if (t.wire == wire) {
+                    return t;
+                }
+            }
+            throw new IllegalArgumentException("kaya: " + wire + " is not a tint");
+        }
+    }
+
+    /** An image's clip (docs/styling-pass-plan.md Y6): ROUNDED is the
+     * platform's own medium corner, CIRCLE the inscribed circle, covering. */
+    public enum Shape {
+        RECT(KayaWire.SHAPE_RECT), ROUNDED(KayaWire.SHAPE_ROUNDED), CIRCLE(KayaWire.SHAPE_CIRCLE);
+
+        final long wire;
+
+        Shape(long wire) {
             this.wire = wire;
         }
     }
@@ -286,6 +311,8 @@ public final class KayaApp {
     // app (DESIGN.md, Binding conventions).
     private long signals, widgets, collections, menuItems;
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
+    private final Map<Long, Consumer<Tx>> widgetActivates = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, List<Object>>> nodeActivates = new HashMap<>();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     private final Map<Long, BiConsumer<Tx, Integer>> sortHandlers = new HashMap<>();
@@ -2534,6 +2561,15 @@ public final class KayaApp {
                 codecs.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
+    /** The dominant colour of a PNG or JPEG, the one quantizer every
+     * binding reaches (docs/styling-pass-plan.md Y2), or empty for bytes
+     * that do not decode: a gradient ground's usual colour. */
+    public static java.util.Optional<Color> imageDominant(byte[] bytes) {
+        int rgb = KayaRing.imageDominant(bytes);
+        return rgb < 0 ? java.util.Optional.empty()
+                : java.util.Optional.of(Color.rgb(rgb >>> 16 & 0xFF, rgb >>> 8 & 0xFF, rgb & 0xFF));
+    }
+
     /** Which way the layout runs, decided by the locale's script. */
     public enum Direction {
         LTR, RTL
@@ -3478,6 +3514,23 @@ public final class KayaApp {
         public WindowRef onCloseRequested(Consumer<Tx> handler) {
             app.closeRequested.put(id, handler);
             return this;
+        }
+
+        /** THIS window's DOCK, the surface under every pane and above a
+         * phone's tab bar (docs/styling-pass-plan.md Y8): {@code dock} is
+         * a fresh surface id and {@code body} builds the root it shows,
+         * whose value comes back out. One per window. */
+        public <R> R dock(long dock, java.util.function.Supplier<Built<R>> body) {
+            tx.emit(KayaWire.txAttachDock(id, dock));
+            Built<R> root = body.get();
+            tx.mountIn(dock, root.id());
+            return root.value();
+        }
+
+        /** The dock whose root is a column holding {@code body}'s widgets. */
+        public void dock(long dock, java.util.function.Consumer<Widget> body) {
+            tx.emit(KayaWire.txAttachDock(id, dock));
+            tx.mountIn(dock, tx.column(body));
         }
 
         /** Binds the closed handler to THIS window: fires when the
@@ -4637,6 +4690,72 @@ public final class KayaApp {
                     + " — use Tx.setA11yId inside a live transaction");
             }
             tx.setA11yId(this, id);
+            return this;
+        }
+
+        private Tx building(String what) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: " + what + " on a widget outside its build transaction"
+                    + " — use Tx.set" + Character.toUpperCase(what.charAt(0)) + what.substring(1)
+                    + " inside a live transaction");
+            }
+            return tx;
+        }
+
+        /** This container's gradient ground (Tx#setGroundGradient), chained. */
+        public Widget groundGradient(Color color) {
+            building("groundGradient").setGroundGradient(this, color);
+            return this;
+        }
+
+        public Widget groundGradient(Signal<Color> s) {
+            building("groundGradient").setGroundGradient(this, s);
+            return this;
+        }
+
+        /** This container's image ground (Tx#setGroundImage), chained. */
+        public Widget groundImage(byte[] bytes) {
+            building("groundImage").setGroundImage(this, bytes);
+            return this;
+        }
+
+        public Widget groundImage(Signal<byte[]> s) {
+            building("groundImage").setGroundImage(this, s);
+            return this;
+        }
+
+        /** This image's clip (Tx#setShape), chained. */
+        public Widget shape(Shape shape) {
+            building("shape").setShape(this, shape);
+            return this;
+        }
+
+        /** This label's standalone tint (Tx#setTint), chained. */
+        public Widget tint(Tint tint) {
+            building("tint").setTint(this, tint);
+            return this;
+        }
+
+        public Widget tint(Signal<Tint> s) {
+            building("tint").setTint(this, s);
+            return this;
+        }
+
+        /** This activatable container's selected surface (Tx#setSelected), chained. */
+        public Widget selected(boolean on) {
+            building("selected").setSelected(this, on);
+            return this;
+        }
+
+        public Widget selected(Signal<Boolean> s) {
+            building("selected").setSelected(this, s);
+            return this;
+        }
+
+        /** This row or column takes a click as a whole (Tx#onActivate), chained. */
+        public Widget onActivate(Consumer<Tx> handler) {
+            building("onActivate").onActivate(this, handler);
             return this;
         }
 
@@ -6010,6 +6129,68 @@ public final class KayaApp {
             t.setFilled(n, tint);
         }
 
+        /** This row's copy of that container's gradient ground (Tpl.setGroundGradient). */
+        public void setGroundGradient(Node n, Color color) {
+            t.setGroundGradient(n, color);
+        }
+
+        public void setGroundGradient(Node n, Signal<Color> s) {
+            t.setGroundGradient(n, s);
+        }
+
+        public void setGroundGradient(Node n, KayaRecords.Field<Color> f) {
+            t.setGroundGradient(n, f);
+        }
+
+        /** This row's copy of that container's image ground (Tpl.setGroundImage). */
+        public void setGroundImage(Node n, byte[] bytes) {
+            t.setGroundImage(n, bytes);
+        }
+
+        public void setGroundImage(Node n, Signal<byte[]> s) {
+            t.setGroundImage(n, s);
+        }
+
+        public void setGroundImage(Node n, KayaRecords.Field<byte[]> f) {
+            t.setGroundImage(n, f);
+        }
+
+        /** This row's copy of that image's clip (Tpl.setShape). */
+        public void setShape(Node n, Shape shape) {
+            t.setShape(n, shape);
+        }
+
+        /** This row's copy of that label's tint (Tpl.setTint). */
+        public void setTint(Node n, Tint tint) {
+            t.setTint(n, tint);
+        }
+
+        public void setTint(Node n, Signal<Tint> s) {
+            t.setTint(n, s);
+        }
+
+        public void setTint(Node n, KayaRecords.Field<Tint> f) {
+            t.setTint(n, f);
+        }
+
+        /** This row's copy of that container's selected surface (Tpl.setSelected). */
+        public void setSelected(Node n, boolean on) {
+            t.setSelected(n, on);
+        }
+
+        public void setSelected(Node n, Signal<Boolean> s) {
+            t.setSelected(n, s);
+        }
+
+        public void setSelected(Node n, KayaRecords.Field<Boolean> f) {
+            t.setSelected(n, f);
+        }
+
+        /** This row's copy of that container takes a click (Tpl.onActivate). */
+        public void onActivate(Node n, BiConsumer<Tx, List<Object>> handler) {
+            t.onActivate(n, handler);
+        }
+
         /** This row's copy of that image's bound ({@link Tpl#setMaxWidth}). */
         public void setMaxWidth(Node n, double points) {
             t.setMaxWidth(n, points);
@@ -6945,6 +7126,66 @@ public final class KayaApp {
          */
         public void setFilled(Widget w, Tint tint) {
             emit(KayaWire.txSetFilled(w.id, tint.wire));
+        }
+
+        /** A row or column's ground fading from {@code color}, clamped by
+         * the core for the appearance's text, into the platform's window
+         * ground (docs/styling-pass-plan.md Y2); {@link KayaApp#imageDominant}
+         * is the usual colour. */
+        public void setGroundGradient(Widget w, Color color) {
+            emit(KayaWire.txSetGround(w.id, KayaWire.GROUND_GRADIENT));
+            emit(KayaWire.txSetColor(w.id, color.r(), color.g(), color.b(), color.a()));
+        }
+
+        public void setGroundGradient(Widget w, Signal<Color> s) {
+            emit(KayaWire.txSetGround(w.id, KayaWire.GROUND_GRADIENT));
+            emit(KayaWire.txBindColor(w.id, s.id));
+        }
+
+        /** A row or column covered by a picture (docs/styling-pass-plan.md
+         * Y3); text over it sits inside a container filled with
+         * {@link Tint#OVERLAY}. */
+        public void setGroundImage(Widget w, byte[] bytes) {
+            emit(KayaWire.txSetGround(w.id, KayaWire.GROUND_IMAGE));
+            setSource(w, bytes);
+        }
+
+        public void setGroundImage(Widget w, Signal<byte[]> s) {
+            emit(KayaWire.txSetGround(w.id, KayaWire.GROUND_IMAGE));
+            bindSource(w, s);
+        }
+
+        /** An image's clip (docs/styling-pass-plan.md Y6). */
+        public void setShape(Widget image, Shape shape) {
+            emit(KayaWire.txSetShape(image.id, shape.wire));
+        }
+
+        /** A label in a tint's standalone colour (docs/styling-pass-plan.md Y7). */
+        public void setTint(Widget label, Tint tint) {
+            emit(KayaWire.txSetTint(label.id, tint.wire));
+        }
+
+        public void setTint(Widget label, Signal<Tint> s) {
+            emit(KayaWire.txBindTint(label.id, s.id));
+        }
+
+        /** An activatable container's selected surface: the app's state,
+         * written where it wants it (docs/styling-pass-plan.md Y4). */
+        public void setSelected(Widget w, boolean on) {
+            emit(KayaWire.txSetSelected(w.id, on));
+        }
+
+        public void setSelected(Widget w, Signal<Boolean> s) {
+            emit(KayaWire.txBindSelected(w.id, s.id));
+        }
+
+        /** This row or column takes a click as a whole
+         * (docs/styling-pass-plan.md Y4): a button to assistive technology,
+         * the platform's press, hover and selected surface. Declaring it
+         * and registering the handler are one act. */
+        public void onActivate(Widget w, Consumer<Tx> handler) {
+            emit(KayaWire.txSetActivatable(w.id, true));
+            widgetActivates.put(w.id, handler);
         }
 
         /** An image's bound in points (docs/photo-attach-plan.md §2). */
@@ -9277,6 +9518,79 @@ public final class KayaApp {
          * bubbles are stamped rows. */
         public void setFilled(Node n, Tint tint) {
             tx.emit(KayaWire.txSetFilled(n.id, tint.wire));
+        }
+
+        /** A stamped container's gradient ground, the blueprint twin of
+         * {@link Tx#setGroundGradient}; a row field gives each copy its
+         * album's colour. */
+        public void setGroundGradient(Node n, Color color) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_GRADIENT));
+            tx.emit(KayaWire.txSetColor(n.id, color.r(), color.g(), color.b(), color.a()));
+        }
+
+        public void setGroundGradient(Node n, Signal<Color> s) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_GRADIENT));
+            tx.emit(KayaWire.txBindColor(n.id, s.id));
+        }
+
+        public void setGroundGradient(Node n, KayaRecords.Field<Color> f) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_GRADIENT));
+            bindColorField(n, 0, f);
+        }
+
+        /** A stamped container's image ground ({@link Tx#setGroundImage}). */
+        public void setGroundImage(Node n, byte[] bytes) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_IMAGE));
+            tx.emit(KayaWire.txSetSource(n.id, KayaRing.blobRegister(bytes)));
+        }
+
+        public void setGroundImage(Node n, Signal<byte[]> s) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_IMAGE));
+            tx.emit(KayaWire.txBindSource(n.id, s.id));
+        }
+
+        public void setGroundImage(Node n, KayaRecords.Field<byte[]> f) {
+            tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_IMAGE));
+            tx.emit(KayaWire.txBindSourceElement(n.id, 0, f.index()));
+        }
+
+        /** A stamped image's clip ({@link Tx#setShape}). */
+        public void setShape(Node n, Shape shape) {
+            tx.emit(KayaWire.txSetShape(n.id, shape.wire));
+        }
+
+        /** A stamped label's tint ({@link Tx#setTint}): one for all, a
+         * signal, or the row's own Tint field. */
+        public void setTint(Node n, Tint tint) {
+            tx.emit(KayaWire.txSetTint(n.id, tint.wire));
+        }
+
+        public void setTint(Node n, Signal<Tint> s) {
+            tx.emit(KayaWire.txBindTint(n.id, s.id));
+        }
+
+        public void setTint(Node n, KayaRecords.Field<Tint> f) {
+            tx.emit(KayaWire.txBindTintElement(n.id, 0, f.index()));
+        }
+
+        /** A stamped container's selected surface ({@link Tx#setSelected}). */
+        public void setSelected(Node n, boolean on) {
+            tx.emit(KayaWire.txSetSelected(n.id, on));
+        }
+
+        public void setSelected(Node n, Signal<Boolean> s) {
+            tx.emit(KayaWire.txBindSelected(n.id, s.id));
+        }
+
+        public void setSelected(Node n, KayaRecords.Field<Boolean> f) {
+            tx.emit(KayaWire.txBindSelectedElement(n.id, 0, f.index()));
+        }
+
+        /** Every stamped copy of this container takes a click as a whole,
+         * the handler handed the copy's keys ({@link Tx#onActivate}). */
+        public void onActivate(Node n, BiConsumer<Tx, List<Object>> handler) {
+            tx.emit(KayaWire.txSetActivatable(n.id, true));
+            nodeActivates.put(n.id, handler);
         }
 
         /** A stamped image's bound, the blueprint twin of
@@ -12179,6 +12493,18 @@ public final class KayaApp {
                     int column = occ.payload instanceof Integer i ? i : 0;
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, column);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_ACTIVATED && occ.keys.isEmpty()) {
+                Consumer<Tx> handler = widgetActivates.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_ACTIVATED) {
+                BiConsumer<Tx, List<Object>> handler = nodeActivates.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_BUTTON_CLICKED && occ.keys.isEmpty()) {

@@ -48,6 +48,8 @@ SCENES = [
     "capture",
     # Network images (docs/network-images-plan.md §5).
     "netimage", "netimage_http",
+    # The skin (docs/styling-pass-plan.md §5).
+    "grounds", "shapes", "cards", "tracks", "dock",
 ]
 
 # Scenes this lane declares off rather than wires (tools/check-steps.py
@@ -85,7 +87,11 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # input queue, so a neighbour taking the foreground would take
              # the key.
              "fullscreen_rust", "fullscreen_python", "fullscreen_js",
-             "fullscreen_go", "fullscreen_csharp", "fullscreen_java"}
+             "fullscreen_go", "fullscreen_csharp", "fullscreen_java",
+             # HOVER moves the VM's real pointer (docs/styling-pass-plan.md
+             # §5): no in-process route reaches a ListViewItem's PointerOver
+             # state, so a neighbour under the pointer would take it.
+             "cards_rust", "cards_python", "cards_js", "cards_go", "cards_csharp", "cards_java"}
 
 # The legs that run under the user's 24-hour clock: HKCU\Control Panel\
 # International's iTime and sShortTime, written by deploy-win before the leg
@@ -199,7 +205,7 @@ MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 # slot 0 (deploy-win's `_release_slot` sorts the free list), so the rule is
 # simply: a pointer leg is never pooled. tools/deploy-win.py refuses the
 # roster and tools/check-steps.py holds it.
-POINTER_VERBS = ("drag", "drag_file")
+POINTER_VERBS = ("drag", "drag_file", "hover")
 
 
 def pointer_scenes(scenes_dir):
@@ -333,6 +339,13 @@ ORDER = [
      # workers park until a click, and scroll_to_row drives the table.
      "netimage_rust", "netimage_python", "netimage_js", "netimage_go", "netimage_csharp",
      "netimage_java",
+     # The skin (docs/styling-pass-plan.md §5): grounds, shapes, the track
+     # table and the dock read pixels and the tree, no real input; the cards'
+     # hover moves the pointer, so they run alone below.
+     "grounds_rust", "grounds_python", "grounds_js", "grounds_go", "grounds_csharp", "grounds_java",
+     "shapes_rust", "shapes_python", "shapes_js", "shapes_go", "shapes_csharp", "shapes_java",
+     "tracks_rust", "tracks_python", "tracks_js", "tracks_go", "tracks_csharp", "tracks_java",
+     "dock_rust", "dock_python", "dock_js", "dock_go", "dock_csharp", "dock_java",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -523,6 +536,13 @@ ORDER = [
     # generalized DoDragDrop for a UI element and OLE's modal loop reads
     # real mouse messages), so a pooled neighbour would be dragged over
     # mid-scene. check-steps' menu_serial pins the barrier.
+    # THE CARDS ALONE: `hover` moves the VM's real pointer onto a card.
+    ["cards_rust"],
+    ["cards_python"],
+    ["cards_js"],
+    ["cards_go"],
+    ["cards_csharp"],
+    ["cards_java"],
     [
      "dnd_rust",
     ],

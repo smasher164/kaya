@@ -97,6 +97,10 @@ val open_asset : string -> asset
 (* This asset's bytes, copied out of core memory. *)
 val asset_bytes : asset -> bytes
 
+(* An image's dominant colour as 0xRRGGBB, or [None] for bytes that do not
+   decode (docs/styling-pass-plan.md Y2). *)
+val image_dominant : bytes -> int option
+
 (* Register this asset's bytes into the pending table and answer with
    the handle the record carries. *)
 val asset_blob : asset -> int64

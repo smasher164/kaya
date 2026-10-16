@@ -677,6 +677,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit as *mut _,
             },
             NativeMethod {
+                name: "emitActivated".into(),
+                sig: "([B)V".into(),
+                fn_ptr: present_emit_activated as *mut _,
+            },
+            NativeMethod {
                 name: "stalledMs".into(),
                 sig: "()J".into(),
                 fn_ptr: present_stalled_ms as *mut _,
@@ -1343,6 +1348,14 @@ extern "system" fn present_emit(env: JNIEnv, _class: JClass, tag: JByteArray) {
         .convert_byte_array(&tag)
         .expect("kaya: reading the click tag failed");
     unsafe { crate::capi::kaya_emit_clicked(bytes.as_ptr(), bytes.len()) };
+}
+
+/// KayaPresent.emitActivated: an activatable container's tag, verbatim.
+extern "system" fn present_emit_activated(env: JNIEnv, _class: JClass, tag: JByteArray) {
+    let bytes = env
+        .convert_byte_array(&tag)
+        .expect("kaya: reading the activation tag failed");
+    unsafe { crate::capi::kaya_emit_activated(bytes.as_ptr(), bytes.len()) };
 }
 
 /// KayaPresent.emitTextChanged: the entry edit plus the undo ledger's

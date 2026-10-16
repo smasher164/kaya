@@ -159,6 +159,17 @@ func (r taskRow) SetFit(n kaya.Node, fit kaya.Fit)                     { r.t.Set
 func (r taskRow) SetPhase(n kaya.Node, phase kaya.ImagePhase)          { r.t.SetPhase(n, phase) }
 func (r taskRow) BindPhase(n kaya.Node, f kaya.Field[kaya.ImagePhase]) { r.t.BindPhase(n, f) }
 func (r taskRow) SetAspect(n kaya.Node, width, height int)             { r.t.SetAspect(n, width, height) }
+func (r taskRow) SetShape(n kaya.Node, shape kaya.Shape)               { r.t.SetShape(n, shape) }
+func (r taskRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.SetTint(n, tint) }
+func (r taskRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
+func (r taskRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
+func (r taskRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r taskRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
+func (r taskRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
+	r.t.BindGroundGradient(n, f)
+}
+func (r taskRow) SetGroundImage(n kaya.Node, source []byte)         { r.t.SetGroundImage(n, source) }
+func (r taskRow) BindGroundImage(n kaya.Node, f kaya.Field[[]byte]) { r.t.BindGroundImage(n, f) }
 
 func (r taskRow) SetMinGap(n kaya.Node, gap float64)          { r.t.SetMinGap(n, gap) }
 func (r taskRow) SetLowLabel(n kaya.Node, label string)       { r.t.SetLowLabel(n, label) }

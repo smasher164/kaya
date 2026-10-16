@@ -2250,7 +2250,7 @@ mod flex {
             let mut children = Vec::new();
             let mut child = widget.first_child();
             while let Some(c) = child {
-                if c.is_visible() {
+                if c.is_visible() && !super::is_ground_picture(&c) {
                     let weight = super::grow_weight(&c);
                     let (minimum, natural) = if weight > 0.0 {
                         // A grower's own natural size is deliberately not
@@ -2367,7 +2367,7 @@ mod flex {
             let mut main_children = Vec::new();
             let mut child = widget.first_child();
             while let Some(c) = child {
-                if c.is_visible() {
+                if c.is_visible() && !super::is_ground_picture(&c) {
                     let (cmin, cnat, _, _) = c.measure(orientation, for_size);
                     if self.is_main(orientation) {
                         let weight = super::grow_weight(&c);
@@ -2388,7 +2388,7 @@ mod flex {
             if vertical && self.is_main(orientation) {
                 let mut child = widget.first_child();
                 while let Some(c) = child {
-                    if c.is_visible() {
+                    if c.is_visible() && !super::is_ground_picture(&c) {
                         let (_, _, bmin, bnat) = c.measure(orientation, for_size);
                         return (minimum, natural, bmin, bnat);
                     }
@@ -2460,6 +2460,7 @@ mod flex {
                 }
                 offset += extent + self.spacing.get();
             }
+            super::allocate_ground_picture(widget, width, height);
         }
     }
 
@@ -2495,7 +2496,7 @@ mod flex {
         let mut child = widget.first_child();
         while let Some(c) = child {
             child = c.next_sibling();
-            if !c.is_visible() {
+            if !c.is_visible() || super::is_ground_picture(&c) {
                 continue;
             }
             let (_, w, _, _) = c.measure(gtk4::Orientation::Horizontal, -1);
@@ -2536,7 +2537,7 @@ mod flex {
                 let mut child = widget.first_child();
                 while let Some(c) = child {
                     child = c.next_sibling();
-                    if !c.is_visible() {
+                    if !c.is_visible() || super::is_ground_picture(&c) {
                         continue;
                     }
                     let (cmin, cnat, _, _) = c.measure(orientation, -1);
@@ -2569,6 +2570,7 @@ mod flex {
                 }
                 y += line_h + spacing;
             }
+            super::allocate_ground_picture(widget, width, _height);
         }
     }
 
@@ -4433,9 +4435,45 @@ fn children_of(widget: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
     let mut child = widget.as_ref().first_child();
     while let Some(w) = child {
         child = w.next_sibling();
-        out.push(w);
+        if !is_ground_picture(&w) {
+            out.push(w);
+        }
     }
     out
+}
+
+/// AN IMAGE GROUND IS A PICTURE BEHIND THE CHILDREN (docs/styling-pass-plan.md
+/// Y3): the container's first child, decoded off the main thread through the
+/// image door and its cache like any image (image_source), and kept out of
+/// every layout and every read of the container's children.
+const GROUND_PICTURE_KEY: &str = "kaya-ground-picture";
+
+fn is_ground_picture(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to `true`.
+    unsafe { widget.data::<bool>(GROUND_PICTURE_KEY).is_some() }
+}
+
+/// The ground picture covers the container's border box, under its inset's
+/// transparent border, which the layout's content box leaves out.
+fn allocate_ground_picture(container: &gtk4::Widget, width: i32, height: i32) {
+    let mut child = container.first_child();
+    while let Some(c) = child {
+        if is_ground_picture(&c) {
+            #[allow(deprecated)]
+            let (border, padding) = {
+                let style = container.style_context();
+                (style.border(), style.padding())
+            };
+            let left = i32::from(border.left()) + i32::from(padding.left());
+            let top = i32::from(border.top()) + i32::from(padding.top());
+            let right = i32::from(border.right()) + i32::from(padding.right());
+            let bottom = i32::from(border.bottom()) + i32::from(padding.bottom());
+            let _ = c.measure(gtk4::Orientation::Horizontal, -1);
+            let transform = gtk4::gsk::Transform::new().translate(&gtk4::graphene::Point::new(-left as f32, -top as f32));
+            c.allocate(width + left + right, height + top + bottom, -1, Some(transform));
+        }
+        child = c.next_sibling();
+    }
 }
 
 /// The header row kaya composed on this For container, or None when no
@@ -6048,6 +6086,8 @@ struct CoreState {
     /// Separate from `inset_css`, which the window arm rewrites whole.
     container_inset_css: gtk4::CssProvider,
     container_insets: BTreeSet<i64>,
+    /// docs/styling-pass-plan.md §3.
+    skin: skin::Skin,
     /// THE BRAND ACCENT (docs/styling-plan.md D1): its own provider —
     /// separate from `inset_css`, which the inset arm rewrites whole — and
     /// the derived values, since the stylesheet holds ONE appearance's
@@ -6210,6 +6250,7 @@ fn drain_transactions() {
             // report emits no op.
             presentation_report(core);
             refresh_bleeds(core);
+            skin_refresh(core);
         });
     });
 }
@@ -8169,6 +8210,233 @@ const TINT_CSS: &str = "\
 .kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
 ";
 
+/// THE SKIN (docs/styling-pass-plan.md §3's GTK row): grounds, image shapes,
+/// activatable containers, label tints and the dock, every colour libadwaita's
+/// own. The hover, press and selected layers are libadwaita 1.9's own rules
+/// for `.card.activatable` and `row.activatable` / `row:selected`, which a
+/// GtkBox matches only through these classes (docs/styling-pass-plan.md §7).
+const SKIN_CSS: &str = "\
+.kaya-shape-rounded { border-radius: 12px; }
+.kaya-shape-circle { border-radius: 9999px; }
+.kaya-activatable:not(.card):hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
+.kaya-activatable:not(.card):active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+.kaya-activatable:not(.card):selected { background-color: color-mix(in srgb, var(--accent-bg-color) 25%, transparent); }
+.kaya-activatable.card:selected { background-image: image(color-mix(in srgb, var(--accent-bg-color) 25%, transparent)); }
+.kaya-filled label.accent, .kaya-filled label.success, .kaya-filled label.warning, .kaya-filled label.error { color: inherit; }
+";
+
+const SHAPE_CLASSES: [&str; 2] = ["kaya-shape-rounded", "kaya-shape-circle"];
+const LABEL_TINT_CLASSES: [&str; 4] = ["accent", "success", "warning", "error"];
+const ACTIVATABLE_CLASS: &str = "kaya-activatable";
+const GROUND_CLASS: &str = "kaya-ground-";
+
+mod skin {
+    use gtk4::prelude::*;
+    use std::cell::RefCell;
+    use std::collections::{BTreeMap, HashMap};
+    use std::rc::Rc;
+
+    /// What one container's ground is, as the core lowered it: the kind, the
+    /// two clamped top stops packed light << 24 | dark, and the picture.
+    #[derive(Default, Clone)]
+    pub struct Ground {
+        pub kind: i64,
+        pub tops: Option<i64>,
+        pub image: Option<std::sync::Arc<[u8]>>,
+    }
+
+    pub struct Skin {
+        pub grounds: Rc<RefCell<BTreeMap<u64, Ground>>>,
+        pub css: gtk4::CssProvider,
+        /// An activatable container's own activation, the gesture's and the
+        /// harness click's one door.
+        pub activations: HashMap<u64, Rc<dyn Fn()>>,
+        /// dock surface id -> the window it is attached to.
+        pub docks: HashMap<u64, u64>,
+        /// dock surface id -> the root mounted into it.
+        pub dock_roots: HashMap<u64, gtk4::Widget>,
+        /// A ground changed this batch, so the stylesheet is rewritten.
+        pub dirty: bool,
+        /// container id -> its image ground's picture (super::GROUND_PICTURE_KEY).
+        pub ground_pictures: HashMap<u64, gtk4::Picture>,
+    }
+
+    /// The ground stylesheet for every live ground, in the appearance the
+    /// session is in now: the gradient's top stop is the core's clamped one,
+    /// its bottom stop libadwaita's own window ground.
+    pub fn ground_css(grounds: &BTreeMap<u64, Ground>, dark: bool) -> String {
+        let mut out = String::new();
+        for (id, g) in grounds {
+            match g.kind {
+                k if k == crate::wire::GROUND_GRADIENT => {
+                    let Some(tops) = g.tops else { continue };
+                    let stop = if dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };
+                    out.push_str(&format!(
+                        ".{}{id} {{ background-image: linear-gradient(to bottom, #{stop:06x}, var(--window-bg-color)); \
+                         background-origin: border-box; }}\n",
+                        super::GROUND_CLASS
+                    ));
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// The colour the picture has at `point` of a `box` it covers, centred
+    /// and cropped (`background-size: cover`), straight RGB 0..1.
+    pub fn picture_at(texture: &gtk4::gdk::Texture, point: (f64, f64), size: (f64, f64)) -> Option<[f64; 3]> {
+        let (iw, ih) = (f64::from(texture.width()), f64::from(texture.height()));
+        if iw < 1.0 || ih < 1.0 || size.0 < 1.0 || size.1 < 1.0 {
+            return None;
+        }
+        let scale = (size.0 / iw).max(size.1 / ih);
+        let (ox, oy) = ((size.0 - iw * scale) / 2.0, (size.1 - ih * scale) / 2.0);
+        let px = (((point.0 - ox) / scale) as i64).clamp(0, iw as i64 - 1) as usize;
+        let py = (((point.1 - oy) / scale) as i64).clamp(0, ih as i64 - 1) as usize;
+        let mut downloader = gtk4::gdk::TextureDownloader::new(texture);
+        downloader.set_format(gtk4::gdk::MemoryFormat::R8g8b8a8);
+        let (bytes, stride) = downloader.download_bytes();
+        let at = py * stride + px * 4;
+        let b = bytes.as_ref();
+        Some([b[at], b[at + 1], b[at + 2]].map(|c| f64::from(c) / 255.0))
+    }
+
+    /// One capture of the window as the user sees it, read by point in the
+    /// window content's coordinates, composited over the resolved ground.
+    pub struct Shot {
+        pub content: gtk4::Widget,
+        rgba: Vec<u8>,
+        stride: usize,
+        width: i32,
+        height: i32,
+        sx: f64,
+        sy: f64,
+        pub ground: [f64; 3],
+        pub text: [f64; 3],
+        pub dark: bool,
+        pub scale: f64,
+    }
+
+    impl Shot {
+        pub fn at(&self, x: f64, y: f64) -> Option<[f64; 3]> {
+            let (px, py) = ((x * self.sx).floor() as i64, (y * self.sy).floor() as i64);
+            if px < 0 || py < 0 || px >= i64::from(self.width) || py >= i64::from(self.height) {
+                return None;
+            }
+            let at = py as usize * self.stride + px as usize * 4;
+            let p = &self.rgba[at..at + 4];
+            let alpha = f64::from(p[3]) / 255.0;
+            Some([0, 1, 2].map(|i| (f64::from(p[i]) / 255.0 + self.ground[i] * (1.0 - alpha)).clamp(0.0, 1.0)))
+        }
+
+        pub fn frame(&self, widget: &gtk4::Widget) -> Option<gtk4::graphene::Rect> {
+            widget.compute_bounds(&self.content)
+        }
+    }
+
+    /// The named colour `name` resolved in `widget`'s style context now.
+    pub fn colour(widget: &gtk4::Widget, name: &str) -> Option<[f64; 4]> {
+        #[allow(deprecated)]
+        gtk4::prelude::StyleContextExt::lookup_color(&widget.style_context(), name)
+            .map(|c| [c.red(), c.green(), c.blue(), c.alpha()].map(f64::from))
+    }
+
+    pub fn over(c: [f64; 4], under: [f64; 3]) -> [f64; 3] {
+        [0, 1, 2].map(|i| c[i] * c[3] + under[i] * (1.0 - c[3]))
+    }
+
+    pub fn shot_of(widget: &gtk4::Widget) -> Result<Shot, String> {
+        let window = widget
+            .root()
+            .and_then(|r| r.downcast::<gtk4::Window>().ok())
+            .ok_or("<the widget is in no window>")?;
+        let content = window.child().ok_or("<the window has no child>")?;
+        while gtk4::glib::MainContext::default().iteration(false) {}
+        let native = content.native().ok_or("<no native>")?;
+        let renderer = native.renderer().ok_or("<this toplevel has no GSK renderer>")?;
+        let (w, h) = (f64::from(content.width()), f64::from(content.height()));
+        if w < 1.0 || h < 1.0 {
+            return Err(format!("<the window's content laid out at {w}x{h}>"));
+        }
+        let paintable = gtk4::WidgetPaintable::new(Some(&content));
+        let snapshot = gtk4::Snapshot::new();
+        paintable.snapshot(&snapshot, w, h);
+        let node = snapshot.to_node().ok_or("<the window snapshotted to nothing>")?;
+        let whole = gtk4::graphene::Rect::new(0.0, 0.0, w as f32, h as f32);
+        let texture = renderer.render_texture(&node, Some(&whole));
+        let (tw, th) = (texture.width(), texture.height());
+        let mut downloader = gtk4::gdk::TextureDownloader::new(&texture);
+        downloader.set_format(gtk4::gdk::MemoryFormat::R8g8b8a8Premultiplied);
+        let (bytes, stride) = downloader.download_bytes();
+        let ground = colour(&content, "window_bg_color").ok_or("<window_bg_color did not resolve>")?;
+        let text = colour(&content, "window_fg_color").ok_or("<window_fg_color did not resolve>")?;
+        let ground = [ground[0], ground[1], ground[2]];
+        Ok(Shot {
+            content,
+            rgba: bytes.to_vec(),
+            stride,
+            width: tw,
+            height: th,
+            sx: f64::from(tw) / w,
+            sy: f64::from(th) / h,
+            ground,
+            text: over(text, ground),
+            dark: adw::StyleManager::default().is_dark(),
+            scale: f64::from(tw) / w,
+        })
+    }
+
+    pub fn gap(a: [f64; 3], b: [f64; 3]) -> f64 {
+        (0..3).map(|i| (a[i] - b[i]).abs()).fold(0.0, f64::max)
+    }
+
+    pub fn luminance(c: [f64; 3]) -> f64 {
+        let l = c.map(|v| if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) });
+        0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+    }
+
+    pub fn contrast(a: [f64; 3], b: [f64; 3]) -> f64 {
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    pub fn hex(c: [f64; 3]) -> String {
+        let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8);
+        format!("{:02X}{:02X}{:02X}", b[0], b[1], b[2])
+    }
+
+    /// Whether a dock's root holds anything but empty containers (the
+    /// depth's collapse rule); the root's own visibility is the answer's.
+    pub fn holds_widget_below(root: &gtk4::Widget) -> bool {
+        let mut child = root.first_child();
+        while let Some(c) = child {
+            if holds_widget(&c) {
+                return true;
+            }
+            child = c.next_sibling();
+        }
+        false
+    }
+
+    pub fn holds_widget(w: &gtk4::Widget) -> bool {
+        if !w.property::<bool>("visible") {
+            return false;
+        }
+        if w.is::<gtk4::Box>() && super::container_vertical(w).is_some() {
+            let mut child = w.first_child();
+            while let Some(c) = child {
+                if holds_widget(&c) {
+                    return true;
+                }
+                child = c.next_sibling();
+            }
+            return false;
+        }
+        true
+    }
+}
+
 /// How close to its end a scroll counts as AT its end for following: one
 /// body line (docs/follow-end-plan.md §1).
 const FOLLOW_SLACK: f64 = 22.0;
@@ -8403,6 +8671,7 @@ mod bounded_paintable {
         /// the box, and the texture placed in it as the video view places one.
         fit: Cell<Option<i64>>,
         rtl: Cell<bool>,
+        shape: Cell<i64>,
     }
 
     #[glib::object_subclass]
@@ -8435,10 +8704,14 @@ mod bounded_paintable {
             if fit.is_some() {
                 let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
                 let (x, y, w, h) = super::image_box_rect(width, height, self.size.get(), self.rtl.get());
+                let clipped = super::push_image_shape(snap, (x, y, w, h), self.shape.get());
                 snap.save();
                 snap.translate(&gtk4::graphene::Point::new(x as f32, y as f32));
                 self.place(snap, &texture, w, h, fit);
                 snap.restore();
+                if clipped {
+                    snap.pop();
+                }
                 return;
             }
             if !self.cover.get() {
@@ -8494,10 +8767,11 @@ mod bounded_paintable {
             self.imp().cover.set(true);
         }
 
-        pub fn boxed(texture: &gdk::Texture, width: i32, height: i32, fit: i64, rtl: bool) -> Self {
+        pub fn boxed(texture: &gdk::Texture, width: i32, height: i32, fit: i64, rtl: bool, shape: i64) -> Self {
             let paintable = Self::new(texture, width, height);
             paintable.imp().fit.set(Some(fit));
             paintable.imp().rtl.set(rtl);
+            paintable.imp().shape.set(shape);
             paintable
         }
 
@@ -8593,7 +8867,14 @@ fn render_image(picture: &gtk4::Picture) {
     let look = if phase == crate::wire::IMAGE_PHASE_FAILED || (texture.is_none() && undecodable) {
         image_look::Look::Failed
     } else if let Some(texture) = texture {
-        picture.set_paintable(Some(&bounded_paintable::BoundedPaintable::boxed(&texture, bw, bh, fit, rtl)));
+        picture.set_paintable(Some(&bounded_paintable::BoundedPaintable::boxed(
+            &texture,
+            bw,
+            bh,
+            fit,
+            rtl,
+            image_shape(picture),
+        )));
         return;
     } else if phase == crate::wire::IMAGE_PHASE_LOADING || pending {
         image_look::Look::Loading
@@ -8818,10 +9099,14 @@ mod image_look {
             let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
             let Some(widget) = self.widget.upgrade() else { return };
             let (x, y, width, height) = super::image_box_rect(width, height, self.size.get(), self.rtl.get());
+            let clipped = super::push_image_shape(snap, (x, y, width, height), super::image_shape(&widget));
             snap.save();
             snap.translate(&gtk4::graphene::Point::new(x as f32, y as f32));
             self.draw(snap, &widget, width, height);
             snap.restore();
+            if clipped {
+                snap.pop();
+            }
         }
     }
 
@@ -8926,8 +9211,8 @@ fn symbol_button_classes(button: &gtk4::Button) {
 
 const FILLED_CLASS: &str = "kaya-filled";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
-const TINT_CLASSES: [&str; 5] =
-    ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card"];
+const TINT_CLASSES: [&str; 6] =
+    ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card", "osd"];
 
 /// The container's fill: exactly one tint class, the default inset unless the
 /// app set one.
@@ -8937,10 +9222,302 @@ fn set_filled(widget: &gtk4::Widget, tint: i64) {
         widget.remove_css_class(class);
     }
     widget.add_css_class(FILLED_CLASS);
-    widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 5) - 1) as usize]);
+    widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 6) - 1) as usize]);
     if !widget.css_classes().iter().any(|c| c.starts_with(INSET_CLASS)) {
         widget.add_css_class(FILLED_PAD_CLASS);
     }
+}
+
+/// A container's ground (docs/styling-pass-plan.md Y2, Y3): its own class,
+/// whose rule the batch's end writes (`skin_refresh`).
+fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl FnOnce(&mut skin::Ground)) {
+    let mut grounds = core.skin.grounds.borrow_mut();
+    let ground = grounds.entry(id).or_default();
+    change(ground);
+    if let Some(bytes) = ground.image.take() {
+        let picture = core.skin.ground_pictures.entry(id).or_insert_with(|| {
+            let picture = gtk4::Picture::new();
+            // SAFETY: the key is private to this module and only ever set to `true`.
+            unsafe { picture.set_data(GROUND_PICTURE_KEY, true) };
+            picture.set_content_fit(gtk4::ContentFit::Cover);
+            picture.set_can_shrink(true);
+            picture.set_can_target(false);
+            picture.set_accessible_role(gtk4::AccessibleRole::Presentation);
+            picture
+        });
+        if picture.parent().is_none() {
+            if let Some(container) = widget.downcast_ref::<gtk4::Box>() {
+                ensure_flex(widget);
+                container.insert_child_after(picture, None::<&gtk4::Widget>);
+            }
+        }
+        image_source(picture, &bytes);
+    }
+    let class = format!("{GROUND_CLASS}{id}");
+    if ground.kind == crate::wire::GROUND_NONE {
+        widget.remove_css_class(&class);
+    } else {
+        widget.add_css_class(&class);
+    }
+    drop(grounds);
+    core.skin.dirty = true;
+}
+
+/// Y4: the container takes a click as a whole. libadwaita paints the hover
+/// and press (`.card.activatable`, or the row rules SKIN_CSS carries), the
+/// tree says button, and the press, Return and Space all go through one door.
+fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: bool) {
+    if !on {
+        widget.remove_css_class(ACTIVATABLE_CLASS);
+        widget.remove_css_class("activatable");
+        core.skin.activations.remove(&id);
+        return;
+    }
+    let Some(tag) = core.widget_tags.get(&id).cloned() else {
+        panic!("kaya: an activatable container {id} carries no occurrence tag (WidgetKind::carries_tag)")
+    };
+    widget.add_css_class(ACTIVATABLE_CLASS);
+    widget.add_css_class("activatable");
+    widget.set_accessible_role(gtk4::AccessibleRole::Button);
+    widget.set_focusable(true);
+    let sink = core.occurrences.clone();
+    let activate: Rc<dyn Fn()> = Rc::new(move || sink.send_activated_tag(&tag));
+    let press = gtk4::GestureClick::new();
+    press.set_button(gdk::BUTTON_PRIMARY);
+    {
+        let weak = widget.downgrade();
+        press.connect_pressed(move |_, _, _, _| {
+            if let Some(w) = weak.upgrade() {
+                w.set_state_flags(gtk4::StateFlags::ACTIVE, false);
+            }
+        });
+    }
+    {
+        let weak = widget.downgrade();
+        let activate = activate.clone();
+        press.connect_released(move |gesture, _, x, y| {
+            let Some(w) = weak.upgrade() else { return };
+            w.unset_state_flags(gtk4::StateFlags::ACTIVE);
+            if w.contains(x, y) {
+                gesture.set_state(gtk4::EventSequenceState::Claimed);
+                activate();
+            }
+        });
+    }
+    {
+        let weak = widget.downgrade();
+        press.connect_stopped(move |_| {
+            if let Some(w) = weak.upgrade() {
+                w.unset_state_flags(gtk4::StateFlags::ACTIVE);
+            }
+        });
+    }
+    widget.add_controller(press);
+    let keys = gtk4::EventControllerKey::new();
+    {
+        let activate = activate.clone();
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter | gdk::Key::ISO_Enter | gdk::Key::space) {
+                activate();
+                glib::Propagation::Stop
+            } else {
+                glib::Propagation::Proceed
+            }
+        });
+    }
+    widget.add_controller(keys);
+    core.skin.activations.insert(id, activate);
+    core.skin.dirty = true;
+}
+
+/// Y4's selected surface: GTK's own selected state, which the stylesheet
+/// paints and the accessibility tree publishes.
+fn set_selected(widget: &gtk4::Widget, on: bool) {
+    if on {
+        widget.set_state_flags(gtk4::StateFlags::SELECTED, false);
+    } else {
+        widget.unset_state_flags(gtk4::StateFlags::SELECTED);
+    }
+    widget.update_state(&[gtk4::accessible::State::Selected(Some(on))]);
+}
+
+const IMAGE_SHAPE_KEY: &str = "kaya-image-shape";
+
+/// The shape an image carries (docs/styling-pass-plan.md Y6), rect if none.
+fn image_shape(picture: &gtk4::Picture) -> i64 {
+    // SAFETY: the key is private to this module and only ever set to an i64 by set_shape.
+    unsafe { picture.data::<i64>(IMAGE_SHAPE_KEY).map_or(crate::wire::SHAPE_RECT, |p| *p.as_ref()) }
+}
+
+/// A BOXED picture is clipped where it is drawn, inside its paintable: in a
+/// table cell GTK stretches the GtkPicture to the column, so a clip on the
+/// widget would round the cell and not the art (measured, netimage's art
+/// cell 361x40; docs/styling-pass-plan.md §7). The radius is libadwaita's
+/// card corner, the filled container's (TINT_CSS).
+fn push_image_shape(snap: &gtk4::Snapshot, (x, y, w, h): (f64, f64, f64, f64), shape: i64) -> bool {
+    let radius = match shape {
+        crate::wire::SHAPE_ROUNDED => 12.0,
+        crate::wire::SHAPE_CIRCLE => w.min(h) / 2.0,
+        _ => return false,
+    } as f32;
+    let corner = gtk4::graphene::Size::new(radius, radius);
+    snap.push_rounded_clip(&gtk4::gsk::RoundedRect::new(
+        gtk4::graphene::Rect::new(x as f32, y as f32, w as f32, h as f32),
+        corner,
+        corner,
+        corner,
+        corner,
+    ));
+    true
+}
+
+/// Y6: the picture and its loading and failed looks clipped to the
+/// border-radius of their own box, since all three are the GtkPicture's
+/// paintable; an unboxed picture's box is its own.
+fn set_shape(picture: &gtk4::Picture, shape: i64) {
+    // SAFETY: the key is private to this module and only ever set to an i64 here.
+    unsafe { picture.set_data(IMAGE_SHAPE_KEY, shape) };
+    render_image(picture);
+    let widget: &gtk4::Widget = picture.upcast_ref();
+    for class in SHAPE_CLASSES {
+        widget.remove_css_class(class);
+    }
+    match shape {
+        crate::wire::SHAPE_ROUNDED => widget.add_css_class(SHAPE_CLASSES[0]),
+        crate::wire::SHAPE_CIRCLE => widget.add_css_class(SHAPE_CLASSES[1]),
+        _ => {}
+    }
+    widget.set_overflow(if shape == crate::wire::SHAPE_RECT { gtk4::Overflow::Visible } else { gtk4::Overflow::Hidden });
+}
+
+/// Y7: libadwaita's standalone colours, as its own style classes.
+fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
+    for class in LABEL_TINT_CLASSES {
+        widget.remove_css_class(class);
+    }
+    let class = match tint as u32 {
+        crate::wire::TINT_ACCENT => LABEL_TINT_CLASSES[0],
+        crate::wire::TINT_SUCCESS => LABEL_TINT_CLASSES[1],
+        crate::wire::TINT_WARNING => LABEL_TINT_CLASSES[2],
+        crate::wire::TINT_CRITICAL => LABEL_TINT_CLASSES[3],
+        _ => return,
+    };
+    widget.add_css_class(class);
+}
+
+/// After every batch: the ground stylesheet, an activatable container's
+/// accessible name from the labels inside it, and each dock's collapse.
+fn skin_refresh(core: &mut CoreState) {
+    if core.skin.dirty {
+        core.skin.dirty = false;
+        let live: Vec<u64> = core.skin.grounds.borrow().keys().copied().filter(|id| !core.widgets.contains_key(&WidgetId(*id))).collect();
+        for id in live {
+            core.skin.grounds.borrow_mut().remove(&id);
+        }
+        core.skin.activations.retain(|id, _| core.widgets.contains_key(&WidgetId(*id)));
+        core.skin.ground_pictures.retain(|id, _| core.widgets.contains_key(&WidgetId(*id)));
+        let css = skin::ground_css(&core.skin.grounds.borrow(), adw::StyleManager::default().is_dark());
+        load_kaya_css(&core.skin.css, "grounds", &css, &core.css_error);
+    }
+    for id in core.skin.activations.keys() {
+        if core.a11y_labels.contains_key(id) {
+            continue;
+        }
+        let Some(widget) = core.widgets.get(&WidgetId(*id)).map(NativeWidget::widget) else { continue };
+        let mut words = Vec::new();
+        fn collect(w: &gtk4::Widget, out: &mut Vec<String>) {
+            if let Some(label) = w.downcast_ref::<gtk4::Label>() {
+                if label.is_visible() && !label.text().is_empty() {
+                    out.push(label.text().to_string());
+                }
+                return;
+            }
+            let mut child = w.first_child();
+            while let Some(c) = child {
+                collect(&c, out);
+                child = c.next_sibling();
+            }
+        }
+        collect(&widget, &mut words);
+        widget.update_property(&[gtk4::accessible::Property::Label(&words.join(", "))]);
+    }
+    for picture in core.skin.ground_pictures.values() {
+        if let Some(container) = picture.parent().and_then(|p| p.downcast::<gtk4::Box>().ok()) {
+            if container.first_child().as_ref() != Some(picture.upcast_ref()) {
+                container.reorder_child_after(picture, None::<&gtk4::Widget>);
+            }
+        }
+    }
+    for root in core.skin.dock_roots.values() {
+        let holds = skin::holds_widget_below(root);
+        if root.property::<bool>("visible") != holds {
+            root.set_visible(holds);
+        }
+    }
+}
+
+/// The brightest an `overlay` sample may be: libadwaita's `.osd` is black at
+/// 70% (its own stylesheet, 1.9), which leaves a white picture at luminance
+/// 0.073 (docs/styling-pass-plan.md §7).
+#[cfg(feature = "harness")]
+const SKIN_OVERLAY_DARKEST: f64 = 0.08;
+
+/// The wayland half of `hover`: a virtual pointer leaves the seat when its
+/// client exits, and GTK then reads the pointer as gone, so the injector is
+/// held at the point as this process's own child until the next hover or this
+/// process's end (PR_SET_PDEATHSIG), never past the leg.
+#[cfg(feature = "harness")]
+fn hold_wayland_pointer(located: &str) {
+    use std::os::unix::process::CommandExt;
+    static HELD: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+    let mut words = located.split_whitespace();
+    let (Some(x), Some(y), Some(injector)) = (words.next(), words.next(), words.next()) else {
+        panic!("kaya: hover: dragdrive.py located nothing: {located:?}")
+    };
+    let mut held = HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(mut old) = held.take() {
+        let _ = old.kill();
+        let _ = old.wait();
+    }
+    let mut command = std::process::Command::new(injector);
+    command
+        .args(["set", x, y, "sleep", "600000"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::inherit());
+    // SAFETY: prctl is async-signal-safe and touches only the child.
+    unsafe {
+        command.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+            Ok(())
+        });
+    }
+    let child = command.spawn().unwrap_or_else(|e| panic!("kaya: hover: {injector} could not be run: {e}"));
+    *held = Some(child);
+    std::thread::sleep(std::time::Duration::from_millis(200));
+}
+
+/// The picture an image ground DREW, its own decoded texture (never the bytes
+/// decoded again).
+#[cfg(feature = "harness")]
+fn ground_texture(core: &CoreState, id: u64) -> Option<gdk::Texture> {
+    core.skin.ground_pictures.get(&id)?.paintable()?.downcast::<gdk::Texture>().ok()
+}
+
+/// What a skin reading is held to, per channel (SwiftUI's kayaSkinTolerance).
+#[cfg(feature = "harness")]
+const SKIN_TOLERANCE: f64 = 0.06;
+
+/// The LAYOUT widget a target names (the textarea's scroller, not its view).
+#[cfg(feature = "harness")]
+fn skin_layout_widget(core: &CoreState, t: crate::harness::Target) -> Option<gtk4::Widget> {
+    let control = target_widget(core, t)?;
+    Some(core.widgets.values().find(|w| w.control() == control).map_or(control, |w| w.widget()))
+}
+
+#[cfg(feature = "harness")]
+fn skin_widget_id(core: &CoreState, widget: &gtk4::Widget) -> Option<u64> {
+    core.widgets.iter().find(|(_, w)| w.widget() == *widget).map(|(id, _)| id.0)
 }
 
 /// The style class the sidebar's row list wears — libadwaita's own sidebar
@@ -14358,7 +14935,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 reg.bar_of.retain(|_, w| *w != window.0);
             }
         }
-        ApplyOp::AttachDock { .. } => crate::depth_stub("dock"),
+        // docs/styling-pass-plan.md Y8: the window's own bottom bar, mounted into.
+        ApplyOp::AttachDock { window, dock } => {
+            core.skin.docks.insert(dock.0, window.0);
+        }
         ApplyOp::PresentSheet { parent, sheet } => {
             // The platform's own dialog (docs/sheet-plan.md U3): AdwDialog
             // chains, Esc reaches the topmost, `can-close` off is the veto
@@ -15788,15 +16368,33 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         set_follow(core, id.0, &sw, true);
                     }
                 }
-                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Filled, Value::I64(6))
-                | (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Ground | Prop::Color | Prop::Source, _) => {
-                    crate::depth_stub("grounds")
+                (NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Ground, Value::I64(kind)) => {
+                    let widget = c.clone().upcast::<gtk4::Widget>();
+                    set_ground(core, id.0, &widget, |g| g.kind = kind);
                 }
-                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Activatable | Prop::Selected, _) => {
-                    crate::depth_stub("cards")
+                (NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Color, Value::I64(tops)) => {
+                    let widget = c.clone().upcast::<gtk4::Widget>();
+                    set_ground(core, id.0, &widget, |g| g.tops = Some(tops));
                 }
-                (NativeWidget::Image(_), Prop::Shape, _) => crate::depth_stub("shapes"),
-                (NativeWidget::Label(_), Prop::Tint, _) => crate::depth_stub("tracks"),
+                (NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Source, Value::Blob(blob)) => {
+                    let widget = c.clone().upcast::<gtk4::Widget>();
+                    let bytes = blob.0.clone();
+                    set_ground(core, id.0, &widget, move |g| g.image = Some(bytes));
+                }
+                (NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Activatable, Value::Bool(on)) => {
+                    let widget = c.clone().upcast::<gtk4::Widget>();
+                    set_activatable(core, id.0, &widget, on);
+                }
+                (NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Selected, Value::Bool(on)) => {
+                    set_selected(c.upcast_ref(), on);
+                }
+                (NativeWidget::Image(picture), Prop::Shape, Value::I64(shape)) => {
+                    let picture = picture.clone();
+                    set_shape(&picture, shape);
+                }
+                (NativeWidget::Label(label), Prop::Tint, Value::I64(tint)) => {
+                    set_label_tint(label.upcast_ref(), tint);
+                }
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
                 | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
                     set_filled(&container.clone().upcast::<gtk4::Widget>(), tint);
@@ -15960,7 +16558,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                                 | NativeWidget::Scroll(_)
                                 | NativeWidget::Radio(_)
                                 | NativeWidget::Labeled(_)
-                        ) {
+                        ) && widget.accessible_role() != gtk4::AccessibleRole::Button
+                        {
                             widget.set_accessible_role(gtk4::AccessibleRole::Group);
                         }
                         // AN AUTHORED NAME MUST WIN. GTK's name computation
@@ -16930,6 +17529,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 let host = entry.window;
                 if core.nav_stacks.get(&host).and_then(|s| s.last()) == Some(&window.0) {
                     refresh_nav(core, host);
+                }
+            } else if let Some(&host) = core.skin.docks.get(&window.0) {
+                // Y8: AdwToolbarView's bottom bar spans the window under every
+                // pane, and the root collapses while it holds no widget.
+                let view = window_shell(core, host);
+                if let Some(old) = core.skin.dock_roots.insert(window.0, root_widget.clone()) {
+                    if old != root_widget {
+                        view.remove(&old);
+                    }
+                }
+                if root_widget.parent().is_none() {
+                    view.add_bottom_bar(&root_widget);
                 }
             } else if window.0 == 0 {
                 set_window_content(core, 0, Some(&root_widget));
@@ -18594,6 +19205,20 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         let tint_css = gtk4::CssProvider::new();
         watch_css_errors(&tint_css, &css_error);
         load_kaya_css(&tint_css, "tints", TINT_CSS, &css_error);
+        let skin_css = gtk4::CssProvider::new();
+        watch_css_errors(&skin_css, &css_error);
+        load_kaya_css(&skin_css, "skin", SKIN_CSS, &css_error);
+        let ground_css = gtk4::CssProvider::new();
+        watch_css_errors(&ground_css, &css_error);
+        let grounds: Rc<RefCell<std::collections::BTreeMap<u64, skin::Ground>>> = Rc::default();
+        {
+            let grounds = grounds.clone();
+            let ground_css = ground_css.clone();
+            let error = css_error.clone();
+            adw::StyleManager::default().connect_dark_notify(move |manager| {
+                load_kaya_css(&ground_css, "grounds", &skin::ground_css(&grounds.borrow(), manager.is_dark()), &error);
+            });
+        }
         let composer_css = gtk4::CssProvider::new();
         watch_css_errors(&composer_css, &css_error);
         load_kaya_css(&composer_css, "composer", COMPOSER_CSS, &css_error);
@@ -18674,6 +19299,16 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &tint_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &skin_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &ground_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(
@@ -18876,6 +19511,15 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 bled: Vec::new(),
                 container_inset_css,
                 container_insets: BTreeSet::new(),
+                skin: skin::Skin {
+                    grounds,
+                    css: ground_css,
+                    activations: HashMap::new(),
+                    docks: HashMap::new(),
+                    dock_roots: HashMap::new(),
+                    dirty: false,
+                    ground_pictures: HashMap::new(),
+                },
                 brand,
                 brand_css,
                 typeface_css,
@@ -21015,6 +21659,17 @@ impl crate::harness::Stage for GtkStage {
                     let i = crate::harness::resolve(t.index, core.number_fields.len());
                     core.number_fields[i].spin.grab_focus();
                 }
+                // Y4: an activatable container through its own one door.
+                crate::harness::TargetKind::Column | crate::harness::TargetKind::Row => {
+                    let id = skin_layout_widget(core, t).and_then(|w| skin_widget_id(core, &w));
+                    match id.and_then(|id| core.skin.activations.get(&id).cloned()) {
+                        Some(activate) => activate(),
+                        None => panic!(
+                            "kaya: click {}: the container is not activatable (no on_activate reached this backend)",
+                            crate::harness::target_spec(&t)
+                        ),
+                    }
+                }
                 _ => {
                     let i = crate::harness::resolve(t.index, core.buttons.len());
                     core.buttons[i].emit_clicked();
@@ -21889,15 +22544,25 @@ impl crate::harness::Stage for GtkStage {
             table_rows(&core.columns[i])
                 .into_iter()
                 .map(|row| {
+                    // A nested cell reads as its labels joined by `/`
+                    // (docs/styling-pass-plan.md Y5), depth first.
+                    fn labels_in(core: &CoreState, w: &gtk4::Widget, out: &mut Vec<String>) {
+                        if let Some(label) = w.downcast_ref::<gtk4::Label>() {
+                            if core.labels.iter().any(|l| l == w) {
+                                out.push(label.text().to_string());
+                            }
+                            return;
+                        }
+                        for child in children_of(w) {
+                            labels_in(core, &child, out);
+                        }
+                    }
                     children_of(&row)
                         .into_iter()
                         .filter_map(|cell| {
-                            let label = cell.downcast::<gtk4::Label>().ok()?;
-                            let cell: gtk4::Widget = label.clone().upcast();
-                            core.labels
-                                .iter()
-                                .any(|l| l == &cell)
-                                .then(|| label.text().to_string())
+                            let mut words = Vec::new();
+                            labels_in(core, &cell, &mut words);
+                            (!words.is_empty()).then(|| words.join("/"))
                         })
                         .collect::<Vec<_>>()
                         .join(",")
@@ -22789,23 +23454,247 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn hover(&self, _: crate::harness::Target) {
-        crate::depth_stub("cards")
+    /// The pointer over the target's centre by the lane's own pointer
+    /// (tools/linux/dragdrive.py's `move`), so GTK's crossing sets the hover
+    /// state the stylesheet paints (docs/styling-pass-plan.md §5).
+    fn hover(&self, t: crate::harness::Target) {
+        let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
+            panic!("kaya: hover: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py")
+        });
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            let widget = skin_layout_widget(core, t)?;
+            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
+            let b = widget.compute_bounds(&window)?;
+            Some((
+                f64::from(b.x()) + f64::from(b.width()) / 2.0,
+                f64::from(b.y()) + f64::from(b.height()) / 2.0,
+                gtk4::prelude::NativeExt::surface_transform(&window),
+            ))
+        });
+        let Some((x, y, transform)) = point else {
+            panic!("kaya: hover {}: no laid-out widget in a window", crate::harness::target_spec(&t))
+        };
+        let wayland = linux_wayland_session();
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args([if wayland { "locate" } else { "move" }, if wayland { "wayland" } else { "x11" }])
+            .arg(std::process::id().to_string())
+            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
+            .output()
+            .unwrap_or_else(|e| panic!("kaya: hover: {driver} could not be run: {e}"));
+        if wayland && out.status.success() {
+            hold_wayland_pointer(&String::from_utf8_lossy(&out.stdout));
+        }
+        crate::vtrace::note(
+            "hover",
+            format_args!(
+                "{} at ({x}, {y}) -> exit {:?} {}{}",
+                crate::harness::target_spec(&t),
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        );
+        assert!(
+            out.status.success(),
+            "kaya: hover: the pointer move failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        Self::await_frames(2);
     }
-    fn ground_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("grounds")
+    fn ground_read(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return "<no such target>".to_owned() };
+            let id = skin_widget_id(core, &widget);
+            let shot = match skin::shot_of(&widget) {
+                Ok(shot) => shot,
+                Err(why) => return why,
+            };
+            let Some(f) = shot.frame(&widget) else { return "<no laid-out frame>".to_owned() };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 8.0 || fh <= 16.0 {
+                return format!("<no laid-out frame: {fw}x{fh}>");
+            }
+            let x = fx + fw - 4.0;
+            let (Some(top), Some(bottom), Some(mid)) = (shot.at(x, fy + 4.0), shot.at(x, fy + fh - 4.0), shot.at(x, fy + fh / 2.0)) else {
+                return format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>");
+            };
+            let seen = format!(
+                "top {}, middle {}, bottom {}, ground {}",
+                skin::hex(top), skin::hex(mid), skin::hex(bottom), skin::hex(shot.ground)
+            );
+            if skin::gap(top, shot.ground) <= SKIN_TOLERANCE {
+                return format!("none ({seen})");
+            }
+            let ground = id.and_then(|id| core.skin.grounds.borrow().get(&id).cloned()).unwrap_or_default();
+            let texture = id.and_then(|id| ground_texture(core, id));
+            if let Some(art) = texture.and_then(|t| skin::picture_at(&t, (fw - 4.0, 4.0), (fw, fh))) {
+                if skin::gap(art, top) <= SKIN_TOLERANCE * 2.0 {
+                    return format!("image ({seen}, the picture there {})", skin::hex(art));
+                }
+            }
+            let Some(tops) = ground.tops else { return format!("unmatched ({seen}, no stop was lowered here)") };
+            let stop = if shot.dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };
+            let want = [(stop >> 16) & 0xFF, (stop >> 8) & 0xFF, stop & 0xFF].map(|c| c as f64 / 255.0);
+            let contrast = skin::contrast(mid, shot.text);
+            let detail = format!("{seen}, the clamped stop {}, text {contrast:.1}:1 at the middle", skin::hex(want));
+            if skin::gap(top, want) <= SKIN_TOLERANCE && skin::gap(bottom, shot.ground) <= SKIN_TOLERANCE && contrast >= 4.5 {
+                format!("gradient ({detail})")
+            } else {
+                format!("unmatched ({detail})")
+            }
+        })
     }
-    fn shape_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("shapes")
+    fn shape_read(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return "<no such target>".to_owned() };
+            let shot = match skin::shot_of(&widget) {
+                Ok(shot) => shot,
+                Err(why) => return why,
+            };
+            let Some(f) = shot.frame(&widget) else { return "<no laid-out frame>".to_owned() };
+            let (mut fx, mut fy, mut fw, mut fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            // A boxed picture is drawn in its box inside the allocation, which a
+            // table cell stretches to the column (push_image_shape).
+            if let Some(picture) = widget.downcast_ref::<gtk4::Picture>() {
+                if let Some((bw, bh, _)) = image_box(picture) {
+                    let rtl = widget.direction() == gtk4::TextDirection::Rtl;
+                    let (x, y, w, h) = image_box_rect(fw, fh, (bw.round() as i32, bh.round() as i32), rtl);
+                    (fx, fy, fw, fh) = (fx + x, fy + y, w, h);
+                }
+            }
+            if fw <= 12.0 || fh <= 12.0 {
+                return format!("<no laid-out frame: {fw}x{fh}>");
+            }
+            let Some(under) = shot.at(fx - 4.0, fy + fh / 2.0) else { return format!("<nothing left of {fx},{fy}>") };
+            let art = |c: [f64; 3]| skin::gap(c, under) > 0.02;
+            let (Some(c1), Some(c6), Some(centre)) =
+                (shot.at(fx + 1.0, fy + 1.0), shot.at(fx + 6.0, fy + 6.0), shot.at(fx + fw / 2.0, fy + fh / 2.0))
+            else {
+                return format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>");
+            };
+            let seen = format!(
+                "(1,1) {}, (6,6) {}, centre {}, under it {}, drawn at {fx},{fy} {fw}x{fh}",
+                skin::hex(c1), skin::hex(c6), skin::hex(centre), skin::hex(under)
+            );
+            match (art(c1), art(c6), art(centre)) {
+                (true, true, true) => format!("rect ({seen})"),
+                (false, true, true) => format!("rounded ({seen})"),
+                (false, false, true) => format!("circle ({seen})"),
+                _ => format!("unmatched ({seen})"),
+            }
+        })
     }
-    fn selected_read(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("cards")
+    fn selected_read(&self, t: crate::harness::Target) -> String {
+        let rank = Self::on_main(move |core| {
+            let widget = skin_layout_widget(core, t)?;
+            atspi_rank(&core.window, &widget)
+        });
+        let Some(rank) = rank else { return "<not in the accessibility tree>".to_owned() };
+        match atspi_states(atspi::Role::Button, rank) {
+            Ok(states) => {
+                let on = states.contains(atspi::State::Selected);
+                format!(
+                    "{} (the bus's button #{rank}: selectable {}, selected {on})",
+                    if on { "on" } else { "off" },
+                    states.contains(atspi::State::Selectable)
+                )
+            }
+            Err(why) => atspi_miss(&why),
+        }
     }
-    fn label_tint(&self, _: crate::harness::Target) -> String {
-        crate::depth_stub("tracks")
+    fn label_tint(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return "<no such target>".to_owned() };
+            let shot = match skin::shot_of(&widget) {
+                Ok(shot) => shot,
+                Err(why) => return why,
+            };
+            let Some(f) = shot.frame(&widget) else { return "<no laid-out frame>".to_owned() };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 2.0 || fh <= 2.0 {
+                return format!("<no laid-out frame: {fw}x{fh}>");
+            }
+            let step = 1.0 / shot.scale;
+            let (mut ink, mut best) = (None, -1.0);
+            let mut y = fy;
+            while y < fy + fh {
+                let mut x = fx;
+                while x < fx + fw {
+                    if let Some(c) = shot.at(x, y) {
+                        let d: f64 = (0..3).map(|i| (c[i] - shot.ground[i]).abs()).sum();
+                        if d > best {
+                            best = d;
+                            ink = Some(c);
+                        }
+                    }
+                    x += step;
+                }
+                y += step;
+            }
+            let Some(ink) = ink else { return format!("<no pixels in {fx},{fy} {fw}x{fh}>") };
+            let mut candidates = vec![("none", shot.text)];
+            for (name, colour) in
+                [("accent", "accent_color"), ("success", "success_color"), ("warning", "warning_color"), ("critical", "error_color")]
+            {
+                let Some(c) = skin::colour(&widget, colour) else { return format!("<{colour} did not resolve>") };
+                candidates.push((name, skin::over(c, shot.ground)));
+            }
+            let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - ink[i]).powi(2)).sum::<f64>();
+            candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
+            format!(
+                "{} (ink {}; {})",
+                candidates[0].0,
+                skin::hex(ink),
+                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", skin::hex(*c))).collect::<Vec<_>>().join(", ")
+            )
+        })
     }
     fn dock_read(&self) -> String {
-        crate::depth_stub("dock")
+        Self::on_main(move |core| {
+            let Some(dock) = core.skin.docks.iter().find(|(_, w)| **w == 0).map(|(d, _)| *d) else {
+                return "hidden (no dock is mounted)".to_owned();
+            };
+            let Some(root) = core.skin.dock_roots.get(&dock).cloned() else {
+                return "hidden (nothing is mounted into the dock)".to_owned();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let view = window_shell(core, 0);
+            let frame = root.compute_bounds(&view);
+            let Some(b) = frame.filter(|b| root.is_mapped() && b.height() >= 1.0) else {
+                return format!(
+                    "hidden (the dock's root visible {} mapped {}, bounds {frame:?}, in a {}, children: {})",
+                    root.is_visible(),
+                    root.is_mapped(),
+                    root.parent().map_or("no parent".to_owned(), |p| p.type_().name().to_owned()),
+                    {
+                        fn tree(w: &gtk4::Widget, depth: usize) -> String {
+                            let kids: Vec<String> = if depth < 4 { children_of(w).iter().map(|c| tree(c, depth + 1)).collect() } else { vec![] };
+                            format!("{}{}{}[{}]", w.type_().name(), if w.is_visible() { "" } else { "(hidden)" },
+                                if container_vertical(w).is_some() { "*" } else { "" }, kids.join(" "))
+                        }
+                        tree(&root, 0)
+                    }
+                );
+            };
+            let (vw, vh) = (f64::from(view.width()), f64::from(view.height()));
+            let (x, y, w, h) = (f64::from(b.x()), f64::from(b.y()), f64::from(b.width()), f64::from(b.height()));
+            let panes = view.content().and_then(|c| c.compute_bounds(&view));
+            let spans = x <= 2.0 && x + w >= vw - 2.0;
+            let at_foot = (y + h - vh).abs() <= 2.0;
+            let above = panes.is_none_or(|p| f64::from(p.y() + p.height()) <= y + 1.0);
+            let detail = format!(
+                "dock {x},{y} {w}x{h}, window {vw}x{vh}, panes {}",
+                panes.map_or("none".to_owned(), |p| format!("{},{} {}x{}", p.x(), p.y(), p.width(), p.height()))
+            );
+            if spans && at_foot && above {
+                format!("shown ({detail})")
+            } else {
+                format!("misplaced ({detail})")
+            }
+        })
     }
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
@@ -22888,13 +23777,75 @@ impl crate::harness::Stage for GtkStage {
                 let over = |i: usize| (c[i] * c[3] + ground[i] * (1.0 - c[3])) * 255.0;
                 candidates.push((name, [over(0), over(1), over(2)]));
             }
+            // THE SKIN'S SURFACES (docs/styling-pass-plan.md Y4): libadwaita's
+            // own hover layer over the bare ground and over a card, and its
+            // selected row, each resolved from the theme's colours now.
+            let (Some(fg), Some(card), Some(card_fg), Some(accent_bg)) =
+                (lookup("window_fg_color"), lookup("card_bg_color"), lookup("card_fg_color"), lookup("accent_bg_color"))
+            else {
+                return "<the skin's colours did not resolve>".to_owned();
+            };
+            let bare = [ground[0], ground[1], ground[2]];
+            let on_card = skin::over(card, bare);
+            let layer = |c: [f64; 4], k: f64, under: [f64; 3]| skin::over([c[0], c[1], c[2], k * c[3]], under).map(|v| v * 255.0);
+            candidates.push(("hovered", layer(fg, 0.04, bare)));
+            candidates.push(("hovered", layer(card_fg, 0.03, on_card)));
+            candidates.push(("selected", layer(accent_bg, 0.25, bare)));
+            candidates.push(("selected", layer(accent_bg, 0.25, on_card)));
             let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - got[i]).powi(2)).sum::<f64>();
             candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
             let hex = |c: &[f64; 3]| {
                 format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
             };
+            // The overlay is libadwaita's `.osd` panel over media (Y3): it
+            // reads as overlay when the window shows a dark sample there, under
+            // half as bright as the picture the nearest image ground draws.
+            let mut behind_note = String::new();
+            let mut holder = widget.parent();
+            while let Some(w) = holder.clone() {
+                let pictured = skin_widget_id(core, &w)
+                    .filter(|id| core.skin.grounds.borrow().get(id).is_some_and(|g| g.kind == crate::wire::GROUND_IMAGE))
+                    .and_then(|id| ground_texture(core, id));
+                if let Some(texture) = pictured {
+                    let shot = match skin::shot_of(&widget) {
+                        Ok(shot) => shot,
+                        Err(why) => {
+                            behind_note = format!("; over an image ground, unread: {why}");
+                            break;
+                        }
+                    };
+                    let (Some(mine), Some(behind)) = (shot.frame(&widget), shot.frame(&w)) else {
+                        behind_note = "; over an image ground whose frame did not resolve".to_owned();
+                        break;
+                    };
+                    let (sx, sy) = (f64::from(mine.x()) + px, f64::from(mine.y()) + py);
+                    let (Some(seen), Some(art)) = (
+                        shot.at(sx, sy),
+                        skin::picture_at(
+                            &texture,
+                            (sx - f64::from(behind.x()), sy - f64::from(behind.y())),
+                            (f64::from(behind.width()), f64::from(behind.height())),
+                        ),
+                    ) else {
+                        break;
+                    };
+                    let (lm, lt) = (skin::luminance(seen), skin::luminance(art));
+                    behind_note = format!(
+                        "; over an image ground the window shows {} at luminance {lm:.3}, the picture there {} at {lt:.3}",
+                        skin::hex(seen), skin::hex(art)
+                    );
+                    if lm < SKIN_OVERLAY_DARKEST && lm < lt / 2.0 {
+                        return format!(
+                            "overlay (sampled {} at ({},{}), luminance {lm:.3} over the picture's {} at {lt:.3})",
+                            skin::hex(seen), px.round(), py.round(), skin::hex(art)
+                        );
+                    }
+                    break;
+                }
+                holder = w.parent();
+            }
             format!(
-                "{} (sampled {} at ({},{}); {})",
+                "{} (sampled {} at ({},{}); {}{behind_note})",
                 candidates[0].0,
                 hex(&got),
                 px.round(),
@@ -24239,7 +25190,16 @@ impl crate::harness::Stage for GtkStage {
             use gtk4::prelude::WidgetExt;
             let spec = crate::harness::target_spec(&t);
             let widget = target_widget(core, t).ok_or_else(|| format!("no such target {spec}"))?;
-            let content = window_content(core, 0).ok_or_else(|| format!("{spec}: no window content to read"))?;
+            // A widget in the window's dock is read against the dock, the
+            // window's other content area (docs/styling-pass-plan.md Y8, A9).
+            let content = core
+                .skin
+                .dock_roots
+                .values()
+                .find(|root| widget.is_ancestor(*root))
+                .cloned()
+                .or_else(|| window_content(core, 0))
+                .ok_or_else(|| format!("{spec}: no window content to read"))?;
             // Both in the content's own coordinates, whose origin is inside its
             // padding; its border box is the window's content area.
             let frame = widget
@@ -24420,8 +25380,29 @@ impl crate::harness::Stage for GtkStage {
             let Some(id) = container else {
                 return "<no such target>".to_string();
             };
-            if core.tables.contains_key(&id) {
-                return "a table; expect_window reads a windowed tier".to_string();
+            // A table's row is in view when its body's viewport, under the
+            // pinned header, holds the row (docs/styling-pass-plan.md Y5).
+            if let Some(table) = core.tables.get(&id) {
+                let (body, content) = (table.body.clone(), table.content.clone());
+                let Some((_, copy)) = core.scene.row_copy(id, &Value::Str(key.clone())) else {
+                    return format!("no row keyed {key:?} in this table");
+                };
+                let Some(row) = copy.and_then(|c| core.widgets.get(&c)).map(|w| w.widget()) else {
+                    return format!("row {key:?} is not realized");
+                };
+                while glib::MainContext::default().iteration(false) {}
+                let Some(b) = row.compute_bounds(&content) else { return format!("row {key:?} has no bounds yet") };
+                let adj = body.vadjustment();
+                let (top, bottom) = (f64::from(b.y()), f64::from(b.y() + b.height()));
+                if top >= adj.value() - 2.0 && bottom <= adj.value() + adj.page_size() + 2.0 {
+                    return String::new();
+                }
+                return format!(
+                    "row {key:?} at {top}..{bottom} in the body, its viewport {}..{} (upper {})",
+                    adj.value(),
+                    adj.value() + adj.page_size(),
+                    adj.upper()
+                );
             }
             let Some((_, copy)) = core.scene.row_copy(id, &Value::Str(key.clone())) else {
                 return format!("no row keyed {key:?} in a For this container hosts");
@@ -25487,6 +26468,10 @@ fn atspi_role_of(w: &gtk4::Widget) -> Option<atspi::Role> {
     // both a textarea and a scroll viewport one element behind.
     if w.is::<gtk4::ScrolledWindow>() {
         return Some(atspi::Role::ScrollPane);
+    }
+    // docs/styling-pass-plan.md Y4: an activatable container is a button.
+    if w.is::<gtk4::Box>() && w.accessible_role() == gtk4::AccessibleRole::Button {
+        return Some(atspi::Role::Button);
     }
     // A container kaya NAMED was promoted to Group by the lowering, and
     // Group is exactly what the bus then publishes for it.

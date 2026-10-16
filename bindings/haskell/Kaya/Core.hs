@@ -211,6 +211,7 @@ module Kaya.Core
     ImagePhase (..),
     imagePhaseWire,
     signalPhase,
+    newSignal,
     patchIf,
     aspectWire,
     MediaSource (..),
@@ -504,6 +505,8 @@ data Pending
   | PValue !Word64 (Double -> IO ())
   | PCommit !Word64 (Double -> IO ())
   | PToggleNode !Word64 ([Key] -> Bool -> IO ())
+  -- A stamped container's activation (docs/styling-pass-plan.md Y4).
+  | PActivateNode !Word64 ([Key] -> IO ())
   -- The template node's document bind, recorded at the transaction
   -- boundary because the collection is BuildState's and the table is
   -- the App's (docs/rich-text-plan.md §19).

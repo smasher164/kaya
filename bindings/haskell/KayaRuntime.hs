@@ -10,6 +10,7 @@ module KayaRuntime
     waitOccurrences,
     wake,
     registerBlob,
+    imageDominantRaw,
     Asset,
     openAsset,
     assetMissSentence,
@@ -159,6 +160,9 @@ capNotificationReply = 16
 
 foreign import ccall unsafe "kaya_submit"
   c_kaya_submit :: Ptr Word8 -> CSize -> IO ()
+
+foreign import ccall unsafe "kaya_image_dominant"
+  c_kaya_image_dominant :: Ptr Word8 -> CSize -> Ptr Word32 -> IO Word8
 
 foreign import ccall unsafe "kaya_blob_register"
   c_kaya_blob_register :: Ptr Word8 -> CSize -> IO Word64
@@ -327,6 +331,15 @@ registerBlob :: BS.ByteString -> IO Word64
 registerBlob bytes =
   unsafeUseAsCStringLen bytes $ \(p, len) ->
     c_kaya_blob_register (castPtr p) (fromIntegral len)
+
+-- | An image's dominant colour as 0xRRGGBB, the core's one quantizer
+-- (docs\/styling-pass-plan.md Y2); 'Nothing' for bytes that do not decode.
+imageDominantRaw :: BS.ByteString -> Maybe Word32
+imageDominantRaw bytes = unsafePerformIO $
+  unsafeUseAsCStringLen bytes $ \(p, len) ->
+    alloca $ \out -> do
+      ok <- c_kaya_image_dominant (castPtr p) (fromIntegral len) out
+      if ok == 0 then return Nothing else Just <$> peek out
 
 -- | An open asset: the bytes kaya read, held by the core until this is
 -- released.

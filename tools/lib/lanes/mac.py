@@ -52,6 +52,7 @@ SCENES = [
     "submit", "numberfield", "timecode", "colorpicker", "range",
     "secure", "autofill", "reveal", "segmented", "toast", "expander",
     "safearea", "netimage", "netimage_http",
+    "grounds", "shapes", "cards", "tracks", "dock",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -59,9 +60,7 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture",
-                # The styling pass (docs/styling-pass-plan.md §5), rust-only at depth.
-                "grounds", "shapes", "cards", "tracks", "dock"]
+                "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -78,7 +77,9 @@ C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             # The safe area at the floor (docs/safe-area-plan.md A16).
             "safearea",
             # Network images at the floor (docs/network-images-plan.md N16).
-            "netimage"]
+            "netimage",
+            # The skin at the floor (docs/styling-pass-plan.md Y10).
+            "grounds", "shapes", "cards", "tracks", "dock"]
 
 # The nine hosted languages in their DEFAULT group order; a group
 # that deviates spells its own order in ORDER below. js is the ninth
@@ -291,11 +292,11 @@ ORDER = [
     ("tints", ("rust",)),
     # The skin (docs/styling-pass-plan.md §5): grounds, shapes, cards, the
     # track table and the dock.
-    ("grounds", ("rust",)),
-    ("shapes", ("rust",)),
-    ("cards", ("rust",)),
-    ("tracks", ("rust",)),
-    ("dock", ("rust",)),
+    ("grounds", LANGS + ("c",)),
+    ("shapes", LANGS + ("c",)),
+    ("cards", LANGS + ("c",)),
+    ("tracks", LANGS + ("c",)),
+    ("dock", LANGS + ("c",)),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar

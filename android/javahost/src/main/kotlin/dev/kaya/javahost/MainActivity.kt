@@ -70,6 +70,11 @@ object GuestStart : KayaGuestStart {
             "safearea" -> Safearea::app
             "netimage" -> Netimage::app
             "netimage_http" -> NetimageHttp::app
+            "grounds" -> Grounds::app
+            "shapes" -> Shapes::app
+            "cards" -> Cards::app
+            "tracks" -> Tracks::app
+            "dock" -> Dock::app
             "toast" -> Toast::app
             "sections" -> Sections::app
             "menus" -> Menus::app

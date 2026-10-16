@@ -412,6 +412,31 @@ executable netimage
   main-is: netimage.hs
   build-depends: kaya-guests
 
+executable grounds
+  import: shared
+  main-is: grounds.hs
+  build-depends: kaya-guests
+
+executable shapes
+  import: shared
+  main-is: shapes.hs
+  build-depends: kaya-guests
+
+executable cards
+  import: shared
+  main-is: cards.hs
+  build-depends: kaya-guests
+
+executable tracks
+  import: shared
+  main-is: tracks.hs
+  build-depends: kaya-guests
+
+executable dock
+  import: shared
+  main-is: dock.hs
+  build-depends: kaya-guests
+
 -- The network images scene over HTTP (docs/network-images-plan.md N12):
 -- the pinned client (flake.nix, tools/linux/Dockerfile, cabal.project)
 -- links into this guest alone.

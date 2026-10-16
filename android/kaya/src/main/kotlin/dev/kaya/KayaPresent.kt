@@ -13,6 +13,10 @@ object KayaPresent {
      * widget's CREATE record, handed back verbatim. */
     @JvmStatic external fun emitClicked(tag: ByteArray)
 
+    /** Emit an activatable container's activation (docs/styling-pass-plan.md
+     * Y4): [tag] is the container's tag, as [emitClicked]'s. */
+    @JvmStatic external fun emitActivated(tag: ByteArray)
+
     /** Milliseconds the app thread has been ignoring pending
      * occurrences, 0 when it is keeping up — the stall watchdog's
      * reading, which `expect_stall` asserts. */

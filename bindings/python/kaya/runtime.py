@@ -194,6 +194,9 @@ _lib.kaya_image_pixels.argtypes = [ctypes.c_uint64,
                                    ctypes.POINTER(ctypes.c_uint32),
                                    ctypes.POINTER(ctypes.c_uint32)]
 _lib.kaya_image_pixels.restype = ctypes.c_size_t
+_lib.kaya_image_dominant.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
+                                     ctypes.POINTER(ctypes.c_uint32)]
+_lib.kaya_image_dominant.restype = ctypes.c_uint8
 _lib.kaya_catalog.argtypes = [ctypes.c_char_p]
 _lib.kaya_catalog.restype = None
 
@@ -249,6 +252,15 @@ def _occurrence_blob(handle: int) -> bytes:
 # Installed rather than imported: wire.py is generated and loads no
 # library of its own.
 wire.occurrence_blob = _occurrence_blob
+
+
+def image_dominant(data: bytes) -> int | None:
+    """The core's dominant colour of encoded bytes as 0xRRGGBB, None when
+    they do not decode (docs/styling-pass-plan.md Y2)."""
+    rgb = ctypes.c_uint32(0)
+    if not _lib.kaya_image_dominant(data, len(data), ctypes.byref(rgb)):
+        return None
+    return rgb.value
 
 
 def submit(*records: bytes) -> None:

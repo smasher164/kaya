@@ -152,13 +152,34 @@ public enum KayaAlign: Int64 {
 }
 
 /// What a filled container's surface means (docs/tints-plan.md T1): each
-/// backend draws it in the platform's own fill and foreground pair.
-public enum KayaTint: Int64 {
+/// backend draws it in the platform's own fill and foreground pair. A label
+/// takes the tint's standalone colour instead and `.none` its untinted text
+/// (docs/styling-pass-plan.md Y7); `.overlay` is the platform's panel over
+/// media (Y3).
+public enum KayaTint: Int64, Sendable {
+    case none = 0
     case accent = 1
     case success = 2
     case warning = 3
     case critical = 4
     case neutral = 5
+    case overlay = 6
+}
+
+/// A row's tint as the wire carries it.
+public func kayaTint(packed: Int64) -> KayaTint {
+    guard let tint = KayaTint(rawValue: packed) else {
+        preconditionFailure("kaya: a tint field holds \(packed), which is no tint")
+    }
+    return tint
+}
+
+/// An image's clip (docs/styling-pass-plan.md Y6): `.rounded` is the
+/// platform's own medium corner, `.circle` the inscribed circle, covering.
+public enum KayaShape: Int64, Sendable {
+    case rect = 0
+    case rounded = 1
+    case circle = 2
 }
 
 /// A container's ARRANGEMENT AXIS: identity is the creation kind
@@ -2493,6 +2514,20 @@ public final class KayaApp {
         app.withCString { kaya_catalog($0) }
     }
 
+    /// The colour of a picture's largest bin of hues, near-greys dropped,
+    /// memoized by the bytes' content: one quantizer in the core for all
+    /// nine bindings (docs/styling-pass-plan.md Y2). nil when the bytes do
+    /// not decode.
+    public static func imageDominant(_ bytes: Data) -> KayaColor? {
+        var rgb: UInt32 = 0
+        let ok = bytes.withUnsafeBytes { raw in
+            kaya_image_dominant(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count), &rgb)
+        }
+        guard ok != 0 else { return nil }
+        return KayaColor(r: UInt8(truncatingIfNeeded: rgb >> 16), g: UInt8(truncatingIfNeeded: rgb >> 8),
+                         b: UInt8(truncatingIfNeeded: rgb))
+    }
+
     /// The message `key` with `args` filled from the loaded catalog; dates
     /// and times are formatted through the door. A missing message or
     /// argument is the core's panic naming the key and the locale.
@@ -2563,6 +2598,10 @@ public final class KayaApp {
     /// plain redraw.
     private var draws: [UInt64: (KayaDraw, KayaViewbox, Double) -> Void] = [:]
     private var nodeHandlers: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
+    /// An activatable row or column's handler (docs/styling-pass-plan.md Y4),
+    /// by widget and by template node.
+    private var widgetActivates: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var nodeActivates: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
     private var widgetSubmits: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
@@ -2989,6 +3028,19 @@ public final class KayaApp {
     /// the stamped copy's keys, outermost first.
     public func onClick(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
         nodeHandlers[n.id] = handler
+    }
+
+    /// The registration half of `KayaAppTx.onActivate` / `KayaTpl.onActivate`.
+    /// NOT PUBLIC: registering the handler and declaring the container
+    /// activatable are ONE act (docs/styling-pass-plan.md Y4).
+    fileprivate func registerActivate(_ w: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        widgetActivates[w] = handler
+    }
+
+    fileprivate func registerActivate(
+        node n: UInt64, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void
+    ) {
+        nodeActivates[n] = handler
     }
 
     /// Register a change handler for a live entry: the widget owns its
@@ -3750,6 +3802,14 @@ public final class KayaApp {
                 if let handler = nodeHandlers[id] {
                     dispatch { try build { tx in try handler(tx, keys) } }
                 }
+            case (UInt16(KAYA_OCCURRENCE_ACTIVATED), true):
+                if let handler = widgetActivates[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_ACTIVATED), false):
+                if let handler = nodeActivates[id] {
+                    dispatch { try build { tx in try handler(tx, keys) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), true):
                 if let handler = widgetChanges[id] {
                     dispatch { try build { tx in try handler(tx, text ?? "") } }
@@ -4330,6 +4390,79 @@ public final class KayaAppTx {
     /// of what sits inside (docs/tints-plan.md T2).
     func setFilled(_ w: KayaWidget, _ tint: KayaTint) {
         tx.setFilled(w.id, tint.rawValue)
+    }
+
+    /// A row or column's ground fading from `color`, clamped by the core for
+    /// the appearance's text, into the platform's window ground
+    /// (docs/styling-pass-plan.md Y2); `KayaApp.imageDominant` is the usual
+    /// colour, and a signal of a colour is the other source.
+    public func setGroundGradient(_ w: KayaWidget, _ color: KayaColor) {
+        tx.setGround(w.id, Int64(KAYA_GROUND_GRADIENT))
+        tx.setColor(w.id, color.r, color.g, color.b, color.a)
+    }
+
+    public func setGroundGradient(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.setGround(w.id, Int64(KAYA_GROUND_GRADIENT))
+        tx.bindColor(w.id, s.id)
+    }
+
+    /// A row or column covered by a picture (docs/styling-pass-plan.md Y3);
+    /// text over it sits inside a container filled with `.overlay`.
+    public func setGroundImage(_ w: KayaWidget, _ data: Data) {
+        tx.setGround(w.id, Int64(KAYA_GROUND_IMAGE))
+        setSource(w, data)
+    }
+
+    public func setGroundImage(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.setGround(w.id, Int64(KAYA_GROUND_IMAGE))
+        bindSource(w, s)
+    }
+
+    /// An image's clip (docs/styling-pass-plan.md Y6).
+    public func setShape(_ w: KayaWidget, _ shape: KayaShape) {
+        tx.setShape(w.id, shape.rawValue)
+    }
+
+    /// A label in a tint's standalone colour (docs/styling-pass-plan.md Y7).
+    public func setTint(_ w: KayaWidget, _ tint: KayaTint) {
+        tx.setTint(w.id, tint.rawValue)
+    }
+
+    public func setTint(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindTint(w.id, s.id)
+    }
+
+    /// An activatable container's selected surface: the app's state, written
+    /// where it wants it (docs/styling-pass-plan.md Y4).
+    public func setSelected(_ w: KayaWidget, _ on: Bool) {
+        tx.setSelected(w.id, on)
+    }
+
+    public func setSelected(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindSelected(w.id, s.id)
+    }
+
+    /// This row or column takes a click as a whole (docs/styling-pass-plan.md
+    /// Y4): a button to assistive technology, the platform's press, hover and
+    /// selected surface. Registering the handler and declaring the container
+    /// activatable are one act.
+    public func onActivate(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        app.registerActivate(w.id, handler)
+        tx.setActivatable(w.id, true)
+    }
+
+    /// This window's DOCK, the surface under every pane and above a phone's
+    /// tab bar (docs/styling-pass-plan.md Y8): `id` is a fresh surface id, and
+    /// `build` makes the root it shows, returning `(root, value)`; the value
+    /// comes back out. One per window.
+    @discardableResult
+    public func dock<R>(
+        _ id: UInt64, window: UInt64 = 0, _ build: (KayaAppTx) throws -> (KayaWidget, R)
+    ) rethrows -> R {
+        tx.attachDock(window, id)
+        let (root, value) = try build(self)
+        tx.mount(id, root.id)
+        return value
     }
 
     /// A container's arrangement axis, the dynamic path beside the
@@ -5259,10 +5392,14 @@ public final class KayaAppTx {
     public func column<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil,
+        onActivate: ((KayaAppTx) throws -> Void)? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
-            UInt32(KAYA_KIND_COLUMN), children, grow: grow, spacing: spacing,
+            UInt32(KAYA_KIND_COLUMN), { w in
+                if let onActivate { self.onActivate(w, onActivate) }
+                return try children(w)
+            }, grow: grow, spacing: spacing,
             inset: inset, align: align, filled: filled)
     }
 
@@ -5292,11 +5429,13 @@ public final class KayaAppTx {
     public func row<R>(
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil, role: KayaRole? = nil,
+        onActivate: ((KayaAppTx) throws -> Void)? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
             UInt32(KAYA_KIND_ROW), { w in
                 if let role { setRole(w, role) }
+                if let onActivate { self.onActivate(w, onActivate) }
                 return try children(w)
             }, grow: grow, spacing: spacing,
             inset: inset, align: align, filled: filled)
@@ -6591,6 +6730,63 @@ public final class KayaTpl {
         tx.tx.setFilled(n.id, tint.rawValue)
     }
 
+    /// A stamped container's gradient ground (KayaAppTx.setGroundGradient):
+    /// one colour for every copy, or the row's own Color field, each copy its
+    /// album's.
+    public func setGroundGradient(_ n: KayaNodeHandle, _ color: KayaColor) {
+        tx.tx.setGround(n.id, Int64(KAYA_GROUND_GRADIENT))
+        tx.tx.setColor(n.id, color.r, color.g, color.b, color.a)
+    }
+
+    public func setGroundGradient(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaColor>) {
+        tx.tx.setGround(n.id, Int64(KAYA_GROUND_GRADIENT))
+        bindColorField(n, level: level, f)
+    }
+
+    /// A stamped container's image ground (KayaAppTx.setGroundImage).
+    public func setGroundImage(_ n: KayaNodeHandle, _ data: Data) {
+        tx.tx.setGround(n.id, Int64(KAYA_GROUND_IMAGE))
+        tx.tx.setSource(n.id, kayaRegisterBlob(data))
+    }
+
+    public func setGroundImage(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Data>) {
+        tx.tx.setGround(n.id, Int64(KAYA_GROUND_IMAGE))
+        bindSourceField(n, level: level, f)
+    }
+
+    /// A stamped image's clip (KayaAppTx.setShape).
+    public func setShape(_ n: KayaNodeHandle, _ shape: KayaShape) {
+        tx.tx.setShape(n.id, shape.rawValue)
+    }
+
+    /// A stamped label's tint (KayaAppTx.setTint): one for every copy, or the
+    /// row's own KayaTint field, the playing track's title.
+    public func setTint(_ n: KayaNodeHandle, _ tint: KayaTint) {
+        tx.tx.setTint(n.id, tint.rawValue)
+    }
+
+    public func setTint(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTint>) {
+        tx.tx.bindTintElement(n.id, level: level, field: f.index)
+    }
+
+    /// A stamped container's selected surface (KayaAppTx.setSelected), the
+    /// row's own Bool field where the app keeps its selection.
+    public func setSelected(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setSelected(n.id, on)
+    }
+
+    public func setSelected(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
+        tx.tx.bindSelectedElement(n.id, level: level, field: f.index)
+    }
+
+    /// Every stamped copy of this container takes a click as a whole, the
+    /// handler handed the copy's keys, outermost first
+    /// (docs/styling-pass-plan.md Y4).
+    public func onActivate(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
+        tx.app.registerActivate(node: n.id, handler)
+        tx.tx.setActivatable(n.id, true)
+    }
+
     /// A stamped image's bound (KayaTx.setMaxWidth, KayaTx.setMaxHeight).
     public func setMaxWidth(_ n: KayaNodeHandle, _ points: Double) {
         tx.tx.setMaxWidth(n.id, points)
@@ -6822,7 +7018,7 @@ public final class KayaTpl {
 
     /// A label wearing the caption role, stamped.
     @discardableResult
-    func caption(_ text: String) -> KayaNodeHandle {
+    public func caption(_ text: String) -> KayaNodeHandle {
         let n = label(text)
         setRole(n, .caption)
         return n
@@ -6836,7 +7032,7 @@ public final class KayaTpl {
     }
 
     @discardableResult
-    func caption(_ f: KayaField<String>) -> KayaNodeHandle {
+    public func caption(_ f: KayaField<String>) -> KayaNodeHandle {
         let n = label(f)
         setRole(n, .caption)
         return n
@@ -7252,7 +7448,7 @@ public final class KayaTpl {
     /// source. A move does NOT write the row's field back — the handler
     /// decides whether the model follows.
     @discardableResult
-    func slider(
+    public func slider(
         min: Double = 0.0, max: Double = 1.0, value: Double,
         step: Double? = nil, tickSpacing: Double? = nil,
         onChange: ((KayaAppTx, [KayaValue], Double) throws -> Void)? = nil,
@@ -7580,7 +7776,7 @@ public final class KayaTpl {
     /// An image with constant encoded bytes: every stamped copy shows the
     /// same picture.
     @discardableResult
-    func image(_ source: Data) -> KayaNodeHandle {
+    public func image(_ source: Data) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_IMAGE))
         tx.tx.setSource(n.id, kayaRegisterBlob(source))
         return n

@@ -33,7 +33,7 @@ DOORS = [
     ("the look decision", "fn render_image(picture: &gtk4::Picture) {",
      ["picture.update_state(&[gtk4::accessible::State::Busy(\n labelled && phase == crate::wire::IMAGE_PHASE_LOADING,",
       "let look = if phase == crate::wire::IMAGE_PHASE_FAILED || (texture.is_none() && undecodable) {",
-      "BoundedPaintable::boxed(&texture, bw, bh, fit, rtl)",
+      "BoundedPaintable::boxed(\n &texture,\n bw,\n bh,\n fit,\n rtl,\n image_shape(picture),\n )",
       "} else if phase == crate::wire::IMAGE_PHASE_LOADING || pending {",
       ".then(|| image_missing_icon(picture))", "bw.min(bh) >= 2 * IMAGE_GLYPH"],
      ["Texture::from_bytes"]),

@@ -61,6 +61,11 @@ static class Program
             case "segmented": SegmentedScene.Run(); break;
             case "expander": ExpanderScene.Run(); break;
             case "safearea": SafeareaScene.Run(); break;
+            case "grounds": GroundsScene.Run(); break;
+            case "shapes": ShapesScene.Run(); break;
+            case "cards": CardsScene.Run(); break;
+            case "tracks": TracksScene.Run(); break;
+            case "dock": DockScene.Run(); break;
             case "toast": ToastScene.Run(); break;
             case "submit": SubmitScene.Run(); break;
             case "progress": ProgressScene.Run(); break;

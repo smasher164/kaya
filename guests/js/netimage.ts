@@ -129,7 +129,7 @@ const { art, phase, band, released, again, tracks } = app.window({ title: "netim
     });
     for (const track of tracks.columns(["Art", "Title"], { grow: 1, a11yId: "tracks" })) {
       kaya.row(() => {
-        kaya.image(track.art, { fit: "cover", phase: track.phase, onNeeded, onReleased }).maxWidth(20).maxHeight(20).a11yId("art");
+        kaya.image(track.art, { fit: "cover", phase: track.phase, shape: "rounded", onNeeded, onReleased }).maxWidth(40).maxHeight(40).a11yId("art");
         kaya.label({ bind: track.title });
       });
     }

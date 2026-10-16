@@ -3,6 +3,8 @@ package dev.kaya
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
@@ -738,6 +740,16 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var align by mutableStateOf(0L)
     /** A filled container's tint (docs/tints-plan.md T2); 0 = not filled. */
     var filled by mutableStateOf(0L)
+    /** The skin (docs/styling-pass-plan.md Y2-Y7): a container's ground and
+     * its clamped stops packed by the core (light 24-47, dark 0-23), an
+     * image's shape, a container's activation and selection, a label's tint. */
+    var ground by mutableStateOf(0L)
+    var groundTops by mutableStateOf(0L)
+    var shape by mutableStateOf(0L)
+    var activatable by mutableStateOf(false)
+    var selected by mutableStateOf(false)
+    var selectedDeclared by mutableStateOf(false)
+    var labelTint by mutableStateOf(0L)
     var insetSet by mutableStateOf(false)
     /** A scroll that keeps its end in view while its content grows
      * (docs/follow-end-plan.md). */
@@ -889,9 +901,21 @@ fun kayaTintPair(tint: Long): Pair<Color, Color> {
         2L -> kayaCustomPair(KAYA_SUCCESS_DESIGN)
         3L -> kayaCustomPair(KAYA_WARNING_DESIGN)
         4L -> Pair(scheme.error, scheme.onError)
+        // The platform's panel over media (docs/styling-pass-plan.md Y3).
+        6L -> Pair(
+            scheme.scrim.copy(alpha = KAYA_OVERLAY_SCRIM),
+            if (scheme.background.luminance() < 0.5f) scheme.onSurface else scheme.inverseOnSurface,
+        )
         else -> Pair(scheme.surfaceContainerHigh, scheme.onSurface)
     }
 }
+
+/** docs/styling-pass-plan.md §3's Compose row: Material's scrim at 60%. */
+const val KAYA_OVERLAY_SCRIM = 0.6f
+
+/** Material's hover state layer, 8% of onSurface: what the ripple draws on
+ * hover, held here for the reader's expectation only. */
+const val KAYA_HOVER_LAYER = 0.08f
 
 /** The fill itself, at Material's medium shape, and the box expect_fill crops. */
 @Composable
@@ -899,15 +923,192 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
     if (node.role == KayaCompose.ROLE_COMPOSER) {
         return Modifier.background(MaterialTheme.colorScheme.surfaceVariant, KAYA_COMPOSER_SHAPE)
     }
-    if (node.filled == 0L) return Modifier
+    if (node.filled == 0L && node.ground == 0L && !node.activatable && !node.selected) return Modifier
     kayaTintFills = (1L..5L).map { kayaTintPair(it).first.toArgb() }
-    return Modifier
+    var surface = Modifier
         .onGloballyPositioned {
             val r = it.boundsInWindow()
             kayaFillBoxes[node.id] = android.graphics.Rect(
                 r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
         }
-        .background(kayaTintPair(node.filled).first, MaterialTheme.shapes.medium)
+        .then(kayaGroundSurface(node))
+    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled).first, MaterialTheme.shapes.medium)
+    if (node.selected) surface = surface.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium)
+    if (node.activatable) surface = surface.then(kayaActivatable(node))
+    return surface
+}
+
+/** A container's ground (docs/styling-pass-plan.md Y2, Y3): the core's
+ * clamped stop for this appearance fading into the scheme's background, or
+ * the picture through the image's own door, covering the container. */
+@Composable
+fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
+    KayaCompose.GROUND_GRADIENT -> {
+        val scheme = MaterialTheme.colorScheme
+        val top = if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF
+            else (node.groundTops shr 24) and 0xFF_FFFF
+        Modifier.background(Brush.verticalGradient(listOf(Color(0xFF00_0000L or top), scheme.background)))
+    }
+    KayaCompose.GROUND_IMAGE -> {
+        KayaPictureDoor(node)
+        val picture = node.picture
+        if (picture == null) {
+            Modifier
+        } else {
+            // Not `paint` (docs/traps.md, Compose's Modifier.paint fills bounded constraints).
+            val painter = remember(picture) { KayaPicturePainter(picture) }
+            Modifier.clipToBounds().drawBehind {
+                val scale = ContentScale.Crop.computeScaleFactor(painter.intrinsicSize, size)
+                val drawn = Size(painter.intrinsicSize.width * scale.scaleX, painter.intrinsicSize.height * scale.scaleY)
+                val at = Alignment.Center.align(
+                    IntSize(drawn.width.roundToInt(), drawn.height.roundToInt()),
+                    IntSize(size.width.roundToInt(), size.height.roundToInt()), layoutDirection)
+                translate(at.x.toFloat(), at.y.toFloat()) { with(painter) { draw(drawn) } }
+            }
+        }
+    }
+    else -> Modifier
+}
+
+/** What each activatable container's composition registered as its press,
+ * by node id: the `click` verb presses through it. */
+val kayaActivators = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
+
+/** An activatable container (docs/styling-pass-plan.md Y4): Material's own
+ * press, hover and focus state layers through the ripple, the button role,
+ * and the selected state where the app declared one. */
+@Composable
+fun kayaActivatable(node: KayaNode): Modifier {
+    val activate = remember(node) { { KayaPresent.emitActivated(node.tag) } }
+    DisposableEffect(node) {
+        kayaActivators[node.id] = activate
+        onDispose { kayaActivators.remove(node.id) }
+    }
+    val name = if (node.a11yLabel.isEmpty()) kayaSkinName(node) else ""
+    val interaction = remember(node) { MutableInteractionSource() }
+    val press = if (node.selectedDeclared) {
+        Modifier.selectable(
+            selected = node.selected,
+            interactionSource = interaction,
+            indication = androidx.compose.material3.ripple(),
+            role = Role.Button,
+            onClick = activate,
+        )
+    } else {
+        Modifier.clickable(
+            interactionSource = interaction,
+            indication = androidx.compose.material3.ripple(),
+            role = Role.Button,
+            onClick = activate,
+        )
+    }
+    return Modifier.clip(MaterialTheme.shapes.medium).then(press)
+        .semantics(mergeDescendants = true) { if (name.isNotEmpty()) contentDescription = name }
+}
+
+/** An activatable container's accessible name: its labels' texts in order,
+ * comma-joined, SwiftUI's combined element's spelling. */
+fun kayaSkinName(node: KayaNode): String {
+    val out = mutableListOf<String>()
+    fun walk(n: KayaNode) {
+        if (n.kind == KayaCompose.KIND_LABEL) { if (n.text.isNotEmpty()) out.add(n.text) } else n.children.forEach(::walk)
+    }
+    walk(node)
+    return out.joinToString(", ")
+}
+
+/** A label's tint (docs/styling-pass-plan.md Y7): the tint's standalone
+ * colour as text, ignored inside a filled container. */
+@Composable
+fun kayaLabelTintColor(node: KayaNode): Color =
+    if (LocalKayaOnFill.current == null && node.labelTint in 1L..4L) kayaTintPair(node.labelTint).first
+    else Color.Unspecified
+
+/** An image's shape (docs/styling-pass-plan.md Y6): Material's medium shape
+ * or the circle, on the picture and on the loading and failed looks. */
+@Composable
+fun kayaImageShape(node: KayaNode): Modifier = when (node.shape) {
+    KayaCompose.SHAPE_ROUNDED -> Modifier.clip(MaterialTheme.shapes.medium)
+    KayaCompose.SHAPE_CIRCLE -> Modifier.clip(CircleShape)
+    else -> Modifier
+}
+
+/** The scheme's skin tokens as the composition resolved them, ARGB, for the
+ * readers' candidates (docs/styling-pass-plan.md Y9). */
+class KayaSkinTokens(
+    val ground: Int,
+    val text: Int,
+    val dark: Boolean,
+    val hover: Int,
+    val neutral: Int,
+    val selected: Int,
+    val standalone: List<Int>,
+    val overlayText: Int,
+)
+
+@Volatile
+var kayaSkinTokens: KayaSkinTokens? = null
+
+@Composable
+fun KayaRecordSkinTokens() {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = KayaSkinTokens(
+        ground = scheme.background.toArgb(),
+        text = scheme.onBackground.toArgb(),
+        dark = scheme.background.luminance() < 0.5f,
+        hover = scheme.onSurface.copy(alpha = KAYA_HOVER_LAYER).toArgb(),
+        neutral = kayaTintPair(5L).first.toArgb(),
+        selected = scheme.secondaryContainer.toArgb(),
+        standalone = (1L..4L).map { kayaTintPair(it).first.toArgb() },
+        overlayText = kayaTintPair(6L).second.toArgb(),
+    )
+    SideEffect { kayaSkinTokens = tokens }
+}
+
+/** expect_rows' text of one cell: a label's, or a nested container's labels
+ * joined by `/` (docs/styling-pass-plan.md Y5); null for a cell with none. */
+fun kayaCellText(node: KayaNode): String? {
+    if (node.kind == KayaCompose.KIND_LABEL) return node.text
+    if (node.kind != KayaCompose.KIND_ROW && node.kind != KayaCompose.KIND_COLUMN) return null
+    val inner = node.children.mapNotNull { kayaCellText(it) }
+    return if (inner.isEmpty()) null else inner.joinToString("/")
+}
+
+/** Whether a dock's root holds a widget: one made of empty containers
+ * collapses the dock (docs/styling-pass-plan.md Y8). */
+fun kayaHoldsWidget(node: KayaNode): Boolean =
+    if (node.kind != KayaCompose.KIND_ROW && node.kind != KayaCompose.KIND_COLUMN) true
+    else node.children.any(::kayaHoldsWidget)
+
+/** The dock's laid-out frame in window pixels, null while collapsed, and
+ * the frame of the surface above it. */
+@Volatile
+var kayaDockFrame: androidx.compose.ui.geometry.Rect? = null
+@Volatile
+var kayaDockAbove: androidx.compose.ui.geometry.Rect? = null
+
+/** The dock (docs/styling-pass-plan.md Y8): the bar surface across the
+ * window's foot, running under the navigation bar when nothing sits below
+ * it, kaya's inset inside it. */
+@Composable
+internal fun KayaDockBar(consumesBottom: Boolean) {
+    val root = KayaSceneModel.dockRoot
+    if (root == null || !kayaHoldsWidget(root)) {
+        SideEffect { kayaDockFrame = null }
+        return
+    }
+    val edges = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(
+        if (consumesBottom) WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom else WindowInsetsSides.Horizontal)
+    Box(
+        Modifier.fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .onGloballyPositioned { kayaDockFrame = it.boundsInWindow() }
+            .windowInsetsPadding(edges)
+            .padding(KayaSceneModel.windowInset.dp),
+    ) {
+        KayaRender(root)
+    }
+    DisposableEffect(Unit) { onDispose { kayaDockFrame = null } }
 }
 
 /** The foreground of the filled container a composable sits in, null outside
@@ -946,10 +1147,11 @@ inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable ()
         ) {
             content()
         }
-    } else if (node.filled == 0L) {
+    } else if (node.filled == 0L && !node.selected) {
         content()
     } else {
-        val onFill = kayaTintPair(node.filled).second
+        val onFill = if (node.selected) MaterialTheme.colorScheme.onSecondaryContainer
+            else kayaTintPair(node.filled).second
         CompositionLocalProvider(
             LocalContentColor provides onFill,
             LocalKayaOnFill provides onFill,
@@ -1307,6 +1509,10 @@ data class KayaRange(val start: Int, val stop: Int)
 
 object KayaSceneModel {
     var root by mutableStateOf<KayaNode?>(null)
+    /** The window's dock (docs/styling-pass-plan.md Y8): its surface id and
+     * the root mounted into it; Android has the one window. */
+    var dockId by mutableStateOf(0L)
+    var dockRoot by mutableStateOf<KayaNode?>(null)
     // The title materializes on TWO surfaces — the Activity task label
     // and the top bar's title slot — and expect_title asserts both.
     // Width/height are advisory only. A COMPOSITION STATE AND NOT A
@@ -2317,6 +2523,7 @@ internal fun KayaImageBox(node: KayaNode, a11yTag: Modifier, label: String) {
     val density = LocalDensity.current.density
     val box = a11yTag.then(kayaFrame(node.id)).size(node.maxWidth.dp, node.maxHeight.dp)
         .onGloballyPositioned { kayaImageDrawn[node.id] = Pair(it.size.width / density, it.size.height / density) }
+        .then(kayaImageShape(node))
     val picture = node.picture
     if (node.phase == KayaCompose.IMAGE_PHASE_FAILED || (picture == null && node.imageFailed)) {
         KayaImageLook(node, "failed", box, label) {
@@ -2963,12 +3170,19 @@ object KayaCompose {
     private const val PROP_EXPANDED = 60
     private const val PROP_BLEED = 61
     private const val PROP_PHASE = 62
-    // docs/styling-pass-plan.md: the skin, a depth slice here (the breadth's).
+    // docs/styling-pass-plan.md: the skin.
     private const val PROP_GROUND = 63
     private const val PROP_SHAPE = 64
     private const val PROP_SELECTED = 65
     private const val PROP_TINT = 66
     private const val PROP_ACTIVATABLE = 67
+    // The ground and shape enums' wire values (docs/styling-pass-plan.md Y2, Y6).
+    const val GROUND_NONE = 0L
+    const val GROUND_GRADIENT = 1L
+    const val GROUND_IMAGE = 2L
+    const val SHAPE_RECT = 0L
+    const val SHAPE_ROUNDED = 1L
+    const val SHAPE_CIRCLE = 2L
     // The image_phase enum's wire values (docs/network-images-plan.md N2).
     const val IMAGE_PHASE_SHOWN = 0L
     const val IMAGE_PHASE_LOADING = 1L
@@ -3992,15 +4206,17 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.rich = readBool(b)
                         PROP_SUBMITS ->
                             KayaSceneModel.nodes[id]!!.submits = readBool(b)
-                        PROP_FILLED -> {
-                            val tint = readI64(b)
-                            if (tint == 6L) depthStub("grounds")
-                            KayaSceneModel.nodes[id]!!.filled = tint
+                        PROP_FILLED ->
+                            KayaSceneModel.nodes[id]!!.filled = readI64(b)
+                        PROP_GROUND -> KayaSceneModel.nodes[id]!!.ground = readI64(b)
+                        PROP_SHAPE -> KayaSceneModel.nodes[id]!!.shape = readI64(b)
+                        PROP_SELECTED -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            node.selected = readBool(b)
+                            node.selectedDeclared = true
                         }
-                        PROP_GROUND -> depthStub("grounds")
-                        PROP_SHAPE -> depthStub("shapes")
-                        PROP_SELECTED, PROP_ACTIVATABLE -> depthStub("cards")
-                        PROP_TINT -> depthStub("tracks")
+                        PROP_ACTIVATABLE -> KayaSceneModel.nodes[id]!!.activatable = readBool(b)
+                        PROP_TINT -> KayaSceneModel.nodes[id]!!.labelTint = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
                         PROP_MAX_LINES ->
@@ -4017,8 +4233,8 @@ object KayaCompose {
                         }
                         PROP_COLOR -> {
                             val node = KayaSceneModel.nodes[id]!!
-                            if (node.kind == KIND_ROW || node.kind == KIND_COLUMN) depthStub("grounds")
-                            node.color = readI64(b)
+                            if (node.kind == KIND_ROW || node.kind == KIND_COLUMN) node.groundTops = readI64(b)
+                            else node.color = readI64(b)
                         }
                         PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
                         // An app write is also the settled pair and fires
@@ -4113,8 +4329,6 @@ object KayaCompose {
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
                         PROP_SOURCE -> {
-                            val holder = KayaSceneModel.nodes[id]!!
-                            if (holder.kind == KIND_ROW || holder.kind == KIND_COLUMN) depthStub("grounds")
                             // The decode is the door's, off the UI thread
                             // (kayaServePicture; docs/network-images-plan.md N9).
                             val handle = readBlobHandle(b)
@@ -4517,7 +4731,10 @@ object KayaCompose {
                         toastId, toastText, toastLabel,
                         toastDuration == TOAST_DURATION_LONG, kayaToastTokens)
                 }
-                APPLY_ATTACH_DOCK -> depthStub("dock")
+                APPLY_ATTACH_DOCK -> {
+                    b.long
+                    KayaSceneModel.dockId = b.long
+                }
                 APPLY_WITHDRAW_TOAST -> {
                     b.long
                     val toastId = b.long
@@ -4889,7 +5106,10 @@ object KayaCompose {
                     val entry = KayaSceneModel.navIndex[wid]
                     val section = KayaSceneModel.sectionIndex[wid]
                     val sheet = KayaSceneModel.sheetIndex[wid]
-                    if (sheet != null) {
+                    if (wid != 0L && wid == KayaSceneModel.dockId) {
+                        KayaSceneModel.dockRoot = KayaSceneModel.nodes[root]
+                        notePresentedChanged()
+                    } else if (sheet != null) {
                         // Mounting presents: KayaSheetHost composes it.
                         sheet.root = KayaSceneModel.nodes[root]
                         notePresentedChanged()
@@ -5834,6 +6054,7 @@ object KayaCompose {
         }
         for (entry in KayaSceneModel.navEntries) entry.root?.let { stack.addLast(it) }
         for (sheet in KayaSceneModel.sheets) sheet.root?.let { stack.addLast(it) }
+        KayaSceneModel.dockRoot?.let { stack.addLast(it) }
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             if (!ids.add(node.id)) continue
@@ -5848,7 +6069,12 @@ object KayaCompose {
      *  the row keyed [key] tops its scroll box within two pixels, or sits
      *  wholly inside a box at its end; otherwise what the placements say. */
     private fun kayaScrolledTo(node: KayaNode, key: String): String? {
-        if (node.tableColumns.isNotEmpty()) return "a table; expect_window reads a windowed tier"
+        if (node.tableColumns.isNotEmpty()) {
+            val window = kayaTableWindows[node.id] ?: return "a table with no windowed tier laid out"
+            val index = KayaPresent.scrollToRow(node.id, key)
+            if (index == KayaPresent.ROW_NOT_FOUND) return "no row carries the key \"$key\""
+            return window.scrolledTo(index.toInt())
+        }
         val copy = node.children.firstOrNull { tableStamp(it.tag)?.keys == listOf(key) }
             ?: return "no realized row keyed \"$key\" among ${node.children.size} children"
         val scroll = kayaScrollAncestor(node) ?: return "the container has no scroll ancestor"
@@ -7551,11 +7777,19 @@ object KayaCompose {
             val loc = IntArray(2)
             decor.getLocationInWindow(loc)
             val ground = (decor.background as? android.graphics.drawable.ColorDrawable)?.color
+            var holder = node?.let { KayaSceneModel.parents[it.id] }
+            while (holder != null && KayaSceneModel.nodes[holder]?.ground != GROUND_IMAGE) {
+                holder = KayaSceneModel.parents[holder]
+            }
+            val pictured = holder?.let { id ->
+                kayaFillBoxes[id]?.let { Pair(it, KayaSceneModel.nodes[id]?.picture) }
+            }
             listOf(
                 node?.let { kayaFillBoxes[it.id] },
                 android.graphics.Point(loc[0], loc[1]),
                 ground,
                 activity.resources.displayMetrics.density,
+                pictured,
             )
         }
         val box = gathered[0] as android.graphics.Rect?
@@ -7591,13 +7825,287 @@ object KayaCompose {
         val names = listOf("accent", "success", "warning", "critical", "neutral")
         val fills = kayaTintFills
         if (fills.size != 5) return "<no filled container has composed, so no tint resolved>"
-        val candidates = listOf("none" to rgb(ground)) + names.zip(fills.map { over(it) })
+        // The skin's surfaces (docs/styling-pass-plan.md Y4): the hover layer
+        // over the bare ground and over a neutral card, and the selected one.
+        val skin = kayaSkinTokens
+        fun overOn(c: Int, under: IntArray): IntArray {
+            val a = ((c ushr 24) and 0xFF) / 255.0
+            val f = rgb(c)
+            return IntArray(3) { Math.round(f[it] * a + under[it] * (1 - a)).toInt() }
+        }
+        val skinned = if (skin == null) emptyList() else listOf(
+            "hovered" to overOn(skin.hover, rgb(ground)),
+            "hovered" to overOn(skin.hover, over(skin.neutral)),
+            "selected" to over(skin.selected),
+        )
+        val candidates = listOf("none" to rgb(ground)) + names.zip(fills.map { over(it) }) + skinned
         val got = rgb(px)
+        // The overlay is the platform's dark panel over media (Y3): a scrim
+        // over the art has no one colour to rank against, so it reads as
+        // overlay when the sample is dark and under half as bright as the
+        // picture the nearest image ground draws behind it.
+        val pictured = gathered[4] as Pair<*, *>?
+        if (pictured != null) {
+            val holderBox = pictured.first as android.graphics.Rect
+            val art = kayaPictureAt(pictured.second as KayaPicture?, (x - origin.x - holderBox.left).toFloat(),
+                (y - origin.y - holderBox.top).toFloat(), holderBox.width().toFloat(), holderBox.height().toFloat())
+            val sample = got.map { it / 255.0 }.toDoubleArray()
+            val mine = kayaLum(sample)
+            val legible = skin != null && kayaContrast(sample, kayaRgb(skin.overlayText)) >= 4.5
+            if (art != null && legible && mine < kayaLum(art) / 2) {
+                return String.format("overlay (sampled %02X%02X%02X at ($x,$y), luminance %.3f over the picture's %s at %.3f)",
+                    got[0], got[1], got[2], mine, kayaHexOf(art), kayaLum(art))
+            }
+        }
         fun dist(c: IntArray) = (0..2).sumOf { (c[it] - got[it]) * (c[it] - got[it]) }
         val ranked = candidates.sortedBy { dist(it.second) }
         fun hex(c: IntArray) = String.format("%02X%02X%02X", c[0], c[1], c[2])
         return "${ranked[0].first} (sampled ${hex(got)} at ($x,$y); " +
             ranked.take(3).joinToString(", ") { "${it.first} ${hex(it.second)}" } + ")"
+    }
+
+    /** A skin reading polled for 5 s until its first word is the wanted one:
+     * the observation SwiftUI's kayaSkinReading spells, or null with the
+     * failure added. */
+    private fun kayaSkinExpect(parts: List<String>, failures: MutableList<String>, read: () -> String?): String? {
+        val want = parts.getOrElse(2) { "" }
+        var got = read()
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (got?.substringBefore(' ') != want && System.nanoTime() < deadline) {
+            Thread.sleep(100)
+            got = read()
+        }
+        val noun = parts[0].removePrefix("expect_")
+        return when {
+            got == null -> { failures.add("no such target ${parts[1]}"); null }
+            got.substringBefore(' ') == want -> "${parts[1]} $noun $want"
+            else -> { failures.add("${parts[1]} reads $noun $got, wanted $want"); null }
+        }
+    }
+
+    /** One PixelCopy of the app's window for the skin's readers
+     * (docs/styling-pass-plan.md Y9), indexed by window pixel. NOT ON THE UI
+     * THREAD — PixelCopy deadlocks there. */
+    private class KayaSkinShot(val bitmap: android.graphics.Bitmap, val density: Float) {
+        fun at(x: Float, y: Float): DoubleArray? {
+            val (px, py) = Pair(x.toInt(), y.toInt())
+            if (px < 0 || py < 0 || px >= bitmap.width || py >= bitmap.height) return null
+            return kayaRgb(bitmap.getPixel(px, py))
+        }
+    }
+
+    private fun kayaSkinShot(activity: ComponentActivity): KayaSkinShot? {
+        val (src, density) = onUi(activity) {
+            val decor = activity.window.decorView
+            val loc = IntArray(2)
+            decor.getLocationInWindow(loc)
+            Pair(android.graphics.Rect(loc[0], loc[1], loc[0] + decor.width, loc[1] + decor.height),
+                activity.resources.displayMetrics.density)
+        }
+        if (src.width() <= 0 || src.height() <= 0) return null
+        val bitmap = android.graphics.Bitmap.createBitmap(src.width(), src.height(), android.graphics.Bitmap.Config.ARGB_8888)
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var result = -1
+        android.view.PixelCopy.request(
+            activity.window, src, bitmap,
+            { code -> result = code; latch.countDown() },
+            android.os.Handler(android.os.Looper.getMainLooper()),
+        )
+        latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+        if (result != android.view.PixelCopy.SUCCESS) {
+            bitmap.recycle()
+            return null
+        }
+        return KayaSkinShot(bitmap, density)
+    }
+
+    private fun kayaRgb(c: Int) =
+        doubleArrayOf(((c shr 16) and 0xFF) / 255.0, ((c shr 8) and 0xFF) / 255.0, (c and 0xFF) / 255.0)
+
+    private fun kayaGap(a: DoubleArray, b: DoubleArray) = (0..2).maxOf { Math.abs(a[it] - b[it]) }
+
+    private fun kayaLum(c: DoubleArray): Double {
+        val l = c.map { if (it <= 0.04045) it / 12.92 else Math.pow((it + 0.055) / 1.055, 2.4) }
+        return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+    }
+
+    private fun kayaContrast(a: DoubleArray, b: DoubleArray): Double {
+        val (x, y) = Pair(kayaLum(a), kayaLum(b))
+        return (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05)
+    }
+
+    private fun kayaHexOf(c: DoubleArray) =
+        String.format("%02X%02X%02X", Math.round(c[0] * 255), Math.round(c[1] * 255), Math.round(c[2] * 255))
+
+    /** SwiftUI's kayaSkinTolerance, the readers' one number. */
+    private const val KAYA_SKIN_TOLERANCE = 0.06
+
+    /** The colour the image ground [picture] draws at [x], [y] of a box
+     * [w] x [h], all window pixels, under ContentScale.Crop. */
+    private fun kayaPictureAt(picture: KayaPicture?, x: Float, y: Float, w: Float, h: Float): DoubleArray? {
+        val bitmap = picture?.bitmap?.asAndroidBitmap() ?: return null
+        val (bw, bh) = Pair(bitmap.width.toFloat(), bitmap.height.toFloat())
+        val scale = maxOf(w / bw, h / bh)
+        val (ox, oy) = Pair((bw * scale - w) / 2, (bh * scale - h) / 2)
+        val (px, py) = Pair(((x + ox) / scale).toInt(), ((y + oy) / scale).toInt())
+        if (px < 0 || py < 0 || px >= bitmap.width || py >= bitmap.height) return null
+        return kayaRgb(bitmap.getPixel(px, py))
+    }
+
+    private fun kayaContainerTarget(spec: String): KayaNode? =
+        target(spec, "column", KayaSceneModel.columns) ?: target(spec, "row", KayaSceneModel.rows)
+
+    /** expect_ground's read (docs/styling-pass-plan.md §5.1), off the window's
+     * pixels 4 units inside the container's right edge, 4 units in from its
+     * top and its bottom and at its middle; SwiftUI's kayaGroundRead. */
+    private fun kayaGroundRead(activity: ComponentActivity, spec: String): String? {
+        val got = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                val box = kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }
+                Triple(box, node.picture, node.groundTops)
+            }
+        } ?: return null
+        val box = got.first ?: return "<no laid-out frame>"
+        val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
+        val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
+        val u = shot.density
+        val x = box.right - 4 * u
+        val top = shot.at(x, box.top + 4 * u)
+        val bottom = shot.at(x, box.bottom - 4 * u)
+        val mid = shot.at(x, box.exactCenterY())
+        if (top == null || bottom == null || mid == null) return "<the probes fall outside the window: $box>"
+        val ground = kayaRgb(tokens.ground)
+        val seen = "top ${kayaHexOf(top)}, middle ${kayaHexOf(mid)}, bottom ${kayaHexOf(bottom)}, ground ${kayaHexOf(ground)}"
+        if (kayaGap(top, ground) <= KAYA_SKIN_TOLERANCE) return "none ($seen)"
+        val art = kayaPictureAt(got.second, box.width() - 4 * u, 4 * u, box.width().toFloat(), box.height().toFloat())
+        if (art != null && kayaGap(art, top) <= KAYA_SKIN_TOLERANCE * 2) {
+            return "image ($seen, the picture there ${kayaHexOf(art)})"
+        }
+        val tops = got.third
+        val stop = if (tokens.dark) tops and 0xFF_FFFF else (tops shr 24) and 0xFF_FFFF
+        val want = kayaRgb(stop.toInt())
+        val contrast = kayaContrast(mid, kayaRgb(tokens.text))
+        val detail = "$seen, the clamped stop ${kayaHexOf(want)}, text ${String.format("%.1f", contrast)}:1 at the middle"
+        if (kayaGap(top, want) <= KAYA_SKIN_TOLERANCE && kayaGap(bottom, ground) <= KAYA_SKIN_TOLERANCE &&
+            contrast >= 4.5
+        ) {
+            return "gradient ($detail)"
+        }
+        return "unmatched ($detail)"
+    }
+
+    /** expect_shape's read (§5.2): the probe 1 unit inside the top-left
+     * corner, the one 6 units in, and the centre, each the picture or what
+     * the image sits on, read 4 units left of it; SwiftUI's kayaShapeRead. */
+    private fun kayaShapeRead(activity: ComponentActivity, spec: String): String? {
+        val frame = onUi(activity) {
+            target(spec, "image", KayaSceneModel.images)?.let { Pair(kayaNodeFrames[it.id], it.id) }
+        } ?: return null
+        val box = frame.first ?: return "<no laid-out frame>"
+        val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
+        val u = shot.density
+        if (box.width < 12 * u || box.height < 12 * u) return "<no laid-out frame: $box>"
+        val under = shot.at(box.left - 4 * u, box.center.y) ?: return "<nothing left of $box>"
+        val c1 = shot.at(box.left + 1 * u, box.top + 1 * u)
+        val c6 = shot.at(box.left + 6 * u, box.top + 6 * u)
+        val centre = shot.at(box.center.x, box.center.y)
+        if (c1 == null || c6 == null || centre == null) return "<the probes fall outside the window: $box>"
+        fun art(c: DoubleArray) = kayaGap(c, under) > 0.02
+        val seen = "(1,1) ${kayaHexOf(c1)}, (6,6) ${kayaHexOf(c6)}, centre ${kayaHexOf(centre)}, " +
+            "under it ${kayaHexOf(under)}, drawn at $box"
+        return when (Triple(art(c1), art(c6), art(centre))) {
+            Triple(true, true, true) -> "rect ($seen)"
+            Triple(false, true, true) -> "rounded ($seen)"
+            Triple(false, false, true) -> "circle ($seen)"
+            else -> "unmatched ($seen)"
+        }
+    }
+
+    /** expect_tint's read (§5.5): the label's most inked pixel, the one
+     * farthest from the ground, against the appearance's text and the four
+     * standalone colours; SwiftUI's kayaLabelTintRead. */
+    private fun kayaLabelTintRead(activity: ComponentActivity, spec: String): String? {
+        val frame = onUi(activity) {
+            target(spec, "label", KayaSceneModel.labels)?.let { Pair(kayaNodeFrames[it.id], it.id) }
+        } ?: return null
+        val box = frame.first ?: return "<no laid-out frame>"
+        val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
+        val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
+        val ground = kayaRgb(tokens.ground)
+        var ink: DoubleArray? = null
+        var best = -1.0
+        var y = box.top
+        while (y < box.bottom) {
+            var x = box.left
+            while (x < box.right) {
+                shot.at(x, y)?.let { c ->
+                    val d = (0..2).sumOf { Math.abs(c[it] - ground[it]) }
+                    if (d > best) { best = d; ink = c }
+                }
+                x += 1f
+            }
+            y += 1f
+        }
+        val seen = ink ?: return "<no pixels in $box>"
+        val names = listOf("accent", "success", "warning", "critical")
+        val candidates = listOf("none" to kayaRgb(tokens.text)) + names.zip(tokens.standalone.map { kayaRgb(it) })
+        fun dist(c: DoubleArray) = (0..2).sumOf { (c[it] - seen[it]) * (c[it] - seen[it]) }
+        val ranked = candidates.sortedBy { dist(it.second) }
+        return "${ranked[0].first} (ink ${kayaHexOf(seen)}; " +
+            ranked.take(3).joinToString(", ") { "${it.first} ${kayaHexOf(it.second)}" } + ")"
+    }
+
+    /** expect_selected's read (§5.3), off the merged semantics tree: the node
+     * carrying the container's tag whose bounds hold the copy's laid-out
+     * centre (a stamped row's tag is shared by its siblings). */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaSelectedRead(activity: ComponentActivity, spec: String): String? = onUi(activity) {
+        val node = kayaContainerTarget(spec) ?: return@onUi null
+        if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
+        val centre = kayaFillBoxes[node.id] ?: return@onUi "<no laid-out frame>"
+        val view = kayaComposeRoot(activity.window.decorView) ?: return@onUi "<no Compose root>"
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val hits = mutableListOf<SemanticsNode>()
+        fun walk(n: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (n.config.getOrNull(SemanticsProperties.TestTag) == node.a11yId) hits.add(n)
+            n.children.forEach { walk(it, depth + 1) }
+        }
+        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        val (cx, cy) = Pair(centre.exactCenterX(), centre.exactCenterY())
+        val chosen = if (hits.size == 1) hits else hits.filter { it.boundsInWindow.contains(androidx.compose.ui.geometry.Offset(cx, cy)) }
+        if (chosen.size != 1) return@onUi "<${hits.size} nodes carry tag '${node.a11yId}', ${chosen.size} hold ($cx,$cy)>"
+        when (chosen[0].config.getOrNull(SemanticsProperties.Selected)) {
+            true -> "on"
+            false -> "off"
+            null -> "none (the node publishes no selected state)"
+        }
+    }
+
+    /** expect_dock's read (§5.4): the dock's laid-out frame spans the window
+     * at its foot (above the section bar where there is one) and the surface
+     * above it ends where it begins. */
+    private fun kayaDockRead(activity: ComponentActivity): String = onUi(activity) {
+        val decor = activity.window.decorView
+        val (w, h) = Pair(decor.width.toFloat(), decor.height.toFloat())
+        val density = activity.resources.displayMetrics.density
+        val root = KayaSceneModel.dockRoot ?: return@onUi "hidden (no dock is mounted)"
+        val frame = kayaDockFrame
+        if (!kayaHoldsWidget(root) || frame == null || frame.height <= 1f) {
+            return@onUi "hidden (dock frame ${frame ?: "none"})"
+        }
+        val bar = if (KayaSceneModel.sections.isNotEmpty()) KayaSceneModel.sectionBarHeight.value * density else 0f
+        val foot = h - bar
+        val slack = 2 * density
+        val spans = frame.left <= slack && frame.right >= w - slack
+        val atFoot = Math.abs(frame.bottom - foot) <= slack
+        val above = kayaDockAbove
+        val ends = above != null && above.bottom <= frame.top + 1
+        val detail = "dock $frame, window ${w.toInt()}x${h.toInt()}, section bar ${bar.toInt()}px, surface above $above"
+        if (spans && atFoot && ends) "shown ($detail)" else "misplaced ($detail)"
     }
 
     private fun kayaCanvasInk(
@@ -9864,7 +10372,13 @@ object KayaCompose {
                                                 "tag=${kayaTagDigest(it.tag)} " +
                                                 "batches=$kayaBatches")
                                         KayaPresent.emitClicked(it.tag)
-                                    } != null
+                                    } != null ||
+                                    // An activatable container presses through the
+                                    // press its composition registered
+                                    // (docs/styling-pass-plan.md Y4).
+                                    kayaContainerTarget(parts[1])
+                                        ?.let { kayaActivators[it.id] }
+                                        ?.also { it() } != null
                             }
                         }
                         if (!ok) failures.add("no such target ${parts[1]}")
@@ -11171,8 +11685,8 @@ object KayaCompose {
                                 ?.children
                                 ?.joinToString("|") { row ->
                                     row.children
-                                        .filter { it.kind == KIND_LABEL }
-                                        .joinToString(",") { it.text }
+                                        .mapNotNull { kayaCellText(it) }
+                                        .joinToString(",")
                                 }
                         }
                         when {
@@ -12896,11 +13410,29 @@ object KayaCompose {
                             failures.add("${parts[1]} is short of its breadth ($short)")
                         }
                     }
-                    "hover", "expect_selected" -> depthStub("cards")
-                    "expect_ground" -> depthStub("grounds")
-                    "expect_shape" -> depthStub("shapes")
-                    "expect_tint" -> depthStub("tracks")
-                    "expect_dock" -> depthStub("dock")
+                    // docs/styling-pass-plan.md §5: a phone has no pointer, and the
+                    // lane cuts a scene at its first hover (tools/lib/lanes/android.py MODS).
+                    "hover" -> failures.add("hover ${parts[1]}: an Android phone has no pointer to hover with")
+                    // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
+                    "expect_ground" ->
+                        kayaSkinExpect(parts, failures) { kayaGroundRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_shape" ->
+                        kayaSkinExpect(parts, failures) { kayaShapeRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_tint" ->
+                        kayaSkinExpect(parts, failures) { kayaLabelTintRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_selected" ->
+                        kayaSkinExpect(parts, failures) { kayaSelectedRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_dock" -> {
+                        val want = parts.getOrElse(1) { "" }
+                        var got = kayaDockRead(activity)
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (got.substringBefore(' ') != want && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            got = kayaDockRead(activity)
+                        }
+                        if (got.substringBefore(' ') == want) observed.add("dock $want")
+                        else failures.add("dock reads $got, wanted $want")
+                    }
                     "expect_fill" -> {
                         // harness.rs Step::ExpectFill.
                         val got = kayaFillRead(activity, parts[1])
@@ -15280,6 +15812,9 @@ internal class KayaTableWindow(private val node: KayaNode) {
     private var lastCount = -1
     private var anchorRow = -1
     private var anchorScroll = -1
+    private var endPark = -1
+    private var endMax = -1
+    private var endScroll = -1
     private var parkSeq = 0
     private var scheduled = false
 
@@ -15301,6 +15836,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
     fun park(row: Int) {
         anchorRow = row
         anchorScroll = -1
+        endPark = -1
         parkSeq += 1
         val count = if (lastCount > 0) lastCount else 1
         lastFirst = row
@@ -15391,6 +15927,16 @@ internal class KayaTableWindow(private val node: KayaNode) {
         // the band the core had already moved).
         publish()
         val scroll = node.scrollState.value
+        if (anchorRow < 0 && endPark >= 0) {
+            if (node.scrollState.maxValue != endMax) {
+                KayaVTrace.note("window", "re-park table=${node.id} row=$endPark: the end moved from $endMax to ${node.scrollState.maxValue}")
+                anchorRow = endPark
+                anchorScroll = -1
+                endPark = -1
+            } else if (scroll != endScroll) {
+                endPark = -1
+            }
+        }
         if (anchorRow >= 0) {
             if (anchorScroll >= 0 && scroll != anchorScroll) {
                 // A scroll this tier did not issue: the reader owns free
@@ -15433,6 +15979,12 @@ internal class KayaTableWindow(private val node: KayaNode) {
                         if (state.value != want) {
                             KayaVTrace.note("window", "park #$parked yields table=${node.id} row=$row: clamped at ${state.value}")
                             anchorRow = -1
+                            // The end may still move (docs/traps.md, Compose's Modifier.paint entry's third part).
+                            if (state.value >= state.maxValue) {
+                                endPark = row
+                                endMax = state.maxValue
+                                endScroll = state.value
+                            }
                         }
                         schedule()
                     }
@@ -15493,6 +16045,21 @@ internal class KayaTableWindow(private val node: KayaNode) {
     /** What expect_window compares: the first VISIBLE row and the
      *  DECLARED total. The band's width is a viewport metric and left the
      *  verb (ruled 2026-08-25). */
+    /** expect_scrolled_to on this tier (docs/scroll-to-plan.md S7): null when
+     *  [row] tops the viewport within two pixels or sits wholly inside it,
+     *  read off the edges this layout drew; otherwise what they say. */
+    fun scrolledTo(row: Int): String? {
+        val top = contentTopOf(row)
+        if (top < 0) return "row $row is not realized (the layout drew ${rowTops.size} rows from $laidOutFirst)"
+        val bottom = top + rowExtents[row - laidOutFirst]
+        val scroll = node.scrollState.value
+        if (Math.abs(top - scroll) <= 2 || (top >= scroll && bottom <= scroll + viewportPx)) return null
+        // A row's extent is its pitch, spacing included, so the last row of a
+        // table scrolled to its end ends past the viewport by that spacing.
+        if (scroll >= node.scrollState.maxValue && top >= scroll && top < scroll + viewportPx) return null
+        return "row $row drawn at $top..$bottom, the viewport showing $scroll..${scroll + viewportPx}"
+    }
+
     fun firstVisible(children: Int): Pair<Int, Int> {
         KayaPresent.windowGeometry(node.id, slots)
         val total = slots[KayaPresent.GEOMETRY_TOTAL].toInt()
@@ -17307,7 +17874,7 @@ private fun KayaRenderCore(
                         else -> LocalTextStyle.current
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
-                        kayaCaptionColor() else Color.Unspecified,
+                        kayaCaptionColor() else kayaLabelTintColor(node),
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = base,
                 )
@@ -17321,6 +17888,7 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     style = MaterialTheme.typography.titleLarge,
+                    color = kayaLabelTintColor(node),
                     // A SAMPLE OF THE RAMP ROUTE for expect_typeface:
                     // this label takes its style from `typography`, so
                     // it goes on reading the platform face if the
@@ -17376,6 +17944,7 @@ private fun KayaRenderCore(
                 // LocalTextStyle, the write the ramp cannot stand in for.
                 Text(
                     node.text,
+                    color = kayaLabelTintColor(node),
                     onTextLayout = { kayaTypefaceSites["label"] = it; kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y),
                 )
@@ -17462,7 +18031,7 @@ private fun KayaRenderCore(
                     contentScale = if (node.bleed) ContentScale.Crop
                         else if (bounded) ContentScale.Fit else ContentScale.None,
                     modifier = boxFill.then(if (node.bleed) kayaBleed(node, fit) else bound).then(a11yTag)
-                        .then(kayaFrame(node.id)).onGloballyPositioned {
+                        .then(kayaFrame(node.id)).then(kayaImageShape(node)).onGloballyPositioned {
                         kayaImageDrawn[node.id] = Pair(
                             it.size.width / density,
                             it.size.height / density,
@@ -18932,6 +19501,7 @@ internal fun KayaTheme(content: @Composable () -> Unit) {
             // what its content colour is" is the M3 contract and kaya
             // wraps the platform's idiom rather than restating it.
             Surface(modifier = Modifier.fillMaxSize(), color = scheme.background) {
+                KayaRecordSkinTokens()
                 content()
             }
         }
@@ -19653,7 +20223,8 @@ private fun KayaSurface(topConsumed: Boolean) {
         return
     }
     val shown = KayaSceneModel.navEntries.lastOrNull()?.root ?: KayaSceneModel.root
-    KayaContentBox(topConsumed, bottomConsumed = false, rides = kayaRidesNow(shown),
+    KayaDocked { docked ->
+    KayaContentBox(topConsumed, bottomConsumed = docked, rides = kayaRidesNow(shown),
         root = shown.takeIf { KayaSceneModel.panes < 2 }) {
         run {
         val topEntry = KayaSceneModel.navEntries.lastOrNull()
@@ -19747,6 +20318,25 @@ private fun KayaSurface(topConsumed: Boolean) {
             }
         }
         }
+    }
+    }
+}
+
+/** The surface with its dock under it once a window declares one
+ * (docs/styling-pass-plan.md Y8); [content] is told whether the dock takes
+ * the window's bottom edge. */
+@Composable
+private fun KayaDocked(content: @Composable (Boolean) -> Unit) {
+    if (KayaSceneModel.dockId == 0L) {
+        content(false)
+        return
+    }
+    val docked = KayaSceneModel.dockRoot?.let(::kayaHoldsWidget) == true
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth().onGloballyPositioned { kayaDockAbove = it.boundsInWindow() }) {
+            content(docked)
+        }
+        KayaDockBar(consumesBottom = true)
     }
 }
 
@@ -20353,6 +20943,9 @@ fun KayaSectionsScaffold(active: KayaSection, topConsumed: Boolean) {
     // padded a frame late).
     Layout(modifier = Modifier.fillMaxSize(), content = {
         Box {
+            if (KayaSceneModel.dockId != 0L) {
+                Box(Modifier.matchParentSize().onGloballyPositioned { kayaDockAbove = it.boundsInWindow() })
+            }
             val shown = active.entries.lastOrNull()?.root ?: active.root
             KayaContentBox(topConsumed, bottomConsumed = !imeShown, rides = kayaRidesNow(shown), root = shown) {
                 val pane = shown
@@ -20360,6 +20953,9 @@ fun KayaSectionsScaffold(active: KayaSection, topConsumed: Boolean) {
             }
         }
         // The toast sits above the bar, as Scaffold places a snackbar (docs/toast-plan.md T8).
+        // The dock rides above the bar, YouTube Music's layout (docs/styling-pass-plan.md Y8).
+        Column {
+        KayaDockBar(consumesBottom = false)
         NavigationBar(
             windowInsets = WindowInsets.systemBars.union(WindowInsets.displayCutout)
                 .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
@@ -20415,6 +21011,7 @@ fun KayaSectionsScaffold(active: KayaSection, topConsumed: Boolean) {
                     },
                 )
             }
+        }
         }
     }) { measurables, constraints ->
         val w = constraints.maxWidth

@@ -58,6 +58,21 @@ public final class Main {
             case "safearea":
                 app = Safearea::app;
                 break;
+            case "grounds":
+                app = Grounds::app;
+                break;
+            case "shapes":
+                app = Shapes::app;
+                break;
+            case "cards":
+                app = Cards::app;
+                break;
+            case "tracks":
+                app = Tracks::app;
+                break;
+            case "dock":
+                app = Dock::app;
+                break;
             case "toast":
                 app = Toast::app;
                 break;

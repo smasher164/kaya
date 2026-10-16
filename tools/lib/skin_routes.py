@@ -10,6 +10,7 @@ with every write, and a gradient sent to the arm unclamped looks fine in the
 light appearance. A backend whose depth stubs go must take a row in BACKENDS.
 """
 
+import importlib
 import re
 
 from content_type_routes import flat
@@ -31,6 +32,20 @@ STUBBED = {
     COMPOSE: [f'depthStub("{f}")' for f in FEATURES],
 }
 BACKENDS = {SWIFT: "the SwiftUI arm"}
+# One module per widget backend's arm, each exporting REL, LABEL,
+# findings(text) -> [str] and CUTS [(label, pattern, replacement, want)].
+ARM_MODULES = {GTK: "skin_gtk", WINUI: "skin_winui", COMPOSE: "skin_compose"}
+
+
+def arm_modules():
+    return {rel: importlib.import_module(name) for rel, name in ARM_MODULES.items()
+            if (ROOT / "tools/lib" / f"{name}.py").exists()}
+
+
+def source_key(rel, mod):
+    """The text a module reads: its backend's file, or the files it names in
+    SOURCES joined in order (an arm split across a file of its own)."""
+    return "+".join(getattr(mod, "SOURCES", (rel,)))
 # A reader may never answer from what the app wrote.
 MODEL = r"node\.shape\b|node\.labelTint\b|node\.selected\b|node\.activatable\b|\.dock\?\.hidden"
 # (label, opener, what the block must hold, what it may never name)
@@ -107,6 +122,14 @@ CALLS = [
      "inProgrammaticScroll = true\ntableView.noteHeightOfRows(\nwithIndexesChanged: IndexSet(\nintegersIn: visible.location..<(visible.location + visible.length)))\ninProgrammaticScroll = false\nreparkAnchor()"),
     (SWIFT, "only the user's own scroll drops the mac table's anchor (Y5)",
      "if !inProgrammaticScroll, let event = NSApp.currentEvent,\n[.scrollWheel, .leftMouseDragged, .leftMouseDown, .keyDown, .swipe].contains(event.type)"),
+    (SWIFT, "the mac native table measures only rows AppKit has made (docs/traps.md)",
+     "guard self.row(at: row) != nil, let measured = measuredHeight(row) else { continue }"),
+    (SWIFT, "the mac native table's first band waits for measured rows (docs/traps.md)",
+     "if reported == nil, KayaHost.rowExtent(node.id, presumed.location) == 0 {\nmeasureRows(presumed)"),
+    (SWIFT, "a reused view leaves the node it drew before (docs/traps.md)",
+     "for (other, views) in kayaSkinAnchors where other != id && views.contains(where: { $0.view === view.view }) {"),
+    (SWIFT, "the skin readers take the newest anchor still in a window",
+     "kayaSkinAnchors[id]?.reversed().lazy.compactMap(\\.view).first(where: { $0.window != nil })"),
     (SCENE, "the core lowers every gradient's colour",
      "let (light, dark) = crate::brand::gradient_tops(rgb);\n*packed = (i64::from(light) << 24) | i64::from(dark);"),
     (SCENE, "a transaction's ops pass the lowering", "crate::links::flush_early();\nself.lower_skin(&mut out);"),
@@ -122,8 +145,12 @@ CALLS = [
 
 
 def findings(sources, backends=None):
-    backends = BACKENDS if backends is None else backends
+    arms_held = arm_modules()
+    backends = {**BACKENDS, **{rel: m.LABEL for rel, m in arms_held.items()}} if backends is None else backends
     out = []
+    for rel, mod in arms_held.items():
+        if rel in backends:
+            out.extend(mod.findings(sources[source_key(rel, mod)]))
     swift = sources[SWIFT]
     for label, opener, needs, never in DOORS:
         found = blocks(swift, opener)
@@ -163,6 +190,9 @@ def findings(sources, backends=None):
 def run(g):
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8")
                for rel in [HARNESS, SCENE, BRAND, DOMINANT, SWIFT, *STUBBED]}
+    for rel, mod in arm_modules().items():
+        key = source_key(rel, mod)
+        sources.setdefault(key, "\n".join((ROOT / one).read_text(encoding="utf-8") for one in key.split("+")))
     still = [rel for rel, stubs in STUBBED.items() if all(stub in sources[rel] for stub in stubs)]
     g.counted("skin clauses held",
               sum(len(n) + len(v) + 1 for *_, n, v in DOORS) + sum(len(n) + 2 for *_, n in READS) + len(CALLS),
@@ -214,6 +244,16 @@ def run(g):
         ("a height correction read as the user's scroll", SWIFT,
          r"inProgrammaticScroll = true\n(\s+)tableView\.noteHeightOfRows\(",
          r"tableView.noteHeightOfRows(", "a height correction keeps the mac table's scroll anchor"),
+        ("an unmade row measured at the floor", SWIFT,
+         r"guard self\.row\(at: row\) != nil, let measured = measuredHeight\(row\) else \{ continue \}",
+         "guard self.row(at: row) != nil else { continue }\n                let measured = measuredHeight(row) ?? kayaNativeRowHeight",
+         "the mac native table measures only rows AppKit has made"),
+        ("the first band sized at the floor", SWIFT,
+         r"if reported == nil, KayaHost\.rowExtent\(node\.id, presumed\.location\) == 0 \{",
+         "if false {", "the mac native table's first band waits for measured rows"),
+        ("a reused view kept by the node it drew before", SWIFT,
+         r"    for \(other, views\) in kayaSkinAnchors where other != id && views\.contains\(where: \{ \$0\.view === view\.view \}\) \{\n        kayaSkinAnchors\[other\] = views\.filter \{ \$0\.view != nil && \$0\.view !== view\.view \}\n    \}\n",
+         "", "a reused view leaves the node it drew before"),
         ("the clamp removed", SCENE,
          r"let \(light, dark\) = crate::brand::gradient_tops\(rgb\);",
          "let (light, dark) = (rgb, rgb);", "the core lowers every gradient's colour"),
@@ -224,9 +264,14 @@ def run(g):
         ("harness.rs reading the model", HARNESS, r"word_reading\(&stage\.shape_read\(\*t\), want,",
          'word_reading("rect", want,', "harness.rs reads the shape the backend drew"),
     ]
+    for rel, mod in arm_modules().items():
+        cuts.extend((label, source_key(rel, mod), pattern, repl, want) for label, pattern, repl, want in mod.CUTS)
     for label, rel, pattern, repl, want in cuts:
         broken = g.doctor(f"skin: {label}", sources[rel], pattern, repl)
         g.negative(f"skin: {label}", lambda rel=rel, broken=broken: findings({**sources, rel: broken}), want=want)
+    for rel in [rel for rel in STUBBED if rel not in still]:
+        g.negative(f"skin: {rel}'s row withheld", lambda: findings(sources, backends=BACKENDS),
+                   want=f"{rel} no longer stubs")
     for rel in still:
         broken = sources[rel]
         for stub in STUBBED[rel]:

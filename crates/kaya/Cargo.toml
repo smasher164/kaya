@@ -593,7 +593,7 @@ path = "../../guests/rust/listrow.rs"
 name = "tints"
 path = "../../guests/rust/tints.rs"
 
-# docs/styling-pass-plan.md §5, rust-only at depth.
+# docs/styling-pass-plan.md §5.
 [[example]]
 name = "grounds"
 path = "../../guests/rust/grounds.rs"

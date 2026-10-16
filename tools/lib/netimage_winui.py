@@ -55,7 +55,7 @@ DOORS = [
       'glyph.SetStyle(&super::themed_foreground_style("FontIcon", None, "TextFillColorSecondaryBrush")?)?;',
       "AutomationProperties::SetAccessibilityView(&glyph, AccessibilityView::Raw)?;",
       "glyph.SetVisibility(shown(arm.width.min(arm.height) >= 2.0 * GLYPH))?;",
-      "image.SetOpacity(if failed { 0.0 } else { 1.0 })"],
+      "image.SetOpacity(if failed || super::skin::shaped(id) { 0.0 } else { 1.0 })"],
      ["SolidColorBrush", "Color {"]),
     ("look's fill", "fn look(width: f64, height: f64)",
      ["look.SetStyle(&fill_style()?)?;", "look.SetHorizontalAlignment(HorizontalAlignment::Left)?;",
@@ -125,11 +125,15 @@ def findings(text):
                 out.append(f"netimage: {LABEL}'s {label} names {name}")
     asyncs = len(re.findall(r"\.SetSourceAsync\(", src))
     in_door = sum(len(re.findall(r"\.SetSourceAsync\(", b)) for b in blocks(src, "fn decode(\n"))
+    # The skin's image ground decodes through the same writer and cache
+    # (docs/styling-pass-plan.md Y3), its own door beside this one.
+    in_ground = sum(len(re.findall(r"\.SetSourceAsync\(", b)) for b in blocks(src, "pub(super) fn picture(\n"))
     syncs = len(re.findall(r"\.SetSource\(&stream\)", src))
     in_mark = sum(len(re.findall(r"\.SetSource\(&stream\)", b)) for b in blocks(src, "fn caption_mark_bitmap("))
-    if asyncs != 1 or in_door != 1 or syncs != in_mark:
+    if asyncs != 2 or in_door != 1 or in_ground != 1 or syncs != in_mark:
         out.append(f"netimage: {LABEL} decodes outside its door — SetSourceAsync appears {asyncs} times "
-                   f"({in_door} in decode), the synchronous SetSource {syncs} times ({in_mark} in the caption mark)")
+                   f"({in_door} in decode, {in_ground} in the ground's picture), the synchronous SetSource {syncs} "
+                   f"times ({in_mark} in the caption mark)")
     for label, opener, needs in READS:
         found = blocks(src, opener)
         if len(found) != 1:

@@ -284,7 +284,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              "summary",
              # docs/network-images-plan.md N2: a stamped image's phase, bound
              # to the row's ImagePhase field.
-             "phase"]
+             "phase",
+             # docs/styling-pass-plan.md Y10: the skin in the template zone.
+             "ground_gradient", "ground_image", "shape", "tint", "selected", "on_activate"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -303,6 +305,8 @@ PROP_MEMBERS = {
         "revealed": "revealed", "revealable": "revealable",
         "summary": "summary",
         "phase": "phase",
+        "ground_gradient": "ground_gradient", "ground_image": "ground_image", "shape": "shape",
+        "tint": "tint", "selected": "selected", "on_activate": "on_activate",
     },
     "go": {
         "format": "SetFormat",
@@ -318,6 +322,8 @@ PROP_MEMBERS = {
         "revealed": "SetRevealed", "revealable": "SetRevealable",
         "summary": "SetSummary",
         "phase": "SetPhase",
+        "ground_gradient": "BindGroundGradient", "ground_image": "BindGroundImage", "shape": "SetShape",
+        "tint": "BindTint", "selected": "BindSelected", "on_activate": "OnActivate",
     },
     "csharp": {
         "format": "SetFormat",
@@ -333,6 +339,8 @@ PROP_MEMBERS = {
         "revealed": "SetRevealed", "revealable": "SetRevealable",
         "summary": "SetSummary",
         "phase": "SetPhase",
+        "ground_gradient": "SetGroundGradient", "ground_image": "SetGroundImage", "shape": "SetShape",
+        "tint": "SetTint", "selected": "SetSelected", "on_activate": "OnActivate",
     },
     "java": {
         "format": "setFormat",
@@ -348,6 +356,8 @@ PROP_MEMBERS = {
         "revealed": "setRevealed", "revealable": "setRevealable",
         "summary": "setSummary",
         "phase": "setPhase",
+        "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
+        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate",
     },
     "swift": {
         "format": "setFormat",
@@ -363,6 +373,8 @@ PROP_MEMBERS = {
         "revealed": "setRevealed", "revealable": "setRevealable",
         "summary": "setSummary",
         "phase": "setPhase",
+        "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
+        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate",
     },
     "ocaml": {
         "format": "set_format",
@@ -378,6 +390,8 @@ PROP_MEMBERS = {
         "revealed": "set_revealed", "revealable": "set_revealable",
         "summary": "set_summary",
         "phase": "set_phase",
+        "ground_gradient": "set_ground_gradient", "ground_image": "set_ground_image", "shape": "set_shape",
+        "tint": "set_tint", "selected": "set_selected", "on_activate": "on_activate",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -395,6 +409,8 @@ PROP_MEMBERS = {
         "revealed": "TplRevealed", "revealable": "TplRevealable",
         "summary": "TplSummary",
         "phase": "TplPhaseField",
+        "ground_gradient": "TplGroundGradientField", "ground_image": "TplGroundImageField", "shape": "TplShapeAs",
+        "tint": "TplTintField", "selected": "TplSelectedField", "on_activate": "TplOnActivate",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -412,6 +428,8 @@ PROP_MEMBERS = {
         "revealed": "revealed", "revealable": "revealable",
         "summary": "summary",
         "phase": "phase",
+        "ground_gradient": "groundGradient", "ground_image": "groundImage", "shape": "shape",
+        "tint": "tint", "selected": "selected", "on_activate": "onActivate",
     },
 }
 
@@ -423,7 +441,11 @@ def members_rust(_):
 
 def members_go(_):
     src = read("bindings/go/app.go") + read("bindings/go/images.go")
-    return set(re.findall(r"^func \(t \*Tpl\) ([A-Za-z][A-Za-z0-9]*)\s*[\(\[]", src, re.M))
+    skin = read("bindings/go/skin.go")
+    # A stamped container's handler is a method on the Node it is
+    # declared on (the Go handler rule), so the skin's is read there.
+    return set(re.findall(r"^func \(t \*Tpl\) ([A-Za-z][A-Za-z0-9]*)\s*[\(\[]", src + skin, re.M)) | set(
+        re.findall(r"^func \(n Node\) (OnActivate)\(", skin, re.M))
 
 
 def members_csharp(_):
@@ -497,7 +519,10 @@ def members_js(_):
         src, r"^export function textarea\(opts: TextAreaOptions = \{\}\): Widget \{")
     phase = brace_block(
         src, r"^function phaseRecord\(handle: Widget, phase: ImagePhase \| Signal<ImagePhase> \| FieldRef\): Uint8Array \{")
-    if None in (base, layout, grow, textarea, phase):
+    skin = brace_block(src, r"^function setSkin\(handle: Handle, opts: SkinOptions\): void \{")
+    label = brace_block(src, r"^export function label\(a: string \| LabelOptions, b\?: LabelOptions\): Widget \{")
+    image = brace_block(src, r"^export function image\(source\?: ImageSource, opts: ImageOptions = \{\}\): Widget \{")
+    if None in (base, layout, grow, textarea, phase, skin, label, image):
         return None
     names = set(re.findall(r"^  ([a-zA-Z][A-Za-z0-9]*)\(", base, re.M))
     # `document` is a constructor OPTION (docs/rich-text-plan.md §19) and
@@ -505,14 +530,24 @@ def members_js(_):
     # is counted from its writer alone, never from the class block.
     names.discard("document")
     names.discard("phase")
+    names -= {"groundGradient", "groundImage", "shape", "tint", "selected", "onActivate"}
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
                                   ("inset", layout, "wire.tx_set_inset("),
                                   ("align", layout, "wire.tx_set_align("),
                                   ("filled", layout, "wire.tx_set_filled("),
                                   ("document", textarea, "bindDocument("),
-                                  ("phase", phase, "wire.tx_bind_phase_element(")):
+                                  ("phase", phase, "wire.tx_bind_phase_element("),
+                                  ("groundGradient", skin, "wire.tx_bind_color_element("),
+                                  ("groundImage", skin, "sourceRecord(\"an image ground\""),
+                                  ("selected", skin, "wire.tx_bind_selected_element("),
+                                  ("onActivate", skin, "wire.OCC_ACTIVATED"),
+                                  ("tint", label, "wire.tx_bind_tint_element(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)
+    # The image's writer asks isNode for its two realization handlers, so
+    # its shape is read off its own unconditional line.
+    if re.search(r"^  if \(opts\.shape !== undefined\) records\(\)\.push\(wire\.tx_set_shape\(handle\.id,", image, re.M):
+        names.add("shape")
     return names
 
 
@@ -2023,7 +2058,7 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 23
+CSHARP_TWIN_FLOOR = 26
 
 
 JAVA_TWIN_FLOOR = 21
