@@ -15402,6 +15402,16 @@ UIView animation; read `system-log` for testmanagerd letting go of a live
 app); or the main thread not answering. docs/deferred.md holds the open
 item.
 
+A UIView animation whose view leaves the window still stops (measured
+2026-10-16, iOS 26.5 simulator, a forced red in the timecode leg): two views
+animated `bounds.size` for 1 s and removed from the window 0.1 s in, one kept
+alive and one released, both reached `animationDidStop:finished:` and XCTest's
+count did not hold; only a third view animated for 100 s in the window held it.
+So "on no layer in any window" with a held count is not explained by the field
+leaving the window. The ledger now records the layer at `addAnimation:forKey:`
+and says at the reading whether it is deallocated, alive in no window, or in a
+window, and whether it still carries the animation (check-flightrec NH19, NH20).
+
 ## The app log selected by process name (measured 2026-10-12)
 
 run-sim.py's `app-log` section was `log show --last 2m --predicate 'process
@@ -16870,6 +16880,46 @@ GUARD: tools/lib/skin_routes.py's four CALLS and three cuts beside them
 ("an unmade row measured at the floor", "the first band sized at the floor",
 "a reused view kept by the node it drew before").
 
+## The frame anchor that took the hit, and the mac table's rows left at the floor (measured 2026-10-16)
+
+The styling breadth put `KayaSkinFrameReader`, a bare NSViewRepresentable, behind
+every container, label and image. macOS's `AXUIElementCopyElementAtPosition` at a
+stamped segmented control's centre then answered the window's AXGroup: the hit
+landed on that ignored platform view and climbed to its nearest published
+ancestor, while the radio group sat in the tree at the very point
+(`(610,626,130,24)` holding the centre `(675,638)`). `segmented` failed in all ten
+languages and `portfolio`'s select the same way; top-level controls still read,
+so which platform view wins depends on z-order nobody chose. The representable is
+now `KayaSkinFrameAnchor`, worn only through `KayaSkinFrameReader` with
+`.accessibilityHidden(true).allowsHitTesting(false)` (which of the two carries it
+was not measured apart). The choice reader's refusal now names the hit's frame,
+the centre and the radio groups or pop-ups the tree holds there.
+
+`tracks` failed one run in six at `expect_shape image@art[t60]` with rows 53-60
+drawn at the 24 pt floor over each other: after the scroll, `measureRows` read
+rows 52-59 while their fresh cells' hosts still answered an ideal height of 24 or
+less, and when the next report's measure read them stale too nothing measured
+again. Each cell's NSHostingView now asks the driver for a report whenever its
+intrinsic size is invalidated (heights 10, 16, then 40 within a millisecond, read
+from a temporary trace), so a late settle is measured. Six cold runs passed after;
+the race was not forced red.
+GUARD: tools/lib/skin_routes.py — the anchor's wrapper, a census of platform views
+behind a node (`BEHIND_EXEMPT`, each with its reason, held to still being used), the
+cell host's report and its wiring; five cuts watched.
+
+## Accessibility Services every minute (measured 2026-10-16)
+
+`com.apple.accessibility.AXVisualSupportAgent` quits on automatic termination after
+60 s and launchd respawns it at once "because ipc (mach)" — a message waiting on
+its port — so the mac lane's app record printed 25 APP APPEARED lines for it in one
+lane. It is host-wide and not kaya's: launchd counted 24,495 runs over 26 days of
+uptime, and it cycled 15:09:32, 15:10:37, 15:11:37 with no kaya process running.
+The cycle then stopped on its own (last spawn 15:46:36) and a 41-leg mac lane at
+16:20 saw no relaunch at all; the sender of the waiting message was not
+identified. It costs a lane nothing measurable (its own process, no window). The record
+excludes it by bundle id and executable (tools/lib/lane_health.py's `HOST_AGENTS`);
+check-flightrec holds the executable to still existing (AP15, AP16).
+
 ## WinUI's cover image over-reports its size, and ItemContainer hears its own press (measured 2026-10-16)
 
 An `Image` under `Stretch.UniformToFill` with a declared 48x48 box reports the
@@ -16895,3 +16945,19 @@ GUARD: tools/lib/skin_winui.py (the activatable host's door, "a release outside
 the item taken as a click", "the unfilled child's box left to the item",
 "kaya keeps the item's own selection").
 
+
+## An OCaml guest naming a sibling guest's module runs that guest (measured 2026-10-16)
+
+guests/ocaml/dune builds every guest from ONE `executables` stanza, and dune
+links into each executable whatever its main module NAMES, as ocamldep reads
+it: syntactically, before `open Kaya_app` shadows anything. media.ml spelled the
+binding's `t.Tracks.audio`; when the styling pass added guests/ocaml/tracks.ml,
+media.exe linked it (81 `camlDune__exe__Tracks` symbols), typing still resolved
+to `Kaya_app.Tracks`, and tracks.ml's top level ran first and never returned.
+Every OCaml media leg ran the tracks scene: title "tracks" on the first step,
+then a 15 s retry per step to the mac pool's 120 s kill, or a "harness target #0
+of 0" panic on the GTK lane. A path whose first component is not a guest
+(`Kaya_app.Tracks`) is not a dependency.
+GUARD: bindings/ocaml/checks/guest_isolation.ml, every guest executable's
+`link_deps`, so `dune build` fails naming the file, the module and the spelling;
+its two negatives in bindings/ocaml/checks/negatives.py (check-abort).

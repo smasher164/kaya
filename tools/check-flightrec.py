@@ -1114,6 +1114,78 @@ def mac_power_checks(src, echo=False):
     return found
 
 
+GTK_MEDIA_NOTES = (
+    ("media_action", "the view's media.play/media.pause action reaching the arm"),
+    ("player_command", "the command and whether the player had loaded"),
+    ("player_state", "the playbin's own state change"))
+
+
+def census_gtk_media_ring(src):
+    """A GTK MEDIA RED NAMES WHICH LINK DROPPED (docs/traps.md, an OCaml guest
+    naming a sibling guest's module): media_session-go-x11's `ax_action video#0
+    "Pause"` reached the app (the ring advanced) and produced no transaction,
+    and its bundle could not say whether the action, the command or the
+    pipeline went quiet."""
+    found = []
+    for verb, what in GTK_MEDIA_NOTES:
+        if f'sheet_note("{verb}", ' not in src[GTK_RS]:
+            found.append(f"gtk: {what} no longer reaches the verb trace ({verb})")
+    return found
+
+
+def mac_timeout_checks(src, echo=False):
+    """A MAC LEG `timeout 120` KILLED NAMES THE STEP IT WAS IN (docs/traps.md,
+    an OCaml guest naming a sibling guest's module runs that guest): every
+    OCaml media leg ran another scene, failed each step to its 15 s retry, and
+    was killed with no verdict, and its bundle's verb-trace sentence listed
+    three ways a leg can end without saying which one this was."""
+    found = []
+    scope = {"re": re, "pathlib": pathlib}
+    for name in ("mac_last_step", "mac_timeout_sentence", "mac_no_trace_sentence"):
+        block = py_block(src[LANE_PY], name)
+        if not block:
+            return [f"mac: {name} is gone from {LANE_PY}"]
+        exec(compile(block, LANE_PY, "exec"), scope)
+    watched = py_block(src[LANE_PY], "watched_leg")
+    status = watched.find('(scratch / "exit-status.txt").write_text(f"{rc}\\n"')
+    if status < 0 or status < watched.find("rc = proc.wait()"):
+        found.append("mac: watched_leg no longer records the leg's exit status after it ends")
+    if not re.search(r"if rc == 124:\n(?:.*\n){0,2}? +killed = mac_timeout_sentence\(", watched):
+        found.append("mac: watched_leg no longer writes the timeout sentence into the leg log")
+    capture = py_block(src[LANE_PY], "_capture")
+    adopt = ('scratch / "verb-trace.txt",\n'
+             '                   why_absent=mac_no_trace_sentence(scratch, log))')
+    if adopt not in capture:
+        found.append("mac: the verb-trace section's absence no longer reads the exit status")
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp)
+        log = d / "leg.log"
+        log.write_text("KAYA_HARNESS: scene ready after 9ms\n"
+                       "KAYA_HARNESS: +9ms expect_title \"media\"\n"
+                       "KAYA_HARNESS: step-failed title \"tracks\", wanted \"media\"\n"
+                       "KAYA_HARNESS: +15011ms expect label#1 \"next 0\"\n", encoding="utf-8")
+        bare = d / "bare.log"
+        bare.write_text("dyld: missing symbol\n", encoding="utf-8")
+        cases = [("no status", None, log, "recorded no exit status"),
+                 ("killed in a step", "124", log,
+                  'exit 124) with no verdict, in step `+15011ms expect label#1 "next 0"`'),
+                 ("killed before a step", "124", bare, "before any step"),
+                 ("killed, streamed", "124", None, "streamed to the terminal"),
+                 ("a crash", "134", log, "exited 134"),
+                 ("the runner's refusal", "0", log, "its own verdict passing")]
+        for what, rc, leg_log, want in cases:
+            st = d / "exit-status.txt"
+            st.unlink(missing_ok=True)
+            if rc is not None:
+                st.write_text(rc + "\n", encoding="utf-8")
+            said = scope["mac_no_trace_sentence"](d, leg_log)
+            if echo:
+                print(f"check-flightrec: mac no-trace ({what}): {said}")
+            if want not in said:
+                found.append(f"mac: branch `{what}` did not print `{want}`: {said}")
+    return found
+
+
 def mac_unified_log_checks(src, echo=False):
     """docs/traps.md, the toast that outlived its seconds: replayd's flood
     filled the one-query section's cap before the leg and kept the head."""
@@ -1513,13 +1585,21 @@ def census_ios_hang_record(src):
             ('NSClassFromString("XCTAnimationsIdleNotifier")', "XCTest's own notifier read"),
             ("blind = loaded && !open[at].xctest", "what XCTest saw start"),
             ('NSSelectorFromString("isAnimationInProgress")', "XCTest's own count read"),
-            ("UIResponder.keyboardWillHideNotification", "the keyboard's timeline")):
+            ("UIResponder.keyboardWillHideNotification", "the keyboard's timeline"),
+            ('NSSelectorFromString("addAnimation:forKey:")', "the layer an animation is added to"),
+            ("prevAdd(layer, addSel, anim, key)", "the replaced add still called"),
+            ("KayaAnimationLedger.shared.added(layer, key as String?)", "the add recorded"),
+            ("let place = placed.removeValue(forKey: ObjectIdentifier(key))",
+             "the add's layer carried into its open start"),
+            ('+ (gotNow[entry.id] ?? ""))', "the add's layer read beside each open start")):
         if want not in ledger:
             found.append(f"swift: KayaAnimationLedger lost {why} ({want.splitlines()[0]})")
     for key in ("XCTest's animation tracking ", "XCTest IN PROGRESS", "XCTest not in progress",
                 "XCTest's notifier first seen at ", "for animations that started before it loaded",
                 "XCTest unread: ", "refused: ", "open since",
-                "main thread did not answer"):
+                "main thread did not answer", "layers read at add: ",
+                "that layer has been deallocated", "is alive in no window",
+                "a window the scene does not list", "never seen added through"):
         if key not in ledger:
             found.append(f"swift: the reading no longer prints {key!r}, which "
                          f"flightrec_lane.ios_animation_reading keys on")
@@ -2108,6 +2188,14 @@ def census_mac_apps(src):
         elif needle not in src[rel]:
             found.append(f"{LANE_HEALTH}: the exclusion `{label}` is no longer named by the "
                          f"lane: {rel} lacks `{needle}`")
+    agents = scope["HOST_AGENTS"]
+    gate.counted("host agents excluded by name", list(agents), floor=1)
+    for label, _bundle, exe, why in agents:
+        if not pathlib.Path(exe).is_file():
+            found.append(f"{LANE_HEALTH}: the host agent `{label}` names {exe}, which this "
+                         f"host no longer has")
+        if not why:
+            found.append(f"{LANE_HEALTH}: the host agent `{label}` is excluded with no reason")
     return found
 
 
@@ -2232,7 +2320,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("iOS ceiling stacks", census_ios_stacks),
             ("iOS app log", census_ios_app_log),
             ("iOS hang record", census_ios_hang_record),
-            ("mac host apps", census_mac_apps))
+            ("mac host apps", census_mac_apps),
+            ("GTK media ring", census_gtk_media_ring))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -2251,6 +2340,8 @@ for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
 for line in mac_unified_log_checks(REAL, echo=True):
     gate.finding(line, at="Mac unified log")
+for line in mac_timeout_checks(REAL, echo=True):
+    gate.finding(line, at="Mac timeout kill")
 for line in ios_recording_recovery(REAL):
     gate.finding(line, at="iOS recording recovery")
 for line in ios_notification_checks(REAL, echo=True):
@@ -2929,7 +3020,13 @@ for label, rel, pattern, repl, want, check in (
          r"^( +)if blind:\n", r"\1if False:\n", "blind reading lost", ios_hang_record_checks),
         ("NH16 the ledger never marking what XCTest saw start", SWIFTUI,
          r"blind = loaded && !open\[at\]\.xctest", "blind = false",
-         "what XCTest saw start", census_ios_hang_record)):
+         "what XCTest saw start", census_ios_hang_record),
+        ("NH19 the layer an animation is added to never recorded", SWIFTUI,
+         r"^ +KayaAnimationLedger\.shared\.added\(layer, key as String\?\)\n", "",
+         "the add recorded", census_ios_hang_record),
+        ("NH20 an open start printed without its add's layer", SWIFTUI,
+         r"\n +\+ \(gotNow\[entry\.id\] \?\? \"\"\)\)", ")",
+         "read beside each open start", census_ios_hang_record)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 for label, name, want in (("NH13 iOS animations section unwritten", "animations",
@@ -3129,6 +3226,13 @@ for label, rel, pattern, repl, want, check in (
          "if (not owner or not bundle",
          "branch `a record held since the start and kaya's own bundle not refused` did not "
          "print", lane_health_checks),
+        ("AP15 a host agent reported as an appearance", LANE_HEALTH,
+         r"^( +)if agent and not owner:\n", r"\1if False:\n",
+         "branch `summary` did not print", lane_health_checks),
+        ("AP16 a host agent this host no longer has", LANE_HEALTH,
+         r'"AXVisualSupportAgent\.app/Contents/MacOS/AXVisualSupportAgent",',
+         '"AXVisualSupportAgent.app/Contents/MacOS/AXVisualSupportAgentGone",',
+         "which this host no longer has", census_mac_apps),
         ("AP14 the adoption's legs unread", LANE_HEALTH,
          r"running = legs_at\(self\.legs, t\)\n( +)when = \(f\"checked in",
          "running = []\n\\1when = (f\"checked in",
@@ -3136,6 +3240,28 @@ for label, rel, pattern, repl, want, check in (
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
-gate.negatives_ran(213 + (5 if DRIVES else 0))
+for label, pattern, repl, want in (
+        ("MT1 the exit status unrecorded",
+         r'^ +\(scratch / "exit-status\.txt"\)\.write_text\(f"\{rc\}\\n", encoding="utf-8"\)\n',
+         "", "no longer records the leg's exit status"),
+        ("MT2 the timeout sentence never written to the log",
+         r"if rc == 124:\n", "if False:\n", "no longer writes the timeout sentence"),
+        ("MT3 the verb-trace absence back to the generic sentence",
+         r"why_absent=mac_no_trace_sentence\(scratch, log\)\)",
+         'why_absent="flightrec: the guest wrote no verb trace")',
+         "no longer reads the exit status"),
+        ("MT4 the step dropped from the timeout sentence",
+         r'where = f"in step `\{step\}`" if step else', 'where = "somewhere" if step else',
+         "branch `killed in a step` did not print")):
+    changed = doctored(LANE_PY, pattern, repl, label)
+    gate.negative(label, lambda: mac_timeout_checks(changed), want=want)
+
+for verb, _ in GTK_MEDIA_NOTES:
+    label = f"MG {verb} cut from the GTK media arm"
+    changed = doctored(GTK_RS, rf'super::sheet_note\("{verb}", ', "drop((), ", label,
+                       want=2 if verb == "player_command" else 1)
+    gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
+
+gate.negatives_ran(224 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

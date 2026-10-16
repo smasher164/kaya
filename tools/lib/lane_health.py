@@ -377,6 +377,15 @@ LANE_APPS = (
     ("java", "name", r"java",
      "tools/lib/lanes/mac.py", 'return ["java", "-XstartOnFirstThread", "-cp",'),
 )
+# Host agents macOS itself relaunches through every lane, named so the record
+# stays readable (docs/traps.md, Accessibility Services every minute).
+HOST_AGENTS = (
+    ("Accessibility Services", "com.apple.accessibility.AXVisualSupportAgent",
+     "/System/Library/PrivateFrameworks/UniversalAccess.framework/Versions/A/Resources/"
+     "AXVisualSupportAgent.app/Contents/MacOS/AXVisualSupportAgent",
+     "launchd respawns it for a pending mach message each time it quits after 60s, "
+     "with or without a lane running"),
+)
 LANE_BUNDLE = re.compile(r"dev\.kaya(?:\.|$)")
 BUNDLE_ID = re.compile(r"^[A-Za-z0-9_.\-]+$")
 LOG_LINE = re.compile(r"^\d{4}-\d\d-\d\d (\d\d:\d\d:\d\d\.\d+) \S+ +(.+?)\[(\d+):[0-9a-f]+\] "
@@ -440,6 +449,14 @@ def lane_owner(app, root):
             if root and exe.startswith(str(root).rstrip("/") + "/"):
                 return label
         elif re.fullmatch(pattern, pathlib.PurePosixPath(exe).name):
+            return label
+    return None
+
+
+def host_agent(app):
+    """The HOST_AGENTS label for this record, by bundle id and executable both."""
+    for label, bundle, exe, _why in HOST_AGENTS:
+        if app["bundle"] == bundle and app["exe"] == exe:
             return label
     return None
 
@@ -566,6 +583,7 @@ class MacApps:
         self.legs = []
         self.seen = {}
         self.excluded = {}
+        self.host_excluded = {}
         self.exe_at_start = {}
         self.adopted = {}
         self.readings = 0
@@ -613,9 +631,15 @@ class MacApps:
                                            and app["when"] < self.began - 1):
                 continue
             with self.lock:
-                if app["pid"] in self.seen or app["pid"] in self.excluded:
+                if (app["pid"] in self.seen or app["pid"] in self.excluded
+                        or app["pid"] in self.host_excluded):
                     continue
             owner = lane_owner(app, self.root)
+            agent = host_agent(app)
+            if agent and not owner:
+                with self.lock:
+                    self.host_excluded[app["pid"]] = agent
+                continue
             if owner and (not app["bundle"] or LANE_BUNDLE.match(app["bundle"])):
                 with self.lock:
                     self.excluded[app["pid"]] = owner
@@ -668,6 +692,11 @@ class MacApps:
             counts[label] = counts.get(label, 0) + 1
         kept = (", ".join(f"{k} {v}" for k, v in sorted(counts.items()))
                 if counts else "none")
+        agents = {}
+        for label in self.host_excluded.values():
+            agents[label] = agents.get(label, 0) + 1
+        hosted = (", ".join(f"{k} {v}" for k, v in sorted(agents.items()))
+                  if agents else "none")
         head = (f"{len(self.seen)} GUI application(s) appeared during the lane"
                 if self.seen else "no GUI application appeared during the lane")
         tail = ""
@@ -675,7 +704,8 @@ class MacApps:
             tail = (f"; the app list was unreadable at {len(self.failed)} of them "
                     f"(first: {self.failed[0]})")
         out.append(f"{head} ({self.readings} readings across {len(self.legs)} legs; the "
-                   f"lane's own apps excluded by name: {kept}){tail}")
+                   f"lane's own apps excluded by name: {kept}; host agents excluded by name: "
+                   f"{hosted}){tail}")
         return out + self.refusals()
 
     def sentence(self, first, alive):
@@ -1225,6 +1255,8 @@ LONER = _app(7, "Calculator", "ASN:0x0-0x4c4c4c", "com.apple.calculator",
              launch="2026/10/14 16:00:50", parent="Terminal")
 NOBUNDLE = _app(8, "a.out", "ASN:0x0-0x5d5d5d", "", "/tmp/a.out", 903, "Foreground",
                 checkin="2026/10/14 16:00:33")
+AXAGENT = _app(14, "Accessibility Services", "ASN:0x0-0x9b9b9b", HOST_AGENTS[0][1], HOST_AGENTS[0][2],
+                906, "UIElement", launch="2026/10/14 16:00:35", checkin="2026/10/14 16:00:35")
 ODD = _app(9, "Odd", "ASN:0x0-0x6e6e6e", 'com.x"y', "/Applications/Odd.app/Contents/MacOS/Odd",
            904, "Foreground", checkin="2026/10/14 16:00:34")
 SIGHTING_LOG = """Timestamp               Ty Process[PID:TID]
@@ -1425,7 +1457,7 @@ def drive():
                   windows_sentences("\n", None)))
 
     seen = _apps_run([(APPS_START, None),
-                      (APPS_START + PREVIEW + HIJACK + PY_GUEST + DAEMON, None),
+                      (APPS_START + PREVIEW + HIJACK + PY_GUEST + DAEMON + AXAGENT, None),
                       (APPS_START + PREVIEW + PY_GUEST, None)], SIGHTING_LEGS)
     for label, want in (
             ("apps at start", "2 GUI applications running at the lane's start (lsappinfo)"),
@@ -1452,7 +1484,8 @@ def drive():
              "(flightrec-winlist: 2 window(s)); gone by the lane's end"),
             ("parent gone", "gone before its parent process could be read"),
             ("summary", "2 GUI application(s) appeared during the lane (3 readings across 5 "
-             "legs; the lane's own apps excluded by name: python3 1)")):
+             "legs; the lane's own apps excluded by name: python3 1; host agents excluded by "
+             "name: Accessibility Services 1)")):
         cases.append((label, want, seen))
     cases.append(("identity adopted", "IDENTITY ADOPTED: pid 84118 (/repo/target/go-guests/"
                   "kaya-go, the lane's own: a binary built in the tree) is registered with "
@@ -1510,7 +1543,8 @@ def drive():
             ("windows unreadable", "its windows unreadable (flightrec-winlist exited 1: x)")):
         cases.append((label, want, alone))
     cases.append(("nothing appeared", "no GUI application appeared during the lane (3 readings "
-                  "across 0 legs; the lane's own apps excluded by name: none)",
+                  "across 0 legs; the lane's own apps excluded by name: none; host agents "
+                  "excluded by name: none)",
                   _apps_run([(APPS_START, None), (APPS_START + DAEMON, None),
                              (APPS_START, None)])))
     blind = _apps_run([("", "lsappinfo exited 1: x")])

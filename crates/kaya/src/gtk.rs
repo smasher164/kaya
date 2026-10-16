@@ -28129,6 +28129,7 @@ mod gtk_media {
             let action = gio::SimpleAction::new(name, None);
             let shown = shown.clone();
             action.connect_activate(move |_, _| {
+                super::sheet_note("media_action", format_args!("media.{name} on the view: shown player {:?}", shown.get()));
                 if let Some(player) = shown.get() {
                     player_command(player, if play { PlayerCommand::Play } else { PlayerCommand::Pause });
                 }
@@ -28637,8 +28638,12 @@ mod gtk_media {
     }
 
     pub(super) fn player_command(id: u64, command: PlayerCommand) {
-        let Some(p) = player(id) else { return };
+        let Some(p) = player(id) else {
+            super::sheet_note("player_command", format_args!("player {id} {command:?}: no such player"));
+            return;
+        };
         let loaded = p.inner.borrow().loaded;
+        super::sheet_note("player_command", format_args!("player {id} {command:?}: loaded={loaded}"));
         match command {
             PlayerCommand::Play => {
                 p.inner.borrow_mut().want_play = true;
@@ -29015,6 +29020,7 @@ mod gtk_media {
             }
             M::StateChanged(change) if from_playbin => {
                 let (old, new) = (change.old(), change.current());
+                super::sheet_note("player_state", format_args!("player {id} playbin {old:?} -> {new:?}"));
                 if new == gst::State::Playing && old != gst::State::Playing {
                     report(id, crate::media::Report::Rate(true));
                     start_tick(&p);

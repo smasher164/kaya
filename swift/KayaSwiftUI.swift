@@ -9190,15 +9190,27 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
     /// UIViewAnimationState's two delegate callbacks, so the ledger counts the same two
     /// the same way (class_replaceMethod, the replaced IMP called first-hand) and keeps
     /// the starts no stop has matched.
+    final class KayaAnimationPlace {
+        weak var layer: CALayer?
+        let at: String
+        init(_ layer: CALayer, _ at: String) {
+            self.layer = layer
+            self.at = at
+        }
+    }
+
     final class KayaAnimationLedger: @unchecked Sendable {
         static let shared = KayaAnimationLedger()
         private let lock = NSLock()
         private var installed = "not installed"
+        private var adds = "not installed"
         private var step = "<before the first step>"
         private var started = 0
         private var stopped = 0
         private var unmatched = 0
-        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool)] = []
+        private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool, placed: KayaAnimationPlace?)] = []
+        private var placed: [ObjectIdentifier: KayaAnimationPlace] = [:]
+        private var placedOrder: [ObjectIdentifier] = []
         private var events: [String] = []
         private var xctestSeen: String?
         private var xctestBlind: [String] = []
@@ -9254,7 +9266,8 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             seeXCTest(loaded)
             started += 1
             lastMove = Date()
-            open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded))
+            let place = placed.removeValue(forKey: ObjectIdentifier(key))
+            open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded, place))
             lock.unlock()
             note("start \(what)")
         }
@@ -9279,6 +9292,63 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             lock.unlock()
             note("stop finished=\(finished)\(at == nil ? " WITH NO START" : "")"
                 + "\(blind ? " WITH NO START AS XCTEST SAW IT" : "") \(what)")
+        }
+
+        /// The layer an open start sits on, read where UIKit adds it, since a reading's
+        /// window walk cannot find a layer that has left every window.
+        static func place(_ layer: CALayer) -> String {
+            func name(_ any: AnyObject) -> String { String(String(describing: type(of: any)).prefix(120)) }
+            var holder: CALayer? = layer
+            while let h = holder, !(h.delegate is UIView) { holder = h.superlayer }
+            let view = holder?.delegate as? UIView
+            var chain: [String] = []
+            var up = view?.superview
+            while let v = up, chain.count < 8 {
+                chain.append(name(v))
+                up = v.superview
+            }
+            return "\(name(layer)) of \(layer.delegate.map { name($0) } ?? "-") frame \(layer.frame)"
+                + (holder === layer ? "" : view.map { " inside \(name($0))" } ?? "")
+                + ", under \(chain.isEmpty ? "no superview" : chain.joined(separator: " < "))"
+                + ", in \(view?.window.map { name($0) } ?? "no window")"
+        }
+
+        func added(_ layer: CALayer, _ key: String?) {
+            guard let key, let anim = layer.animation(forKey: key), let delegate = anim.delegate,
+                NSStringFromClass(type(of: delegate as AnyObject)) == "UIViewAnimationState"
+            else { return }
+            let site = Thread.isMainThread
+                ? Self.place(layer) : "\(type(of: layer)), added off the main thread"
+            let entry = KayaAnimationPlace(layer, "\(site) key \(key) at \(Self.clock())")
+            let id = ObjectIdentifier(anim)
+            lock.lock()
+            placed[id] = entry
+            placedOrder.append(id)
+            if placedOrder.count > 400 {
+                for gone in placedOrder.prefix(placedOrder.count - 400) { placed.removeValue(forKey: gone) }
+                placedOrder.removeFirst(placedOrder.count - 400)
+            }
+            lock.unlock()
+        }
+
+        static func now(_ place: KayaAnimationPlace?, _ anim: AnyObject, _ listed: [UIWindow]) -> String {
+            guard let place else { return "; never seen added through CALayer's addAnimation:forKey:" }
+            guard let layer = place.layer else {
+                return "; added to \(place.at); that layer has been deallocated"
+            }
+            var root = layer
+            while let up = root.superlayer { root = up }
+            var holder: CALayer? = layer
+            while let h = holder, !(h.delegate is UIView) { holder = h.superlayer }
+            let carried = (layer.animationKeys() ?? []).contains { layer.animation(forKey: $0) === anim }
+            let whereNow = ((holder?.delegate as? UIView)?.window).map { window in
+                "is in \(type(of: window)) (hidden \(window.isHidden))"
+                    + (listed.contains { $0 === window } ? "" : ", a window the scene does not list")
+            } ?? ("is alive in no window, its topmost layer \(type(of: root)) of "
+                    + (root.delegate.map { "\(type(of: $0))" } ?? "-")
+                    + (root === layer ? " (itself, with no superlayer)" : ""))
+            return "; added to \(place.at); that layer now \(whereNow) and "
+                + (carried ? "still carries the animation" : "no longer carries it")
         }
 
         /// docs/traps.md, XCTest's notifier loaded over an open animation.
@@ -9363,6 +9433,21 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                             + (secs.map { " duration \($0)" } ?? ""))
                 }
             }
+            let addSel = NSSelectorFromString("addAnimation:forKey:")
+            if let add = class_getInstanceMethod(CALayer.self, addSel) {
+                typealias Add = @convention(c) (CALayer, Selector, CAAnimation, NSString?) -> Void
+                let prevAdd = unsafeBitCast(method_getImplementation(add), to: Add.self)
+                let onAdd: @convention(block) (CALayer, CAAnimation, NSString?) -> Void = {
+                    layer, anim, key in
+                    prevAdd(layer, addSel, anim, key)
+                    KayaAnimationLedger.shared.added(layer, key as String?)
+                }
+                class_replaceMethod(
+                    CALayer.self, addSel, imp_implementationWithBlock(onAdd), method_getTypeEncoding(add))
+                adds = "installed"
+            } else {
+                adds = "refused: CALayer answers no addAnimation:forKey:"
+            }
             installed = "installed"
         }
 
@@ -9384,11 +9469,12 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             lock.lock()
             let mine = open
             let head = "kaya's ledger \(installed); \(started) started, \(stopped) stopped, "
-                + "\(unmatched) stopped with no start, \(open.count) open"
+                + "\(unmatched) stopped with no start, \(open.count) open, layers read at add: \(adds)"
             let ring = events
             lock.unlock()
             let lock2 = NSLock()
             var placed: [ObjectIdentifier: String]?
+            var later: [ObjectIdentifier: String] = [:]
             var mode = ""
             let asked = Date()
             var answered = 0.0
@@ -9408,17 +9494,24 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                 {
                     walk(window.layer)
                 }
+                var nowFound: [ObjectIdentifier: String] = [:]
+                let listed = UIApplication.shared.connectedScenes
+                    .compactMap({ $0 as? UIWindowScene }).flatMap({ $0.windows })
+                for entry in mine { nowFound[entry.id] = Self.now(entry.placed, entry.anim, listed) }
                 lock2.lock()
                 placed = found
+                later = nowFound
                 mode = RunLoop.main.currentMode?.rawValue ?? "none"
                 answered = Date().timeIntervalSince(asked)
                 lock2.unlock()
             }
             let until = Date().addingTimeInterval(2)
             var got: [ObjectIdentifier: String]?
+            var gotNow: [ObjectIdentifier: String] = [:]
             while Date() < until {
                 lock2.lock()
                 got = placed
+                gotNow = later
                 lock2.unlock()
                 if got != nil { break }
                 Thread.sleep(forTimeInterval: 0.02)
@@ -9429,7 +9522,8 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             let lines = mine.prefix(60).map { entry in
                 "  open since \(entry.at) (step '\(entry.step)'): \(entry.what); "
                     + (got == nil ? "not placed"
-                        : got?[entry.id].map { "on \($0)" } ?? "on no layer in any window")
+                        : (got?[entry.id].map { "on \($0)" } ?? "on no layer in any window")
+                            + (gotNow[entry.id] ?? ""))
             }
             let more = mine.count > 60 ? ["  open and not listed: \(mine.count - 60) more"] : []
             return "XCTest's animation tracking \(moment): \(Self.xctest()); \(xctestLoad()); \(head); \(main)"
@@ -17034,8 +17128,24 @@ private struct KayaNativeTable: View {
     /// KayaRender. A row outside the band keeps its cell and shows
     /// nothing rather than dropping out of the table's geometry — one
     /// node is one widget (tools/check-empty-child.py), one tier over.
+    final class KayaCellHost: NSHostingView<AnyView> {
+        var onContentSized: (() -> Void)?
+        override func invalidateIntrinsicContentSize() {
+            super.invalidateIntrinsicContentSize()
+            onContentSized?()
+        }
+    }
+
     final class KayaTableCellView: NSTableCellView {
-        private let host = NSHostingView(rootView: AnyView(Color.clear))
+        private let host = KayaCellHost(rootView: AnyView(Color.clear))
+        /// A cell's content settles its ideal size after it was measured (a
+        /// fresh row's hosts answer the 24 pt floor at first), so a resize asks
+        /// the driver for another report (docs/traps.md, the mac table's rows
+        /// left at the floor after a scroll).
+        var onContentSized: (() -> Void)? {
+            get { host.onContentSized }
+            set { host.onContentSized = newValue }
+        }
 
         override init(frame: NSRect) {
             super.init(frame: frame)
@@ -17287,6 +17397,7 @@ private struct KayaNativeTable: View {
                 (tableView.makeView(withIdentifier: identifier, owner: self)
                 as? KayaTableCellView) ?? KayaTableCellView(frame: .zero)
             cell.identifier = identifier
+            cell.onContentSized = { [weak self] in self?.scheduleReport() }
             let stamped = self.row(at: row)
             cell.present(
                 (stamped?.children.count ?? 0) > column ? stamped?.children[column] : nil)
@@ -20125,8 +20236,15 @@ final class KayaWeakView {
     #endif
 }
 
+struct KayaSkinFrameReader: View {
+    let id: UInt64
+    var body: some View {
+        KayaSkinFrameAnchor(id: id).accessibilityHidden(true).allowsHitTesting(false)
+    }
+}
+
 #if os(macOS)
-    struct KayaSkinFrameReader: NSViewRepresentable {
+    struct KayaSkinFrameAnchor: NSViewRepresentable {
         let id: UInt64
         func makeNSView(context: Context) -> NSView {
             let view = NSView()
@@ -20136,7 +20254,7 @@ final class KayaWeakView {
         func updateNSView(_ view: NSView, context: Context) { kayaHoldAnchor(id, KayaWeakView(view)) }
     }
 #else
-    struct KayaSkinFrameReader: UIViewRepresentable {
+    struct KayaSkinFrameAnchor: UIViewRepresentable {
         let id: UInt64
         func makeUIView(context: Context) -> UIView {
             let view = UIView()
@@ -26743,10 +26861,28 @@ enum KayaChoiceRead {
             }
             at = kayaAxCopy(element, kAXParentAttribute).map { $0 as! AXUIElement }
         }
+        let shown = anchors.filter { $0.window?.isVisible == true }
+        let centre = CGPoint(x: CGFloat(rect.midX), y: primary.frame.maxY - rect.midY)
+        var holders: [String] = []
+        func gather(_ element: AXUIElement, _ depth: Int) {
+            if depth > 12 { return }
+            let role = kayaAxCopy(element, kAXRoleAttribute) as? String ?? "?"
+            if role == "AXMenuBar" { return }
+            if role == "AXRadioGroup" || role == "AXPopUpButton", let frame = kayaAxFrame(element), frame.contains(centre) {
+                holders.append("\(role) \(frame)")
+            }
+            for kid in kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { gather(kid, depth + 1) }
+        }
+        gather(app, 0)
         return .unread(
             "the element at the control's centre sits in no radio group or pop-up button ("
-                + chain.joined(separator: " < ") + ")")
+                + chain.joined(separator: " < ") + "); the hit's frame "
+                + (kayaAxFrame(hit).map { "\($0)" } ?? "<unpublished>") + " and the centre \(centre), top-left origin; "
+                + "the tree holds \(holders.count) radio group(s) or pop-up(s) containing that centre"
+                + (holders.isEmpty ? "" : " (" + holders.joined(separator: ", ") + ")")
+                + "; \(shown.count) of \(anchors.count) rendering(s) in a visible window")
     }
+
 #else
     /// The accessibility elements UIKit publishes inside the control's frame:
     /// a UISegmentedControl's segments, or a menu picker's button.

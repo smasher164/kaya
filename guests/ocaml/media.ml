@@ -246,7 +246,7 @@ let tracks_app app =
       write summary line;
       write audio line);
   on_tracks app p (fun t ->
-      write audio (track_line "audio" t.Tracks.audio t.audio_selected);
+      write audio (track_line "audio" t.Kaya_app.Tracks.audio t.audio_selected);
       write captions (track_line "captions" t.captions t.caption_selected));
   on_cue app p (fun text -> write cue text);
   exit (run app)

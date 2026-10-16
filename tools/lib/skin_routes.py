@@ -128,6 +128,12 @@ CALLS = [
      "if reported == nil, KayaHost.rowExtent(node.id, presumed.location) == 0 {\nmeasureRows(presumed)"),
     (SWIFT, "a reused view leaves the node it drew before (docs/traps.md)",
      "for (other, views) in kayaSkinAnchors where other != id && views.contains(where: { $0.view === view.view }) {"),
+    (SWIFT, "a skinned node's frame anchor is hidden from accessibility and hit testing (docs/traps.md)",
+     "KayaSkinFrameAnchor(id: id).accessibilityHidden(true).allowsHitTesting(false)"),
+    (SWIFT, "a mac table cell's content settling its size asks for a report (docs/traps.md)",
+     "override func invalidateIntrinsicContentSize() {\nsuper.invalidateIntrinsicContentSize()\nonContentSized?()"),
+    (SWIFT, "every mac table cell is wired to the report",
+     "cell.onContentSized = { [weak self] in self?.scheduleReport() }"),
     (SWIFT, "the skin readers take the newest anchor still in a window",
      "kayaSkinAnchors[id]?.reversed().lazy.compactMap(\\.view).first(where: { $0.window != nil })"),
     (SCENE, "the core lowers every gradient's colour",
@@ -144,6 +150,33 @@ CALLS = [
 ]
 
 
+# A platform view behind a node answers macOS's hit test at a point in place of
+# the control above it (docs/traps.md, the frame anchor that took the hit).
+PLATFORM_BEHIND = re.compile(r"\.(?:background|overlay)\(\s*(\w+)\(")
+REPRESENTABLE = re.compile(r"struct (\w+): (?:NS|UI)ViewRepresentable")
+BEHIND_EXEMPT = {
+    "KayaChoiceAnchor": "under its own control, which answers the choice reads' hit test at its centre",
+    "KayaExpanderAnchor": "under its own header or body; the header read's hit test answers the disclosure triangle",
+    "KayaMacDragDropSurface": "the drag source and drop target's own view, which must receive the drag",
+    "KayaPhoneDragDropSurface": "the drag source and drop target's own view, which must receive the drag",
+    "KayaSheetAccessor": "reaches its sheet's window; behind every sheet with every sheet leg's reads green",
+    "KayaSheetDismissWatcher": "reaches its sheet's controller; behind every sheet with every sheet leg's reads green",
+    "KayaWindowAccessor": "reaches its window; behind every root with every hit-test read green",
+}
+
+
+def behind_findings(swift):
+    reps = set(REPRESENTABLE.findall(swift))
+    used = {m.group(1) for m in PLATFORM_BEHIND.finditer(swift) if m.group(1) in reps}
+    out = [f"skin: {name}, a platform view, sits behind a node with accessibility and hit testing on, so "
+           f"macOS's hit test at a point can answer it instead of the control above it; wrap it the way "
+           f"KayaSkinFrameReader wraps KayaSkinFrameAnchor, or name it in tools/lib/skin_routes.py's "
+           f"BEHIND_EXEMPT with a reason" for name in sorted(used - set(BEHIND_EXEMPT))]
+    out += [f"skin: BEHIND_EXEMPT names {name}, which no longer sits behind a node"
+            for name in sorted(set(BEHIND_EXEMPT) - used)]
+    return out
+
+
 def findings(sources, backends=None):
     arms_held = arm_modules()
     backends = {**BACKENDS, **{rel: m.LABEL for rel, m in arms_held.items()}} if backends is None else backends
@@ -152,6 +185,7 @@ def findings(sources, backends=None):
         if rel in backends:
             out.extend(mod.findings(sources[source_key(rel, mod)]))
     swift = sources[SWIFT]
+    out.extend(behind_findings(swift))
     for label, opener, needs, never in DOORS:
         found = blocks(swift, opener)
         if len(found) != 1:
@@ -241,6 +275,21 @@ def run(g):
          "only the user's own scroll drops the mac table's anchor"),
         ("the mac table's rows held at the floor", SWIFT, r"height = max\(height, content > kayaNativeRowHeight \? content \+ kayaNativeRowPadding : content\)",
          "height = max(height, kayaNativeRowHeight)", "the mac native table's row takes its tallest cell"),
+        ("the frame anchor open to the hit test", SWIFT,
+         r"KayaSkinFrameAnchor\(id: id\)\.accessibilityHidden\(true\)\.allowsHitTesting\(false\)",
+         "KayaSkinFrameAnchor(id: id)", "hidden from accessibility and hit testing"),
+        ("a bare platform anchor behind a container", SWIFT,
+         r"(\.modifier\(KayaActivatable\(node: node\)\)\n\s+)\.background\(KayaSkinFrameReader\(id: node\.id\)\)",
+         r"\1.background(KayaSkinFrameAnchor(id: node.id))", "KayaSkinFrameAnchor, a platform view, sits behind a node"),
+        ("an exemption that no longer sits behind a node", SWIFT,
+         r"\.background\(KayaWindowAccessor\(windowId: (\w+)\)\)", r".onAppear { _ = \1 }",
+         "BEHIND_EXEMPT names KayaWindowAccessor", 2),
+        ("a cell's resize left unheard", SWIFT,
+         r"(super\.invalidateIntrinsicContentSize\(\)\n)\s+onContentSized\?\(\)\n", r"\1",
+         "content settling its size asks for a report"),
+        ("a cell left unwired", SWIFT,
+         r"\s+cell\.onContentSized = \{ \[weak self\] in self\?\.scheduleReport\(\) \}\n", "\n",
+         "every mac table cell is wired to the report"),
         ("a height correction read as the user's scroll", SWIFT,
          r"inProgrammaticScroll = true\n(\s+)tableView\.noteHeightOfRows\(",
          r"tableView.noteHeightOfRows(", "a height correction keeps the mac table's scroll anchor"),
@@ -266,8 +315,8 @@ def run(g):
     ]
     for rel, mod in arm_modules().items():
         cuts.extend((label, source_key(rel, mod), pattern, repl, want) for label, pattern, repl, want in mod.CUTS)
-    for label, rel, pattern, repl, want in cuts:
-        broken = g.doctor(f"skin: {label}", sources[rel], pattern, repl)
+    for label, rel, pattern, repl, want, *count in cuts:
+        broken = g.doctor(f"skin: {label}", sources[rel], pattern, repl, want=count[0] if count else 1)
         g.negative(f"skin: {label}", lambda rel=rel, broken=broken: findings({**sources, rel: broken}), want=want)
     for rel in [rel for rel in STUBBED if rel not in still]:
         g.negative(f"skin: {rel}'s row withheld", lambda: findings(sources, backends=BACKENDS),

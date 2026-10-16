@@ -566,6 +566,50 @@ def frontmost_from_listing(out, rc, err):
             f"them at layer 0")
 
 
+def mac_last_step(log_path):
+    """The last step the harness entered, as its leg log printed it."""
+    try:
+        text = pathlib.Path(log_path).read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return None, f"the leg log could not be read ({e})"
+    steps = [ln for ln in text.splitlines() if re.match(r"KAYA_HARNESS: \+\d+ms ", ln)]
+    if not steps:
+        return None, "the leg log carries no step line, so no step was entered"
+    return steps[-1][len("KAYA_HARNESS: "):], None
+
+
+def mac_timeout_sentence(log_path):
+    step, why = mac_last_step(log_path)
+    where = f"in step `{step}`" if step else f"before any step: {why}"
+    return (f"flightrec: `timeout 120` killed the leg (exit 124) with no verdict, "
+            f"{where}")
+
+
+def mac_no_trace_sentence(scratch, log):
+    status = pathlib.Path(scratch) / "exit-status.txt"
+    try:
+        rc = status.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ("flightrec: the guest wrote no verb trace, and the runner "
+                f"recorded no exit status ({status} absent), so whether "
+                "`timeout 120`, a crash or act one's own refusal ended it is "
+                "unknown")
+    if rc == "124":
+        return (mac_timeout_sentence(log) if log else
+                "flightrec: `timeout 120` killed the leg (exit 124) with no "
+                "verdict; it streamed to the terminal, so no step is named") + (
+                    "; the harness dumps the ring only on a verdict or its step "
+                    "watchdog, so it wrote no verb trace")
+    if rc == "0":
+        return ("flightrec: the guest wrote no verb trace because it exited 0, "
+                "its own verdict passing; the red is the runner's refusal, "
+                "written at the end of the leg log")
+    return (f"flightrec: the guest wrote no verb trace and exited {rc}: the "
+            "ring is dumped on a FAILED verdict and by the step watchdog, so "
+            "the leg ended before either (a crash or act one's own refusal; "
+            "the leg log carries its last lines)")
+
+
 def mac_frontmost(root):
     """`frontmost <app> "<title>" (pid N)` right now, or why it cannot be told.
 
@@ -1883,6 +1927,15 @@ class MacRecorder(LaneRecorder):
                 log_file.write(line)
         rc = proc.wait()
         self.sampler_stop(sampler)
+        (scratch / "exit-status.txt").write_text(f"{rc}\n", encoding="utf-8")
+        if rc == 124:
+            log_file.flush()
+            killed = mac_timeout_sentence(pathlib.Path(log_file.name))
+            log_file.write(killed + "\n")
+            log_file.flush()
+            if echo:
+                echo.write(killed + "\n")
+                echo.flush()
         refused = self.secure_scan(env, log_file, scratch)
         if refused:
             log_file.write("\n".join(refused) + "\n")
@@ -2043,12 +2096,7 @@ class MacRecorder(LaneRecorder):
                               "A missing sample does not establish the "
                               "leg's elapsed duration.")
         self.adopt(bundle, "verb-trace", scratch / "verb-trace.txt",
-                   why_absent="flightrec: the guest wrote no verb trace. "
-                              "The ring is dumped by the harness on a FAILED "
-                              "verdict and by the step watchdog, so a leg "
-                              "killed before either — the runner's `timeout "
-                              "120`, a crash, act one's own refusal — leaves "
-                              "none")
+                   why_absent=mac_no_trace_sentence(scratch, log))
         if log and pathlib.Path(log).is_file():
             self.adopt(bundle, "leg-log", log)
         else:

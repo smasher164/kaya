@@ -16119,7 +16119,7 @@ after install, or refuse with the free space and the launcher's pinned
 count named, and it is held by android-leg-order's staging clause.
 
 ## INVESTIGATE — XCTest waits 60 s for "animations idle" after a Return that commits a list row and removes the focused field (iOS, seen 2026-10-08 and 2026-10-12)
-KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
+KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, KayaAnimationPlace, addAnimation:forKey:, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
 
 docs/traps.md, "The iOS ceiling's stacks, and XCTest's 60 s animations-idle
 wait", has the mechanism and both sightings. Both were the same step:
@@ -16177,3 +16177,19 @@ long before the Return. The readings now say when XCTest's notifier was first
 seen and name any stop that reached it with no start, and the app log lists
 answers 5 s or more late, so the next timecode sighting can rule this cause in
 or out.
+
+The third sighting, 2026-10-16 (matrix at 50e27735, `timecode-swift`, the same
+Return): XCTest's count held, no blind stop, the main thread answering in 0 ms,
+and the ledger holding two `CASpringAnimation bounds.size duration 0.3833` starts
+of the keyboard-hide spring (44 bounds.size starts on that UIViewAnimationState, 42
+stops) "on no layer in any window". That rules the 2026-10-14 cause out and puts
+this one in the first case above, but the bundle could not say whose layer. A
+removal from the window does not explain it: a forced red with views animated for
+1 s and removed from the window 0.1 s in, one retained and one released, saw both
+stops arrive (docs/traps.md). Since then the ledger reads each UIView animation's
+layer where UIKit adds it (`CALayer addAnimation:forKey:`): every open line names
+the layer, its view, the superview chain and window at the add, and whether that
+layer is now deallocated, alive in no window (its topmost layer named), or in a
+window (hidden or not, listed by the scene or not), still carrying the animation
+or not. On the next sighting that line names the view; find what removed or
+paused it on the Return.
