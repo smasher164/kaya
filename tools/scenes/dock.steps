@@ -1,0 +1,12 @@
+# docs/styling-pass-plan.md Y8, §5.4: the dock lies at the window's foot
+# across its width with the content ending above it, its controls inside the
+# safe area, and it collapses while its root holds no widget.
+expect_title "dock"
+expect_dock shown
+expect_safe slider@progress
+expect_safe button@pause
+click button@stop
+expect_dock hidden
+click button@play
+expect_dock shown
+expect_no_clipping

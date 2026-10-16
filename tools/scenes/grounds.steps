@@ -1,0 +1,12 @@
+# docs/styling-pass-plan.md Y2, Y3, §5.1: each ground read off the pixels. A
+# gradient's top probe is the core's clamped stop, its bottom probe the window
+# ground, and its middle holds 4.5:1 against the appearance's text; an image
+# ground's top probe is the picture there. The dark leg runs this script under
+# KAYA_APPEARANCE=dark, where the clamp is what keeps the white text legible.
+expect_title "grounds"
+expect_ground column@header gradient
+expect_ax label@title "heading/Kind of Blue"
+expect_ground column@hero image
+expect_fill row@scrim overlay
+expect_ground column@plain none
+expect_no_clipping

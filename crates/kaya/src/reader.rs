@@ -81,6 +81,18 @@ pub(crate) fn decode(bytes: &[u8]) -> Result<Pixmap, (MediaFailure, String)> {
     pixmap(width, height, &rgba).map_err(|e| (MediaFailure::DecodeError, e))
 }
 
+/// `decode`'s straight-alpha RGBA8 before premultiplication, or None for
+/// bytes that are not a PNG or JPEG that decodes.
+pub(crate) fn decode_straight(bytes: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        decode_png(bytes).ok()
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        decode_jpeg(bytes).ok()
+    } else {
+        None
+    }
+}
+
 fn decode_png(bytes: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);

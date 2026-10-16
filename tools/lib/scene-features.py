@@ -143,6 +143,15 @@ VERB_FEATURE = {
     "expect_insets": "safearea",
     # docs/network-images-plan.md §5, the same reasoning.
     "expect_image_phase": "netimage",
+    # docs/styling-pass-plan.md §5, the same reasoning: a scene reading a
+    # ground, a shape, a hover, a selection, a label's tint or the dock needs
+    # the backend that draws it.
+    "expect_ground": "grounds",
+    "expect_shape": "shapes",
+    "hover": "cards",
+    "expect_selected": "cards",
+    "expect_tint": "tracks",
+    "expect_dock": "dock",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.

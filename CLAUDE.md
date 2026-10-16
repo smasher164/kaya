@@ -1025,8 +1025,14 @@ in docs/deferred.md.
    second, lsappinfo's parent, what runningboardd, talagentd,
    launchservicesd and WindowServer logged around the launch, its windows
    when first seen), its own apps excluded only by the launch lines
-   lane_health.LANE_APPS holds the lane to; nine cuts watched.
-   Two hundred and thirteen watched negatives, counts printed),
+   lane_health.LANE_APPS holds the lane to; nine cuts watched. AND A LANE
+   PROCESS REGISTERED AS ANOTHER APP FAILS THE LANE since 2026-10-16:
+   LaunchServices matches a check-in to whatever record sits at the pid,
+   so a guest given a dead app's pid became that app; a lane binary whose
+   record names another bundle id, not held since the start, is an
+   IDENTITY ADOPTED refusal (the fix is crates/kaya/src/ls_identity.rs,
+   check-app-identity's C16 its static half); five cuts watched.
+   Two hundred and eighteen watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

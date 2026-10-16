@@ -16642,6 +16642,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             });
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
+        ApplyOp::AttachDock { .. } => crate::depth_stub("dock"),
         ApplyOp::PresentSheet { parent, sheet } => {
             // Built hidden; the mount opens it (docs/sheet-plan.md U1).
             let smoke: Grid = XamlReader::Load(&HSTRING::from(SHEET_SMOKE_XAML))?.cast()?;
@@ -17689,6 +17690,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         core.follow_tokens.insert(id, token);
                     }
                 }
+                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Filled, Value::I64(6))
+                | (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Ground | Prop::Color | Prop::Source, _) => {
+                    crate::depth_stub("grounds")
+                }
+                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Activatable | Prop::Selected, _) => {
+                    crate::depth_stub("cards")
+                }
+                (NativeWidget::Image { .. }, Prop::Shape, _) => crate::depth_stub("shapes"),
+                (NativeWidget::Label { .. }, Prop::Tint, _) => crate::depth_stub("tracks"),
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
                     ensure_accent_surface()?;
                     grid.SetStyle(&filled_style(tint)?)?;
@@ -25939,6 +25949,24 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn hover(&self, _: crate::harness::Target) {
+        crate::depth_stub("cards")
+    }
+    fn ground_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("grounds")
+    }
+    fn shape_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("shapes")
+    }
+    fn selected_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("cards")
+    }
+    fn label_tint(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("tracks")
+    }
+    fn dock_read(&self) -> String {
+        crate::depth_stub("dock")
+    }
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(element) = target_element(core, t)? else {

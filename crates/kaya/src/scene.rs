@@ -796,6 +796,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::PopEntry { .. } => UndoVerdict::Refused("pop_entry"),
         TxOp::SetEntryProp { .. } => UndoVerdict::Refused("set_entry_prop"),
         TxOp::PresentSheet { .. } => UndoVerdict::Refused("present_sheet"),
+        TxOp::AttachDock { .. } => UndoVerdict::Refused("attach_dock"),
         TxOp::DismissSheet { .. } => UndoVerdict::Refused("dismiss_sheet"),
         TxOp::SetSheetProp { .. } => UndoVerdict::Refused("set_sheet_prop"),
         TxOp::AddSection { .. } => UndoVerdict::Refused("add_section"),
@@ -891,6 +892,21 @@ pub(crate) struct Scene {
     /// both move (docs/fullscreen-plan.md §1); absent is false.
     fullscreen: HashMap<WindowId, bool>,
     section_bindings: HashMap<SignalId, Vec<(WindowId, SectionProp)>>,
+    /// Live docks (docs/styling-pass-plan.md Y8): dock -> its window, and each
+    /// window's one dock. Docks share the surface namespace and die with
+    /// their window.
+    dock_of: HashMap<WindowId, WindowId>,
+    window_dock: HashMap<WindowId, WindowId>,
+    /// Every row and column the backends were told to create, live or
+    /// stamped: the ids whose `color` is a gradient's (`lower_skin`).
+    skin_containers: HashSet<WidgetId>,
+    /// Per live row, column and image, what it declared toward the skin's
+    /// pairings (docs/styling-pass-plan.md Y1-Y4, Y6), checked at the end of
+    /// the transaction.
+    skin_boxes: HashMap<WidgetId, SkinBox>,
+    skin_dirty: Vec<WidgetId>,
+    /// A child joined a tree this transaction, so Y3's bare-text walk runs.
+    skin_text_dirty: bool,
     /// Menu items by id — their OWN id space (DESIGN.md, Menus).
     /// Append-only, never removed in v1.
     menu_items: HashMap<MenuItemId, MenuItem>,
@@ -1258,6 +1274,127 @@ impl ImageBox {
     }
 }
 
+/// What a row, column or image has declared toward the skin's pairings
+/// (docs/styling-pass-plan.md Y1-Y4, Y6), in either zone.
+#[derive(Default, Clone, Copy)]
+struct SkinBox {
+    /// Whether a ground was declared, and its value, None while bound to a
+    /// row field or a signal.
+    ground_set: bool,
+    ground: Option<i64>,
+    filled: bool,
+    color: bool,
+    source: bool,
+    selected: bool,
+    activatable: bool,
+    circle: bool,
+    fit: bool,
+}
+
+impl SkinBox {
+    fn note(&mut self, prop: Prop, value: &PropValue) {
+        let constant = match value {
+            PropValue::Const(v) => Some(v),
+            _ => None,
+        };
+        match prop {
+            Prop::Ground => {
+                self.ground_set = true;
+                self.ground = constant.and_then(|v| if let Value::I64(g) = v { Some(*g) } else { None });
+            }
+            Prop::Filled => self.filled = !matches!(constant, Some(Value::I64(0))),
+            Prop::Color => self.color = true,
+            Prop::Source => self.source = true,
+            Prop::Selected => self.selected = true,
+            Prop::Activatable => self.activatable = !matches!(constant, Some(Value::Bool(false))),
+            Prop::Shape => self.circle = matches!(constant, Some(Value::I64(crate::wire::SHAPE_CIRCLE))),
+            Prop::Fit => self.fit = true,
+            _ => {}
+        }
+    }
+
+    /// A fill or a ground of its own, which is what text inside it sits on.
+    fn covers(&self) -> bool {
+        self.filled || (self.ground_set && self.ground != Some(crate::wire::GROUND_NONE))
+    }
+
+    /// The container pairings; an image's only rule is Y6's fit, applied
+    /// rather than refused.
+    fn refusal(&self, who: &str, container: bool) -> Option<String> {
+        use crate::wire::{GROUND_GRADIENT, GROUND_IMAGE, GROUND_NONE};
+        if !container {
+            return None;
+        }
+        let ground = self.ground.unwrap_or(-1);
+        let plan = "docs/styling-pass-plan.md";
+        if self.filled && self.ground.is_some_and(|g| g != GROUND_NONE) {
+            return Some(format!(
+                "kaya: {who} declares a ground and a fill — a container has one or the other \
+                 ({plan} Y2)"
+            ));
+        }
+        if ground == GROUND_GRADIENT && !self.color {
+            return Some(format!(
+                "kaya: {who} has a gradient ground and no `color` — the gradient's top stop is that \
+                 colour ({plan} Y2)"
+            ));
+        }
+        if ground == GROUND_IMAGE && !self.source {
+            return Some(format!(
+                "kaya: {who} has an image ground and no `source` — declare the picture it covers \
+                 itself with ({plan} Y3)"
+            ));
+        }
+        if self.color && self.ground.is_some_and(|g| g != GROUND_GRADIENT) {
+            return Some(format!(
+                "kaya: {who} declares a `color` without a gradient ground — a container's colour is \
+                 its gradient's top stop and nothing else ({plan} Y2)"
+            ));
+        }
+        if self.source && self.ground.is_some_and(|g| g != GROUND_IMAGE) {
+            return Some(format!(
+                "kaya: {who} declares a `source` without an image ground — a container's picture \
+                 is its image ground ({plan} Y3)"
+            ));
+        }
+        if (self.color || self.source) && !self.ground_set {
+            return Some(format!(
+                "kaya: {who} declares a {} and no ground — a container's colour and picture belong \
+                 to its `ground` ({plan} Y2, Y3)",
+                if self.color { "`color`" } else { "`source`" }
+            ));
+        }
+        if self.selected && !self.activatable {
+            return Some(format!(
+                "kaya: {who} declares `selected` and takes no `on_activate` — only a container \
+                 that takes a click as a whole can be selected ({plan} Y4)"
+            ));
+        }
+        None
+    }
+}
+
+/// The kinds that put text on screen (docs/styling-pass-plan.md Y3).
+fn is_text_kind(kind: WidgetKind) -> bool {
+    matches!(
+        kind,
+        WidgetKind::Label
+            | WidgetKind::Textarea
+            | WidgetKind::Entry
+            | WidgetKind::Search
+            | WidgetKind::NumberField
+            | WidgetKind::SecureField
+    )
+}
+
+fn bare_text_refusal(text: &str, ground: &str) -> String {
+    format!(
+        "kaya: {text} sits bare on the image ground of {ground} — text over a picture has no \
+         contrast anyone can promise; put it inside a container `filled` with `overlay` \
+         (docs/styling-pass-plan.md Y3)"
+    )
+}
+
 /// A stamped image as N8 reads it (docs/network-images-plan.md).
 struct ImageRow {
     addr: (u64, PathKey),
@@ -1343,7 +1480,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Date | Prop::MinDate | Prop::MaxDate => matches!(kind, WidgetKind::DatePicker),
         Prop::Time | Prop::MinuteStep => matches!(kind, WidgetKind::TimePicker),
         // docs/color-picker-plan.md §2.
-        Prop::Color | Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
+        // A gradient ground's colour and an image ground's picture ride a
+        // row or column too, each held to its ground at the end of the
+        // transaction (docs/styling-pass-plan.md Y2, Y3).
+        Prop::Color => matches!(kind, WidgetKind::ColorPicker | WidgetKind::Column | WidgetKind::Row),
+        Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3; an image's box (docs/network-images-plan.md N3).
         Prop::Fit => matches!(kind, WidgetKind::Video | WidgetKind::Image),
         Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
@@ -1358,7 +1499,11 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/safe-area-plan.md A3: the three kinds whose content is a picture.
         Prop::Bleed => matches!(kind, WidgetKind::Image | WidgetKind::Video | WidgetKind::Canvas),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
-        Prop::Source => matches!(kind, WidgetKind::Image),
+        Prop::Source => matches!(kind, WidgetKind::Image | WidgetKind::Column | WidgetKind::Row),
+        // docs/styling-pass-plan.md Y1: the skin's kinds, no control among them.
+        Prop::Ground | Prop::Selected | Prop::Activatable => matches!(kind, WidgetKind::Column | WidgetKind::Row),
+        Prop::Shape => kind == WidgetKind::Image,
+        Prop::Tint => kind == WidgetKind::Label,
         // Layout weight is kind-agnostic: any child of a row/column may
         // grow, so it applies to every widget kind.
         Prop::Grow => true,
@@ -1997,6 +2142,8 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Expanded => ValueType::Bool,
         Prop::Bleed => ValueType::Bool,
         Prop::Phase => ValueType::I64,
+        Prop::Ground | Prop::Shape | Prop::Tint => ValueType::I64,
+        Prop::Selected | Prop::Activatable => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2782,8 +2929,30 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
         assert!(
-            (1..=5).contains(tint),
-            "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5), got {tint}"
+            (1..=6).contains(tint),
+            "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5, \
+             overlay=6), got {tint}"
+        );
+    }
+    if let (Prop::Ground, Value::I64(ground)) = (prop, value) {
+        assert!(
+            crate::wire::vocab_name(crate::wire::GROUNDS, *ground).is_some(),
+            "kaya: ground is none (0), gradient (1) or image (2), got {ground}"
+        );
+    }
+    if let (Prop::Shape, Value::I64(shape)) = (prop, value) {
+        assert!(
+            crate::wire::vocab_name(crate::wire::SHAPES, *shape).is_some(),
+            "kaya: an image's shape is rect (0), rounded (1) or circle (2), got {shape}"
+        );
+    }
+    // A label's tint is a standalone colour; neutral and overlay have none
+    // (docs/styling-pass-plan.md Y7).
+    if let (Prop::Tint, Value::I64(tint)) = (prop, value) {
+        assert!(
+            (0..=4).contains(tint),
+            "kaya: a label's tint is none (0), accent (1), success (2), warning (3) or critical (4) \
+             — neutral and overlay are fills with no standalone colour, got {tint}"
         );
     }
     if let (Prop::Player, Value::I64(player)) = (prop, value) {
@@ -3227,6 +3396,67 @@ impl Scene {
     }
 
     /// N3 in the template zone (docs/network-images-plan.md).
+    /// Y3 (docs/styling-pass-plan.md): text whose nearest ground is a picture
+    /// sits inside a filled container, or is refused, live zone.
+    fn bare_text_on_image(&self) -> Option<String> {
+        let image_grounds: Vec<WidgetId> = self
+            .skin_boxes
+            .iter()
+            .filter(|(id, b)| b.ground == Some(crate::wire::GROUND_IMAGE) && self.widgets.contains_key(id))
+            .map(|(id, _)| *id)
+            .collect();
+        for top in image_grounds {
+            let mut stack: Vec<WidgetId> = self.children_of.get(&top).cloned().unwrap_or_default();
+            while let Some(id) = stack.pop() {
+                let Some(kind) = self.widgets.get(&id).copied() else { continue };
+                if is_text_kind(kind) {
+                    return Some(bare_text_refusal(&format!("{kind:?} {id:?}"), &format!("{top:?}")));
+                }
+                let covers = self.skin_boxes.get(&id).is_some_and(SkinBox::covers);
+                if !covers {
+                    stack.extend(self.children_of.get(&id).cloned().unwrap_or_default());
+                }
+            }
+        }
+        None
+    }
+
+    /// Y3's template twin: the same walk over one body's blueprint.
+    fn check_skin_template(body: &TplBody) {
+        let mut boxes: HashMap<u64, SkinBox> = HashMap::new();
+        let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
+        let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        for op in &body.ops {
+            match op {
+                TplOp::Widget { node, kind } => {
+                    kinds.insert(*node, *kind);
+                }
+                TplOp::SetProp { node, prop, value } => boxes.entry(*node).or_default().note(*prop, value),
+                TplOp::AddChild { parent, child } => children.entry(*parent).or_default().push(*child),
+                _ => {}
+            }
+        }
+        for (node, b) in &boxes {
+            let kind = kinds.get(node).copied();
+            let container = matches!(kind, Some(WidgetKind::Row | WidgetKind::Column));
+            if let Some(why) = b.refusal(&format!("template node {node} ({kind:?})"), container) {
+                panic!("{why}");
+            }
+            if b.ground != Some(crate::wire::GROUND_IMAGE) {
+                continue;
+            }
+            let mut stack = children.get(node).cloned().unwrap_or_default();
+            while let Some(id) = stack.pop() {
+                if kinds.get(&id).copied().is_some_and(is_text_kind) {
+                    panic!("{}", bare_text_refusal(&format!("template node {id}"), &format!("template node {node}")));
+                }
+                if !boxes.get(&id).is_some_and(SkinBox::covers) {
+                    stack.extend(children.get(&id).cloned().unwrap_or_default());
+                }
+            }
+        }
+    }
+
     fn check_image_template(body: &TplBody) {
         let mut boxes: HashMap<u64, ImageBox> = HashMap::new();
         for op in &body.ops {
@@ -3696,6 +3926,12 @@ impl Scene {
                             self.image_box_dirty.push(widget);
                         }
                     }
+                    if matches!(kind, WidgetKind::Row | WidgetKind::Column | WidgetKind::Image) {
+                        self.skin_boxes.entry(widget).or_default().note(prop, &value);
+                        if !self.skin_dirty.contains(&widget) {
+                            self.skin_dirty.push(widget);
+                        }
+                    }
                     if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
                         self.accept_lists.insert(widget, list.clone());
                     }
@@ -3998,6 +4234,10 @@ impl Scene {
                     }
                     self.selected_section.remove(&window);
                     self.fullscreen.remove(&window);
+                    if let Some(dock) = self.window_dock.remove(&window) {
+                        self.dock_of.remove(&dock);
+                        self.mounted_windows.remove(&dock);
+                    }
                     // ... and its sheet chain: parent-bound, it goes with the window.
                     if let Some(child) = self.child_sheet.get(&window).copied() {
                         self.forget_sheet(child);
@@ -4451,7 +4691,8 @@ impl Scene {
                         !self.windows.contains(&sheet)
                             && !self.nav_entries.contains_key(&sheet)
                             && !self.section_of.contains_key(&sheet)
-                            && !self.sheets.contains_key(&sheet),
+                            && !self.sheets.contains_key(&sheet)
+                            && !self.dock_of.contains_key(&sheet),
                         "kaya: surface id {sheet:?} already exists"
                     );
                     assert!(
@@ -4462,6 +4703,36 @@ impl Scene {
                     self.sheets.insert(sheet, parent);
                     self.child_sheet.insert(parent, sheet);
                     out.push(ApplyOp::PresentSheet { parent, sheet });
+                }
+                TxOp::AttachDock { window, dock } => {
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&window),
+                        "kaya: attach_dock to unknown window {window:?} — a dock belongs to a \
+                         window (0 is the primary), never to an entry, section or sheet \
+                         (docs/styling-pass-plan.md Y8)"
+                    );
+                    assert!(dock.0 != 0, "kaya: surface id 0 is the primary window, not a dock");
+                    assert!(
+                        dock.0 & INTERNAL_BIT == 0,
+                        "kaya: dock id {dock:?} uses the reserved internal bit"
+                    );
+                    assert!(
+                        !self.windows.contains(&dock)
+                            && !self.nav_entries.contains_key(&dock)
+                            && !self.section_of.contains_key(&dock)
+                            && !self.sheets.contains_key(&dock)
+                            && !self.dock_of.contains_key(&dock),
+                        "kaya: surface id {dock:?} already exists"
+                    );
+                    if let Some(held) = self.window_dock.get(&window) {
+                        panic!(
+                            "kaya: window {window:?} already has dock {held:?} — one dock per \
+                             window (docs/styling-pass-plan.md Y8)"
+                        );
+                    }
+                    self.dock_of.insert(dock, window);
+                    self.window_dock.insert(window, dock);
+                    out.push(ApplyOp::AttachDock { window, dock });
                 }
                 TxOp::DismissSheet { sheet } => {
                     assert!(
@@ -4731,6 +5002,7 @@ impl Scene {
                         self.widgets.contains_key(&child),
                         "kaya: add_child of unknown child {child:?}"
                     );
+                    self.skin_text_dirty = true;
                     if self.widgets[&parent] == WidgetKind::Scroll {
                         let fresh = self.filled_scrolls.insert(parent);
                         assert!(
@@ -4789,10 +5061,11 @@ impl Scene {
                             || self.windows.contains(&window)
                             || self.nav_entries.contains_key(&window)
                             || self.section_of.contains_key(&window)
-                            || self.sheets.contains_key(&window),
+                            || self.sheets.contains_key(&window)
+                            || self.dock_of.contains_key(&window),
                         "kaya: mount into unknown surface {window:?} — \
-                         create_window, push_entry, add_section or present_sheet \
-                         first (0 is the primary)"
+                         create_window, push_entry, add_section, present_sheet or \
+                         attach_dock first (0 is the primary)"
                     );
                     assert!(
                         self.widgets.contains_key(&root),
@@ -5483,6 +5756,30 @@ impl Scene {
                 panic!("{why}");
             }
         }
+        let skin_dirty = std::mem::take(&mut self.skin_dirty);
+        for id in &skin_dirty {
+            let Some(skin) = self.skin_boxes.get_mut(id) else { continue };
+            let kind = self.widgets[id];
+            if let Some(why) = skin.refusal(&format!("{kind:?} {id:?}"), kind != WidgetKind::Image) {
+                panic!("{why}");
+            }
+            // A circle of a picture that is not square must crop, so the
+            // root covers unless the app chose a fit (docs/styling-pass-plan.md Y6).
+            if skin.circle && !skin.fit {
+                skin.fit = true;
+                out.push(ApplyOp::SetProp {
+                    id: *id,
+                    prop: Prop::Fit,
+                    value: Value::I64(crate::wire::FITS[1].0),
+                });
+            }
+        }
+        if !skin_dirty.is_empty() || self.skin_text_dirty {
+            self.skin_text_dirty = false;
+            if let Some(why) = self.bare_text_on_image() {
+                panic!("{why}");
+            }
+        }
         // NO GROW INSIDE A WRAPPING ROW (docs/layout-knobs-plan.md §2): a
         // weight has no track to take on a line that breaks where it must.
         for id in std::mem::take(&mut self.wrap_dirty) {
@@ -5700,7 +5997,30 @@ impl Scene {
         // waited for this, and is delivered first. Idempotent past the
         // first batch.
         crate::links::flush_early();
+        self.lower_skin(&mut out);
         out
+    }
+
+    /// A row's or column's `color` is a gradient's top stop, sent on as the
+    /// two clamped tops, light in bits 24-47 and dark in bits 0-23
+    /// (docs/styling-pass-plan.md Y2). Every op list the backends see passes
+    /// here, so no arm ever draws an unclamped data colour.
+    fn lower_skin(&mut self, ops: &mut [ApplyOp]) {
+        for op in ops.iter_mut() {
+            match op {
+                ApplyOp::Create { id, kind: WidgetKind::Row | WidgetKind::Column, .. } => {
+                    self.skin_containers.insert(*id);
+                }
+                ApplyOp::SetProp { id, prop: Prop::Color, value: Value::I64(packed) }
+                    if self.skin_containers.contains(id) =>
+                {
+                    let rgb = ((*packed as u64 >> 8) & 0xFF_FFFF) as u32;
+                    let (light, dark) = crate::brand::gradient_tops(rgb);
+                    *packed = (i64::from(light) << 24) | i64::from(dark);
+                }
+                _ => {}
+            }
+        }
     }
 
     /// The end-of-batch fan-out: every dirtied signal reaches everything
@@ -6799,6 +7119,7 @@ impl Scene {
         let mut out = Vec::new();
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
         out.extend(self.reconcile_toasts());
+        self.lower_skin(&mut out);
         Some((out, occurrence))
     }
 
@@ -6897,6 +7218,7 @@ impl Scene {
         self.apply_delta(&delta, &mut out);
         self.ledgers.entry(window).or_default().done.push(back);
         out.extend(self.reconcile_toasts());
+        self.lower_skin(&mut out);
         Some((
             out,
             Occurrence::Redone {
@@ -8373,11 +8695,29 @@ impl Scene {
                     }
                 }
                 let top = scopes.last_mut().unwrap();
+                // A circle covers unless the app chose a fit: the live
+                // zone's rule (docs/styling-pass-plan.md Y6), placed before
+                // any later fit of the app's in the body.
+                let circle = prop == Prop::Shape
+                    && matches!(&value, PropValue::Const(Value::I64(crate::wire::SHAPE_CIRCLE)));
                 top.current.ops.push(TplOp::SetProp {
                     node: widget.0,
                     prop,
                     value,
                 });
+                if circle
+                    && !top
+                        .current
+                        .ops
+                        .iter()
+                        .any(|op| matches!(op, TplOp::SetProp { node, prop: Prop::Fit, .. } if *node == widget.0))
+                {
+                    top.current.ops.push(TplOp::SetProp {
+                        node: widget.0,
+                        prop: Prop::Fit,
+                        value: PropValue::Const(Value::I64(crate::wire::FITS[1].0)),
+                    });
+                }
             }
             TxOp::AddChild { parent, child } => {
                 assert!(
@@ -8528,6 +8868,7 @@ impl Scene {
                             self.check_document_template(body);
                             self.check_expander_template(body, true);
                             Self::check_image_template(body);
+                            Self::check_skin_template(body);
                         }
                     }
                     ClosedScope::When { body, .. } => {
@@ -8536,6 +8877,7 @@ impl Scene {
                         self.check_document_template(body);
                         self.check_expander_template(body, in_for);
                         Self::check_image_template(body);
+                        Self::check_skin_template(body);
                     }
                 }
                 match (scopes.last_mut(), bodies) {
@@ -10359,6 +10701,7 @@ impl Scene {
             .park(order, first.min(order.len().saturating_sub(1)));
         #[cfg(debug_assertions)]
         self.assert_bands_hold();
+        self.lower_skin(&mut out);
         out
     }
 
@@ -11526,12 +11869,13 @@ mod tests {
     fn declaration_renders_nothing() {
         let mut scene = Scene::new();
         let ops = scene.apply(milestone2_scene());
-        // Only the live zone appears: the column, the When container,
-        // the For container. No template node hits the backend.
+        // Only the live zone appears: the column (tagged, since a live
+        // container can be activatable), the When container, the For
+        // container. No template node hits the backend.
         assert_eq!(
             creates(&ops),
             vec![
-                (WidgetKind::Column, false),
+                (WidgetKind::Column, true),
                 (WidgetKind::Column, false),
                 (WidgetKind::Column, false),
             ]
@@ -12353,7 +12697,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "filled takes a tint")]
     fn a_filled_row_refuses_a_value_outside_the_tints() {
-        declare(WidgetKind::Row, Prop::Filled, 6);
+        declare(WidgetKind::Row, Prop::Filled, 7);
     }
 
     #[test]
@@ -14034,7 +14378,7 @@ mod tests {
         let tag = ops
             .iter()
             .find_map(|op| match op {
-                ApplyOp::Create { tag: Some(t), .. } => Some(t.clone()),
+                ApplyOp::Create { tag: Some(t), kind: WidgetKind::Button, .. } => Some(t.clone()),
                 _ => None,
             })
             .unwrap();
@@ -19888,8 +20232,10 @@ mod tests {
     /// an update + a move + a remove produced at the base commit
     /// (0bc8ce1, parent a5f6189), BEFORE row windowing existed. The two
     /// `Align` lines joined 2026-09-05 with the row's centre default
-    /// (docs/tasks-plan.md R5), the one change to this stream since.
-    const BASE_BRIDGE_STREAM: &str = r#"Create { id: WidgetId(1), kind: Column, tag: None }
+    /// (docs/tasks-plan.md R5), and the live root's tag on 2026-10-15, when
+    /// rows and columns began carrying one for `activated`
+    /// (docs/styling-pass-plan.md Y4): the two changes since.
+    const BASE_BRIDGE_STREAM: &str = r#"Create { id: WidgetId(1), kind: Column, tag: Some([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]) }
 Create { id: WidgetId(4), kind: Column, tag: None }
 AddChild { parent: WidgetId(1), child: WidgetId(4) }
 Mount { window: WindowId(0), root: WidgetId(1) }
@@ -21261,5 +21607,247 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             std::panic::catch_unwind(|| check_prop(WidgetKind::Label, Prop::Phase)).unwrap_err(),
         );
         assert!(msg.contains("has no property"), "{msg}");
+    }
+
+    // --- The skin (docs/styling-pass-plan.md Y1-Y8) -----------------------
+
+    fn skin_refusal(tx: Transaction) -> String {
+        panic_text(
+            std::panic::catch_unwind(move || {
+                Scene::new().apply(tx);
+            })
+            .expect_err("the skin admitted what Y1-Y4 refuse"),
+        )
+    }
+
+    fn set(id: u64, prop: Prop, value: Value) -> TxOp {
+        TxOp::SetProperty { widget: WidgetId(id), prop, value: PropValue::Const(value) }
+    }
+
+    fn skin_root(kind: WidgetKind, props: Vec<TxOp>) -> Transaction {
+        let mut tx = vec![TxOp::CreateWidget { id: WidgetId(1), kind }];
+        tx.extend(props);
+        tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        tx
+    }
+
+    /// Y1: the skin's props live on their kinds and no control takes one.
+    #[test]
+    fn the_skin_lives_on_its_kinds_alone() {
+        for kind in [WidgetKind::Button, WidgetKind::Slider, WidgetKind::Entry, WidgetKind::Label] {
+            for prop in [Prop::Ground, Prop::Selected, Prop::Activatable] {
+                let msg = panic_text(std::panic::catch_unwind(|| check_prop(kind, prop)).unwrap_err());
+                assert!(msg.contains("has no property"), "{kind:?} {prop:?}: {msg}");
+            }
+        }
+        for kind in [WidgetKind::Button, WidgetKind::Video, WidgetKind::Canvas, WidgetKind::Label] {
+            assert!(std::panic::catch_unwind(|| check_prop(kind, Prop::Shape)).is_err(), "{kind:?} shape");
+        }
+        for kind in [WidgetKind::Button, WidgetKind::Entry, WidgetKind::Row] {
+            assert!(std::panic::catch_unwind(|| check_prop(kind, Prop::Tint)).is_err(), "{kind:?} tint");
+        }
+        for kind in [WidgetKind::Row, WidgetKind::Column] {
+            check_prop(kind, Prop::Ground);
+            check_prop(kind, Prop::Selected);
+            check_prop(kind, Prop::Activatable);
+        }
+        check_prop(WidgetKind::Image, Prop::Shape);
+        check_prop(WidgetKind::Label, Prop::Tint);
+    }
+
+    /// Y2, Y3, Y4: the root's pairings, each refused in its own words.
+    #[test]
+    fn the_skins_pairings_are_refused_by_name() {
+        let gradient = Value::I64(crate::wire::GROUND_GRADIENT);
+        let image = Value::I64(crate::wire::GROUND_IMAGE);
+        let colour = Value::I64(0x7A2E_9CFF);
+        let art = Value::Blob(crate::protocol::Blob::from(&b"\xff\xd8 art"[..]));
+        let cases: Vec<(Transaction, &str)> = vec![
+            (skin_root(WidgetKind::Column, vec![set(1, Prop::Ground, gradient.clone())]), "has a gradient ground and no `color`"),
+            (skin_root(WidgetKind::Row, vec![set(1, Prop::Ground, image.clone())]), "has an image ground and no `source`"),
+            (skin_root(WidgetKind::Column, vec![set(1, Prop::Color, colour.clone())]), "and no ground"),
+            (
+                skin_root(WidgetKind::Column, vec![set(1, Prop::Ground, image.clone()), set(1, Prop::Color, colour.clone()), set(1, Prop::Source, art.clone())]),
+                "without a gradient ground",
+            ),
+            (
+                skin_root(WidgetKind::Column, vec![set(1, Prop::Ground, gradient.clone()), set(1, Prop::Color, colour.clone()), set(1, Prop::Source, art.clone())]),
+                "without an image ground",
+            ),
+            (
+                skin_root(WidgetKind::Column, vec![set(1, Prop::Ground, gradient.clone()), set(1, Prop::Color, colour.clone()), set(1, Prop::Filled, Value::I64(5))]),
+                "a ground and a fill",
+            ),
+            (skin_root(WidgetKind::Row, vec![set(1, Prop::Selected, Value::Bool(true))]), "takes no `on_activate`"),
+        ];
+        for (tx, want) in cases {
+            let msg = skin_refusal(tx);
+            assert!(msg.contains(want) && msg.contains("styling-pass-plan.md"), "wanted {want:?}: {msg}");
+        }
+        Scene::new().apply(skin_root(WidgetKind::Column, vec![set(1, Prop::Ground, gradient), set(1, Prop::Color, colour)]));
+        Scene::new().apply(skin_root(WidgetKind::Row, vec![set(1, Prop::Ground, image), set(1, Prop::Source, art)]));
+        Scene::new().apply(skin_root(
+            WidgetKind::Row,
+            vec![set(1, Prop::Activatable, Value::Bool(true)), set(1, Prop::Selected, Value::Bool(true))],
+        ));
+    }
+
+    /// Y7: neutral and overlay have no standalone colour; Y3: overlay fills.
+    #[test]
+    fn a_labels_tint_is_a_standalone_colour_and_overlay_is_a_fill() {
+        for tint in 0..=4 {
+            declare(WidgetKind::Label, Prop::Tint, tint);
+        }
+        for tint in [5, 6] {
+            let msg = panic_text(std::panic::catch_unwind(|| declare(WidgetKind::Label, Prop::Tint, tint)).unwrap_err());
+            assert!(msg.contains("no standalone colour"), "{tint}: {msg}");
+        }
+        declare(WidgetKind::Row, Prop::Filled, crate::wire::TINT_OVERLAY as i64);
+    }
+
+    /// Y3: text bare on a picture dies naming the label, in both zones; inside
+    /// an overlay fill it stands.
+    #[test]
+    fn bare_text_on_an_image_ground_is_refused_in_both_zones() {
+        let art = Value::Blob(crate::protocol::Blob::from(&b"\xff\xd8 art"[..]));
+        let hero = |wrapped: bool| {
+            let mut tx = vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+                set(1, Prop::Ground, Value::I64(crate::wire::GROUND_IMAGE)),
+                set(1, Prop::Source, art.clone()),
+                TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Row },
+                TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Label },
+                TxOp::AddChild { parent: WidgetId(2), child: WidgetId(3) },
+                TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ];
+            if wrapped {
+                tx.insert(4, set(2, Prop::Filled, Value::I64(crate::wire::TINT_OVERLAY as i64)));
+            }
+            tx
+        };
+        Scene::new().apply(hero(true));
+        let msg = skin_refusal(hero(false));
+        assert!(msg.contains("Label WidgetId(3)") && msg.contains("`overlay`") && msg.contains("Y3"), "{msg}");
+        let stamped = |wrapped: bool| {
+            let mut tx = vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+                TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Blob]] },
+                TxOp::CreateFor { id: 2, collection: CollectionId(1) },
+                TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Column },
+                TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Ground, value: PropValue::Const(Value::I64(crate::wire::GROUND_IMAGE)) },
+                TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Source, value: PropValue::Element { level: 0, field: 0 } },
+                TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Row },
+                TxOp::CreateWidget { id: WidgetId(12), kind: WidgetKind::Label },
+                TxOp::AddChild { parent: WidgetId(11), child: WidgetId(12) },
+                TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+                TxOp::TemplateEnd,
+                TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+                TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            ];
+            if wrapped {
+                tx.insert(7, TxOp::SetProperty { widget: WidgetId(11), prop: Prop::Filled, value: PropValue::Const(Value::I64(6)) });
+            }
+            tx
+        };
+        Scene::new().apply(stamped(true));
+        let msg = skin_refusal(stamped(false));
+        assert!(msg.contains("template node 12") && msg.contains("Y3"), "{msg}");
+    }
+
+    /// Y6: a circle covers unless the app chose a fit.
+    #[test]
+    fn a_circle_covers_unless_the_app_chose_a_fit() {
+        let fits = |ops: &[ApplyOp]| -> Vec<i64> {
+            ops.iter()
+                .filter_map(|op| match op {
+                    ApplyOp::SetProp { prop: Prop::Fit, value: Value::I64(f), .. } => Some(*f),
+                    _ => None,
+                })
+                .collect()
+        };
+        let circle = || set(1, Prop::Shape, Value::I64(crate::wire::SHAPE_CIRCLE));
+        let ops = Scene::new().apply(skin_root(WidgetKind::Image, vec![circle()]));
+        assert_eq!(fits(&ops), vec![1], "{ops:?}");
+        let ops = Scene::new().apply(skin_root(WidgetKind::Image, vec![circle(), set(1, Prop::Fit, Value::I64(0))]));
+        assert_eq!(fits(&ops), vec![0], "{ops:?}");
+        let ops = Scene::new().apply(skin_root(WidgetKind::Image, vec![set(1, Prop::Shape, Value::I64(crate::wire::SHAPE_ROUNDED))]));
+        assert!(fits(&ops).is_empty(), "{ops:?}");
+    }
+
+    /// Y2: no backend ever sees the raw data colour on a container, while a
+    /// colour picker's colour passes untouched.
+    #[test]
+    fn a_gradients_colour_reaches_the_backends_clamped() {
+        let raw = 0xF4E04Du32;
+        let ops = Scene::new().apply(skin_root(
+            WidgetKind::Column,
+            vec![set(1, Prop::Ground, Value::I64(crate::wire::GROUND_GRADIENT)), set(1, Prop::Color, Value::I64(i64::from(raw) << 8 | 0xFF))],
+        ));
+        let packed = ops
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::SetProp { prop: Prop::Color, value: Value::I64(p), .. } => Some(*p),
+                _ => None,
+            })
+            .expect("the colour reached the backend");
+        let (light, dark) = crate::brand::gradient_tops(raw);
+        assert_eq!(packed, (i64::from(light) << 24) | i64::from(dark));
+        assert!(crate::brand::contrast_ratio(dark, 0xFFFFFF) >= 4.5);
+        let ops = Scene::new().apply(skin_root(WidgetKind::ColorPicker, vec![set(1, Prop::Color, Value::I64(0x1234_56FF))]));
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::SetProp { prop: Prop::Color, value: Value::I64(0x1234_56FF), .. })));
+    }
+
+    /// Y8: one dock per window, in the surface namespace, mounted like any
+    /// surface and gone with its window.
+    #[test]
+    fn a_dock_is_one_surface_per_window() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(40) },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::Mount { window: WindowId(40), root: WidgetId(1) },
+        ]);
+        assert!(ops.contains(&ApplyOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(40) }));
+        assert!(ops.contains(&ApplyOp::Mount { window: WindowId(40), root: WidgetId(1) }));
+        let msg = panic_text(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                scene.apply(vec![TxOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(41) }]);
+            }))
+            .unwrap_err(),
+        );
+        assert!(msg.contains("one dock per window"), "{msg}");
+        let msg = skin_refusal(vec![
+            TxOp::PresentSheet { parent: DEFAULT_WINDOW, sheet: WindowId(40) },
+            TxOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(40) },
+        ]);
+        assert!(msg.contains("already exists"), "{msg}");
+        let msg = skin_refusal(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(21) },
+            TxOp::AttachDock { window: WindowId(21), dock: WindowId(40) },
+        ]);
+        assert!(msg.contains("a dock belongs to a window"), "{msg}");
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWindow { window: WindowId(5) },
+            TxOp::AttachDock { window: WindowId(5), dock: WindowId(50) },
+            TxOp::DestroyWindow { window: WindowId(5) },
+            TxOp::CreateWindow { window: WindowId(5) },
+            TxOp::AttachDock { window: WindowId(5), dock: WindowId(50) },
+        ]);
+    }
+
+    /// Y4: a live container's tag decodes as an activation of it.
+    #[test]
+    fn a_live_containers_tag_names_its_activation() {
+        let ops = Scene::new().apply(skin_root(WidgetKind::Row, vec![set(1, Prop::Activatable, Value::Bool(true))]));
+        let tag = ops
+            .iter()
+            .find_map(|op| match op {
+                ApplyOp::Create { tag: Some(t), kind: WidgetKind::Row, .. } => Some(t.clone()),
+                _ => None,
+            })
+            .expect("a live row carries its tag");
+        assert_eq!(crate::wire::decode_activated_tag(&tag), Occurrence::Activated { id: WidgetId(1) });
     }
 }

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x303cc490b4cb14fbL;
+    public static final long SPEC_HASH = 0x9e1c92057e3f0dc2L;
 
     public static final int VALUE_BOOL = 1;
     public static final int VALUE_I64 = 2;
@@ -142,6 +142,11 @@ public final class KayaWire {
     public static final int PROP_EXPANDED = 60;
     public static final int PROP_BLEED = 61;
     public static final int PROP_PHASE = 62;
+    public static final int PROP_GROUND = 63;
+    public static final int PROP_SHAPE = 64;
+    public static final int PROP_SELECTED = 65;
+    public static final int PROP_TINT = 66;
+    public static final int PROP_ACTIVATABLE = 67;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -223,11 +228,19 @@ public final class KayaWire {
     public static final int SIZE_CLASS_NONE = 0;
     public static final int SIZE_CLASS_COMPACT = 1;
     public static final int SIZE_CLASS_REGULAR = 2;
+    public static final int TINT_NONE = 0;
     public static final int TINT_ACCENT = 1;
     public static final int TINT_SUCCESS = 2;
     public static final int TINT_WARNING = 3;
     public static final int TINT_CRITICAL = 4;
     public static final int TINT_NEUTRAL = 5;
+    public static final int TINT_OVERLAY = 6;
+    public static final int GROUND_NONE = 0;
+    public static final int GROUND_GRADIENT = 1;
+    public static final int GROUND_IMAGE = 2;
+    public static final int SHAPE_RECT = 0;
+    public static final int SHAPE_ROUNDED = 1;
+    public static final int SHAPE_CIRCLE = 2;
     public static final int ROLE_DESTRUCTIVE = 1;
     public static final int ROLE_PROMINENT = 2;
     public static final int ROLE_HEADING = 3;
@@ -465,6 +478,7 @@ public final class KayaWire {
     public static final short TX_KIND_SHOW_TOAST = 82;
     public static final short TX_KIND_DISMISS_TOAST = 83;
     public static final short TX_KIND_COLLECTION_PATCH_IF = 84;
+    public static final short TX_KIND_ATTACH_DOCK = 85;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -535,6 +549,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_VIDEO_CAPTURE = 70;
     public static final short APPLY_KIND_PRESENT_TOAST = 71;
     public static final short APPLY_KIND_WITHDRAW_TOAST = 72;
+    public static final short APPLY_KIND_ATTACH_DOCK = 73;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -592,6 +607,7 @@ public final class KayaWire {
     public static final short OCC_KIND_TOAST_RESULT = 55;
     public static final short OCC_KIND_IMAGE_NEEDED = 56;
     public static final short OCC_KIND_IMAGE_RELEASED = 57;
+    public static final short OCC_KIND_ACTIVATED = 58;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1458,6 +1474,14 @@ public final class KayaWire {
         encodeValue(b, guardValue);
         encodeValues(b, fields);
         encodeValues(b, values);
+        return finish(b);
+    }
+
+    /** Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does. */
+    public static byte[] txAttachDock(long window, long dock) {
+        Enc b = begin(TX_KIND_ATTACH_DOCK);
+        b.putLong(window);
+        b.putLong(dock);
         return finish(b);
     }
 
@@ -2928,6 +2952,121 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant ground value. */
+    public static byte[] txSetGround(long widgetId, long ground) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_GROUND).putInt(SOURCE_CONST);
+        encodeValue(b, ground);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound ground value. */
+    public static byte[] txBindGround(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_GROUND).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindGroundElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_GROUND).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant shape value. */
+    public static byte[] txSetShape(long widgetId, long shape) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SHAPE).putInt(SOURCE_CONST);
+        encodeValue(b, shape);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound shape value. */
+    public static byte[] txBindShape(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SHAPE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindShapeElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SHAPE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant selected value. */
+    public static byte[] txSetSelected(long widgetId, boolean selected) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SELECTED).putInt(SOURCE_CONST);
+        encodeValue(b, selected);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound selected value. */
+    public static byte[] txBindSelected(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SELECTED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindSelectedElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_SELECTED).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant tint value. */
+    public static byte[] txSetTint(long widgetId, long tint) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TINT).putInt(SOURCE_CONST);
+        encodeValue(b, tint);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound tint value. */
+    public static byte[] txBindTint(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TINT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindTintElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TINT).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant activatable value. */
+    public static byte[] txSetActivatable(long widgetId, boolean activatable) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ACTIVATABLE).putInt(SOURCE_CONST);
+        encodeValue(b, activatable);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound activatable value. */
+    public static byte[] txBindActivatable(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ACTIVATABLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindActivatableElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_ACTIVATABLE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -3597,7 +3736,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED) {
             return null;
         }
         long id = b.getLong(8);

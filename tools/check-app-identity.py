@@ -83,6 +83,11 @@ dev_shell_or_die()
 #       paints its own ground). Beside them the packaging steps' own
 #       byte checks, which is where the comparison lives.
 #   C15 [links] hosts CLAIM WEB LINKS AND SAVED LOGINS: tools/lib/web_claims.py.
+#   C16 A MAC PROCESS CHECKS IN AS ITSELF: prepare_process's first act is
+#       ls_identity::claim_own_identity, which reads LaunchServices' record
+#       at this pid BEFORE AppKit checks in, and every entry reaches the
+#       SwiftUI interpreter only after prepare_process (docs/traps.md, the
+#       Preview a Go guest's checkin relaunched).
 # The self-test runs the real checker over a shadow root of symlinks
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
@@ -1045,9 +1050,78 @@ def check(root):
                 f"{MANIFEST} there, on the path nobody can avoid, and "
                 f"this gate is only the static half of that")
 
+    bad += ls_identity_findings(root)
+
     global _web_tag
     _web_tag += 1
     bad += web_claims.check(root, g.scratch(), _web_tag)
+    return bad
+
+
+LS_LIB = "crates/kaya/src/lib.rs"
+LS_CAPI = "crates/kaya/src/capi.rs"
+LS_MOD = "crates/kaya/src/ls_identity.rs"
+
+
+def rust_fn_body(text, head):
+    at = text.find(head)
+    if at < 0:
+        return None
+    open_at = text.find("{", at)
+    depth = 0
+    for i in range(open_at, len(text)):
+        depth += {"{": 1, "}": -1}.get(text[i], 0)
+        if depth == 0:
+            return text[open_at + 1:i]
+    return None
+
+
+def ls_identity_findings(root):
+    """C16."""
+    bad = []
+    texts = {}
+    for rel in (LS_LIB, LS_CAPI, LS_MOD):
+        f = root / rel
+        if not f.is_file():
+            return [f"{rel}: missing — C16 holds the mac LaunchServices identity there"]
+        texts[rel] = f.read_text(encoding="utf-8")
+    prep = rust_fn_body(texts[LS_LIB], "pub(crate) fn prepare_process()")
+    if prep is None:
+        return [f"{LS_LIB}: no `pub(crate) fn prepare_process()` to read"]
+    code = [ln.strip() for ln in prep.splitlines()
+            if ln.strip() and not ln.strip().startswith("//")]
+    if code[:2] != ['#[cfg(target_os = "macos")]', "ls_identity::claim_own_identity();"]:
+        bad.append(f"{LS_LIB}: prepare_process's first statement is not "
+                   f"`ls_identity::claim_own_identity();` under cfg macos (it begins "
+                   f"{code[:2]!r}); anything before it runs twice when the process respawns, "
+                   f"and anything that checks in before it registers under the record the "
+                   f"pid holds")
+    for rel, head in ((LS_LIB, "pub fn run("), (LS_CAPI, "pub extern \"C\" fn kaya_run()")):
+        body = rust_fn_body(texts[rel], head)
+        if body is None:
+            bad.append(f"{rel}: no `{head}` to read")
+            continue
+        prepared = body.find("prepare_process()")
+        entered = body.find("swiftui_host::run()")
+        if entered < 0 or not 0 <= prepared < entered:
+            bad.append(f"{rel}: `{head}` reaches swiftui_host::run() (at {entered}) without "
+                       f"prepare_process() before it (at {prepared}); the interpreter's "
+                       f"NSApplication checks in on its first line")
+    claim = rust_fn_body(texts[LS_MOD], "pub(crate) fn claim_own_identity()")
+    if claim is None:
+        bad.append(f"{LS_MOD}: no `pub(crate) fn claim_own_identity()`")
+    else:
+        for needle, what in (
+                ("let pid = std::process::id() as i32;", "reads this process's own pid"),
+                ("record_at(pid)", "asks LaunchServices for the record at that pid"),
+                ("Verdict::Foreign => {}", "falls through to the respawn on a foreign record"),
+                ("respawn(pid, depth + 1, &own, &held);", "respawns")):
+            if needle not in claim:
+                bad.append(f"{LS_MOD}: claim_own_identity no longer {what} (`{needle}`)")
+    reader = rust_fn_body(texts[LS_MOD], "fn record_at(pid: i32)")
+    if reader is None or "runningApplicationWithProcessIdentifier(pid)" not in reader:
+        bad.append(f"{LS_MOD}: record_at no longer asks "
+                   f"NSRunningApplication.runningApplicationWithProcessIdentifier for the pid")
     return bad
 
 
@@ -1540,7 +1614,30 @@ doctor_shadow("the exempt door record no longer writing a desktop entry", s,
 g.negative("an exemption whose file no longer names the tool",
            lambda p=s: check(p), want="drop the stale exemption")
 
-g.negatives_ran(38)
+# N39-N44 — C16's own.
+for _tag, _rel, _pat, _repl, _want in (
+    ("lsuncalled", LS_LIB, r"\n    #\[cfg\(target_os = \"macos\"\)\]\n"
+     r"    ls_identity::claim_own_identity\(\);", "",
+     "first statement is not `ls_identity::claim_own_identity();`"),
+    ("lslate", LS_LIB,
+     r"(\n    #\[cfg\(target_os = \"macos\"\)\]\n    ls_identity::claim_own_identity\(\);)"
+     r"(.*?fmt::install_locale_knob\(\);)", r"\2\1",
+     "first statement is not `ls_identity::claim_own_identity();`"),
+    ("capiunprepared", LS_CAPI, r"(pub extern \"C\" fn kaya_run\(\) -> i32 \{.*?)"
+     r"    crate::prepare_process\(\);\n", r"\1",
+     "reaches swiftui_host::run() (at"),
+    ("ownpid", LS_MOD, r"let pid = std::process::id\(\) as i32;\n    let held",
+     "let pid = 1;\n    let held", "no longer reads this process's own pid"),
+    ("noforeign", LS_MOD, r"Verdict::Foreign => \{\}", "Verdict::Foreign => return",
+     "no longer falls through to the respawn"),
+    ("noquery", LS_MOD, r"runningApplicationWithProcessIdentifier\(pid\)",
+     "currentApplication()", "record_at no longer asks"),
+):
+    s = fresh(_tag)
+    doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
+    g.negative(f"C16 with the {_tag} cut", lambda p=s: check(p), want=_want)
+
+g.negatives_ran(44)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

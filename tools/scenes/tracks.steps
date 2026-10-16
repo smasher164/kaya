@@ -1,0 +1,21 @@
+# docs/styling-pass-plan.md Y5-Y7, §5.5: a table whose title cell is rounded
+# art beside two lines. Every tier takes the row's height from its tallest
+# cell, so the art is whole, the header stays pinned over the taller rows,
+# and the last row of a long playlist scrolls into view; the playing track's
+# name is in the accent's standalone colour.
+expect_title "tracks"
+# FIRST, before any read measures the playlist's rows: the scroll lands on a
+# document of presumed heights and must survive their correction. In view is
+# read off the table's own visible rect, since a cell's frame is not cut by
+# the table's clip.
+scroll_to_row column@tracks t60
+settle 1500
+expect_scrolled_to column@tracks t60
+expect_header_shown column@tracks
+expect_shape image@art[t60] rounded
+expect_column_edges column@album 3
+expect_rows column@album "1,Blue in Green/Miles Davis,Kind of Blue|2,So What/Miles Davis,Kind of Blue|3,Naima/John Coltrane,Giant Steps"
+expect_image_size image@art[a1] "40x40"
+expect_shape image@art[a1] rounded
+expect_tint label@name[a3] accent
+expect_tint label@name[a2] none

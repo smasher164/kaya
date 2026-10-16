@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x303cc490b4cb14fb;
+    public const ulong SpecHash = 0x9e1c92057e3f0dc2;
 
     public const uint ValueBool = 1;
     public const uint ValueI64 = 2;
@@ -141,6 +141,11 @@ static class KayaWire
     public const uint PropExpanded = 60;
     public const uint PropBleed = 61;
     public const uint PropPhase = 62;
+    public const uint PropGround = 63;
+    public const uint PropShape = 64;
+    public const uint PropSelected = 65;
+    public const uint PropTint = 66;
+    public const uint PropActivatable = 67;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -222,11 +227,19 @@ static class KayaWire
     public const uint SizeClassNone = 0;
     public const uint SizeClassCompact = 1;
     public const uint SizeClassRegular = 2;
+    public const uint TintNone = 0;
     public const uint TintAccent = 1;
     public const uint TintSuccess = 2;
     public const uint TintWarning = 3;
     public const uint TintCritical = 4;
     public const uint TintNeutral = 5;
+    public const uint TintOverlay = 6;
+    public const uint GroundNone = 0;
+    public const uint GroundGradient = 1;
+    public const uint GroundImage = 2;
+    public const uint ShapeRect = 0;
+    public const uint ShapeRounded = 1;
+    public const uint ShapeCircle = 2;
     public const uint RoleDestructive = 1;
     public const uint RoleProminent = 2;
     public const uint RoleHeading = 3;
@@ -464,6 +477,7 @@ static class KayaWire
     public const ushort TxKindShowToast = 82;
     public const ushort TxKindDismissToast = 83;
     public const ushort TxKindCollectionPatchIf = 84;
+    public const ushort TxKindAttachDock = 85;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -534,6 +548,7 @@ static class KayaWire
     public const ushort ApplyKindSetVideoCapture = 70;
     public const ushort ApplyKindPresentToast = 71;
     public const ushort ApplyKindWithdrawToast = 72;
+    public const ushort ApplyKindAttachDock = 73;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -591,6 +606,7 @@ static class KayaWire
     public const ushort OccKindToastResult = 55;
     public const ushort OccKindImageNeeded = 56;
     public const ushort OccKindImageReleased = 57;
+    public const ushort OccKindActivated = 58;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1515,6 +1531,15 @@ static class KayaWire
         EncodeValues(w, fields);
         EncodeValues(w, values);
         return Finish(stream, w, TxKindCollectionPatchIf);
+    }
+
+    /// Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does.
+    public static byte[] TxAttachDock(ulong window, ulong dock)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(dock);
+        return Finish(stream, w, TxKindAttachDock);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3103,6 +3128,131 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant ground value.
+    public static byte[] TxSetGround(ulong widgetId, long ground)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropGround); w.Write(SourceConst);
+        EncodeValue(w, ground);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound ground value.
+    public static byte[] TxBindGround(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropGround); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindGroundElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropGround); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant shape value.
+    public static byte[] TxSetShape(ulong widgetId, long shape)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropShape); w.Write(SourceConst);
+        EncodeValue(w, shape);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound shape value.
+    public static byte[] TxBindShape(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropShape); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindShapeElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropShape); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant selected value.
+    public static byte[] TxSetSelected(ulong widgetId, bool selected)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSelected); w.Write(SourceConst);
+        EncodeValue(w, selected);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound selected value.
+    public static byte[] TxBindSelected(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSelected); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindSelectedElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropSelected); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant tint value.
+    public static byte[] TxSetTint(ulong widgetId, long tint)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTint); w.Write(SourceConst);
+        EncodeValue(w, tint);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound tint value.
+    public static byte[] TxBindTint(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTint); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindTintElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTint); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant activatable value.
+    public static byte[] TxSetActivatable(ulong widgetId, bool activatable)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropActivatable); w.Write(SourceConst);
+        EncodeValue(w, activatable);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound activatable value.
+    public static byte[] TxBindActivatable(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropActivatable); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindActivatableElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropActivatable); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -3675,7 +3825,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)

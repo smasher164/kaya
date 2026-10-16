@@ -997,6 +997,11 @@ if os.environ.get("KAYA_RECORD"):
 # The one-line verdict: suites accumulate failures rather than abort,
 # so a truncated log must still end with the answer.
 lane_health.mac_report("mac", "end")
+if lane_health.MAC_APPS.refusals():
+    print(f"validate-mac: {len(lane_health.MAC_APPS.refusals())} lane process(es) registered "
+          f"with LaunchServices under another app's identity (IDENTITY ADOPTED above)",
+          file=sys.stderr)
+    status = 1
 exclusive.summary("mac")
 lane.idle_summary()
 only.summary("validate-mac", _only_selected)

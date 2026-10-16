@@ -2084,6 +2084,19 @@ def census_mac_apps(src):
                          f"(`{needle}`)")
     if "self.sample(" not in py_block(health, "leg_ended"):
         found.append(f"{LANE_HEALTH}: a leg's end no longer reads the apps")
+    sample = py_block(health, "sample")
+    adopt = sample.find("self.adoption(app, where)")
+    typed = sample.find('if app["type"] not in APP_TYPES:')
+    if not 0 <= adopt < typed:
+        found.append(f"{LANE_HEALTH}: sample no longer reads every record for an adopted "
+                     f"identity before it filters to GUI types")
+    tail = runner[runner.find('lane_health.mac_report("mac", "end")'):]
+    tail = tail[:tail.find('exclusive.summary("mac")')]
+    if not re.search(r"\nif lane_health\.MAC_APPS\.refusals\(\):\n(?: .*\n)*? +status = 1\n$",
+                     tail):
+        found.append(f"{MAC_RUNNER}: an IDENTITY ADOPTED reading no longer fails the lane "
+                     f"(`if lane_health.MAC_APPS.refusals():` setting status = 1 after the "
+                     f"end reading)")
     scope = {"__name__": "lane_health_shadow"}
     exec(compile(health, LANE_HEALTH, "exec"), scope)
     named = scope["LANE_APPS"]
@@ -3100,10 +3113,29 @@ for label, rel, pattern, repl, want, check in (
          r'first\["windows"\] = window_sentence\(app\["pid"\], '
          r'\*self\.windows\(app\["pid"\], self\.root\)\)',
          'first["windows"] = "windows not read"', "branch `window on screen` did not print",
-         lane_health_checks)):
+         lane_health_checks),
+        ("AP10 an adopted identity printed and the lane passed", MAC_RUNNER,
+         r"(identity \(IDENTITY ADOPTED above\)\",\n +file=sys\.stderr\)\n +)status = 1\n",
+         r"\1pass\n", "no longer fails the lane", census_mac_apps),
+        ("AP11 records never read for an adopted identity", LANE_HEALTH,
+         r"^ +self\.adoption\(app, where\)\n", "",
+         "sample no longer reads every record", census_mac_apps),
+        ("AP12 a record held since the start refused", LANE_HEALTH,
+         r"\n +or self\.exe_at_start\.get\(app\[\"pid\"\]\) == app\[\"exe\"\]\):", "):",
+         "branch `a record held since the start and kaya's own bundle not refused` did not "
+         "print", lane_health_checks),
+        ("AP13 kaya's own bundle refused", LANE_HEALTH,
+         r"if \(not owner or not bundle or LANE_BUNDLE\.match\(bundle\)",
+         "if (not owner or not bundle",
+         "branch `a record held since the start and kaya's own bundle not refused` did not "
+         "print", lane_health_checks),
+        ("AP14 the adoption's legs unread", LANE_HEALTH,
+         r"running = legs_at\(self\.legs, t\)\n( +)when = \(f\"checked in",
+         "running = []\n\\1when = (f\"checked in",
+         "branch `identity adopted` did not print", lane_health_checks)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
-gate.negatives_ran(208 + (5 if DRIVES else 0))
+gate.negatives_ran(213 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

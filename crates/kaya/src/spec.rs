@@ -301,6 +301,22 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/network-images-plan.md N2: what an image is waiting for, the app's
     // own knowledge of its fetch; a busy phase needs a declared box (N3).
     ("phase", 62, PropKind::Enum("image_phase")),
+    // docs/styling-pass-plan.md Y2, Y3: what a row or column paints behind
+    // its children. A gradient takes `color`, an image `source`. On a row or
+    // column the core sends `color` on as the two clamped top stops, the
+    // light one in bits 24-47 and the dark one in bits 0-23 (Y2's clamp).
+    ("ground", 63, PropKind::Enum("ground")),
+    // docs/styling-pass-plan.md Y6: an image's clip, the platform's corner.
+    ("shape", 64, PropKind::Enum("shape")),
+    // docs/styling-pass-plan.md Y4: an activatable container wears the
+    // platform's selected surface; the app's state, never kaya's.
+    ("selected", 65, PropKind::Bool),
+    // docs/styling-pass-plan.md Y7: a label in the tint's standalone colour.
+    ("tint", 66, PropKind::Enum("tint")),
+    // docs/styling-pass-plan.md Y4: a row or column takes a click as a whole
+    // and emits `activated`. The binding lowers `on_activate` to it; the
+    // guest never spells it, the canvas size policy's precedent.
+    ("activatable", 67, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2104,6 +2120,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   record does NOTHING and the transaction goes on. The guard \
                   is read from the model this transaction commits to.",
         },
+        Record {
+            kind: 85,
+            name: "attach_dock",
+            fields: &[f("window", FieldTy::U64), f("dock", FieldTy::U64)],
+            payload: None,
+            doc: "Give `window` its DOCK (docs/styling-pass-plan.md Y8): one \
+                  surface under every pane, above a phone's tab bar, filled by \
+                  `mount(dock, root)`. Dock ids share the surface namespace with \
+                  windows, entries, sections and sheets. One per window, a \
+                  second refused at the root; it goes when its window does.",
+        },
     ],
     apply: &[
         Record {
@@ -3118,6 +3145,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "Take the toast off screen if it is still the one shown; the \
                   core has retired it, so the arm reports nothing.",
         },
+        Record {
+            kind: 73,
+            name: "attach_dock",
+            fields: &[f("window", FieldTy::U64), f("dock", FieldTy::U64)],
+            payload: None,
+            doc: "The window's dock surface (docs/styling-pass-plan.md Y8); \
+                  its root arrives by `mount` like any surface's.",
+        },
     ],
     occurrence: &[
         Record {
@@ -4120,6 +4155,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   image that image_needed was sent for was torn down while its \
                   phase is still `loading` (docs/network-images-plan.md N8).",
         },
+        Record {
+            kind: 58,
+            name: "activated",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "An activatable row or column was pressed as a whole \
+                  (docs/styling-pass-plan.md Y4); button_clicked's encoding: \
+                  path_len 0 names a widget, otherwise a template node and the \
+                  copy's key path, outermost first.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4309,6 +4358,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("expanded", 60),
                 ("bleed", 61),
                 ("phase", 62),
+                ("ground", 63),
+                ("shape", 64),
+                ("selected", 65),
+                ("tint", 66),
+                ("activatable", 67),
             ],
         },
         EnumSpec {
@@ -4490,12 +4544,27 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         EnumSpec {
             name: "tint",
             variants: &[
+                // A label's untinted text (docs/styling-pass-plan.md Y7); no
+                // fill is `none`.
+                ("none", 0),
                 ("accent", 1),
                 ("success", 2),
                 ("warning", 3),
                 ("critical", 4),
                 ("neutral", 5),
+                // The platform's panel over media (docs/styling-pass-plan.md Y3).
+                ("overlay", 6),
             ],
+        },
+        EnumSpec {
+            // docs/styling-pass-plan.md Y2, Y3.
+            name: "ground",
+            variants: &[("none", 0), ("gradient", 1), ("image", 2)],
+        },
+        EnumSpec {
+            // docs/styling-pass-plan.md Y6.
+            name: "shape",
+            variants: &[("rect", 0), ("rounded", 1), ("circle", 2)],
         },
         EnumSpec {
             name: "role",
@@ -4954,6 +5023,7 @@ mod tests {
             ("show_toast", wire::TX_SHOW_TOAST),
             ("dismiss_toast", wire::TX_DISMISS_TOAST),
             ("collection_patch_if", wire::TX_COLLECTION_PATCH_IF),
+            ("attach_dock", wire::TX_ATTACH_DOCK),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5037,6 +5107,7 @@ mod tests {
                 ("set_video_capture", wire::APPLY_SET_VIDEO_CAPTURE),
                 ("present_toast", wire::APPLY_PRESENT_TOAST),
                 ("withdraw_toast", wire::APPLY_WITHDRAW_TOAST),
+                ("attach_dock", wire::APPLY_ATTACH_DOCK),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -5103,6 +5174,7 @@ mod tests {
                 ("toast_result", crate::ring::REC_TOAST_RESULT),
                 ("image_needed", crate::ring::REC_IMAGE_NEEDED),
                 ("image_released", crate::ring::REC_IMAGE_RELEASED),
+                ("activated", crate::ring::REC_ACTIVATED),
             ]
         );
     }
@@ -5355,6 +5427,8 @@ mod tests {
                     ("playback_state", _) => canvas_pin(wire::PLAYBACK_STATES, name),
                     ("fit", _) => canvas_pin(wire::FITS, name),
                     ("image_phase", _) => canvas_pin(wire::IMAGE_PHASES, name),
+                    ("ground", _) => canvas_pin(wire::GROUNDS, name),
+                    ("shape", _) => canvas_pin(wire::SHAPES, name),
                     ("content_type", _) => canvas_pin(wire::CONTENT_TYPES, name),
                     ("pprop", _) => canvas_pin(wire::PPROPS, name),
                     ("track_kind", _) => canvas_pin(wire::TRACK_KINDS, name),
@@ -5439,6 +5513,11 @@ mod tests {
                     ("prop", "expanded") => wire::PROP_EXPANDED,
                     ("prop", "bleed") => wire::PROP_BLEED,
                     ("prop", "phase") => wire::PROP_PHASE,
+                    ("prop", "ground") => wire::PROP_GROUND,
+                    ("prop", "shape") => wire::PROP_SHAPE,
+                    ("prop", "selected") => wire::PROP_SELECTED,
+                    ("prop", "tint") => wire::PROP_TINT,
+                    ("prop", "activatable") => wire::PROP_ACTIVATABLE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -5544,6 +5623,8 @@ mod tests {
                     ("tint", "warning") => wire::TINT_WARNING,
                     ("tint", "critical") => wire::TINT_CRITICAL,
                     ("tint", "neutral") => wire::TINT_NEUTRAL,
+                    ("tint", "none") => wire::TINT_NONE,
+                    ("tint", "overlay") => wire::TINT_OVERLAY,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,
@@ -5621,6 +5702,8 @@ mod tests {
             ("playback_state", wire::PLAYBACK_STATES),
             ("fit", wire::FITS),
             ("image_phase", wire::IMAGE_PHASES),
+            ("ground", wire::GROUNDS),
+            ("shape", wire::SHAPES),
             ("content_type", wire::CONTENT_TYPES),
             ("pprop", wire::PPROPS),
             ("track_kind", wire::TRACK_KINDS),

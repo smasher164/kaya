@@ -103,6 +103,50 @@ fn derive_one(rgb: u32, appearance: Appearance) -> DerivedAccent {
     }
 }
 
+/// docs/styling-pass-plan.md Y2: the dark appearance's white text passes
+/// 4.5:1 at or below this L*, the light appearance's black text far above
+/// 4.5:1 at or above the other.
+pub(crate) const GRADIENT_DARK_MAX_LSTAR: f64 = 48.0;
+pub(crate) const GRADIENT_LIGHT_MIN_LSTAR: f64 = 75.0;
+
+/// A gradient ground's top stop in each appearance, from one data colour:
+/// `(light, dark)`, packed 0xRRGGBB (docs/styling-pass-plan.md Y2).
+pub fn gradient_tops(rgb: u32) -> (u32, u32) {
+    let rgb = rgb & 0xFF_FFFF;
+    let lstar = cie_lstar(rgb);
+    let dark = if lstar > GRADIENT_DARK_MAX_LSTAR {
+        let mut target = GRADIENT_DARK_MAX_LSTAR - 0.5;
+        let mut top = set_lstar(rgb, target);
+        while cie_lstar(top) > GRADIENT_DARK_MAX_LSTAR && target > 0.0 {
+            target -= 0.5;
+            top = set_lstar(rgb, target);
+        }
+        top
+    } else {
+        rgb
+    };
+    let light = if lstar < GRADIENT_LIGHT_MIN_LSTAR {
+        let mut target = GRADIENT_LIGHT_MIN_LSTAR + 0.5;
+        let mut top = set_lstar(rgb, target);
+        while cie_lstar(top) < GRADIENT_LIGHT_MIN_LSTAR && target < 100.0 {
+            target += 0.5;
+            top = set_lstar(rgb, target);
+        }
+        top
+    } else {
+        rgb
+    };
+    (light, dark)
+}
+
+/// WCAG's contrast ratio of two packed sRGB colours.
+#[cfg(test)]
+pub fn contrast_ratio(a: u32, b: u32) -> f64 {
+    let (la, lb) = (rel_luminance(a), rel_luminance(b));
+    let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+    (hi + 0.05) / (lo + 0.05)
+}
+
 fn srgb_channels(rgb: u32) -> (f64, f64, f64) {
     (
         ((rgb >> 16) & 0xFF) as f64 / 255.0,
@@ -324,6 +368,65 @@ mod tests {
         // Apple's two blues (light/dark system blue).
         assert_eq!(derive(0x007AFF, None, None).light.on_fill, 0xFFFFFF);
         assert_eq!(derive(0x0A84FF, None, None).light.on_fill, 0xFFFFFF);
+    }
+
+    /// docs/styling-pass-plan.md Y2: from any colour, the dark top passes
+    /// 4.5:1 for white text and the light top for black, a colour already
+    /// inside both clamps is untouched, and the dark top keeps its hue.
+    #[test]
+    fn gradient_tops_hold_the_text_contrast_and_the_hue() {
+        for rgb in sweep() {
+            let (light, dark) = gradient_tops(rgb);
+            assert!(
+                contrast_ratio(dark, 0xFFFFFF) >= 4.5,
+                "{rgb:06x}: dark top {dark:06x} gives white {:.2}:1",
+                contrast_ratio(dark, 0xFFFFFF)
+            );
+            assert!(
+                contrast_ratio(light, 0x000000) >= 4.5,
+                "{rgb:06x}: light top {light:06x} gives black {:.2}:1",
+                contrast_ratio(light, 0x000000)
+            );
+            let l = cie_lstar(rgb);
+            if l <= GRADIENT_DARK_MAX_LSTAR {
+                assert_eq!(dark, rgb, "{rgb:06x} is dark enough already");
+            }
+            if l >= GRADIENT_LIGHT_MIN_LSTAR {
+                assert_eq!(light, rgb, "{rgb:06x} is light enough already");
+            }
+            let (r, g, b) = srgb_channels(rgb);
+            let chroma = r.max(g).max(b) - r.min(g).min(b);
+            if chroma > 0.3 && cie_lstar(dark) > 20.0 {
+                let hue = |c: u32| {
+                    let (r, g, b) = srgb_channels(c);
+                    let (lr, lg, lb) = (linearize(r), linearize(g), linearize(b));
+                    let sum = lr + lg + lb;
+                    (lr / sum, lg / sum)
+                };
+                let (a, b2) = (hue(rgb), hue(dark));
+                assert!(
+                    (a.0 - b2.0).abs() < 0.02 && (a.1 - b2.1).abs() < 0.02,
+                    "{rgb:06x} -> {dark:06x} moved its chromaticity {a:?} -> {b2:?}"
+                );
+            }
+        }
+    }
+
+    /// The mid-stops hold the ratio too: an sRGB mix toward the mac's dark
+    /// ground never brightens past its brighter end (§7's 11.6:1 to 15.2:1).
+    #[test]
+    fn gradient_mid_stops_hold_white_text() {
+        let ground = 0x1E1E1E_u32;
+        for rgb in sweep() {
+            let (_, dark) = gradient_tops(rgb);
+            let (r0, g0, b0) = srgb_channels(dark);
+            let (r1, g1, b1) = srgb_channels(ground);
+            for t in [0.25, 0.5, 0.75] {
+                let mix = pack(r0 + (r1 - r0) * t, g0 + (g1 - g0) * t, b0 + (b1 - b0) * t);
+                assert!(contrast_ratio(mix, 0xFFFFFF) >= 4.5, "{rgb:06x} mix {t} {mix:06x}");
+            }
+        }
+        assert_eq!(gradient_tops(0x5B2A86).1, 0x5B2A86);
     }
 
     /// 12 hues x 3 saturations x 20 lightness steps, plus the u8 corners.

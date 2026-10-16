@@ -1,0 +1,14 @@
+# docs/styling-pass-plan.md Y6, §5.2: one picture clipped three ways, read off
+# three probes at 48 units, where a 12-unit corner leaves (1,1) outside its
+# arc and (6,6) inside, and a circle of radius 24 leaves (6,6) outside.
+expect_title "shapes"
+expect_shape image@rect rect
+expect_shape image@rounded rounded
+expect_shape image@circle circle
+# A circle of a picture that is not square crops it to the square.
+expect_shape image@wide circle
+expect_image_size image@wide "48x48"
+# The loading look takes the shape too.
+expect_image_phase image@avatar[a1] loading
+expect_shape image@avatar[a1] circle
+expect_no_clipping

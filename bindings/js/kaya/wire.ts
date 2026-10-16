@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x303cc490b4cb14fbn;
+export const SPEC_HASH = 0x9e1c92057e3f0dc2n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -136,6 +136,11 @@ export const PROP_SUMMARY = 59;
 export const PROP_EXPANDED = 60;
 export const PROP_BLEED = 61;
 export const PROP_PHASE = 62;
+export const PROP_GROUND = 63;
+export const PROP_SHAPE = 64;
+export const PROP_SELECTED = 65;
+export const PROP_TINT = 66;
+export const PROP_ACTIVATABLE = 67;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -217,11 +222,19 @@ export const AXIS_VERTICAL = 1;
 export const SIZE_CLASS_NONE = 0;
 export const SIZE_CLASS_COMPACT = 1;
 export const SIZE_CLASS_REGULAR = 2;
+export const TINT_NONE = 0;
 export const TINT_ACCENT = 1;
 export const TINT_SUCCESS = 2;
 export const TINT_WARNING = 3;
 export const TINT_CRITICAL = 4;
 export const TINT_NEUTRAL = 5;
+export const TINT_OVERLAY = 6;
+export const GROUND_NONE = 0;
+export const GROUND_GRADIENT = 1;
+export const GROUND_IMAGE = 2;
+export const SHAPE_RECT = 0;
+export const SHAPE_ROUNDED = 1;
+export const SHAPE_CIRCLE = 2;
 export const ROLE_DESTRUCTIVE = 1;
 export const ROLE_PROMINENT = 2;
 export const ROLE_HEADING = 3;
@@ -460,6 +473,7 @@ export const TX_WATCH_CAPTURE_DEVICES = 81;
 export const TX_SHOW_TOAST = 82;
 export const TX_DISMISS_TOAST = 83;
 export const TX_COLLECTION_PATCH_IF = 84;
+export const TX_ATTACH_DOCK = 85;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -530,6 +544,7 @@ export const APPLY_WATCH_CAPTURE_DEVICES = 69;
 export const APPLY_SET_VIDEO_CAPTURE = 70;
 export const APPLY_PRESENT_TOAST = 71;
 export const APPLY_WITHDRAW_TOAST = 72;
+export const APPLY_ATTACH_DOCK = 73;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -587,6 +602,7 @@ export const OCC_CAPTURE_OVERRUN = 54;
 export const OCC_TOAST_RESULT = 55;
 export const OCC_IMAGE_NEEDED = 56;
 export const OCC_IMAGE_RELEASED = 57;
+export const OCC_ACTIVATED = 58;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1479,6 +1495,14 @@ export function tx_collection_patch_if(collection_id: number, path: readonly Wir
   enc.values(fields);
   enc.values(values);
   return enc.end(TX_COLLECTION_PATCH_IF);
+}
+
+/** Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does. */
+export function tx_attach_dock(window: number, dock: number): Uint8Array {
+  enc.begin();
+  enc.u64(window);
+  enc.u64(dock);
+  return enc.end(TX_ATTACH_DOCK);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2627,6 +2651,96 @@ export function tx_bind_phase_element(widget_id: number, level = 0, field = 0): 
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant ground value. */
+export function tx_set_ground(widget_id: number, ground: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROUND); enc.u32(SOURCE_CONST); enc.value(new I64(ground));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound ground value. */
+export function tx_bind_ground(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROUND); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_ground_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_GROUND); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant shape value. */
+export function tx_set_shape(widget_id: number, shape: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SHAPE); enc.u32(SOURCE_CONST); enc.value(new I64(shape));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound shape value. */
+export function tx_bind_shape(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SHAPE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_shape_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SHAPE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant selected value. */
+export function tx_set_selected(widget_id: number, selected: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SELECTED); enc.u32(SOURCE_CONST); enc.value(selected);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound selected value. */
+export function tx_bind_selected(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SELECTED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_selected_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_SELECTED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant tint value. */
+export function tx_set_tint(widget_id: number, tint: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TINT); enc.u32(SOURCE_CONST); enc.value(new I64(tint));
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound tint value. */
+export function tx_bind_tint(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TINT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_tint_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TINT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant activatable value. */
+export function tx_set_activatable(widget_id: number, activatable: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACTIVATABLE); enc.u32(SOURCE_CONST); enc.value(activatable);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound activatable value. */
+export function tx_bind_activatable(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACTIVATABLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_activatable_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACTIVATABLE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -3073,7 +3187,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };

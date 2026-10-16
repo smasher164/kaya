@@ -9,6 +9,95 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — the styling pass toward an app-skinned look (docs/styling-pass-plan.md), depth on the mac and iOS (2026-10-16); GTK, WinUI, Compose, the eight other bindings and the C floor are the breadth
+KEY: styling pass, skin, ground, GROUND_GRADIENT, GROUND_IMAGE, PROP_GROUND, shape, PROP_SHAPE, SHAPE_ROUNDED, SHAPE_CIRCLE, selected, PROP_SELECTED, activatable, PROP_ACTIVATABLE, on_activate, activated, REC_ACTIVATED, kaya_emit_activated, emit_activated, tint, PROP_TINT, TINT_NONE, TINT_OVERLAY, overlay, attach_dock, AttachDock, dock, KayaDockHost, KayaTabAccessory, gradient_tops, image_dominant, kaya_image_dominant, dominant.rs, lower_skin, SkinBox, bare_text_on_image, KayaGroundSurface, KayaImageShape, KayaActivatable, KayaLabelTint, kayaWindowPixels, kayaGroundRead, kayaShapeRead, kayaLabelTintRead, kayaAxSelectedRead, kayaDockRead, kayaHoverTarget, expect_ground, expect_shape, expect_selected, expect_tint, expect_dock, hover, FILL_READINGS, skin_routes, grounds.steps, shapes.steps, cards.steps, tracks.steps, dock.steps, DEPTH STUB grounds, DEPTH STUB shapes, DEPTH STUB cards, DEPTH STUB tracks, DEPTH STUB dock
+
+The depth slice: props 63 `ground` (spec enum `ground`: none, gradient,
+image), 64 `shape` (enum `shape`: rect, rounded, circle), 65 `selected`, 66
+`tint` on a label, 67 `activatable` (the binding's lowering of `on_activate`,
+the canvas size policy's precedent, since the backend must draw a button and
+the root must know a container takes clicks); the `tint` enum grows `none` 0
+(a label's untinted text, so a row field has a value for the rows that are not
+playing; `filled` still refuses it) and `overlay` 6; tx record 85 and apply
+record 73 `attach_dock`, one per window in the shared surface namespace,
+mounted like any surface and gone with its window; occurrence 58 `activated`
+in `button_clicked`'s encoding, a live row or column now carrying its tag. The
+root refuses Y1's kinds, a ground with a fill, a gradient without `color`, an
+image ground without `source`, a container's `color` or `source` without its
+ground, `selected` without `on_activate`, `neutral` and `overlay` on a label,
+and Y3's bare text on an image ground in both zones, and covers a circle that
+declared no fit. The core sends a container's `color` on as the two clamped
+top stops (`brand::gradient_tops`, dark L* at most 48, light at least 75) so no
+arm sees the raw data colour; `kaya::image_dominant` and the C ABI's
+`kaya_image_dominant` are one quantizer over the core's own decoder. The
+SwiftUI arm on macOS and iOS, the harness verbs reading pixels and the tree,
+the Rust binding in both zones, and grounds, shapes, cards, tracks and dock
+scenes with Rust guests.
+  - **DEPTH STUB: grounds on gtk** — GTK refuses the gradient ground from the core's two clamped stops into the window ground, the image ground covering its container, and the `overlay` panel over media (docs/styling-pass-plan.md §3's GTK column).
+  - **DEPTH STUB: grounds on winui** — WinUI refuses the gradient ground from the core's two clamped stops into the window ground, the image ground covering its container, and the `overlay` panel over media (docs/styling-pass-plan.md §3's WinUI column).
+  - **DEPTH STUB: grounds on compose** — Compose refuses the gradient ground from the core's two clamped stops into the window ground, the image ground covering its container, and the `overlay` panel over media (docs/styling-pass-plan.md §3's Compose column).
+  - **DEPTH STUB: shapes on gtk** — GTK refuses the image's clip at the platform's medium corner or the inscribed circle, on the picture and on its loading and failed looks (docs/styling-pass-plan.md §3's GTK column).
+  - **DEPTH STUB: shapes on winui** — WinUI refuses the image's clip at the platform's medium corner or the inscribed circle, on the picture and on its loading and failed looks (docs/styling-pass-plan.md §3's WinUI column).
+  - **DEPTH STUB: shapes on compose** — Compose refuses the image's clip at the platform's medium corner or the inscribed circle, on the picture and on its loading and failed looks (docs/styling-pass-plan.md §3's Compose column).
+  - **DEPTH STUB: cards on gtk** — GTK refuses the activatable row or column: the press, the button role, the platform's hover state layer, the selected surface and its tree state, and the `hover` verb (docs/styling-pass-plan.md §3's GTK column).
+  - **DEPTH STUB: cards on winui** — WinUI refuses the activatable row or column: the press, the button role, the platform's hover state layer, the selected surface and its tree state, and the `hover` verb (docs/styling-pass-plan.md §3's WinUI column).
+  - **DEPTH STUB: cards on compose** — Compose refuses the activatable row or column: the press, the button role, the platform's hover state layer, the selected surface and its tree state, and the `hover` verb (docs/styling-pass-plan.md §3's Compose column).
+  - **DEPTH STUB: tracks on gtk** — GTK refuses the label's standalone tint and the table row taller than one line (docs/styling-pass-plan.md §3's GTK column).
+  - **DEPTH STUB: tracks on winui** — WinUI refuses the label's standalone tint and the table row taller than one line (docs/styling-pass-plan.md §3's WinUI column).
+  - **DEPTH STUB: tracks on compose** — Compose refuses the label's standalone tint and the table row taller than one line (docs/styling-pass-plan.md §3's Compose column).
+  - **DEPTH STUB: dock on gtk** — GTK refuses the window's dock under its panes, `attach_dock`'s apply arm (docs/styling-pass-plan.md §3's GTK column).
+  - **DEPTH STUB: dock on winui** — WinUI refuses the window's dock under its panes, `attach_dock`'s apply arm (docs/styling-pass-plan.md §3's WinUI column).
+  - **DEPTH STUB: dock on compose** — Compose refuses the window's dock under its panes, `attach_dock`'s apply arm (docs/styling-pass-plan.md §3's Compose column).
+
+## DEFER — the skin's breadth surfaces: the eight other bindings, the C floor's sugar rows and the template census (docs/styling-pass-plan.md §4, Y10; 2026-10-16)
+KEY: check-sugar-surface skin rows, tpl-surfaces ground shape selected tint on_activate, image_dominant nine bindings, dock in the window construct, kaya_image_dominant, Ground.Gradient, kaya.Gradient, ~ground, TplGround
+
+The depth lands the Rust binding alone, in both zones. The census rows §5
+names for check-sugar-surface (`ground` with its colour or picture, `shape`,
+`on_activate` in each family's spelling with Go's on the handle, `selected`,
+`tint` on a label, the dock in the window construct, `image_dominant`) and
+the five template props in tools/tpl-surfaces.py would be red in the other
+eight bindings until the breadth writes them, so they join with the breadth
+rather than sitting red beside it. The generated wire files already carry the
+props, enums, records and the occurrence. Trigger: the breadth slice.
+
+## DEFER — the data-colour tier beyond the gradient (docs/styling-pass-plan.md Y2; 2026-10-16)
+KEY: data colour, dominant colour, raw colour tier, T3
+
+Y2 admits one data colour, a gradient ground's top stop, under the core's
+clamp. A project's dot or a calendar's colour stays docs/tints-plan.md T3's
+own future ruling. Trigger: an app whose content is a colour outside a header.
+
+## DEFER — window backdrops: Mica, DesktopAcrylic, Liquid Glass (docs/styling-pass-plan.md §2's deferred list; 2026-10-16)
+KEY: backdrop, Mica, glassEffect, DesktopAcrylic
+
+A window-level material is a platform choice kaya makes per backend, not a
+prop; whether the dock and the sidebar should wear one is measured at the
+breadth on each platform. Trigger: the media player demo's review page.
+
+## DEFER — a `hovered` reading for the app (docs/styling-pass-plan.md Y4, refused; 2026-10-16)
+KEY: hovered signal, hover state for the app, onHover occurrence
+
+Refused by the ruling: hover is presentation, and no platform hands it to the
+model. Recorded so nobody re-proposes it as a gap.
+
+## DEFER — the skin's readings no depth leg makes (docs/styling-pass-plan.md §5; 2026-10-16)
+KEY: overlay over a flat ground, tints overlay, native table hover, unboxed circle, tab bar accessory leg, bare text refusal leg, Reduce Transparency overlay, High Contrast gradient
+
+Five readings the depth's scenes do not make, each with the reason:
+`expect_fill overlay` over the bare window ground (tints.steps' addition in
+§5.6) cannot be told from the ground in the dark appearance, since the
+material is the ground's own grey there, so the overlay is read over the art
+in grounds.steps only; a row of the macOS native table takes no kaya hover, by
+Y4 (`kaya paints nothing over a native row`), so tracks.steps reads no hover;
+a circle on an image with no declared box keeps the picture's own shape (the
+root covers it, and cover means nothing without a box); iOS 26's tab-bar
+accessory is built for a window with sections (`KayaTabAccessory`) and the
+dock scene's window has none, so no leg reaches it yet; the bare-text refusal
+is held by the core's unit tests in both zones rather than by a guest forced to
+die once per run. Reduce Transparency and Windows High Contrast stay hand
+captures (§7). Trigger: the breadth, or the demo's sectioned phone window.
+
 ## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13) and breadth on GTK, WinUI, Compose and all nine bindings with the C floor (2026-10-13); the media player's art (N17) and the review page are open
 KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage, netimage_gtk, netimage_winui, netimage_compose, netimage_surface, KayaRowImages, RowImages, PatchIf, patchIf, OnNeeded, onNeeded, FetchHTTP, HttpFetch, kayaURLSessionFetch, Row_images, rowImages, blobContentId, drain_when_free, winbuild/clang, SYMBOL_IMAGE_MISSING
 
@@ -343,7 +432,7 @@ next sighting, read those lines in the leg's bundle (kept under
 ~/.local/state/kaya/flightrec/red/ once its run is pruned) before any
 hypothesis.
 
-## OPEN — the mac native table's rows taller than its 24pt floor run past the window (2026-10-13)
+## ~~OPEN — the mac native table's rows taller than its 24pt floor run past the window (2026-10-13)~~ FIXED 2026-10-16 AT THE CAUSE (docs/styling-pass-plan.md Y5): the rows never ran past the window; the clip did not reach the document's end. A scroll to the last row parked the clip at the end of a document built on the floor's 24pt presumption, and the clip moves AppKit made itself as the rows were measured (the band's restamp, `noteHeightOfRows`) reached `boundsMoved`, which read every move it had not issued as the user's and dropped the anchor, so the last rows stayed under the clip (measured with a temporary probe: document 2583 to 2895 points, clip held at 2129, first visible row 43 of 60). The anchor now yields only to a move made under the user's own scroll, drag, press or key event, and a height correction re-parks it; a row taller than the floor keeps the floor's 8pt around its content. A cell's frame is not cut by the clip, so `expect_safe` stayed green throughout; tracks.steps reads `expect_scrolled_to`, which the native tier answers off the table's own visible rect, and the skin's readers ask a platform anchor view for its frame, since a cell's SwiftUI frame is not told when the table scrolls. GUARD: tools/lib/skin_routes.py, the user-only anchor rule, the height correction and the tallest-cell row, each cut watched red; the user-only rule's runtime negative in tracks.steps.
 KEY: kayaNativeRowHeight, native table tall rows, grown table overflow, scroll_to_row last row, netimage 20pt art
 
 MEASURED while building network images: a grown one-column-plus table whose

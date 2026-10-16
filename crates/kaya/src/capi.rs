@@ -162,6 +162,8 @@ pub const KAYA_OCCURRENCE_TOAST_RESULT: u16 = 55;
 /// (docs/network-images-plan.md N8).
 pub const KAYA_OCCURRENCE_IMAGE_NEEDED: u16 = 56;
 pub const KAYA_OCCURRENCE_IMAGE_RELEASED: u16 = 57;
+/// ACTIVATED { button_clicked's layout } (docs/styling-pass-plan.md Y4).
+pub const KAYA_OCCURRENCE_ACTIVATED: u16 = 58;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -200,6 +202,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_TOAST_RESULT == ring::REC_TOAST_RESULT
         && KAYA_OCCURRENCE_IMAGE_NEEDED == ring::REC_IMAGE_NEEDED
         && KAYA_OCCURRENCE_IMAGE_RELEASED == ring::REC_IMAGE_RELEASED
+        && KAYA_OCCURRENCE_ACTIVATED == ring::REC_ACTIVATED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -341,6 +344,8 @@ pub const KAYA_TX_DISMISS_TOAST: u16 = 83;
 /// guard_field; u32 variant; Value guard; Values fields; Values values }
 /// (docs/network-images-plan.md N7).
 pub const KAYA_TX_COLLECTION_PATCH_IF: u16 = 84;
+/// ATTACH_DOCK { u64 window; u64 dock } (docs/styling-pass-plan.md Y8).
+pub const KAYA_TX_ATTACH_DOCK: u16 = 85;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -668,6 +673,7 @@ const _: () = assert!(
         && KAYA_TX_SHOW_TOAST == wire::TX_SHOW_TOAST
         && KAYA_TX_DISMISS_TOAST == wire::TX_DISMISS_TOAST
         && KAYA_TX_COLLECTION_PATCH_IF == wire::TX_COLLECTION_PATCH_IF
+        && KAYA_TX_ATTACH_DOCK == wire::TX_ATTACH_DOCK
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -768,6 +774,8 @@ pub const KAYA_APPLY_SET_VIDEO_CAPTURE: u16 = 70;
 /// WITHDRAW_TOAST { u64 window; u64 toast }: off screen, nothing reported.
 pub const KAYA_APPLY_PRESENT_TOAST: u16 = 71;
 pub const KAYA_APPLY_WITHDRAW_TOAST: u16 = 72;
+/// ATTACH_DOCK { u64 window; u64 dock }.
+pub const KAYA_APPLY_ATTACH_DOCK: u16 = 73;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -912,6 +920,7 @@ const _: () = assert!(
         && KAYA_APPLY_SET_VIDEO_CAPTURE == wire::APPLY_SET_VIDEO_CAPTURE
         && KAYA_APPLY_PRESENT_TOAST == wire::APPLY_PRESENT_TOAST
         && KAYA_APPLY_WITHDRAW_TOAST == wire::APPLY_WITHDRAW_TOAST
+        && KAYA_APPLY_ATTACH_DOCK == wire::APPLY_ATTACH_DOCK
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1144,6 +1153,16 @@ pub const KAYA_PROP_EXPANDED: u32 = 60;
 pub const KAYA_PROP_BLEED: u32 = 61;
 /// What an image is waiting for, a KAYA_IMAGE_PHASE_* (docs/network-images-plan.md N2).
 pub const KAYA_PROP_PHASE: u32 = 62;
+/// What a row or column paints behind its children, a KAYA_GROUND_* (docs/styling-pass-plan.md Y2, Y3).
+pub const KAYA_PROP_GROUND: u32 = 63;
+/// An image's clip, a KAYA_SHAPE_* (docs/styling-pass-plan.md Y6).
+pub const KAYA_PROP_SHAPE: u32 = 64;
+/// An activatable container's selected surface (docs/styling-pass-plan.md Y4).
+pub const KAYA_PROP_SELECTED: u32 = 65;
+/// A label's standalone tint, a KAYA_TINT_* (docs/styling-pass-plan.md Y7).
+pub const KAYA_PROP_TINT: u32 = 66;
+/// A row or column that emits KAYA_OCCURRENCE_ACTIVATED (docs/styling-pass-plan.md Y4).
+pub const KAYA_PROP_ACTIVATABLE: u32 = 67;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1309,7 +1328,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 57,
+    crate::spec::SPEC.occurrence.len() == 58,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1420,6 +1439,11 @@ const _: () = assert!(
         && KAYA_PROP_EXPANDED == wire::PROP_EXPANDED
         && KAYA_PROP_BLEED == wire::PROP_BLEED
         && KAYA_PROP_PHASE == wire::PROP_PHASE
+        && KAYA_PROP_GROUND == wire::PROP_GROUND
+        && KAYA_PROP_SHAPE == wire::PROP_SHAPE
+        && KAYA_PROP_SELECTED == wire::PROP_SELECTED
+        && KAYA_PROP_TINT == wire::PROP_TINT
+        && KAYA_PROP_ACTIVATABLE == wire::PROP_ACTIVATABLE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -1543,12 +1567,18 @@ pub const KAYA_TINT_SUCCESS: u32 = 2;
 pub const KAYA_TINT_WARNING: u32 = 3;
 pub const KAYA_TINT_CRITICAL: u32 = 4;
 pub const KAYA_TINT_NEUTRAL: u32 = 5;
+/// A label's untinted text; no fill.
+pub const KAYA_TINT_NONE: u32 = 0;
+/// The platform's panel over media (docs/styling-pass-plan.md Y3).
+pub const KAYA_TINT_OVERLAY: u32 = 6;
 const _: () = assert!(
     KAYA_TINT_ACCENT == wire::TINT_ACCENT
         && KAYA_TINT_SUCCESS == wire::TINT_SUCCESS
         && KAYA_TINT_WARNING == wire::TINT_WARNING
         && KAYA_TINT_CRITICAL == wire::TINT_CRITICAL
         && KAYA_TINT_NEUTRAL == wire::TINT_NEUTRAL
+        && KAYA_TINT_NONE == wire::TINT_NONE
+        && KAYA_TINT_OVERLAY == wire::TINT_OVERLAY
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
@@ -1749,6 +1779,12 @@ pub const KAYA_FIT_FILL: u32 = 2;
 pub const KAYA_IMAGE_PHASE_SHOWN: u32 = 0;
 pub const KAYA_IMAGE_PHASE_LOADING: u32 = 1;
 pub const KAYA_IMAGE_PHASE_FAILED: u32 = 2;
+pub const KAYA_GROUND_NONE: u32 = 0;
+pub const KAYA_GROUND_GRADIENT: u32 = 1;
+pub const KAYA_GROUND_IMAGE: u32 = 2;
+pub const KAYA_SHAPE_RECT: u32 = 0;
+pub const KAYA_SHAPE_ROUNDED: u32 = 1;
+pub const KAYA_SHAPE_CIRCLE: u32 = 2;
 pub const KAYA_CONTENT_TYPE_NONE: u32 = 0;
 pub const KAYA_CONTENT_TYPE_USERNAME: u32 = 1;
 pub const KAYA_CONTENT_TYPE_PASSWORD: u32 = 2;
@@ -1872,6 +1908,12 @@ const _: () = assert!(
         && vocab_is(wire::IMAGE_PHASES, "shown", KAYA_IMAGE_PHASE_SHOWN)
         && vocab_is(wire::IMAGE_PHASES, "loading", KAYA_IMAGE_PHASE_LOADING)
         && vocab_is(wire::IMAGE_PHASES, "failed", KAYA_IMAGE_PHASE_FAILED)
+        && vocab_is(wire::GROUNDS, "none", KAYA_GROUND_NONE)
+        && vocab_is(wire::GROUNDS, "gradient", KAYA_GROUND_GRADIENT)
+        && vocab_is(wire::GROUNDS, "image", KAYA_GROUND_IMAGE)
+        && vocab_is(wire::SHAPES, "rect", KAYA_SHAPE_RECT)
+        && vocab_is(wire::SHAPES, "rounded", KAYA_SHAPE_ROUNDED)
+        && vocab_is(wire::SHAPES, "circle", KAYA_SHAPE_CIRCLE)
         && vocab_is(wire::CONTENT_TYPES, "none", KAYA_CONTENT_TYPE_NONE)
         && vocab_is(wire::CONTENT_TYPES, "username", KAYA_CONTENT_TYPE_USERNAME)
         && vocab_is(wire::CONTENT_TYPES, "password", KAYA_CONTENT_TYPE_PASSWORD)
@@ -1965,7 +2007,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 62,
+    crate::spec::PROPS.len() == 67,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4585,6 +4627,42 @@ pub unsafe extern "C" fn kaya_emit_clicked(tag: *const u8, len: usize) {
         return;
     }
     state().ring.push_record(ring::REC_BUTTON_CLICKED, tag);
+}
+
+/// Presentation side: an activatable row or column was pressed as a whole
+/// (docs/styling-pass-plan.md Y4) — `tag` is the container's CREATE tag,
+/// handed back verbatim, as kaya_emit_clicked takes a button's.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_activated(tag: *const u8, len: usize) {
+    assert!(!tag.is_null() && len != 0, "kaya: empty activation tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, len) };
+    if !stamped_tag_is_live(tag, "activation") {
+        return;
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_activated_tag(tag);
+        return;
+    }
+    state().ring.push_record(ring::REC_ACTIVATED, tag);
+}
+
+/// The dominant colour of a PNG or JPEG (docs/styling-pass-plan.md Y2), the
+/// one quantizer every binding reaches: writes 0xRRGGBB to `rgb` and answers
+/// 1, or answers 0 for bytes that do not decode.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_image_dominant(bytes: *const u8, len: usize, rgb: *mut u32) -> u8 {
+    assert!(!rgb.is_null(), "kaya: kaya_image_dominant's out-pointer is null");
+    if bytes.is_null() || len == 0 {
+        return 0;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(bytes, len) };
+    match crate::dominant::dominant_rgb(bytes) {
+        Some(found) => {
+            unsafe { *rgb = found };
+            1
+        }
+        None => 0,
+    }
 }
 
 /// A tag naming a torn-down stamped copy is dropped with one sentence: the
@@ -7264,6 +7342,7 @@ mod tests {
             ("show_toast", KAYA_TX_SHOW_TOAST),
             ("dismiss_toast", KAYA_TX_DISMISS_TOAST),
             ("collection_patch_if", KAYA_TX_COLLECTION_PATCH_IF),
+            ("attach_dock", KAYA_TX_ATTACH_DOCK),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7336,6 +7415,7 @@ mod tests {
             ("set_video_capture", KAYA_APPLY_SET_VIDEO_CAPTURE),
             ("present_toast", KAYA_APPLY_PRESENT_TOAST),
             ("withdraw_toast", KAYA_APPLY_WITHDRAW_TOAST),
+            ("attach_dock", KAYA_APPLY_ATTACH_DOCK),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

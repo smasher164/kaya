@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x303cc490b4cb14fb
+let kayaSpecHash: UInt64 = 0x9e1c92057e3f0dc2
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -103,6 +103,7 @@ private let applySetVideoCapture: UInt16 = 70
 /// one; withdraw takes off one the core has retired.
 private let applyPresentToast: UInt16 = 71
 private let applyWithdrawToast: UInt16 = 72
+private let applyAttachDock: UInt16 = 73
 let kayaToastDurationLong: UInt32 = 1
 let kayaToastActionNone: UInt32 = 0
 let kayaToastActionApp: UInt32 = 1
@@ -338,6 +339,18 @@ private let propSummary: UInt32 = 59
 private let propExpanded: UInt32 = 60
 private let propBleed: UInt32 = 61
 private let propPhase: UInt32 = 62
+// docs/styling-pass-plan.md Y2-Y7: the skin.
+private let propGround: UInt32 = 63
+private let propShape: UInt32 = 64
+private let propSelected: UInt32 = 65
+private let propTint: UInt32 = 66
+private let propActivatable: UInt32 = 67
+private let groundNone: Int64 = 0
+private let groundGradient: Int64 = 1
+private let groundImage: Int64 = 2
+private let shapeRect: Int64 = 0
+private let shapeRounded: Int64 = 1
+private let shapeCircle: Int64 = 2
 private let imagePhaseShown: Int64 = 0
 private let imagePhaseLoading: Int64 = 1
 private let imagePhaseFailed: Int64 = 2
@@ -347,6 +360,8 @@ private let tintSuccess: Int64 = 2
 private let tintWarning: Int64 = 3
 private let tintCritical: Int64 = 4
 private let tintNeutral: Int64 = 5
+private let tintNone: Int64 = 0
+private let tintOverlay: Int64 = 6
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -765,6 +780,16 @@ final class KayaNode: Identifiable {
     var insetSet = false
     /// A filled container's tint (docs/tints-plan.md T2); 0 = not filled.
     var filled: Int64 = 0
+    /// docs/styling-pass-plan.md Y2-Y7: a container's ground, a gradient's
+    /// two clamped top stops as the core packed them (light in bits 24-47,
+    /// dark in bits 0-23), an image's shape, a label's standalone tint, and
+    /// an activatable container's selected surface.
+    var ground: Int64 = 0
+    var groundTops: Int64 = 0
+    var shape: Int64 = 0
+    var labelTint: Int64 = 0
+    var activatable = false
+    var selected = false
     /// A scroll that keeps its end in view while its content grows
     /// (docs/follow-end-plan.md).
     var followsEnd = false
@@ -984,6 +1009,9 @@ struct KayaTableViewportObservation {
 final class KayaWindowModel: Identifiable {
     let id: UInt64
     var root: KayaNode?
+    /// The dock's mounted root (docs/styling-pass-plan.md Y8), nil before a
+    /// mount or for a window with none.
+    var dock: KayaNode?
     var title: String
     var width: Double?
     var height: Double?
@@ -1200,6 +1228,8 @@ final class KayaSceneModel {
     /// id -> hosting window.
     var sectionsById: [UInt64: KayaSectionModel] = [:]
     var sectionWindow: [UInt64: UInt64] = [:]
+    /// dock surface -> its window (docs/styling-pass-plan.md Y8).
+    var dockWindow: [UInt64: UInt64] = [:]
     /// Menu items by id — their OWN id space, never widget, node or surface
     /// ids.
     var menuItems: [UInt64: KayaMenuItemModel] = [:]
@@ -1425,6 +1455,35 @@ func kayaDrainRowScrolls() {
 /// tops its scroll's viewport within two points, or sits wholly inside a
 /// viewport at its end; otherwise what the geometry says.
 func kayaScrolledTo(_ node: KayaNode, _ key: String) -> String? {
+    #if os(macOS)
+        // The native tier's row is in view when the table's own visible rect,
+        // under its pinned header, holds the row's rect (docs/styling-pass-plan.md
+        // Y5): a cell's frame is not cut by the clip, so no frame read can say.
+        if !node.tableColumns.isEmpty, let driver = kayaTableDrivers[node.id] {
+            guard let offset = node.children.firstIndex(where: { kayaTableStamp($0.tag)?.keys == [key] }) else {
+                return "no realized row keyed \"\(key)\" among \(node.children.count) children"
+            }
+            return driver.shows(offset)
+        }
+    #else
+        // The phone's tiers draw their rows in SwiftUI, whose frames follow
+        // the scroll: the row is in view when the table's own frame holds it.
+        if !node.tableColumns.isEmpty {
+            guard let copy = node.children.first(where: { kayaTableStamp($0.tag)?.keys == [key] }) else {
+                return "no realized row keyed \"\(key)\" among \(node.children.count) children"
+            }
+            // A label of the row answers its platform frame now (its anchor),
+            // read against the window's safe area.
+            func anchored(_ n: KayaNode) -> CGRect? {
+                MainActor.assumeIsolated { kayaAnchoredFrame(n.id) } ?? n.children.lazy.compactMap(anchored).first
+            }
+            guard let row = anchored(copy) else { return "row \"\(key)\" has no laid-out label" }
+            guard let window = MainActor.assumeIsolated({ kayaHarnessWindow() }) else { return "no window" }
+            let shown = window.bounds.inset(by: window.safeAreaInsets)
+            if row.minY >= shown.minY - 1 && row.maxY <= shown.maxY + 1 { return nil }
+            return "row \"\(key)\"'s label at \(kayaRectText(row)) against the window's safe \(kayaRectText(shown))"
+        }
+    #endif
     if !node.tableColumns.isEmpty {
         return "\(node.a11yId) is a table; expect_window reads a windowed tier"
     }
@@ -5195,6 +5254,12 @@ enum KayaHost {
         }
     }
 
+    static func emitActivated(_ tag: [UInt8]) {
+        tag.withUnsafeBufferPointer { buffer in
+            api.emit_activated(buffer.baseAddress, UInt(buffer.count))
+        }
+    }
+
     static func emitCloseRequested(_ window: UInt64) {
         api.emit_close_requested(window)
     }
@@ -6538,6 +6603,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propMinuteStep, valueF64):
                     kayaScene.nodes[id]!.minuteStep =
                         Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
+                case (propColor, valueI64) where kayaScene.nodes[id]!.kind == kindRow
+                    || kayaScene.nodes[id]!.kind == kindColumn:
+                    kayaScene.nodes[id]!.groundTops =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
                 case (propColor, valueI64):
                     kayaScene.nodes[id]!.color =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
@@ -6651,6 +6720,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propFilled, valueI64):
                     kayaScene.nodes[id]!.filled =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propGround, valueI64):
+                    kayaScene.nodes[id]!.ground = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propShape, valueI64):
+                    kayaScene.nodes[id]!.shape = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propTint, valueI64):
+                    kayaScene.nodes[id]!.labelTint = raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (propSelected, valueBool):
+                    kayaScene.nodes[id]!.selected = raw[body + 24] != 0
+                case (propActivatable, valueBool):
+                    kayaScene.nodes[id]!.activatable = raw[body + 24] != 0
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`. The decode
@@ -6663,6 +6742,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 default:
                     fatalError("kaya: cannot apply prop \(prop) with value type \(valueType)")
                 }
+            case applyAttachDock:
+                let window = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let dock = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.dockWindow[dock] = window
             case applyAddChild:
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
@@ -6763,6 +6846,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     // An entry presents in-window: the push already put it on
                     // the stack; the mount fills it. Nothing new materializes.
                     entry.root = kayaScene.nodes[root]
+                    break
+                }
+                if let owner = kayaScene.dockWindow[wid] {
+                    kayaScene.windows[owner]?.dock = kayaScene.nodes[root]
                     break
                 }
                 if let section = kayaScene.sectionsById[wid] {
@@ -7321,8 +7408,11 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     let isContainer =
         node.kind == kindColumn || node.kind == kindRow || node.kind == kindGrid
         || node.kind == kindScroll
+    // An activatable container is already ONE element, a button combining its
+    // children (docs/styling-pass-plan.md Y4); `.contain` would wrap it in a
+    // group that takes the identifier instead.
     let addressed =
-        (isContainer && !(node.a11yId.isEmpty && node.a11yLabel.isEmpty))
+        (isContainer && !node.activatable && !(node.a11yId.isEmpty && node.a11yLabel.isEmpty))
         ? AnyView(view.accessibilityElement(children: .contain)) : AnyView(view)
     let identified =
         node.a11yId.isEmpty
@@ -7567,6 +7657,39 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
             .compactMap { kayaAxCopy(hit, $0 as String) as? String }
             .first { !$0.isEmpty } ?? ""
         return role + "/" + label
+    }
+
+    /// The tree's selected state for one identifier (docs/styling-pass-plan.md
+    /// Y4): `on` or `off` from AXSelected, or what the walk found instead.
+    /// A stamped copy shares its id with its siblings, so the element is the
+    /// one whose frame holds the copy's laid-out centre, in screen points.
+    func kayaAxSelectedRead(_ identifier: String, at centre: CGPoint?) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            var matches: [AXUIElement] = []
+            kayaAxFindAll(app, identifier, 0, &matches)
+            func holds(_ element: AXUIElement, _ p: CGPoint) -> Bool {
+                guard let position = kayaAxCopy(element, kAXPositionAttribute as String),
+                    let size = kayaAxCopy(element, kAXSizeAttribute as String)
+                else { return false }
+                var origin = CGPoint.zero, extent = CGSize.zero
+                AXValueGetValue(position as! AXValue, .cgPoint, &origin)
+                AXValueGetValue(size as! AXValue, .cgSize, &extent)
+                return CGRect(origin: origin, size: extent).contains(p)
+            }
+            let chosen = matches.count == 1 ? matches : matches.filter { e in centre.map { holds(e, $0) } ?? false }
+            guard chosen.count == 1, let hit = chosen.first else {
+                return "<\(matches.count) elements carry id '\(identifier)', \(chosen.count) hold \(centre.map(String.init(describing:)) ?? "no centre")>"
+            }
+            guard let selected = kayaAxCopy(hit, kAXSelectedAttribute as String) as? Bool else {
+                let role = kayaAxCopy(hit, kAXRoleAttribute) as? String ?? "?"
+                return "off (the \(role) publishes no AXSelected)"
+            }
+            return selected ? "on" : "off"
+        }
     }
 
     /// What one textarea's text layer, selection and viewport say, in ONE
@@ -8046,6 +8169,43 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         }
     }
 
+    /// The tree's selected state for one identifier (docs/styling-pass-plan.md
+    /// Y4): `on` or `off` from the element's selected trait.
+    func kayaAxSelectedRead(_ identifier: String, at centre: CGPoint?) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> String in
+            var hits: [NSObject] = []
+            func walk(_ element: NSObject, _ depth: Int) {
+                if depth > 64 { return }
+                if kayaAxIdentifier(element) == identifier { hits.append(element) }
+                let count = element.accessibilityElementCount()
+                if count != NSNotFound && count > 0 {
+                    for i in 0..<count {
+                        if let child = element.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                    }
+                }
+                if let view = element as? UIView { view.subviews.forEach { walk($0, depth + 1) } }
+            }
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { walk(window, 0) }
+            }
+            // SwiftUI hands the row's identifier to its combined element and to
+            // each child under it; the activatable row is the button holding
+            // the copy's centre.
+            var chosen = hits.count == 1 ? hits : hits.filter { h in centre.map { h.accessibilityFrame.contains($0) } ?? false }
+            if chosen.count > 1 { chosen = chosen.filter { $0.accessibilityTraits.contains(.button) } }
+            // The same element can be reached through two parents; elements
+            // that agree on the trait are one answer.
+            let states = Set(chosen.map { $0.accessibilityTraits.contains(.selected) })
+            if chosen.count > 1, states.count == 1, let one = chosen.first { chosen = [one] }
+            guard chosen.count == 1, let hit = chosen.first else {
+                return "<\(hits.count) elements carry id '\(identifier)', \(chosen.count) hold \(centre.map(String.init(describing:)) ?? "no centre")>"
+            }
+            return hit.accessibilityTraits.contains(.selected) ? "on" : "off"
+        }
+    }
+
     /// A field's content type as UIKit holds it: the UITextField's own
     /// `textContentType`, found by the field's a11y_id (docs/autofill-plan.md A6).
     private func kayaContentTypeRead(_ identifier: String) -> (String?, String) {
@@ -8447,6 +8607,8 @@ private func kayaLiveIds() -> Set<UInt64> {
     var ids = Set<UInt64>()
     var stack: [KayaNode] = []
     for window in kayaScene.windows.values { if let root = window.root { stack.append(root) } }
+    // And a dock (docs/styling-pass-plan.md Y8).
+    for window in kayaScene.windows.values { if let dock = window.dock { stack.append(dock) } }
     for section in kayaScene.sectionsById.values { if let root = section.root { stack.append(root) } }
     for entry in kayaScene.navEntries.values { if let root = entry.root { stack.append(root) } }
     // A SHEET IS A SURFACE TOO: its root's widgets answer keyed targets
@@ -9598,6 +9760,14 @@ private func kayaRunScript(_ script: String) {
                         kayaScene.focusedId = node.id
                         return true
                     }
+                    // An activatable row or column takes the click as a whole
+                    // (docs/styling-pass-plan.md Y4), through its own emit.
+                    if let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                        ?? kayaTarget(parts[1], "row", kayaScene.rows), node.activatable
+                    {
+                        KayaHost.emitActivated(node.tag)
+                        return true
+                    }
                     guard let node = kayaTarget(parts[1], "button", kayaScene.buttons) else {
                         return false
                     }
@@ -10590,12 +10760,7 @@ private func kayaRunScript(_ script: String) {
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
                     kayaTarget(parts[1], "column", kayaScene.columns)?.children
-                        .map { row in
-                            row.children
-                                .filter { $0.kind == kindLabel }
-                                .map { $0.text }
-                                .joined(separator: ",")
-                        }
+                        .map { row in row.children.compactMap(kayaCellText).joined(separator: ",") }
                         .joined(separator: "|")
                 }
                 if let got, kayaBytesEqual(got, want) {
@@ -11917,6 +12082,39 @@ private func kayaRunScript(_ script: String) {
                 #else
                 failures.append("pick_emoji \"\(emoji)\": iOS has no emoji picker to open (docs/emoji-picker-plan.md R2)")
                 #endif
+            case "expect_ground":
+                // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
+                let (ok, fail) = kayaSkinReading(parts)
+                if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_shape":
+                let (ok, fail) = kayaSkinReading(parts)
+                if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_tint":
+                let (ok, fail) = kayaSkinReading(parts)
+                if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_selected":
+                let (ok, fail) = kayaSkinReading(parts)
+                if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_dock":
+                let want = parts.count > 1 ? String(parts[1]) : ""
+                var got = DispatchQueue.main.sync { kayaDockRead() }
+                let deadline = Date().addingTimeInterval(5)
+                while got.split(separator: " ").first.map(String.init) != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    got = DispatchQueue.main.sync { kayaDockRead() }
+                }
+                if got.split(separator: " ").first.map(String.init) == want {
+                    observed.append("dock \(want)")
+                } else {
+                    failures.append("dock reads \(got), wanted \(want)")
+                }
+            case "hover":
+                // The platform's own hover route (docs/styling-pass-plan.md §5):
+                // a mouse-moved event over the target through the window, in
+                // process, as the typing verbs send their keys.
+                kayaAwaitQuiet()
+                let hovered = DispatchQueue.main.sync { kayaHoverTarget(parts[1]) }
+                if let hovered { failures.append(hovered) }
             case "expect_image_phase":
                 // What the arm DREW, never the phase prop (docs/network-images-plan.md N15).
                 let want = parts.count > 2 ? String(parts[2]) : ""
@@ -16547,6 +16745,11 @@ struct KayaTableSurface: View {
     /// measures TALLER when its content is, which moves a For onto the
     /// corrected path.
     let kayaNativeRowHeight: CGFloat = 24
+    /// What the floor leaves around a line of body text (24 over 16), kept
+    /// around a cell's content that is taller than the floor, so a row of art
+    /// beside two lines is not cell against cell (docs/styling-pass-plan.md
+    /// Y5); a row under the floor is untouched.
+    let kayaNativeRowPadding: CGFloat = 8
     let kayaNativeHeaderHeight: CGFloat = 28
     let kayaNativeTopInset: CGFloat = 5
     let kayaNativeApronHeight: CGFloat = 5
@@ -17108,9 +17311,16 @@ private struct KayaNativeTable: View {
         // --- The report loop. ------------------------------------------
 
         @objc private func boundsMoved() {
-            // A scroll the harness did not issue is the user's: the
-            // anchor yields to free scrolling.
-            if !inProgrammaticScroll { anchorRow = nil }
+            // A scroll the user made yields the anchor to free scrolling. A
+            // move AppKit made itself, re-fitting the document after a band
+            // change or a height correction, is not one: it dropped the anchor
+            // of a scroll to a tall table's last row and left the last rows
+            // under the clip (docs/deferred.md's tall-rows entry).
+            if !inProgrammaticScroll, let event = NSApp.currentEvent,
+                [.scrollWheel, .leftMouseDragged, .leftMouseDown, .keyDown, .swipe].contains(event.type)
+            {
+                anchorRow = nil
+            }
             scheduleReport()
         }
 
@@ -17209,9 +17419,17 @@ private struct KayaNativeTable: View {
             }
             guard moved else { return }
             KayaHost.rowsMeasured(node.id, visible.location, heights)
+            // A height correction moves the clip as AppKit re-fits the
+            // document, which is not the user's scroll: the anchor stays and
+            // is re-parked on the corrected rows, or a scroll to a tall
+            // table's last row stopped where the presumed heights ended
+            // (docs/deferred.md's mac native table tall-rows entry).
+            inProgrammaticScroll = true
             tableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(
                     integersIn: visible.location..<(visible.location + visible.length)))
+            inProgrammaticScroll = false
+            reparkAnchor()
         }
 
         /// A row's extent along the scroll axis: what its cells ask for,
@@ -17225,7 +17443,8 @@ private struct KayaNativeTable: View {
                     let cell = tableView.view(atColumn: column, row: row, makeIfNecessary: false)
                         as? KayaTableCellView
                 else { continue }
-                height = max(height, cell.contentHeight)
+                let content = cell.contentHeight
+                height = max(height, content > kayaNativeRowHeight ? content + kayaNativeRowPadding : content)
             }
             return height.rounded(.up)
         }
@@ -17362,6 +17581,22 @@ private struct KayaNativeTable: View {
         /// declared total — the pair a byte-shared scene can freeze.
         /// The overscan above the viewport is the band's business, not
         /// the verb's.
+        /// Nil when the realized row at `offset` lies whole inside what the
+        /// table shows, under the header and inside the window, else what it saw.
+        func shows(_ offset: Int) -> String? {
+            refresh()
+            let index = (total > 0 ? first : 0) + offset
+            let row = tableView.rect(ofRow: index)
+            let seen = visibleRect()
+            let inWindow = scrollView.window.map { w in
+                scrollView.convert(scrollView.bounds, to: nil).minY >= -1
+                    && scrollView.convert(scrollView.bounds, to: nil).maxY <= (w.contentView?.bounds.height ?? .infinity) + 1
+            } ?? false
+            if seen.minY <= row.minY + 1 && row.maxY <= seen.maxY + 1 && inWindow { return nil }
+            return "row \(index) at \(kayaRectText(row)) against the shown \(kayaRectText(seen)), "
+                + "the scroll view \(inWindow ? "inside" : "outside") the window"
+        }
+
         func firstVisible() -> (first: Int, total: Int) {
             refresh()
             let visible = tableView.rows(in: tableView.visibleRect)
@@ -19389,11 +19624,199 @@ struct KayaFilledSurface: ViewModifier {
     func body(content: Content) -> some View {
         if tint == 0 {
             content
+        } else if tint == tintOverlay {
+            // docs/styling-pass-plan.md §3: the platform's panel over media,
+            // the regular material under the 40% black the ruling names, light
+            // text over it.
+            content
+                .foregroundStyle(.white)
+                .environment(\.kayaInFill, true)
+                .background {
+                    ZStack {
+                        Rectangle().fill(.regularMaterial)
+                        Color.black.opacity(kayaOverlayScrim)
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+                    .environment(\.colorScheme, .dark)
+                }
         } else {
             let pair = kayaTintPair(tint)
             content
                 .foregroundStyle(pair.fore)
+                .environment(\.kayaInFill, true)
                 .background(pair.fill, in: RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+        }
+    }
+}
+
+// MARK: - The skin (docs/styling-pass-plan.md Y2-Y8)
+
+/// The overlay tint's scrim over the material (§3's SwiftUI lowering).
+let kayaOverlayScrim = 0.4
+
+private struct KayaInFillKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether a view sits on a filled or selected surface, whose foreground
+    /// a label's tint yields to (docs/styling-pass-plan.md Y7).
+    var kayaInFill: Bool {
+        get { self[KayaInFillKey.self] }
+        set { self[KayaInFillKey.self] = newValue }
+    }
+}
+
+/// The platform's window ground, the gradient's bottom stop (Y2).
+@MainActor func kayaWindowGround() -> Color {
+    #if os(macOS)
+        Color(nsColor: .windowBackgroundColor)
+    #else
+        Color(uiColor: .systemBackground)
+    #endif
+}
+
+private func kayaPackedRGB(_ rgb: Int64) -> Color {
+    Color(
+        red: Double((rgb >> 16) & 0xFF) / 255.0,
+        green: Double((rgb >> 8) & 0xFF) / 255.0,
+        blue: Double(rgb & 0xFF) / 255.0)
+}
+
+/// A row's or column's ground: the core's clamped top stop for this
+/// appearance fading into the window ground, or a picture covering it.
+struct KayaGroundSurface: ViewModifier {
+    let node: KayaNode
+    @Environment(\.colorScheme) private var scheme
+
+    func body(content: Content) -> some View {
+        switch node.ground {
+        case groundGradient:
+            let top = scheme == .dark ? node.groundTops & 0xFF_FFFF : (node.groundTops >> 24) & 0xFF_FFFF
+            content.background(
+                LinearGradient(
+                    colors: [kayaPackedRGB(top), kayaWindowGround()],
+                    startPoint: .top, endPoint: .bottom))
+        case groundImage:
+            content
+                .background {
+                    if let image = node.image {
+                        #if os(macOS)
+                            Image(nsImage: image).resizable().scaledToFill()
+                        #else
+                            Image(uiImage: image).resizable().scaledToFill()
+                        #endif
+                    }
+                }
+                .clipped()
+        default:
+            content
+        }
+    }
+}
+
+/// An image's clip (Y6), on the picture and on its loading and failed looks.
+struct KayaImageShape: ViewModifier {
+    let shape: Int64
+
+    func body(content: Content) -> some View {
+        switch shape {
+        case shapeCircle: content.clipShape(Circle())
+        case shapeRounded: content.clipShape(RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+        default: content
+        }
+    }
+}
+
+/// The selected surface's fill and foreground (Y4): AppKit's selected
+/// content pair, the grouped list's on iOS.
+@MainActor func kayaSelectedPair() -> (fill: Color, fore: Color) {
+    #if os(macOS)
+        (Color(nsColor: .selectedContentBackgroundColor), Color(nsColor: .alternateSelectedControlTextColor))
+    #else
+        (Color(uiColor: .systemFill), Color(uiColor: .label))
+    #endif
+}
+
+/// The mac's hover layer (Y4, the maintainer's ruling: the quaternary fill).
+@MainActor func kayaHoverFill() -> Color {
+    #if os(macOS)
+        if #available(macOS 14, *) { return Color(nsColor: .quaternarySystemFill) }
+        return Color(nsColor: .quaternaryLabelColor)
+    #else
+        return Color(uiColor: .quaternarySystemFill)
+    #endif
+}
+
+/// Nodes the pointer is over, written by the platform's own hover callback.
+@MainActor var kayaHovered: Set<UInt64> = []
+
+/// A row or column that takes a click as a whole (Y4): a button to assistive
+/// technology, the platform's press and hover, and the app's selection.
+struct KayaActivatable: ViewModifier {
+    let node: KayaNode
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        if !node.activatable {
+            content
+        } else {
+            let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
+            content
+                .foregroundStyle(node.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
+                .environment(\.kayaInFill, node.selected || node.filled != 0)
+                .background {
+                    if node.selected { shape.fill(kayaSelectedPair().fill) }
+                }
+                .overlay {
+                    if hovering && !node.selected { shape.fill(kayaHoverFill()).allowsHitTesting(false) }
+                }
+                .contentShape(shape)
+                .onTapGesture { KayaHost.emitActivated(node.tag) }
+                #if os(macOS)
+                    .onHover { inside in
+                        hovering = inside
+                        if inside { kayaHovered.insert(node.id) } else { kayaHovered.remove(node.id) }
+                    }
+                #else
+                    .hoverEffect(.highlight)
+                #endif
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(node.selected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction { KayaHost.emitActivated(node.tag) }
+        }
+    }
+}
+
+/// A label's standalone tint (Y7), yielding to a fill's foreground.
+@MainActor func kayaStandalone(_ tint: Int64) -> Color? {
+    switch tint {
+    case tintAccent:
+        if let brand = kayaScene.brand {
+            #if os(macOS)
+                let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            #else
+                let dark = UITraitCollection.current.userInterfaceStyle == .dark
+            #endif
+            return kayaPackedRGB(Int64(dark ? brand[8] : brand[3]))
+        }
+        return Color.accentColor
+    case tintSuccess: return .green
+    case tintWarning: return .orange
+    case tintCritical: return .red
+    default: return nil
+    }
+}
+
+struct KayaLabelTint: ViewModifier {
+    let tint: Int64
+    @Environment(\.kayaInFill) private var inFill
+
+    func body(content: Content) -> some View {
+        if !inFill, let colour = kayaStandalone(tint) {
+            content.foregroundStyle(colour)
+        } else {
+            content
         }
     }
 }
@@ -19405,7 +19828,7 @@ struct KayaFilledSurface: ViewModifier {
 /// window's appearance and composited over the ground where translucent. The
 /// answer is the nearest name, so a container that drew nothing reads "none".
 @MainActor func kayaFillRead(_ node: KayaNode) -> String {
-    guard let frame = kayaNodeFrames[node.id], frame.width > 8, frame.height > 8 else {
+    guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id), frame.width > 8, frame.height > 8 else {
         return "<no laid-out frame: \(kayaNodeFrames[node.id].map(String.init(describing:)) ?? "none recorded")>"
     }
     let probe = CGRect(x: frame.maxX - 8, y: frame.midY - 4, width: 8, height: 8)
@@ -19435,6 +19858,9 @@ struct KayaFilledSurface: ViewModifier {
         var accent = rgba(.controlAccentColor)
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(neutral))]
+        let hover: NSColor
+        if #available(macOS 14, *) { hover = .quaternarySystemFill } else { hover = .quaternaryLabelColor }
+        let skin = (hover: rgba(hover), neutral: rgba(neutral), selected: rgba(.selectedContentBackgroundColor))
     #else
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return "<no key window>" }
@@ -19453,6 +19879,7 @@ struct KayaFilledSurface: ViewModifier {
         var accent = rgba(.tintColor)
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(.secondarySystemFill))]
+        let skin = (hover: rgba(.quaternarySystemFill), neutral: rgba(.secondarySystemFill), selected: rgba(.systemFill))
     #endif
     if let brand = kayaScene.brand {
         let rgb = dark ? brand[6] : brand[1]
@@ -19480,7 +19907,16 @@ struct KayaFilledSurface: ViewModifier {
     guard drawn else { return "<no bitmap context for the sample>" }
     let px = buf.prefix(3).map { Double($0) / 255 }
     let got = String(format: "%02X%02X%02X", buf[0], buf[1], buf[2])
-    let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))] + others.map { ($0.0, over($0.1)) }
+    // The skin's surfaces (docs/styling-pass-plan.md Y4): the hover layer over
+    // the bare ground and over a neutral card, and the selected surface.
+    func layered(_ top: [Double], _ under: [Double]) -> [Double] {
+        (0..<3).map { top[$0] * top[3] + under[$0] * (1 - top[3]) }
+    }
+    let skinned = [("hovered", layered(skin.hover, Array(ground.prefix(3)))),
+                   ("hovered", layered(skin.hover, over(skin.neutral))),
+                   ("selected", over(skin.selected))]
+    let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))]
+        + others.map { ($0.0, over($0.1)) } + skinned
     func hex(_ c: [Double]) -> String {
         String(format: "%02X%02X%02X", Int((c[0] * 255).rounded()), Int((c[1] * 255).rounded()), Int((c[2] * 255).rounded()))
     }
@@ -19493,8 +19929,565 @@ struct KayaFilledSurface: ViewModifier {
         .map { (name: String, c: [Double]) in (name, c, distance(c)) }
         .sorted { $0.2 < $1.2 }
     let probeAt = "(\(Int(probe.midX)),\(Int(probe.midY)))"
+    // The overlay is the platform's dark panel over media (Y3): a material,
+    // so it has no one colour to rank against, and over art it keeps a trace
+    // of the art's hue. It reads as overlay when the sample is dark and under
+    // half as bright as the picture the nearest image ground draws behind it.
+    func lum(_ c: [Double]) -> Double {
+        let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+        return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+    }
+    var holder = kayaScene.parents[node.id]
+    while let id = holder, kayaScene.nodes[id]?.ground != groundImage { holder = kayaScene.parents[id] }
+    if let id = holder, let pictured = kayaScene.nodes[id], let behind = kayaSkinFrame(pictured),
+        let art = kayaPictureAt(pictured, CGPoint(x: probe.midX - behind.minX, y: probe.midY - behind.minY), behind.size)
+    {
+        let (mine, theirs) = (lum(px), lum(art))
+        if mine < 0.06 && mine < theirs / 2 {
+            return "overlay (sampled \(got) at \(probeAt), luminance \(String(format: "%.3f", mine)) over the picture's "
+                + "\(kayaHex(art)) at \(String(format: "%.3f", theirs)))"
+        }
+    }
     return "\(ranked[0].0) (sampled \(got) at \(probeAt); "
         + ranked.prefix(3).map { "\($0.0) \(hex($0.1))" }.joined(separator: ", ") + ")"
+}
+
+/// The window's own pixels for the skin's readers (docs/styling-pass-plan.md
+/// Y9): one capture of the visible window composited over its resolved
+/// ground, read by window point, with the appearance's primary text colour.
+@MainActor struct KayaWindowPixels {
+    let rgba: [UInt8]
+    let width: Int
+    let height: Int
+    let scale: CGFloat
+    let ground: [Double]
+    let text: [Double]
+    let dark: Bool
+
+    func at(_ p: CGPoint) -> [Double]? {
+        let x = Int(p.x * scale), y = Int(p.y * scale)
+        guard x >= 0, y >= 0, x < width, y < height else { return nil }
+        let i = (y * width + x) * 4
+        return [Double(rgba[i]) / 255, Double(rgba[i + 1]) / 255, Double(rgba[i + 2]) / 255]
+    }
+}
+
+@MainActor func kayaWindowPixels() -> KayaWindowPixels? {
+    #if os(macOS)
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }),
+            let content = window.contentView,
+            let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
+        else { return nil }
+        content.cacheDisplay(in: content.bounds, to: rep)
+        guard let cg = rep.cgImage else { return nil }
+        let appearance = window.effectiveAppearance
+        func rgba(_ c: NSColor) -> [Double] {
+            var out: [Double] = [0, 0, 0, 1]
+            appearance.performAsCurrentDrawingAppearance {
+                if let s = c.usingColorSpace(.sRGB) { out = [s.redComponent, s.greenComponent, s.blueComponent, s.alphaComponent] }
+            }
+            return out
+        }
+        let ground = rgba(.windowBackgroundColor), text = rgba(.labelColor)
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let points = content.bounds.width
+    #else
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return nil }
+        guard let cg = UIGraphicsImageRenderer(bounds: window.bounds).image(actions: { _ in
+            window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+        }).cgImage else { return nil }
+        let traits = window.traitCollection
+        func rgba(_ c: UIColor) -> [Double] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            c.resolvedColor(with: traits).getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [Double(r), Double(g), Double(b), Double(a)]
+        }
+        let ground = rgba(.systemBackground), text = rgba(.label)
+        let dark = traits.userInterfaceStyle == .dark
+        let points = window.bounds.width
+    #endif
+    let (w, h) = (cg.width, cg.height)
+    var buf = [UInt8](repeating: 0, count: w * h * 4)
+    let drawn = buf.withUnsafeMutableBytes { raw -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let ctx = CGContext(
+                data: raw.baseAddress, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.setFillColor(red: ground[0], green: ground[1], blue: ground[2], alpha: 1)
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        return true
+    }
+    guard drawn, points > 0 else { return nil }
+    return KayaWindowPixels(
+        rgba: buf, width: w, height: h, scale: CGFloat(w) / points,
+        ground: Array(ground.prefix(3)), text: Array(text.prefix(3)), dark: dark)
+}
+
+func kayaHex(_ c: [Double]) -> String {
+    String(format: "%02X%02X%02X", Int((c[0] * 255).rounded()), Int((c[1] * 255).rounded()), Int((c[2] * 255).rounded()))
+}
+
+/// The largest per-channel difference of two colours.
+func kayaColourGap(_ a: [Double], _ b: [Double]) -> Double {
+    (0..<3).map { abs(a[$0] - b[$0]) }.max() ?? 1
+}
+
+/// WCAG's contrast ratio of two sRGB colours.
+func kayaContrast(_ a: [Double], _ b: [Double]) -> Double {
+    func lum(_ c: [Double]) -> Double {
+        let l = c.prefix(3).map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+        return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+    }
+    let (x, y) = (lum(a), lum(b))
+    return (max(x, y) + 0.05) / (min(x, y) + 0.05)
+}
+
+/// A colour the screen could have drawn for `want`, within the gate the
+/// display profile leaves (docs/canvas-plan.md §7.2 measured 1; a gradient
+/// probe 4 units in has moved a little further toward its other stop).
+let kayaSkinTolerance = 0.06
+
+
+@MainActor func kayaSkinFrame(_ node: KayaNode) -> CGRect? {
+    kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]
+}
+
+/// A node's laid-out centre in screen points, the space the accessibility
+/// tree answers frames in.
+@MainActor func kayaScreenCentre(_ node: KayaNode) -> CGPoint? {
+    guard let frame = kayaSkinFrame(node) else { return nil }
+    #if os(macOS)
+        guard let window = kayaNSWindows[0] ?? NSApp.windows.first(where: { $0.isVisible }),
+            let content = window.contentView
+        else { return nil }
+        let local = CGPoint(x: frame.midX, y: content.isFlipped ? frame.midY : content.bounds.height - frame.midY)
+        let screen = window.convertPoint(toScreen: content.convert(local, to: nil))
+        let top = NSScreen.screens.first?.frame.maxY ?? 0
+        return CGPoint(x: screen.x, y: top - screen.y)
+    #else
+        return CGPoint(x: frame.midX, y: frame.midY)
+    #endif
+}
+
+/// A platform view behind each skinned node, asked for its frame at read
+/// time: a table cell's SwiftUI frame is not told when the table scrolls or
+/// reuses the cell, so a recorded frame went stale under the reads (measured
+/// 2026-10-16, a striped row's art read 17 points off).
+@MainActor var kayaSkinAnchors: [UInt64: KayaWeakView] = [:]
+
+final class KayaWeakView {
+    #if os(macOS)
+        weak var view: NSView?
+        init(_ view: NSView) { self.view = view }
+    #else
+        weak var view: UIView?
+        init(_ view: UIView) { self.view = view }
+    #endif
+}
+
+#if os(macOS)
+    struct KayaSkinFrameReader: NSViewRepresentable {
+        let id: UInt64
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView()
+            kayaSkinAnchors[id] = KayaWeakView(view)
+            return view
+        }
+        func updateNSView(_ view: NSView, context: Context) { kayaSkinAnchors[id] = KayaWeakView(view) }
+    }
+#else
+    struct KayaSkinFrameReader: UIViewRepresentable {
+        let id: UInt64
+        func makeUIView(context: Context) -> UIView {
+            let view = UIView()
+            view.isUserInteractionEnabled = false
+            kayaSkinAnchors[id] = KayaWeakView(view)
+            return view
+        }
+        func updateUIView(_ view: UIView, context: Context) { kayaSkinAnchors[id] = KayaWeakView(view) }
+    }
+#endif
+
+/// The anchor's frame in window points, top-left origin, now.
+@MainActor func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {
+    guard let view = kayaSkinAnchors[id]?.view, view.window != nil else { return nil }
+    #if os(macOS)
+        return kayaHarnessRect(view.bounds, in: view)
+    #else
+        return view.convert(view.bounds, to: nil)
+    #endif
+}
+
+/// expect_ground's read (docs/styling-pass-plan.md §5.1), off the pixels at
+/// the container's right edge, 4 units in from its top and its bottom and at
+/// its middle.
+@MainActor func kayaGroundRead(_ node: KayaNode) -> String {
+    guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16 else {
+        return "<no laid-out frame>"
+    }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    let x = frame.maxX - 4
+    guard let top = shot.at(CGPoint(x: x, y: frame.minY + 4)),
+        let bottom = shot.at(CGPoint(x: x, y: frame.maxY - 4)),
+        let mid = shot.at(CGPoint(x: x, y: frame.midY))
+    else { return "<the probes fall outside the window: \(frame)>" }
+    let seen = "top \(kayaHex(top)), middle \(kayaHex(mid)), bottom \(kayaHex(bottom)), ground \(kayaHex(shot.ground))"
+    if kayaColourGap(top, shot.ground) <= kayaSkinTolerance {
+        return "none (\(seen))"
+    }
+    if let art = kayaPictureAt(node, CGPoint(x: frame.width - 4, y: 4), frame.size),
+        kayaColourGap(art, top) <= kayaSkinTolerance * 2
+    {
+        return "image (\(seen), the picture there \(kayaHex(art)))"
+    }
+    let stop = shot.dark ? node.groundTops & 0xFF_FFFF : (node.groundTops >> 24) & 0xFF_FFFF
+    let want = [Double((stop >> 16) & 0xFF) / 255, Double((stop >> 8) & 0xFF) / 255, Double(stop & 0xFF) / 255]
+    let contrast = kayaContrast(mid, shot.text)
+    let detail = "\(seen), the clamped stop \(kayaHex(want)), text \(String(format: "%.1f", contrast)):1 at the middle"
+    if kayaColourGap(top, want) <= kayaSkinTolerance && kayaColourGap(bottom, shot.ground) <= kayaSkinTolerance
+        && contrast >= 4.5
+    {
+        return "gradient (\(detail))"
+    }
+    return "unmatched (\(detail))"
+}
+
+/// The picture an image ground shows at a point of its container, as cover
+/// places it, or nil when it shows none.
+@MainActor func kayaPictureAt(_ node: KayaNode, _ p: CGPoint, _ box: CGSize) -> [Double]? {
+    guard node.ground == groundImage, let image = node.image else { return nil }
+    #if os(macOS)
+        guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    #else
+        guard let cg = image.cgImage else { return nil }
+    #endif
+    let (w, h) = (CGFloat(cg.width), CGFloat(cg.height))
+    let scale = max(box.width / w, box.height / h)
+    let ox = (w * scale - box.width) / 2, oy = (h * scale - box.height) / 2
+    let px = Int((p.x + ox) / scale), py = Int((p.y + oy) / scale)
+    guard px >= 0, py >= 0, px < cg.width, py < cg.height else { return nil }
+    var buf = [UInt8](repeating: 0, count: 4)
+    let ok = buf.withUnsafeMutableBytes { raw -> Bool in
+        guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+            let ctx = CGContext(data: raw.baseAddress, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+                                space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        ctx.draw(cg, in: CGRect(x: -CGFloat(px), y: -CGFloat(cg.height - 1 - py), width: w, height: h))
+        return true
+    }
+    return ok ? buf.prefix(3).map { Double($0) / 255 } : nil
+}
+
+/// expect_shape's read (§5.2): the probe 1 unit inside the top-left corner,
+/// the one 6 units in, and the centre, each named art or ground.
+@MainActor func kayaShapeRead(_ node: KayaNode) -> String {
+    let frames = [kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]].compactMap { $0 }
+    guard let frame = frames.first, frame.width > 12, frame.height > 12 else {
+        return "<no laid-out frame: \(frames.count) recorded \(frames)>"
+    }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    // What the image sits on is read 4 units left of it at its middle (a
+    // table row's stripe, a card's fill, the window), and reads back within a
+    // unit of itself; iOS's loading look is 3 units from its ground, so a gap
+    // over 0.02 tells the picture from it.
+    guard let under = shot.at(CGPoint(x: frame.minX - 4, y: frame.midY)) else { return "<nothing left of \(frame)>" }
+    func art(_ c: [Double]) -> Bool { kayaColourGap(c, under) > 0.02 }
+    let box = frame
+    guard let c1 = shot.at(CGPoint(x: box.minX + 1, y: box.minY + 1)),
+        let c6 = shot.at(CGPoint(x: box.minX + 6, y: box.minY + 6)),
+        let centre = shot.at(CGPoint(x: box.midX, y: box.midY))
+    else { return "<the probes fall outside the window: \(box)>" }
+    let seen = "(1,1) \(kayaHex(c1)), (6,6) \(kayaHex(c6)), centre \(kayaHex(centre)), under it \(kayaHex(under)), "
+        + "drawn at \(kayaRectText(box))"
+    switch (art(c1), art(c6), art(centre)) {
+    case (true, true, true): return "rect (\(seen))"
+    case (false, true, true): return "rounded (\(seen))"
+    case (false, false, true): return "circle (\(seen))"
+    default: return "unmatched (\(seen))"
+    }
+}
+
+/// expect_tint's read (Y7): the label's most inked pixel, nearest of the
+/// standalone colours and the primary text colour.
+@MainActor func kayaLabelTintRead(_ node: KayaNode) -> String {
+    let frames = [kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]].compactMap { $0 }
+    guard let frame = frames.first,
+        frame.width > 2, frame.height > 2
+    else {
+        return "<no laid-out frame: \(frames.count) recorded \(frames)>"
+    }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    var ink: [Double]? = nil
+    var best = -1.0
+    let step = 1 / shot.scale
+    var y = frame.minY
+    while y < frame.maxY {
+        var x = frame.minX
+        while x < frame.maxX {
+            if let c = shot.at(CGPoint(x: x, y: y)) {
+                let d = (0..<3).map { abs(c[$0] - shot.ground[$0]) }.reduce(0, +)
+                if d > best { best = d; ink = c }
+            }
+            x += step
+        }
+        y += step
+    }
+    guard let ink else { return "<no pixels in \(frame)>" }
+    #if os(macOS)
+        func tone(_ c: NSColor) -> [Double] {
+            var out: [Double] = [0, 0, 0]
+            NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
+                if let s = c.usingColorSpace(.sRGB) { out = [s.redComponent, s.greenComponent, s.blueComponent] }
+            }
+            return out
+        }
+        var accent = tone(.controlAccentColor)
+        let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
+    #else
+        func tone(_ c: UIColor) -> [Double] {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            c.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [Double(r), Double(g), Double(b)]
+        }
+        var accent = tone(.tintColor)
+        let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
+    #endif
+    if let brand = kayaScene.brand {
+        let rgb = shot.dark ? brand[8] : brand[3]
+        accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255]
+    }
+    let candidates: [(String, [Double])] = [("none", shot.text), ("accent", accent)] + others
+    func distance(_ c: [Double]) -> Double {
+        var sum = 0.0
+        for k in 0..<3 { sum += (c[k] - ink[k]) * (c[k] - ink[k]) }
+        return sum
+    }
+    let ranked: [(String, [Double], Double)] = candidates.map { ($0.0, $0.1, distance($0.1)) }.sorted { $0.2 < $1.2 }
+    return "\(ranked[0].0) (ink \(kayaHex(ink)); " + ranked.prefix(3).map { "\($0.0) \(kayaHex($0.1))" }.joined(separator: ", ") + ")"
+}
+
+/// The dock's laid-out frame in window points, recorded by its root's reader.
+@MainActor var kayaDockFrame: CGRect? = nil
+
+/// expect_ground, expect_shape, expect_tint and expect_selected
+/// (docs/styling-pass-plan.md Y9), polled for five seconds: the observation,
+/// or nil and the failure sentence.
+func kayaSkinReading(_ parts: [Substring]) -> (String?, String) {
+    let verb = String(parts[0])
+    let want = parts.count > 2 ? String(parts[2]) : ""
+    func read() -> String? {
+        if verb == "expect_ground" {
+            return DispatchQueue.main.sync {
+                (kayaTarget(parts[1], "column", kayaScene.columns)
+                    ?? kayaTarget(parts[1], "row", kayaScene.rows)).map(kayaGroundRead)
+            }
+        } else if verb == "expect_shape" {
+            return DispatchQueue.main.sync { kayaTarget(parts[1], "image", kayaScene.images).map(kayaShapeRead) }
+        } else if verb == "expect_tint" {
+            return DispatchQueue.main.sync { kayaTarget(parts[1], "label", kayaScene.labels).map(kayaLabelTintRead) }
+        } else {
+            let found = DispatchQueue.main.sync { () -> (String, CGPoint?)? in
+                (kayaTarget(parts[1], "column", kayaScene.columns)
+                    ?? kayaTarget(parts[1], "row", kayaScene.rows)).map { ($0.a11yId, kayaScreenCentre($0)) }
+            }
+            return found.map { kayaAxSelectedRead($0.0, at: $0.1) }
+        }
+    }
+    var got = read()
+    let deadline = Date().addingTimeInterval(5)
+    while got?.split(separator: " ").first.map(String.init) != want && Date() < deadline {
+        Thread.sleep(forTimeInterval: 0.1)
+        got = read()
+    }
+    let noun = verb.dropFirst("expect_".count)
+    if let got, got.split(separator: " ").first.map(String.init) == want {
+        return ("\(parts[1]) \(noun) \(want)", "")
+    }
+    if let got { return (nil, "\(parts[1]) reads \(noun) \(got), wanted \(want)") }
+    return (nil, "no such target \(parts[1])")
+}
+
+/// expect_rows' text of one cell: a label's, or a nested container's labels
+/// joined by `/` (docs/styling-pass-plan.md Y5); nil for a cell with none.
+func kayaCellText(_ node: KayaNode) -> String? {
+    if node.kind == kindLabel { return node.text }
+    guard node.kind == kindRow || node.kind == kindColumn else { return nil }
+    let inner = node.children.compactMap(kayaCellText)
+    return inner.isEmpty ? nil : inner.joined(separator: "/")
+}
+
+/// hover's in-process route (docs/styling-pass-plan.md §5, §7): a mouse-moved
+/// event at the target's centre through the window, then to every view whose
+/// tracking areas take moves, which is how SwiftUI's hosting view hears the
+/// pointer. The verdict is the platform's own `.onHover` callback firing, never
+/// kaya's model. Nil when it fired, else what was tried.
+@MainActor func kayaHoverTarget(_ spec: Substring) -> String? {
+    guard let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) else {
+        return "no such target \(spec)"
+    }
+    #if os(macOS)
+        guard let frame = kayaSkinFrame(node) else { return "\(spec) has no laid-out frame to hover" }
+        guard let window = kayaNSWindows[0] ?? NSApp.windows.first(where: { $0.isVisible }),
+            let content = window.contentView
+        else { return "no window to hover in" }
+        window.acceptsMouseMovedEvents = true
+        let local = CGPoint(x: frame.midX, y: frame.midY)
+        let inWindow = content.convert(
+            content.isFlipped ? local : CGPoint(x: local.x, y: content.bounds.height - local.y), to: nil)
+        guard let event = NSEvent.mouseEvent(
+            with: .mouseMoved, location: inWindow, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)
+        else { return "no mouse-moved event could be made" }
+        kayaHovered.removeAll()
+        window.sendEvent(event)
+        var movers = 0
+        var entered = 0
+        func walk(_ view: NSView) {
+            let here = view.convert(inWindow, from: nil)
+            for area in view.trackingAreas where area.rect.contains(here) {
+                guard let owner = area.owner as? NSResponder else { continue }
+                if area.options.contains(.mouseEnteredAndExited),
+                    let enter = NSEvent.enterExitEvent(
+                        with: .mouseEntered, location: inWindow, modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                        context: nil, eventNumber: 0,
+                        trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque()), userData: nil)
+                {
+                    entered += 1
+                    owner.mouseEntered(with: enter)
+                }
+                if area.options.contains(.mouseMoved) {
+                    movers += 1
+                    owner.mouseMoved(with: event)
+                }
+            }
+            view.subviews.forEach(walk)
+        }
+        walk(content)
+        let deadline = Date().addingTimeInterval(2)
+        while !kayaHovered.contains(node.id) && Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        if kayaHovered.contains(node.id) { return nil }
+        return "\(spec)'s .onHover never fired: a mouse-moved event at \(inWindow) went through the window, "
+            + "\(entered) tracking area(s) under it were sent an enter and \(movers) a move; hovered now \(kayaHovered.sorted())"
+    #else
+        return "hover is a desktop verb: \(spec) has no pointer on this platform"
+    #endif
+}
+
+/// Whether a dock's root holds a widget: a dock whose root holds only empty
+/// containers (a When that is false) collapses, its bar with it (Y8).
+@MainActor func kayaHoldsWidget(_ node: KayaNode) -> Bool {
+    if node.kind != kindRow && node.kind != kindColumn { return true }
+    return node.children.contains(where: kayaHoldsWidget)
+}
+
+/// Whether the window's dock rides iOS 26's tab-bar accessory instead of an
+/// inset (docs/styling-pass-plan.md Y8): a phone window with sections.
+@MainActor func kayaDockIsAccessory(_ windowId: UInt64) -> Bool {
+    #if os(iOS)
+        if #available(iOS 26, *) { return kayaScene.windows[windowId]?.sections.isEmpty == false }
+    #endif
+    return false
+}
+
+#if os(iOS)
+    /// The Music app's mini player above the tab bar (Y8), iOS 26 and later.
+    struct KayaTabAccessory: ViewModifier {
+        let windowId: UInt64
+        @State private var scene = kayaScene
+
+        func body(content: Content) -> some View {
+            if #available(iOS 26, *), let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock) {
+                content.tabViewBottomAccessory {
+                    KayaRender(node: dock, isRoot: true)
+                        .padding(.horizontal, 12)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onAppear { kayaDockFrame = geo.frame(in: .global) }
+                                    .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
+                                    .onDisappear { kayaDockFrame = nil }
+                            })
+                }
+            } else {
+                content
+            }
+        }
+    }
+#endif
+
+/// The window's dock under every pane (Y8): a bottom inset of the window's
+/// content on both platforms, the bar material running to the window's edge
+/// and under the home indicator while the content keeps the safe area.
+struct KayaDockHost: ViewModifier {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    func body(content: Content) -> some View {
+        if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {
+            content.safeAreaInset(edge: .bottom, spacing: 0) {
+                KayaRender(node: dock, isRoot: true)
+                    .padding(.horizontal, scene.windows[windowId]?.inset ?? 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(.bar, ignoresSafeAreaEdges: .bottom)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { kayaDockFrame = geo.frame(in: .global) }
+                                .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
+                                .onDisappear { kayaDockFrame = nil }
+                        })
+            }
+        } else {
+            content
+        }
+    }
+}
+
+/// expect_dock's read (Y8): the dock's frame against the window's content
+/// and every pane's frame.
+@MainActor func kayaDockRead() -> String {
+    guard let dock = kayaScene.windows[0]?.dock else { return "hidden (no dock is mounted)" }
+    guard kayaHoldsWidget(dock), let frame = kayaDockFrame, frame.height > 1 else {
+        return "hidden (dock frame \(kayaDockFrame.map(String.init(describing:)) ?? "none"))"
+    }
+    #if os(macOS)
+        guard let content = kayaNSWindows[0]?.contentView ?? NSApp.windows.first(where: { $0.isVisible })?.contentView else {
+            return "<no window>"
+        }
+        let bounds = content.bounds
+        let bottom = bounds.height
+        var panes: [CGRect] = []
+        if let split = kayaFindSplitView(content) {
+            panes = split.arrangedSubviews.filter { !$0.isHidden && $0.frame.width > 1 }
+                .map { $0.convert($0.bounds, to: content) }
+                .map { content.isFlipped ? $0 : CGRect(x: $0.minX, y: bounds.height - $0.maxY, width: $0.width, height: $0.height) }
+        }
+    #else
+        guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return "<no key window>" }
+        let bounds = window.bounds
+        let bottom = bounds.height - window.safeAreaInsets.bottom
+        let panes: [CGRect] = []
+    #endif
+    if kayaDockIsAccessory(0) {
+        // The accessory's frame is the platform's: above the tab bar, inside
+        // the window's width.
+        let inside = frame.minX >= -1 && frame.maxX <= bounds.width + 1 && frame.maxY <= bottom
+        return (inside ? "shown" : "misplaced") + " (the tab bar's accessory at \(frame), window \(bounds.size))"
+    }
+    let spans = frame.minX <= 2 && frame.maxX >= bounds.width - 2
+    let atFoot = abs(frame.maxY - bottom) <= 2 || frame.maxY >= bottom - 2 && frame.maxY <= bounds.height + 2
+    let above = panes.allSatisfy { $0.maxY <= frame.minY + 1 }
+    let detail = "dock \(frame), window \(bounds.size), panes \(panes.map(\.debugDescription))"
+    if spans && atFoot && above { return "shown (\(detail))" }
+    return "misplaced (\(detail))"
 }
 
 /// The brand tint for the CURRENT appearance, or nil for "no request". A
@@ -22532,6 +23525,9 @@ struct KayaRender: View {
             .padding(kayaFilledInset(node))
             .background(KayaInsetReader(id: node.id, outer: true))
             .modifier(KayaFilledSurface(tint: node.filled))
+            .modifier(KayaGroundSurface(node: node))
+            .modifier(KayaActivatable(node: node))
+            .background(KayaSkinFrameReader(id: node.id))
             .modifier(KayaComposerSurface(on: node.role == roleComposer))
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
@@ -22659,6 +23655,8 @@ struct KayaRender: View {
                     base
                 }
             }
+            .modifier(KayaLabelTint(tint: node.labelTint))
+            .background(KayaSkinFrameReader(id: node.id))
             .accessibilityAddTraits(
                 node.role == roleHeading ? .isHeader : [])
             .alignmentGuide(.top) { d in
@@ -23044,6 +24042,8 @@ struct KayaRender: View {
             } else if kayaImageBoxed(node) {
                 KayaImageBox(node: node)
                     .background(KayaLabelFrameReader(id: node.id))
+                    .modifier(KayaImageShape(shape: node.shape))
+                    .background(KayaSkinFrameReader(id: node.id))
             } else if let image = node.image {
                 let fit = kayaImageFit(natural: image.size, node: node)
                 Group {
@@ -23061,7 +24061,9 @@ struct KayaRender: View {
                         }
                     #endif
                 }
+                .modifier(KayaImageShape(shape: node.shape))
                 .background(KayaLabelFrameReader(id: node.id))
+                .background(KayaSkinFrameReader(id: node.id))
                 .onAppear { kayaImageAppeared(node, "shown") }
                 .onDisappear { kayaImageGone(node, "shown") }
             } else if let natural = node.imagePendingNatural {
@@ -30753,6 +31755,7 @@ struct KayaSectionsView: View {
                 }
             #else
                 tabBody(window)
+                    .modifier(KayaTabAccessory(windowId: windowId))
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                     .tint(kayaBrandTint())
                     .font(kayaBrandFont())
@@ -30958,6 +31961,9 @@ struct KayaRoot: View {
         }
         }
         }
+        // The dock spans every pane (docs/styling-pass-plan.md Y8), so it rides
+        // outside the arm chain.
+        .modifier(KayaDockHost(windowId: 0))
         // The form factor is measured on the WHOLE window, outside the arm chain,
         // so the reading does not depend on which arm rendered — the arm depends
         // on the reading, never the reverse.

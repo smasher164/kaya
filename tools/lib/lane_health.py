@@ -403,7 +403,7 @@ def parse_apps(text):
         if m:
             cur = {"name": m.group(1), "asn": m.group(2).rstrip(":"), "bundle": None,
                    "exe": "", "pid": None, "type": "", "parent": "",
-                   "when": None, "stamp": ""}
+                   "when": None, "stamp": "", "checkin": None, "checkin_stamp": ""}
             apps.append(cur)
             continue
         if cur is None:
@@ -427,6 +427,8 @@ def parse_apps(text):
             w = re.search(r"(\d{4}/\d\d/\d\d \d\d:\d\d:\d\d)", s)
             if w and (s.startswith("launch") or cur["when"] is None):
                 cur["when"], cur["stamp"] = _local_epoch(w.group(1)), w.group(1)
+            if w and s.startswith("checkin"):
+                cur["checkin"], cur["checkin_stamp"] = _local_epoch(w.group(1)), w.group(1)
     return [a for a in apps if a["pid"] is not None]
 
 
@@ -564,6 +566,8 @@ class MacApps:
         self.legs = []
         self.seen = {}
         self.excluded = {}
+        self.exe_at_start = {}
+        self.adopted = {}
         self.readings = 0
         self.failed = []
 
@@ -574,7 +578,9 @@ class MacApps:
         if problem:
             self.base_problem = problem
             return f"app list unreadable at the lane's start ({problem}); no app can be called new"
-        apps = [a for a in parse_apps(text) if a["type"] in APP_TYPES]
+        every = parse_apps(text)
+        self.exe_at_start = {a["pid"]: a["exe"] for a in every}
+        apps = [a for a in every if a["type"] in APP_TYPES]
         self.base = {a["pid"] for a in apps}
         return f"{len(apps)} GUI applications running at the lane's start (lsappinfo)"
 
@@ -599,6 +605,7 @@ class MacApps:
                 return set()
         now = set()
         for app in parse_apps(text):
+            self.adoption(app, where)
             if app["type"] not in APP_TYPES:
                 continue
             now.add(app["pid"])
@@ -619,6 +626,34 @@ class MacApps:
             with self.lock:
                 self.seen.setdefault(app["pid"], first)
         return now
+
+    def adoption(self, app, where):
+        """docs/traps.md, the Preview a Go guest's checkin relaunched: a lane
+        binary registered under another app's bundle id took that app's record."""
+        owner = lane_owner(app, self.root)
+        bundle = app["bundle"]
+        if (not owner or not bundle or LANE_BUNDLE.match(bundle)
+                or self.exe_at_start.get(app["pid"]) == app["exe"]):
+            return
+        t = app["checkin"]
+        if t is None:
+            when = "at a checkin time lsappinfo did not give"
+        else:
+            running = legs_at(self.legs, t)
+            when = (f"checked in {app['checkin_stamp']} while "
+                    + (f"{', '.join(running)} ran" if running
+                       else "no leg of this lane was running"))
+        with self.lock:
+            self.adopted.setdefault(app["pid"], (
+                f"IDENTITY ADOPTED: pid {app['pid']} ({app['exe']}, the lane's own: {owner}) "
+                f"is registered with LaunchServices as {app['name']} ({bundle}, {app['asn']}, "
+                f"{app['type'] or 'no type'}), {when}; first seen {where}. A kaya process "
+                f"checks in under its own identity or respawns off a pid that holds another "
+                f"app's record (crates/kaya/src/ls_identity.rs), and this one did neither"))
+
+    def refusals(self):
+        with self.lock:
+            return [self.adopted[pid] for pid in sorted(self.adopted)]
 
     def end(self):
         if self.base is None:
@@ -641,7 +676,7 @@ class MacApps:
                     f"(first: {self.failed[0]})")
         out.append(f"{head} ({self.readings} readings across {len(self.legs)} legs; the "
                    f"lane's own apps excluded by name: {kept}){tail}")
-        return out
+        return out + self.refusals()
 
     def sentence(self, first, alive):
         app = first["app"]
@@ -1419,6 +1454,39 @@ def drive():
             ("summary", "2 GUI application(s) appeared during the lane (3 readings across 5 "
              "legs; the lane's own apps excluded by name: python3 1)")):
         cases.append((label, want, seen))
+    cases.append(("identity adopted", "IDENTITY ADOPTED: pid 84118 (/repo/target/go-guests/"
+                  "kaya-go, the lane's own: a binary built in the tree) is registered with "
+                  "LaunchServices as Preview (com.apple.Preview, ASN:0x0-0x25e44e1f, Foreground), "
+                  "checked in 2026/10/14 16:00:38 while scroll-go-swiftui, scrollto-rust-swiftui "
+                  "ran; first seen after a leg", seen))
+    late = _app(11, "Preview", "ASN:0x0-0x25e44e1f", "com.apple.Preview",
+                "/repo/target/rust-guests/scroll", 84200, "BackgroundOnly",
+                launch="2026/09/24 19:20:07", checkin="2026/10/14 16:00:50")
+    ghost = (' 12) "Preview" ASN:0x0-0x25e44e20: \n    bundleID="com.apple.Preview"\n'
+             '    executable path="/repo/target/c-guests/scroll"\n'
+             '    pid = 84201 type="Foreground" flavor=3 Arch=ARM64 \n')
+    own = _app(13, "Notes", "ASN:0x0-0x8a8a8a", "dev.kaya.aurora.notes",
+               "/repo/target/rust-guests/notes.app/Contents/MacOS/notes", 84202, "Foreground",
+               checkin="2026/10/14 16:00:36")
+    stale = _apps_run([(APPS_START + HIJACK, None), (APPS_START + HIJACK + late + ghost + own, None),
+                       (APPS_START, None)], SIGHTING_LEGS)
+    for label, want in (
+            ("adopted while no leg ran", "IDENTITY ADOPTED: pid 84200 (/repo/target/rust-guests/"
+             "scroll, the lane's own: a binary built in the tree) is registered with "
+             "LaunchServices as Preview (com.apple.Preview, ASN:0x0-0x25e44e1f, BackgroundOnly), "
+             "checked in 2026/10/14 16:00:50 while no leg of this lane was running"),
+            ("adopted with no checkin time", "IDENTITY ADOPTED: pid 84201 (/repo/target/c-guests/"
+             "scroll, the lane's own: a binary built in the tree) is registered with "
+             "LaunchServices as Preview (com.apple.Preview, ASN:0x0-0x25e44e20, Foreground), at "
+             "a checkin time lsappinfo did not give")):
+        cases.append((label, want, stale))
+    quiet = [s for s in stale if s.startswith("IDENTITY ADOPTED") and (
+        "pid 84118 " in s or "pid 84202 " in s)]
+    cases.append(("a record held since the start and kaya's own bundle not refused",
+                  "refused 2 of 4: 84200 84201",
+                  [f"refused {len([x for x in stale if x.startswith('IDENTITY ADOPTED')])} of 4: "
+                   + " ".join(x.split()[3] for x in stale if x.startswith("IDENTITY ADOPTED"))
+                   + (" WRONGLY " + repr(quiet) if quiet else "")]))
     alone = _apps_run([(APPS_START, None),
                        (APPS_START + LONER + NOBUNDLE + ODD + NOTIME, None),
                        (APPS_START + LONER, None)],

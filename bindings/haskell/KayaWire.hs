@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x303cc490b4cb14fb
+specHash = 0x9e1c92057e3f0dc2
 
 valueBool :: Word32
 valueBool = 1
@@ -280,6 +280,16 @@ propBleed :: Word32
 propBleed = 61
 propPhase :: Word32
 propPhase = 62
+propGround :: Word32
+propGround = 63
+propShape :: Word32
+propShape = 64
+propSelected :: Word32
+propSelected = 65
+propTint :: Word32
+propTint = 66
+propActivatable :: Word32
+propActivatable = 67
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -442,6 +452,8 @@ sizeClassCompact :: Word32
 sizeClassCompact = 1
 sizeClassRegular :: Word32
 sizeClassRegular = 2
+tintNone :: Word32
+tintNone = 0
 tintAccent :: Word32
 tintAccent = 1
 tintSuccess :: Word32
@@ -452,6 +464,20 @@ tintCritical :: Word32
 tintCritical = 4
 tintNeutral :: Word32
 tintNeutral = 5
+tintOverlay :: Word32
+tintOverlay = 6
+groundNone :: Word32
+groundNone = 0
+groundGradient :: Word32
+groundGradient = 1
+groundImage :: Word32
+groundImage = 2
+shapeRect :: Word32
+shapeRect = 0
+shapeRounded :: Word32
+shapeRounded = 1
+shapeCircle :: Word32
+shapeCircle = 2
 roleDestructive :: Word32
 roleDestructive = 1
 roleProminent :: Word32
@@ -926,6 +952,8 @@ txKindDismissToast :: Word16
 txKindDismissToast = 83
 txKindCollectionPatchIf :: Word16
 txKindCollectionPatchIf = 84
+txKindAttachDock :: Word16
+txKindAttachDock = 85
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1066,6 +1094,8 @@ applyKindPresentToast :: Word16
 applyKindPresentToast = 71
 applyKindWithdrawToast :: Word16
 applyKindWithdrawToast = 72
+applyKindAttachDock :: Word16
+applyKindAttachDock = 73
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1180,6 +1210,8 @@ occKindImageNeeded :: Word16
 occKindImageNeeded = 56
 occKindImageReleased :: Word16
 occKindImageReleased = 57
+occKindActivated :: Word16
+occKindActivated = 58
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1547,6 +1579,10 @@ txDismissToast toast = wireRecord txKindDismissToast (word64LE toast)
 -- A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to.
 txCollectionPatchIf :: Word64 -> [Value] -> Value -> Word32 -> Word32 -> Value -> [Value] -> [Value] -> Builder
 txCollectionPatchIf collectionId path key guardField variant guardValue fields values = wireRecord txKindCollectionPatchIf (word64LE collectionId <> encodeValues path <> encodeValue key <> word32LE guardField <> word32LE variant <> encodeValue guardValue <> encodeValues fields <> encodeValues values)
+
+-- Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does.
+txAttachDock :: Word64 -> Word64 -> Builder
+txAttachDock window dock = wireRecord txKindAttachDock (word64LE window <> word64LE dock)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -2756,6 +2792,101 @@ txBindPhaseElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propPhase <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
+-- set_property with a constant ground value.
+txSetGround :: Word64 -> Int64 -> Builder
+txSetGround widgetId ground = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGround <> word32LE sourceConst
+    <> encodeValue (VI64 ground))
+
+-- set_property with a signal-bound ground value.
+txBindGround :: Word64 -> Word64 -> Builder
+txBindGround widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGround <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindGroundElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindGroundElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propGround <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant shape value.
+txSetShape :: Word64 -> Int64 -> Builder
+txSetShape widgetId shape = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propShape <> word32LE sourceConst
+    <> encodeValue (VI64 shape))
+
+-- set_property with a signal-bound shape value.
+txBindShape :: Word64 -> Word64 -> Builder
+txBindShape widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propShape <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindShapeElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindShapeElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propShape <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant selected value.
+txSetSelected :: Word64 -> Bool -> Builder
+txSetSelected widgetId selected = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSelected <> word32LE sourceConst
+    <> encodeValue (VBool selected))
+
+-- set_property with a signal-bound selected value.
+txBindSelected :: Word64 -> Word64 -> Builder
+txBindSelected widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSelected <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindSelectedElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindSelectedElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propSelected <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant tint value.
+txSetTint :: Word64 -> Int64 -> Builder
+txSetTint widgetId tint = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTint <> word32LE sourceConst
+    <> encodeValue (VI64 tint))
+
+-- set_property with a signal-bound tint value.
+txBindTint :: Word64 -> Word64 -> Builder
+txBindTint widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTint <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindTintElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindTintElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTint <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant activatable value.
+txSetActivatable :: Word64 -> Bool -> Builder
+txSetActivatable widgetId activatable = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propActivatable <> word32LE sourceConst
+    <> encodeValue (VBool activatable))
+
+-- set_property with a signal-bound activatable value.
+txBindActivatable :: Word64 -> Word64 -> Builder
+txBindActivatable widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propActivatable <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindActivatableElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindActivatableElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propActivatable <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
 -- set_window_prop with a constant title value (window 0, the primary surface).
 txSetWindowTitle :: Word64 -> String -> Builder
 txSetWindowTitle window title = wireRecord txKindSetWindowProp
@@ -3232,7 +3363,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64

@@ -16780,8 +16780,35 @@ Relaunching due to app activation or Dock menu command`; runningboardd's
 `LS launch com.apple.Preview` (originator CoreServicesUIAgent) started the
 real Preview at .929, and talagentd's kill of the old serial number failed
 (-54). The only stub move and TAL relaunch in that day's log (08:00-18:10).
-WHY an unbundled guest was handed another app's stub ASN is NOT NAMED (one
-sighting). The lane now records the next one: lane_health.MacApps reads
+
+THE CAUSE IS PID REUSE (read 2026-10-15): the real Preview had checked in
+on 2026-10-13 at 21:50:09 AS PID 84118 (`CHECKIN:0x0-0x25e44e1f 84118
+com.apple.Preview`), and launchservicesd matches a check-in to whatever
+record already sits at the checking-in pid. Pids wrap about every twenty
+minutes under a matrix, so whichever guest drew 84118 would have become
+Preview; nothing about Go. REPRODUCED without a stub: a dead record of
+Preview's ThemeWidgetControlViewService (launched 2026-09-24, never checked
+in) sat at pid 68883; an unbundled probe steered onto 68883 (19,679
+`/usr/bin/true` spawns, 20 s) came back from NSApplication's check-in as
+com.apple.Preview, "launch to checkin time: 20 days", and launchservicesd
+logged `Not allowing "CFBundleIdentifier" to be changed ... immutable`, so
+a process cannot assert its way out of the match. Measured beside it:
+`NSRunningApplication(processIdentifier:)` answers the stale record BEFORE
+the check-in (0.07 s for all 99,999 pids), and an LS launch (`open -n`) of
+a bundled app steered onto the same pid fails with -600 and leaves the app
+STOPPED at `_dyld_start` under PPID 1 indefinitely (a bundle does not
+adopt; it hangs). The fix: `ls_identity::claim_own_identity`, the first act
+of prepare_process, reads the record at this pid and, when it names
+another executable, runs the process again as its own child under a fresh
+pid (signals forwarded, the exit status passed back, the child leaving if
+the parent is killed) and never checks in itself; code before kaya's entry
+runs twice in that case. A kaya scroll guest steered onto 68883 printed the
+respawn sentence, checked in as pid 68884 with a fresh ASN and passed. The
+stub's own termination was not reproduced: TAL terminated nothing on a
+timer in two days of logs and pressure would terminate the maintainer's
+apps. GUARDS: check-app-identity C16 (six cuts) and the lane's IDENTITY
+ADOPTED refusal (check-flightrec AP10-AP14). The lane also records the
+next app that appears: lane_health.MacApps reads
 `lsappinfo list` (about 40 ms) at the start, after every leg and at the end,
 and prints one `APP APPEARED:` sentence per new GUI application with the
 legs running in its launch second, lsappinfo's parent, and those four log

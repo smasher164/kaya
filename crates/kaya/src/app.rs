@@ -77,6 +77,11 @@ pub struct ColorKind;
 impl ValueKind for ColorKind {
     const TYPE: ValueType = ValueType::I64;
 }
+/// docs/styling-pass-plan.md Y7: a label's tint, an I64 on the wire.
+pub struct TintKind;
+impl ValueKind for TintKind {
+    const TYPE: ValueType = ValueType::I64;
+}
 /// docs/network-images-plan.md N2: an image's phase, an I64 on the wire.
 pub struct ImagePhaseKind;
 impl ValueKind for ImagePhaseKind {
@@ -183,6 +188,24 @@ impl<T: Into<crate::protocol::Blob>> From<T> for TplSource<BlobKind> {
 impl From<crate::protocol::PlayerId> for TplSource<PlayerKind> {
     fn from(p: crate::protocol::PlayerId) -> Self {
         TplSource { inner: SourceInner::Const(Value::from(p)), _kind: PhantomData }
+    }
+}
+
+impl From<Tint> for TplSource<TintKind> {
+    fn from(t: Tint) -> Self {
+        TplSource { inner: SourceInner::Const(Value::I64(t.wire())), _kind: PhantomData }
+    }
+}
+
+impl From<Tint> for LiveSource<TintKind> {
+    fn from(t: Tint) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::I64(t.wire())), _kind: PhantomData }
+    }
+}
+
+impl From<crate::Color> for LiveSource<ColorKind> {
+    fn from(c: crate::Color) -> Self {
+        LiveSource { inner: LiveInner::Const(Value::from(c)), _kind: PhantomData }
     }
 }
 
@@ -464,6 +487,20 @@ impl KayaField for crate::Color {
             Value::I64(n) => crate::Color::from_packed(*n)
                 .unwrap_or_else(|why| panic!("kaya: a Color field holds {n}, which is not one: {why}")),
             other => panic!("kaya: expected a Color field (I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+/// A row's tint (docs/styling-pass-plan.md Y7): the playing track's title.
+impl KayaField for Tint {
+    type Kind = TintKind;
+    fn to_value(&self) -> Value {
+        Value::I64(self.wire())
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => Tint::from_wire(*n).unwrap_or_else(|| panic!("kaya: {n} is no tint")),
+            other => panic!("kaya: expected a tint (an I64 on the wire), model holds {other:?}"),
         }
     }
 }
@@ -1790,23 +1827,54 @@ impl Align {
 /// What a FILLED container's surface means (docs/tints-plan.md T1): each
 /// backend lowers it to the platform's own fill and foreground pair, so it
 /// holds in dark mode and the contrast settings. Rides the wire as I64.
+/// A label takes the tint's standalone colour instead (Y7), `None` its
+/// untinted text; `Overlay` is the platform's panel over media (Y3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tint {
+    None,
     Accent,
     Success,
     Warning,
     Critical,
     Neutral,
+    Overlay,
 }
 
 impl Tint {
     fn wire(self) -> i64 {
         match self {
+            Tint::None => 0,
             Tint::Accent => 1,
             Tint::Success => 2,
             Tint::Warning => 3,
             Tint::Critical => 4,
             Tint::Neutral => 5,
+            Tint::Overlay => 6,
+        }
+    }
+
+    fn from_wire(n: i64) -> Option<Tint> {
+        [Tint::None, Tint::Accent, Tint::Success, Tint::Warning, Tint::Critical, Tint::Neutral, Tint::Overlay]
+            .into_iter()
+            .find(|t| t.wire() == n)
+    }
+}
+
+/// An image's clip (docs/styling-pass-plan.md Y6): `Rounded` is the
+/// platform's own medium corner, `Circle` the inscribed circle, covering.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shape {
+    Rect,
+    Rounded,
+    Circle,
+}
+
+impl Shape {
+    fn wire(self) -> i64 {
+        match self {
+            Shape::Rect => crate::wire::SHAPE_RECT,
+            Shape::Rounded => crate::wire::SHAPE_ROUNDED,
+            Shape::Circle => crate::wire::SHAPE_CIRCLE,
         }
     }
 }
@@ -1973,6 +2041,47 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// This container filled with a platform tint — [`Tx::filled`] chained.
     pub fn filled(self, tint: Tint) -> Self {
         self.tx.filled(self.id, tint);
+        self
+    }
+
+    /// This container's gradient ground — [`Tx::ground_gradient`] chained.
+    pub fn ground_gradient(self, color: impl Into<LiveSource<ColorKind>>) -> Self {
+        self.tx.ground_gradient(self.id, color);
+        self
+    }
+
+    /// This container's image ground — [`Tx::ground_image`] chained.
+    pub fn ground_image(self, bytes: impl Into<LiveSource<BlobKind>>) -> Self {
+        self.tx.ground_image(self.id, bytes);
+        self
+    }
+
+    /// This image's clip — [`Tx::shape`] chained.
+    pub fn shape(self, shape: Shape) -> Self {
+        self.tx.shape(self.id, shape);
+        self
+    }
+
+    /// This label's standalone tint — [`Tx::tint`] chained.
+    pub fn tint(self, tint: impl Into<LiveSource<TintKind>>) -> Self {
+        self.tx.tint(self.id, tint);
+        self
+    }
+
+    /// This activatable container wears the platform's selected surface —
+    /// [`Tx::selected`] chained.
+    pub fn selected(self, on: impl Into<LiveSource<BoolKind>>) -> Self {
+        self.tx.selected(self.id, on);
+        self
+    }
+
+    /// This row or column takes a click as a whole and means `msg`
+    /// (docs/styling-pass-plan.md Y4): a button to assistive technology, the
+    /// platform's press, hover and selected surface. Registering the message
+    /// and declaring the container activatable are one act.
+    pub fn on_activate<M: Clone + 'static>(self, msgs: &Messages<M>, msg: M) -> Self {
+        msgs.register_activate(self.id, msg);
+        self.tx.set(self.id, Prop::Activatable, true);
         self
     }
 
@@ -3088,6 +3197,38 @@ impl<'a> Tx<'a> {
     /// foreground of what sits inside (docs/tints-plan.md T2).
     pub fn filled(&mut self, widget: WidgetId, tint: Tint) {
         self.set(widget, Prop::Filled, tint.wire());
+    }
+
+    /// A row or column's ground fading from `color`, clamped by the core for
+    /// the appearance's text, into the platform's window ground
+    /// (docs/styling-pass-plan.md Y2). [`crate::image_dominant`] is the
+    /// usual colour.
+    pub fn ground_gradient(&mut self, widget: WidgetId, color: impl Into<LiveSource<ColorKind>>) {
+        self.set(widget, Prop::Ground, crate::wire::GROUND_GRADIENT);
+        self.set_live(widget, Prop::Color, color.into());
+    }
+
+    /// A row or column covered by a picture (docs/styling-pass-plan.md Y3);
+    /// text over it sits inside a container filled with [`Tint::Overlay`].
+    pub fn ground_image(&mut self, widget: WidgetId, bytes: impl Into<LiveSource<BlobKind>>) {
+        self.set(widget, Prop::Ground, crate::wire::GROUND_IMAGE);
+        self.set_live(widget, Prop::Source, bytes.into());
+    }
+
+    /// An image's clip (docs/styling-pass-plan.md Y6).
+    pub fn shape(&mut self, widget: WidgetId, shape: Shape) {
+        self.set(widget, Prop::Shape, shape.wire());
+    }
+
+    /// A label in a tint's standalone colour (docs/styling-pass-plan.md Y7).
+    pub fn tint(&mut self, widget: WidgetId, tint: impl Into<LiveSource<TintKind>>) {
+        self.set_live(widget, Prop::Tint, tint.into());
+    }
+
+    /// An activatable container's selected surface: the app's state, written
+    /// where it wants it (docs/styling-pass-plan.md Y4).
+    pub fn selected(&mut self, widget: WidgetId, on: impl Into<LiveSource<BoolKind>>) {
+        self.set_live(widget, Prop::Selected, on.into());
     }
 
     /// An image's widest in points: the picture scales down to fit, its
@@ -5228,6 +5369,35 @@ impl<'b> Row<'_, 'b> {
         self.tpl().filled(node, tint)
     }
 
+    pub fn ground_gradient(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
+        self.tpl().ground_gradient(node, src)
+    }
+
+    pub fn ground_image(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BlobKind>>) {
+        self.tpl().ground_image(node, src)
+    }
+
+    pub fn shape(&mut self, node: TemplateNodeId, shape: Shape) {
+        self.tpl().shape(node, shape)
+    }
+
+    pub fn tint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<TintKind>>) {
+        self.tpl().tint(node, src)
+    }
+
+    pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.tpl().selected(node, src)
+    }
+
+    pub fn on_activate<M: 'static>(
+        &mut self,
+        node: TemplateNodeId,
+        msgs: &Messages<M>,
+        f: impl Fn(Path) -> M + 'static,
+    ) {
+        self.tpl().on_activate(node, msgs, f)
+    }
+
     pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
         self.tpl().max_width(node, points)
     }
@@ -5582,6 +5752,27 @@ impl<M> Messages<M> {
         f: Box<dyn Fn(&mut Draw, Viewbox, f64)>,
     ) {
         self.draws.borrow_mut().insert(canvas.0, (policy, f));
+    }
+
+    /// An activation means this message; private, because the container
+    /// must be declared activatable in the same act ([`Widget::on_activate`]).
+    fn register_activate(&self, w: WidgetId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::Activated { .. } => Some(msg.clone()),
+                _ => None,
+            }),
+        );
+    }
+
+    fn register_activate_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceActivated { path, .. } => Some(f(path.clone())),
+                _ => None,
+            }),
+        );
     }
 
     /// A click means this message (cloned per fire).
@@ -6357,6 +6548,7 @@ impl<M> Messages<M> {
                     unreachable!("the core asks only live canvases: {occ:?}")
                 }
                 Occurrence::ButtonClicked { id }
+                | Occurrence::Activated { id }
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Submitted { id, .. }
                 | Occurrence::Toggled { id, .. }
@@ -6379,6 +6571,7 @@ impl<M> Messages<M> {
                     .get(&id.0)
                     .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
                 Occurrence::InstanceButtonClicked { node, .. }
+                | Occurrence::InstanceActivated { node, .. }
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceSubmitted { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
@@ -7253,6 +7446,17 @@ impl WindowRef<'_, '_> {
     pub fn fullscreen(self, on: bool) -> Self {
         self.tx.set_window_prop(self.window, WindowProp::Fullscreen, on);
         self
+    }
+
+    /// This window's DOCK, the surface under every pane and above a phone's
+    /// tab bar (docs/styling-pass-plan.md Y8): `dock` is a fresh surface id,
+    /// and `build` makes the root it shows, returning `(root, value)`; the
+    /// value comes back out. One per window.
+    pub fn dock<R>(self, dock: WindowId, build: impl FnOnce(&mut Tx<'_>) -> (WidgetId, R)) -> R {
+        self.tx.ops.push(TxOp::AttachDock { window: self.window, dock });
+        let (root, value) = build(self.tx);
+        self.tx.mount_in(dock, root);
+        value
     }
 
     pub fn id(&self) -> WindowId {
@@ -8749,6 +8953,46 @@ impl<'b> Tpl<'_, 'b> {
         self.set(node, Prop::Filled, tint.wire());
     }
 
+    /// A stamped container's gradient ground, the blueprint twin of
+    /// [`Tx::ground_gradient`]; a row field gives each copy its album's colour.
+    pub fn ground_gradient(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
+        self.set(node, Prop::Ground, crate::wire::GROUND_GRADIENT);
+        self.apply_source(node, Prop::Color, src.into().inner);
+    }
+
+    /// A stamped container's image ground, the blueprint twin of [`Tx::ground_image`].
+    pub fn ground_image(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BlobKind>>) {
+        self.set(node, Prop::Ground, crate::wire::GROUND_IMAGE);
+        self.apply_source(node, Prop::Source, src.into().inner);
+    }
+
+    /// A stamped image's clip, the blueprint twin of [`Tx::shape`].
+    pub fn shape(&mut self, node: TemplateNodeId, shape: Shape) {
+        self.set(node, Prop::Shape, shape.wire());
+    }
+
+    /// A stamped label's tint, the blueprint twin of [`Tx::tint`].
+    pub fn tint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<TintKind>>) {
+        self.apply_source(node, Prop::Tint, src.into().inner);
+    }
+
+    /// A stamped container's selected surface, the blueprint twin of [`Tx::selected`].
+    pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.apply_source(node, Prop::Selected, src.into().inner);
+    }
+
+    /// Every stamped copy of this container takes a click as a whole, `f`
+    /// handed the copy's key path (docs/styling-pass-plan.md Y4).
+    pub fn on_activate<M: 'static>(
+        &mut self,
+        node: TemplateNodeId,
+        msgs: &Messages<M>,
+        f: impl Fn(Path) -> M + 'static,
+    ) {
+        msgs.register_activate_node(node, f);
+        self.set(node, Prop::Activatable, true);
+    }
+
     /// A stamped image's bound, the blueprint twin of [`Tx::max_width`].
     pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
         self.set(node, Prop::MaxWidth, points);
@@ -10226,6 +10470,7 @@ mod tests {
                         tx.commit();
                     }
                     Occurrence::InstanceButtonClicked { .. } => {}
+                    Occurrence::Activated { .. } | Occurrence::InstanceActivated { .. } => {}
                     Occurrence::TextChanged { .. }
                     | Occurrence::InstanceTextChanged { .. }
                     | Occurrence::Submitted { .. }

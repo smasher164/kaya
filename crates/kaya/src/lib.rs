@@ -11,6 +11,9 @@ mod brand;
 // and every platform blits.
 mod canvas;
 mod content_id;
+// docs/styling-pass-plan.md Y2: one quantizer for every binding.
+mod dominant;
+pub use dominant::image_dominant;
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 mod image_header;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD
@@ -110,6 +113,9 @@ mod jvm;
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 mod swiftui_host;
 
+#[cfg(target_os = "macos")]
+mod ls_identity;
+
 // libkaya is the Node addon (docs/js-plan.md §2): the three desktops,
 // since Node does not run on the phones.
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
@@ -137,7 +143,7 @@ pub use app::{
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, Platform, Role, SizeClass, Sort, Symbol, Tint, ToggleRef, Tpl, TplSource, Tx,
+    CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
@@ -231,6 +237,10 @@ fn bundled_executable() -> bool {
 /// entry cannot skip a step (the notification grant was once in `run`
 /// alone, and every other binding read `notifications` false).
 pub(crate) fn prepare_process() {
+    // BEFORE EVERYTHING, since a respawn runs this process again
+    // (docs/traps.md, the Preview a Go guest's checkin relaunched).
+    #[cfg(target_os = "macos")]
+    ls_identity::claim_own_identity();
     // THE LOCALE KNOB FIRST, before any thread formats or any toolkit
     // reads the locale (docs/compliance-plan.md §2.2).
     fmt::install_locale_knob();

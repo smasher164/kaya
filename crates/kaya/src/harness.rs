@@ -512,8 +512,26 @@ pub enum Step {
     /// row-to-row comparison can see (docs/deferred.md's list-row entry).
     ExpectHeightFits(Target),
     /// A filled container's drawn surface, classified as the nearest of the
-    /// five tints or `none` (docs/tints-plan.md §4).
+    /// five tints or `none` (docs/tints-plan.md §4), `overlay`, or the
+    /// platform's `hovered` and `selected` surfaces
+    /// (docs/styling-pass-plan.md Y9).
     ExpectFill(Target, String),
+    /// The pointer over a target, by the platform's own hover route (Y9).
+    Hover(Target),
+    /// A container's ground read off its pixels: `gradient`, `image` or
+    /// `none` (docs/styling-pass-plan.md §5.1).
+    ExpectGround(Target, String),
+    /// An image's clip read off three pixel probes: `rect`, `rounded` or
+    /// `circle` (§5.2).
+    ExpectShape(Target, String),
+    /// A container's selected state off the accessibility tree (Y4).
+    ExpectSelected(Target, bool),
+    /// A label's ink classified against the standalone tints, `none` the
+    /// primary text colour (Y7).
+    ExpectTint(Target, String),
+    /// Whether the primary window's dock is on screen under its panes:
+    /// `shown` or `hidden` (Y8).
+    ExpectDock(String),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -1015,6 +1033,11 @@ impl Step {
             | Step::ExpectPressTakes(t, _, _)
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
+            | Step::Hover(t)
+            | Step::ExpectGround(t, _)
+            | Step::ExpectShape(t, _)
+            | Step::ExpectSelected(t, _)
+            | Step::ExpectTint(t, _)
             | Step::ExpectFill(t, _) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::Toggle(t, _)
@@ -1176,7 +1199,8 @@ impl Step {
             | Step::ResizeWindow(..)
             | Step::ExpectSplit(..)
             | Step::ExpectPanes(..)
-            | Step::Frame(..) => Vec::new(),
+            | Step::Frame(..)
+            | Step::ExpectDock(_) => Vec::new(),
         }
     }
 
@@ -1248,6 +1272,11 @@ impl Step {
             Step::ExpectNotTaller { .. } => true,
             Step::ExpectHeightFits { .. } => true,
             Step::ExpectFill { .. } => true,
+            Step::ExpectGround { .. }
+            | Step::ExpectShape { .. }
+            | Step::ExpectSelected { .. }
+            | Step::ExpectTint { .. }
+            | Step::ExpectDock { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -1360,6 +1389,7 @@ impl Step {
             Step::ExpectRuns { .. } => true,
             Step::ExpectEdit { .. } => true,
             Step::Press { .. } => false,
+            Step::Hover(_) => false,
         }
     }
 }
@@ -1378,6 +1408,20 @@ pub const VIDEO_INK_TOLERANCE: u8 = 2;
 pub const VIDEO_INK_NONE: &str = "none";
 
 /// How far right of a video view's box `Stage::video_ground` reads, in points.
+/// What `expect_fill` may say (docs/tints-plan.md §4, docs/styling-pass-plan.md Y9).
+pub(crate) const FILL_READINGS: &[&str] =
+    &["accent", "success", "warning", "critical", "neutral", "overlay", "hovered", "selected", "none"];
+
+/// A reading whose first word is the verdict and whose rest is what the
+/// reader measured, held to the wanted word.
+fn word_reading(got: &str, want: &str, what: impl Fn() -> String) -> Result<String, String> {
+    if got.split(' ').next() == Some(want) {
+        Ok(format!("{} {want}", what()))
+    } else {
+        Err(format!("{} reads {got}, wanted {want}", what()))
+    }
+}
+
 pub(crate) const VIDEO_GROUND_OFFSET: f64 = 8.0;
 
 /// How far in from the box's top-left corner `Stage::video_corner` reads, in
@@ -1780,6 +1824,28 @@ pub trait Stage: Send + 'static {
     /// sampled and the nearest candidates for the failure sentence; `<...>`
     /// when unread.
     fn fill_tint(&self, target: Target) -> String;
+    /// Put the pointer over the target by the platform's own hover route
+    /// (docs/styling-pass-plan.md §5): a desktop verb, cut on the phones.
+    fn hover(&self, target: Target);
+    /// A container's ground off its pixels (§5.1): `gradient` when the
+    /// probe 4 units in at the top is the clamped stop and the one 4 units in
+    /// at the bottom the window ground and the midpoint holds 4.5:1 against
+    /// the appearance's text, `image` when the top probe is the picture,
+    /// `none` otherwise; then what it sampled, for the failure sentence.
+    fn ground_read(&self, target: Target) -> String;
+    /// An image's clip off three probes (§5.2): `rect`, `rounded`, `circle`,
+    /// then the samples.
+    fn shape_read(&self, target: Target) -> String;
+    /// `on` or `off` off the accessibility tree's selected state, `<...>`
+    /// when unread.
+    fn selected_read(&self, target: Target) -> String;
+    /// A label's ink against the standalone tints: `none`, `accent`,
+    /// `success`, `warning`, `critical`, then what it sampled.
+    fn label_tint(&self, target: Target) -> String;
+    /// `shown` when the primary window's dock lies at its bottom edge across
+    /// its width with every pane ending above it, `hidden` when no dock is
+    /// on screen, else a description.
+    fn dock_read(&self) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -2703,12 +2769,46 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_fill wants a target and a tint, got {rest:?}")
                 })?;
                 let tint = tint.trim();
-                if !["accent", "success", "warning", "critical", "neutral", "none"].contains(&tint) {
-                    return Err(format!(
-                        "expect_fill's tint is accent, success, warning, critical, neutral or none, got {tint:?}"
-                    ));
+                if !FILL_READINGS.contains(&tint) {
+                    return Err(format!("expect_fill's reading is one of {}, got {tint:?}", FILL_READINGS.join(", ")));
                 }
                 Step::ExpectFill(parse_target(target.trim())?, tint.to_owned())
+            }
+            "hover" => Step::Hover(parse_target(rest)?),
+            "expect_ground" | "expect_shape" | "expect_tint" => {
+                let (target, word) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("{op} wants a target and a word: {line:?}"))?;
+                let word = word.trim();
+                let (allowed, step): (&[&str], fn(Target, String) -> Step) = match op {
+                    "expect_ground" => (&["none", "gradient", "image"], Step::ExpectGround),
+                    "expect_shape" => (&["rect", "rounded", "circle"], Step::ExpectShape),
+                    _ => (&["none", "accent", "success", "warning", "critical"], Step::ExpectTint),
+                };
+                if !allowed.contains(&word) {
+                    return Err(format!("{op}'s word is one of {}, got {word:?}", allowed.join(", ")));
+                }
+                step(parse_target(target.trim())?, word.to_owned())
+            }
+            "expect_selected" => {
+                let (target, state) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_selected wants a target and on|off: {line:?}"))?;
+                Step::ExpectSelected(
+                    parse_target(target.trim())?,
+                    match state.trim() {
+                        "on" => true,
+                        "off" => false,
+                        other => return Err(format!("expect_selected takes on or off, got {other:?}")),
+                    },
+                )
+            }
+            "expect_dock" => {
+                let word = rest.trim();
+                if !["shown", "hidden"].contains(&word) {
+                    return Err(format!("expect_dock takes shown or hidden, got {word:?}"));
+                }
+                Step::ExpectDock(word.to_owned())
             }
             "expect_not_taller" => {
                 let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -6551,6 +6651,27 @@ fn run_with_log(
                     Err(format!("{} reads filled {got}, wanted {want}", target_spec(t)))
                 }
             })),
+            Step::Hover(t) => {
+                await_quiet();
+                vtrace::note("hover", format_args!("-> stage.hover {}", target_spec(t)));
+                stage.hover(*t);
+                vtrace::note("hover", format_args!("<- stage.hover {}", target_spec(t)));
+                None
+            }
+            Step::ExpectGround(t, want) => Some(poll(|| {
+                word_reading(&stage.ground_read(*t), want, || format!("{} ground", target_spec(t)))
+            })),
+            Step::ExpectShape(t, want) => Some(poll(|| {
+                word_reading(&stage.shape_read(*t), want, || format!("{} shape", target_spec(t)))
+            })),
+            Step::ExpectTint(t, want) => Some(poll(|| {
+                word_reading(&stage.label_tint(*t), want, || format!("{} tint", target_spec(t)))
+            })),
+            Step::ExpectSelected(t, on) => Some(poll(|| {
+                let want = if *on { "on" } else { "off" };
+                word_reading(&stage.selected_read(*t), want, || format!("{} selected", target_spec(t)))
+            })),
+            Step::ExpectDock(want) => Some(poll(|| word_reading(&stage.dock_read(), want, || "dock".to_owned()))),
             Step::ExpectHeightFits(t) => Some(poll(|| {
                 let off = stage.height_fits(*t);
                 if off.is_empty() {
@@ -9391,6 +9512,22 @@ mod tests {
         fn fill_tint(&self, t: Target) -> String {
             if t.index == 0 { "accent".into() } else { "none".into() }
         }
+        fn hover(&self, _: Target) {}
+        fn ground_read(&self, t: Target) -> String {
+            if t.index == 0 { "gradient".into() } else { "none".into() }
+        }
+        fn shape_read(&self, _: Target) -> String {
+            "circle".into()
+        }
+        fn selected_read(&self, t: Target) -> String {
+            if t.index == 0 { "on".into() } else { "off".into() }
+        }
+        fn label_tint(&self, _: Target) -> String {
+            "accent".into()
+        }
+        fn dock_read(&self) -> String {
+            "shown".into()
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -10374,6 +10511,22 @@ mod tests {
             fn fill_tint(&self, _: Target) -> String {
                 String::new()
             }
+            fn hover(&self, _: Target) {}
+            fn ground_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn shape_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn selected_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn label_tint(&self, _: Target) -> String {
+                String::new()
+            }
+            fn dock_read(&self) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -10831,6 +10984,22 @@ mod tests {
                 String::new()
             }
             fn fill_tint(&self, _: Target) -> String {
+                String::new()
+            }
+            fn hover(&self, _: Target) {}
+            fn ground_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn shape_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn selected_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn label_tint(&self, _: Target) -> String {
+                String::new()
+            }
+            fn dock_read(&self) -> String {
                 String::new()
             }
             fn cross_mode(&self, _: Target) -> String {

@@ -178,6 +178,8 @@ RUST_SCENES = [
     "safearea", "taskskeyboard", "autofillkeyboard",
     # Network images (docs/network-images-plan.md §6).
     "netimage", "netimage_http",
+    # The skin (docs/styling-pass-plan.md §5): rust-only at depth.
+    "grounds", "shapes", "cards", "tracks", "dock",
 ]
 
 # The iPad legs, queued right after their phone sibling: the phone pool is
@@ -187,7 +189,7 @@ RUST_SCENES = [
 # buys that the native path executes at all.
 # Scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-swiftui`:
 # the tints resolved in the dark appearance (docs/tints-plan.md §4).
-DARK_EXTRAS = ("tints",)
+DARK_EXTRAS = ("tints", "grounds")
 # Scenes that also run in a bundle pinned to landscape, as
 # `<scene>land-<suite>` (docs/safe-area-plan.md §5.4): the keyboard leaves
 # least room there. The reading appended proves the interface turned: a
@@ -231,6 +233,9 @@ SAFEAREA_EXTRA = ('expect_insets "bar/bar"; click button@full; expect label@capt
 # ONE step by verb and target; `keep` names the assertions neither may
 # take with it; `extra` appends steps only true on this device.
 MODS = {
+    # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
+    # ends at its first hover.
+    ("rust-swiftui", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
     # The declared NAME is read off an auxiliary window this host does
     # not have; the icon reads survive (docs/app-identity-plan.md
     # ruling 3).

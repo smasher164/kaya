@@ -5708,6 +5708,8 @@ from netimage_routes import run as check_netimage_routes
 check_netimage_routes(g)
 from simscreen_routes import run as check_simscreen_routes
 check_simscreen_routes(g)
+from skin_routes import run as check_skin_routes
+check_skin_routes(g)
 
 # The SELF-TEST fail() calls below the drain at "EVERY SELF-TEST FAILURE
 # BELOW THE FIRST DRAIN" reach the exit here.

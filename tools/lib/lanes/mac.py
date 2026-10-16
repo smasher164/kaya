@@ -59,7 +59,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The styling pass (docs/styling-pass-plan.md §5), rust-only at depth.
+                "grounds", "shapes", "cards", "tracks", "dock"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -135,7 +137,9 @@ SCENE_CLOCK = {"clock24": "24"}
 # script and binary under KAYA_APPEARANCE=dark; and the tints resolved in
 # the dark appearance (docs/tints-plan.md §4).
 DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
-             ("tintsdark-rust-swiftui", "tints", "rust"))
+             ("tintsdark-rust-swiftui", "tints", "rust"),
+             # The clamped gradient in the dark (docs/styling-pass-plan.md Y2).
+             ("groundsdark-rust-swiftui", "grounds", "rust"))
 
 # EXCLUSIVE and the idle wait are below, after legs() — the set is derived
 # from the queue rather than spelled.
@@ -285,6 +289,13 @@ ORDER = [
     ("listrow", ("rust",)),
     # The platform tints on a filled container (docs/tints-plan.md).
     ("tints", ("rust",)),
+    # The skin (docs/styling-pass-plan.md §5): grounds, shapes, cards, the
+    # track table and the dock.
+    ("grounds", ("rust",)),
+    ("shapes", ("rust",)),
+    ("cards", ("rust",)),
+    ("tracks", ("rust",)),
+    ("dock", ("rust",)),
     # The task manager: a RUST app by design (docs/tasks-plan.md §0).
     ("tasks", ("rust",)),
     # The task manager in Arabic (docs/compliance-plan.md §6): the ar

@@ -2642,7 +2642,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x303cc490b4cb14fbuL
+    private const val SPEC_HASH: ULong = 0x9e1c92057e3f0dc2uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -2726,6 +2726,7 @@ object KayaCompose {
     // The toast (docs/toast-plan.md §4).
     private const val APPLY_PRESENT_TOAST = 71
     private const val APPLY_WITHDRAW_TOAST = 72
+    private const val APPLY_ATTACH_DOCK = 73
     private const val TOAST_DURATION_LONG = 1
     private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
@@ -2962,6 +2963,12 @@ object KayaCompose {
     private const val PROP_EXPANDED = 60
     private const val PROP_BLEED = 61
     private const val PROP_PHASE = 62
+    // docs/styling-pass-plan.md: the skin, a depth slice here (the breadth's).
+    private const val PROP_GROUND = 63
+    private const val PROP_SHAPE = 64
+    private const val PROP_SELECTED = 65
+    private const val PROP_TINT = 66
+    private const val PROP_ACTIVATABLE = 67
     // The image_phase enum's wire values (docs/network-images-plan.md N2).
     const val IMAGE_PHASE_SHOWN = 0L
     const val IMAGE_PHASE_LOADING = 1L
@@ -3985,8 +3992,15 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.rich = readBool(b)
                         PROP_SUBMITS ->
                             KayaSceneModel.nodes[id]!!.submits = readBool(b)
-                        PROP_FILLED ->
-                            KayaSceneModel.nodes[id]!!.filled = readI64(b)
+                        PROP_FILLED -> {
+                            val tint = readI64(b)
+                            if (tint == 6L) depthStub("grounds")
+                            KayaSceneModel.nodes[id]!!.filled = tint
+                        }
+                        PROP_GROUND -> depthStub("grounds")
+                        PROP_SHAPE -> depthStub("shapes")
+                        PROP_SELECTED, PROP_ACTIVATABLE -> depthStub("cards")
+                        PROP_TINT -> depthStub("tracks")
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
                         PROP_MAX_LINES ->
@@ -4001,7 +4015,11 @@ object KayaCompose {
                             node.maxHeight = readF64(b)
                             if (node.kind == KIND_IMAGE) node.imageGen += 1
                         }
-                        PROP_COLOR -> KayaSceneModel.nodes[id]!!.color = readI64(b)
+                        PROP_COLOR -> {
+                            val node = KayaSceneModel.nodes[id]!!
+                            if (node.kind == KIND_ROW || node.kind == KIND_COLUMN) depthStub("grounds")
+                            node.color = readI64(b)
+                        }
                         PROP_ALPHA -> KayaSceneModel.nodes[id]!!.alpha = readBool(b)
                         // An app write is also the settled pair and fires
                         // nothing (docs/range-plan.md §2), the slider's rule.
@@ -4095,6 +4113,8 @@ object KayaCompose {
                         PROP_TICK_SPACING ->
                             KayaSceneModel.nodes[id]!!.tickSpacing = readF64(b)
                         PROP_SOURCE -> {
+                            val holder = KayaSceneModel.nodes[id]!!
+                            if (holder.kind == KIND_ROW || holder.kind == KIND_COLUMN) depthStub("grounds")
                             // The decode is the door's, off the UI thread
                             // (kayaServePicture; docs/network-images-plan.md N9).
                             val handle = readBlobHandle(b)
@@ -4497,6 +4517,7 @@ object KayaCompose {
                         toastId, toastText, toastLabel,
                         toastDuration == TOAST_DURATION_LONG, kayaToastTokens)
                 }
+                APPLY_ATTACH_DOCK -> depthStub("dock")
                 APPLY_WITHDRAW_TOAST -> {
                     b.long
                     val toastId = b.long
@@ -12875,6 +12896,11 @@ object KayaCompose {
                             failures.add("${parts[1]} is short of its breadth ($short)")
                         }
                     }
+                    "hover", "expect_selected" -> depthStub("cards")
+                    "expect_ground" -> depthStub("grounds")
+                    "expect_shape" -> depthStub("shapes")
+                    "expect_tint" -> depthStub("tracks")
+                    "expect_dock" -> depthStub("dock")
                     "expect_fill" -> {
                         // harness.rs Step::ExpectFill.
                         val got = kayaFillRead(activity, parts[1])

@@ -1,0 +1,20 @@
+# docs/styling-pass-plan.md Y4, §5.3: a card takes a click as a whole, is a
+# button to assistive technology, and shows the platform's hover; a library
+# row the app selects wears the platform's selected surface and says so in the
+# tree. The phones have no pointer, so their legs cut at the first hover.
+expect_title "cards"
+click column@card1
+expect label@status "opened: Daily Mix 1"
+expect_ax column@card1 "button/Daily Mix 1, Made for you"
+expect_fill column@card1 neutral
+click row@lib[p2]
+expect_selected row@lib[p2] on
+expect_selected row@lib[p1] off
+expect_fill row@lib[p2] selected
+click row@lib[p3]
+expect_selected row@lib[p3] on
+expect_selected row@lib[p2] off
+expect_no_clipping
+hover column@card2
+expect_fill column@card2 hovered
+expect_fill column@card1 neutral

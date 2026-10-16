@@ -1,7 +1,8 @@
 # The styling pass toward an app-skinned look: the design pass (2026-10-14)
 
 Status: RULED 2026-10-15 (the maintainer: "accept all"), Y1-Y11 as recommended
-(§8); nothing built yet. The roadmap card (docs/roadmap/editorial.toml,
+(§8). DEPTH BUILT 2026-10-16 on the mac and iOS with the Rust binding
+(docs/deferred.md's styling pass BUILD entry); the breadth is open. The roadmap card (docs/roadmap/editorial.toml,
 "A styling pass toward an app-skinned look") carries his ask of 2026-10-08,
 after seeing a Spotify client written in egui: "push kaya as far as possible
 towards being able to style it like that." The same day he described what he
@@ -877,12 +878,22 @@ Gates that grow:
   scene shows the macOS native table with its 20pt art beside one-line titles
   at NSTableView's 24pt floor, nothing rounded, nothing hovered, nothing
   selected, the stripes AppKit's own: the state Y4, Y5 and Y6 start from.
-- To measure at the depth: whether an in-process `mouseMoved` through
-  `NSApp.sendEvent` reaches SwiftUI's `.onHover` (tracking areas follow the
-  real cursor, so the expectation is no, and the mac hover legs then go
-  EXCLUSIVE); the quaternary fill's read-back on macOS 13 and 14; whether
-  `NSTableView.usesAutomaticRowHeights` keeps the pinned header and the
-  realized band honest or a measured `rowHeight` must be set; that GTK's
+- MEASURED AT THE DEPTH 2026-10-16 (the mac, cards.steps): a synthetic
+  mouse-moved event through `NSApp.sendEvent`, and `mouseMoved(with:)` sent to
+  the one view with a tracking area, never fire SwiftUI's `.onHover`; an enter
+  event (`NSEvent.enterExitEvent`, its tracking number the `NSTrackingArea`'s
+  own pointer) sent to the tracking area's owner under the point does. So
+  `hover` stays in process and the mac hover legs are not EXCLUSIVE. The
+  macOS native table's tall rows never ran past the window: a scroll to the
+  last of 60 parked the clip at the end of the floor's presumed document, and
+  the clip moves AppKit made as the rows were measured reached the driver as
+  user scrolls and dropped the anchor (document 2583 to 2895 points, clip held
+  at 2129), which closed docs/deferred.md's tall-rows entry once only the
+  user's own events drop it. The dark material under the 40% black reads 361C17 over the red
+  cover in both appearances: dark, but carrying the art's hue, so
+  `expect_fill overlay` reads the panel against the picture behind it.
+- Still to measure at the breadth: the quaternary fill's read-back on macOS
+  13 (the depth ran on 14 and later); that GTK's
   rounded clip on a wrapper reaches the `GtkPicture`'s paintable on x11 and
   wayland, and its cost at 60 rows; the WinUI `ImageBrush` route's decode
   sharing with the cache (N10's shared `BitmapImage`); the gradient's

@@ -74,6 +74,7 @@ pub(crate) const TX_WATCH_CAPTURE_DEVICES: u16 = 81;
 pub(crate) const TX_SHOW_TOAST: u16 = 82;
 pub(crate) const TX_DISMISS_TOAST: u16 = 83;
 pub(crate) const TX_COLLECTION_PATCH_IF: u16 = 84;
+pub(crate) const TX_ATTACH_DOCK: u16 = 85;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -194,6 +195,7 @@ pub(crate) const APPLY_WATCH_CAPTURE_DEVICES: u16 = 69;
 pub(crate) const APPLY_SET_VIDEO_CAPTURE: u16 = 70;
 pub(crate) const APPLY_PRESENT_TOAST: u16 = 71;
 pub(crate) const APPLY_WITHDRAW_TOAST: u16 = 72;
+pub(crate) const APPLY_ATTACH_DOCK: u16 = 73;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1200,6 +1202,11 @@ pub(crate) const PROP_SUMMARY: u32 = 59;
 pub(crate) const PROP_EXPANDED: u32 = 60;
 pub(crate) const PROP_BLEED: u32 = 61;
 pub(crate) const PROP_PHASE: u32 = 62;
+pub(crate) const PROP_GROUND: u32 = 63;
+pub(crate) const PROP_SHAPE: u32 = 64;
+pub(crate) const PROP_SELECTED: u32 = 65;
+pub(crate) const PROP_TINT: u32 = 66;
+pub(crate) const PROP_ACTIVATABLE: u32 = 67;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1513,6 +1520,20 @@ pub(crate) const TINT_SUCCESS: u32 = 2;
 pub(crate) const TINT_WARNING: u32 = 3;
 pub(crate) const TINT_CRITICAL: u32 = 4;
 pub(crate) const TINT_NEUTRAL: u32 = 5;
+pub(crate) const TINT_NONE: u32 = 0;
+pub(crate) const TINT_OVERLAY: u32 = 6;
+
+/// docs/styling-pass-plan.md Y2, Y3 (spec enum "ground").
+pub(crate) const GROUND_NONE: i64 = 0;
+pub(crate) const GROUND_GRADIENT: i64 = 1;
+pub(crate) const GROUND_IMAGE: i64 = 2;
+pub(crate) const GROUNDS: &[(i64, &str)] = &[(GROUND_NONE, "none"), (GROUND_GRADIENT, "gradient"), (GROUND_IMAGE, "image")];
+
+/// docs/styling-pass-plan.md Y6 (spec enum "shape").
+pub(crate) const SHAPE_RECT: i64 = 0;
+pub(crate) const SHAPE_ROUNDED: i64 = 1;
+pub(crate) const SHAPE_CIRCLE: i64 = 2;
+pub(crate) const SHAPES: &[(i64, &str)] = &[(SHAPE_RECT, "rect"), (SHAPE_ROUNDED, "rounded"), (SHAPE_CIRCLE, "circle")];
 
 /// The semantic icon vocabulary's wire values (spec enum "symbol";
 /// docs/styling-plan.md D6). APPEND-ONLY: every backend keys its
@@ -1837,6 +1858,11 @@ fn prop(raw: u32) -> Prop {
         PROP_EXPANDED => Prop::Expanded,
         PROP_BLEED => Prop::Bleed,
         PROP_PHASE => Prop::Phase,
+        PROP_GROUND => Prop::Ground,
+        PROP_SHAPE => Prop::Shape,
+        PROP_SELECTED => Prop::Selected,
+        PROP_TINT => Prop::Tint,
+        PROP_ACTIVATABLE => Prop::Activatable,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2775,6 +2801,10 @@ pub fn decode_transaction_with_blobs(
                 parent: WindowId(r.u64()),
                 sheet: WindowId(r.u64()),
             },
+            TX_ATTACH_DOCK => TxOp::AttachDock {
+                window: WindowId(r.u64()),
+                dock: WindowId(r.u64()),
+            },
             TX_DISMISS_SHEET => TxOp::DismissSheet {
                 sheet: WindowId(r.u64()),
             },
@@ -3652,6 +3682,15 @@ pub fn decode_click_tag(tag: &[u8]) -> Occurrence {
             node: TemplateNodeId(id),
             path,
         }
+    }
+}
+
+/// `activated`'s body is the container's tag verbatim (docs/styling-pass-plan.md Y4).
+pub fn decode_activated_tag(tag: &[u8]) -> Occurrence {
+    match decode_click_tag(tag) {
+        Occurrence::ButtonClicked { id } => Occurrence::Activated { id },
+        Occurrence::InstanceButtonClicked { node, path } => Occurrence::InstanceActivated { node, path },
+        _ => unreachable!("decode_click_tag answers a click"),
     }
 }
 
@@ -4598,6 +4637,10 @@ impl Writer {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&sheet.0.to_le_bytes());
             }),
+            ApplyOp::AttachDock { window, dock } => self.record(APPLY_ATTACH_DOCK, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&dock.0.to_le_bytes());
+            }),
             ApplyOp::DismissSheet { sheet } => self.record(APPLY_DISMISS_SHEET, |b, _| {
                 b.extend_from_slice(&sheet.0.to_le_bytes());
             }),
@@ -5239,6 +5282,10 @@ impl Writer {
                 b.extend_from_slice(&parent.0.to_le_bytes());
                 b.extend_from_slice(&sheet.0.to_le_bytes());
             }),
+            TxOp::AttachDock { window, dock } => self.record(TX_ATTACH_DOCK, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&dock.0.to_le_bytes());
+            }),
             TxOp::DismissSheet { sheet } => self.record(TX_DISMISS_SHEET, |b, _| {
                 b.extend_from_slice(&sheet.0.to_le_bytes());
             }),
@@ -5736,6 +5783,11 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Expanded => PROP_EXPANDED,
         Prop::Bleed => PROP_BLEED,
         Prop::Phase => PROP_PHASE,
+        Prop::Ground => PROP_GROUND,
+        Prop::Shape => PROP_SHAPE,
+        Prop::Selected => PROP_SELECTED,
+        Prop::Tint => PROP_TINT,
+        Prop::Activatable => PROP_ACTIVATABLE,
     }
 }
 

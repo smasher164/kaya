@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x303cc490b4cb14fb
+SPEC_HASH = 0x9e1c92057e3f0dc2
 
 VALUE_BOOL = 1
 VALUE_I64 = 2
@@ -143,6 +143,11 @@ PROP_SUMMARY = 59
 PROP_EXPANDED = 60
 PROP_BLEED = 61
 PROP_PHASE = 62
+PROP_GROUND = 63
+PROP_SHAPE = 64
+PROP_SELECTED = 65
+PROP_TINT = 66
+PROP_ACTIVATABLE = 67
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -224,11 +229,19 @@ AXIS_VERTICAL = 1
 SIZE_CLASS_NONE = 0
 SIZE_CLASS_COMPACT = 1
 SIZE_CLASS_REGULAR = 2
+TINT_NONE = 0
 TINT_ACCENT = 1
 TINT_SUCCESS = 2
 TINT_WARNING = 3
 TINT_CRITICAL = 4
 TINT_NEUTRAL = 5
+TINT_OVERLAY = 6
+GROUND_NONE = 0
+GROUND_GRADIENT = 1
+GROUND_IMAGE = 2
+SHAPE_RECT = 0
+SHAPE_ROUNDED = 1
+SHAPE_CIRCLE = 2
 ROLE_DESTRUCTIVE = 1
 ROLE_PROMINENT = 2
 ROLE_HEADING = 3
@@ -467,6 +480,7 @@ TX_WATCH_CAPTURE_DEVICES = 81
 TX_SHOW_TOAST = 82
 TX_DISMISS_TOAST = 83
 TX_COLLECTION_PATCH_IF = 84
+TX_ATTACH_DOCK = 85
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -537,6 +551,7 @@ APPLY_WATCH_CAPTURE_DEVICES = 69
 APPLY_SET_VIDEO_CAPTURE = 70
 APPLY_PRESENT_TOAST = 71
 APPLY_WITHDRAW_TOAST = 72
+APPLY_ATTACH_DOCK = 73
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -594,6 +609,7 @@ OCC_CAPTURE_OVERRUN = 54
 OCC_TOAST_RESULT = 55
 OCC_IMAGE_NEEDED = 56
 OCC_IMAGE_RELEASED = 57
+OCC_ACTIVATED = 58
 
 
 def _pad(b: bytes) -> bytes:
@@ -1012,6 +1028,10 @@ def tx_dismiss_toast(toast: int) -> bytes:
 def tx_collection_patch_if(collection_id: int, path: Sequence[Value], key: Value, guard_field: int, variant: int, guard_value: Value, fields: Sequence[Value], values: Sequence[Value]) -> bytes:
     """A conditional row write (docs/network-images-plan.md N7): when the entry at `key` exists, holds `variant`, and its field `guard_field` equals `guard_value`, each I64 in `fields` names a field set to the value at the same place in `values`, as collection_update_field would; otherwise the record does NOTHING and the transaction goes on. The guard is read from the model this transaction commits to."""
     return record(TX_COLLECTION_PATCH_IF, struct.pack("<Q", collection_id) + _enc.values(path) + _enc.value(key) + struct.pack("<I", guard_field) + struct.pack("<I", variant) + _enc.value(guard_value) + _enc.values(fields) + _enc.values(values))
+
+def tx_attach_dock(window: int, dock: int) -> bytes:
+    """Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does."""
+    return record(TX_ATTACH_DOCK, struct.pack("<Q", window) + struct.pack("<Q", dock))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -1944,6 +1964,81 @@ def tx_bind_phase_element(widget_id: int, level: int = 0, field: int = 0) -> byt
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_PHASE, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_ground(widget_id: int, ground: int) -> bytes:
+    """set_property with a constant ground value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_GROUND, SOURCE_CONST) + _enc.value(int(ground)))
+
+
+def tx_bind_ground(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound ground value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_GROUND, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_ground_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_GROUND, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_shape(widget_id: int, shape: int) -> bytes:
+    """set_property with a constant shape value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SHAPE, SOURCE_CONST) + _enc.value(int(shape)))
+
+
+def tx_bind_shape(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound shape value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SHAPE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_shape_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SHAPE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_selected(widget_id: int, selected: bool) -> bytes:
+    """set_property with a constant selected value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_SELECTED, SOURCE_CONST) + _enc.value(selected))
+
+
+def tx_bind_selected(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound selected value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_SELECTED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_selected_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_SELECTED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_tint(widget_id: int, tint: int) -> bytes:
+    """set_property with a constant tint value (int)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TINT, SOURCE_CONST) + _enc.value(int(tint)))
+
+
+def tx_bind_tint(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound tint value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TINT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_tint_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TINT, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_activatable(widget_id: int, activatable: bool) -> bytes:
+    """set_property with a constant activatable value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_ACTIVATABLE, SOURCE_CONST) + _enc.value(activatable))
+
+
+def tx_bind_activatable(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound activatable value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_ACTIVATABLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_activatable_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ACTIVATABLE, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2314,7 +2409,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.

@@ -1076,6 +1076,10 @@ pub enum Occurrence {
     /// A click on a stamped copy of a template button: which blueprint
     /// node, and the key path naming the copy.
     InstanceButtonClicked { node: TemplateNodeId, path: Path },
+    /// An activatable row or column pressed as a whole
+    /// (docs/styling-pass-plan.md Y4).
+    Activated { id: WidgetId },
+    InstanceActivated { node: TemplateNodeId, path: Path },
     /// The user edited an entry the guest created directly. The widget
     /// owns its text; there is no read-back, by doctrine.
     TextChanged { id: WidgetId, text: String },
@@ -2043,13 +2047,15 @@ impl WidgetKind {
             | WidgetKind::Range
             | WidgetKind::SecureField
             | WidgetKind::Segmented
-            | WidgetKind::Expander => true,
+            | WidgetKind::Expander
+            // An activatable container reports `activated`
+            // (docs/styling-pass-plan.md Y4).
+            | WidgetKind::Column
+            | WidgetKind::Row => true,
             // Exhaustive on purpose — no wildcard. A kind added to the
             // spec lands here as a compile error, which is the moment to
             // decide whether it reports.
-            WidgetKind::Column
-            | WidgetKind::Row
-            | WidgetKind::Label
+            WidgetKind::Label
             | WidgetKind::Image
             | WidgetKind::Scroll
             | WidgetKind::Progress
@@ -2308,6 +2314,17 @@ pub enum Prop {
     /// What an image is waiting for (I64, spec enum "image_phase";
     /// docs/network-images-plan.md N2).
     Phase,
+    /// What a row or column paints behind its children (I64, spec enum
+    /// "ground"; docs/styling-pass-plan.md Y2, Y3).
+    Ground,
+    /// An image's clip (I64, spec enum "shape"; docs/styling-pass-plan.md Y6).
+    Shape,
+    /// An activatable container's selected surface (Bool; Y4).
+    Selected,
+    /// A label's standalone tint (I64, spec enum "tint"; Y7).
+    Tint,
+    /// A row or column that emits `activated` (Bool; Y4).
+    Activatable,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2773,6 +2790,9 @@ pub enum TxOp {
     /// §3): a chain, one child per parent, refused at the root otherwise.
     /// Materializes hidden; mounting a root into it presents it.
     PresentSheet { parent: WindowId, sheet: WindowId },
+    /// Give a window its dock (docs/styling-pass-plan.md Y8): one per
+    /// window, filled by a mount.
+    AttachDock { window: WindowId, dock: WindowId },
     /// Dismiss a live sheet and forget its tree, child sheets with it; also
     /// the dismiss-veto grammar's confirmation.
     DismissSheet { sheet: WindowId },
@@ -3082,6 +3102,8 @@ pub enum ApplyOp {
     SetEntryProp { entry: WindowId, prop: EntryProp, value: Value },
     /// Materialize a sheet over the parent surface, hidden until a mount.
     PresentSheet { parent: WindowId, sheet: WindowId },
+    /// The window's dock surface, its root arriving by mount.
+    AttachDock { window: WindowId, dock: WindowId },
     /// Dismiss the sheet and release its views, child sheets first.
     DismissSheet { sheet: WindowId },
     SetSheetProp { sheet: WindowId, prop: SheetProp, value: Value },
@@ -3279,6 +3301,14 @@ impl OccSink {
                 Occurrence::InstanceButtonClicked { node, path } => {
                     let tag = crate::wire::click_tag(node.0, &path);
                     ring.push_record(crate::ring::REC_BUTTON_CLICKED, &tag);
+                }
+                Occurrence::Activated { id } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_ACTIVATED, &tag);
+                }
+                Occurrence::InstanceActivated { node, path } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_ACTIVATED, &tag);
                 }
                 Occurrence::TextChanged { id, text } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
@@ -3661,6 +3691,20 @@ impl OccSink {
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_BUTTON_CLICKED, tag);
+            }
+        }
+    }
+
+    /// The same fast path for an activatable container
+    /// (docs/styling-pass-plan.md Y4): its tag, under `activated`.
+    pub(crate) fn send_activated_tag(&self, tag: &[u8]) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_activated_tag(tag)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(crate::ring::REC_ACTIVATED, tag);
             }
         }
     }

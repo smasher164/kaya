@@ -258,6 +258,11 @@
 #define KAYA_OCCURRENCE_IMAGE_RELEASED 57
 
 /**
+ * ACTIVATED { button_clicked's layout } (docs/styling-pass-plan.md Y4).
+ */
+#define KAYA_OCCURRENCE_ACTIVATED 58
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -447,6 +452,11 @@
  * (docs/network-images-plan.md N7).
  */
 #define KAYA_TX_COLLECTION_PATCH_IF 84
+
+/**
+ * ATTACH_DOCK { u64 window; u64 dock } (docs/styling-pass-plan.md Y8).
+ */
+#define KAYA_TX_ATTACH_DOCK 85
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -852,6 +862,11 @@
 #define KAYA_APPLY_PRESENT_TOAST 71
 
 #define KAYA_APPLY_WITHDRAW_TOAST 72
+
+/**
+ * ATTACH_DOCK { u64 window; u64 dock }.
+ */
+#define KAYA_APPLY_ATTACH_DOCK 73
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1276,6 +1291,31 @@
 #define KAYA_PROP_PHASE 62
 
 /**
+ * What a row or column paints behind its children, a KAYA_GROUND_* (docs/styling-pass-plan.md Y2, Y3).
+ */
+#define KAYA_PROP_GROUND 63
+
+/**
+ * An image's clip, a KAYA_SHAPE_* (docs/styling-pass-plan.md Y6).
+ */
+#define KAYA_PROP_SHAPE 64
+
+/**
+ * An activatable container's selected surface (docs/styling-pass-plan.md Y4).
+ */
+#define KAYA_PROP_SELECTED 65
+
+/**
+ * A label's standalone tint, a KAYA_TINT_* (docs/styling-pass-plan.md Y7).
+ */
+#define KAYA_PROP_TINT 66
+
+/**
+ * A row or column that emits KAYA_OCCURRENCE_ACTIVATED (docs/styling-pass-plan.md Y4).
+ */
+#define KAYA_PROP_ACTIVATABLE 67
+
+/**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.
  */
@@ -1589,6 +1629,16 @@
 #define KAYA_TINT_NEUTRAL 5
 
 /**
+ * A label's untinted text; no fill.
+ */
+#define KAYA_TINT_NONE 0
+
+/**
+ * The platform's panel over media (docs/styling-pass-plan.md Y3).
+ */
+#define KAYA_TINT_OVERLAY 6
+
+/**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
  * D6). A closed set of CONCEPTS each backend maps to its own platform's
  * symbol set; both KAYA_MPROP_SYMBOL and KAYA_SPROP_SYMBOL take them.
@@ -1785,6 +1835,18 @@
 #define KAYA_IMAGE_PHASE_LOADING 1
 
 #define KAYA_IMAGE_PHASE_FAILED 2
+
+#define KAYA_GROUND_NONE 0
+
+#define KAYA_GROUND_GRADIENT 1
+
+#define KAYA_GROUND_IMAGE 2
+
+#define KAYA_SHAPE_RECT 0
+
+#define KAYA_SHAPE_ROUNDED 1
+
+#define KAYA_SHAPE_CIRCLE 2
 
 #define KAYA_CONTENT_TYPE_NONE 0
 
@@ -2601,6 +2663,10 @@ typedef struct KayaHostApi {
   uint32_t (*capture_nearest_format)(const uint32_t*, uintptr_t, double, double, double, uint32_t*);
   void (*capture_self_view_box)(uint32_t, uint32_t, uint32_t, int64_t, uint32_t*);
   void (*video_view_box)(uint32_t, uint32_t, int64_t, uint32_t*);
+  /**
+   * docs/styling-pass-plan.md Y4: an activatable container pressed.
+   */
+  void (*emit_activated)(const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -3324,6 +3390,20 @@ void kaya_emit_notification_reply(uint64_t notification, const uint8_t *text, ui
  * CREATE record, handed back verbatim. Do not combine with kaya_run.
  */
 void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
+
+/**
+ * Presentation side: an activatable row or column was pressed as a whole
+ * (docs/styling-pass-plan.md Y4) — `tag` is the container's CREATE tag,
+ * handed back verbatim, as kaya_emit_clicked takes a button's.
+ */
+void kaya_emit_activated(const uint8_t *tag, uintptr_t len);
+
+/**
+ * The dominant colour of a PNG or JPEG (docs/styling-pass-plan.md Y2), the
+ * one quantizer every binding reaches: writes 0xRRGGBB to `rgb` and answers
+ * 1, or answers 0 for bytes that do not decode.
+ */
+uint8_t kaya_image_dominant(const uint8_t *bytes, uintptr_t len, uint32_t *rgb);
 
 /**
  * Presentation side: emit a column-header click, exactly as a

@@ -1070,8 +1070,9 @@ legs (tools/lib/media_server.py's condition, and the linux runner's).
 - Found at the depth: a signal of bytes could not be written (docs/traps.md),
   the mac table's scroll to its last rows reported a one-row band
   (docs/traps.md), and the mac native table's rows taller than its 24pt floor
-  run past the window (docs/deferred.md's OPEN entry), which is why
-  netimage.steps' table art is 20pt.
+  seemed to run past the window, which is why netimage.steps' table art is
+  20pt; the cause was a scroll anchor dropped by a height correction, fixed
+  2026-10-16 (docs/deferred.md's struck tall-rows entry).
 
 ## §8: What the maintainer is asked
 

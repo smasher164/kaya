@@ -14358,6 +14358,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 reg.bar_of.retain(|_, w| *w != window.0);
             }
         }
+        ApplyOp::AttachDock { .. } => crate::depth_stub("dock"),
         ApplyOp::PresentSheet { parent, sheet } => {
             // The platform's own dialog (docs/sheet-plan.md U3): AdwDialog
             // chains, Esc reaches the topmost, `can-close` off is the veto
@@ -15787,6 +15788,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         set_follow(core, id.0, &sw, true);
                     }
                 }
+                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Filled, Value::I64(6))
+                | (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Ground | Prop::Color | Prop::Source, _) => {
+                    crate::depth_stub("grounds")
+                }
+                (NativeWidget::Column(_) | NativeWidget::Row(_), Prop::Activatable | Prop::Selected, _) => {
+                    crate::depth_stub("cards")
+                }
+                (NativeWidget::Image(_), Prop::Shape, _) => crate::depth_stub("shapes"),
+                (NativeWidget::Label(_), Prop::Tint, _) => crate::depth_stub("tracks"),
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
                 | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
                     set_filled(&container.clone().upcast::<gtk4::Widget>(), tint);
@@ -22779,6 +22789,24 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn hover(&self, _: crate::harness::Target) {
+        crate::depth_stub("cards")
+    }
+    fn ground_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("grounds")
+    }
+    fn shape_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("shapes")
+    }
+    fn selected_read(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("cards")
+    }
+    fn label_tint(&self, _: crate::harness::Target) -> String {
+        crate::depth_stub("tracks")
+    }
+    fn dock_read(&self) -> String {
+        crate::depth_stub("dock")
+    }
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{NativeExt, PaintableExt, WidgetExt};

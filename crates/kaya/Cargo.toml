@@ -196,6 +196,8 @@ objc2-app-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 # The desktop JVM guest tier (jvm.rs).
 jni = "0.21"
+# ls_identity.rs's respawn: kqueue on the parent, signal forwarding.
+libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # The formatter door's glibc arm (docs/compliance-plan.md §2.3): setlocale,
@@ -590,6 +592,27 @@ path = "../../guests/rust/listrow.rs"
 [[example]]
 name = "tints"
 path = "../../guests/rust/tints.rs"
+
+# docs/styling-pass-plan.md §5, rust-only at depth.
+[[example]]
+name = "grounds"
+path = "../../guests/rust/grounds.rs"
+
+[[example]]
+name = "shapes"
+path = "../../guests/rust/shapes.rs"
+
+[[example]]
+name = "cards"
+path = "../../guests/rust/cards.rs"
+
+[[example]]
+name = "tracks"
+path = "../../guests/rust/tracks.rs"
+
+[[example]]
+name = "dock"
+path = "../../guests/rust/dock.rs"
 
 # Android has no native process entry (Zygote forks and an Activity is
 # the way in), so this one is a cdylib exporting the JNI entry, not a bin.

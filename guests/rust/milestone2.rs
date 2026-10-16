@@ -94,6 +94,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Occurrence::ButtonClicked { .. } | Occurrence::InstanceButtonClicked { .. } => {}
+            Occurrence::Activated { .. } | Occurrence::InstanceActivated { .. } => {}
             Occurrence::AlertResult { .. }
             | Occurrence::NotificationResult { .. }
             | Occurrence::ToastResult { .. }
