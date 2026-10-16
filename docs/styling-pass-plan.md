@@ -1,19 +1,7 @@
 # The styling pass toward an app-skinned look: the design pass (2026-10-14)
 
-Status: DRAFTED 2026-10-14, every ruling below RECOMMENDED and open for the
-maintainer (§8). Nothing is built. The roadmap card (docs/roadmap/editorial.toml,
-"A styling pass toward an app-skinned look") carries his ask of 2026-10-08,
-after seeing a Spotify client written in egui: "push kaya as far as possible
-towards being able to style it like that." The same day he described what he
-saw: a gradient header, a round avatar, art thumbnails in a track table, a
-docked now-playing bar, chip filters. The card names five candidate
-capabilities: gradient and image surface backgrounds; image shapes (a round
-avatar, rounded art); card surfaces with hover and selection; image and
-two-line cells in a table; a bar docked under the panes. His standing
-preferences frame every answer here: styling portable as far as possible;
-semantic tokens over raw values wherever the platforms share one; native
-controls kept; churn is free; no staged splits once the unknowns are gone;
-every capability a ruling of his.
+Status: RULED 2026-10-15 (the maintainer: "accept all"), Y1-Y11 as recommended
+(§8); nothing built yet.
 
 This pass amends DESIGN.md's "Brand identity and the styling ceiling" a second
 time, as docs/tints-plan.md did on 2026-09-25. docs/safe-area-plan.md and
@@ -303,9 +291,9 @@ has a token for it. The one place kaya draws something the platform has no
 idiom for is the mac's hover (Y4), and that is named as a choice for the
 maintainer rather than slipped in.
 
-## §2: The rulings (RECOMMENDED; for the maintainer)
+## §2: The rulings (RULED 2026-10-15, as recommended)
 
-### Y1: The line: grounds, pictures and states are the app's skin; controls stay the platform's
+### Y1: The line: grounds, pictures and states are the app's skin; controls stay the platform's (RULED 2026-10-15)
 
 RECOMMEND that the vocabulary this pass adds (a ground, a shape, `on_activate`
 with `selected`, a tinted label, a dock) be legal only on the kinds it names:
@@ -325,7 +313,7 @@ controls are plain controls in the accent.
 Refused: a `style`/`class` prop, a stylesheet, per-widget radius or padding
 overrides (docs/styling-plan.md §2 stands), a native-view escape hatch.
 
-### Y2: A gradient ground on a container, from one data colour, fading into the platform's ground
+### Y2: A gradient ground on a container, from one data colour, fading into the platform's ground (RULED 2026-10-15)
 
 RECOMMEND a new container prop `ground`, an enum (`none` 0, `gradient` 1,
 `image` 2), legal on row and column in both zones, beside `filled`; a
@@ -376,7 +364,7 @@ Refused: a gradient on a control; a horizontal or angled gradient; two app
 colours; a gradient window ground; a data colour anywhere else (a label, a
 fill, a chrome element), which stays the T3 tier's own future ruling.
 
-### Y3: An image ground on a container, with text allowed only inside an `overlay` fill
+### Y3: An image ground on a container, with text allowed only inside an `overlay` fill (RULED 2026-10-15)
 
 RECOMMEND that `ground` may be `image`, taking the existing `source` prop (6,
 Blob) made legal on row and column when `ground` is `image`, drawn to cover
@@ -404,7 +392,7 @@ not kaya's alpha.
 Refused: text bare on an image ground; a repeating or positioned image; a
 blur radius or scrim opacity knob; a video as a ground.
 
-### Y4: A container that takes a click as a whole, with the platform's hover and selection
+### Y4: A container that takes a click as a whole, with the platform's hover and selection (RULED 2026-10-15)
 
 RECOMMEND an `on_activate` handler on row and column in both zones, where
 each binding spells a button's click (chained in Rust, Go, Python's keyword,
@@ -453,7 +441,7 @@ signal the app can read (hover is presentation, not state; no platform hands
 it to the model); a double-click or long-press occurrence (the context menu
 and swipe actions cover the second gesture); selection kaya manages.
 
-### Y5: An image cell and a two-line cell at a row height every tier honours
+### Y5: An image cell and a two-line cell at a row height every tier honours (RULED 2026-10-15)
 
 RECOMMEND no new kind: a table cell is any widget, as docs/tables-plan.md
 decision 4 already allows, so an image cell is an `image` with a `shape`
@@ -474,7 +462,7 @@ cell" kind would spell on the wire what two existing kinds already say.
 
 Refused: a `subtitle` prop on a label; a `list_item` kind; a per-column width.
 
-### Y6: Image shapes: rect, rounded, circle, in both zones, on every look
+### Y6: Image shapes: rect, rounded, circle, in both zones, on every look (RULED 2026-10-15)
 
 RECOMMEND a new image prop `shape`, an enum (`rect` 0, `rounded` 1, `circle`
 2), legal on the image in both zones. `rounded` is the platform's own medium
@@ -499,7 +487,7 @@ Refused: a radius value; a `squircle`/continuous knob (Apple's continuous
 corner is what `rounded` means there); shapes on the video view (its box is
 the player's, docs/media-plan.md §3) or the canvas.
 
-### Y7: A tinted label
+### Y7: A tinted label (RULED 2026-10-15)
 
 RECOMMEND a new label prop `tint`, the existing `tint` enum, legal on label
 and rich label: the platform's STANDALONE colour for that tint (Apple's
@@ -519,7 +507,7 @@ Why: the one coloured word in the reference. A token on all four.
 Refused: a raw colour on text (the T3 tier, which Y2 opens for the gradient
 alone); a tint on a control's caption.
 
-### Y8: A dock: one surface per window, under the panes, above a phone's tab bar
+### Y8: A dock: one surface per window, under the panes, above a phone's tab bar (RULED 2026-10-15)
 
 RECOMMEND a new surface, the DOCK: `attach_dock(window, dock)` declares it
 once per window (a second refused at the root, as a second live sheet is),
@@ -560,7 +548,7 @@ platform's bar surface or the iOS 26 accessory.
 Refused: a dock per pane or per section; a top dock (the toolbar and the menu
 promotion are the top); a dock that pushes or presents on its own.
 
-### Y9: The harness reads every one of these off the screen or the tree, never the model
+### Y9: The harness reads every one of these off the screen or the tree, never the model (RULED 2026-10-15)
 
 RECOMMEND the readings §5 lists, each against the platform's resolved token
 or its accessibility tree, with the verdict a NAME that is byte-identical on
@@ -576,7 +564,7 @@ is today (tools/check-universal-props.py).
 Why: docs/styling-plan.md §0's rule, read-backs lie on every platform; the
 styling scenes assert pixels or real tokens.
 
-### Y10: All nine bindings and the C floor, both zones where the prop lives there
+### Y10: All nine bindings and the C floor, both zones where the prop lives there (RULED 2026-10-15)
 
 RECOMMEND the sweep in §4: every ruling above reaches all nine bindings and
 the C floor in the same slice, with no language scoped out. The template zone
@@ -587,7 +575,7 @@ window-construct declaration and so lives in the live zone alone.
 Why: invariant 2; and the demo's library rows, cards and track rows are all
 stamped.
 
-### Y11: The first home: the media player demo, screen by screen
+### Y11: The first home: the media player demo, screen by screen (RULED 2026-10-15)
 
 RECOMMEND that the demo decide the build's order (the card's own words): the
 library sidebar and the Home card grid first (Y4, Y6), the playlist screen's
@@ -895,6 +883,16 @@ Gates that grow:
   lane knob exists; a hand capture on the review page).
 
 ## §8: What the maintainer is asked
+
+RULED 2026-10-15 (the maintainer: "accept all"): Y1-Y11 as recommended, and
+every choice below as its recommendation: the one data colour clamped (Y2),
+image grounds with text only inside an `overlay` fill (Y3), the mac hover as
+the quaternary fill (Y4, shown on the review page beside the alternative),
+selection as the app's state (Y4), `rounded` as the platform's medium corner
+with no radius and GTK through CSS (Y6), the dock as one surface per window
+with iOS 26's accessory where available (Y8), the demo following the system
+appearance (Y11), both lane-time costs accepted, and `overlay` joining the
+tint vocabulary.
 
 Every ruling above is his. Nine need something only he can supply:
 
