@@ -1,7 +1,19 @@
 # The styling pass toward an app-skinned look: the design pass (2026-10-14)
 
 Status: RULED 2026-10-15 (the maintainer: "accept all"), Y1-Y11 as recommended
-(§8); nothing built yet.
+(§8); nothing built yet. The roadmap card (docs/roadmap/editorial.toml,
+"A styling pass toward an app-skinned look") carries his ask of 2026-10-08,
+after seeing a Spotify client written in egui: "push kaya as far as possible
+towards being able to style it like that." The same day he described what he
+saw: a gradient header, a round avatar, art thumbnails in a track table, a
+docked now-playing bar, chip filters. The card names five candidate
+capabilities: gradient and image surface backgrounds; image shapes (a round
+avatar, rounded art); card surfaces with hover and selection; image and
+two-line cells in a table; a bar docked under the panes. His standing
+preferences frame every answer here: styling portable as far as possible;
+semantic tokens over raw values wherever the platforms share one; native
+controls kept; churn is free; no staged splits once the unknowns are gone;
+every capability a ruling of his.
 
 This pass amends DESIGN.md's "Brand identity and the styling ceiling" a second
 time, as docs/tints-plan.md did on 2026-09-25. docs/safe-area-plan.md and
