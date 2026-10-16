@@ -16802,7 +16802,8 @@ of prepare_process, reads the record at this pid and, when it names
 another executable, runs the process again as its own child under a fresh
 pid (signals forwarded, the exit status passed back, the child leaving if
 the parent is killed) and never checks in itself; code before kaya's entry
-runs twice in that case. A kaya scroll guest steered onto 68883 printed the
+runs twice in that case (accepted by the maintainer, 2026-10-16: "im okay with
+the restart behavior"). A kaya scroll guest steered onto 68883 printed the
 respawn sentence, checked in as pid 68884 with a fresh ASN and passed. The
 stub's own termination was not reproduced: TAL terminated nothing on a
 timer in two days of logs and pressure would terminate the maintainer's
