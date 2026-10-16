@@ -227,6 +227,14 @@ size = 'L'
 unblocks = 'the media player'
 text = "The maintainer, 2026-10-08, after an egui Spotify client: push kaya as far as possible towards styling a media client like that. It loosens DESIGN.md's brand-tier ceiling again, as the semantic tints did on 2026-09-25: gradient and image surface backgrounds, image shapes (a round avatar, rounded art), card surfaces with hover and selection, image and two-line cells in a table, a bar docked under the panes; tokens over raw values wherever the platforms share one, native controls kept. Every capability is a ruling of his; the demo app decides the order."
 
+[[menu]]
+title = 'Restyle the earlier demo apps with the styling pass'
+star = false
+status = 'open'
+size = 'M each'
+unblocks = 'the text editor, the portfolio, the task manager and the chat app'
+text = "The maintainer, 2026-10-15: once the styling pass is built (docs/styling-pass-plan.md, ruled 2026-10-15), go back to each earlier demo app and apply its vocabulary (data-colour grounds, image grounds with overlay panels, activatable cards with hover and selection, image shapes, tinted labels, the dock) to push each into its own unique, interesting look, within Y1's line that controls stay the platform's. After the media player, which drives the pass's build order."
+
 [[demo]]
 name = 'The text editor'
 grp = 'docs/editor-plan.md; written in Go on purpose, the first forcing app'
