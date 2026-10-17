@@ -1,8 +1,8 @@
 # The media player demo: the design pass (2026-10-17)
 
-Status: PROPOSED 2026-10-17; M1 (Jamendo) and M3 (Python) RULED 2026-10-17
-(the maintainer: "let's go with jamendo and python"), the rest awaiting his
-rulings (§8). Nothing is built. The roadmap card (docs/roadmap/editorial.toml, "The media player")
+Status: RULED 2026-10-17: M1 (Jamendo) and M3 (Python) (the maintainer:
+"let's go with jamendo and python"), then the rest as recommended ("accept
+the rest as recommended"). Nothing is built. The roadmap card (docs/roadmap/editorial.toml, "The media player")
 names the app: a music client styled toward the egui Spotify screenshot the
 maintainer saw on 2026-10-08, over a public catalogue, shipping with audio
 and Now Playing on every platform, media keys, sliders, tables, the
@@ -233,7 +233,7 @@ Alternatives:
   Archive (no audio; covers not redistributable), Free Music Archive (no
   API), ccMixter (audio refused to a request without the site's Referer).
 
-### M2: The lanes run against a mirror of a Jamendo snapshot, served by the lane's media server
+### M2: The lanes run against a mirror of a Jamendo snapshot, served by the lane's media server (RULED 2026-10-17)
 
 RECOMMEND a snapshot of Jamendo's answers and files, committed under
 guests/assets as a new family `catalogue`, served by the lane's media server
@@ -323,7 +323,7 @@ new" (docs/chat-plan.md R1); (d) Java, a language no demo has used, on four
 lanes, with iOS missing from every review capture; (e) Swift, likewise new,
 on two lanes.
 
-### M4: No account and no sign-in; the only credential is the catalogue's client id
+### M4: No account and no sign-in; the only credential is the catalogue's client id (RULED 2026-10-17)
 
 RECOMMEND that the demo has no sign-in. Jamendo's reads need no person, only
 the app's client id (M1), and the person enters that once on the "Connect a
@@ -361,7 +361,7 @@ the system; the review page shows every screen in light and in dark. The
 lanes run both through `KAYA_APPEARANCE` (the dark legs' precedent,
 tools/lib/lanes/mac.py's `DARK_LEGS`).
 
-### M6: Three panes on the desktops, sections and the dock on the phones
+### M6: Three panes on the desktops, sections and the dock on the phones (RULED 2026-10-17)
 
 RECOMMEND §1's shape: `panes` with a sidebar, a content stack and a Now
 Playing pane on the desktops (the pane ladder collapses the third pane first
@@ -377,7 +377,7 @@ Alternatives: (b) two panes, Now Playing only in the dock and a sheet
 everywhere: simpler, and the three-pane window would go unused by any demo;
 (c) one window per screen: no platform's music app does that.
 
-### M7: Now Playing artwork from the app's bytes (a GAP)
+### M7: Now Playing artwork from the app's bytes (a GAP) (RULED 2026-10-17)
 
 RECOMMEND that the session's `artwork` take what an image's `source` takes:
 an asset name OR bytes the app registered (the content-keyed bytes network
@@ -401,7 +401,7 @@ would fetch itself: refused by N1 (no HTTP in kaya) and it would fetch every
 cover twice; (c) no artwork for network art: the demo's Now Playing would
 show a blank square on every platform.
 
-### M8: The transport symbols join the symbol vocabulary (a GAP)
+### M8: The transport symbols join the symbol vocabulary (a GAP) (RULED 2026-10-17)
 
 RECOMMEND ten symbols in crates/kaya/src/wire.rs's SYMBOLS, each the
 platform's own glyph, checked against each platform's floor by
@@ -434,7 +434,7 @@ precedent for a symbol with an accessibility label.
 Alternative: the app ships its own glyph images: refused by
 docs/styling-plan.md's symbol rule (symbols are the platform's).
 
-### M9: A positional duration formatter (a GAP)
+### M9: A positional duration formatter (a GAP) (RULED 2026-10-17)
 
 RECOMMEND `format_duration(ms)` answering positional time, "3:45" or
 "1:02:03", in the locale's own digits (Arabic-Indic digits under `ar`, the
@@ -455,7 +455,7 @@ Alternatives: (b) the native positional formatter where one exists and the
 core's elsewhere: two outputs that may differ by a separator; (c) none, the
 app composes it: the Arabic shell shows mixed digits.
 
-### M10: An app's write to a slider waits while the user's gesture is live (a GAP, measured first)
+### M10: An app's write to a slider waits while the user's gesture is live (a GAP, measured first) (RULED 2026-10-17)
 
 RECOMMEND one rule on all four backends: while a pointer or keyboard gesture
 is driving a slider (the same "is a pointer driving" each backend already
@@ -479,7 +479,7 @@ backend, the thumb under a held pointer while the app writes (the jump is
 expected on SwiftUI's `updateNSView` and Compose's controlled slider; GTK and
 WinUI may already ignore a programmatic set during a drag).
 
-### M11: The queue is the app's; no gapless, no preload
+### M11: The queue is the app's; no gapless, no preload (RULED 2026-10-17)
 
 RECOMMEND that the app keep the queue, shuffle and repeat, and move one
 player to the next track by setting its `source` on `ended`, on the dock's
@@ -495,7 +495,7 @@ MediaPlaybackList), a new object on four platforms that this catalogue's
 albums do not need: few are mixed without gaps. The gap between two tracks
 is measured on each lane (§7) and goes on the review page.
 
-### M12: Home's cards are a live fitting grid per shelf; a collection laid out as a grid is deferred
+### M12: Home's cards are a live fitting grid per shelf; a collection laid out as a grid is deferred (RULED 2026-10-17)
 
 RECOMMEND that each Home shelf be a LIVE `grid` with `min_column_width`
 (docs/layout-knobs-plan.md §3), rebuilt in a transaction when the shelf's
@@ -519,7 +519,7 @@ mouse is awkward on the desktops and Spotify's desktop app does not use it,
 though its phone app does; available to the app on the phones if the
 maintainer prefers.
 
-### M13: The skin's choices, as the demo uses them
+### M13: The skin's choices, as the demo uses them (RULED 2026-10-17)
 
 RECOMMEND, all within rulings already made: cards and sidebar rows `neutral`
 filled with the platform's hover (Y4), art `rounded` and the artist avatar
