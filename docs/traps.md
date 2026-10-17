@@ -17374,3 +17374,25 @@ readers only through atspi_collect and atspi_range_read, and
 skin_routes' NATIVE_TABLE, READS and CALLS rows for every tier, each cut
 watched red; three mac scene negatives (tools/mac/scene-negative.py) and one
 iOS one watched red.
+
+## The client id Jamendo hands back (measured 2026-10-17)
+
+Jamendo's API v3 answers every paged request with `headers.next`, the next
+page's whole address, and that address carries the caller's `client_id` in
+the clear; its audio addresses carry an opaque `from=` token as well. A
+snapshot that kept Jamendo's answers verbatim would commit the maintainer's
+personal id (docs/media-player-plan.md M1). The API also answers a populated
+query with NO results intermittently: one artist's `tracks?artist_id=`
+answered 0, then 18, then 0 results on three asks a few seconds apart, and
+another 0, 50, 50, so a selection reading one empty answer as "this artist
+has no tracks" picks different music on every run. And an artist's image carries
+no licence at all: Kellee Maize's was the cover of her CC BY-NC-ND album
+"Crown", which a snapshot taking artist images would have committed beside
+her BY tracks. GUARD: tools/gen-catalogue.py
+drops `headers.next`, rewrites every storage and image address to the
+mirror's form, refuses to keep a written file holding the id's bytes, and
+asks an empty answer again up to four times (searches excepted), and takes
+each artist's image from one of that artist's BY or BY-SA album covers
+(`artist_cover`, refusing an artist with none; check-assets N42);
+`--check`, run by check-assets' C14, refuses any `client_id` in the
+committed answers (N41) and any address the mirror does not serve (N40).

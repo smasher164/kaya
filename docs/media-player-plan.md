@@ -243,11 +243,18 @@ media guest (`KAYA_MEDIA_URL`, read by guests/rust/netimage_http.rs today).
 
 - WHAT IS IN IT: three artists, two albums each, two tracks from each album
   (twelve tracks), every track AND its album CC BY or CC BY-SA, plus each
-  album's cover at 300 and 600 px and each artist's image at 500 px, and the
+  album's cover at 300 and 600 px, and the
   JSON answers for exactly the requests the app makes (the featured charts
   for Home, each album and its tracks, each artist and their albums, two
   searches, one playlist). Covers that Jamendo serves as GIF are transcoded
-  to JPEG, or the album is skipped.
+  to JPEG, or the album is skipped. RULED 2026-10-17 (the maintainer: "im
+  okay with your recommendations"): no Jamendo artist image is in it, since
+  they carry no licence and Kellee Maize's was the cover of her BY-NC-ND
+  album "Crown"; each artist's image is the cover of the first of that
+  artist's albums in the snapshot whose every track is CC BY or BY-SA,
+  named in `_snapshot.artist_images`, and the mirror's
+  `/catalogue/usercontent?type=artist&...` address answers with that
+  cover's bytes. The generator refuses an artist with no such album.
 - CLIPS, NOT WHOLE TRACKS: each track trimmed to 20 s and kept as Jamendo's
   own `mp31` MP3 (96 kbps): about 240 KB a clip, about 2.9 MB for twelve,
   with covers and artist images about 0.8 MB more. Whole tracks would be 3 to
@@ -615,8 +622,19 @@ Gates that grow (each with watched negatives, counts printed):
    two tracks per backend; the Now Playing artwork readers; the ten glyphs at
    each platform's floor.
 2. ~~The defect: the macOS native table's double-click and selection (Y4).~~ Fixed 2026-10-17 (§0's playlist row).
-3. The snapshot: the generator, run once by the maintainer with his id, the
-   family committed with its README and ATTRIBUTION, the server's routes.
+3. ~~The snapshot: the generator, run once by the maintainer with his id, the
+   family committed with its README and ATTRIBUTION, the server's routes.~~
+   Built 2026-10-17: tools/gen-catalogue.py (run once with the maintainer's
+   id, 37 API calls) wrote guests/assets/catalogue (27 files, 3,269,776
+   bytes: twelve 20 s clips, six covers at 300 and 600 px, `api.json` with
+   24 answers, README.md and ATTRIBUTION.md; the artist images are album
+   covers, M2); Pierce Murphy (jazz), Kellee Maize (electronic) and David
+   Amber (rock), every track CC BY 3.0 or CC BY-SA 3.0. tools/lib/catalogue.py
+   is the one resolver the server and `--check` share; the routes are held by
+   tools/lib/catalogue_server_routes.py (check-exclusive) and the snapshot by
+   check-assets' C14. No Jamendo playlist is in it: a public playlist's tracks
+   are any licence and any artist, so its answer narrowed to the twelve is
+   empty; the demo's playlists are the user's own.
 4. The gaps as ruled, depth then breadth: M8's symbols, M9's formatter, M7's
    artwork, M10's hold, each on the mac and iOS with Rust, then the other
    backends and bindings.
@@ -653,8 +671,21 @@ Gates that grow (each with watched negatives, counts printed):
   media (guests/assets/media 896 KB, guests/assets/covers 36 KB).
 - READ FROM THE TREE 2026-10-17 at b2a5d252: §0's table, with the file and
   line for each gap.
-- To be measured at the depth: the five players on Jamendo's extensionless
-  address; embedded CPython's certificate verification on iOS and Android;
+- MEASURED 2026-10-17, the extensionless address: the mac's AVPlayer
+  (the SwiftUI interpreter through the harness, a scratch Python guest) played
+  the mirror's `/catalogue/storage/?trackid=1860165&format=mp31` past 1 s with
+  a 20 s duration, and Jamendo's live
+  `https://prod-1.storage.jamendo.com/?trackid=1860165&format=mp31` (no id
+  needed) past 1 s with its 249 s; GStreamer's playbin3 in the linux image
+  (gst-launch with fake sinks, the element the GTK arm uses, not the arm
+  itself) played the mirror's address to EOS with no error; the Windows VM's
+  Windows.Media.Playback.MediaPlayer (the WinUI arm's player, from PowerShell,
+  not the arm itself) played it with a 20.062 s duration and its position
+  advancing. Jamendo's API answers a populated query with no results
+  intermittently (one artist's `tracks?artist_id=` answered 0, 18, 0 results
+  on three asks seconds apart), so the generator asks an empty answer again.
+- To be measured at the depth: iOS's and Android's players on Jamendo's
+  extensionless address; embedded CPython's certificate verification on iOS and Android;
   the slider's thumb under a held pointer while the app writes, per backend;
   the silence between two tracks when the app swaps `source` on `ended`, per
   backend; which Now Playing readers can see artwork; the ten glyphs against

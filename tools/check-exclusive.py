@@ -1373,7 +1373,12 @@ for _label, _pattern, _repl, _want in (
 from netimage_server_routes import run as check_netimage_server_routes  # noqa: E402
 check_netimage_server_routes(gate)
 
-gate.negatives_ran(71)
+# THE JAMENDO MIRROR ANSWERS AT JAMENDO'S ADDRESS SHAPES
+# (tools/lib/catalogue_server_routes.py; docs/media-player-plan.md M2).
+from catalogue_server_routes import run as check_catalogue_server_routes  # noqa: E402
+check_catalogue_server_routes(gate)
+
+gate.negatives_ran(82)
 
 gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",

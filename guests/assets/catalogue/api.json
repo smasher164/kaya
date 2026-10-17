@@ -1,0 +1,1036 @@
+{
+ "_snapshot": {
+  "albums": [
+   "201715",
+   "581719",
+   "139585",
+   "116452",
+   "149020",
+   "154466"
+  ],
+  "artist_images": {
+   "357359": "139585",
+   "476085": "201715",
+   "476280": "149020"
+  },
+  "artists": [
+   "476085",
+   "357359",
+   "476280"
+  ],
+  "clip_s": 20,
+  "genres": [
+   "jazz",
+   "electronic",
+   "rock"
+  ],
+  "home": [
+   "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=jazz",
+   "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=electronic",
+   "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=rock"
+  ],
+  "searches": [
+   "Pierce Murphy",
+   "Athens"
+  ],
+  "taken": "2026-10-17",
+  "tracks": [
+   "1860165",
+   "1860160",
+   "2207896",
+   "2207899",
+   "1161940",
+   "1161932",
+   "989871",
+   "989873",
+   "1243462",
+   "1243461",
+   "1296804",
+   "1296792"
+  ]
+ },
+ "albums/tracks?id=116452&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "357359",
+    "artist_name": "Kellee Maize",
+    "id": "116452",
+    "image": "/catalogue/usercontent?type=album&id=116452&width=600",
+    "name": "Owl Time (2013)",
+    "releasedate": "2012-12-18",
+    "track_id": "989871",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=989871&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "989871",
+      "license_ccurl": "http://creativecommons.org/licenses/by-sa/3.0/",
+      "name": "In Tune",
+      "position": "1"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=989873&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "989873",
+      "license_ccurl": "http://creativecommons.org/licenses/by-sa/3.0/",
+      "name": "Owl Time",
+      "position": "3"
+     }
+    ]
+   }
+  ]
+ },
+ "albums/tracks?id=139585&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "357359",
+    "artist_name": "Kellee Maize",
+    "id": "139585",
+    "image": "/catalogue/usercontent?type=album&id=139585&width=600",
+    "name": "The Remixes (2015)",
+    "releasedate": "2014-10-23",
+    "track_id": "1161932",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=1161932&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1161932",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Mad Humans (J. Glaze Remix)",
+      "position": "3"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=1161940&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1161940",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "In Tune (J. Glaze Remix)",
+      "position": "1"
+     }
+    ]
+   }
+  ]
+ },
+ "albums/tracks?id=149020&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "476280",
+    "artist_name": "David Amber",
+    "id": "149020",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=600",
+    "name": "David Amber and Friends, Vol. 1",
+    "releasedate": "2015-06-23",
+    "track_id": "1243461",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=1243461&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1243461",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "i LuV iT (feat. Ashley Jana)",
+      "position": "1"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=1243462&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1243462",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Gnarly (feat. Devyn Rush)",
+      "position": "3"
+     }
+    ]
+   }
+  ]
+ },
+ "albums/tracks?id=154466&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "476280",
+    "artist_name": "David Amber",
+    "id": "154466",
+    "image": "/catalogue/usercontent?type=album&id=154466&width=600",
+    "name": "David Amber and Friends, Vol. 2 Instrumentals",
+    "releasedate": "2015-12-08",
+    "track_id": "1296792",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=1296792&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1296792",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "BoomShaKaLaKa ~ Instrumental Version",
+      "position": "1"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=1296804&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1296804",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Clayton Kershaw (feat. Evan Coles) ~ Instrumental Version",
+      "position": "3"
+     }
+    ]
+   }
+  ]
+ },
+ "albums/tracks?id=201715&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "476085",
+    "artist_name": "Pierce Murphy",
+    "id": "201715",
+    "image": "/catalogue/usercontent?type=album&id=201715&width=600",
+    "name": "Through The Olive Branches",
+    "releasedate": "2021-05-24",
+    "track_id": "1860157",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=1860160&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1860160",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Seven Chimes",
+      "position": "4"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=1860165&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "1860165",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Athens",
+      "position": "7"
+     }
+    ]
+   }
+  ]
+ },
+ "albums/tracks?id=581719&imagesize=600": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "476085",
+    "artist_name": "Pierce Murphy",
+    "id": "581719",
+    "image": "/catalogue/usercontent?type=album&id=581719&width=600",
+    "name": "Fellow Traveler",
+    "releasedate": "2024-10-03",
+    "track_id": "2207896",
+    "tracks": [
+     {
+      "audio": "/catalogue/storage/?trackid=2207896&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "2207896",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "Persimmon",
+      "position": "2"
+     },
+     {
+      "audio": "/catalogue/storage/?trackid=2207899&format=mp31",
+      "count": "1",
+      "duration": "20",
+      "id": "2207899",
+      "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+      "name": "A Serpent I Did Hear",
+      "position": "1"
+     }
+    ]
+   }
+  ]
+ },
+ "albums?limit=200&namesearch=Athens": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "albums?limit=200&namesearch=Pierce%20Murphy": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "artists/albums?id=357359": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "albums": [
+     {
+      "id": "116452",
+      "image": "/catalogue/usercontent?type=album&id=116452&width=300",
+      "name": "Owl Time (2013)",
+      "releasedate": "2012-12-18"
+     },
+     {
+      "id": "139585",
+      "image": "/catalogue/usercontent?type=album&id=139585&width=300",
+      "name": "The Remixes (2015)",
+      "releasedate": "2014-10-23"
+     }
+    ],
+    "id": "357359",
+    "image": "/catalogue/usercontent?type=artist&id=357359&width=300",
+    "joindate": "2010-02-07",
+    "name": "Kellee Maize",
+    "website": "http://www.kelleemaize.com"
+   }
+  ]
+ },
+ "artists/albums?id=476085": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "albums": [
+     {
+      "id": "201715",
+      "image": "/catalogue/usercontent?type=album&id=201715&width=300",
+      "name": "Through The Olive Branches",
+      "releasedate": "2021-05-24"
+     },
+     {
+      "id": "581719",
+      "image": "/catalogue/usercontent?type=album&id=581719&width=300",
+      "name": "Fellow Traveler",
+      "releasedate": "2024-10-03"
+     }
+    ],
+    "id": "476085",
+    "image": "/catalogue/usercontent?type=artist&id=476085&width=300",
+    "joindate": "2015-06-20",
+    "name": "Pierce Murphy",
+    "website": ""
+   }
+  ]
+ },
+ "artists/albums?id=476280": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "albums": [
+     {
+      "id": "149020",
+      "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+      "name": "David Amber and Friends, Vol. 1",
+      "releasedate": "2015-06-23"
+     },
+     {
+      "id": "154466",
+      "image": "/catalogue/usercontent?type=album&id=154466&width=300",
+      "name": "David Amber and Friends, Vol. 2 Instrumentals",
+      "releasedate": "2015-12-08"
+     }
+    ],
+    "id": "476280",
+    "image": "/catalogue/usercontent?type=artist&id=476280&width=300",
+    "joindate": "2015-06-22",
+    "name": "David Amber",
+    "website": "http://www.ambersongs.com"
+   }
+  ]
+ },
+ "artists?id=357359": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "id": "357359",
+    "image": "/catalogue/usercontent?type=artist&id=357359&width=300",
+    "joindate": "2010-02-07",
+    "name": "Kellee Maize",
+    "shareurl": "https://www.jamendo.com/artist/357359",
+    "shorturl": "https://jamen.do/a/357359",
+    "website": "http://www.kelleemaize.com"
+   }
+  ]
+ },
+ "artists?id=476085": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "id": "476085",
+    "image": "/catalogue/usercontent?type=artist&id=476085&width=300",
+    "joindate": "2015-06-20",
+    "name": "Pierce Murphy",
+    "shareurl": "https://www.jamendo.com/artist/476085",
+    "shorturl": "https://jamen.do/a/476085",
+    "website": ""
+   }
+  ]
+ },
+ "artists?id=476280": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "id": "476280",
+    "image": "/catalogue/usercontent?type=artist&id=476280&width=300",
+    "joindate": "2015-06-22",
+    "name": "David Amber",
+    "shareurl": "https://www.jamendo.com/artist/476280",
+    "shorturl": "https://jamen.do/a/476280",
+    "website": "http://www.ambersongs.com"
+   }
+  ]
+ },
+ "artists?limit=200&namesearch=Athens": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "artists?limit=200&namesearch=Pierce%20Murphy": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "id": "476085",
+    "image": "/catalogue/usercontent?type=artist&id=476085&width=300",
+    "joindate": "2015-06-20",
+    "name": "Pierce Murphy",
+    "shareurl": "https://www.jamendo.com/artist/476085",
+    "shorturl": "https://jamen.do/a/476085",
+    "website": ""
+   }
+  ]
+ },
+ "tracks?artist_id=357359&limit=200&order=popularity_total": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 4,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "139585",
+    "album_image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "album_name": "The Remixes (2015)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=1161940&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1161940",
+    "image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "In Tune (J. Glaze Remix)",
+    "position": 1,
+    "prourl": "https://licensing.jamendo.com/track/1161940",
+    "releasedate": "2014-10-23",
+    "shareurl": "https://www.jamendo.com/track/1161940",
+    "shorturl": "https://jamen.do/t/1161940"
+   },
+   {
+    "album_id": "116452",
+    "album_image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "album_name": "Owl Time (2013)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=989871&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "989871",
+    "image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "name": "In Tune",
+    "position": 1,
+    "prourl": "https://licensing.jamendo.com/track/989871",
+    "releasedate": "2012-12-18",
+    "shareurl": "https://www.jamendo.com/track/989871",
+    "shorturl": "https://jamen.do/t/989871"
+   },
+   {
+    "album_id": "116452",
+    "album_image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "album_name": "Owl Time (2013)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=989873&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "989873",
+    "image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "name": "Owl Time",
+    "position": 3,
+    "prourl": "https://licensing.jamendo.com/track/989873",
+    "releasedate": "2012-12-18",
+    "shareurl": "https://www.jamendo.com/track/989873",
+    "shorturl": "https://jamen.do/t/989873"
+   },
+   {
+    "album_id": "139585",
+    "album_image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "album_name": "The Remixes (2015)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=1161932&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1161932",
+    "image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Mad Humans (J. Glaze Remix)",
+    "position": 3,
+    "prourl": "https://licensing.jamendo.com/track/1161932",
+    "releasedate": "2014-10-23",
+    "shareurl": "https://www.jamendo.com/track/1161932",
+    "shorturl": "https://jamen.do/t/1161932"
+   }
+  ]
+ },
+ "tracks?artist_id=476085&limit=200&order=popularity_total": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 4,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "201715",
+    "album_image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "album_name": "Through The Olive Branches",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=1860165&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1860165",
+    "image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Athens",
+    "position": 7,
+    "prourl": "",
+    "releasedate": "2021-05-24",
+    "shareurl": "https://www.jamendo.com/track/1860165",
+    "shorturl": "https://jamen.do/t/1860165"
+   },
+   {
+    "album_id": "581719",
+    "album_image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "album_name": "Fellow Traveler",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=2207896&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "2207896",
+    "image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Persimmon",
+    "position": 2,
+    "prourl": "",
+    "releasedate": "2024-10-03",
+    "shareurl": "https://www.jamendo.com/track/2207896",
+    "shorturl": "https://jamen.do/t/2207896"
+   },
+   {
+    "album_id": "201715",
+    "album_image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "album_name": "Through The Olive Branches",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=1860160&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1860160",
+    "image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Seven Chimes",
+    "position": 4,
+    "prourl": "",
+    "releasedate": "2021-05-24",
+    "shareurl": "https://www.jamendo.com/track/1860160",
+    "shorturl": "https://jamen.do/t/1860160"
+   },
+   {
+    "album_id": "581719",
+    "album_image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "album_name": "Fellow Traveler",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=2207899&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "2207899",
+    "image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "A Serpent I Did Hear",
+    "position": 1,
+    "prourl": "",
+    "releasedate": "2024-10-03",
+    "shareurl": "https://www.jamendo.com/track/2207899",
+    "shorturl": "https://jamen.do/t/2207899"
+   }
+  ]
+ },
+ "tracks?artist_id=476280&limit=200&order=popularity_total": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 4,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "149020",
+    "album_image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "album_name": "David Amber and Friends, Vol. 1",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1243462&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1243462",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Gnarly (feat. Devyn Rush)",
+    "position": 3,
+    "prourl": "",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/track/1243462",
+    "shorturl": "https://jamen.do/t/1243462"
+   },
+   {
+    "album_id": "149020",
+    "album_image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "album_name": "David Amber and Friends, Vol. 1",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1243461&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1243461",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "i LuV iT (feat. Ashley Jana)",
+    "position": 1,
+    "prourl": "",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/track/1243461",
+    "shorturl": "https://jamen.do/t/1243461"
+   },
+   {
+    "album_id": "154466",
+    "album_image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "album_name": "David Amber and Friends, Vol. 2 Instrumentals",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1296804&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1296804",
+    "image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Clayton Kershaw (feat. Evan Coles) ~ Instrumental Version",
+    "position": 3,
+    "prourl": "",
+    "releasedate": "2015-12-08",
+    "shareurl": "https://www.jamendo.com/track/1296804",
+    "shorturl": "https://jamen.do/t/1296804"
+   },
+   {
+    "album_id": "154466",
+    "album_image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "album_name": "David Amber and Friends, Vol. 2 Instrumentals",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1296792&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1296792",
+    "image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "BoomShaKaLaKa ~ Instrumental Version",
+    "position": 1,
+    "prourl": "",
+    "releasedate": "2015-12-08",
+    "shareurl": "https://www.jamendo.com/track/1296792",
+    "shorturl": "https://jamen.do/t/1296792"
+   }
+  ]
+ },
+ "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=electronic": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 2,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "139585",
+    "album_image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "album_name": "The Remixes (2015)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=1161940&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1161940",
+    "image": "/catalogue/usercontent?type=album&id=139585&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "musicinfo": {
+     "acousticelectric": "electric",
+     "gender": "female",
+     "lang": "en",
+     "speed": "medium",
+     "tags": {
+      "genres": [
+       "pop",
+       "dance",
+       "electronic"
+      ],
+      "instruments": [],
+      "vartags": [
+       "happy",
+       "love",
+       "acoustic",
+       "voice",
+       "electopop"
+      ]
+     },
+     "vocalinstrumental": "vocal"
+    },
+    "name": "In Tune (J. Glaze Remix)",
+    "position": 1,
+    "prourl": "https://licensing.jamendo.com/track/1161940",
+    "releasedate": "2014-10-23",
+    "shareurl": "https://www.jamendo.com/track/1161940",
+    "shorturl": "https://jamen.do/t/1161940"
+   },
+   {
+    "album_id": "116452",
+    "album_image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "album_name": "Owl Time (2013)",
+    "artist_id": "357359",
+    "artist_idstr": "Kellee_Maize",
+    "artist_name": "Kellee Maize",
+    "audio": "/catalogue/storage/?trackid=989871&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "989871",
+    "image": "/catalogue/usercontent?type=album&id=116452&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by-sa/3.0/",
+    "musicinfo": {
+     "acousticelectric": "electric",
+     "gender": "female",
+     "lang": "",
+     "speed": "medium",
+     "tags": {
+      "genres": [
+       "pop",
+       "hiphop",
+       "electronic"
+      ],
+      "instruments": [
+       "synthesizer",
+       "drums"
+      ],
+      "vartags": [
+       "energetic",
+       "acoustic",
+       "vocal",
+       "voice"
+      ]
+     },
+     "vocalinstrumental": "vocal"
+    },
+    "name": "In Tune",
+    "position": 1,
+    "prourl": "https://licensing.jamendo.com/track/989871",
+    "releasedate": "2012-12-18",
+    "shareurl": "https://www.jamendo.com/track/989871",
+    "shorturl": "https://jamen.do/t/989871"
+   }
+  ]
+ },
+ "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=jazz": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 2,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "201715",
+    "album_image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "album_name": "Through The Olive Branches",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=1860165&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1860165",
+    "image": "/catalogue/usercontent?type=album&id=201715&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "musicinfo": {
+     "acousticelectric": "electric",
+     "gender": "male",
+     "lang": "en",
+     "speed": "high",
+     "tags": {
+      "genres": [
+       "soul",
+       "jazz",
+       "folk"
+      ],
+      "instruments": [],
+      "vartags": [
+       "acoustic",
+       "vocal",
+       "happy",
+       "voice"
+      ]
+     },
+     "vocalinstrumental": "vocal"
+    },
+    "name": "Athens",
+    "position": 7,
+    "prourl": "",
+    "releasedate": "2021-05-24",
+    "shareurl": "https://www.jamendo.com/track/1860165",
+    "shorturl": "https://jamen.do/t/1860165"
+   },
+   {
+    "album_id": "581719",
+    "album_image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "album_name": "Fellow Traveler",
+    "artist_id": "476085",
+    "artist_idstr": "Pierce_Murphy",
+    "artist_name": "Pierce Murphy",
+    "audio": "/catalogue/storage/?trackid=2207896&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "2207896",
+    "image": "/catalogue/usercontent?type=album&id=581719&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "musicinfo": {
+     "acousticelectric": "electric",
+     "gender": "male",
+     "lang": "en",
+     "speed": "high",
+     "tags": {
+      "genres": [
+       "jazz",
+       "smoothjazz"
+      ],
+      "instruments": [
+       "saxophone",
+       "bass"
+      ],
+      "vartags": [
+       "contemporary",
+       "romantic",
+       "acoustic",
+       "voice"
+      ]
+     },
+     "vocalinstrumental": "vocal"
+    },
+    "name": "Persimmon",
+    "position": 2,
+    "prourl": "",
+    "releasedate": "2024-10-03",
+    "shareurl": "https://www.jamendo.com/track/2207896",
+    "shorturl": "https://jamen.do/t/2207896"
+   }
+  ]
+ },
+ "tracks?ccnc=false&ccnd=false&include=musicinfo&limit=50&order=popularity_week&tags=rock": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "149020",
+    "album_image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "album_name": "David Amber and Friends, Vol. 1",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1243462&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1243462",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "musicinfo": {
+     "acousticelectric": "electric",
+     "gender": "female",
+     "lang": "en",
+     "speed": "high",
+     "tags": {
+      "genres": [
+       "pop",
+       "rock",
+       "surfrock"
+      ],
+      "instruments": [],
+      "vartags": [
+       "happy",
+       "summer",
+       "acoustic",
+       "voice",
+       "surfer"
+      ]
+     },
+     "vocalinstrumental": "vocal"
+    },
+    "name": "Gnarly (feat. Devyn Rush)",
+    "position": 3,
+    "prourl": "",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/track/1243462",
+    "shorturl": "https://jamen.do/t/1243462"
+   }
+  ]
+ },
+ "tracks?limit=200&search=Athens": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "tracks?limit=200&search=Pierce%20Murphy": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ }
+}

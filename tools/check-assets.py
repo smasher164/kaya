@@ -31,6 +31,8 @@ dev_shell_or_die()
 #   C7 THE APK'S    three files spell Android's `assets/<prefix>/` and
 #      PREFIX       this holds them equal; THE BYTES are checked by
 #                   `apk_assets_verify` in run-emulator.py.
+#   C14 THE         guests/assets/catalogue passes tools/gen-catalogue.py
+#      SNAPSHOT     --check: no network, every licence CC BY or BY-SA.
 #   C8-C11          the market family: artifacts DERIVED and regenerated
 #                   into scratch to compare, the ledger netting to the
 #                   guest's BOOK, the history ending on it, and the
@@ -44,6 +46,7 @@ dev_shell_or_die()
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
 import ast as ast_mod
+import json
 import os
 import re
 import struct
@@ -1065,6 +1068,23 @@ def covers_derivation(root):
     return derivation(root, "covers", "gen-covers.py")
 
 
+def catalogue_derivation(root):
+    """C14 (docs/media-player-plan.md M2): the Jamendo snapshot cannot be
+    regenerated without a client id and the network, so it is READ: every
+    address resolves, every file is named, every licence is BY or BY-SA."""
+    fam = pathlib.Path(root) / ASSET_ROOT / "catalogue"
+    if not fam.is_dir():
+        return []
+    r = subprocess.run([sys.executable, str(ROOT / "tools" / "gen-catalogue.py"), "--check",
+                        "--against", str(fam)], capture_output=True, text=True,
+                       encoding="utf-8", check=False)
+    if r.returncode == 0:
+        return []
+    return ["guests/assets/catalogue fails tools/gen-catalogue.py --check — the snapshot "
+            "is regenerated only by `tools/gen-catalogue.py` with a Jamendo client id, "
+            "never hand-edited:\n" + r.stderr.strip()[:4000]]
+
+
 def fresh(name):
     """A shadow root the checker can read. THE ASSET ROOT IS COPIED,
     EVERYTHING ELSE IS LINKED: C2 refuses a symlink inside the root, so
@@ -1504,7 +1524,52 @@ g.negative("N38 (a committed cover its generator no longer writes)",
            lambda: covers_derivation(s),
            want="differs from what tools/gen-covers.py generates")
 
-g.negatives_ran(40)
+# N39 — C14: one snapshot entry's licence doctored to BY-NC.
+s = fresh("n39")
+doctor_shadow("N39's BY-NC licence", s, "guests/assets/catalogue/api.json",
+              r'\A(.*?"license_ccurl": "http://creativecommons\.org/licenses/)by(?:-sa)?/',
+              r"\1by-nc/")
+g.negative("N39 (a snapshot track licensed BY-NC)", lambda: catalogue_derivation(s),
+           want="outside CC BY and CC BY-SA")
+
+# N40 — C14: an answer still naming Jamendo's own storage host.
+s = fresh("n40")
+doctor_shadow("N40's live storage address", s, "guests/assets/catalogue/api.json",
+              r'\A(.*?"audio": ")/catalogue/storage/', r"\1https://prod-1.storage.jamendo.com/")
+g.negative("N40 (an answer that would leave the machine)", lambda: catalogue_derivation(s),
+           want="the demo would leave the machine")
+
+# N41 — C14: an echoed request address carrying a client id.
+s = fresh("n41")
+doctor_shadow("N41's echoed client id", s, "guests/assets/catalogue/api.json",
+              r'\A(.*?"results_count": \d+)', r'\1, "next": "?client_id=probe00"')
+g.negative("N41 (a client id in the snapshot)", lambda: catalogue_derivation(s),
+           want="names client_id")
+
+# N42 — C14: an artist whose only candidate albums are NC/ND, so no cover
+# may stand for its image (docs/media-player-plan.md M2).
+s = fresh("n42")
+snap_path = s / "guests/assets/catalogue/api.json"
+snap = json.loads(snap_path.read_text(encoding="utf-8"))
+victim = snap["_snapshot"]["artists"][1]
+doctored_tracks = 0
+for key, ans in snap.items():
+    if key.startswith("albums/tracks?"):
+        for r in ans["results"]:
+            if r["artist_id"] == victim:
+                for t in r["tracks"]:
+                    t["license_ccurl"] = "http://creativecommons.org/licenses/by-nc-nd/3.0/"
+                    doctored_tracks += 1
+print(f"check-assets: self-test N42 doctored {doctored_tracks} track licence(s) of artist "
+      f"{victim} to BY-NC-ND")
+if doctored_tracks == 0:
+    g.refuse("SELF-TEST BROKEN — N42 doctored no licence, so it would prove nothing")
+snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+                     encoding="utf-8")
+g.negative("N42 (an artist whose only candidate cover is NC/ND)",
+           lambda: catalogue_derivation(s), want="has no CC BY or BY-SA album")
+
+g.negatives_ran(44)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",
@@ -1516,6 +1581,7 @@ g.counted("files under the asset root",
 out, bad = check(ROOT)
 bad += media_derivation(ROOT)
 bad += covers_derivation(ROOT)
+bad += catalogue_derivation(ROOT)
 print("\n".join(out))
 if bad:
     for b in bad:

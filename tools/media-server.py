@@ -12,7 +12,8 @@ dev_shell_or_die()
 # through tools/lib/media_server.py. Range is load-bearing: AVPlayer refuses a
 # server that ignores it (-11850, docs/probes/media-suite-2026-09-29.md).
 # The covers family and /status/ are the network-images scenes'
-# (docs/network-images-plan.md §5).
+# (docs/network-images-plan.md §5); /catalogue/ is the Jamendo mirror, routed
+# by tools/lib/catalogue.py (docs/media-player-plan.md M2).
 
 import argparse
 import http.server
@@ -22,6 +23,8 @@ import select
 import socket
 import threading
 import time
+
+import catalogue
 
 FAMILY = ROOT / "guests" / "assets" / "media"
 FAMILIES = {"covers": ROOT / "guests" / "assets" / "covers"}
@@ -43,6 +46,7 @@ TYPES = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
+    ".json": "application/json",
 }
 
 RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
@@ -123,8 +127,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         f = family / name
         return f if f.is_file() else None
 
-    def _head(self, send_body):
-        f = self._file()
+    def _head(self, send_body, f=None, ctype=None):
+        f = f or self._file()
         if f is None:
             self.send_response(404)
             self.send_header("Content-Length", "0")
@@ -158,7 +162,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         began = time.monotonic()
         self.say(f"request {self.command} {self.path} range {rng or '-'}")
         self.send_response(status)
-        self.send_header("Content-Type", TYPES.get(f.suffix, "application/octet-stream"))
+        self.send_header("Content-Type", ctype or TYPES.get(f.suffix, "application/octet-stream"))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Content-Length", str(len(body)))
         if status == 206:
@@ -224,10 +228,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.close_connection = True
         self.served += 1
 
+    def _catalogue(self, send_body):
+        got = catalogue.resolve(self.path)
+        if got is None:
+            self.say(f"request {self.command} {self.path}: the snapshot holds nothing for "
+                     f"{catalogue.key_of(self.path)}, answered 404")
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            self.served += 1
+            return
+        kind, payload, ctype = got
+        if kind == "file":
+            self._head(send_body, payload, ctype)
+            return
+        self.say(f"request {self.command} {self.path}: answer {catalogue.key_of(self.path)}")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if send_body:
+            self.wfile.write(payload)
+        self.served += 1
+        self.say(f"sent {self.command} {self.path} 200 {len(payload) if send_body else 0} bytes")
+
     def _route(self, send_body):
         status = STATUS.match(self.path)
         if status:
             self._status(int(status.group(1)))
+        elif self.path.startswith(catalogue.PREFIX):
+            self._catalogue(send_body)
         elif self.path.startswith(TRICKLE):
             self._trickle(send_body)
         else:
@@ -246,7 +276,8 @@ def main():
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     server = http.server.ThreadingHTTPServer((args.bind, args.port), Handler)
-    also = ", ".join(f"/{k}/ from {v}" for k, v in FAMILIES.items())
+    also = ", ".join(f"/{k}/ from {v}" for k, v in
+                     {**FAMILIES, "catalogue": catalogue.FAMILY}.items())
     print(f"media-server: {stamp()} serving {FAMILY} and {also} on http://{args.bind}:{args.port} "
           f"pid {os.getpid()}", flush=True)
     server.serve_forever()

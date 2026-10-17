@@ -34,8 +34,8 @@ SERVER_NEEDS = [
     ('FAMILIES = {"covers": ROOT / "guests" / "assets" / "covers"}', "the covers family"),
     ('STATUS = re.compile(r"^/status/(\\d{3})(?:/|$)")', "the /status/<code>/ route"),
     ('        status = STATUS.match(self.path)\n        if status:\n'
-     '            self._status(int(status.group(1)))\n        elif self.path.startswith(TRICKLE):',
-     "/status/ routed ahead of /trickle/ and the files"),
+     '            self._status(int(status.group(1)))\n        elif self.path.startswith(catalogue.PREFIX):',
+     "/status/ routed ahead of /catalogue/, /trickle/ and the files"),
     ('self.send_header("Content-Length", "0")\n        self.send_header("Connection", "close")',
      "a status answer with no body that closes"),
     ('closed by the client', "the trickle's log of a client that let go"),
@@ -51,6 +51,7 @@ def predicate_findings(text):
     out = []
     for name, want in [("media_formats", True), ("media_formats-rust", True),
                        ("netimage_http", True), ("netimage_http-go", True),
+                       ("music_home", True), ("music_dock-python", True), ("music", False),
                        ("netimage", False), ("media", False)]:
         if bool(serves(name)) != want:
             out.append(f"{PREDICATE}: serves({name!r}) answers {not want}, wanted {want}")
@@ -103,8 +104,11 @@ def run(g):
                    want="spells the server's condition")
     cuts = [
         (PREDICATE, "the predicate without netimage_http",
-         r'SERVED = \("media_", "netimage_http"\)',
-         'SERVED = ("media_",)', "serves('netimage_http') answers False"),
+         r'SERVED = \("media_", "netimage_http", "music_"\)',
+         'SERVED = ("media_", "music_")', "serves('netimage_http') answers False"),
+        (PREDICATE, "the predicate without music_",
+         r'SERVED = \("media_", "netimage_http", "music_"\)',
+         'SERVED = ("media_", "netimage_http")', "serves('music_home') answers False"),
         (SERVER, "no JPEG type", r'\n    "\.jpg": "image/jpeg",', "", "lacks the JPEG type"),
         (SERVER, "no PNG type", r'\n    "\.png": "image/png",', "", "lacks the PNG type"),
         (SERVER, "no /status/ route", r"status = STATUS\.match\(self\.path\)",
