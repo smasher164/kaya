@@ -1,0 +1,693 @@
+# The media player demo: the design pass (2026-10-17)
+
+Status: PROPOSED 2026-10-17, awaiting the maintainer's rulings (§8). Nothing
+is built. The roadmap card (docs/roadmap/editorial.toml, "The media player")
+names the app: a music client styled toward the egui Spotify screenshot the
+maintainer saw on 2026-10-08, over a public catalogue, shipping with audio
+and Now Playing on every platform, media keys, sliders, tables, the
+three-pane window, the search field, the secure field and autofill for
+sign-in, the segmented control for its filter chips, and the toast. Two
+passes were built for it and both leave their last step to this app: the
+styling pass (docs/styling-pass-plan.md Y11 and §6 steps 4 and 5: the demo's
+screens in Y11's order, each a review capture on every lane) and network
+images (docs/network-images-plan.md N17: album art from a public catalogue
+over https, and §6 step 7's review page). docs/media-plan.md is the player
+and the media session it plays through. docs/safe-area-plan.md and
+docs/network-images-plan.md are the shape of this document; the chat app
+(docs/chat-plan.md), the portfolio (docs/portfolio-plan.md) and the task
+manager (docs/tasks-plan.md) are the precedents for how a demo is written,
+scened and run.
+
+Words used in this file, each as the field uses it:
+
+- A CATALOGUE is a music service's database of artists, albums and tracks,
+  reached over an API (a set of web addresses that answer in JSON). A
+  STREAM here is the plainest kind: the player is given the https address of
+  one audio file and downloads it while playing, asking for pieces with HTTP
+  RANGE requests (a header naming a byte span, answered with status 206).
+- A CLIENT ID (also API key) is a string a service issues to an
+  application, sent with every request so the service can count and limit
+  that application's use. It identifies the APP, not a person. SIGNING IN
+  is the other thing: a person proving who they are, after which the app
+  holds a TOKEN on that person's behalf (OAuth is the usual protocol).
+- HERMETIC means a test reaches nothing outside the machine running it, so
+  it gives the same answer offline, when the service is down, and in ten
+  years. A SNAPSHOT is a small copy of a catalogue's answers and files taken
+  once; a MIRROR is a local server that serves the snapshot at addresses
+  shaped like the real ones.
+- CREATIVE COMMONS (CC) licences let anyone copy a work under conditions
+  named by letters: BY (credit the author), SA (share-alike: a changed copy
+  carries the same licence), NC (non-commercial use only), ND (no
+  derivatives: only verbatim copies). CC0 waives everything. Trimming a
+  track to a clip is a derivative, which ND forbids.
+- NOW PLAYING is the operating system's own display of what an app is
+  playing (Control Centre and the lock screen on Apple, the media
+  notification on Android, the GNOME Shell media card through MPRIS, the
+  Windows media flyout through its System Media Transport Controls). MEDIA
+  KEYS are the keyboard's and headset's play, pause, next and previous
+  keys; the system routes them to whichever app holds the media session
+  (docs/media-plan.md §5).
+- A QUEUE is the ordered list of tracks to play next. GAPLESS playback
+  starts the next track with no silence between, which needs the next file
+  opened before the current one ends (PRELOADING).
+- A SHELF is a single horizontal row of cards that scrolls sideways; a CARD
+  GRID wraps cards onto as many lines as they need.
+
+## §0: What exists, what the earlier demos did, and what the catalogues offer
+
+### What the demo's screens need, against the tree at b2a5d252
+
+Read from the tree on 2026-10-17. "Built" means built on all five lanes and
+in all nine bindings unless said otherwise.
+
+| screen (Y11's order) | needs | state |
+|---|---|---|
+| 1. Library sidebar | the panes window (docs/multicolumn-plan.md), two-line rows with rounded art (Y5, Y6), the selected row (Y4), `on_activate` on a stamped row | built |
+| 1. Home | cards that take a click as a whole with the platform's hover (Y4), rounded art, the caption role, a fitting grid (`min_column_width`, docs/layout-knobs-plan.md §3) | built for a LIVE grid; a collection's For cannot be laid out as a grid (crates/kaya/src/scene.rs:1552 holds `columns` to the Grid widget, and a For is its own container, scene.rs:7398-7410); a For in a sideways scroll (a shelf) is built (guests/rust/scrollto.rs:63-77) |
+| 1. Home | art per card from the network, phases and the fetch helper (docs/network-images-plan.md N2, N7, N8, N12) | built |
+| 2. Playlist | a table whose title cell is art beside two lines, the pinned header, the playing track's tinted name (Y5-Y7, tools/scenes/tracks.steps) | built |
+| 2. Playlist | a row that plays on double-click or Return | ruled (Y4: on the macOS native table, `on_activate` is the table's double-click action and `selected` its own selection) and NOT BUILT on the macOS native tier: swift/KayaSwiftUI.swift names no `doubleAction`, and the native table driver wires no activation or selection. A defect against a ruling, fixed in §6 step 2, not a new ruling |
+| 2. Playlist | a context menu on a track (Add to queue, Go to artist) | built for stamped rows (a template's context catalog, docs/traps.md's catalog entries); on the macOS native table UNMEASURED |
+| 2. Playlist | track and playlist durations ("3:45", "1 hr 12 min") | NOT BUILT: crates/kaya/src/fmt.rs has date, time, number, percent, currency and timecode, no duration (§2 M9) |
+| 3. Gradient header | the gradient ground from one data colour, `image_dominant` (Y2) | built |
+| 4. Dock (player bar) | the dock (Y8), the player (docs/media-plan.md §2), a progress slider and a volume slider, transport buttons | dock, player and sliders built; the TRANSPORT SYMBOLS are NOT BUILT: crates/kaya/src/wire.rs's SYMBOLS has 25 entries and none is play, pause, next, previous, shuffle, repeat or volume (§2 M8) |
+| 4. Dock | the progress slider moved by the player's position every 250 ms (crates/kaya/src/media.rs `POSITION_TICK_MS`) while the user may be dragging it | NO RULE: every backend applies an app's write at once, mid-gesture (KayaSwiftUI.swift:15166, KayaCompose.kt:22118, gtk.rs:16488, winui/mod.rs:17873), so the thumb jumps back under the finger (§2 M10) |
+| 4. Dock, phones | the full player as a sheet with detents | built (docs/sheet-plan.md) |
+| 5. Artist page | the image ground with text inside an `overlay` panel (Y3), a round avatar (Y6) | built |
+| all | the media session with next and previous offered, so media keys skip | built: an action in the app's mask reaches it as `session_action` (media.rs:536-549) |
+| all | Now Playing artwork for a track whose art came from the network | NOT BUILT: `artwork` is an asset name only (crates/kaya/src/protocol.rs:581-582; media.rs:515-520 panics on anything else) (§2 M7) |
+| all | the next track | one source per player (spec.rs:428-439): no queue, no preload, no gapless; the app swaps `source` on `ended` or `next` (§2 M11) |
+| Search | the search field, results filtered by the segmented control | built (docs/search-plan.md, docs/segmented-plan.md) |
+| all | the toast with an action ("Added to Liked Songs", Undo) | built (docs/toast-plan.md) |
+| sign-in | the secure field, autofill's username and password content types | built (docs/secure-entry-plan.md, docs/autofill-plan.md); whether the demo has anything to sign in to is §2 M4 |
+| attribution | a link per track to its page at the source, the licence named | built (the `link` role) |
+
+### How the earlier demos were built
+
+| demo | language | why that language | how it runs on the lanes |
+|---|---|---|---|
+| the editor (docs/editor-plan.md) | Go | "an editor in Rust would be kaya testing itself" | one Go guest under guests/go/editor, alone between drains on every lane |
+| the portfolio (docs/portfolio-plan.md) | Python | "one other language just for diversity's sake", the dynamic binding with the ambient transaction | one file, guests/python/portfolio.py; the phones since 2026-08-30 through the Python host (tools/ios/run-sim.py stages `PYTHON_SCENES`, tools/android/run-emulator.py copies the scene files into android/pyhost) |
+| the task manager (docs/tasks-plan.md) | Rust | the first app, the reference binding | guests/rust/tasks.rs, the same example under several scripts (`taskspersist`, `tasksrtl`, `tasksbig`) through tools/lib/lanes/mac.py's `HAND_QUEUED` |
+| the chat app (docs/chat-plan.md R1) | Go | "one of the three languages that run on all five lanes"; "Rust would test nothing new" | guests/go/chat, its peer a server inside the app on loopback; `("chat", ("go",))` alone between drains on the mac, tools/lib/lanes/win.py's `GO_ONLY_SCENES`, a `chatgo` bundle on iOS |
+| the video editor (docs/video-editor-plan.md) | Rust, ruled | | not built |
+
+Each demo is ONE language, and its scenes are shared scripts in tools/scenes
+read byte for byte on every lane that runs that language. The toolkit
+surfaces a demo uses are held in all nine bindings by the sugar census
+(invariants 1 and 2), whatever the demo is written in. The languages that run
+on all five lanes are Rust, Go and Python; Swift runs on the mac and iOS,
+Java on the three desktops and Android, C# and JS on the three desktops, OCaml
+and Haskell on the mac and linux.
+
+### The catalogues, surveyed and probed (MEASURED 2026-10-17 from the desk)
+
+Every row below was probed with curl from the mac on 2026-10-17 between
+about 17:30 and 18:00 UTC, with a User-Agent naming the probe; timings are
+total seconds from this desk; image sizes were read from the JPEG, PNG or
+GIF header; audio by a ranged request for its first 200 KB with the first
+MPEG frame's header parsed. Nothing was registered: no account was made at
+any service.
+
+| catalogue | who runs it | audio | art | key or account | terms that matter | may a snapshot be committed | measured |
+|---|---|---|---|---|---|---|---|
+| Jamendo API v3 | Jamendo S.A., Luxembourg | whole tracks, direct https MP3: `mp31` 96 kbps constant, `mp32` about 192 kbps variable; 0 redirects; Range honoured (206) | album covers 25 to 600 px square by a `width` parameter (300, 500, 600 measured JPEG; one album's original is a GIF at every width); artist images 500 px | a `client_id` on every API call, free and self-serve for non-commercial use, 35,000 requests a month; the audio and image hosts need none | credentials "strictly personal" and never shared; credit the artist and Jamendo with a backlink per item; no app "specifically designed to cache the content" or offer offline access; not to replicate Jamendo's own look | per track: CC BY and BY-SA yes (trimmed too), ND only verbatim, NC no | API answers in 0.4 to 1.0 s; every client id circulating in tutorials is dead (`your_client_id` invalid, `709fa152` "suspended", `b6747d04` "usage limits are exceeded"); a 272 s track's `mp31` is 3,291,136 bytes, a 600 px cover 35,177 bytes, an artist image 18,421 bytes |
+| Openverse | the WordPress Foundation (once Creative Commons' search) | Jamendo's storage addresses, as above | a 300x300 thumbnail; Jamendo's keyless image host to 600 | none: anonymous 20 requests a minute, 200 a day, 20 results a page (read off the response headers); free registration raises them | per-source licences; ready-made attribution sentences and the Jamendo backlink | filters to `license=by,by-sa` on the server | 200 in 2.0 s, 18 KB for 10 results; no album, artist or playlist endpoints; Jamendo rows last indexed about 2022 |
+| Internet Archive netlabels | the Internet Archive | MP3 originals (128 kbps measured) and 64 kbps copies; one redirect to a storage node; Range honoured; https throughout | the uploaded cover, small and not always square (284x270, 300x300 measured), a 180 px tile; no resizing | none | per item `licenseurl`, often blank | CC BY 3.0 alone: 998 netlabel items | search 0.6 s, item 0.7 s, audio 1.1 s; "artist" is free text and there are no artist images or playlists |
+| Free Music Archive | Tribe of Noise, Netherlands | no API (shut down; `/api` answers 404) | | | no hotlinking, no scraping; "use FMA music provided you host it on your own server" | per track CC | site up, API gone |
+| MusicBrainz + Cover Art Archive | the MetaBrainz Foundation | none | 250, 500, 1200 px and the original (3500 px measured); two redirects; one 500 on a first try | none; a User-Agent naming the app and 1 request a second | data CC0; covers carry no licence ("use at your own risk") | covers no | MusicBrainz 1.1 s; covers 2 to 3 s cold |
+| ccMixter | ArtisTech Media | MP3 that answers 403 unless the request claims to come from ccmixter.org (a Referer header) | avatars only | none | per upload CC | CC BY uploads yes | a native player sends no Referer, so the audio does not play |
+| Audius | Audius Inc. | 320 kbps MP3 through two redirects to an address that expires in 5 minutes | 150, 480, 1000 px; artist pictures and wide cover photos | an `app_name` only (measured); an optional free key | the artists' own copyrighted music under Audius' terms | no | 0.5 to 2.3 s |
+| iTunes Search | Apple | 30 s AAC previews only | any size by rewriting the address (100, 300, 600 measured) | none, about 20 a minute | promotion of the store only, no redistribution | no | 0.5 to 0.9 s |
+| Spotify Web API | Spotify | none for new apps since 2024-11-27 | 64, 300, 640 | an account and an OAuth token | no redistribution | no | 401 without a token |
+| SoundCloud | SoundCloud | needs OAuth | | a registered app (registration restricted) | copyrighted | no | 401 without a token |
+| Wikimedia Commons, Freesound | Wikimedia; Universitat Pompeu Fabra | single files and sounds, no albums | none | none; Freesound a key | per file | CC0, BY, BY-SA files yes | not a catalogue |
+
+What the survey settles: Jamendo is the one free catalogue shaped like
+Spotify's (artists with several albums, square covers per album, artist
+images, playlists, featured charts by genre) with whole tracks a native
+player can stream from a plain https address, and every track labelled with
+its licence, so the redistributable part can be picked by a program. Its one
+cost is the client id, which its terms forbid sharing, so none may be in the
+repository. MEASURED from Openverse's index: the Jamendo artist "Rataxes" has
+37 tracks over 8 albums, 7 albums CC BY; Kevin MacLeod's albums there are
+mostly BY-NC-ND. Licences vary by album and by artist, so a snapshot must be
+chosen per track AND per album.
+
+## §1: The app, in one page
+
+A music client in the shape of the reference (docs/styling-pass-plan.md §0,
+"The reference look"), with these screens:
+
+- DESKTOPS: a three-pane window. The SIDEBAR holds Home, Search and Your
+  Library as destinations, then the user's saved playlists and albums as
+  two-line rows with rounded art, the one being viewed selected. The CONTENT
+  pane is a navigation stack: Home, a playlist or album, an artist, search
+  results. The THIRD pane is Now Playing: the playing track's large art, its
+  two lines, the licence and its link, then the queue. The DOCK spans the
+  window's foot under all three: the playing track's art and two lines,
+  previous, play or pause, next, shuffle and repeat, the progress slider with
+  elapsed and total times, and volume.
+- PHONES: the window's sections (Home, Search, Library) in the tab bar, the
+  dock above it (iOS 26's tab bar accessory where available, Y8), and the
+  full player as a sheet with detents when the dock is tapped.
+- HOME: shelves titled by genre or chart ("Popular this week", "Jazz",
+  "Electronic"), each a row of cards (rounded art, title, caption), the card
+  under the pointer lightened, a click opening the album.
+- PLAYLIST OR ALBUM: the gradient header from the cover's dominant colour,
+  the large cover, the title in the heading role, a caption ("Rataxes · 2015
+  · 6 songs, 24 min"), a play button, then the track table: index, title cell
+  (art and two lines), album, duration; the playing row's name tinted
+  accent; double-click or Return plays from that row.
+- ARTIST: the artist image as the page's ground with the name inside an
+  `overlay` panel, a round avatar, then the artist's albums as a shelf and
+  the top tracks as a table.
+- SEARCH: the search field, the segmented control (All, Artists, Albums,
+  Tracks), results grouped under it.
+- TOASTS: "Added to Liked Songs" with Undo; "Couldn't reach the catalogue"
+  with Retry.
+- LIKED SONGS: the app's own list, kept in the app's preferences store
+  (docs/tasks-s4-plan.md's precedent), never on the catalogue.
+
+The app owns the catalogue client, the queue, shuffle and repeat, the liked
+songs and every request; kaya owns the layout, the player and its decoding,
+the session, the images' decoding and cache, and the slider's gesture. The
+catalogue is reached through ONE interface in the app with one real
+implementation and the mirror's address in its place under the harness (M2),
+so the scenes run the same parsing, fetching and playing code the person
+runs by hand.
+
+## §2: The rulings (PROPOSED 2026-10-17)
+
+### M1: The catalogue is Jamendo, through its own API, with the person's own client id
+
+RECOMMEND Jamendo's API v3 for the app run by hand, with a client id the
+person registers for free at Jamendo's developer portal and gives the app:
+on the desktops through an environment variable (`KAYA_JAMENDO_CLIENT_ID`),
+on the phones and the desktops alike through a one-field "Connect a
+catalogue" sheet whose value the app keeps in its preferences store. With no
+id the app opens on the bundled sampler (the snapshot of M2, read from the
+app's own assets), says so in one line on Home, and offers the sheet. Audio
+streams from Jamendo's storage host as `mp32` (about 192 kbps); covers come
+from its image host at 300 px for rows and cards and 600 px for headers and
+Now Playing; the artist image at 500 px. Every track's page shows its
+licence by name and links to its Jamendo page, which is the terms' credit
+and backlink clause.
+
+Why: §0's survey. Jamendo is the only free catalogue with the reference's
+structure (artists, several albums each, per-album covers, artist images,
+playlists, featured charts) and whole tracks on plain https addresses that
+every platform's player opens, Range included. Its terms make the client id
+personal, so the repository cannot carry one, which is also why every public
+id is dead: an id in a public repository gets used up by strangers. The
+sampler keeps the app useful to someone who has not registered, and costs
+nothing beyond M2's snapshot, which exists for the lanes anyway.
+
+Two points of the terms the maintainer should see before ruling. (a)
+"Applications must not be specifically designed to cache the content nor
+offering an offline access to the content": the app caches nothing from the
+live catalogue (images are cached decoded in memory by kaya, N10, which is a
+display cache, not offline access); the sampler is a separate set of files
+taken under their CC licences (M2), which govern redistribution whatever the
+API's terms say about apps. (b) "not ... confusingly similar to the design
+or look and feel" of Jamendo: the reference look is Spotify's, not
+Jamendo's.
+
+Alternatives:
+- (b) OPENVERSE as the live catalogue: no key at all, licence filtering on
+  the server, attribution sentences ready-made. Refused as the default
+  because it has no album, artist or playlist entities (an album's tracklist
+  is a search), its Jamendo index stops about 2022, and 200 anonymous
+  requests a day is a few minutes of browsing. It could serve as the no-id
+  mode instead of the sampler; that is a second live client to write and
+  hold green by hand.
+- (c) INTERNET ARCHIVE netlabels: no key, CC BY material by the thousand,
+  but small and often non-square covers, artists as free text and no artist
+  images, so the artist page and the Home grid would be a curated fiction.
+- (d) AUDIUS: current, rich, 320 kbps and keyless with an app name, but the
+  music is copyrighted, so nothing can be snapshotted and the lanes would
+  test against different music than the person hears.
+- Refused: Spotify and SoundCloud (no audio for new apps, OAuth), iTunes
+  Search (30 s previews, promotion only), MusicBrainz with the Cover Art
+  Archive (no audio; covers not redistributable), Free Music Archive (no
+  API), ccMixter (audio refused to a request without the site's Referer).
+
+### M2: The lanes run against a mirror of a Jamendo snapshot, served by the lane's media server
+
+RECOMMEND a snapshot of Jamendo's answers and files, committed under
+guests/assets as a new family `catalogue`, served by the lane's media server
+(tools/media-server.py) at addresses SHAPED LIKE JAMENDO'S, and the app
+pointed at it under the harness by the address the lanes already hand every
+media guest (`KAYA_MEDIA_URL`, read by guests/rust/netimage_http.rs today).
+
+- WHAT IS IN IT: three artists, two albums each, two tracks from each album
+  (twelve tracks), every track AND its album CC BY or CC BY-SA, plus each
+  album's cover at 300 and 600 px and each artist's image at 500 px, and the
+  JSON answers for exactly the requests the app makes (the featured charts
+  for Home, each album and its tracks, each artist and their albums, two
+  searches, one playlist). Covers that Jamendo serves as GIF are transcoded
+  to JPEG, or the album is skipped.
+- CLIPS, NOT WHOLE TRACKS: each track trimmed to 20 s and kept as Jamendo's
+  own `mp31` MP3 (96 kbps): about 240 KB a clip, about 2.9 MB for twelve,
+  with covers and artist images about 0.8 MB more. Whole tracks would be 3 to
+  5 MB each, 40 to 60 MB in all, and the asset root is staged whole onto
+  every lane and into every phone bundle (tools/check-assets.py). The JSON's
+  durations are the clips', so the table, the slider and the player agree.
+- THE ADDRESSES KEEP JAMENDO'S SHAPE: the mirror answers
+  `/catalogue/v3.0/albums/tracks?...`, `/catalogue/storage/?trackid=<id>&format=mp31`
+  with `audio/mpeg` and no file extension, and
+  `/catalogue/usercontent?type=album&id=<id>&width=600`, because a player
+  that infers a type from a file extension (AVFoundation, Media Foundation)
+  is exactly what the extensionless live address would break, and a mirror
+  serving `track.mp3` would pass a scene the person's app then fails. The
+  server grows a query-routed family and the `application/json` type.
+- THE SNAPSHOT IS MADE BY A TOOL, a `gen-catalogue.py` beside
+  tools/gen-covers.py, run once by the maintainer with his own client id
+  (never stored): it fetches, refuses any track or album whose
+  `license_ccurl` is not CC BY or CC BY-SA, trims with the dev shell's FFmpeg,
+  transcodes GIFs, rewrites every address in the JSON to the mirror's
+  relative form, and writes the family's README with an ATTRIBUTION table
+  (title, artist, album, source page, licence, "trimmed to 20 s"). Its
+  `--check` mode reads only the committed files (the network is not
+  hermetic): every address in the JSON resolves to a file, every file is
+  named by the JSON, every track's licence is in the allowed set.
+- BY HAND, THE SAMPLER (M1's no-id mode) reads the same family through
+  `asset(name)` with no server: the app's catalogue client takes a FETCH
+  function (N12's shape), and the sampler's fetch maps the mirror's addresses
+  to asset reads.
+
+Why: the chat app's rule (a real network path through the guest's own
+stack, nothing outside the machine) and the media suite's (a local server
+with Range, never the internet, docs/media-plan.md §7a). A lane that reached
+Jamendo would go red when Jamendo is slow, when the free quota runs out, or
+when an artist withdraws an album, and could not carry a client id at all.
+
+Alternatives: (b) the lanes run against the assets with no server, as the
+sampler does: the network images helper, the player's https path and the
+failure paths would then go unexercised by the demo's own scenes. (c) whole
+tracks: 40 to 60 MB in every bundle. (d) synthetic music (tones, like the
+media suite's clips) with synthetic covers: no licence question at all, but
+the review page would show test patterns where the reference shows albums,
+and the dominant colour and the gradient would be read off flat fills.
+
+### M3: The demo is written in Python
+
+RECOMMEND Python, as one file `music.py` beside guests/python/portfolio.py,
+run on all five lanes through the Python host as the portfolio is.
+
+Why: the demo must run on all five lanes, because every screen is a review
+capture on every lane (Y11, §6), and only Rust, Go and Python do. Rust wrote
+the task manager and will write the video editor; Go wrote the editor and
+the chat app. Python wrote one app, and that app reads no network, starts no
+background work and plays nothing. This one exercises exactly the Python
+surfaces no app has: the network images helper's default fetch over the
+standard library (`urllib.request`, docs/network-images-plan.md N16), a
+background thread posting results into the ambient transaction, the player's
+occurrences and the session's handlers in the dynamic binding, the skin's
+template props in Python's row templates, and the second Python app on the
+phones' Python host. The surfaces it uses stay held in all nine bindings by
+the census, whatever the demo is written in.
+
+Risk, to be measured first (§7): whether the CPython embedded in the phone
+bundles verifies https certificates with the standard library alone. The
+lanes do not depend on it (the mirror is plain http, M2), only the person's
+hand run on a phone. If it does not, the app's fetch loads a CA bundle file
+shipped with the app, a dependency to rule then.
+
+Alternatives: (b) Go, the safest https on every platform (its standard
+library reads the system's roots on iOS and Android), at the cost of a third
+Go app testing what chat already tested; (c) Rust, whose fetch is the pinned
+`ureq` with its own bundled roots, at the cost of "Rust would test nothing
+new" (docs/chat-plan.md R1); (d) Java, a language no demo has used, on four
+lanes, with iOS missing from every review capture; (e) Swift, likewise new,
+on two lanes.
+
+### M4: No account and no sign-in; the only credential is the catalogue's client id
+
+RECOMMEND that the demo has no sign-in. Jamendo's reads need no person, only
+the app's client id (M1), and the person enters that once on the "Connect a
+catalogue" sheet in a SECURE FIELD (docs/secure-entry-plan.md), since the
+terms call it personal and it should not sit on screen. The field takes no
+autofill content type, because a client id is not a username or password and
+a password manager offering one would be wrong. Liked songs and the library
+are the app's own, local. The roadmap line's "the secure field and autofill
+for sign-in" becomes "the secure field for the catalogue's key"; autofill's
+first app home stays the proposed password manager (docs/roadmap/editorial.toml,
+"3. A password manager"), where a sign-in is the subject.
+
+Why, from zero: signing in to Jamendo as a person (its "Jamendo Connect",
+OAuth) is only needed for the person's own favourites and playlists on
+Jamendo. OAuth on a native app means opening the service's sign-in page in
+the platform's web authentication session (ASWebAuthenticationSession on
+Apple, Custom Tabs on Android, the system browser with a loopback redirect on
+the desktops) and keeping the returned token in the platform's secure store
+(the Keychain, Android's Keystore, Windows' Credential Locker, libsecret).
+kaya has neither: the web authentication session is not on the roadmap and
+the secure store is the unbuilt "Biometrics and secure storage (keychain)"
+feature (docs/roadmap/features.toml, `biometrics`, cost L). A sign-in form
+that signs into nothing would be a prop, which this repository does not
+ship.
+
+Alternatives: (b) Jamendo Connect for real: two new subsystems (the web
+authentication session and the secure store), each L, before the demo; (c) a
+username-and-password form against the lane's mirror only: refused, it signs
+into nothing a person can use.
+
+### M5: The appearance follows the system, both shown on the review page (CARRIED, not asked)
+
+Y11 ruled it on 2026-10-15: the demo declares no `appearance` and follows
+the system; the review page shows every screen in light and in dark. The
+lanes run both through `KAYA_APPEARANCE` (the dark legs' precedent,
+tools/lib/lanes/mac.py's `DARK_LEGS`).
+
+### M6: Three panes on the desktops, sections and the dock on the phones
+
+RECOMMEND §1's shape: `panes` with a sidebar, a content stack and a Now
+Playing pane on the desktops (the pane ladder collapses the third pane first
+on a narrow window, docs/multicolumn-plan.md); sections Home, Search and
+Library on the phones, where the third pane is the player sheet. The dock is
+attached once to the window and hidden while nothing has played.
+
+Why: it is the reference's anatomy, and the roadmap card names the
+three-pane window. Spotify's own right-hand "Now playing view" is the third
+pane's model.
+
+Alternatives: (b) two panes, Now Playing only in the dock and a sheet
+everywhere: simpler, and the three-pane window would go unused by any demo;
+(c) one window per screen: no platform's music app does that.
+
+### M7: Now Playing artwork from the app's bytes (a GAP)
+
+RECOMMEND that the session's `artwork` take what an image's `source` takes:
+an asset name OR bytes the app registered (the content-keyed bytes network
+images write, docs/network-images-plan.md N7, N10), so the art the app
+downloaded for its dock is the art the lock screen shows. Per platform:
+
+| platform | artwork from bytes |
+|---|---|
+| macOS, iOS | `MPMediaItemArtwork(boundsSize:requestHandler:)` answering an NSImage or UIImage decoded from the bytes |
+| Android | media3 `MediaMetadata.Builder.setArtworkData(bytes, PICTURE_TYPE_FRONT_COVER)` |
+| GTK (MPRIS) | `mpris:artUrl` takes only a URL, so kaya writes the bytes once per content id to a file in the app's cache directory and names it `file://`, removed at exit |
+| WinUI | `SystemMediaTransportControlsDisplayUpdater.Thumbnail` from `RandomAccessStreamReference.CreateFromStream` over an in-memory stream |
+
+Why: today the lock screen and the media flyout can show only an album
+bundled with the app, so every catalogue app shows the wrong or no art.
+Taking the same bytes the image takes reuses the content id and N1's rule
+(kaya fetches nothing).
+
+Alternatives: (b) artwork by https address, which each platform but GTK
+would fetch itself: refused by N1 (no HTTP in kaya) and it would fetch every
+cover twice; (c) no artwork for network art: the demo's Now Playing would
+show a blank square on every platform.
+
+### M8: The transport symbols join the symbol vocabulary (a GAP)
+
+RECOMMEND ten symbols in crates/kaya/src/wire.rs's SYMBOLS, each the
+platform's own glyph, checked against each platform's floor by
+tools/check-symbols.py and held across the six files by
+tools/check-symbol-parity.py:
+
+| name | SF Symbols | Material | Adwaita | Segoe Fluent Icons |
+|---|---|---|---|---|
+| `play` | play.fill | play_arrow | media-playback-start-symbolic | Play (E768) |
+| `pause` | pause.fill | pause | media-playback-pause-symbolic | Pause (E769) |
+| `next` | forward.end.fill | skip_next | media-skip-forward-symbolic | Next (E893) |
+| `previous` | backward.end.fill | skip_previous | media-skip-backward-symbolic | Previous (E892) |
+| `shuffle` | shuffle | shuffle | media-playlist-shuffle-symbolic | Shuffle (E8B1) |
+| `repeat` | repeat | repeat | media-playlist-repeat-symbolic | RepeatAll (E8EE) |
+| `repeat_one` | repeat.1 | repeat_one | media-playlist-repeat-song-symbolic | RepeatOne (E8ED) |
+| `volume` | speaker.wave.2.fill | volume_up | audio-volume-high-symbolic | Volume (E767) |
+| `queue` | list.bullet | queue_music | view-list-symbolic | List (EA37) |
+| `favorite` | heart, heart.fill when on | favorite_border, favorite | heart symbolic names to be read from the lane image's Adwaita theme | Heart (EB51), HeartFill (EB52) |
+
+The glyph names and code points are the vendors' published names as this
+pass recalls them, NOT yet checked against the installed sets; each is
+confirmed at the depth (§7), and
+`favorite`'s filled state rides the button's `checked` where the platform
+has a toggle button. The existing `star` stays the generic favourite.
+
+Why: a player bar of text buttons ("Play", "Next") is not the reference and
+not any platform's music app; the chat composer's icon-only buttons are the
+precedent for a symbol with an accessibility label.
+
+Alternative: the app ships its own glyph images: refused by
+docs/styling-plan.md's symbol rule (symbols are the platform's).
+
+### M9: A positional duration formatter (a GAP)
+
+RECOMMEND `format_duration(ms)` answering positional time, "3:45" or
+"1:02:03", in the locale's own digits (Arabic-Indic digits under `ar`, the
+format scene's precedent), composed by the core from the number formatter on
+every platform so the five lanes print one string. The playlist's total
+("6 songs, 24 min", "about 3 hr") is the app's own catalog message with plural
+arguments (docs/compliance-plan.md §2.4), not a formatter.
+
+Why: every track row, the dock's two times and the header's caption need it;
+an app spelling `f"{m}:{s:02}"` prints European digits in an Arabic shell,
+which tasksrtl's discipline refuses. Apple has a positional formatter
+(`Duration.formatted(.time(pattern:))`, `DateComponentsFormatter`), Android
+has `DateUtils.formatElapsedTime`, glibc and Windows.Globalization have none,
+so composing it in the core from the number formatter's digits is the one
+spelling all five can share.
+
+Alternatives: (b) the native positional formatter where one exists and the
+core's elsewhere: two outputs that may differ by a separator; (c) none, the
+app composes it: the Arabic shell shows mixed digits.
+
+### M10: An app's write to a slider waits while the user's gesture is live (a GAP, measured first)
+
+RECOMMEND one rule on all four backends: while a pointer or keyboard gesture
+is driving a slider (the same "is a pointer driving" each backend already
+reads for the committed value, tools/check-slider-commit.py), a write from
+the app to `value` is held, and the last held value is applied when the
+gesture ends, unless the gesture's own commit superseded it. The app then
+binds the progress slider to the player's position with no bookkeeping, and
+seeks on `value_committed`.
+
+Why: today every backend applies the write at once (§0), so a playing
+track's 250 ms position ticks pull the thumb back under the user's finger
+while they scrub. The app can almost avoid it alone (ignore ticks between a
+non-final `value_changed` and the commit), but a press that has not moved yet
+has sent nothing, and every app with a playhead would re-derive the same
+rule; the video editor's playhead is the second.
+
+Alternatives: (b) the app's rule, documented, no kaya change; (c) a
+`scrubbing` reading the app can ask: refused, it is the app's bookkeeping
+moved behind a getter. To be measured before the ruling's build: on each
+backend, the thumb under a held pointer while the app writes (the jump is
+expected on SwiftUI's `updateNSView` and Compose's controlled slider; GTK and
+WinUI may already ignore a programmatic set during a drag).
+
+### M11: The queue is the app's; no gapless, no preload
+
+RECOMMEND that the app keep the queue, shuffle and repeat, and move one
+player to the next track by setting its `source` on `ended`, on the dock's
+next button and on the session's `next` action (offered in the session's
+mask so media keys skip, media.rs:536-549). Gapless playback and preloading
+the next item are deferred to the ledger (KEY: gapless, preload, queue).
+
+Why: a music app's queue is its own (shuffle orders, repeat-one, "play
+next"), and docs/media-plan.md §2 rule 3 already says the app owns play
+state. Gapless needs a second item opened before the first ends
+(AVQueuePlayer, ExoPlayer's playlist, playbin's `about-to-finish`,
+MediaPlaybackList), a new object on four platforms that this catalogue's
+albums do not need: few are mixed without gaps. The gap between two tracks
+is measured on each lane (§7) and goes on the review page.
+
+### M12: Home's cards are a live fitting grid per shelf; a collection laid out as a grid is deferred
+
+RECOMMEND that each Home shelf be a LIVE `grid` with `min_column_width`
+(docs/layout-knobs-plan.md §3), rebuilt in a transaction when the shelf's
+answer arrives, its cards' art live images fetched by the app's helper; at
+most twelve cards a shelf. A collection's For laid out as a grid (a lazily
+realized grid of hundreds) is deferred (KEY: For as a grid, lazy grid,
+LazyVGrid, GridView, ItemsRepeater) with its trigger: a "Show all" page or
+the photo gallery demo.
+
+Why: the reference's Home shows a dozen cards per shelf; a live grid holds
+that with no new kind, and the cards scene (tools/scenes/cards.steps) already
+proves the live grid's cards, hover and selection on every lane. A lazy grid
+is a new layout on four platforms (SwiftUI `LazyVGrid`, Compose
+`LazyVerticalGrid`, GTK `GtkGridView`, WinUI `ItemsRepeater` with
+`UniformGridLayout`) whose virtualization rules (docs/virtualization-plan.md)
+would need their own pass.
+
+Alternatives: (b) build the lazy grid now, a pass of its own (L); (c) shelves
+as sideways-scrolling Fors (built): the platform's sideways scroll with a
+mouse is awkward on the desktops and Spotify's desktop app does not use it,
+though its phone app does; available to the app on the phones if the
+maintainer prefers.
+
+### M13: The skin's choices, as the demo uses them
+
+RECOMMEND, all within rulings already made: cards and sidebar rows `neutral`
+filled with the platform's hover (Y4), art `rounded` and the artist avatar
+`circle` (Y6), the playlist header's colour from `image_dominant` of the
+600 px cover (Y2), the artist page's image ground with its name and follower
+line inside an `overlay` panel (Y3), the playing row's name tinted `accent`
+(Y7), the brand accent left at kaya's default (no Spotify green, which would
+be impersonating a brand on a public page).
+
+Why: the demo applies the pass, it does not extend it.
+
+## §3: Per platform
+
+| | macOS | iOS | GTK | WinUI | Android |
+|---|---|---|---|---|---|
+| window | panes, three columns, pane ladder | sections + dock as the tab bar's accessory (iOS 26) or a bottom inset | panes in AdwNavigationSplitView, dock as AdwToolbarView's bottom bar | NavigationView + a Grid row for the dock | sections + dock above the NavigationBar |
+| full player | the third pane | a sheet with detents from the dock's `on_activate` | the third pane | the third pane | a sheet |
+| audio from Jamendo's extensionless MP3 address | to be measured (AVURLAsset reads the type from the server's `audio/mpeg`) | the same | to be measured (souphttpsrc, typefind) | to be measured (Media Foundation's byte-stream handler by content type) | to be measured (media3's extractor sniffing) |
+| background playback | n/a | the `audio` background mode in the Python host's Info.plist (tools/ios/run-sim.py `make_bundle` writes it for a bundle whose app sets a session; the Python host is shared by every Python scene) | n/a | n/a | the media session's foreground service (docs/media-plan.md §5) |
+| media keys and Now Playing | MPRemoteCommandCenter, `playbackState` | the same, lock screen | MPRIS2, GNOME's media card | SMTC | media3 MediaSession, the media notification |
+| artwork from bytes (M7) | MPMediaItemArtwork | the same | a cache file, `file://` | an in-memory stream | `setArtworkData` |
+| table row activation | the native table's double-click and Return: NOT BUILT (§0) | the synthesized tier's tap | built | built | built |
+
+## §4: The wire and the sweep
+
+The gaps, if ruled as recommended, move the spec and reach every binding
+(invariant 2): M7 widens `set_session`'s `artwork` to an image source (the
+spec hash moves; all nine bindings and the C floor take bytes there, Python's
+`artwork=` keyword, Rust's builder, and so on); M8 adds ten values to the
+symbol enum (generated into every binding; the six hand-copied tables held
+by check-symbol-parity); M9 adds one function to the formatter door in all
+nine and the C floor (held by check-sugar-surface's formatter rows); M10
+changes no surface. M1-M6 and M11-M13 change nothing in kaya.
+
+| binding | M7 artwork bytes | M8 symbols | M9 duration |
+|---|---|---|---|
+| Rust | do | do (generated) | do |
+| Python | do | do | do |
+| Go | do | do | do |
+| C# | do | do | do |
+| Java | do | do | do |
+| Swift | do | do | do |
+| OCaml | do | do | do |
+| Haskell | do | do | do |
+| JS | do | do | do |
+| C floor | do, the TX record with the bytes' content id | do, the hand-written numbers held by check-symbol-parity | do |
+
+No language has a reason to defer any of the three.
+
+## §5: The scenes, the server and the gates
+
+One app under five scripts, the task manager's shape (one example, several
+scripts through `HAND_QUEUED`), one script per Y11 screen, each the review
+capture's leg: `tools/scenes/music_<screen>.steps` for `home`, `playlist`,
+`header` (the gradient, in both appearances), `dock` (play, pause, next,
+the session, the slider) and `artist`, plus `search`. Each reads the screen
+off the platform through verbs that exist: `expect_image_phase`,
+`expect_shape`, `expect_ground`, `expect_tint`, `expect_selected`,
+`expect_dock`, `hover`, `expect_rows`, the player's state read through the
+labels the app's handlers write (tools/scenes/media_session.steps' shape),
+`expect_now_playing`, `session_send` for next and previous and `ax_action`
+for the dock's buttons (the media session scene's verbs), `expect_toast`.
+Two reads each new gap needs: the session's artwork read back off the
+system's Now Playing where the platform lets a reader see it (to be
+measured: MPNowPlayingInfoCenter's artwork, MPRIS's `mpris:artUrl`, the
+SMTC's thumbnail, media3's metadata), and the formatter's string in the
+format scene.
+
+The server: the `catalogue` family with its query-routed addresses and the
+JSON type; the lanes start it for the `music_` legs through
+`media_server.serves` (its `SERVED` tuple grows; tools/lib/netimage_server_routes.py
+holds every lane to that one predicate).
+
+Gates that grow (each with watched negatives, counts printed):
+- check-assets: the family's README and ATTRIBUTION, the census in
+  tools/scenes/assets.steps, and the generator's `--check`, which also
+  refuses any track or album outside CC BY and CC BY-SA. Its negative: one
+  snapshot entry's licence doctored to BY-NC in a copy, watched refused.
+- check-symbols and check-symbol-parity: the ten symbols.
+- check-sugar-surface: artwork bytes and the duration formatter in all nine.
+- check-slider-commit: M10's hold per backend, the held write applied at the
+  gesture's end; a cut that applies the write at once is watched red.
+- check-verbs (skin_routes): the macOS native table's double-click action
+  and its selection, the Y4 rule that was never wired.
+- check-staging: the Python app's file in both phone hosts' staged lists.
+
+## §6: Build order
+
+1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on
+   all five players (by hand, against the mirror once it exists, and
+   against Jamendo with the maintainer's id); embedded CPython's https on
+   both phones; the slider under a held pointer per backend; the gap between
+   two tracks per backend; the Now Playing artwork readers; the ten glyphs at
+   each platform's floor.
+2. The defect: the macOS native table's double-click and selection (Y4).
+3. The snapshot: the generator, run once by the maintainer with his id, the
+   family committed with its README and ATTRIBUTION, the server's routes.
+4. The gaps as ruled, depth then breadth: M8's symbols, M9's formatter, M7's
+   artwork, M10's hold, each on the mac and iOS with Rust, then the other
+   backends and bindings.
+5. The app, screen by screen in Y11's order, each screen's scene green on the
+   mac and then on the other four lanes, each a review capture as it is
+   built: the library sidebar and Home, the playlist table, the gradient
+   header, the dock with the session and media keys, the artist page, then
+   search and the toasts.
+6. The matrix once, then the review page: every lane's capture of every
+   screen in light and dark, a card hovered on the desktops and selected,
+   the playing row's tinted title, the dock on the desktops and above the tab
+   bar on the phones with the phone's sheet open, the system's Now Playing
+   with the album's art on each platform, and the app by hand against
+   Jamendo on the mac. That page also closes N17 and the styling pass's §6
+   step 5.
+
+## §7: Measured, and to be measured
+
+- MEASURED 2026-10-17 from the desk: §0's catalogue table. Jamendo's API
+  needs a client id on every call and every id found in public is invalid,
+  suspended or over its limit; its storage host serves `mp31` as constant
+  96 kbps MPEG-1 Layer III at 44.1 kHz (a 272 s track: 3,291,136 bytes, the
+  first frame after a 26 KB ID3 tag) and `mp32` at about 198 kbps average
+  (6,735,872 bytes), both answering a Range request with 206 over https with
+  no redirect in 1.9 to 2.2 s; its image host answers a 300 px cover in
+  12,502 bytes and a 600 px one in 35,177 bytes (JPEG), one album's in GIF at
+  every width, an artist image at 500 px in 18,421 bytes, with no key and no
+  redirect. Openverse's anonymous limits are 20 a minute and 200 a day with
+  20 results a page; ten CC BY or BY-SA jazz results are 18,049 bytes in
+  2.0 s, all from Jamendo.
+- COMPUTED 2026-10-17: a 20 s clip at 96 kbps is 240 KB; twelve are about
+  2.9 MB; twelve 300 px and six 600 px covers and three 500 px artist images
+  about 0.8 MB at the measured sizes. The asset root today is under 1 MB of
+  media (guests/assets/media 896 KB, guests/assets/covers 36 KB).
+- READ FROM THE TREE 2026-10-17 at b2a5d252: §0's table, with the file and
+  line for each gap.
+- To be measured at the depth: the five players on Jamendo's extensionless
+  address; embedded CPython's certificate verification on iOS and Android;
+  the slider's thumb under a held pointer while the app writes, per backend;
+  the silence between two tracks when the app swaps `source` on `ended`, per
+  backend; which Now Playing readers can see artwork; the ten glyphs against
+  each platform's installed set and floor (check-symbols holds SF's); the
+  context menu on a macOS native table row; whether a Python host bundle
+  carrying the `audio` background mode for one scene changes any other
+  Python leg.
+
+## §8: What the maintainer is asked
+
+Every ruling above is his. These need something only he can supply:
+
+1. M1, the catalogue: Jamendo's own API with the person's own free client id
+   and a bundled sampler when there is none (recommended); or Openverse,
+   keyless; or the Internet Archive; or Audius. And whether Jamendo's terms
+   (the cache and offline clause, the look-and-feel clause) read to him as
+   §2 M1 reads them.
+2. M2, the lanes: a 12-clip CC BY / BY-SA snapshot of Jamendo served by the
+   lane's media server at Jamendo-shaped addresses (recommended, about
+   3.7 MB in the asset root), or synthetic tones and covers, or whole tracks.
+   And the generator run once with his own client id, since nobody else may
+   hold one for the repository.
+3. M3, the language: Python (recommended), Go, Rust, or a new language on
+   fewer than five lanes.
+4. M4, sign-in: none, the client id in a secure field, autofill left to the
+   password manager demo (recommended); or Jamendo Connect with the web
+   authentication session and the secure store built first.
+5. M6, the window: three panes on the desktops (recommended) or two.
+6. The gaps, each a build: M7 artwork from bytes, M8 the ten transport
+   symbols, M9 the positional duration formatter, M10 the slider holding an
+   app's write during a gesture (each recommended), and M12's deferral of a
+   collection laid out as a grid (recommended) against building it now.
+7. M11: the queue in the app with gapless and preload deferred
+   (recommended).
+
+M5 (the appearance follows the system, both on the review page) is carried
+from Y11 and not asked again; M13 applies rulings already made.

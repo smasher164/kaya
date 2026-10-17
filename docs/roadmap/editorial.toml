@@ -276,9 +276,9 @@ then = 'the app one screen at a time (XL), when the maintainer picks it'
 
 [[demo]]
 name = 'The media player'
-grp = 'a music client styled toward the egui Spotify screenshot (the maintainer, 2026-10-08), over a public catalogue'
+grp = 'docs/media-player-plan.md; a music client styled toward the egui Spotify screenshot (the maintainer, 2026-10-08), over a public catalogue'
 shipped = 'the media player with audio and Now Playing on every platform, media keys, sliders, tables, the three-pane window, the search field, the secure field and autofill for sign-in, the segmented control for its filter chips, the toast'
-waits = 'images from the network and the styling pass'
+waits = "the maintainer's rulings on the design pass (docs/media-player-plan.md §8, proposed 2026-10-17); images from the network and the styling pass, which it waited on, are built"
 then_tier = 'next'
 then = 'the app one screen at a time (M for the app, L for the styling pass), after safe areas'
 
