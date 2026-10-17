@@ -1,7 +1,8 @@
 # The media player demo: the design pass (2026-10-17)
 
-Status: PROPOSED 2026-10-17, awaiting the maintainer's rulings (§8). Nothing
-is built. The roadmap card (docs/roadmap/editorial.toml, "The media player")
+Status: PROPOSED 2026-10-17; M1 (Jamendo) and M3 (Python) RULED 2026-10-17
+(the maintainer: "let's go with jamendo and python"), the rest awaiting his
+rulings (§8). Nothing is built. The roadmap card (docs/roadmap/editorial.toml, "The media player")
 names the app: a music client styled toward the egui Spotify screenshot the
 maintainer saw on 2026-10-08, over a public catalogue, shipping with audio
 and Now Playing on every platform, media keys, sliders, tables, the
@@ -179,7 +180,7 @@ runs by hand.
 
 ## §2: The rulings (PROPOSED 2026-10-17)
 
-### M1: The catalogue is Jamendo, through its own API, with the person's own client id
+### M1: The catalogue is Jamendo, through its own API, with the person's own client id (RULED 2026-10-17)
 
 RECOMMEND Jamendo's API v3 for the app run by hand, with a client id the
 person registers for free at Jamendo's developer portal and gives the app:
@@ -290,7 +291,7 @@ media suite's clips) with synthetic covers: no licence question at all, but
 the review page would show test patterns where the reference shows albums,
 and the dominant colour and the gradient would be read off flat fills.
 
-### M3: The demo is written in Python
+### M3: The demo is written in Python (RULED 2026-10-17)
 
 RECOMMEND Python, as one file `music.py` beside guests/python/portfolio.py,
 run on all five lanes through the Python host as the portfolio is.
