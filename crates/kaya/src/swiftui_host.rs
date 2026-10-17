@@ -324,6 +324,9 @@ pub struct KayaHostApi {
     /// asks per row over the WHOLE collection, which the band-shaped
     /// geometry read cannot answer.
     pub row_extent: extern "C" fn(u64, u64) -> f64,
+    /// The index of the realized row a copy root widget belongs to
+    /// (KAYA_ROW_NOT_FOUND for none): the band a backend's children ARE.
+    pub window_row_of: extern "C" fn(u64, u64) -> u64,
     /// THE CANVAS (docs/canvas-plan.md). `presentation` is the window's
     /// scale and appearance, reported so the core re-rasters; nothing
     /// about the drawing crosses the other way except the pixels on the
@@ -661,6 +664,7 @@ pub(crate) fn run() -> i32 {
         scroll_to_row_i64: crate::capi::kaya_scroll_to_row_i64,
         window_geometry: crate::capi::kaya_window_geometry,
         row_extent: crate::capi::kaya_row_extent,
+        window_row_of: crate::capi::kaya_window_row_of,
         presentation: crate::capi::kaya_presentation,
         text_scale_report: crate::capi::kaya_text_scale_report,
         canvas_probe: crate::capi::kaya_canvas_probe,

@@ -2483,6 +2483,11 @@ typedef struct KayaHostApi {
    */
   double (*row_extent)(uint64_t, uint64_t);
   /**
+   * The index of the realized row a copy root widget belongs to
+   * (KAYA_ROW_NOT_FOUND for none): the band a backend's children ARE.
+   */
+  uint64_t (*window_row_of)(uint64_t, uint64_t);
+  /**
    * THE CANVAS (docs/canvas-plan.md). `presentation` is the window's
    * scale and appearance, reported so the core re-rasters; nothing
    * about the drawing crosses the other way except the pixels on the
@@ -4232,6 +4237,14 @@ void kaya_window_geometry(uint64_t for_target, struct KayaWindowGeometry *out);
  * and a backend without this would keep the second estimator §2 removes.
  */
 double kaya_row_extent(uint64_t for_target, uint64_t index);
+
+/**
+ * The index of the realized row whose copy's root widget is `widget`, or
+ * [`KAYA_ROW_NOT_FOUND`]. A backend whose band reaches its children through
+ * the apply queue asks it before trusting the core's band for the rows it
+ * drew (docs/traps.md, the band placed under the core's newer index).
+ */
+uint64_t kaya_window_row_of(uint64_t for_target, uint64_t widget);
 
 /**
  * THE WINDOW'S SCALE AND APPEARANCE, reported by the backend; the core

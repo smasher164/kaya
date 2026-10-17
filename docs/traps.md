@@ -17155,3 +17155,44 @@ plus the class's LocalServer32 (relaunch-com.ps1, in the leg log). The forced
 red read back `at the push, alive: pid 4236 chat_go.exe threads=1
 handles=1319`. GUARD: tools/lib/activator_routes.py (check-verbs), nine
 clauses, five cuts watched, the dropped cookie as shipped among them.
+
+## The band placed under the core's newer index (measured 2026-10-17)
+
+The full matrix at 441aa1c8 failed `varied-python` on iOS: `column@varied windows
+"204 300", wanted "200 300"` after the first `scroll_to_row r200`, held 15 s. The
+window#4 records showed the park landing at 18425 (visible 200), then the offset
+moving +113.3 while the placement read as unmoved, so the park was cancelled as a
+reader's scroll; from then every read alternated between drawn band 197+18 with
+the core at 199+15 (visible 204) and "drawn" 199+18 with the core at 197+18
+(visible 203). varied.py's heights are known (1 + (i*7 % 11) % 5 lines plus the
+name, 28.3 pt each): the records with drawn band "199" carried the pitches of
+rows 197..200 (r199 170.0, r200 56.7 where r199 is 113.3 and r200 141.7), and the
+core's extents read the same shifted numbers. The layout had placed band 197's
+children under `first = 199`, and `rows_measured` wrote those heights two rows
+off.
+
+Cause: `kaya_window_moved`'s applies are queued (capi `with_window_scene` ->
+PRESENTATION_PENDING) and reach the tier's `node.children` only when the pump
+next delivers, while `report()` published `first`/`top` from
+`kaya_window_geometry` at once. The layout then placed the old children under the
+new index, and the measure, the visible-first walk and the cancel test all read
+that placement. Each mislabelled measure moved the arithmetic, which moved the
+band again, so the loop never settled.
+
+`kaya_window_row_of(for, widget)` answers the index of the realized row a copy
+root belongs to. The report publishes the core's band only when the children's
+first row IS its first and their count its count, and measures, reports, judges a
+scroll and re-parks only from a placement that placed these children
+(KayaTablePlacement.bandRow) under their own index; otherwise it writes `held:`
+into the park's account and waits for the apply. A forced-red run (varied.steps
+plus a final `expect_window ... 999 300`, restored from a copy) recorded twelve
+holds, among them `held: children from r144, the layout has not placed them`, and
+each park landed after one re-park where the red needed six. Compose's
+KayaTableWindow publishes `bandStart` from the core the same way and its
+stale-layout check compares the layout against that published value, not against
+the children, so it may share this class; not measured. GUARD:
+tools/lib/band_routes.py (check-verbs), eleven clauses and four cuts, the shipped
+publish among them; scene::tests::a_drawn_rows_index_is_its_own_not_the_cores_band,
+watched failing with the index taken from the core's band. Validation: the iOS
+varied, table, scroll, scrollto, netimage and tracks legs (22) ALL PASS six runs
+in a row, four of them beside twelve CPU spinners; gates.py 64/64.

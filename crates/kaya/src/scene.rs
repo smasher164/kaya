@@ -10775,6 +10775,27 @@ impl Scene {
         }
     }
 
+    /// The index in the current order of the realized row whose copy's root
+    /// widget is `widget`; None when no realized row of this For has that
+    /// root. docs/traps.md, the band placed under the core's newer index.
+    pub(crate) fn window_row_of(&mut self, target: u64, widget: u64) -> Option<usize> {
+        let (id, path) = self.window_site(target, "kaya_window_row_of");
+        let site = (id, path.clone());
+        let order = &self.coll_instances[&site].order;
+        let window = &self.for_sites[&site].window;
+        let start = window.band(order.len()).start;
+        let (k, key) = window.realized().iter().enumerate().find(|(_, key)| {
+            self.stamps
+                .get(&(id, path.clone(), (*key).clone()))
+                .and_then(|s| s.roots.first())
+                == Some(&WidgetId(widget))
+        })?;
+        if order.get(start + k) == Some(key) {
+            return Some(start + k);
+        }
+        order.iter().position(|o| o == key)
+    }
+
     /// One row's height, measured or presumed — the row-height delegate's
     /// question, asked per row over the whole collection
     /// (docs/virtualization-plan.md §4, the macOS native tier).
@@ -20655,6 +20676,33 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             creates(&ops).iter().filter(|(kind, _)| *kind == WidgetKind::Label).count(),
             4
         );
+    }
+
+    /// docs/traps.md, the band placed under the core's newer index: a backend
+    /// whose children lag the core's band reads the band its children ARE.
+    #[test]
+    fn a_drawn_rows_index_is_its_own_not_the_cores_band() {
+        let mut scene = nested_lines_table(200);
+        let root = |scene: &Scene, i: usize| {
+            scene.row_copy(4, &v(&format!("a{i:03}"))).unwrap().1.unwrap().0
+        };
+        scene.window_moved(4, 42, 10);
+        let drawn = scene.window_geometry(4).first;
+        let drawn_root = root(&scene, drawn);
+        assert_eq!(scene.window_row_of(4, drawn_root), Some(drawn));
+
+        scene.window_moved(4, 40, 10);
+        let band = scene.window_geometry(4).first;
+        assert_eq!(band + 2, drawn, "the core's band moved up by two rows");
+        assert_eq!(
+            scene.window_row_of(4, drawn_root),
+            Some(drawn),
+            "the lagging children's first row answers its own index"
+        );
+        assert_eq!(scene.window_row_of(4, root(&scene, band)), Some(band));
+
+        scene.window_moved(4, 199, 1);
+        assert_eq!(scene.window_row_of(4, drawn_root), None, "a torn-down copy is no row");
     }
 
     /// SCROLL AWAY AND BACK: the copy's widgets go, its data does not, and

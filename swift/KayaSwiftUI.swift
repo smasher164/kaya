@@ -5473,6 +5473,14 @@ enum KayaHost {
         return api.row_extent(container, UInt64(index))
     }
 
+    /// The index of the realized row `widget` is the copy root of; nil when
+    /// it is none (docs/traps.md, the band placed under the core's newer index).
+    static func windowRowOf(_ container: UInt64, _ widget: UInt64) -> Int? {
+        guard api != nil else { return nil }
+        let index = api.window_row_of(container, widget)
+        return index == KAYA_ROW_NOT_FOUND ? nil : Int(index)
+    }
+
     /// THE WINDOW'S SCALE AND APPEARANCE (docs/canvas-plan.md §5, §6).
     /// The core re-rasters every canvas at what this reports; a report
     /// that changes nothing emits nothing. Only the two numbers cross —
@@ -17911,6 +17919,7 @@ private struct KayaTableLayout: Layout {
     /// reads the band THIS PASS DREW: mixing a fresh band index with a stale
     /// placement was measured answering row 197 for a viewport parked on 200.
     var first = 0
+    var firstRow: UInt64?
     /// What this layout PLACED, for the report that follows it, and the
     /// ask for that report.
     var placement: KayaTablePlacement?
@@ -18013,6 +18022,7 @@ private struct KayaTableLayout: Layout {
         // content, and the pitch this pass gave each realized row.
         if let placement {
             placement.bandFirst = first
+            placement.bandRow = firstRow
             placement.bandOffset = top
             placement.bandTop = y - bounds.minY
             placement.rowPitches = rows.map { $0 + rowGap }
@@ -18143,6 +18153,7 @@ final class KayaTablePlacement {
     var columnsContent: CGFloat = 0
     var columnsViewport: CGFloat = 0
     var bandFirst = 0
+    var bandRow: UInt64?
     var bandOffset: CGFloat = 0
     var bandTop: CGFloat = 0
     var rowPitches: [CGFloat] = []
@@ -18209,7 +18220,7 @@ typealias KayaTablePlaced = () -> Void
     /// the re-arm below hops the main queue: a table that never gets
     /// geometry would otherwise spin it forever.
     @ObservationIgnored private var misses = 0
-    /// docs/deferred.md, the iOS varied-python entry: the park's own account,
+    /// docs/traps.md, the band placed under the core's newer index: the park's own account,
     /// written into the verb trace a red leg's bundle carries.
     @ObservationIgnored private var parkNotes = 0
     @ObservationIgnored private var lastNote = ""
@@ -18259,7 +18270,11 @@ typealias KayaTablePlaced = () -> Void
             + (visible.map { "\($0.first)+\($0.count)" } ?? "none")
             + " anchor " + (anchorRow.map { "r\($0)" } ?? "none")
             + " landedAt " + (landedAt.map(n) ?? "none")
-            + "; r\(focus) top \(focusTop); drawn band \(drawnFirst)+\(pitches.count) bandTop "
+            + "; r\(focus) top \(focusTop); drawn band \(drawnFirst)+\(pitches.count) children "
+            + (node.children.first.flatMap { KayaHost.windowRowOf(node.id, $0.id) }
+                .map { "r\($0)+\(node.children.count)" } ?? "none")
+            + (placement.bandRow == node.children.first?.id ? "" : " (not the ones placed)")
+            + " bandTop "
             + "\(n(Double(placement.bandTop))) bandOffset \(n(Double(placement.bandOffset)))"
             + "; core \(core); rows drawn/core " + rows.joined(separator: ", ")
     }
@@ -18364,13 +18379,38 @@ typealias KayaTablePlaced = () -> Void
             return
         }
         misses = 0
-        let band = Int(geometry.first)..<Int(geometry.first) + Int(geometry.count)
-        var spanned = 0.0
-        for index in band { spanned += KayaHost.rowExtent(node.id, index) }
-        publish(
-            windowed: true, top: geometry.offset,
-            bottom: max(0, geometry.extent - geometry.offset - spanned),
-            first: Int(geometry.first), total: Int(geometry.total))
+        // THE CORE'S BAND REACHES THE CHILDREN THROUGH THE APPLY QUEUE, so it
+        // is published only once the children ARE it, and a placement is read
+        // only if it placed these children under their own index (docs/traps.md,
+        // the band placed under the core's newer index).
+        let drawnRow = node.children.first?.id
+        let drawnIndex = drawnRow.flatMap { KayaHost.windowRowOf(node.id, $0) }
+        let childrenAreBand = drawnRow == nil
+            ? geometry.count == 0
+            : drawnIndex == Int(geometry.first) && node.children.count == Int(geometry.count)
+        if childrenAreBand {
+            let band = Int(geometry.first)..<Int(geometry.first) + Int(geometry.count)
+            var spanned = 0.0
+            for index in band { spanned += KayaHost.rowExtent(node.id, index) }
+            publish(
+                windowed: true, top: geometry.offset,
+                bottom: max(0, geometry.extent - geometry.offset - spanned),
+                first: Int(geometry.first), total: Int(geometry.total))
+        }
+        let placementIsChildren = placement.bandRow == drawnRow
+            && (drawnRow == nil || drawnIndex == placement.bandFirst)
+        guard childrenAreBand, placementIsChildren else {
+            if anchorRow != nil {
+                note(
+                    node,
+                    "held: children from r" + (drawnIndex.map(String.init) ?? "?")
+                        + (childrenAreBand ? "" : " are not the core's band yet")
+                        + (placementIsChildren ? "" : ", the layout has not placed them"))
+            }
+            misses += 1
+            if misses < 8 { schedule(node) }
+            return
+        }
 
         // WHERE THE VIEWPORT SITS IN THE BAND THAT WAS DRAWN, all from the SAME
         // layout pass: reading a fresh band index against the drawn placement
@@ -19290,7 +19330,8 @@ private struct KayaSynthesizedTable: View {
         KayaTableLayout(
             cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing,
             windowed: window.windowed, top: window.top, bottom: window.bottom,
-            first: window.first, placement: window.placement,
+            first: window.first, firstRow: node.children.first?.id,
+            placement: window.placement,
             placed: { window.placed(node) },
             offsetX: window.columnsOffset
         ) {

@@ -6516,6 +6516,18 @@ pub extern "C" fn kaya_row_extent(for_target: u64, index: u64) -> f64 {
     })
 }
 
+/// The index of the realized row whose copy's root widget is `widget`, or
+/// [`KAYA_ROW_NOT_FOUND`]. A backend whose band reaches its children through
+/// the apply queue asks it before trusting the core's band for the rows it
+/// drew (docs/traps.md, the band placed under the core's newer index).
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_window_row_of(for_target: u64, widget: u64) -> u64 {
+    with_window_scene("reading a drawn row's index", |scene| {
+        (Vec::new(), scene.window_row_of(for_target, widget))
+    })
+    .map_or(KAYA_ROW_NOT_FOUND, |index| index as u64)
+}
+
 /// THE WINDOW'S SCALE AND APPEARANCE, reported by the backend; the core
 /// re-rasters every canvas at them (docs/canvas-plan.md §5, §6). `scale` is
 /// the TRUE scale, never the rounded one — GTK can hand back a fraction, and

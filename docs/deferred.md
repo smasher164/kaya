@@ -13856,7 +13856,7 @@ each a stub the runner reads (tools/check-stubs.py):
     that replaced it named the cause in one (docs/traps.md, PowerShell's
     case-insensitive variable names).
 
-## WATCH — iOS varied-python: `scroll_to_row r100` landed the band at 98 (first sighting 2026-09-03)
+## ~~WATCH — iOS varied-python: `scroll_to_row r100` landed the band at 98 (first sighting 2026-09-03)~~ — FIXED 2026-10-17: the fourth sighting's window# records (the full matrix at 441aa1c8, "204 300" after r200) showed the synthesized tier publishing the core's band before the band's applies reached its children, so the layout placed old rows under the new index and `rows_measured` wrote their heights two rows off; the report now publishes and measures only once the children are the core's band and the placement placed them, read through `kaya_window_row_of` (docs/traps.md, the band placed under the core's newer index; GUARD tools/lib/band_routes.py and scene::tests::a_drawn_rows_index_is_its_own_not_the_cores_band).
 KEY: varied-python, scroll_to_row, expect_window, first visible, synthesized tier, variable row heights, "98 300", window#, park account
 
 On the drag-and-drop core's second matrix (10:05, the pool free, every
