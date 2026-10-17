@@ -1764,17 +1764,21 @@ for proto in x11 wayland; do
     run "$proto" cards-java env KAYA_SELFTEST=cards KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" cards-c env KAYA_SELFTEST=cards tools/linux/a11y-leg.sh /tmp/c-guests/cards
-    run "$proto" tracks-rust env KAYA_SELFTEST=tracks "$CARGO_TARGET_DIR/debug/examples/tracks"
-    run "$proto" tracks-python env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" python3 guests/python/tracks.py
-    run "$proto" tracks-js env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" node guests/js/tracks.ts
-    run "$proto" tracks-go env KAYA_SELFTEST=tracks /tmp/go-guests/kaya-go
-    run "$proto" tracks-csharp env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" dotnet exec "$CS_GUEST"
+    run "$proto" tracks-rust env KAYA_SELFTEST=tracks \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/tracks"
+    run "$proto" tracks-python env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/tracks.py
+    run "$proto" tracks-js env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/tracks.ts
+    run "$proto" tracks-go env KAYA_SELFTEST=tracks tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" tracks-csharp env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
     run "$proto" tracks-ocaml env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
-        _build-linux/default/guests/ocaml/tracks.exe
-    run "$proto" tracks-haskell env KAYA_SELFTEST=tracks "$(hs_bin tracks)"
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/tracks.exe
+    run "$proto" tracks-haskell env KAYA_SELFTEST=tracks tools/linux/a11y-leg.sh "$(hs_bin tracks)"
     run "$proto" tracks-java env KAYA_SELFTEST=tracks KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.guests.Main
-    run "$proto" tracks-c env KAYA_SELFTEST=tracks /tmp/c-guests/tracks
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" tracks-c env KAYA_SELFTEST=tracks tools/linux/a11y-leg.sh /tmp/c-guests/tracks
     run "$proto" dock-rust env KAYA_SELFTEST=dock "$CARGO_TARGET_DIR/debug/examples/dock"
     run "$proto" dock-python env KAYA_SELFTEST=dock KAYA_LIB="$LIB" python3 guests/python/dock.py
     run "$proto" dock-js env KAYA_SELFTEST=dock KAYA_LIB="$LIB" node guests/js/dock.ts

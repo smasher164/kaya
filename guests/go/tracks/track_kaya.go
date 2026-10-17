@@ -56,6 +56,11 @@ func (p trackPatchBuilder) Tint(v kaya.Tint) trackPatchBuilder {
 	return p
 }
 
+func (p trackPatchBuilder) Selected(v bool) trackPatchBuilder {
+	p.p.Set(func(t *Track) *bool { return &t.Selected }, v)
+	return p
+}
+
 // TrackPatchIf is TrackPatch made only while the entry exists and the
 // guard's field still holds expected; otherwise nothing, and no panic
 // (docs/network-images-plan.md N7). The chain is one record.
@@ -97,6 +102,11 @@ func (p trackPatchIfBuilder) Tint(v kaya.Tint) trackPatchIfBuilder {
 	return p
 }
 
+func (p trackPatchIfBuilder) Selected(v bool) trackPatchIfBuilder {
+	p.p.Set(func(t *Track) *bool { return &t.Selected }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type trackRow struct {
@@ -115,6 +125,8 @@ func (r trackRow) Album() kaya.Field[string] { return kaya.FieldAt[string](3) }
 func (r trackRow) Art() kaya.Field[[]byte] { return kaya.FieldAt[[]byte](4) }
 
 func (r trackRow) Tint() kaya.Field[kaya.Tint] { return kaya.FieldAt[kaya.Tint](5) }
+
+func (r trackRow) Selected() kaya.Field[bool] { return kaya.FieldAt[bool](6) }
 
 func (r trackRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 

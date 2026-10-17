@@ -67,7 +67,7 @@ in all nine bindings unless said otherwise.
 | 1. Home | cards that take a click as a whole with the platform's hover (Y4), rounded art, the caption role, a fitting grid (`min_column_width`, docs/layout-knobs-plan.md §3) | built for a LIVE grid; a collection's For cannot be laid out as a grid (crates/kaya/src/scene.rs:1552 holds `columns` to the Grid widget, and a For is its own container, scene.rs:7398-7410); a For in a sideways scroll (a shelf) is built (guests/rust/scrollto.rs:63-77) |
 | 1. Home | art per card from the network, phases and the fetch helper (docs/network-images-plan.md N2, N7, N8, N12) | built |
 | 2. Playlist | a table whose title cell is art beside two lines, the pinned header, the playing track's tinted name (Y5-Y7, tools/scenes/tracks.steps) | built |
-| 2. Playlist | a row that plays on double-click or Return | ruled (Y4: on the macOS native table, `on_activate` is the table's double-click action and `selected` its own selection) and NOT BUILT on the macOS native tier: swift/KayaSwiftUI.swift names no `doubleAction`, and the native table driver wires no activation or selection. A defect against a ruling, fixed in §6 step 2, not a new ruling |
+| 2. Playlist | a row that plays on double-click or Return | built 2026-10-17 (Y4, §6 step 2): on the macOS native table `on_activate` is the NSTableView's `doubleAction` and Return, `selected` its own selection, a user's click proposing none the app did not write; the iOS synthesized tier, Compose and WinUI table rows activate and wear the selection too, and tools/scenes/tracks.steps clicks and reads two album rows on every lane (docs/traps.md, "The table row nobody rendered") |
 | 2. Playlist | a context menu on a track (Add to queue, Go to artist) | built for stamped rows (a template's context catalog, docs/traps.md's catalog entries); on the macOS native table UNMEASURED |
 | 2. Playlist | track and playlist durations ("3:45", "1 hr 12 min") | NOT BUILT: crates/kaya/src/fmt.rs has date, time, number, percent, currency and timecode, no duration (§2 M9) |
 | 3. Gradient header | the gradient ground from one data colour, `image_dominant` (Y2) | built |
@@ -614,7 +614,7 @@ Gates that grow (each with watched negatives, counts printed):
    both phones; the slider under a held pointer per backend; the gap between
    two tracks per backend; the Now Playing artwork readers; the ten glyphs at
    each platform's floor.
-2. The defect: the macOS native table's double-click and selection (Y4).
+2. ~~The defect: the macOS native table's double-click and selection (Y4).~~ Fixed 2026-10-17 (§0's playlist row).
 3. The snapshot: the generator, run once by the maintainer with his id, the
    family committed with its README and ATTRIBUTION, the server's routes.
 4. The gaps as ruled, depth then breadth: M8's symbols, M9's formatter, M7's

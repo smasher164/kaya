@@ -16364,6 +16364,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 )
             }
             Spacer(Modifier)
+            rows.forEach { row -> KayaTableRowGround(row) }
             rows.forEach { row ->
                 row.children.forEachIndexed { index, cell ->
                     Box(Modifier.edge("$geometryGeneration${row.id}/$index")) { KayaRender(cell) }
@@ -16442,7 +16443,8 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val nFolded = folded.size
         val headers =
             measurables.subList(nFolded, nFolded + cols).map { it.measure(Constraints()) }
-        val cells = measurables.subList(nFolded + cols + 1, measurables.size - 3)
+        val nRows = rows.size
+        val cells = measurables.subList(nFolded + cols + 1 + nRows, measurables.size - 3)
             .map { it.measure(Constraints()) }
         val colWidth = IntArray(cols)
         headers.forEachIndexed { c, p -> colWidth[c] = maxOf(colWidth[c], p.width) }
@@ -16552,6 +16554,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.headerRestPx = foldedBlock
         val bodySeg = measurables[measurables.size - 1]
             .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
+        val grounds = measurables.subList(nFolded + cols + 1, nFolded + cols + 1 + nRows)
+            .mapIndexed { r, m ->
+                m.measure(kayaFixedRepresentable(innerW, rowExtents.getOrElse(r) { 0 }))
+            }
         val tops = IntArray(rowExtents.size)
         var y = topH
         for (r in rowExtents.indices) {
@@ -16587,12 +16593,23 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             }
             headers.forEachIndexed { c, p -> p.place(padX + colX[c], headerY + padY, zIndex = 1f) }
             top.place(0, rowsTop)
+            grounds.forEachIndexed { r, p ->
+                if (r < tops.size) p.place(padX, rowsTop + tops[r] - rowGapPx / 2)
+            }
             cells.chunked(cols).forEachIndexed { r, row ->
                 row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }
             }
             bottom.place(0, rowsTop + topH + bandH - tail)
         }
     }
+}
+
+/** A table row's ground (docs/styling-pass-plan.md Y4): an activatable row's
+ * press, ripple, button role and selected surface, behind its cells. */
+@Composable
+private fun KayaTableRowGround(row: KayaNode) {
+    val tag = if (row.a11yId.isNotEmpty()) Modifier.testTag(row.a11yId) else Modifier
+    Box(if (row.activatable) tag.then(kayaFilledSurface(row)) else Modifier)
 }
 
 /**

@@ -10,7 +10,8 @@ import dev.kaya.KayaRecords;
 /** The tracks scene from the JVM — guests/rust/tracks.rs, tools/scenes/tracks.steps. */
 public final class Tracks {
     @KayaGen(key = "String")
-    record PlaylistTrack(String number, String title, String artist, String album, byte[] art, Tint titleTint) {}
+    record PlaylistTrack(String number, String title, String artist, String album, byte[] art, Tint titleTint,
+            boolean selected) {}
 
     private static final int PLAYLIST = 60;
     private static final int PLAYING = 3;
@@ -21,7 +22,7 @@ public final class Tracks {
     };
 
     private static KayaApp.Widget table(KayaApp.Tx tx, KayaRecords.Collection<String, PlaylistTrack> tracks,
-            String id, String rowId) {
+            String id, String rowId, java.util.function.BiConsumer<KayaApp.Tx, String> pick) {
         var rows = PlaylistTrackKaya.rows(tx, tracks);
         for (var row : rows) {
             KayaApp.Node line = row.row(() -> {
@@ -43,6 +44,8 @@ public final class Tracks {
                 row.label(row.album);
             });
             row.setA11yId(line, rowId);
+            row.setSelected(line, row.selected);
+            row.onActivate(line, (t, keys) -> pick.accept(t, (String) keys.get(0)));
         }
         rows.columns(new String[] {"#", "Title", "Album"}, KayaApp.Sort.none());
         rows.handle.a11yId(id);
@@ -52,7 +55,7 @@ public final class Tracks {
     private static PlaylistTrack track(int i, byte[] art) {
         String[] n = NAMES[i % NAMES.length];
         return new PlaylistTrack(Integer.toString(i + 1), n[0], n[1], n[2], art,
-                i + 1 == PLAYING ? Tint.ACCENT : Tint.NONE);
+                i + 1 == PLAYING ? Tint.ACCENT : Tint.NONE, false);
     }
 
     public static void app() {
@@ -65,9 +68,17 @@ public final class Tracks {
             tx.window(0).title("tracks").size(720.0, 640.0);
             var album = PlaylistTrackKaya.collection(tx);
             var playlist = PlaylistTrackKaya.collection(tx);
+            java.util.function.BiConsumer<KayaApp.Tx, String> pick = (t, picked) -> {
+                for (int i = 0; i < NAMES.length; i++) {
+                    PlaylistTrackKaya.patch(t, album, "a" + (i + 1)).selected(("a" + (i + 1)).equals(picked));
+                }
+                for (int i = 0; i < PLAYLIST; i++) {
+                    PlaylistTrackKaya.patch(t, playlist, "t" + (i + 1)).selected(("t" + (i + 1)).equals(picked));
+                }
+            };
             tx.mount(tx.column(root -> {
-                table(tx, album, "album", "a");
-                tx.setGrow(table(tx, playlist, "tracks", "t"), 1);
+                table(tx, album, "album", "a", pick);
+                tx.setGrow(table(tx, playlist, "tracks", "t", pick), 1);
             }).spacing(12));
             for (int i = 0; i < NAMES.length; i++) {
                 album.insert(tx, "a" + (i + 1), track(i, art));

@@ -10,6 +10,7 @@ type track = {
   album : string;
   art : bytes;
   tint : Tint.t;
+  selected : bool;
 }
 [@@deriving kaya_gen]
 
@@ -23,13 +24,14 @@ let names =
     ("Naima", "John Coltrane", "Giant Steps");
   |]
 
-let table tracks id row_id =
+let table tracks id row_id pick =
   let table =
     each (record_handle tracks)
       (fun () ->
         ignore
           Tpl.(
-            row ~a11y_id:row_id
+            row ~a11y_id:row_id ~selected_field:track_selected
+              ~on_activate:(fun keys -> pick (key_text (List.hd keys)))
               [
                 label ~bind_field:track_number;
                 row
@@ -60,6 +62,7 @@ let track i art =
     album;
     art;
     tint = (if i + 1 = playing then Tint.Accent else Tint.None);
+    selected = false;
   }
 
 let () =
@@ -69,8 +72,19 @@ let () =
       let art = asset_bytes (asset "covers/cover-600.jpg") in
       let album = collection_of track_record in
       let playlist = collection_of track_record in
-      let album_table = table album "album" "a" in
-      let long = table playlist "tracks" "t" in
+      let pick picked =
+        Array.iteri
+          (fun i _ ->
+            let key = Printf.sprintf "a%d" (i + 1) in
+            track_patch ~selected:(key = picked) album (Key.str key))
+          names;
+        for i = 0 to playlist_length - 1 do
+          let key = Printf.sprintf "t%d" (i + 1) in
+          track_patch ~selected:(key = picked) playlist (Key.str key)
+        done
+      in
+      let album_table = table album "album" "a" pick in
+      let long = table playlist "tracks" "t" pick in
       set_grow long 1.0;
       let root = column ~spacing:12.0 [ w album_table; w long ] () in
       mount root;

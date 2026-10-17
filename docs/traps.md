@@ -17336,3 +17336,41 @@ reached its end, paused rate=0.0 clock=1899ms of 2000ms looping=true: seek to 0
 and play`; with the fix it passed. GUARD: check-verbs' `loop_end_rows` in the
 media arms, four watched negatives (the shipped unconditional play, the ax
 record, the status record and the loop record each cut).
+
+## The table row nobody rendered (measured 2026-10-17)
+
+Y4's `on_activate` and `selected` on a table's row template reached no
+table tier but GTK's. On the mac native tier the NSTableView had no
+`doubleAction` and no selection wiring; on the iOS synthesized tier and the
+Compose table the row node is never drawn (the cells are laid out directly
+in the table's own Layout), so the row had no press, no surface and no
+accessibility element (`<0 elements carry id 'a'>`, Compose `no such
+target`); on WinUI the row's Grid is wrapped in an ItemContainer like any
+activatable container, and the table readers that walk the band's children
+as Grids, and `scroll_ancestor`'s logical Parent() chain (which stops at the
+ItemContainer's template), lost the rows. Every lane's tracks leg had stayed
+green because no scene activated a table row. tracks.steps now clicks and
+reads two album rows.
+
+Three AppKit findings from the mac fix. A synthesized NSEvent mouseDown,
+sent to `tableView.mouseDown`, `window.sendEvent` or `NSApp.sendEvent`, does
+nothing in a window that is not key: no selection proposal, no action, no
+`doubleAction`; with the window key every route selects and fires both
+(scratchpad probe, six routes). A leg's window reports `isKeyWindow` false, so
+the harness's `click` on a native row sends the table's own `doubleAction` to
+its target with `KayaNativeTableView.harnessClickedRow` standing in for
+`clickedRow`. `NSTableRowView.setAccessibilityIdentifier` does not surface in
+the AX walk (the row views answer AXUnknown), so expect_selected on a native
+row reads `AXRows[index].AXSelected` off the AXTable named
+`kaya.native-table.<id>`. `selectionIndexesForProposedSelection` returning the
+current set refuses a user's click and the `doubleAction` still fires.
+
+On linux the leg ran without tools/linux/a11y-leg.sh and every
+expect_selected read "no accessibility bus": check-steps' bus clause found
+readers only through atspi_collect and atspi_range_read, and
+`selected_read` reads through atspi_states. GUARD: check-steps' AX_VERB names
+`selected_read` and `expanded`, and the reader census follows atspi_states
+(it refused the nine unwrapped tracks legs before they were wrapped);
+skin_routes' NATIVE_TABLE, READS and CALLS rows for every tier, each cut
+watched red; three mac scene negatives (tools/mac/scene-negative.py) and one
+iOS one watched red.

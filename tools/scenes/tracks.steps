@@ -2,7 +2,9 @@
 # art beside two lines. Every tier takes the row's height from its tallest
 # cell, so the art is whole, the header stays pinned over the taller rows,
 # and the last row of a long playlist scrolls into view; the playing track's
-# name is in the accent's standalone colour.
+# name is in the accent's standalone colour. A row takes the platform's
+# activation (on the mac's native table, its double-click) and wears the
+# selection the app writes on it (Y4).
 expect_title "tracks"
 # FIRST, before any read measures the playlist's rows: the scroll lands on a
 # document of presumed heights and must survive their correction. In view is
@@ -19,3 +21,9 @@ expect_image_size image@art[a1] "40x40"
 expect_shape image@art[a1] rounded
 expect_tint label@name[a3] accent
 expect_tint label@name[a2] none
+click row@a[a2]
+expect_selected row@a[a2] on
+expect_selected row@a[a1] off
+click row@a[a3]
+expect_selected row@a[a3] on
+expect_selected row@a[a2] off

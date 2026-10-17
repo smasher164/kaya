@@ -16,6 +16,7 @@ static class PlaylistTrackKaya
     public static readonly Field<string> Album = KayaRecords.FieldAt<string>(3);
     public static readonly Field<byte[]> Art = KayaRecords.FieldAt<byte[]>(4);
     public static readonly Field<Tint> TitleTint = KayaRecords.FieldAt<Tint>(5);
+    public static readonly Field<bool> Selected = KayaRecords.FieldAt<bool>(6);
 
     public static PlaylistTrackKayaPatch Patch(Tx tx, RecordCollection<PlaylistTrack> c, object key) =>
         new PlaylistTrackKayaPatch(c.Patch(tx, key));
@@ -85,6 +86,7 @@ sealed class PlaylistTrackRow
     public readonly Field<string> Album = PlaylistTrackKaya.Album;
     public readonly Field<byte[]> Art = PlaylistTrackKaya.Art;
     public readonly Field<Tint> TitleTint = PlaylistTrackKaya.TitleTint;
+    public readonly Field<bool> Selected = PlaylistTrackKaya.Selected;
 
     internal PlaylistTrackRow(Tpl t) => this.t = t;
 
@@ -623,6 +625,12 @@ sealed class PlaylistTrackKayaPatch
         p.Set(PlaylistTrackKaya.TitleTint, v);
         return this;
     }
+
+    public PlaylistTrackKayaPatch Selected(bool v)
+    {
+        p.Set(PlaylistTrackKaya.Selected, v);
+        return this;
+    }
 }
 
 sealed class PlaylistTrackKayaPatchIf
@@ -664,6 +672,12 @@ sealed class PlaylistTrackKayaPatchIf
     public PlaylistTrackKayaPatchIf TitleTint(Tint v)
     {
         p.Set(PlaylistTrackKaya.TitleTint, v);
+        return this;
+    }
+
+    public PlaylistTrackKayaPatchIf Selected(bool v)
+    {
+        p.Set(PlaylistTrackKaya.Selected, v);
         return this;
     }
 }

@@ -7739,6 +7739,27 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         }
     }
 
+    /// A native table row's selected state from the table's own AXRows
+    /// (Y4: the selection is the table's), `on` or `off`, or what was found.
+    func kayaAxTableRowSelected(_ table: String, _ index: Int) -> String {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            var matches: [AXUIElement] = []
+            kayaAxFindAll(app, table, 0, &matches)
+            guard matches.count == 1, let hit = matches.first else {
+                return "<\(matches.count) elements carry the native table's id '\(table)'>"
+            }
+            let rows = kayaAxCopy(hit, kAXRowsAttribute as String) as? [AXUIElement] ?? []
+            guard index < rows.count else { return "<the native table lists \(rows.count) AXRows, none at \(index)>" }
+            guard let selected = kayaAxCopy(rows[index], kAXSelectedAttribute as String) as? Bool else {
+                return "off (AXRow \(index) publishes no AXSelected)"
+            }
+            return selected ? "on" : "off"
+        }
+    }
+
     /// What one textarea's text layer, selection and viewport say, in ONE
     /// main-thread hop. WHY THE HIGHLIGHT READ FORCES THE LOWERING'S HAND: of
     /// three macOS background mechanisms only `NSTextStorage`'s is published to
@@ -9887,6 +9908,7 @@ private func kayaRunScript(_ script: String) {
             case "click":
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
+                var refused: String?
                 let ok = DispatchQueue.main.sync { () -> Bool in
                     // A click on a TEXT KIND focuses it — the only way a scene
                     // can focus a STAMPED copy, which has no live handle.
@@ -9901,6 +9923,16 @@ private func kayaRunScript(_ script: String) {
                         kayaScene.focusedId = node.id
                         return true
                     }
+                    #if os(macOS)
+                        // A native table's row activates through the table's own
+                        // double-click (Y4), never the emit below.
+                        if let node = kayaTarget(parts[1], "row", kayaScene.rows),
+                            let driver = kayaTableDrivers.values.first(where: { $0.stamps(node) })
+                        {
+                            refused = driver.userDoubleClick(node)
+                            return refused == nil
+                        }
+                    #endif
                     // An activatable row or column takes the click as a whole
                     // (docs/styling-pass-plan.md Y4), through its own emit.
                     if let node = kayaTarget(parts[1], "column", kayaScene.columns)
@@ -9923,6 +9955,8 @@ private func kayaRunScript(_ script: String) {
                 }
                 if ok {
                     kayaAwaitAnswer(answered)
+                } else if let refused {
+                    failures.append("click \(parts[1]): \(refused)")
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
@@ -17234,6 +17268,21 @@ private struct KayaNativeTable: View {
         var contentWidth: CGFloat { host.intrinsicContentSize.width }
     }
 
+    /// The native table's identifier in the accessibility tree.
+    func kayaNativeTableAxId(_ id: UInt64) -> String { "kaya.native-table.\(id)" }
+
+    /// Return on a row is the double-click's twin (docs/styling-pass-plan.md Y4).
+    final class KayaNativeTableView: NSTableView {
+        var onReturn: (() -> Bool)?
+        /// The row a harness activation names, read where AppKit's own is.
+        var harnessClickedRow: Int?
+        override var clickedRow: Int { harnessClickedRow ?? super.clickedRow }
+        override func keyDown(with event: NSEvent) {
+            if [36, 76].contains(event.keyCode), onReturn?() == true { return }
+            super.keyDown(with: event)
+        }
+    }
+
     /// The mac table's data source, delegate, window reporter and geometry
     /// reporter — ONE object, because they are one loop: AppKit asks the CORE
     /// for row heights, the core's band decides which rows carry widgets, and
@@ -17242,7 +17291,7 @@ private struct KayaNativeTable: View {
         private(set) var node: KayaNode
         private var generation = 0
         private let scrollView = KayaTableScrollView()
-        private let tableView = NSTableView()
+        private let tableView = KayaNativeTableView()
         /// The core's band and the collection's declared total, read
         /// TOGETHER and held for the length of a layout pass: AppKit's
         /// row count may not change under it.
@@ -17275,7 +17324,16 @@ private struct KayaNativeTable: View {
             tableView.intercellSpacing = NSSize(width: 0, height: 0)
             tableView.rowHeight = kayaNativeRowHeight
             tableView.allowsColumnReordering = false
-            tableView.allowsMultipleSelection = false
+            // The selection is the app's `selected` (Y4): several rows may carry it.
+            tableView.allowsMultipleSelection = true
+            tableView.allowsEmptySelection = true
+            tableView.target = self
+            tableView.doubleAction = #selector(rowDoubleClicked(_:))
+            tableView.setAccessibilityIdentifier(kayaNativeTableAxId(node.id))
+            tableView.onReturn = { [weak self] in
+                guard let self else { return false }
+                return self.activate(row: self.tableView.selectedRow)
+            }
             tableView.columnAutoresizingStyle = .noColumnAutoresizing
             let header = NSTableHeaderView(
                 frame: NSRect(x: 0, y: 0, width: 0, height: kayaNativeHeaderHeight))
@@ -17456,6 +17514,87 @@ private struct KayaNativeTable: View {
             return cell
         }
 
+        // --- Activation and selection (docs/styling-pass-plan.md Y4). ---
+
+        /// How many rows the door has activated, for the harness's sentence.
+        private(set) var activations = 0
+        private var applyingSelection = false
+
+        @objc func rowDoubleClicked(_ sender: NSTableView) {
+            _ = activate(row: sender.clickedRow)
+        }
+
+        /// THE ONE DOOR: a double-click and Return both end here.
+        func activate(row index: Int) -> Bool {
+            guard let stamped = row(at: index) else {
+                KayaVTrace.attempt("table#\(node.id)", 0, "<- activation at row \(index): no stamped row there")
+                return false
+            }
+            guard stamped.activatable else {
+                KayaVTrace.attempt("table#\(node.id)", 0, "<- activation at row \(index): node \(stamped.id) declares no on_activate")
+                return false
+            }
+            activations += 1
+            KayaVTrace.attempt("table#\(node.id)", 0, "-> activated row \(index) node \(stamped.id)")
+            KayaHost.emitActivated(stamped.tag)
+            return true
+        }
+
+        /// The user's proposal is refused: selection is the app's (Y4).
+        func tableView(
+            _ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet
+        ) -> IndexSet {
+            applyingSelection ? proposed : tableView.selectedRowIndexes
+        }
+
+        /// The realized rows' `selected` onto the table's own selection; a row
+        /// outside the band keeps what it last wore.
+        private func applySelection() {
+            var want = tableView.selectedRowIndexes
+            let base = total > 0 ? first : 0
+            for (offset, stamped) in node.children.enumerated() {
+                if stamped.selected { want.insert(base + offset) } else { want.remove(base + offset) }
+            }
+            want = want.filteredIndexSet { $0 < tableView.numberOfRows }
+            guard want != tableView.selectedRowIndexes else { return }
+            applyingSelection = true
+            tableView.selectRowIndexes(want, byExtendingSelection: false)
+            applyingSelection = false
+        }
+
+        /// Whether this table stamped `row`.
+        func stamps(_ row: KayaNode) -> Bool { node.children.contains { $0 === row } }
+
+        /// The harness's activation of a row: the table's own double-click
+        /// action sent to its own target, with the row as the clicked one. A
+        /// synthesized mouseDown does nothing in a window that is not key
+        /// (measured 2026-10-17), and a leg's window is not. Nil when the door
+        /// fired, else what was sent.
+        func userDoubleClick(_ stamped: KayaNode) -> String? {
+            guard let offset = node.children.firstIndex(where: { $0 === stamped }) else {
+                return "node \(stamped.id) is not among the native table's realized rows"
+            }
+            let index = (total > 0 ? first : 0) + offset
+            guard let action = tableView.doubleAction else {
+                return "the native table has no doubleAction, so a double-click on row \(index) reaches nothing"
+            }
+            let before = activations
+            tableView.harnessClickedRow = index
+            let sent = tableView.sendAction(action, to: tableView.target)
+            tableView.harnessClickedRow = nil
+            if activations > before { return nil }
+            return "the native table's doubleAction \(NSStringFromSelector(action)) on row \(index) was "
+                + "\(sent ? "sent" : "not sent (no target took it)"), the row is \(stamped.activatable ? "" : "not ")activatable, "
+                + "and the door did not fire"
+        }
+
+        /// The tree's name for this table and the collection position of
+        /// `stamped`, for expect_selected's read of the table's own AXRows.
+        func axRow(of stamped: KayaNode) -> (table: String, index: Int)? {
+            guard let offset = node.children.firstIndex(where: { $0 === stamped }) else { return nil }
+            return (kayaNativeTableAxId(node.id), (total > 0 ? first : 0) + offset)
+        }
+
         func tableView(
             _ tableView: NSTableView, sortDescriptorsDidChange old: [NSSortDescriptor]
         ) {
@@ -17511,6 +17650,7 @@ private struct KayaNativeTable: View {
         func report() {
             guard scrollView.window != nil else { return }
             refresh()
+            applySelection()
             layoutColumns()
             reparkAnchor()
             // The first report waits for the realized rows' own heights, or a
@@ -17968,10 +18108,18 @@ private struct KayaTableLayout: Layout {
     /// ask for that report.
     var placement: KayaTablePlacement?
     var placed: KayaTablePlaced?
+    /// One ground per row, which an activatable row takes its press and its
+    /// selected surface on (docs/styling-pass-plan.md Y4).
+    var rowCount = 0
 
-    /// Headers, the rule, the cells row-major, then the header's ground.
+    /// Headers, the rule, the rows' grounds, the cells row-major, then the
+    /// header's ground.
     private func cellViews(_ subviews: Subviews) -> Subviews.SubSequence {
-        subviews[(cols + 1)..<(subviews.count - 1)]
+        subviews[(cols + 1 + rowCount)..<(subviews.count - 1)]
+    }
+
+    private func rowGrounds(_ subviews: Subviews) -> Subviews.SubSequence {
+        subviews[(cols + 1)..<(cols + 1 + rowCount)]
     }
 
     private func columnWidths(
@@ -18079,13 +18227,61 @@ private struct KayaTableLayout: Layout {
             placed?()
         }
         let cells = Array(cellViews(subviews))
+        let grounds = Array(rowGrounds(subviews))
         for (r, rowH) in rows.enumerated() {
+            if r < grounds.count {
+                grounds[r].place(
+                    at: CGPoint(x: bounds.minX, y: y - rowGap / 2), anchor: .topLeading,
+                    proposal: ProposedViewSize(width: bounds.width, height: rowH + rowGap))
+            }
             for c in 0..<cols where r * cols + c < cells.count {
                 cells[r * cols + c].place(
                     at: CGPoint(x: colX[c], y: y), anchor: .topLeading,
                     proposal: .unspecified)
             }
             y += rowH + rowGap
+        }
+    }
+}
+
+/// A synthesized table row's ground (docs/styling-pass-plan.md Y4): an
+/// activatable row is one button to assistive technology, takes the press
+/// and wears the app's selection across the whole row.
+private struct KayaTableRowGround: View {
+    let row: KayaNode
+
+    var body: some View {
+        if row.activatable {
+            Rectangle()
+                .fill(row.selected ? AnyShapeStyle(kayaSelectedPair().fill) : AnyShapeStyle(Color.clear))
+                .contentShape(Rectangle())
+                .onTapGesture { KayaHost.emitActivated(row.tag) }
+                .background(KayaSkinFrameReader(id: row.id))
+                .accessibilityElement()
+                .accessibilityLabel(kayaCellText(row) ?? "")
+                .accessibilityIdentifier(row.a11yId)
+                .accessibilityAddTraits(row.selected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction { KayaHost.emitActivated(row.tag) }
+        } else {
+            Color.clear.allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
+}
+
+/// A cell of an activatable row passes its press to the row and takes the
+/// selected surface's foreground.
+private struct KayaTableRowPress: ViewModifier {
+    let row: KayaNode
+
+    func body(content: Content) -> some View {
+        if row.activatable {
+            content
+                .foregroundStyle(row.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
+                .environment(\.kayaInFill, row.selected)
+                .contentShape(Rectangle())
+                .onTapGesture { KayaHost.emitActivated(row.tag) }
+        } else {
+            content
         }
     }
 }
@@ -19377,6 +19573,7 @@ private struct KayaSynthesizedTable: View {
             first: window.first, firstRow: node.children.first?.id,
             placement: window.placement,
             placed: { window.placed(node) },
+            rowCount: node.children.count,
             offsetX: window.columnsOffset
         ) {
             ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
@@ -19392,8 +19589,12 @@ private struct KayaSynthesizedTable: View {
             }
             Divider()
             ForEach(node.children) { row in
+                KayaTableRowGround(row: row)
+            }
+            ForEach(node.children) { row in
                 ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
                     KayaRender(node: cell, flexVertical: false, flexStretch: false)
+                        .modifier(KayaTableRowPress(row: row))
                         .background(
                             KayaEdgeReporter(
                                 node: node, key: kayaTableCellKey(row, col, cell),
@@ -20628,10 +20829,20 @@ func kayaSkinReading(_ parts: [Substring]) -> (String?, String) {
         } else if verb == "expect_tint" {
             return DispatchQueue.main.sync { kayaTarget(parts[1], "label", kayaScene.labels).map(kayaLabelTintRead) }
         } else {
-            let found = DispatchQueue.main.sync { () -> (String, CGPoint?)? in
-                (kayaTarget(parts[1], "column", kayaScene.columns)
-                    ?? kayaTarget(parts[1], "row", kayaScene.rows)).map { ($0.a11yId, kayaScreenCentre($0)) }
+            let found = DispatchQueue.main.sync { () -> (String, CGPoint?, Int?)? in
+                guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                    ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                else { return nil }
+                #if os(macOS)
+                    if let at = kayaTableDrivers.values.lazy.compactMap({ $0.axRow(of: node) }).first {
+                        return (at.table, nil, at.index)
+                    }
+                #endif
+                return (node.a11yId, kayaScreenCentre(node), nil)
             }
+            #if os(macOS)
+                if let found, let index = found.2 { return kayaAxTableRowSelected(found.0, index) }
+            #endif
             return found.map { kayaAxSelectedRead($0.0, at: $0.1) }
         }
     }

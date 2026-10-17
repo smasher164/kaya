@@ -11,6 +11,7 @@ struct Track: KayaGen {
     var album: String
     var art: Data
     var tint: KayaTint
+    var selected: Bool
 }
 
 let playlistLength = 60
@@ -22,7 +23,10 @@ let names = [
 ]
 
 @KayaAppActor
-func table(_ tx: KayaAppTx, _ tracks: KayaRecordCollection<Track>, _ id: String, _ rowId: String) -> KayaWidget {
+func table(
+    _ tx: KayaAppTx, _ tracks: KayaRecordCollection<Track>, _ id: String, _ rowId: String,
+    _ pick: @escaping (KayaAppTx, String) -> Void
+) -> KayaWidget {
     let table = trackEach(tx, tracks) { row in
         let line = row.row {
             row.label(row.number)
@@ -42,6 +46,11 @@ func table(_ tx: KayaAppTx, _ tracks: KayaRecordCollection<Track>, _ id: String,
             row.label(row.album)
         }
         row.t.setA11yId(line, rowId)
+        row.t.setSelected(line, row.selected)
+        row.t.onActivate(line) { t, keys in
+            guard case .str(let picked) = keys[0] else { return }
+            pick(t, picked)
+        }
     }
     tx.columns(table, ["#", "Title", "Album"], .none)
     tx.setA11yId(table, id)
@@ -51,7 +60,7 @@ func table(_ tx: KayaAppTx, _ tracks: KayaRecordCollection<Track>, _ id: String,
 func track(_ i: Int, _ art: Data) -> Track {
     let (title, artist, album) = names[i % names.count]
     return Track(number: String(i + 1), title: title, artist: artist, album: album, art: art,
-                 tint: i + 1 == playing ? .accent : .none)
+                 tint: i + 1 == playing ? .accent : .none, selected: false)
 }
 
 KayaApp.run { app in
@@ -60,9 +69,17 @@ KayaApp.run { app in
         tx.window(title: "tracks", width: 720, height: 640)
         let album = trackCollection(tx)
         let playlist = trackCollection(tx)
+        let pick = { (t: KayaAppTx, picked: String) in
+            for i in 0..<names.count {
+                album.patch(t, .str("a\(i + 1)")).set(\.selected, "a\(i + 1)" == picked)
+            }
+            for i in 0..<playlistLength {
+                playlist.patch(t, .str("t\(i + 1)")).set(\.selected, "t\(i + 1)" == picked)
+            }
+        }
         let root = tx.column(spacing: 12) { root in
-            _ = table(tx, album, "album", "a")
-            let long = table(tx, playlist, "tracks", "t")
+            _ = table(tx, album, "album", "a", pick)
+            let long = table(tx, playlist, "tracks", "t", pick)
             tx.setGrow(long, 1)
             return root
         }

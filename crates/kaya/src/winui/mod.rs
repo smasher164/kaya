@@ -4629,12 +4629,21 @@ fn ancestors_cut(
 /// The nearest ScrollViewer above an element, by the framework's own
 /// parent chain.
 fn scroll_ancestor(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
     let mut current: bindings::Microsoft::UI::Xaml::DependencyObject =
         windows_core::Interface::cast(element)?;
     loop {
         let fe: windows_core::Result<FrameworkElement> = windows_core::Interface::cast(&current);
         let Ok(fe) = fe else { return Ok(None) };
-        let Ok(parent) = fe.Parent() else { return Ok(None) };
+        // A wrapped container's control sits in its ItemContainer's template
+        // (skin.rs `wrap`), which no logical parent crosses.
+        let parent = match fe.Parent() {
+            Ok(parent) => parent,
+            Err(_) => match VisualTreeHelper::GetParent(&current) {
+                Ok(parent) => parent,
+                Err(_) => return Ok(None),
+            },
+        };
         if let Ok(viewer) = windows_core::Interface::cast::<ScrollViewer>(&parent) {
             return Ok(Some(viewer));
         }
@@ -22028,9 +22037,11 @@ fn table_rows_in_track_order(
     let children = grid.Children()?;
     let mut rows: Vec<(i32, Grid)> = Vec::new();
     for at in 0..children.Size()? {
-        if let Ok(row) = children.GetAt(at)?.cast::<Grid>() {
+        let child = children.GetAt(at)?;
+        let held = skin::inner_of(&child).unwrap_or_else(|| child.clone());
+        if let Ok(row) = held.cast::<Grid>() {
             if core.rows.iter().any(|r| r == &row) {
-                let track = Grid::GetRow(&row.cast::<FrameworkElement>()?)?;
+                let track = Grid::GetRow(&child.cast::<FrameworkElement>()?)?;
                 rows.push((track, row));
             }
         }

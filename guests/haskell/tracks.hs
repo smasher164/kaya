@@ -21,7 +21,8 @@ data Track = Track
     artist :: Text,
     album :: Text,
     art :: BS.ByteString,
-    tint :: Tint
+    tint :: Tint,
+    selected :: Bool
   }
   deriving stock (Generic)
   deriving anyclass (KayaRecord)
@@ -37,11 +38,11 @@ names =
     ("Naima", "John Coltrane", "Giant Steps")
   ]
 
-table :: RecordCollection Track -> Text -> Text -> Build Widget
-table tracks ident rowId = do
+table :: RecordCollection Track -> Text -> Text -> ([Key] -> IO ()) -> Build Widget
+table tracks ident rowId open = do
   (list, _) <- forEach (recordHandle tracks) $
     withTplAttrs
-      [TplA11yId rowId]
+      [TplA11yId rowId, TplSelectedField (field @"selected" @Track), TplOnActivate open]
       ( rowOf
           [ label (field @"number" @Track),
             rowOf
@@ -63,7 +64,7 @@ table tracks ident rowId = do
 track :: Int -> BS.ByteString -> Track
 track i bytes =
   let (t, a, al) = names !! (i `mod` length names)
-   in Track (tshow (i + 1)) t a al bytes (if i + 1 == playing then TintAccent else TintNone)
+   in Track (tshow (i + 1)) t a al bytes (if i + 1 == playing then TintAccent else TintNone) False
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -72,8 +73,17 @@ main = kayaMain $ \app -> do
     window primary [WTitle "tracks", WSize 720 640]
     albumRows <- collectionOf @Track
     playlist <- collectionOf @Track
-    albumTable <- table albumRows "album" "a"
-    long <- table playlist "tracks" "t"
+    let open keys = case keys of
+          picked : _ -> submitTx app $ do
+            forM_ [0 .. length names - 1] $ \i ->
+              let key = textKey ("a" <> tshow (i + 1))
+               in patch albumRows key [set (field @"selected" @Track) (key == picked)]
+            forM_ [0 .. playlistLength - 1] $ \i ->
+              let key = textKey ("t" <> tshow (i + 1))
+               in patch playlist key [set (field @"selected" @Track) (key == picked)]
+          [] -> return ()
+    albumTable <- table albumRows "album" "a" open
+    long <- table playlist "tracks" "t" open
     setGrow long 1
     root <- column [Spacing 12] [pure albumTable, pure long]
     mount root

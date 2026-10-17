@@ -2359,6 +2359,11 @@ AX_VERB = {
     "save_dialog_state": "expect_save_dialog",
     "set_save_name": "file_dialog_name",
     "confirm_save": "file_save",
+    # A row's or a section's state, read off the bus's StateSet: tracks ran
+    # without the wrapper and every expect_selected read "no accessibility
+    # bus" (2026-10-17).
+    "selected_read": "expect_selected",
+    "expanded": "expect_expanded",
 }
 
 
@@ -2372,6 +2377,7 @@ def ax_bus(root):
     for i, line in enumerate(gtk):
         if "atspi_collect(" not in line \
                 and "atspi_range_read(" not in line \
+                and "atspi_states(" not in line \
                 and "file_dialog_atspi(" not in line:
             continue
         for j in range(i, -1, -1):
@@ -2380,7 +2386,7 @@ def ax_bus(root):
             if m:
                 readers.add(m.group(1))
                 break
-    readers -= {"atspi_collect", "atspi_range_read", "file_dialog_atspi"}
+    readers -= {"atspi_collect", "atspi_range_read", "atspi_states", "file_dialog_atspi"}
     # A reader that read nothing agrees with everything.
     if not readers:
         bad.append("check-steps: no caller of "

@@ -7,13 +7,13 @@ import Kaya
 extension Track: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at
     /// its zero value.
-    static let prototype = Track(number: "", title: "", artist: "", album: "", art: Data(), tint: .none)
+    static let prototype = Track(number: "", title: "", artist: "", album: "", art: Data(), tint: .none, selected: false)
 
     init(values: [KayaValue]) {
-        guard case .str(let number) = values[0], case .str(let title) = values[1], case .str(let artist) = values[2], case .str(let album) = values[3], case .bytes(let art) = values[4], case .i64(let tint) = values[5] else {
+        guard case .str(let number) = values[0], case .str(let title) = values[1], case .str(let artist) = values[2], case .str(let album) = values[3], case .bytes(let art) = values[4], case .i64(let tint) = values[5], case .bool(let selected) = values[6] else {
             preconditionFailure("kaya: Track fields out of order")
         }
-        self.init(number: number, title: title, artist: artist, album: album, art: Data(art), tint: kayaTint(packed: tint))
+        self.init(number: number, title: title, artist: artist, album: album, art: Data(art), tint: kayaTint(packed: tint), selected: selected)
     }
 }
 
@@ -25,6 +25,7 @@ enum TrackFields {
     static let album = KayaField<String>(index: 3)
     static let art = KayaField<Data>(index: 4)
     static let tint = KayaField<KayaTint>(index: 5)
+    static let selected = KayaField<Bool>(index: 6)
 }
 
 /// The collection factory; the struct is the schema.
@@ -42,6 +43,7 @@ struct TrackRow {
     let album = TrackFields.album
     let art = TrackFields.art
     let tint = TrackFields.tint
+    let selected = TrackFields.selected
 
     @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {

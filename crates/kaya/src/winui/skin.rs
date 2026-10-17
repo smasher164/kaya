@@ -81,6 +81,14 @@ pub(super) fn host_of(inner: &UIElement) -> Option<UIElement> {
 }
 
 #[cfg(feature = "harness")]
+/// What a wrapped container's ItemContainer holds: the container's own
+/// control, for the walks that meet the item in its place (a table's rows).
+pub(super) fn inner_of(outer: &UIElement) -> Option<UIElement> {
+    use windows_core::Interface;
+    outer.cast::<ItemContainer>().ok()?.Child().ok()
+}
+
+#[cfg(feature = "harness")]
 /// The element an assistive client meets for a target: the host of a wrapped
 /// container, the element itself otherwise.
 pub(super) fn ax_element(element: &UIElement) -> UIElement {

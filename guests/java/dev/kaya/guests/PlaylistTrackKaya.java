@@ -21,6 +21,7 @@ final class PlaylistTrackKaya {
     static final KayaRecords.Field<String> ALBUM = KayaRecords.fieldAt(3);
     static final KayaRecords.Field<byte[]> ART = KayaRecords.fieldAt(4);
     static final KayaRecords.Field<dev.kaya.KayaApp.Tint> TITLE_TINT = KayaRecords.fieldAt(5);
+    static final KayaRecords.Field<Boolean> SELECTED = KayaRecords.fieldAt(6);
 
     static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Tracks.PlaylistTrack> c, String key) {
         return new Patch(c.patch(tx, key));
@@ -60,6 +61,11 @@ final class PlaylistTrackKaya {
 
         Patch titleTint(dev.kaya.KayaApp.Tint v) {
             p.set(TITLE_TINT, v);
+            return this;
+        }
+
+        Patch selected(boolean v) {
+            p.set(SELECTED, v);
             return this;
         }
     }
@@ -108,6 +114,11 @@ final class PlaylistTrackKaya {
             p.set(TITLE_TINT, v);
             return this;
         }
+
+        PatchIf selected(boolean v) {
+            p.set(SELECTED, v);
+            return this;
+        }
     }
 
     /** The record template: `for (var row : PlaylistTrackKaya.rows(tx, c))`
@@ -141,6 +152,7 @@ final class PlaylistTrackKaya {
         final KayaRecords.Field<String> album = ALBUM;
         final KayaRecords.Field<byte[]> art = ART;
         final KayaRecords.Field<dev.kaya.KayaApp.Tint> titleTint = TITLE_TINT;
+        final KayaRecords.Field<Boolean> selected = SELECTED;
 
         Row(KayaApp.Tpl t, KayaRecords.Collection<String, Tracks.PlaylistTrack> c) {
             super(t);

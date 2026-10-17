@@ -79,6 +79,54 @@ DOORS = [
      [".safeAreaInset(edge: .bottom, spacing: 0)", ".background(.bar, ignoresSafeAreaEdges: .bottom)",
       "kayaHoldsWidget(dock)"], []),
 ]
+# Y4 on the macOS native tier: `on_activate` is the NSTableView's own
+# double-click action and Return, `selected` its own selection, and the harness
+# reaches the same action rather than the emit. tracks.steps cannot see Return,
+# nor a user's click inventing a selection the app never wrote.
+# (label, opener, what the block must hold, what it may never name)
+NATIVE_TABLE = [
+    ("the native table's wiring", "func build() -> NSScrollView {",
+     ["tableView.target = self", "tableView.doubleAction = #selector(rowDoubleClicked(_:))", "tableView.onReturn = {",
+      "return self.activate(row: self.tableView.selectedRow)",
+      "tableView.setAccessibilityIdentifier(kayaNativeTableAxId(node.id))"], []),
+    ("the native table's double-click action", "@objc func rowDoubleClicked(_ sender: NSTableView) {",
+     ["_ = activate(row: sender.clickedRow)"], []),
+    ("the native table's activation door", "func activate(row index: Int) -> Bool {",
+     ["guard stamped.activatable else", "KayaHost.emitActivated(stamped.tag)"], []),
+    ("Return on the native table", "final class KayaNativeTableView: NSTableView {",
+     ["if [36, 76].contains(event.keyCode), onReturn?() == true { return }",
+      "override var clickedRow: Int { harnessClickedRow ?? super.clickedRow }"], []),
+    ("the native table's selection", "private func applySelection() {",
+     ["if stamped.selected { want.insert(base + offset) } else { want.remove(base + offset) }",
+      "tableView.selectRowIndexes(want, byExtendingSelection: false)"], []),
+    ("a user's selection on the native table", "selectionIndexesForProposedSelection proposed: IndexSet",
+     ["applyingSelection ? proposed : tableView.selectedRowIndexes"], []),
+    ("the harness's double-click", "func userDoubleClick(_ stamped: KayaNode) -> String? {",
+     ["let sent = tableView.sendAction(action, to: tableView.target)", "tableView.harnessClickedRow = index",
+      "if activations > before { return nil }"], ["emitActivated"]),
+    ("the synthesized table row's ground", "private struct KayaTableRowGround: View {",
+     [".onTapGesture { KayaHost.emitActivated(row.tag) }", "kayaSelectedPair().fill",
+      ".accessibilityIdentifier(row.a11yId)", ".accessibilityAddTraits(row.selected ? [.isButton, .isSelected] : .isButton)",
+      ".background(KayaSkinFrameReader(id: row.id))"], ["Color(red:", "Color.gray"]),
+    ("a synthesized row's cells", "private struct KayaTableRowPress: ViewModifier {",
+     [".onTapGesture { KayaHost.emitActivated(row.tag) }", "kayaSelectedPair().fore"], []),
+]
+
+
+def native_table_findings(swift):
+    out = []
+    for label, opener, needs, never in NATIVE_TABLE:
+        found = blocks(swift, opener)
+        if len(found) != 1:
+            out.append(f"skin: {label} is defined {len(found)} times in {SWIFT}, wanted once ({opener})")
+            continue
+        body = flat(found[0])
+        out += [f"skin: {label} lacks {need}" for need in needs if flat(need) not in body]
+        out += [f"skin: {label} names {name}, which the platform's own route replaces"
+                for name in never if flat(name) in body]
+    return out
+
+
 # (label, opener, what the block must hold) -- and never MODEL
 READS = [
     ("the window's pixels", "func kayaWindowPixels() -> KayaWindowPixels? {",
@@ -96,6 +144,9 @@ READS = [
     ("the platform's frame for a skinned node", "func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {",
      ["kayaHarnessRect(view.bounds, in: view)", "view.convert(view.bounds, to: nil)"]),
     ("expect_selected's readers", "func kayaAxSelectedRead(_ identifier: String, at centre: CGPoint?) -> String {", []),
+    ("expect_selected's native table reader", "func kayaAxTableRowSelected(_ table: String, _ index: Int) -> String {",
+     ["kayaAxFindAll(app, table, 0, &matches)", "kayaAxCopy(hit, kAXRowsAttribute as String)",
+      "kayaAxCopy(rows[index], kAXSelectedAttribute as String) as? Bool"]),
     ("expect_dock's reader", "func kayaDockRead() -> String {", ["kayaDockFrame", "kayaFindSplitView(content)"]),
     ("hover's route", "func kayaHoverTarget(_ spec: Substring) -> String? {",
      ["window.sendEvent(event)", "owner.mouseEntered(with: enter)", "owner.mouseMoved(with: event)",
@@ -114,6 +165,29 @@ CALLS = [
     (SWIFT, "iOS reads the selected trait", "hit.accessibilityTraits.contains(.selected)"),
     (SWIFT, "a click reaches an activatable container",
      "?? kayaTarget(parts[1], \"row\", kayaScene.rows), node.activatable\n{\nKayaHost.emitActivated(node.tag)"),
+    (SWIFT, "a click on a native table's row takes the table's double-click, before the emit (Y4)",
+     "refused = driver.userDoubleClick(node)\nreturn refused == nil\n}\n#endif\n"
+     "// An activatable row or column takes the click as a whole"),
+    (SWIFT, "expect_selected on a native table's row reads the table's AXRows (Y4)",
+     "if let found, let index = found.2 { return kayaAxTableRowSelected(found.0, index) }"),
+    (SWIFT, "every report puts the app's selection on the native table (Y4)",
+     "refresh()\napplySelection()\nlayoutColumns()"),
+    (SWIFT, "a synthesized row's cells pass their press to the row (Y4)", ".modifier(KayaTableRowPress(row: row))"),
+    (SWIFT, "the synthesized table stamps one ground per row (Y4)",
+     "ForEach(node.children) { row in\nKayaTableRowGround(row: row)\n}"),
+    (SWIFT, "the synthesized table's layout knows its grounds (Y4)", "rowCount: node.children.count"),
+    (SWIFT, "the synthesized table's layout places each row's ground (Y4)",
+     "grounds[r].place(\nat: CGPoint(x: bounds.minX, y: y - rowGap / 2), anchor: .topLeading,"),
+    (COMPOSE, "the Compose table stamps one ground per row under its cells (Y4)",
+     "rows.forEach { row -> KayaTableRowGround(row) }\nrows.forEach { row ->"),
+    (COMPOSE, "the Compose table's cells are counted past the grounds (Y4)",
+     "val cells = measurables.subList(nFolded + cols + 1 + nRows, measurables.size - 3)"),
+    (COMPOSE, "a Compose table row's ground is the activatable surface (Y4)",
+     "Box(if (row.activatable) tag.then(kayaFilledSurface(row)) else Modifier)"),
+    (WINUI, "WinUI's table rows read through an activatable row's ItemContainer (Y4)",
+     "let held = skin::inner_of(&child).unwrap_or_else(|| child.clone());"),
+    (WINUI, "WinUI's scroll walk crosses an ItemContainer's template (Y4)",
+     "Err(_) => match VisualTreeHelper::GetParent(&current) {"),
     (SWIFT, "the hover layer is the platform's own callback",
      "if inside { kayaHovered.insert(node.id) } else { kayaHovered.remove(node.id) }"),
     (SWIFT, "the mac native table's row takes its tallest cell (Y5)", "height = max(height, content > kayaNativeRowHeight ? content + kayaNativeRowPadding : content)"),
@@ -233,6 +307,7 @@ def findings(sources, backends=None):
             out.extend(mod.findings(sources[source_key(rel, mod)]))
     swift = sources[SWIFT]
     out.extend(behind_findings(swift))
+    out.extend(native_table_findings(swift))
     out.extend(visible_findings(sources))
     for label, opener, needs, never in DOORS:
         found = blocks(swift, opener)
@@ -278,6 +353,7 @@ def run(g):
     still = [rel for rel, stubs in STUBBED.items() if all(stub in sources[rel] for stub in stubs)]
     g.counted("skin clauses held",
               sum(len(n) + len(v) + 1 for *_, n, v in DOORS) + sum(len(n) + 2 for *_, n in READS) + len(CALLS)
+              + sum(len(n) + len(v) + 1 for *_, n, v in NATIVE_TABLE)
               + len(VISIBLE),
               floor=70)
     g.counted("skin backends still stubbed", len(still), floor=0)
@@ -358,6 +434,60 @@ def run(g):
         ("a reused view kept by the node it drew before", SWIFT,
          r"    for \(other, views\) in kayaSkinAnchors where other != id && views\.contains\(where: \{ \$0\.view === view\.view \}\) \{\n        kayaSkinAnchors\[other\] = views\.filter \{ \$0\.view != nil && \$0\.view !== view\.view \}\n    \}\n",
          "", "a reused view leaves the node it drew before"),
+        ("the native table's doubleAction unwired", SWIFT,
+         r"\n\s+tableView\.doubleAction = #selector\(rowDoubleClicked\(_:\)\)", "",
+         "the native table's wiring lacks tableView.doubleAction"),
+        ("the double-click action reading no row", SWIFT, r"_ = activate\(row: sender\.clickedRow\)",
+         "_ = sender", "the native table's double-click action lacks"),
+        ("Return passed through", SWIFT, r"if \[36, 76\]\.contains\(event\.keyCode\), onReturn\?\(\) == true \{ return \}",
+         "", "Return on the native table lacks if [36, 76]"),
+        ("Return wired to nothing", SWIFT, r"return self\.activate\(row: self\.tableView\.selectedRow\)",
+         "return false", "the native table's wiring lacks return self.activate"),
+        ("the door blind to on_activate", SWIFT, r"guard stamped\.activatable else", "guard true else",
+         "the native table's activation door lacks guard stamped.activatable"),
+        ("the door publishing nothing", SWIFT, r"\n\s+KayaHost\.emitActivated\(stamped\.tag\)", "",
+         "the native table's activation door lacks KayaHost.emitActivated"),
+        ("the selection ignoring `selected`", SWIFT,
+         r"if stamped\.selected \{ want\.insert\(base \+ offset\) \} else \{ want\.remove\(base \+ offset\) \}",
+         "want.insert(base + offset)", "the native table's selection lacks"),
+        ("a user's click taken as the selection", SWIFT,
+         r"applyingSelection \? proposed : tableView\.selectedRowIndexes", "proposed",
+         "a user's selection on the native table lacks"),
+        ("a report leaving the selection behind", SWIFT, r"(refresh\(\))\n\s+applySelection\(\)\n(\s+)layoutColumns\(\)",
+         r"\1\n\2layoutColumns()", "every report puts the app's selection on the native table"),
+        ("the harness's double-click a shortcut to the emit", SWIFT,
+         r"let sent = tableView\.sendAction\(action, to: tableView\.target\)",
+         "let sent = true; KayaHost.emitActivated(stamped.tag); activations += 1",
+         "the harness's double-click names emitActivated"),
+        ("a click on a native row taking the emit", SWIFT, r"refused = driver\.userDoubleClick\(node\)",
+         "refused = nil; KayaHost.emitActivated(node.tag)", "a click on a native table's row takes the table's double-click"),
+        ("the native row's selected read off the cells", SWIFT,
+         r"if let found, let index = found\.2 \{ return kayaAxTableRowSelected\(found\.0, index\) \}", "",
+         "expect_selected on a native table's row reads the table's AXRows"),
+        ("the native reader reading no AXRows", SWIFT, r"kayaAxCopy\(hit, kAXRowsAttribute as String\)",
+         "kayaAxCopy(hit, kAXChildrenAttribute as String)", "expect_selected's native table reader lacks"),
+        ("the synthesized row's ground unnamed to the tree", SWIFT,
+         r"\n\s+\.accessibilityIdentifier\(row\.a11yId\)", "",
+         "the synthesized table row's ground lacks .accessibilityIdentifier"),
+        ("the synthesized row's selected surface kaya's own", SWIFT,
+         r"AnyShapeStyle\(kayaSelectedPair\(\)\.fill\) : AnyShapeStyle\(Color\.clear\)",
+         "AnyShapeStyle(Color.gray) : AnyShapeStyle(Color.clear)", "the synthesized table row's ground lacks"),
+        ("the synthesized layout blind to its grounds", SWIFT, r"rowCount: node\.children\.count", "rowCount: 0",
+         "the synthesized table's layout knows its grounds"),
+        ("the synthesized cells keeping their press", SWIFT, r"\n\s+\.modifier\(KayaTableRowPress\(row: row\)\)", "",
+         "KayaTableRowPress"),
+        ("the Compose table's grounds gone", COMPOSE, r"rows\.forEach \{ row -> KayaTableRowGround\(row\) \}\n", "",
+         "the Compose table stamps one ground per row"),
+        ("the Compose cells counted from the grounds", COMPOSE, r"nFolded \+ cols \+ 1 \+ nRows, measurables", "nFolded + cols + 1, measurables",
+         "the Compose table's cells are counted past the grounds"),
+        ("a Compose ground with no press", COMPOSE, r"tag\.then\(kayaFilledSurface\(row\)\)", "tag",
+         "a Compose table row's ground is the activatable surface"),
+        ("WinUI's table rows read off the items", WINUI,
+         r"let held = skin::inner_of\(&child\)\.unwrap_or_else\(\|\| child\.clone\(\)\);", "let held = child.clone();",
+         "WinUI's table rows read through an activatable row's ItemContainer"),
+        ("WinUI's scroll walk stopping at the template", WINUI,
+         r"Err\(_\) => match VisualTreeHelper::GetParent\(&current\) \{", "Err(_) => match Err::<i32, ()>(()) {",
+         "WinUI's scroll walk crosses an ItemContainer's template"),
         ("the clamp removed", SCENE,
          r"let \(light, dark\) = crate::brand::gradient_tops\(rgb\);",
          "let (light, dark) = (rgb, rgb);", "the core lowers every gradient's colour"),

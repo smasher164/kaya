@@ -1,7 +1,7 @@
 // The tracks scene, C# port — guests/rust/tracks.rs, tools/scenes/tracks.steps.
 
 [KayaGen]
-record PlaylistTrack(string Number, string Title, string Artist, string Album, byte[] Art, Tint TitleTint);
+record PlaylistTrack(string Number, string Title, string Artist, string Album, byte[] Art, Tint TitleTint, bool Selected);
 
 static class TracksScene
 {
@@ -14,7 +14,8 @@ static class TracksScene
         ("Naima", "John Coltrane", "Giant Steps"),
     };
 
-    static Widget Table(Tx tx, RecordCollection<PlaylistTrack> tracks, string id, string rowId)
+    static Widget Table(Tx tx, RecordCollection<PlaylistTrack> tracks, string id, string rowId,
+        System.Action<Tx, string> pick)
     {
         var table = PlaylistTrackKaya.Each(tx, tracks, row =>
         {
@@ -40,6 +41,8 @@ static class TracksScene
                 row.Label(row.Album);
             });
             row.SetA11yId(line, rowId);
+            row.SetSelected(line, row.Selected);
+            row.OnActivate(line, (t, keys) => pick(t, (string)keys[0]));
         });
         tx.Columns(table, new[] { "#", "Title", "Album" }, Sort.None);
         tx.SetA11yId(table, id);
@@ -50,7 +53,7 @@ static class TracksScene
     {
         var (title, artist, album) = Names[i % Names.Length];
         return new PlaylistTrack((i + 1).ToString(), title, artist, album, art,
-            i + 1 == Playing ? Tint.Accent : Tint.None);
+            i + 1 == Playing ? Tint.Accent : Tint.None, false);
     }
 
     public static void Run()
@@ -63,10 +66,17 @@ static class TracksScene
             using (var asset = tx.Asset("covers/cover-600.jpg")) art = asset.Bytes();
             var album = PlaylistTrackKaya.Collection(tx);
             var playlist = PlaylistTrackKaya.Collection(tx);
+            void Pick(Tx t, string picked)
+            {
+                for (int i = 0; i < Names.Length; i++)
+                    PlaylistTrackKaya.Patch(t, album, $"a{i + 1}").Selected($"a{i + 1}" == picked);
+                for (int i = 0; i < Playlist; i++)
+                    PlaylistTrackKaya.Patch(t, playlist, $"t{i + 1}").Selected($"t{i + 1}" == picked);
+            }
             tx.Mount(tx.Column(root =>
             {
-                Table(tx, album, "album", "a");
-                var lng = Table(tx, playlist, "tracks", "t");
+                Table(tx, album, "album", "a", Pick);
+                var lng = Table(tx, playlist, "tracks", "t", Pick);
                 tx.SetGrow(lng, 1);
                 return root;
             }, spacing: 12));

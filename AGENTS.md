@@ -1466,9 +1466,13 @@ in docs/deferred.md.
    the one named exception), `overlay` the platform's material, the shape on
    the picture and on its loading and failed looks, the dock's ground to the
    edge, and every skin reader answering from pixels or the tree, never the
-   node (docs/styling-pass-plan.md §3, §5); 129 SwiftUI and core clauses and
-   the arms' 20, 31 and 21 cuts, each watched red, and a backend's row
-   withheld refused.
+   node (docs/styling-pass-plan.md §3, §5); and since 2026-10-17 a TABLE
+   ROW's activation and selection on every tier (the mac NSTableView's own
+   doubleAction, Return and selection, a user's click refused as app state,
+   the harness's click sent through that doubleAction; the iOS, Compose and
+   WinUI rows' grounds and readers; docs/traps.md, the table row nobody
+   rendered); 199 SwiftUI, Compose, WinUI and core clauses and the arms' 20,
+   31 and 21 cuts, each watched red, and a backend's row withheld refused.
    THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
    the constant sweep now reads a TYPE as well as a prefix: draw_op,
    paint, fill_rule, text_align and text_baseline ride the op stream as

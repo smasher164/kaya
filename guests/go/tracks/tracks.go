@@ -1,6 +1,7 @@
 // The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md Y5,
 // Y6, Y7): a playlist's table whose title cell is rounded art beside the
-// track's name over its artist, the playing track's name in the accent.
+// track's name over its artist, the playing track's name in the accent, and a
+// row the app selects on activation (Y4).
 package tracks
 
 import (
@@ -17,7 +18,8 @@ type Track struct {
 	Artist string
 	Album  string
 	Art    []byte
-	Tint   kaya.Tint
+	Tint     kaya.Tint
+	Selected bool
 }
 
 const playlist = 60
@@ -29,7 +31,7 @@ var names = [][3]string{
 	{"Naima", "John Coltrane", "Giant Steps"},
 }
 
-func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID string) kaya.Widget {
+func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID string, pick func(*kaya.Tx, string)) kaya.Widget {
 	rows := TrackRows(tx, tracks).Columns([]string{"#", "Title", "Album"}, kaya.SortNone())
 	for row := range rows.All() {
 		line := row.Row(func() {
@@ -51,6 +53,10 @@ func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID s
 			row.Label(row.Album())
 		})
 		row.SetA11yID(line, rowID)
+		row.BindSelected(line, row.Selected())
+		line.OnActivate(func(tx *kaya.Tx, keys []any) {
+			pick(tx, keys[0].(string))
+		})
 	}
 	return rows.Widget().A11yID(id)
 }
@@ -73,9 +79,19 @@ func App() *kaya.App {
 		a.Close()
 		album := TrackCollection(tx)
 		list := TrackCollection(tx)
+		pick := func(tx *kaya.Tx, picked string) {
+			for i := range names {
+				key := fmt.Sprintf("a%d", i+1)
+				TrackPatch(album, tx, key).Selected(key == picked)
+			}
+			for i := range playlist {
+				key := fmt.Sprintf("t%d", i+1)
+				TrackPatch(list, tx, key).Selected(key == picked)
+			}
+		}
 		tx.Mount(tx.Column(func() {
-			table(tx, album, "album", "a")
-			long := table(tx, list, "tracks", "t")
+			table(tx, album, "album", "a", pick)
+			long := table(tx, list, "tracks", "t", pick)
 			tx.SetGrow(long, 1)
 		}).Spacing(12))
 		for i := range names {

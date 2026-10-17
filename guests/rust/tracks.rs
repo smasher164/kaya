@@ -1,10 +1,11 @@
 //! The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md Y5,
 //! Y6, Y7): a playlist's table whose title cell is rounded art beside the
 //! track's name over its artist, at a row height every tier honours, the
-//! playing track's name in the accent. A three-row album table carries the
-//! reading of every row; the long playlist carries the scroll.
+//! playing track's name in the accent, and a row the app selects on
+//! activation (Y4). A three-row album table carries the reading of every row;
+//! the long playlist carries the scroll.
 
-use kaya::{Fit, Shape, Tint};
+use kaya::{Fit, Path, PathKey, Shape, Tint};
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
 struct Track {
@@ -14,6 +15,7 @@ struct Track {
     album: String,
     art: Vec<u8>,
     tint: Tint,
+    selected: bool,
 }
 
 const PLAYLIST: usize = 60;
@@ -24,7 +26,13 @@ const NAMES: [(&str, &str, &str); 3] = [
     ("Naima", "John Coltrane", "Giant Steps"),
 ];
 
-fn table(tx: &mut kaya::Tx<'_>, tracks: &kaya::Collection<Track>, id: &str, row_id: &str) -> kaya::WidgetId {
+fn table(
+    tx: &mut kaya::Tx<'_>,
+    tracks: &kaya::Collection<Track>,
+    id: &str,
+    row_id: &str,
+    msgs: &kaya::Messages<Path>,
+) -> kaya::WidgetId {
     let rows = tracks.rows(tx).columns(&["#", "Title", "Album"], kaya::Sort::none());
     let table = rows.id();
     for mut row in rows {
@@ -47,6 +55,8 @@ fn table(tx: &mut kaya::Tx<'_>, tracks: &kaya::Collection<Track>, id: &str, row_
             t.label(Track::album());
         });
         row.a11y_id(line, row_id);
+        row.selected(line, Track::selected());
+        row.on_activate(line, msgs, |path| path);
     }
     tx.a11y_id(table, id);
     table
@@ -61,20 +71,21 @@ fn track(i: usize, art: &[u8]) -> Track {
         album: album.to_owned(),
         art: art.to_vec(),
         tint: if i + 1 == PLAYING { Tint::Accent } else { Tint::None },
+        selected: false,
     }
 }
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
-    let msgs = kaya::Messages::<()>::new();
-    ctx.apply(|tx| {
+    let msgs = kaya::Messages::new();
+    let (album, playlist) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("tracks").size(720.0, 640.0);
         let art = tx.asset("covers/cover-600.jpg").bytes().to_vec();
         let album = tx.collection::<Track>();
         let playlist = tx.collection::<Track>();
         let root = tx
             .column(|tx| {
-                table(tx, &album, "album", "a");
-                let long = table(tx, &playlist, "tracks", "t");
+                table(tx, &album, "album", "a", &msgs);
+                let long = table(tx, &playlist, "tracks", "t", &msgs);
                 tx.grow(long, 1.0);
             })
             .spacing(12.0)
@@ -86,8 +97,21 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         for i in 0..PLAYLIST {
             tx.insert(&playlist, format!("t{}", i + 1).as_str(), track(i, &art));
         }
+        (album, playlist)
     });
-    while msgs.next(&ctx).is_some() {}
+    while let Some(path) = msgs.next(&ctx) {
+        let picked = path.key::<String>(0);
+        ctx.apply(|tx| {
+            for i in 0..NAMES.len() {
+                let key = format!("a{}", i + 1);
+                album.patch(tx, key.as_str()).selected(key == picked);
+            }
+            for i in 0..PLAYLIST {
+                let key = format!("t{}", i + 1);
+                playlist.patch(tx, key.as_str()).selected(key == picked);
+            }
+        });
+    }
 }
 
 fn main() {

@@ -1,7 +1,9 @@
 /* The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md
  * Y5, Y6, Y7) with every field explicit: two tables whose title cell is a
  * `rounded` image beside a name over a caption, the name's `tint` bound to
- * the row's field. See guests/rust/tracks.rs. */
+ * the row's field, and each row `activatable` with `selected` bound to its
+ * field, the app writing it from the `activated` occurrence (Y4). See
+ * guests/rust/tracks.rs. */
 
 #include <kaya.h>
 #include <kaya_wire.h>
@@ -42,6 +44,7 @@
 #define F_ALBUM 3
 #define F_ART 4
 #define F_TINT 5
+#define F_SELECTED 6
 
 #define PLAYLIST 60
 #define PLAYING 3
@@ -112,6 +115,8 @@ static void cells(KayaTx *tx, uint64_t base, const char *row_id) {
     kaya_tx_bind_text_element(tx, album, 0, F_ALBUM);
     kaya_tx_add_child(tx, line, album);
     kaya_tx_set_a11y_id(tx, line, row_id);
+    kaya_tx_bind_selected_element(tx, line, 0, F_SELECTED);
+    kaya_tx_set_activatable(tx, line, 1);
 }
 
 static void headers(KayaTx *tx, uint64_t table, const char *id) {
@@ -127,8 +132,8 @@ static void insert(KayaTx *tx, uint64_t collection, char prefix, int i, KayaVal 
     snprintf(number, sizeof number, "%d", i + 1);
     const char *const *n = NAMES[i % 3];
     KayaVal fields[] = {kaya_str(number), kaya_str(n[0]), kaya_str(n[1]), kaya_str(n[2]), art,
-                        kaya_i64(i + 1 == PLAYING ? KAYA_TINT_ACCENT : KAYA_TINT_NONE)};
-    kaya_tx_collection_insert(tx, collection, NULL, 0, kaya_str(key), 0, fields, 6);
+                        kaya_i64(i + 1 == PLAYING ? KAYA_TINT_ACCENT : KAYA_TINT_NONE), kaya_bool(0)};
+    kaya_tx_collection_insert(tx, collection, NULL, 0, kaya_str(key), 0, fields, 7);
 }
 
 static void build_scene(void) {
@@ -148,9 +153,9 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
     kaya_tx_set_spacing(&tx, W_ROOT, 12.0);
     uint32_t schema[] = {KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_BLOB,
-                         KAYA_VALUE_I64};
-    kaya_tx_create_collection(&tx, C_ALBUM, (KayaVariantSchema[]){{schema, 6}}, 1);
-    kaya_tx_create_collection(&tx, C_PLAYLIST, (KayaVariantSchema[]){{schema, 6}}, 1);
+                         KAYA_VALUE_I64, KAYA_VALUE_BOOL};
+    kaya_tx_create_collection(&tx, C_ALBUM, (KayaVariantSchema[]){{schema, 7}}, 1);
+    kaya_tx_create_collection(&tx, C_PLAYLIST, (KayaVariantSchema[]){{schema, 7}}, 1);
 
     kaya_tx_create_for(&tx, W_ALBUM, C_ALBUM);
     kaya_tx_create_widget(&tx, N_A_LINE, KAYA_KIND_ROW);
@@ -189,6 +194,25 @@ static void build_scene(void) {
     kaya_asset_release(asset);
 }
 
+/* The app selects the row it was handed; kaya toggles nothing (Y4). */
+static void select_in(KayaTx *tx, uint64_t collection, char prefix, int count, const KayaVal *picked) {
+    for (int i = 0; i < count; i++) {
+        char key[8];
+        snprintf(key, sizeof key, "%c%d", prefix, i + 1);
+        int on = picked->type == KAYA_VALUE_STR && picked->s_len == strlen(key) &&
+                 memcmp(picked->s, key, picked->s_len) == 0;
+        kaya_tx_collection_update_field(tx, collection, NULL, 0, kaya_str(key), F_SELECTED, 0, kaya_bool(on));
+    }
+}
+
+static void on_row(const KayaVal *picked) {
+    static uint8_t buf[8192];
+    KayaTx tx = {buf, 0, sizeof buf};
+    select_in(&tx, C_ALBUM, 'a', 3, picked);
+    select_in(&tx, C_PLAYLIST, 't', PLAYLIST, picked);
+    submit(&tx);
+}
+
 static void *app(void *arg) {
     (void)arg;
     build_scene();
@@ -197,6 +221,14 @@ static void *app(void *arg) {
         size_t size = kaya_next_occurrence(&rec);
         if (size == KAYA_OCCURRENCE_SHUTDOWN)
             break;
+        if (size == KAYA_OCCURRENCE_WOKEN)
+            continue;
+        uint64_t id;
+        KayaVal keys[2];
+        uint32_t n_keys;
+        if (kaya_parse_activated(rec, &id, keys, 2, &n_keys) && n_keys == 1 &&
+            (id == N_A_LINE || id == N_T_LINE))
+            on_row(&keys[0]);
     }
     return NULL;
 }
