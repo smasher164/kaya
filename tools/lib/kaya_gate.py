@@ -16,7 +16,9 @@ tools/check-python.py runs that on every sweep.
 """
 
 import atexit
+import concurrent.futures
 import contextlib
+import functools
 import hashlib
 import os
 import pathlib
@@ -331,6 +333,36 @@ class Gate:
             )
 
 
+# The routes tables call this on whole interpreter files once per clause and
+# per cut; only the large texts are worth holding
+# (docs/measurements/gate-sweep-2026-10-17.md).
+def flat(text):
+    """The text with every whitespace character removed (str.isspace, the
+    same set as re's \\s)."""
+    return _flat_large(text) if len(text) > 4096 else "".join(text.split())
+
+
+@functools.lru_cache(maxsize=48)
+def _flat_large(text):
+    return "".join(text.split())
+
+
+PROBE_WIDTH = max(1, int(os.environ.get("KAYA_PROBE_JOBS", "") or "4"))
+
+
+def in_parallel(fn, items, width=PROBE_WIDTH):
+    """fn over every item on `width` threads, the results in item order.
+
+    Every item runs to its end before this returns or raises, and a worker
+    that raised raises HERE, the first in item order — a pool that dropped
+    one is the swallowed-exception false green (selftest F11)."""
+    items = list(items)
+    workers = max(1, min(width, len(items) or 1))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(fn, item) for item in items]
+    return [f.result() for f in futures]
+
+
 @contextlib.contextmanager
 def scratch_dir(prefix="kaya-gate-"):
     """EXIT-safe temp directory for code with no Gate in hand."""
@@ -519,6 +551,48 @@ def _selftest():  # noqa: PLR0915 — one flat list of watched properties
           "ALPHA" in p1.read_text(encoding="utf-8")
           and "BETA" in p2.read_text(encoding="utf-8")
           and "BETA" not in p1.read_text(encoding="utf-8"))
+
+    # F11. A POOL RETURNS EVERY RESULT IN ITEM ORDER AND RAISES A WORKER'S
+    # FAILURE: a parallelized gate that dropped a red worker is green.
+    import time as _time
+    order = in_parallel(lambda n: (_time.sleep(0.05 * (4 - n)), n)[1], range(4), width=4)
+    check("F11 in_parallel answers in item order", order == [0, 1, 2, 3])
+    finished = []
+
+    def worker(n):
+        _time.sleep(0.05 * n)
+        finished.append(n)
+        if n == 1:
+            raise RuntimeError("worker 1 red")
+        return n
+    try:
+        in_parallel(worker, range(4), width=4)
+        raised = None
+    except RuntimeError as error:
+        raised = str(error)
+    print(f"kaya_gate: F11 a red worker raised {raised!r}, {len(finished)} of 4 workers finished")
+    check("F11 a red worker's failure is raised, not dropped", raised == "worker 1 red")
+    check("F11 every worker finishes before the failure is raised",
+          sorted(finished) == [0, 1, 2, 3])
+    child = subprocess.run(
+        [sys.executable, "-c",
+         "import pathlib, sys; sys.path.insert(0, "
+         f"{str(pathlib.Path(__file__).resolve().parent)!r}); "
+         "from kaya_gate import in_parallel\n"
+         "def w(n):\n    if n == 2: raise SystemExit(1)\n    return n\n"
+         "in_parallel(w, range(4)); print('green')"],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=False,
+    )
+    print(f"kaya_gate: F11 a gate whose worker exits 1 left rc={child.returncode}, "
+          f"stdout={child.stdout.strip()!r}")
+    check("F11 a worker's SystemExit reddens the gate", child.returncode != 0
+          and "green" not in child.stdout)
+
+    # F12. flat() is re's \s+ removal over every code point.
+    every = "".join(chr(c) for c in range(sys.maxunicode + 1) if not 0xD800 <= c <= 0xDFFF)
+    check("F12 flat() removes exactly re's whitespace", flat(every) == re.sub(r"\s+", "", every))
+    check("F12 flat() of a large text is the same twice",
+          flat(every * 2) == flat(every * 2) == re.sub(r"\s+", "", every * 2))
 
     print(f"kaya_gate: SELF-TEST {'OK' if not bad else f'FAILED ({bad})'}")
     return bad == 0

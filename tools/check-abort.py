@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, in_parallel, scratch_dir
 
 dev_shell_or_die()
 
@@ -23,6 +23,22 @@ import subprocess
 import time
 
 g = Gate("check-abort")
+
+# The sections run as concurrent children of this file, one per PART, heaviest
+# first (docs/measurements/gate-sweep-2026-10-17.md). A section's guard names
+# its part; the parent refuses a guard naming no part, a part no guard names,
+# and a verdict unless every part exited 0 after printing its end line.
+PARTS = ("swift-executor", "swift-netimage", "swift-async", "swift-notify", "haskell",
+         "java", "csharp", "rust-go", "ocaml")
+PART = sys.argv[2] if sys.argv[1:2] == ["--part"] and len(sys.argv) == 3 else None
+if sys.argv[1:] and PART not in PARTS:
+    g.refuse(f"unknown arguments {sys.argv[1:]!r}: a child is `--part <one of {', '.join(PARTS)}>`")
+
+
+def part(name):
+    if name not in PARTS:
+        g.refuse(f"a section is guarded by part({name!r}), which is not in PARTS, so it never runs")
+    return PART == name
 
 LIB = TARGET / "debug/libkaya.dylib"
 if not LIB.is_file():
@@ -73,43 +89,107 @@ def probe_run(argv, timeout=10, env=None):
         raise
 
 
-timeout_child = g.doctor(
-    "timeout diagnostic", "pass", r"^pass$",
-    "import sys, threading; print('timeout-out', flush=True); "
-    "print('timeout-err', file=sys.stderr, flush=True); threading.Event().wait(60)")
-timeout_report = io.StringIO()
-try:
-    with contextlib.redirect_stdout(timeout_report):
-        probe_run([sys.executable, "-c", timeout_child], timeout=1)
-except subprocess.TimeoutExpired:
-    report = timeout_report.getvalue()
-    if ("captured stdout (12 characters):\ntimeout-out\n" not in report
-            or "captured stderr (12 characters):\ntimeout-err\n" not in report):
-        g.refuse(f"timeout diagnostic lost the child's output: {report}")
-else:
-    g.refuse("timeout diagnostic did not exercise the timeout branch")
-print("check-abort: timeout diagnostic retained both child streams")
+if PART is None:
+    timeout_child = g.doctor(
+        "timeout diagnostic", "pass", r"^pass$",
+        "import sys, threading; print('timeout-out', flush=True); "
+        "print('timeout-err', file=sys.stderr, flush=True); threading.Event().wait(60)")
+    timeout_report = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(timeout_report):
+            probe_run([sys.executable, "-c", timeout_child], timeout=1)
+    except subprocess.TimeoutExpired:
+        report = timeout_report.getvalue()
+        if ("captured stdout (12 characters):\ntimeout-out\n" not in report
+                or "captured stderr (12 characters):\ntimeout-err\n" not in report):
+            g.refuse(f"timeout diagnostic lost the child's output: {report}")
+    else:
+        g.refuse("timeout diagnostic did not exercise the timeout branch")
+    print("check-abort: timeout diagnostic retained both child streams")
+
+
+def run_part(name):
+    return subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve()), "--part", name],
+                          cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                          encoding="utf-8", errors="replace", check=False)
+
+
+def part_findings(names, results):
+    out = []
+    for name, got in zip(names, results, strict=True):
+        if got.returncode != 0:
+            out.append(f"part {name} exited {got.returncode}")
+        elif f"check-abort: part {name} OK" not in got.stdout:
+            out.append(f"part {name} exited 0 without its end line, so it did not run to its end")
+    return out
+
+
+def guarded_parts(source):
+    return set(re.findall(r'^\s*if part\("([^"]+)"\):', source, re.M))
+
+
+def guard_findings(held):
+    out = []
+    if held - set(PARTS):
+        out.append(f"guarded only {sorted(held - set(PARTS))}: a section whose part is not in "
+                   f"PARTS never runs")
+    if set(PARTS) - held:
+        out.append(f"never guarded {sorted(set(PARTS) - held)}: a part no section names runs "
+                   f"nothing")
+    return out
+
+
+if PART is None:
+    held = guarded_parts(pathlib.Path(__file__).read_text(encoding="utf-8"))
+    g.counted("check-abort parts guarding a section", len(held & set(PARTS)), floor=len(PARTS))
+    for line in guard_findings(held):
+        g.refuse(f"PARTS and the section guards disagree: {line}")
+    g.negative("a part no section guards", lambda: guard_findings(held - {"java"}),
+               want="never guarded ['java']")
+    g.negative("a guard naming no part", lambda: guard_findings(held | {"jvaa"}),
+               want="guarded only ['jvaa']")
+    ok = subprocess.CompletedProcess([], 0, "check-abort: part a OK\n")
+    for label, results, want in (
+        ("a red part", [ok, subprocess.CompletedProcess([], 1, "")], "part b exited 1"),
+        ("a part that stopped short", [ok, subprocess.CompletedProcess([], 0, "")],
+         "part b exited 0 without its end line"),
+    ):
+        g.negative(label, lambda results=results: part_findings(("a", "b"), results), want=want)
+    g.negatives_ran(4)
+    began = time.monotonic()
+    results = in_parallel(run_part, PARTS)
+    for name, got in zip(PARTS, results, strict=True):
+        print(f"check-abort: ── part {name} (exit {got.returncode}) ──")
+        sys.stdout.write(got.stdout)
+    failed = part_findings(PARTS, results)
+    for line in failed:
+        print(f"check-abort: {line}", file=sys.stderr)
+    print(f"check-abort: {len(results) - len(failed)} of {len(PARTS)} parts passed in "
+          f"{time.monotonic() - began:.1f}s", flush=True)
+    if failed:
+        sys.exit(1)
 
 
 with scratch_dir("check-abort-") as tmp:
-    step("rust-scoped", [sys.executable, "tools/checks/rust-scoped.py"],
-         tmp / "rust-scoped.log", echo="rust-scoped:")
-    step("rust-async", ["timeout", "60", "cargo", "test", "-p", "kaya",
-                        "--features", "harness", "--locked",
-                        "app::tasks::tests", "--", "--nocapture", "--test-threads=1"],
-         tmp / "rust-async.log", echo=("test result:", "kaya: async handler failed;"))
-    rust_async_log = (tmp / "rust-async.log").read_text(encoding="utf-8")
-    rust_async_source = (ROOT / "crates/kaya/src/app/tasks.rs").read_text(encoding="utf-8")
-    rust_async_count = rust_async_source.count("#[test]")
-    rust_async_verdict = f"test result: ok. {rust_async_count} passed; 0 failed"
-    if rust_async_count < 13 or rust_async_verdict not in rust_async_log:
-        g.refuse("Rust async tests did not run their declared census")
-    if rust_async_log.count("kaya: async handler failed; "
-                            "no transaction was rolled back by this reporter; "
-                            "completed transactions remain committed") != 4:
-        g.refuse("Rust async reporter did not answer the initial panic, "
-                 "two resumed panics and returned error")
-    step("go", ["go", "test", "dev.kaya/bindings/go"], tmp / "go.log")
+    if part("rust-go"):
+        step("rust-scoped", [sys.executable, "tools/checks/rust-scoped.py"],
+             tmp / "rust-scoped.log", echo="rust-scoped:")
+        step("rust-async", ["timeout", "60", "cargo", "test", "-p", "kaya",
+                            "--features", "harness", "--locked",
+                            "app::tasks::tests", "--", "--nocapture", "--test-threads=1"],
+             tmp / "rust-async.log", echo=("test result:", "kaya: async handler failed;"))
+        rust_async_log = (tmp / "rust-async.log").read_text(encoding="utf-8")
+        rust_async_source = (ROOT / "crates/kaya/src/app/tasks.rs").read_text(encoding="utf-8")
+        rust_async_count = rust_async_source.count("#[test]")
+        rust_async_verdict = f"test result: ok. {rust_async_count} passed; 0 failed"
+        if rust_async_count < 13 or rust_async_verdict not in rust_async_log:
+            g.refuse("Rust async tests did not run their declared census")
+        if rust_async_log.count("kaya: async handler failed; "
+                                "no transaction was rolled back by this reporter; "
+                                "completed transactions remain committed") != 4:
+            g.refuse("Rust async reporter did not answer the initial panic, "
+                     "two resumed panics and returned error")
+        step("go", ["go", "test", "dev.kaya/bindings/go"], tmp / "go.log")
 
     # Built as ONE module with the bindings: the internal mirrors are
     # assertable only from inside it.
@@ -121,20 +201,21 @@ with scratch_dir("check-abort-") as tmp:
     else:
         swiftc = "/usr/bin/swiftc"
         sdk_args = ["-sdk", "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"]
-    step("swift-build",
-         [swiftc, *sdk_args, "-o", str(tmp / "swift-abort"),
-          *sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))),
-          str(ROOT / "tools/checks/swift-abort/main.swift"),
-          "-import-objc-header", "crates/kaya/include/kaya.h",
-          "-I", "crates/kaya/include",
-          # The binding is a package target and names the C API as a
-          # MODULE (Package.swift); this arm compiles the same files as
-          # one module with its probe, so it needs the modulemap's dir.
-          "-I", "bindings/swift/CKaya",
-          "-L", str(TARGET / "debug"), "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
-         tmp / "swift.log", env=NO_XCODE)
-    step("swift", [str(tmp / "swift-abort")], tmp / "swift.log")
+    if part("swift-notify"):
+        step("swift-build",
+             [swiftc, *sdk_args, "-o", str(tmp / "swift-abort"),
+              *sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))),
+              str(ROOT / "tools/checks/swift-abort/main.swift"),
+              "-import-objc-header", "crates/kaya/include/kaya.h",
+              "-I", "crates/kaya/include",
+              # The binding is a package target and names the C API as a
+              # MODULE (Package.swift); this arm compiles the same files as
+              # one module with its probe, so it needs the modulemap's dir.
+              "-I", "bindings/swift/CKaya",
+              "-L", str(TARGET / "debug"), "-lkaya",
+              "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
+             tmp / "swift.log", env=NO_XCODE)
+        step("swift", [str(tmp / "swift-abort")], tmp / "swift.log")
 
     executor_compile = [
         "bash", "-c",
@@ -145,749 +226,774 @@ with scratch_dir("check-abort-") as tmp:
     ]
     executor_sources = sorted(glob.glob(str(ROOT / "bindings/swift/*.swift")))
     executor_probe = str(ROOT / "tools/checks/swift-executor/main.swift")
-    step("swift-executor-build", executor_compile + executor_sources + [
-        executor_probe, "-o", str(tmp / "swift-executor")], tmp / "executor-build.log")
-    step("swift-executor", [str(tmp / "swift-executor")], tmp / "executor.log",
-         echo=("swift-executor:", "kaya: handler threw"))
-    for mode, expected in (("closed", "transaction is over"),
-                           ("double-start", "the Swift app executor may only start once"),
-                           ("setup-throw", "kaya: app setup threw: setup")):
-        got = subprocess.run([str(tmp / "swift-executor"), mode], cwd=ROOT,
-                             capture_output=True, text=True, encoding="utf-8", timeout=10)
-        said = got.stdout + got.stderr
-        if got.returncode == 0 or expected not in said:
-            g.refuse(f"swift-executor {mode}: rc={got.returncode}: {said}")
-        print(f"check-abort: swift-executor {mode} refused by name: {expected}")
+    if part("swift-executor"):
+        step("swift-executor-build", executor_compile + executor_sources + [
+            executor_probe, "-o", str(tmp / "swift-executor")], tmp / "executor-build.log")
+        step("swift-executor", [str(tmp / "swift-executor")], tmp / "executor.log",
+             echo=("swift-executor:", "kaya: handler threw"))
+        for mode, expected in (("closed", "transaction is over"),
+                               ("double-start", "the Swift app executor may only start once"),
+                               ("setup-throw", "kaya: app setup threw: setup")):
+            got = subprocess.run([str(tmp / "swift-executor"), mode], cwd=ROOT,
+                                 capture_output=True, text=True, encoding="utf-8", timeout=10)
+            said = got.stdout + got.stderr
+            if got.returncode == 0 or expected not in said:
+                g.refuse(f"swift-executor {mode}: rc={got.returncode}: {said}")
+            print(f"check-abort: swift-executor {mode} refused by name: {expected}")
 
-    legacy = tmp / "legacy.swift"
-    legacy.write_text(g.doctor("Swift legacy entry", "import Kaya\nKayaApp.run { _ in }\n",
-                              re.escape("KayaApp.run { _ in }"),
-                              "let app = KayaApp()\napp.run()"), encoding="utf-8")
-    got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
-                         str(legacy)], cwd=ROOT, capture_output=True, text=True, encoding="utf-8")
-    if got.returncode == 0 or "Use KayaApp.run { app in ... }" not in got.stderr:
-        g.refuse(f"swift-executor legacy entry was not refused: {got.stderr}")
-    print("check-abort: swift-executor legacy entry refused at compile time")
+        legacy = tmp / "legacy.swift"
+        legacy.write_text(g.doctor("Swift legacy entry", "import Kaya\nKayaApp.run { _ in }\n",
+                                  re.escape("KayaApp.run { _ in }"),
+                                  "let app = KayaApp()\napp.run()"), encoding="utf-8")
+        got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
+                             str(legacy)], cwd=ROOT, capture_output=True, text=True,
+                             encoding="utf-8")
+        if got.returncode == 0 or "Use KayaApp.run { app in ... }" not in got.stderr:
+            g.refuse(f"swift-executor legacy entry was not refused: {got.stderr}")
+        print("check-abort: swift-executor legacy entry refused at compile time")
 
-    actor_state = tmp / "actor-state.swift"
-    actor_state.write_text(g.doctor("Swift main-thread state",
-                                   "import Kaya\nKayaApp.run { _ in }\n",
-                                   re.escape("KayaApp.run { _ in }"),
-                                   "var count = 0\nKayaApp.run { _ in count += 1 }"),
-                           encoding="utf-8")
-    got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
-                         str(actor_state)], cwd=ROOT, capture_output=True,
-                         text=True, encoding="utf-8")
-    if got.returncode == 0 or "main actor-isolated var 'count'" not in got.stderr:
-        g.refuse(f"swift-executor main-thread state was not refused: {got.stderr}")
-    print("check-abort: swift-executor main-thread state refused at compile time")
+        actor_state = tmp / "actor-state.swift"
+        actor_state.write_text(g.doctor("Swift main-thread state",
+                                       "import Kaya\nKayaApp.run { _ in }\n",
+                                       re.escape("KayaApp.run { _ in }"),
+                                       "var count = 0\nKayaApp.run { _ in count += 1 }"),
+                               encoding="utf-8")
+        got = subprocess.run(executor_compile + ["-typecheck", "-I", "target/swiftpm/debug/Modules",
+                             str(actor_state)], cwd=ROOT, capture_output=True,
+                             text=True, encoding="utf-8")
+        if got.returncode == 0 or "main actor-isolated var 'count'" not in got.stderr:
+            g.refuse(f"swift-executor main-thread state was not refused: {got.stderr}")
+        print("check-abort: swift-executor main-thread state refused at compile time")
 
-    stalled = "executor: timed out waiting for the app loop"
-    for name, file, before, after, expected in (
-        ("drain", "KayaApp.swift", "            KayaAppExecutor.shared.drain()", "", stalled),
-        ("wake", "KayaExecutor.swift", "        kaya_wake()", "", stalled),
-        ("owner", "KayaExecutor.swift", "KayaAppExecutor.shared.asUnownedSerialExecutor()",
-         "MainActor.shared.unownedExecutor", stalled),
-        ("rollback", "KayaApp.swift", "app.signalMirrors[id] = old",
-         "app.signalMirrors[id] = old == .i64(0) ? .i64(99) : old",
-         "executor: thrown post was not rolled back"),
-    ):
-        shadow = tmp / f"executor-{name}"
-        shutil.copytree(ROOT / "bindings/swift", shadow)
-        target = shadow / file
-        target.write_text(g.doctor(f"Swift executor {name}", target.read_text(encoding="utf-8"),
-                                  re.escape(before), after), encoding="utf-8")
-        binary = tmp / f"executor-{name}-bin"
-        step(f"swift-executor-{name}-build", executor_compile +
-             sorted(map(str, shadow.glob("*.swift"))) + [executor_probe, "-o", str(binary)],
-             tmp / f"executor-{name}-build.log")
-        got = probe_run([str(binary)])
-        refused = expected in got.stderr
-        if got.returncode == 0 or not refused:
-            g.refuse(f"Swift executor {name} negative: rc={got.returncode}: "
+        stalled = "executor: timed out waiting for the app loop"
+        for name, file, before, after, expected in (
+            ("drain", "KayaApp.swift", "            KayaAppExecutor.shared.drain()", "", stalled),
+            ("wake", "KayaExecutor.swift", "        kaya_wake()", "", stalled),
+            ("owner", "KayaExecutor.swift", "KayaAppExecutor.shared.asUnownedSerialExecutor()",
+             "MainActor.shared.unownedExecutor", stalled),
+            ("rollback", "KayaApp.swift", "app.signalMirrors[id] = old",
+             "app.signalMirrors[id] = old == .i64(0) ? .i64(99) : old",
+             "executor: thrown post was not rolled back"),
+        ):
+            shadow = tmp / f"executor-{name}"
+            shutil.copytree(ROOT / "bindings/swift", shadow)
+            target = shadow / file
+            target.write_text(g.doctor(f"Swift executor {name}", target.read_text(encoding="utf-8"),
+                                      re.escape(before), after), encoding="utf-8")
+            binary = tmp / f"executor-{name}-bin"
+            step(f"swift-executor-{name}-build", executor_compile +
+                 sorted(map(str, shadow.glob("*.swift"))) + [executor_probe, "-o", str(binary)],
+                 tmp / f"executor-{name}-build.log")
+            got = probe_run([str(binary)])
+            refused = expected in got.stderr
+            if got.returncode == 0 or not refused:
+                g.refuse(f"Swift executor {name} negative: rc={got.returncode}: "
+                         f"{got.stdout}{got.stderr}")
+            print(f"check-abort: Swift executor {name} negative refused by the runtime probe")
+
+        # docs/async-dialogs-plan.md section 2.1
+    if part("swift-async"):
+        async_probe = str(ROOT / "tools/checks/swift-async/main.swift")
+        async_sentence = (
+            "kaya: async handler failed; no transaction was rolled back by this reporter; "
+            "completed transactions remain committed")
+        async_refusals = {
+            "closed": "transaction is over",
+            "overlap-alert": "another alert is already live",
+            "overlap-file": "another file dialog is already live",
+            "overlap-save": "another file dialog is already live",
+            "async-overlap-alert": "another alert is already live",
+            "async-overlap-file": "another file dialog is already live",
+            "async-overlap-save": "another file dialog is already live",
+            "template": "async work cannot be started inside a template body",
+            "boundary": "async work cannot run inside a transaction",
+        }
+
+        def async_findings(got, mode):
+            if mode in async_refusals:
+                if got.returncode == 0 or async_refusals[mode] not in got.stderr:
+                    return f"{mode}: missing named refusal {async_refusals[mode]}"
+            else:
+                if got.returncode != 0 or "swift-async: OK " not in got.stdout:
+                    return f"{mode}: runtime probe failed or did not finish"
+                reports = 1 if mode in ("before", "outside", "inside") else 0
+                if got.stderr.count(async_sentence) != reports:
+                    return f"{mode}: async reporter count mismatch"
+                if "transaction rolled back" in got.stderr:
+                    return f"{mode}: async error reached the synchronous reporter"
+            return ""
+
+        async_binary = tmp / "swift-async"
+        step("swift-async-build", executor_compile + executor_sources + [
+            async_probe, "-o", str(async_binary)], tmp / "async-build.log")
+        for mode in ("requests", "rollback", "before", "outside", "inside", "caught",
+                     *async_refusals):
+            got = probe_run([str(async_binary), mode])
+            finding = async_findings(got, mode)
+            if finding:
+                g.refuse(f"Swift async {finding}: {got.stdout}{got.stderr}")
+            print(f"check-abort: Swift async {mode} passed")
+
+        async_shadow = tmp / "async-shadow"
+        shutil.copytree(ROOT / "bindings/swift", async_shadow)
+        async_source = async_shadow / "KayaApp.swift"
+        async_text = async_source.read_text(encoding="utf-8")
+        mutant = 'ProcessInfo.processInfo.environment["KAYA_SWIFT_ASYNC_MUTANT"]'
+        async_cuts = (
+            ("observer", "try await body()",
+             f'if {mutant} == "observer" {{ Task {{ try await body() }}; return }}\n'
+             '                try await body()', "outside", "async reporter count mismatch"),
+            ("boundary", 'precondition(currentTx == nil, '
+             '"kaya: async work cannot run inside a transaction")',
+             f'precondition({mutant} == "boundary" || currentTx == nil, '
+             '"kaya: async work cannot run inside a transaction")',
+             "boundary", "async: open transaction was accepted"),
+            ("alert", 'precondition(liveAlert == 0, "kaya: another alert is already live; '
+             'wait for its result before showing the next")',
+             f'precondition({mutant} == "alert" || liveAlert == 0, '
+             '"kaya: another alert is already live; wait for its result before showing the next")',
+             "overlap-alert", "async: overlapping alert was accepted"),
+            ("file", 'precondition(liveFileDialog == 0, "kaya: another file dialog is '
+             'already live; '
+             'wait for its result before showing the next")',
+             f'precondition({mutant} == "file" || liveFileDialog == 0, '
+             '"kaya: another file dialog is already live; '
+             'wait for its result before showing the next")',
+             "overlap-file", "async: overlapping file dialog was accepted"),
+            ("retire-alert", 'if liveAlert == id { liveAlert = 0 }',
+             f'if liveAlert == id && {mutant} != "retire-alert" {{ liveAlert = 0 }}',
+             "requests", "async: alert did not retire"),
+            ("retire-file", 'if liveFileDialog == id { liveFileDialog = 0 }',
+             f'if liveFileDialog == id && {mutant} != "retire-file" {{ liveFileDialog = 0 }}',
+             "requests", "async: file dialog did not retire"),
+            ("retire-clipboard", 'if let handler = clipboardReads.removeValue(forKey: id) {',
+             f'if let handler = ({mutant} == "retire-clipboard" ? clipboardReads[id] : '
+             'clipboardReads.removeValue(forKey: id)) {',
+             "requests", "async: clipboard did not retire"),
+            ("rollback", 'for action in rollbackActions.reversed() { action() }',
+             f'if {mutant} != "rollback" {{ '
+             f'for action in rollbackActions.reversed() {{ action() }} }}',
+             "rollback", "async: rollback leaked alert"),
+            ("scope", 'app.signalMirrors[id] = old',
+             f'if {mutant} != "scope" {{ app.signalMirrors[id] = old }}',
+             "inside", "async: scope atomicity changed"),
+            ("template", 'precondition(tplDepth == 0, '
+             '"kaya: async work cannot be started inside a template body")',
+             f'precondition({mutant} == "template" || tplDepth == 0, '
+             '"kaya: async work cannot be started inside a template body")',
+             "template", "async: task in template was accepted"),
+        )
+        for name, before, after, _, _ in async_cuts:
+            if async_text.count(before) != 1:
+                g.refuse(f"Swift async {name} mutation is not unique")
+            async_text = g.doctor(f"Swift async {name}", async_text, re.escape(before), after)
+        async_source.write_text(async_text, encoding="utf-8")
+        mutant_binary = tmp / "swift-async-mutant"
+        step("swift-async-mutant-build", executor_compile +
+             sorted(map(str, async_shadow.glob("*.swift")))
+             + [async_probe, "-o", str(mutant_binary)],
+             tmp / "async-mutant-build.log")
+        for name, _, _, mode, expected in async_cuts:
+            got = probe_run([str(mutant_binary), mode], env=dict(ENV, KAYA_SWIFT_ASYNC_MUTANT=name))
+            finding = async_findings(got, mode)
+            if not finding or expected not in finding + got.stdout + got.stderr:
+                g.refuse(f"Swift async {name} mutation did not fail by {expected}: "
+                         f"{finding}\n{got.stdout}{got.stderr}")
+            print(f"check-abort: Swift async {name} mutation refused: {expected}")
+
+        async_compile_source = (
+            'KayaApp.run { app in app.task { _ = await app.showAlert(cancel: "keep") } }\n')
+        for name, before, after, expected in (
+            ("build-await", 'app.task { _ = await app.showAlert(cancel: "keep") }',
+             'app.build { _ in _ = await app.showAlert(cancel: "keep") }', "synchronous"),
+            ("handler-and-await", 'app.showAlert(cancel: "keep")',
+             'app.showAlert(cancel: "keep", onResult: { _, _ in })', "extra argument 'onResult'"),
+            ("actor", async_compile_source,
+             'func wrong(_ app: KayaApp) { app.task {} }\n',
+             "global actor 'KayaAppActor'-isolated"),
+        ):
+            negative_dir = tmp / f"async-compile-{name}"
+            negative_dir.mkdir()
+            negative_main = negative_dir / "main.swift"
+            negative_main.write_text(g.doctor(f"Swift async compile {name}", async_compile_source,
+                                             re.escape(before), after), encoding="utf-8")
+            got = probe_run(executor_compile + executor_sources + [
+                str(negative_main), "-o", str(negative_dir / "probe")], timeout=60)
+            if got.returncode == 0 or expected not in got.stderr:
+                g.refuse(f"Swift async compile {name} was not refused by {expected}: {got.stderr}")
+            print(f"check-abort: Swift async compile {name} refused by {expected}")
+
+    if part("swift-notify"):
+        # THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER
+        # (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry): the
+        # one-shot handler bound at the show wins, an id this process never
+        # showed reaches the process-level one, that one does not retire,
+        # and an unclaimed result announces its drop in full. NO LANE CAN
+        # SEE ANY OF IT — a scene registers one or the other, never both.
+        # ONE MODULE with the binding, like the abort arm above: the ring
+        # loop's switch has no seam, so the decision is a method and this
+        # drives it.
+        step("swift-notify-build",
+             [swiftc, *sdk_args, "-o", str(tmp / "swift-notify"),
+              *sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))),
+              str(ROOT / "tools/checks/swift-notify/main.swift"),
+              "-import-objc-header", "crates/kaya/include/kaya.h",
+              "-I", "crates/kaya/include",
+              # The binding is a package target and names the C API as a
+              # MODULE (Package.swift); this arm compiles the same files as
+              # one module with its probe, so it needs the modulemap's dir.
+              "-I", "bindings/swift/CKaya",
+              "-L", str(TARGET / "debug"), "-lkaya",
+              "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
+             tmp / "swift-notify.log", env=NO_XCODE)
+        step("swift-notify", [str(tmp / "swift-notify")],
+             tmp / "swift-notify.log", echo=("notify-order:", "link-route:"))
+
+        # ITS WATCHED NEGATIVE: the ORDER SWAPPED in a COPY of the binding —
+        # the process-level handler consulted before the one-shot one — with
+        # the substitution COUNTED and the exerciser required to say so. Swift
+        # is the one of the five whose build is a FILE LIST rather than a
+        # project, so its copy costs one compiler invocation and no scaffolding
+        # (java-typecheck's notify negative is the other; C#, OCaml and
+        # Haskell are rooted in dotnet, dune and cabal projects, and their
+        # negatives are recorded hand runs).
+        swapped = tmp / "swift-swapped"
+        swapped.mkdir()
+        for src in sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))):
+            (swapped / os.path.basename(src)).write_bytes(
+                pathlib.Path(src).read_bytes())
+        doctored = swapped / "KayaApp.swift"
+        doctored.write_text(
+            g.doctor("swift notify-order negative consulted the process "
+                     "handler first", doctored.read_text(encoding="utf-8"),
+                     r"        if let handler = notifications\.removeValue"
+                     r"\(forKey: id\) \{",
+                     "        if notificationActivation == nil, "
+                     "let handler = notifications.removeValue(forKey: id) {"),
+            encoding="utf-8")
+        step("swift-notify-swapped-build",
+             [swiftc, *sdk_args, "-o", str(tmp / "swift-notify-swapped"),
+              *sorted(glob.glob(str(swapped / "*.swift"))),
+              str(ROOT / "tools/checks/swift-notify/main.swift"),
+              "-import-objc-header", "crates/kaya/include/kaya.h",
+              "-I", "crates/kaya/include",
+              # The binding is a package target and names the C API as a
+              # MODULE (Package.swift); this arm compiles the same files as
+              # one module with its probe, so it needs the modulemap's dir.
+              "-I", "bindings/swift/CKaya",
+              "-L", str(TARGET / "debug"), "-lkaya",
+              "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
+             tmp / "swift-swapped.log", env=NO_XCODE)
+        with (tmp / "swift-swapped-run.log").open("w", encoding="utf-8") as out:
+            swapped_run = subprocess.run(
+                [str(tmp / "swift-notify-swapped")], cwd=ROOT, env=ENV,
+                stdout=out, stderr=subprocess.STDOUT, check=False)
+        swapped_said = (tmp / "swift-swapped-run.log").read_text(
+            encoding="utf-8", errors="replace")
+        if swapped_run.returncode == 0:
+            print("check-abort: SELF-TEST FAIL — the swift notify-order "
+                  "exerciser PASSED against a binding that consults the "
+                  "process-level handler first, so it is not exercising the "
+                  "order", file=sys.stderr)
+            sys.exit(1)
+        if "the one-shot handler did not answer" not in swapped_said:
+            print("check-abort: SELF-TEST FAIL — the swapped swift copy failed, "
+                  "but NOT by misrouting the one-shot result. What it printed:",
+                  file=sys.stderr)
+            print(swapped_said, file=sys.stderr)
+            sys.exit(1)
+
+        # THE LINK HALF'S WATCHED NEGATIVE, the same copy trick one rule over:
+        # ROUTE 0 MADE TO SPEAK. Two drops with disjoint causes
+        # (docs/app-links-plan.md §4) — a route that MATCHED and reached no
+        # handler is the binding's to announce, while route 0 is a URL NO
+        # ROUTE TOOK, which the core already announced on stderr naming every
+        # declared pattern. NO LANE CAN SEE THE SECOND LINE: a scene reads the
+        # same screen back either way, and a reader who meets two sentences
+        # for one event learns to distrust both. Removing the guard must turn
+        # the exerciser red on its OWN sentence, not merely nonzero.
+        spoke = tmp / "swift-route-zero-src"
+        spoke.mkdir()
+        for src in sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))):
+            (spoke / os.path.basename(src)).write_bytes(
+                pathlib.Path(src).read_bytes())
+        loud = spoke / "KayaApp.swift"
+        loud.write_text(
+            g.doctor("swift link negative let route 0 announce a drop of its own",
+                     loud.read_text(encoding="utf-8"),
+                     r"\} else if route != 0 \{", "} else {"),
+            encoding="utf-8")
+        step("swift-route-zero-build",
+             [swiftc, *sdk_args, "-o", str(tmp / "swift-route-zero"),
+              *sorted(glob.glob(str(spoke / "*.swift"))),
+              str(ROOT / "tools/checks/swift-notify/main.swift"),
+              "-import-objc-header", "crates/kaya/include/kaya.h",
+              "-I", "crates/kaya/include",
+              # The binding is a package target and names the C API as a
+              # MODULE (Package.swift); this arm compiles the same files as
+              # one module with its probe, so it needs the modulemap's dir.
+              "-I", "bindings/swift/CKaya",
+              "-L", str(TARGET / "debug"), "-lkaya",
+              "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
+             tmp / "swift-route-zero.log", env=NO_XCODE)
+        with (tmp / "swift-route-zero-run.log").open("w", encoding="utf-8") as out:
+            zero_run = subprocess.run(
+                [str(tmp / "swift-route-zero")], cwd=ROOT, env=ENV,
+                stdout=out, stderr=subprocess.STDOUT, check=False)
+        zero_said = (tmp / "swift-route-zero-run.log").read_text(
+            encoding="utf-8", errors="replace")
+        if zero_run.returncode == 0:
+            print("check-abort: SELF-TEST FAIL — the swift link-route exerciser "
+                  "PASSED against a binding that announces route 0 as well, so "
+                  "it is not exercising the two drops", file=sys.stderr)
+            sys.exit(1)
+        if "the link drop was announced as" not in zero_said:
+            print("check-abort: SELF-TEST FAIL — the route-0 swift copy failed, "
+                  "but NOT on the drop sentence. What it printed:",
+                  file=sys.stderr)
+            print(zero_said, file=sys.stderr)
+            sys.exit(1)
+        print("check-abort: self-test swift link-route negative refused, by its "
+              "own sentence")
+
+    if part("swift-netimage"):
+        # The network images surface (tools/checks/swift-netimage/main.swift):
+        # the conditional write through the mirror, the wrong thread, the helper.
+        netimage_probe = str(ROOT / "tools/checks/swift-netimage/main.swift")
+
+        def netimage_build(sources, binary, log):
+            step(f"{binary.name}-build",
+                 executor_compile + sources + [netimage_probe, "-o", str(binary)], log)
+
+        netimage_binary = tmp / "swift-netimage"
+        netimage_build(executor_sources, netimage_binary, tmp / "netimage-build.log")
+        got = probe_run([str(netimage_binary)], timeout=20)
+        print(got.stdout, end="")
+        if got.returncode != 0 or "swift-netimage: OK" not in got.stdout:
+            g.refuse(f"Swift netimage probe failed: {got.stdout}{got.stderr}")
+        got = probe_run([str(netimage_binary), "foreign"], timeout=20)
+        if got.returncode == 0 or "a transaction belongs to the app thread" not in got.stderr:
+            g.refuse(f"Swift netimage foreign-thread write was not refused: "
                      f"{got.stdout}{got.stderr}")
-        print(f"check-abort: Swift executor {name} negative refused by the runtime probe")
+        print("check-abort: Swift netimage foreign-thread write refused by name")
+        build_wall = ("    public func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {\n"
+                      "        KayaApp.requireAppThread()\n")
+        alive_wall = ("that created it; to mutate from a background thread use app.post\")\n"
+                      "        KayaApp.requireAppThread()\n")
+        for name, file, cuts, run_mode, expected in (
+            ("mirror-guard", "KayaImages.swift",
+             [("kayaSameWire(current[keyPath: `guard`], expected)", "true")], "all",
+             "guard answers"),
+            # Both app-thread walls, the build's and the write chokepoint's.
+            ("foreign-thread", "KayaApp.swift",
+             [(build_wall, build_wall.replace("        KayaApp.requireAppThread()\n", "")),
+              (alive_wall, alive_wall.replace("        KayaApp.requireAppThread()\n", ""))],
+             "foreign", "conditional write from a foreign thread was not refused"),
+            ("coalesce", "KayaImages.swift",
+             [("if waiting[wanted]!.count > 1 { return }", "")], "all",
+             "three rows sharing a URL"),
+            ("cap", "KayaImages.swift", [("running < Self.limit", "running < 64")], "all",
+             "six fetches start"),
+            ("cancel", "KayaImages.swift", [("inFlight.removeValue(forKey: u)?.task.cancel()",
+                                             "_ = inFlight.removeValue(forKey: u)")], "all",
+             "running fetch is cancelled"),
+        ):
+            shadow = tmp / f"netimage-{name}"
+            shutil.copytree(ROOT / "bindings/swift", shadow)
+            target = shadow / file
+            text = target.read_text(encoding="utf-8")
+            for before, after in cuts:
+                text = g.doctor(f"Swift netimage {name}", text, re.escape(before), after)
+            target.write_text(text, encoding="utf-8")
+            binary = tmp / f"netimage-{name}-bin"
+            netimage_build(sorted(map(str, shadow.glob("*.swift"))), binary,
+                           tmp / f"netimage-{name}-build.log")
+            got = probe_run([str(binary), run_mode], timeout=20)
+            if got.returncode == 0 or expected not in got.stdout + got.stderr:
+                g.refuse(f"Swift netimage {name} negative: rc={got.returncode}: "
+                         f"{got.stdout}{got.stderr}")
+            print(f"check-abort: Swift netimage {name} negative refused: {expected}")
 
-    # docs/async-dialogs-plan.md section 2.1
-    async_probe = str(ROOT / "tools/checks/swift-async/main.swift")
-    async_sentence = (
-        "kaya: async handler failed; no transaction was rolled back by this reporter; "
-        "completed transactions remain committed")
-    async_refusals = {
-        "closed": "transaction is over",
-        "overlap-alert": "another alert is already live",
-        "overlap-file": "another file dialog is already live",
-        "overlap-save": "another file dialog is already live",
-        "async-overlap-alert": "another alert is already live",
-        "async-overlap-file": "another file dialog is already live",
-        "async-overlap-save": "another file dialog is already live",
-        "template": "async work cannot be started inside a template body",
-        "boundary": "async work cannot run inside a transaction",
-    }
+    if part("csharp"):
+        # Built UNCONDITIONALLY, like every arm here: an `[ -f ]` guard ran a
+        # dll older than the edited binding and called it green (2026-08-22,
+        # invariant 4). dotnet's incremental build makes it cheap.
+        step("csharp-build",
+             ["dotnet", "build", "--nologo", "-v", "q",
+              "guests/csharp/kaya-guests.csproj"], tmp / "cs.log")
+        step("csharp",
+             ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+             tmp / "cs.log", env=dict(ENV, KAYA_CHECK="abort"), echo="async-dialog:")
+        # The notification dispatch order, same binary, its own KAYA_CHECK.
+        step("csharp-notify",
+             ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+             tmp / "cs-notify.log", env=dict(ENV, KAYA_CHECK="notify"),
+             echo=("notify-order:", "link-route:"))
+        # The media records' decode, the mirror and the stamped video
+        # (guests/csharp/MediaCheck.cs), same binary.
+        step("csharp-media",
+             ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+             tmp / "cs-media.log", env=dict(ENV, KAYA_CHECK="media"), echo="media-check:")
+        if "media-check: OK" not in (tmp / "cs-media.log").read_text(encoding="utf-8",
+                                                                     errors="replace"):
+            fail("csharp-media (exited 0 without its verdict)", tmp / "cs-media.log")
+        # The network images surface (guests/csharp/NetimageCheck.cs): the
+        # conditional write through the mirror, the wrong thread, the helper.
+        step("csharp-netimage",
+             ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+             tmp / "cs-netimage.log", env=dict(ENV, KAYA_CHECK="netimage"),
+             echo="netimage-check:")
+        if "netimage-check: OK" not in (tmp / "cs-netimage.log").read_text(
+                encoding="utf-8", errors="replace"):
+            fail("csharp-netimage (exited 0 without its verdict)", tmp / "cs-netimage.log")
+        for name, rel, cuts, expected in (
+            ("mirror-guard", "KayaRecords.cs",
+             [("&& KayaRecords.SameWire(Info.FieldOfWire(current!, guard.Index), expected)", "")],
+             "guard answers"),
+            # Both app-thread walls, the Build's and the write chokepoint's.
+            ("foreign-thread", "KayaApp.cs",
+             [("RequireAppThread();\n        RequireSynchronousBuild(build);\n        using var tx",
+               "RequireSynchronousBuild(build);\n        using var tx"),
+              ("ObjectDisposedException.ThrowIf(disposed, this);\n"
+               "        KayaApp.RequireAppThread();",
+               "ObjectDisposedException.ThrowIf(disposed, this);")],
+             "conditional write from a foreign thread was not refused"),
+            ("coalesce", "KayaImages.cs", [("if (rowsWaiting.Count > 1) return;", "")],
+             "three rows sharing a URL"),
+            ("cap", "KayaImages.cs", [("running < DefaultLimit", "running < 64")],
+             "three rows sharing a URL make one fetch and at most six run"),
+            ("cancel", "KayaImages.cs", [("if (inFlight.Remove(u, out var cts)) cts.Cancel();",
+                                          "inFlight.Remove(u, out _);")],
+             "running fetch is cancelled"),
+        ):
+            shadow = tmp / f"cs-netimage-{name}"
+            shadow.mkdir()
+            for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
+                text = src.read_text(encoding="utf-8")
+                if src.name == rel:
+                    for before, after in cuts:
+                        text = g.doctor(f"C# netimage {name}", text, re.escape(before), after)
+                (shadow / src.name).write_text(text, encoding="utf-8")
+            for guest in ("NetimageCheck.cs", "NetimageScene.cs", "SongKaya.cs"):
+                shutil.copyfile(ROOT / "guests/csharp" / guest, shadow / guest)
+            (shadow / "Main.cs").write_text(
+                "static class MainCheck { static void Main() { NetimageCheck.Run(); } }",
+                encoding="utf-8")
+            (shadow / "netimage.csproj").write_text(
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
+                '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
+                '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
+                encoding="utf-8")
+            step(f"csharp-netimage-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
+                                                  str(shadow / "netimage.csproj")],
+                 tmp / f"cs-netimage-{name}-build.log")
+            got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/netimage.dll")],
+                                 env=ENV, capture_output=True, text=True, encoding="utf-8",
+                                 timeout=60, check=False)
+            said = got.stdout + got.stderr
+            if got.returncode != 1 or expected not in said:
+                g.refuse(f"C# netimage {name}: expected exit 1 naming {expected}: {said}")
+            print(f"check-abort: C# netimage {name} refused: {expected}")
 
-    def async_findings(got, mode):
-        if mode in async_refusals:
-            if got.returncode == 0 or async_refusals[mode] not in got.stderr:
-                return f"{mode}: missing named refusal {async_refusals[mode]}"
-        else:
-            if got.returncode != 0 or "swift-async: OK " not in got.stdout:
-                return f"{mode}: runtime probe failed or did not finish"
-            reports = 1 if mode in ("before", "outside", "inside") else 0
-            if got.stderr.count(async_sentence) != reports:
-                return f"{mode}: async reporter count mismatch"
-            if "transaction rolled back" in got.stderr:
-                return f"{mode}: async error reached the synchronous reporter"
-        return ""
+        for name, before, after, expected in (
+            ("ambient", "try { job(); }", "try { Build(_ => job()); }",
+             "continuation had an ambient transaction"),
+            ("rollback", "App.SignalMirrors[id] = old!;",
+             'App.SignalMirrors[id] = "broken rollback";',
+             "explicit scope rollback/commit mismatch"),
+            ("reporter", "kaya: async handler failed; no transaction was rolled back by "
+             "this reporter; "
+             "completed transactions remain committed",
+             "kaya: handler threw (transaction rolled back)", "async reporter claimed rollback"),
+            ("completion", "send(tx, value => QueueAsync(() => answer.SetResult(value)));",
+             "send(tx, value => answer.SetResult(value));",
+             "future completed inside result dispatch"),
+            ("retire", "if (liveAlert == id) liveAlert = 0;", "",
+             "alert id did not retire"),
+            ("overlap", "if (App.liveAlert != 0)", "if (App.liveAlert == ulong.MaxValue)",
+             "missing refusal: another alert"),
+            ("abandon", "foreach (var action in RollbackActions) action();", "",
+             "abandoned request leaked a registration"),
+            ("encode", "ulong id = ++App.nextAlert;",
+             "ulong id = ++App.nextAlert; if (onResult != null) App.alerts[id] = onResult;",
+             "invalid request leaked a registration"),
+            ("sync-build-void", "public void Build(Action<Tx> build)\n    {\n"
+             "        RequireSynchronousBuild(build);",
+             "public void Build(Action<Tx> build)\n    {",
+             "missing refusal: Build requires a synchronous body"),
+            ("sync-build-task", "RequireAppThread();\n        RequireSynchronousBuild(build);",
+             "RequireAppThread();",
+             "missing refusal: Build requires a synchronous body"),
+            ("raw-boundary", "if (CurrentTx != null)",
+             "if (CurrentTx != null && liveAlert == ulong.MaxValue)",
+             "missing refusal: async work cannot run inside a transaction"),
+        ):
+            shadow = tmp / f"cs-async-{name}"
+            shadow.mkdir()
+            for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
+                text = src.read_text(encoding="utf-8")
+                if src.name == "KayaApp.cs":
+                    text = g.doctor(f"C# async {name}", text, re.escape(before), after)
+                (shadow / src.name).write_text(text, encoding="utf-8")
+            shutil.copyfile(ROOT / "guests/csharp/AsyncDialogCheck.cs",
+                            shadow / "AsyncDialogCheck.cs")
+            (shadow / "Main.cs").write_text(
+                'static class MainCheck { static int Main() { try { '
+                'AsyncDialogCheck.Run(new KayaApp()); return 0; } '
+                'catch (System.Exception e) { System.Console.Error.WriteLine(e); return 1; } } }',
+                encoding="utf-8")
+            (shadow / "async.csproj").write_text(
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
+                '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
+                '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
+                encoding="utf-8")
+            step(f"csharp-async-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
+                                               str(shadow / "async.csproj")],
+                 tmp / f"cs-{name}-build.log")
+            got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/async.dll")],
+                                 env=ENV, capture_output=True, text=True, encoding="utf-8",
+                                 timeout=20, check=False)
+            said = got.stdout + got.stderr
+            if got.returncode != 1 or expected not in said:
+                g.refuse(f"C# async {name}: expected exit 1 naming {expected}: {said}")
+            print(f"check-abort: C# async {name} refused: {expected}")
 
-    async_binary = tmp / "swift-async"
-    step("swift-async-build", executor_compile + executor_sources + [
-        async_probe, "-o", str(async_binary)], tmp / "async-build.log")
-    for mode in ("requests", "rollback", "before", "outside", "inside", "caught", *async_refusals):
-        got = probe_run([str(async_binary), mode])
-        finding = async_findings(got, mode)
-        if finding:
-            g.refuse(f"Swift async {finding}: {got.stdout}{got.stderr}")
-        print(f"check-abort: Swift async {mode} passed")
+    if part("java"):
+        # Pure JVM against the ring stub — no natives, so mutating
+        # transactions always abort (AbortCheck.java's header has the shape).
+        shutil.rmtree(tmp / "java", ignore_errors=True)
+        step("java-build",
+             ["javac", "--release", "21", "-encoding", "UTF-8",
+              "-d", str(tmp / "java"),
+              "bindings/java-desktop/dev/kaya/KayaRing.java",
+              *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java"))),
+              "tools/checks/java-abort/dev/kaya/IdSpaceCheck.java",
+              "tools/checks/java-abort/AbortCheck.java"], tmp / "java.log")
+        step("java", ["java", "-cp", str(tmp / "java"), "AbortCheck"],
+             tmp / "java.log")
 
-    async_shadow = tmp / "async-shadow"
-    shutil.copytree(ROOT / "bindings/swift", async_shadow)
-    async_source = async_shadow / "KayaApp.swift"
-    async_text = async_source.read_text(encoding="utf-8")
-    mutant = 'ProcessInfo.processInfo.environment["KAYA_SWIFT_ASYNC_MUTANT"]'
-    async_cuts = (
-        ("observer", "try await body()",
-         f'if {mutant} == "observer" {{ Task {{ try await body() }}; return }}\n'
-         '                try await body()', "outside", "async reporter count mismatch"),
-        ("boundary", 'precondition(currentTx == nil, '
-         '"kaya: async work cannot run inside a transaction")',
-         f'precondition({mutant} == "boundary" || currentTx == nil, '
-         '"kaya: async work cannot run inside a transaction")',
-         "boundary", "async: open transaction was accepted"),
-        ("alert", 'precondition(liveAlert == 0, "kaya: another alert is already live; '
-         'wait for its result before showing the next")',
-         f'precondition({mutant} == "alert" || liveAlert == 0, '
-         '"kaya: another alert is already live; wait for its result before showing the next")',
-         "overlap-alert", "async: overlapping alert was accepted"),
-        ("file", 'precondition(liveFileDialog == 0, "kaya: another file dialog is already live; '
-         'wait for its result before showing the next")',
-         f'precondition({mutant} == "file" || liveFileDialog == 0, '
-         '"kaya: another file dialog is already live; '
-         'wait for its result before showing the next")',
-         "overlap-file", "async: overlapping file dialog was accepted"),
-        ("retire-alert", 'if liveAlert == id { liveAlert = 0 }',
-         f'if liveAlert == id && {mutant} != "retire-alert" {{ liveAlert = 0 }}',
-         "requests", "async: alert did not retire"),
-        ("retire-file", 'if liveFileDialog == id { liveFileDialog = 0 }',
-         f'if liveFileDialog == id && {mutant} != "retire-file" {{ liveFileDialog = 0 }}',
-         "requests", "async: file dialog did not retire"),
-        ("retire-clipboard", 'if let handler = clipboardReads.removeValue(forKey: id) {',
-         f'if let handler = ({mutant} == "retire-clipboard" ? clipboardReads[id] : '
-         'clipboardReads.removeValue(forKey: id)) {',
-         "requests", "async: clipboard did not retire"),
-        ("rollback", 'for action in rollbackActions.reversed() { action() }',
-         f'if {mutant} != "rollback" {{ for action in rollbackActions.reversed() {{ action() }} }}',
-         "rollback", "async: rollback leaked alert"),
-        ("scope", 'app.signalMirrors[id] = old',
-         f'if {mutant} != "scope" {{ app.signalMirrors[id] = old }}',
-         "inside", "async: scope atomicity changed"),
-        ("template", 'precondition(tplDepth == 0, '
-         '"kaya: async work cannot be started inside a template body")',
-         f'precondition({mutant} == "template" || tplDepth == 0, '
-         '"kaya: async work cannot be started inside a template body")',
-         "template", "async: task in template was accepted"),
-    )
-    for name, before, after, _, _ in async_cuts:
-        if async_text.count(before) != 1:
-            g.refuse(f"Swift async {name} mutation is not unique")
-        async_text = g.doctor(f"Swift async {name}", async_text, re.escape(before), after)
-    async_source.write_text(async_text, encoding="utf-8")
-    mutant_binary = tmp / "swift-async-mutant"
-    step("swift-async-mutant-build", executor_compile +
-         sorted(map(str, async_shadow.glob("*.swift"))) + [async_probe, "-o", str(mutant_binary)],
-         tmp / "async-mutant-build.log")
-    for name, _, _, mode, expected in async_cuts:
-        got = probe_run([str(mutant_binary), mode], env=dict(ENV, KAYA_SWIFT_ASYNC_MUTANT=name))
-        finding = async_findings(got, mode)
-        if not finding or expected not in finding + got.stdout + got.stderr:
-            g.refuse(f"Swift async {name} mutation did not fail by {expected}: "
-                     f"{finding}\n{got.stdout}{got.stderr}")
-        print(f"check-abort: Swift async {name} mutation refused: {expected}")
+        java_async = ROOT / "tools/checks/java-async/dev/kaya/AsyncCheck.java"
+        java_binding = ROOT / "bindings/java/dev/kaya/KayaApp.java"
+        java_compile = ["javac", "--release", "21", "-encoding", "UTF-8", "-proc:none"]
+        java_sources = ["bindings/java-desktop/dev/kaya/KayaRing.java",
+                        *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java")))]
+        step("java-async-build", [*java_compile, "-d", str(tmp / "java"),
+                                  *java_sources, str(java_async)], tmp / "java-async-build.log")
+        for mode in ("all", "loop"):
+            step(f"java-async-{mode}", ["java", "-cp", str(tmp / "java"),
+                                       "dev.kaya.AsyncCheck", mode],
+                 tmp / f"java-async-{mode}.log", echo="java-async:")
 
-    async_compile_source = (
-        'KayaApp.run { app in app.task { _ = await app.showAlert(cancel: "keep") } }\n')
-    for name, before, after, expected in (
-        ("build-await", 'app.task { _ = await app.showAlert(cancel: "keep") }',
-         'app.build { _ in _ = await app.showAlert(cancel: "keep") }', "synchronous"),
-        ("handler-and-await", 'app.showAlert(cancel: "keep")',
-         'app.showAlert(cancel: "keep", onResult: { _, _ in })', "extra argument 'onResult'"),
-        ("actor", async_compile_source,
-         'func wrong(_ app: KayaApp) { app.task {} }\n', "global actor 'KayaAppActor'-isolated"),
-    ):
-        negative_dir = tmp / f"async-compile-{name}"
-        negative_dir.mkdir()
-        negative_main = negative_dir / "main.swift"
-        negative_main.write_text(g.doctor(f"Swift async compile {name}", async_compile_source,
-                                         re.escape(before), after), encoding="utf-8")
-        got = probe_run(executor_compile + executor_sources + [
-            str(negative_main), "-o", str(negative_dir / "probe")], timeout=60)
-        if got.returncode == 0 or expected not in got.stderr:
-            g.refuse(f"Swift async compile {name} was not refused by {expected}: {got.stderr}")
-        print(f"check-abort: Swift async compile {name} refused by {expected}")
+        java_original = java_binding.read_text(encoding="utf-8")
+        java_probe = java_async.read_text(encoding="utf-8")
+        java_mutations = [
+            ("parent-observer", "probe", r'app.observe\(terminal\);',
+             'app.observe(request.answer());', "all", "report count mismatch"),
+            ("inline-completion", "binding",
+             r'send.accept\(value -> queueAsync\(\(\) -> \{\s*requireAsyncBoundary\(\);'
+             r'\s*answer.complete\(value\);\s*\}\)\);',
+             'send.accept(value -> { requireAsyncBoundary(); answer.complete(value); });',
+             "all", "completion did not resolve"),
+            ("raw-boundary", "binding", r'if \(transactionDepth != 0 \|\| tplDepth != 0\)',
+             'if (false)', "all", "missing refusal: inside a transaction"),
+            ("scope-rollback", "binding", r'tx.rollback\(\);', '', "all",
+             "throwing scope committed"),
+            ("reporter", "binding", re.escape('System.err.println("kaya: async handler failed; '
+             'no transaction was rolled back by this reporter; '
+             'completed transactions remain committed");'),
+             'System.err.println("kaya: transaction rolled back");', "all",
+             "report count mismatch"),
+            ("alert-overlap", "binding", r'if \(app.liveAlert != 0\)',
+             'if (false)', "all", "missing refusal: another alert"),
+            ("file-overlap", "binding", r'if \(liveFileDialog != 0\)',
+             'if (false)', "all", "missing refusal: another file dialog"),
+            ("retirement", "binding", r'alerts.remove\(id\);\n        if \(handler != null\)',
+             'alerts.get(id);\n        if (handler != null)',
+             "all", "result registration did not retire"),
+            ("rollback-cleanup", "binding",
+             r'for \(int i = rollbackActions.size\(\) - 1; i >= 0; i--\) '
+             r'rollbackActions.get\(i\).run\(\);',
+             '', "all", "aborted request kept registration"),
+            ("abort-completion", "binding",
+             r'tx.rollbackActions.add\(\(\) -> queueAsync\(\(\) -> answer.completeExceptionally\('
+             r'\s*new IllegalStateException\("kaya: dialog request transaction aborted"\)\)\)\);',
+             '', "all", "aborted request left future pending"),
+            ("mixed-owner", "binding", r'if \(onResult != null\) throw new IllegalStateException\('
+             r'"kaya: choose a callback or a future, not both"\);',
+             '', "all", "missing refusal: callback or a future"),
+            ("fatal-error", "binding", r'if \(failure instanceof Error fatal\) throw fatal;',
+             '', "all", "fatal error was swallowed"),
+            ("queue-drain", "binding", r'drainPosted\(\);\s*drainAsync\(\);',
+             'drainPosted();', "loop", "async queue did not wake and drain"),
+            ("queue-wake", "binding", r'asyncJobs.add\(job\);\s*\}\s*KayaRing.wake\(\);',
+             'asyncJobs.add(job);\n        }', "loop", "async queue did not wake and drain"),
+        ]
+        for name, target, pattern, replacement, mode, expected in java_mutations:
+            shadow = tmp / f"java-async-{name}"
+            shadow.mkdir()
+            source = java_probe if target == "probe" else java_original
+            changed = g.doctor(f"Java async {name}", source, pattern, replacement,
+                               want=5 if name == "mixed-owner" else 1)
+            binding_copy = shadow / "KayaApp.java"
+            probe_copy = shadow / "AsyncCheck.java"
+            binding_copy.write_text(changed if target == "binding" else java_original,
+                                    encoding="utf-8")
+            probe_copy.write_text(changed if target == "probe" else java_probe, encoding="utf-8")
+            step(f"java-async-{name}-build",
+                 [*java_compile, "-d", str(shadow), "-cp", str(tmp / "java"),
+                  str(binding_copy), str(probe_copy)], tmp / f"java-{name}-build.log")
+            got = probe_run(["java", "-cp", os.pathsep.join((str(shadow), str(tmp / "java"))),
+                             "dev.kaya.AsyncCheck", mode], timeout=15, env=ENV)
+            said = got.stdout + got.stderr
+            if got.returncode != 1 or expected not in said:
+                g.refuse(f"Java async {name}: expected exit 1 naming {expected}: {said}")
+            print(f"check-abort: Java async {name} refused: {expected}")
 
-    # THE PROCESS-LEVEL NOTIFICATION HANDLER'S DISPATCH ORDER
-    # (docs/tasks-s9-plan.md R1, docs/deferred.md's S9 entry): the
-    # one-shot handler bound at the show wins, an id this process never
-    # showed reaches the process-level one, that one does not retire,
-    # and an unclaimed result announces its drop in full. NO LANE CAN
-    # SEE ANY OF IT — a scene registers one or the other, never both.
-    # ONE MODULE with the binding, like the abort arm above: the ring
-    # loop's switch has no seam, so the decision is a method and this
-    # drives it.
-    step("swift-notify-build",
-         [swiftc, *sdk_args, "-o", str(tmp / "swift-notify"),
-          *sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))),
-          str(ROOT / "tools/checks/swift-notify/main.swift"),
-          "-import-objc-header", "crates/kaya/include/kaya.h",
-          "-I", "crates/kaya/include",
-          # The binding is a package target and names the C API as a
-          # MODULE (Package.swift); this arm compiles the same files as
-          # one module with its probe, so it needs the modulemap's dir.
-          "-I", "bindings/swift/CKaya",
-          "-L", str(TARGET / "debug"), "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
-         tmp / "swift-notify.log", env=NO_XCODE)
-    step("swift-notify", [str(tmp / "swift-notify")],
-         tmp / "swift-notify.log", echo=("notify-order:", "link-route:"))
+        for name, chain, method in (
+            ("alert", 'tx.showAlert().cancel("no")', "showFuture"),
+            ("pick", 'tx.pickFile().filter("Text", "txt")', "showFuture"),
+            ("save", 'tx.saveFile("copy")', "showFuture"),
+            ("clipboard", 'tx.readClipboard().text()', "sendFuture"),
+        ):
+            fixture = tmp / "MixedAsync.java"
+            control = (
+                'import dev.kaya.KayaApp; class MixedAsync { void check(KayaApp.Tx tx) { '
+                + chain + '.' + method + '(); } }')
+            fixture.write_text(control, encoding="utf-8")
+            step(f"java-async-{name}-control", [*java_compile, "-cp", str(tmp / "java"),
+                                               str(fixture)], tmp / f"java-{name}-control.log")
+            fixture.write_text(g.doctor(
+                f"Java callback/future {name}", control, re.escape('.' + method + '();'),
+                '.onResult((t, value) -> {}).'+ method + '();'), encoding="utf-8")
+            got = probe_run([*java_compile, "-cp", str(tmp / "java"), str(fixture)], env=ENV)
+            if (got.returncode == 0 or "cannot find symbol" not in got.stderr
+                    or method not in got.stderr):
+                g.refuse(f"Java callback/future {name} did not refuse {method}: "
+                         f"{got.stdout}{got.stderr}")
+            print(f"check-abort: Java callback/future {name}: compiler refused {method}")
 
-    # ITS WATCHED NEGATIVE: the ORDER SWAPPED in a COPY of the binding —
-    # the process-level handler consulted before the one-shot one — with
-    # the substitution COUNTED and the exerciser required to say so. Swift
-    # is the one of the five whose build is a FILE LIST rather than a
-    # project, so its copy costs one compiler invocation and no scaffolding
-    # (java-typecheck's notify negative is the other; C#, OCaml and
-    # Haskell are rooted in dotnet, dune and cabal projects, and their
-    # negatives are recorded hand runs).
-    swapped = tmp / "swift-swapped"
-    swapped.mkdir()
-    for src in sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))):
-        (swapped / os.path.basename(src)).write_bytes(
-            pathlib.Path(src).read_bytes())
-    doctored = swapped / "KayaApp.swift"
-    doctored.write_text(
-        g.doctor("swift notify-order negative consulted the process "
-                 "handler first", doctored.read_text(encoding="utf-8"),
-                 r"        if let handler = notifications\.removeValue"
-                 r"\(forKey: id\) \{",
-                 "        if notificationActivation == nil, "
-                 "let handler = notifications.removeValue(forKey: id) {"),
-        encoding="utf-8")
-    step("swift-notify-swapped-build",
-         [swiftc, *sdk_args, "-o", str(tmp / "swift-notify-swapped"),
-          *sorted(glob.glob(str(swapped / "*.swift"))),
-          str(ROOT / "tools/checks/swift-notify/main.swift"),
-          "-import-objc-header", "crates/kaya/include/kaya.h",
-          "-I", "crates/kaya/include",
-          # The binding is a package target and names the C API as a
-          # MODULE (Package.swift); this arm compiles the same files as
-          # one module with its probe, so it needs the modulemap's dir.
-          "-I", "bindings/swift/CKaya",
-          "-L", str(TARGET / "debug"), "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
-         tmp / "swift-swapped.log", env=NO_XCODE)
-    with (tmp / "swift-swapped-run.log").open("w", encoding="utf-8") as out:
-        swapped_run = subprocess.run(
-            [str(tmp / "swift-notify-swapped")], cwd=ROOT, env=ENV,
-            stdout=out, stderr=subprocess.STDOUT, check=False)
-    swapped_said = (tmp / "swift-swapped-run.log").read_text(
-        encoding="utf-8", errors="replace")
-    if swapped_run.returncode == 0:
-        print("check-abort: SELF-TEST FAIL — the swift notify-order "
-              "exerciser PASSED against a binding that consults the "
-              "process-level handler first, so it is not exercising the "
-              "order", file=sys.stderr)
-        sys.exit(1)
-    if "the one-shot handler did not answer" not in swapped_said:
-        print("check-abort: SELF-TEST FAIL — the swapped swift copy failed, "
-              "but NOT by misrouting the one-shot result. What it printed:",
-              file=sys.stderr)
-        print(swapped_said, file=sys.stderr)
-        sys.exit(1)
+    if part("ocaml"):
+        step("ocaml-build",
+             ["dune", "build", "--root", ".",
+              "./bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
+        step("ocaml",
+             ["dune", "exec", "--root", ".",
+              "bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
+        step("ocaml-notify-build",
+             ["dune", "build", "--root", ".",
+              "./bindings/ocaml/checks/notify_order_check.exe"],
+             tmp / "ml-notify.log")
+        step("ocaml-notify",
+             ["dune", "exec", "--root", ".",
+              "bindings/ocaml/checks/notify_order_check.exe"],
+             tmp / "ml-notify.log", echo=("notify-order:", "link-route:"))
+        # The typed-signal, variant-role and typed-key refusals of the idiom
+        # pass (docs/deferred.md, the idiom-pass entry): three fixtures that
+        # must NOT compile, each on the one line its finding is about.
+        step("ocaml-negatives",
+             ["python3", "bindings/ocaml/checks/negatives.py"],
+             tmp / "ml-negatives.log", echo=("negatives:",))
 
-    # THE LINK HALF'S WATCHED NEGATIVE, the same copy trick one rule over:
-    # ROUTE 0 MADE TO SPEAK. Two drops with disjoint causes
-    # (docs/app-links-plan.md §4) — a route that MATCHED and reached no
-    # handler is the binding's to announce, while route 0 is a URL NO
-    # ROUTE TOOK, which the core already announced on stderr naming every
-    # declared pattern. NO LANE CAN SEE THE SECOND LINE: a scene reads the
-    # same screen back either way, and a reader who meets two sentences
-    # for one event learns to distrust both. Removing the guard must turn
-    # the exerciser red on its OWN sentence, not merely nonzero.
-    spoke = tmp / "swift-route-zero-src"
-    spoke.mkdir()
-    for src in sorted(glob.glob(str(ROOT / "bindings/swift/*.swift"))):
-        (spoke / os.path.basename(src)).write_bytes(
-            pathlib.Path(src).read_bytes())
-    loud = spoke / "KayaApp.swift"
-    loud.write_text(
-        g.doctor("swift link negative let route 0 announce a drop of its own",
-                 loud.read_text(encoding="utf-8"),
-                 r"\} else if route != 0 \{", "} else {"),
-        encoding="utf-8")
-    step("swift-route-zero-build",
-         [swiftc, *sdk_args, "-o", str(tmp / "swift-route-zero"),
-          *sorted(glob.glob(str(spoke / "*.swift"))),
-          str(ROOT / "tools/checks/swift-notify/main.swift"),
-          "-import-objc-header", "crates/kaya/include/kaya.h",
-          "-I", "crates/kaya/include",
-          # The binding is a package target and names the C API as a
-          # MODULE (Package.swift); this arm compiles the same files as
-          # one module with its probe, so it needs the modulemap's dir.
-          "-I", "bindings/swift/CKaya",
-          "-L", str(TARGET / "debug"), "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
-         tmp / "swift-route-zero.log", env=NO_XCODE)
-    with (tmp / "swift-route-zero-run.log").open("w", encoding="utf-8") as out:
-        zero_run = subprocess.run(
-            [str(tmp / "swift-route-zero")], cwd=ROOT, env=ENV,
-            stdout=out, stderr=subprocess.STDOUT, check=False)
-    zero_said = (tmp / "swift-route-zero-run.log").read_text(
-        encoding="utf-8", errors="replace")
-    if zero_run.returncode == 0:
-        print("check-abort: SELF-TEST FAIL — the swift link-route exerciser "
-              "PASSED against a binding that announces route 0 as well, so "
-              "it is not exercising the two drops", file=sys.stderr)
-        sys.exit(1)
-    if "the link drop was announced as" not in zero_said:
-        print("check-abort: SELF-TEST FAIL — the route-0 swift copy failed, "
-              "but NOT on the drop sentence. What it printed:",
-              file=sys.stderr)
-        print(zero_said, file=sys.stderr)
-        sys.exit(1)
-    print("check-abort: self-test swift link-route negative refused, by its "
-          "own sentence")
+    if part("haskell"):
+        # A PRIVATE build tree, never the shared dist-newstyle: the repo is
+        # mounted into the linux container, so wiping the shared one destroys
+        # the docker lane's Haskell guests mid-run (2026-07-24). The build
+        # directory goes every run because cabal trusts its plan cache over
+        # the artifact's existence (docs/traps.md: An ad-hoc `cabal build`
+        # poisons the shared dist-newstyle for the whole mac lane).
+        hs_dist = ROOT / "target/hs-abort-dist"
+        for stale in glob.glob(str(hs_dist / "build/*/*/kaya-guests-0")):
+            shutil.rmtree(stale, ignore_errors=True)
+        cabal_args = [f"--builddir={hs_dist}",
+                      f"--extra-lib-dirs={TARGET}/debug",
+                      f"--ghc-options=-L{TARGET}/debug "
+                      f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
+        step("haskell-build",
+             ["cabal", "build", "kaya-abort-check", *cabal_args],
+             tmp / "hs.log", cwd=ROOT / "guests/haskell")
+        where = subprocess.run(
+            ["cabal", "list-bin", "kaya-abort-check", f"--builddir={hs_dist}",
+             "-v0"], cwd=ROOT / "guests/haskell", stdout=subprocess.PIPE,
+            text=True, check=False)
+        step("haskell", [where.stdout.strip()], tmp / "hs.log")
 
-    # The network images surface (tools/checks/swift-netimage/main.swift):
-    # the conditional write through the mirror, the wrong thread, the helper.
-    netimage_probe = str(ROOT / "tools/checks/swift-netimage/main.swift")
+        step("haskell-notify-build",
+             ["cabal", "build", "kaya-notify-order-check", *cabal_args],
+             tmp / "hs-notify.log", cwd=ROOT / "guests/haskell")
+        where_notify = subprocess.run(
+            ["cabal", "list-bin", "kaya-notify-order-check",
+             f"--builddir={hs_dist}", "-v0"], cwd=ROOT / "guests/haskell",
+            stdout=subprocess.PIPE, text=True, check=False)
+        step("haskell-notify", [where_notify.stdout.strip()],
+             tmp / "hs-notify.log", echo=("notify-order:", "link-route:"))
 
-    def netimage_build(sources, binary, log):
-        step(f"{binary.name}-build",
-             executor_compile + sources + [netimage_probe, "-o", str(binary)], log)
-
-    netimage_binary = tmp / "swift-netimage"
-    netimage_build(executor_sources, netimage_binary, tmp / "netimage-build.log")
-    got = probe_run([str(netimage_binary)], timeout=20)
-    print(got.stdout, end="")
-    if got.returncode != 0 or "swift-netimage: OK" not in got.stdout:
-        g.refuse(f"Swift netimage probe failed: {got.stdout}{got.stderr}")
-    got = probe_run([str(netimage_binary), "foreign"], timeout=20)
-    if got.returncode == 0 or "a transaction belongs to the app thread" not in got.stderr:
-        g.refuse(f"Swift netimage foreign-thread write was not refused: {got.stdout}{got.stderr}")
-    print("check-abort: Swift netimage foreign-thread write refused by name")
-    build_wall = ("    public func build<R>(_ build: (KayaAppTx) throws -> R) rethrows -> R {\n"
-                  "        KayaApp.requireAppThread()\n")
-    alive_wall = ("that created it; to mutate from a background thread use app.post\")\n"
-                  "        KayaApp.requireAppThread()\n")
-    for name, file, cuts, run_mode, expected in (
-        ("mirror-guard", "KayaImages.swift",
-         [("kayaSameWire(current[keyPath: `guard`], expected)", "true")], "all", "guard answers"),
-        # Both app-thread walls, the build's and the write chokepoint's.
-        ("foreign-thread", "KayaApp.swift",
-         [(build_wall, build_wall.replace("        KayaApp.requireAppThread()\n", "")),
-          (alive_wall, alive_wall.replace("        KayaApp.requireAppThread()\n", ""))],
-         "foreign", "conditional write from a foreign thread was not refused"),
-        ("coalesce", "KayaImages.swift", [("if waiting[wanted]!.count > 1 { return }", "")], "all",
-         "three rows sharing a URL"),
-        ("cap", "KayaImages.swift", [("running < Self.limit", "running < 64")], "all",
-         "six fetches start"),
-        ("cancel", "KayaImages.swift", [("inFlight.removeValue(forKey: u)?.task.cancel()",
-                                         "_ = inFlight.removeValue(forKey: u)")], "all",
-         "running fetch is cancelled"),
-    ):
-        shadow = tmp / f"netimage-{name}"
-        shutil.copytree(ROOT / "bindings/swift", shadow)
-        target = shadow / file
-        text = target.read_text(encoding="utf-8")
-        for before, after in cuts:
-            text = g.doctor(f"Swift netimage {name}", text, re.escape(before), after)
-        target.write_text(text, encoding="utf-8")
-        binary = tmp / f"netimage-{name}-bin"
-        netimage_build(sorted(map(str, shadow.glob("*.swift"))), binary,
-                       tmp / f"netimage-{name}-build.log")
-        got = probe_run([str(binary), run_mode], timeout=20)
-        if got.returncode == 0 or expected not in got.stdout + got.stderr:
-            g.refuse(f"Swift netimage {name} negative: rc={got.returncode}: "
-                     f"{got.stdout}{got.stderr}")
-        print(f"check-abort: Swift netimage {name} negative refused: {expected}")
-
-    # Built UNCONDITIONALLY, like every arm here: an `[ -f ]` guard ran a
-    # dll older than the edited binding and called it green (2026-08-22,
-    # invariant 4). dotnet's incremental build makes it cheap.
-    step("csharp-build",
-         ["dotnet", "build", "--nologo", "-v", "q",
-          "guests/csharp/kaya-guests.csproj"], tmp / "cs.log")
-    step("csharp",
-         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
-         tmp / "cs.log", env=dict(ENV, KAYA_CHECK="abort"), echo="async-dialog:")
-    # The notification dispatch order, same binary, its own KAYA_CHECK.
-    step("csharp-notify",
-         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
-         tmp / "cs-notify.log", env=dict(ENV, KAYA_CHECK="notify"),
-         echo=("notify-order:", "link-route:"))
-    # The media records' decode, the mirror and the stamped video
-    # (guests/csharp/MediaCheck.cs), same binary.
-    step("csharp-media",
-         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
-         tmp / "cs-media.log", env=dict(ENV, KAYA_CHECK="media"), echo="media-check:")
-    if "media-check: OK" not in (tmp / "cs-media.log").read_text(encoding="utf-8",
-                                                                 errors="replace"):
-        fail("csharp-media (exited 0 without its verdict)", tmp / "cs-media.log")
-    # The network images surface (guests/csharp/NetimageCheck.cs): the
-    # conditional write through the mirror, the wrong thread, the helper.
-    step("csharp-netimage",
-         ["dotnet", "exec", "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
-         tmp / "cs-netimage.log", env=dict(ENV, KAYA_CHECK="netimage"),
-         echo="netimage-check:")
-    if "netimage-check: OK" not in (tmp / "cs-netimage.log").read_text(
-            encoding="utf-8", errors="replace"):
-        fail("csharp-netimage (exited 0 without its verdict)", tmp / "cs-netimage.log")
-    for name, rel, cuts, expected in (
-        ("mirror-guard", "KayaRecords.cs",
-         [("&& KayaRecords.SameWire(Info.FieldOfWire(current!, guard.Index), expected)", "")],
-         "guard answers"),
-        # Both app-thread walls, the Build's and the write chokepoint's.
-        ("foreign-thread", "KayaApp.cs",
-         [("RequireAppThread();\n        RequireSynchronousBuild(build);\n        using var tx",
-           "RequireSynchronousBuild(build);\n        using var tx"),
-          ("ObjectDisposedException.ThrowIf(disposed, this);\n        KayaApp.RequireAppThread();",
-           "ObjectDisposedException.ThrowIf(disposed, this);")],
-         "conditional write from a foreign thread was not refused"),
-        ("coalesce", "KayaImages.cs", [("if (rowsWaiting.Count > 1) return;", "")],
-         "three rows sharing a URL"),
-        ("cap", "KayaImages.cs", [("running < DefaultLimit", "running < 64")],
-         "three rows sharing a URL make one fetch and at most six run"),
-        ("cancel", "KayaImages.cs", [("if (inFlight.Remove(u, out var cts)) cts.Cancel();",
-                                      "inFlight.Remove(u, out _);")],
-         "running fetch is cancelled"),
-    ):
-        shadow = tmp / f"cs-netimage-{name}"
-        shadow.mkdir()
-        for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
-            text = src.read_text(encoding="utf-8")
-            if src.name == rel:
-                for before, after in cuts:
-                    text = g.doctor(f"C# netimage {name}", text, re.escape(before), after)
-            (shadow / src.name).write_text(text, encoding="utf-8")
-        for guest in ("NetimageCheck.cs", "NetimageScene.cs", "SongKaya.cs"):
-            shutil.copyfile(ROOT / "guests/csharp" / guest, shadow / guest)
-        (shadow / "Main.cs").write_text(
-            "static class MainCheck { static void Main() { NetimageCheck.Run(); } }",
-            encoding="utf-8")
-        (shadow / "netimage.csproj").write_text(
-            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
-            '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
-            '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
-            '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
-            encoding="utf-8")
-        step(f"csharp-netimage-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
-                                              str(shadow / "netimage.csproj")],
-             tmp / f"cs-netimage-{name}-build.log")
-        got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/netimage.dll")],
-                             env=ENV, capture_output=True, text=True, encoding="utf-8",
-                             timeout=60, check=False)
-        said = got.stdout + got.stderr
-        if got.returncode != 1 or expected not in said:
-            g.refuse(f"C# netimage {name}: expected exit 1 naming {expected}: {said}")
-        print(f"check-abort: C# netimage {name} refused: {expected}")
-
-    for name, before, after, expected in (
-        ("ambient", "try { job(); }", "try { Build(_ => job()); }",
-         "continuation had an ambient transaction"),
-        ("rollback", "App.SignalMirrors[id] = old!;",
-         'App.SignalMirrors[id] = "broken rollback";', "explicit scope rollback/commit mismatch"),
-        ("reporter", "kaya: async handler failed; no transaction was rolled back by this reporter; "
-         "completed transactions remain committed",
-         "kaya: handler threw (transaction rolled back)", "async reporter claimed rollback"),
-        ("completion", "send(tx, value => QueueAsync(() => answer.SetResult(value)));",
-         "send(tx, value => answer.SetResult(value));", "future completed inside result dispatch"),
-        ("retire", "if (liveAlert == id) liveAlert = 0;", "",
-         "alert id did not retire"),
-        ("overlap", "if (App.liveAlert != 0)", "if (App.liveAlert == ulong.MaxValue)",
-         "missing refusal: another alert"),
-        ("abandon", "foreach (var action in RollbackActions) action();", "",
-         "abandoned request leaked a registration"),
-        ("encode", "ulong id = ++App.nextAlert;",
-         "ulong id = ++App.nextAlert; if (onResult != null) App.alerts[id] = onResult;",
-         "invalid request leaked a registration"),
-        ("sync-build-void", "public void Build(Action<Tx> build)\n    {\n"
-         "        RequireSynchronousBuild(build);",
-         "public void Build(Action<Tx> build)\n    {",
-         "missing refusal: Build requires a synchronous body"),
-        ("sync-build-task", "RequireAppThread();\n        RequireSynchronousBuild(build);",
-         "RequireAppThread();",
-         "missing refusal: Build requires a synchronous body"),
-        ("raw-boundary", "if (CurrentTx != null)",
-         "if (CurrentTx != null && liveAlert == ulong.MaxValue)",
-         "missing refusal: async work cannot run inside a transaction"),
-    ):
-        shadow = tmp / f"cs-async-{name}"
-        shadow.mkdir()
-        for src in sorted((ROOT / "bindings/csharp").glob("*.cs")):
-            text = src.read_text(encoding="utf-8")
-            if src.name == "KayaApp.cs":
-                text = g.doctor(f"C# async {name}", text, re.escape(before), after)
-            (shadow / src.name).write_text(text, encoding="utf-8")
-        shutil.copyfile(ROOT / "guests/csharp/AsyncDialogCheck.cs", shadow / "AsyncDialogCheck.cs")
-        (shadow / "Main.cs").write_text(
-            'static class MainCheck { static int Main() { try { '
-            'AsyncDialogCheck.Run(new KayaApp()); return 0; } '
-            'catch (System.Exception e) { System.Console.Error.WriteLine(e); return 1; } } }',
-            encoding="utf-8")
-        (shadow / "async.csproj").write_text(
-            '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
-            '<OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>'
-            '<AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>'
-            '<ImplicitUsings>enable</ImplicitUsings></PropertyGroup></Project>',
-            encoding="utf-8")
-        step(f"csharp-async-{name}-build", ["dotnet", "build", "--nologo", "-v", "q",
-                                           str(shadow / "async.csproj")],
-             tmp / f"cs-{name}-build.log")
-        got = subprocess.run(["dotnet", "exec", str(shadow / "bin/Debug/net10.0/async.dll")],
-                             env=ENV, capture_output=True, text=True, encoding="utf-8",
-                             timeout=20, check=False)
-        said = got.stdout + got.stderr
-        if got.returncode != 1 or expected not in said:
-            g.refuse(f"C# async {name}: expected exit 1 naming {expected}: {said}")
-        print(f"check-abort: C# async {name} refused: {expected}")
-
-    # Pure JVM against the ring stub — no natives, so mutating
-    # transactions always abort (AbortCheck.java's header has the shape).
-    shutil.rmtree(tmp / "java", ignore_errors=True)
-    step("java-build",
-         ["javac", "--release", "21", "-encoding", "UTF-8",
-          "-d", str(tmp / "java"),
-          "bindings/java-desktop/dev/kaya/KayaRing.java",
-          *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java"))),
-          "tools/checks/java-abort/dev/kaya/IdSpaceCheck.java",
-          "tools/checks/java-abort/AbortCheck.java"], tmp / "java.log")
-    step("java", ["java", "-cp", str(tmp / "java"), "AbortCheck"],
-         tmp / "java.log")
-
-    java_async = ROOT / "tools/checks/java-async/dev/kaya/AsyncCheck.java"
-    java_binding = ROOT / "bindings/java/dev/kaya/KayaApp.java"
-    java_compile = ["javac", "--release", "21", "-encoding", "UTF-8", "-proc:none"]
-    java_sources = ["bindings/java-desktop/dev/kaya/KayaRing.java",
-                    *sorted(glob.glob(str(ROOT / "bindings/java/dev/kaya/*.java")))]
-    step("java-async-build", [*java_compile, "-d", str(tmp / "java"),
-                              *java_sources, str(java_async)], tmp / "java-async-build.log")
-    for mode in ("all", "loop"):
-        step(f"java-async-{mode}", ["java", "-cp", str(tmp / "java"),
-                                   "dev.kaya.AsyncCheck", mode],
-             tmp / f"java-async-{mode}.log", echo="java-async:")
-
-    java_original = java_binding.read_text(encoding="utf-8")
-    java_probe = java_async.read_text(encoding="utf-8")
-    java_mutations = [
-        ("parent-observer", "probe", r'app.observe\(terminal\);',
-         'app.observe(request.answer());', "all", "report count mismatch"),
-        ("inline-completion", "binding",
-         r'send.accept\(value -> queueAsync\(\(\) -> \{\s*requireAsyncBoundary\(\);'
-         r'\s*answer.complete\(value\);\s*\}\)\);',
-         'send.accept(value -> { requireAsyncBoundary(); answer.complete(value); });',
-         "all", "completion did not resolve"),
-        ("raw-boundary", "binding", r'if \(transactionDepth != 0 \|\| tplDepth != 0\)',
-         'if (false)', "all", "missing refusal: inside a transaction"),
-        ("scope-rollback", "binding", r'tx.rollback\(\);', '', "all", "throwing scope committed"),
-        ("reporter", "binding", re.escape('System.err.println("kaya: async handler failed; '
-         'no transaction was rolled back by this reporter; '
-         'completed transactions remain committed");'),
-         'System.err.println("kaya: transaction rolled back");', "all", "report count mismatch"),
-        ("alert-overlap", "binding", r'if \(app.liveAlert != 0\)',
-         'if (false)', "all", "missing refusal: another alert"),
-        ("file-overlap", "binding", r'if \(liveFileDialog != 0\)',
-         'if (false)', "all", "missing refusal: another file dialog"),
-        ("retirement", "binding", r'alerts.remove\(id\);\n        if \(handler != null\)',
-         'alerts.get(id);\n        if (handler != null)',
-         "all", "result registration did not retire"),
-        ("rollback-cleanup", "binding",
-         r'for \(int i = rollbackActions.size\(\) - 1; i >= 0; i--\) '
-         r'rollbackActions.get\(i\).run\(\);',
-         '', "all", "aborted request kept registration"),
-        ("abort-completion", "binding",
-         r'tx.rollbackActions.add\(\(\) -> queueAsync\(\(\) -> answer.completeExceptionally\('
-         r'\s*new IllegalStateException\("kaya: dialog request transaction aborted"\)\)\)\);',
-         '', "all", "aborted request left future pending"),
-        ("mixed-owner", "binding", r'if \(onResult != null\) throw new IllegalStateException\('
-         r'"kaya: choose a callback or a future, not both"\);',
-         '', "all", "missing refusal: callback or a future"),
-        ("fatal-error", "binding", r'if \(failure instanceof Error fatal\) throw fatal;',
-         '', "all", "fatal error was swallowed"),
-        ("queue-drain", "binding", r'drainPosted\(\);\s*drainAsync\(\);',
-         'drainPosted();', "loop", "async queue did not wake and drain"),
-        ("queue-wake", "binding", r'asyncJobs.add\(job\);\s*\}\s*KayaRing.wake\(\);',
-         'asyncJobs.add(job);\n        }', "loop", "async queue did not wake and drain"),
-    ]
-    for name, target, pattern, replacement, mode, expected in java_mutations:
-        shadow = tmp / f"java-async-{name}"
-        shadow.mkdir()
-        source = java_probe if target == "probe" else java_original
-        changed = g.doctor(f"Java async {name}", source, pattern, replacement,
-                           want=5 if name == "mixed-owner" else 1)
-        binding_copy = shadow / "KayaApp.java"
-        probe_copy = shadow / "AsyncCheck.java"
-        binding_copy.write_text(changed if target == "binding" else java_original, encoding="utf-8")
-        probe_copy.write_text(changed if target == "probe" else java_probe, encoding="utf-8")
-        step(f"java-async-{name}-build",
-             [*java_compile, "-d", str(shadow), "-cp", str(tmp / "java"),
-              str(binding_copy), str(probe_copy)], tmp / f"java-{name}-build.log")
-        got = probe_run(["java", "-cp", os.pathsep.join((str(shadow), str(tmp / "java"))),
-                         "dev.kaya.AsyncCheck", mode], timeout=15, env=ENV)
-        said = got.stdout + got.stderr
-        if got.returncode != 1 or expected not in said:
-            g.refuse(f"Java async {name}: expected exit 1 naming {expected}: {said}")
-        print(f"check-abort: Java async {name} refused: {expected}")
-
-    for name, chain, method in (
-        ("alert", 'tx.showAlert().cancel("no")', "showFuture"),
-        ("pick", 'tx.pickFile().filter("Text", "txt")', "showFuture"),
-        ("save", 'tx.saveFile("copy")', "showFuture"),
-        ("clipboard", 'tx.readClipboard().text()', "sendFuture"),
-    ):
-        fixture = tmp / "MixedAsync.java"
-        control = (
-            'import dev.kaya.KayaApp; class MixedAsync { void check(KayaApp.Tx tx) { '
-            + chain + '.' + method + '(); } }')
-        fixture.write_text(control, encoding="utf-8")
-        step(f"java-async-{name}-control", [*java_compile, "-cp", str(tmp / "java"),
-                                           str(fixture)], tmp / f"java-{name}-control.log")
-        fixture.write_text(g.doctor(
-            f"Java callback/future {name}", control, re.escape('.' + method + '();'),
-            '.onResult((t, value) -> {}).'+ method + '();'), encoding="utf-8")
-        got = probe_run([*java_compile, "-cp", str(tmp / "java"), str(fixture)], env=ENV)
-        if (got.returncode == 0 or "cannot find symbol" not in got.stderr
-                or method not in got.stderr):
-            g.refuse(f"Java callback/future {name} did not refuse {method}: "
-                     f"{got.stdout}{got.stderr}")
-        print(f"check-abort: Java callback/future {name}: compiler refused {method}")
-
-    step("ocaml-build",
-         ["dune", "build", "--root", ".",
-          "./bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
-    step("ocaml",
-         ["dune", "exec", "--root", ".",
-          "bindings/ocaml/checks/abort_check.exe"], tmp / "ml.log")
-    step("ocaml-notify-build",
-         ["dune", "build", "--root", ".",
-          "./bindings/ocaml/checks/notify_order_check.exe"],
-         tmp / "ml-notify.log")
-    step("ocaml-notify",
-         ["dune", "exec", "--root", ".",
-          "bindings/ocaml/checks/notify_order_check.exe"],
-         tmp / "ml-notify.log", echo=("notify-order:", "link-route:"))
-    # The typed-signal, variant-role and typed-key refusals of the idiom
-    # pass (docs/deferred.md, the idiom-pass entry): three fixtures that
-    # must NOT compile, each on the one line its finding is about.
-    step("ocaml-negatives",
-         ["python3", "bindings/ocaml/checks/negatives.py"],
-         tmp / "ml-negatives.log", echo=("negatives:",))
-
-    # A PRIVATE build tree, never the shared dist-newstyle: the repo is
-    # mounted into the linux container, so wiping the shared one destroys
-    # the docker lane's Haskell guests mid-run (2026-07-24). The build
-    # directory goes every run because cabal trusts its plan cache over
-    # the artifact's existence (docs/traps.md: An ad-hoc `cabal build`
-    # poisons the shared dist-newstyle for the whole mac lane).
-    hs_dist = ROOT / "target/hs-abort-dist"
-    for stale in glob.glob(str(hs_dist / "build/*/*/kaya-guests-0")):
-        shutil.rmtree(stale, ignore_errors=True)
-    cabal_args = [f"--builddir={hs_dist}",
-                  f"--extra-lib-dirs={TARGET}/debug",
-                  f"--ghc-options=-L{TARGET}/debug "
-                  f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
-    step("haskell-build",
-         ["cabal", "build", "kaya-abort-check", *cabal_args],
-         tmp / "hs.log", cwd=ROOT / "guests/haskell")
-    where = subprocess.run(
-        ["cabal", "list-bin", "kaya-abort-check", f"--builddir={hs_dist}",
-         "-v0"], cwd=ROOT / "guests/haskell", stdout=subprocess.PIPE,
-        text=True, check=False)
-    step("haskell", [where.stdout.strip()], tmp / "hs.log")
-
-    step("haskell-notify-build",
-         ["cabal", "build", "kaya-notify-order-check", *cabal_args],
-         tmp / "hs-notify.log", cwd=ROOT / "guests/haskell")
-    where_notify = subprocess.run(
-        ["cabal", "list-bin", "kaya-notify-order-check",
-         f"--builddir={hs_dist}", "-v0"], cwd=ROOT / "guests/haskell",
-        stdout=subprocess.PIPE, text=True, check=False)
-    step("haskell-notify", [where_notify.stdout.strip()],
-         tmp / "hs-notify.log", echo=("notify-order:", "link-route:"))
-
-    # The Build/Tpl monad wall, pinned by a must-not-compile fixture. The
-    # TYPE error is demanded: a syntax error must not pass as "didn't
-    # compile".
-    with (tmp / "hs-guard.log").open("w", encoding="utf-8") as out:
-        guard = subprocess.run(
-            ["ghc", "-fno-code", "-XGHC2021", "-ibindings/haskell",
-             "-hidir", str(tmp / "hs-guard"), "-odir", str(tmp / "hs-guard"),
-             "tools/checks/haskell-guard-fail/TplRead.hs"],
-            cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
-            check=False)
-    if guard.returncode == 0:
-        print("check-abort: haskell guard fixture COMPILED — the Build/Tpl "
-              "wall fell", file=sys.stderr)
-        sys.exit(1)
-    if "Couldn't match" not in (tmp / "hs-guard.log").read_text(
-            encoding="utf-8"):
-        fail("haskell-guard-fixture", tmp / "hs-guard.log")
-    # The KayaValue wall (the idiom pass's typed signals and keys): four
-    # numbered cases, each compiled alone and each refused by the class,
-    # never by a syntax or scope error. The probe carries its own CPP
-    # pragma; `-XCPP` on the command line would preprocess every module
-    # (docs/traps.md).
-    for case in ("1", "2", "3"):
-        log = tmp / f"hs-kayavalue-{case}.log"
-        with log.open("w", encoding="utf-8") as out:
-            probe = subprocess.run(
-                ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
-                 "-ibindings/haskell", "-iguests/haskell",
-                 "-hidir", str(tmp / "hs-kayavalue"),
-                 "-odir", str(tmp / "hs-kayavalue"),
-                 "guests/haskell/checks/KayaValueNegative.hs"],
+        # The Build/Tpl monad wall, pinned by a must-not-compile fixture. The
+        # TYPE error is demanded: a syntax error must not pass as "didn't
+        # compile".
+        with (tmp / "hs-guard.log").open("w", encoding="utf-8") as out:
+            guard = subprocess.run(
+                ["ghc", "-fno-code", "-XGHC2021", "-ibindings/haskell",
+                 "-hidir", str(tmp / "hs-guard"), "-odir", str(tmp / "hs-guard"),
+                 "tools/checks/haskell-guard-fail/TplRead.hs"],
                 cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
                 check=False)
-        text = log.read_text(encoding="utf-8", errors="replace")
-        if probe.returncode == 0:
-            print(f"check-abort: haskell KayaValue probe case {case} COMPILED "
-                  f"— the typed-value wall fell", file=sys.stderr)
+        if guard.returncode == 0:
+            print("check-abort: haskell guard fixture COMPILED — the Build/Tpl "
+                  "wall fell", file=sys.stderr)
             sys.exit(1)
-        if "No instance for" not in text or "KayaValue Unsupported" not in text:
-            fail(f"haskell-kayavalue-case-{case}", log)
-    print("check-abort: haskell KayaValue probe refused 3/3 cases by the class")
-    # The Key wall (the redo's `Key` at every key slot): four cases refused
-    # naming Key, and CASE 0 — the positive control — compiling clean.
-    for case in ("0", "1", "2", "3", "4"):
-        log = tmp / f"hs-key-{case}.log"
-        with log.open("w", encoding="utf-8") as out:
-            probe = subprocess.run(
-                ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
-                 "-ibindings/haskell", "-iguests/haskell",
-                 "-hidir", str(tmp / "hs-key"), "-odir", str(tmp / "hs-key"),
-                 "guests/haskell/checks/KeyNegative.hs"],
-                cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
-                check=False)
-        text = log.read_text(encoding="utf-8", errors="replace")
-        if case == "0":
-            if probe.returncode != 0:
-                fail("haskell-key-positive-control", log)
-            continue
-        if probe.returncode == 0:
-            print(f"check-abort: haskell Key probe case {case} COMPILED — the "
-                  f"key wall fell", file=sys.stderr)
-            sys.exit(1)
-        if "Couldn't match expected type" not in text or "Key" not in text:
-            fail(f"haskell-key-case-{case}", log)
-    print("check-abort: haskell Key probe refused 4/4 cases naming Key, control clean")
+        if "Couldn't match" not in (tmp / "hs-guard.log").read_text(
+                encoding="utf-8"):
+            fail("haskell-guard-fixture", tmp / "hs-guard.log")
+        # The KayaValue wall (the idiom pass's typed signals and keys): four
+        # numbered cases, each compiled alone and each refused by the class,
+        # never by a syntax or scope error. The probe carries its own CPP
+        # pragma; `-XCPP` on the command line would preprocess every module
+        # (docs/traps.md).
+        for case in ("1", "2", "3"):
+            log = tmp / f"hs-kayavalue-{case}.log"
+            with log.open("w", encoding="utf-8") as out:
+                probe = subprocess.run(
+                    ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
+                     "-ibindings/haskell", "-iguests/haskell",
+                     "-hidir", str(tmp / "hs-kayavalue"),
+                     "-odir", str(tmp / "hs-kayavalue"),
+                     "guests/haskell/checks/KayaValueNegative.hs"],
+                    cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
+                    check=False)
+            text = log.read_text(encoding="utf-8", errors="replace")
+            if probe.returncode == 0:
+                print(f"check-abort: haskell KayaValue probe case {case} COMPILED "
+                      f"— the typed-value wall fell", file=sys.stderr)
+                sys.exit(1)
+            if "No instance for" not in text or "KayaValue Unsupported" not in text:
+                fail(f"haskell-kayavalue-case-{case}", log)
+        print("check-abort: haskell KayaValue probe refused 3/3 cases by the class")
+        # The Key wall (the redo's `Key` at every key slot): four cases refused
+        # naming Key, and CASE 0 — the positive control — compiling clean.
+        for case in ("0", "1", "2", "3", "4"):
+            log = tmp / f"hs-key-{case}.log"
+            with log.open("w", encoding="utf-8") as out:
+                probe = subprocess.run(
+                    ["ghc", "-fno-code", "-XGHC2021", f"-DCASE={case}",
+                     "-ibindings/haskell", "-iguests/haskell",
+                     "-hidir", str(tmp / "hs-key"), "-odir", str(tmp / "hs-key"),
+                     "guests/haskell/checks/KeyNegative.hs"],
+                    cwd=ROOT, env=ENV, stdout=out, stderr=subprocess.STDOUT,
+                    check=False)
+            text = log.read_text(encoding="utf-8", errors="replace")
+            if case == "0":
+                if probe.returncode != 0:
+                    fail("haskell-key-positive-control", log)
+                continue
+            if probe.returncode == 0:
+                print(f"check-abort: haskell Key probe case {case} COMPILED — the "
+                      f"key wall fell", file=sys.stderr)
+                sys.exit(1)
+            if "Couldn't match expected type" not in text or "Key" not in text:
+                fail(f"haskell-key-case-{case}", log)
+        print("check-abort: haskell Key probe refused 4/4 cases naming Key, control clean")
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -978,108 +1084,116 @@ def demand_red(lang, argv, log, *, env=ENV, cwd=ROOT):
 
 
 with scratch_dir("check-abort-neg-") as tmp:
-    # --- C# -----------------------------------------------------------
-    cs = stage("csharp",
-               [(f"binding/{os.path.basename(f)}", f"bindings/csharp/"
-                 f"{os.path.basename(f)}")
-                for f in sorted(glob.glob(str(ROOT / "bindings/csharp/*.cs")))]
-               + [("NotifyOrderCheck.cs", "guests/csharp/NotifyOrderCheck.cs")],
-               "bindings/csharp/KayaApp.cs")
-    (cs / "src" / "NotifyMain.cs").write_text(
-        "// The scratch project's entry point: the guest binary's own\n"
-        "// KAYA_CHECK switch is not copied, so this calls the check.\n"
-        "static class NotifyMain\n"
-        "{\n"
-        "    static void Main() { NotifyOrderCheck.Run(); }\n"
-        "}\n", encoding="utf-8")
-    (cs / "src" / "kaya-notify.csproj").write_text(
-        '<Project Sdk="Microsoft.NET.Sdk">\n'
-        "  <PropertyGroup>\n"
-        "    <OutputType>Exe</OutputType>\n"
-        "    <TargetFramework>net10.0</TargetFramework>\n"
-        "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
-        "    <Nullable>enable</Nullable>\n"
-        "    <ImplicitUsings>enable</ImplicitUsings>\n"
-        "  </PropertyGroup>\n"
-        "</Project>\n", encoding="utf-8")
-    step("csharp-notify-swapped-build",
-         ["dotnet", "build", "--nologo", "-v", "q",
-          str(cs / "src" / "kaya-notify.csproj")], tmp / "cs-neg-build.log")
-    demand_red("csharp",
-               ["dotnet", "exec",
-                str(cs / "src" / "bin/Debug/net10.0/kaya-notify.dll")],
-               tmp / "cs-neg.log")
+    if part("csharp"):
+        # --- C# -----------------------------------------------------------
+        cs = stage("csharp",
+                   [(f"binding/{os.path.basename(f)}", f"bindings/csharp/"
+                     f"{os.path.basename(f)}")
+                    for f in sorted(glob.glob(str(ROOT / "bindings/csharp/*.cs")))]
+                   + [("NotifyOrderCheck.cs", "guests/csharp/NotifyOrderCheck.cs")],
+                   "bindings/csharp/KayaApp.cs")
+        (cs / "src" / "NotifyMain.cs").write_text(
+            "// The scratch project's entry point: the guest binary's own\n"
+            "// KAYA_CHECK switch is not copied, so this calls the check.\n"
+            "static class NotifyMain\n"
+            "{\n"
+            "    static void Main() { NotifyOrderCheck.Run(); }\n"
+            "}\n", encoding="utf-8")
+        (cs / "src" / "kaya-notify.csproj").write_text(
+            '<Project Sdk="Microsoft.NET.Sdk">\n'
+            "  <PropertyGroup>\n"
+            "    <OutputType>Exe</OutputType>\n"
+            "    <TargetFramework>net10.0</TargetFramework>\n"
+            "    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>\n"
+            "    <Nullable>enable</Nullable>\n"
+            "    <ImplicitUsings>enable</ImplicitUsings>\n"
+            "  </PropertyGroup>\n"
+            "</Project>\n", encoding="utf-8")
+        step("csharp-notify-swapped-build",
+             ["dotnet", "build", "--nologo", "-v", "q",
+              str(cs / "src" / "kaya-notify.csproj")], tmp / "cs-neg-build.log")
+        demand_red("csharp",
+                   ["dotnet", "exec",
+                    str(cs / "src" / "bin/Debug/net10.0/kaya-notify.dll")],
+                   tmp / "cs-neg.log")
 
-    # --- OCaml --------------------------------------------------------
-    ml = stage("ocaml",
-               [("kaya_wire.ml", "bindings/ocaml/kaya_wire.ml"),
-                ("kaya_runtime.ml", "bindings/ocaml/kaya_runtime.ml"),
-                ("kaya_app.ml", "bindings/ocaml/kaya_app.ml"),
-                ("kaya_ml_stubs.c", "bindings/ocaml/kaya_ml_stubs.c"),
-                ("notify_order_check.ml",
-                 "bindings/ocaml/checks/notify_order_check.ml")],
-               "bindings/ocaml/kaya_app.ml")
-    (ml / "src" / "dune-project").write_text("(lang dune 3.0)\n",
-                                             encoding="utf-8")
-    (ml / "src" / "dune").write_text(
-        "(library\n"
-        " (name kaya_guest_binding)\n"
-        " (wrapped false)\n"
-        " (modules kaya_wire kaya_runtime kaya_app)\n"
-        " (libraries ctypes ctypes-foreign threads.posix)\n"
-        " (foreign_stubs\n"
-        "  (language c)\n"
-        "  (names kaya_ml_stubs)))\n"
-        "\n"
-        "(executable\n"
-        " (name notify_order_check)\n"
-        " (modules notify_order_check)\n"
-        " (libraries kaya_guest_binding unix))\n", encoding="utf-8")
-    step("ocaml-notify-swapped-build",
-         ["dune", "build", "--root", str(ml / "src"),
-          "./notify_order_check.exe"], tmp / "ml-neg-build.log")
-    demand_red("ocaml",
-               [str(ml / "src" / "_build/default/notify_order_check.exe")],
-               tmp / "ml-neg.log")
+    if part("ocaml"):
+        # --- OCaml --------------------------------------------------------
+        ml = stage("ocaml",
+                   [("kaya_wire.ml", "bindings/ocaml/kaya_wire.ml"),
+                    ("kaya_runtime.ml", "bindings/ocaml/kaya_runtime.ml"),
+                    ("kaya_app.ml", "bindings/ocaml/kaya_app.ml"),
+                    ("kaya_ml_stubs.c", "bindings/ocaml/kaya_ml_stubs.c"),
+                    ("notify_order_check.ml",
+                     "bindings/ocaml/checks/notify_order_check.ml")],
+                   "bindings/ocaml/kaya_app.ml")
+        (ml / "src" / "dune-project").write_text("(lang dune 3.0)\n",
+                                                 encoding="utf-8")
+        (ml / "src" / "dune").write_text(
+            "(library\n"
+            " (name kaya_guest_binding)\n"
+            " (wrapped false)\n"
+            " (modules kaya_wire kaya_runtime kaya_app)\n"
+            " (libraries ctypes ctypes-foreign threads.posix)\n"
+            " (foreign_stubs\n"
+            "  (language c)\n"
+            "  (names kaya_ml_stubs)))\n"
+            "\n"
+            "(executable\n"
+            " (name notify_order_check)\n"
+            " (modules notify_order_check)\n"
+            " (libraries kaya_guest_binding unix))\n", encoding="utf-8")
+        step("ocaml-notify-swapped-build",
+             ["dune", "build", "--root", str(ml / "src"),
+              "./notify_order_check.exe"], tmp / "ml-neg-build.log")
+        demand_red("ocaml",
+                   [str(ml / "src" / "_build/default/notify_order_check.exe")],
+                   tmp / "ml-neg.log")
 
-    # --- Haskell ------------------------------------------------------
-    hs = stage("haskell",
-               [("binding/KayaApp.hs", "bindings/haskell/KayaApp.hs"),
-                ("binding/Kaya/Core.hs", "bindings/haskell/Kaya/Core.hs"),
-                ("binding/KayaRuntime.hs", "bindings/haskell/KayaRuntime.hs"),
-                ("binding/KayaWire.hs", "bindings/haskell/KayaWire.hs"),
-                ("binding/kaya_hs_stubs.c",
-                 "bindings/haskell/kaya_hs_stubs.c"),
-                ("NotifyOrderCheck.hs", "guests/haskell/NotifyOrderCheck.hs")],
-               "bindings/haskell/KayaApp.hs")
-    (hs / "src" / "kaya-notify.cabal").write_text(
-        "cabal-version: 2.4\n"
-        "name: kaya-notify\n"
-        "version: 0\n"
-        "build-type: Simple\n"
-        "\n"
-        "executable kaya-notify-order-check\n"
-        "  default-language: GHC2021\n"
-        "  build-depends: base, bytestring, containers, text, time, mtl, "
-        "transformers, directory\n"
-        "  ghc-options: -threaded\n"
-        "  main-is: NotifyOrderCheck.hs\n"
-        "  other-modules: KayaApp, Kaya.Core, KayaRuntime, KayaWire\n"
-        "  hs-source-dirs: . binding\n"
-        "  c-sources: binding/kaya_hs_stubs.c\n"
-        "  extra-libraries: kaya\n", encoding="utf-8")
-    hs_neg_dist = NEG_ROOT / "haskell/dist"
-    hs_neg_args = [f"--builddir={hs_neg_dist}",
-                   f"--extra-lib-dirs={TARGET}/debug",
-                   f"--ghc-options=-L{TARGET}/debug "
-                   f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
-    step("haskell-notify-swapped-build",
-         ["cabal", "build", "kaya-notify-order-check", *hs_neg_args],
-         tmp / "hs-neg-build.log", cwd=hs / "src")
-    hs_neg_bin = subprocess.run(
-        ["cabal", "list-bin", "kaya-notify-order-check",
-         f"--builddir={hs_neg_dist}", "-v0"], cwd=hs / "src",
-        stdout=subprocess.PIPE, text=True, check=False)
-    demand_red("haskell", [hs_neg_bin.stdout.strip()], tmp / "hs-neg.log")
+    if part("haskell"):
+        # --- Haskell ------------------------------------------------------
+        hs = stage("haskell",
+                   [("binding/KayaApp.hs", "bindings/haskell/KayaApp.hs"),
+                    ("binding/Kaya/Core.hs", "bindings/haskell/Kaya/Core.hs"),
+                    ("binding/KayaRuntime.hs", "bindings/haskell/KayaRuntime.hs"),
+                    ("binding/KayaWire.hs", "bindings/haskell/KayaWire.hs"),
+                    ("binding/kaya_hs_stubs.c",
+                     "bindings/haskell/kaya_hs_stubs.c"),
+                    ("NotifyOrderCheck.hs", "guests/haskell/NotifyOrderCheck.hs")],
+                   "bindings/haskell/KayaApp.hs")
+        (hs / "src" / "kaya-notify.cabal").write_text(
+            "cabal-version: 2.4\n"
+            "name: kaya-notify\n"
+            "version: 0\n"
+            "build-type: Simple\n"
+            "\n"
+            "executable kaya-notify-order-check\n"
+            "  default-language: GHC2021\n"
+            "  build-depends: base, bytestring, containers, text, time, mtl, "
+            "transformers, directory\n"
+            "  ghc-options: -threaded\n"
+            "  main-is: NotifyOrderCheck.hs\n"
+            "  other-modules: KayaApp, Kaya.Core, KayaRuntime, KayaWire\n"
+            "  hs-source-dirs: . binding\n"
+            "  c-sources: binding/kaya_hs_stubs.c\n"
+            "  extra-libraries: kaya\n", encoding="utf-8")
+        hs_neg_dist = NEG_ROOT / "haskell/dist"
+        hs_neg_args = [f"--builddir={hs_neg_dist}",
+                       f"--extra-lib-dirs={TARGET}/debug",
+                       f"--ghc-options=-L{TARGET}/debug "
+                       f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
+        step("haskell-notify-swapped-build",
+             ["cabal", "build", "kaya-notify-order-check", *hs_neg_args],
+             tmp / "hs-neg-build.log", cwd=hs / "src")
+        hs_neg_bin = subprocess.run(
+            ["cabal", "list-bin", "kaya-notify-order-check",
+             f"--builddir={hs_neg_dist}", "-v0"], cwd=hs / "src",
+            stdout=subprocess.PIPE, text=True, check=False)
+        demand_red("haskell", [hs_neg_bin.stdout.strip()], tmp / "hs-neg.log")
 
-print("check-abort: OK")
+if PART:
+    if g.status:
+        sys.exit(g.status)
+    print(f"check-abort: part {PART} OK")
+else:
+    g.verdict(f"{len(PARTS)} parts")

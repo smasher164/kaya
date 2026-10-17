@@ -6,6 +6,8 @@ ContentType with no route to kaya's model."""
 
 import re
 
+from kaya_gate import flat
+
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 HEADER = "crates/kaya/include/kaya.h"
 
@@ -41,10 +43,6 @@ SENTENCES = {
     "new_password refusal": (r'pub const CONTENT_READS_NEW_PASSWORD: &str =\s*"([^"]*)";',
                              r'internal const val KAYA_CONTENT_READS_NEW_PASSWORD =\s*"([^"]*)"'),
 }
-
-
-def flat(text):
-    return re.sub(r"\s+", "", text)
 
 
 def balanced(text, opener, open_ch="{", close_ch="}"):

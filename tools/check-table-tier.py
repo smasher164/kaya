@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, in_parallel
 
 dev_shell_or_die()
 
@@ -21,6 +21,8 @@ dev_shell_or_die()
 #      interpreter's own module and run.
 # WHAT NEITHER CLAUSE HOLDS: which size class a PHYSICAL device reports.
 
+import contextlib
+import io
 import os
 import platform
 import re
@@ -1314,7 +1316,7 @@ def write_doctored(name):
 def build_probe(source, out_bin):
     """The probe compiles the interpreter's OWN source, so there is no
     interpreter artifact in this path to go stale."""
-    return subprocess.run(
+    built = subprocess.run(
         ["bash", "-c",
          'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
          'shift && kaya_swiftc "$@"',
@@ -1323,33 +1325,86 @@ def build_probe(source, out_bin):
          str(source), PROBE,
          "-L", str(TARGET / "debug"), "-lkaya",
          "-framework", "AppKit", "-framework", "Foundation",
-         "-o", str(out_bin)], check=False).returncode == 0
+         "-o", str(out_bin)], capture_output=True, text=True,
+        encoding="utf-8", errors="replace", check=False)
+    sys.stdout.write(built.stdout + built.stderr)
+    return built.returncode == 0
 
 
 DYLD = dict(os.environ,
             DYLD_LIBRARY_PATH=str(TARGET / "debug"))
 
-if not build_probe(ROOT / SWIFTUI, T / "table-tier"):
-    print("check-table-tier: the tier probe did not compile",
-          file=sys.stderr)
-    raise SystemExit(1)
-live = subprocess.run([str(T / "table-tier")], env=DYLD, check=False)
-if live.returncode != 0:
-    print(f"check-table-tier: FAIL — the tier probe exited "
-          f"{live.returncode} (its own output names", file=sys.stderr)
-    print("  the cell that disagreed).", file=sys.stderr)
-    raise SystemExit(1)
+# Every probe is built and run on the pool at once (each a ~15 s compile of
+# the whole interpreter; docs/measurements/gate-sweep-2026-10-17.md), then
+# judged here in declaration order, the first red ending the gate.
+PROBES = []
+
+
+def probe(name, source, judge):
+    PROBES.append((name, source, T / name, judge))
+
+
+def build_and_run(entry):
+    _name, source, binary, _judge = entry
+    if not build_probe(source, binary):
+        return None
+    return subprocess.run([str(binary)], env=DYLD, capture_output=True,
+                          text=True, encoding="utf-8", errors="replace",
+                          check=False)
+
+
+def judge_all(entries, results):
+    for (_name, _source, _binary, judge), r in zip(entries, results, strict=True):
+        judge(r)
+
+
+def judge_refusals(entries, results):
+    """judge_all over a made-up pool's answers, its exit as a finding."""
+    said = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(said), contextlib.redirect_stdout(said):
+            judge_all(entries, results)
+    except SystemExit as stop:
+        return [f"exit {stop.code}: {said.getvalue()}"]
+    return []
+
+
+def run_probes():
+    fine = subprocess.CompletedProcess([], 0, "", "")
+    g.negative("a pool whose negative probe did not build",
+               lambda: judge_refusals(PROBES[:2], [fine, None]), want="did not compile")
+    g.negative("a pool whose negative probe passed",
+               lambda: judge_refusals(PROBES[:2], [fine, fine]), want="was accepted")
+    results = in_parallel(build_and_run, PROBES)
+    print(f"check-table-tier: {len(results)} of {len(PROBES)} probes built and run")
+    judge_all(PROBES, results)
+
+
+def judge_live(r):
+    if r is None:
+        print("check-table-tier: the tier probe did not compile",
+              file=sys.stderr)
+        raise SystemExit(1)
+    sys.stdout.write(r.stdout + r.stderr)
+    if r.returncode != 0:
+        print(f"check-table-tier: FAIL — the tier probe exited "
+              f"{r.returncode} (its own output names", file=sys.stderr)
+        print("  the cell that disagreed).", file=sys.stderr)
+        raise SystemExit(1)
+
+
+probe("table-tier", ROOT / SWIFTUI, judge_live)
 
 
 def runtime_refuses(name, diagnostic, what):
-    source = write_doctored(name)
-    binary = T / name
-    if not build_probe(source, binary):
+    probe(name, write_doctored(name), lambda r: judge_refuses(r, diagnostic, what))
+
+
+def judge_refuses(r, diagnostic, what):
+    if r is None:
         print(f"check-table-tier: SELF-TEST BROKEN — {what} did not "
               f"compile", file=sys.stderr)
         raise SystemExit(1)
-    r = subprocess.run([str(binary)], env=DYLD, capture_output=True,
-                       text=True, check=False)
     log = r.stdout + r.stderr
     if r.returncode == 0:
         print(f"check-table-tier: SELF-TEST FAILED — {what} was "
@@ -1463,22 +1518,33 @@ chained("incomplete-geometry",
         "if false {",
         "a table with no realized row accepted as current",
         "func kayaCurrentTableGeometry", "stale-viewport")
-geometry_src = write_doctored("incomplete-geometry")
-if not build_probe(geometry_src, T / "table-geometry-doctored"):
-    print("check-table-tier: SELF-TEST BROKEN — the doctored geometry "
-          "probe did not compile, so the runtime negative proved "
-          "nothing", file=sys.stderr)
-    raise SystemExit(1)
-r = subprocess.run([str(T / "table-geometry-doctored")], env=DYLD,
-                   capture_output=True, text=True, check=False)
-geometry_log = r.stdout + r.stderr
-if r.returncode == 0:
-    print("check-table-tier: SELF-TEST FAILED — chained clusters and "
-          "displaced cells were accepted by the real-window probe.",
-          file=sys.stderr)
-    print(geometry_log, file=sys.stderr)
-    raise SystemExit(1)
-for diagnostic in (
+
+
+def judge_geometry(r):
+    if r is None:
+        print("check-table-tier: SELF-TEST BROKEN — the doctored geometry "
+              "probe did not compile, so the runtime negative proved "
+              "nothing", file=sys.stderr)
+        raise SystemExit(1)
+    geometry_log = r.stdout + r.stderr
+    if r.returncode == 0:
+        print("check-table-tier: SELF-TEST FAILED — chained clusters and "
+              "displaced cells were accepted by the real-window probe.",
+              file=sys.stderr)
+        print(geometry_log, file=sys.stderr)
+        raise SystemExit(1)
+    for diagnostic in GEOMETRY_DIAGNOSTICS:
+        if diagnostic not in geometry_log:
+            print(f"check-table-tier: SELF-TEST FAILED — the geometry "
+                  f"shadow reddened, but did not name '{diagnostic}'. "
+                  f"Got:", file=sys.stderr)
+            print(geometry_log, file=sys.stderr)
+            raise SystemExit(1)
+    print(f"check-table-tier: self-test — identity, generation, and "
+          f"containment guards all red (exit {r.returncode})")
+
+
+GEOMETRY_DIAGNOSTICS = (
     "table track overflow is rejected",
     "edge clustering is anchored to its representative",
     "column identity rejects frames borrowed from an existing cluster",
@@ -1490,15 +1556,8 @@ for diagnostic in (
     "a layout invalidation rejects the previous generation",
     "live native cells stay inside the recorded viewport horizontally",
     "live native rows stay inside the recorded viewport vertically",
-):
-    if diagnostic not in geometry_log:
-        print(f"check-table-tier: SELF-TEST FAILED — the geometry "
-              f"shadow reddened, but did not name '{diagnostic}'. "
-              f"Got:", file=sys.stderr)
-        print(geometry_log, file=sys.stderr)
-        raise SystemExit(1)
-print(f"check-table-tier: self-test — identity, generation, and "
-      f"containment guards all red (exit {r.returncode})")
+)
+probe("table-geometry-doctored", write_doctored("incomplete-geometry"), judge_geometry)
 
 # The runtime clause guards itself: the compact arm flipped on a COPY
 # must red the probe, and the perturbation must be PROVEN applied.
@@ -1508,30 +1567,33 @@ doctored["compact-native"] = perturb(
     REAL, r"case \.compact, \.unknown: return \.synthesized",
     "case .compact, .unknown: return .native",
     "the compact arm flipped to the native tier", "func kayaTableTier")
-compact_src = write_doctored("compact-native")
-if not build_probe(compact_src, T / "table-tier-doctored"):
-    print("check-table-tier: SELF-TEST BROKEN — the doctored "
-          "interpreter did not compile, so the runtime negative proved "
-          "nothing", file=sys.stderr)
-    raise SystemExit(1)
-r = subprocess.run([str(T / "table-tier-doctored")], env=DYLD,
-                   capture_output=True, text=True, check=False)
-compact_log = r.stdout + r.stderr
-if r.returncode == 0:
-    print("check-table-tier: SELF-TEST FAILED — a compact iOS host "
-          "routed to the NATIVE tier and the probe still passed. The "
-          "truth table is not being driven; nothing above is a "
-          "measurement.", file=sys.stderr)
-    print(compact_log, file=sys.stderr)
-    raise SystemExit(1)
-if "iOS compact at/above the floor" not in compact_log:
-    print("check-table-tier: SELF-TEST FAILED — the doctored rule was "
-          "refused, but not by the compact cell. Wanted a line naming "
-          "'iOS compact at/above the floor'; got:", file=sys.stderr)
-    print(compact_log, file=sys.stderr)
-    raise SystemExit(1)
-print(f"check-table-tier: self-test — the flipped compact arm reds "
-      f"the probe (exit {r.returncode})")
+
+
+def judge_compact(r):
+    if r is None:
+        print("check-table-tier: SELF-TEST BROKEN — the doctored "
+              "interpreter did not compile, so the runtime negative proved "
+              "nothing", file=sys.stderr)
+        raise SystemExit(1)
+    compact_log = r.stdout + r.stderr
+    if r.returncode == 0:
+        print("check-table-tier: SELF-TEST FAILED — a compact iOS host "
+              "routed to the NATIVE tier and the probe still passed. The "
+              "truth table is not being driven; nothing above is a "
+              "measurement.", file=sys.stderr)
+        print(compact_log, file=sys.stderr)
+        raise SystemExit(1)
+    if "iOS compact at/above the floor" not in compact_log:
+        print("check-table-tier: SELF-TEST FAILED — the doctored rule was "
+              "refused, but not by the compact cell. Wanted a line naming "
+              "'iOS compact at/above the floor'; got:", file=sys.stderr)
+        print(compact_log, file=sys.stderr)
+        raise SystemExit(1)
+    print(f"check-table-tier: self-test — the flipped compact arm reds "
+          f"the probe (exit {r.returncode})")
+
+
+probe("table-tier-doctored", write_doctored("compact-native"), judge_compact)
 
 # CONTENT IS THE FLOOR (ruled 2026-08-26), both halves watched going
 # red on the real-window probe, and the third — the re-present —
@@ -1580,6 +1642,7 @@ doctored["unrepresented-widening"] = perturb(
 refuses(doctored["unrepresented-widening"],
         "does not call `represent(visible)`",
         "a widened column that never re-presents its cells")
+run_probes()
 
 # REGISTRY READS HOP TO THE MAIN THREAD (docs/traps.md: A registry
 # subscript on the harness thread races the main thread's write). The
@@ -1618,7 +1681,7 @@ bare_doctored = g.doctor("the driver lookups unwrapped inside the harness reader
 g.negative("a bare registry read on the harness thread",
            lambda: [f"{f}:{n}" for f, n, _ in bare_registry_reads(bare_doctored)],
            want="kayaRunScript")
-g.negatives_ran(1)
+g.negatives_ran(3)
 for func, n, line in bare_registry_reads(REAL):
     g.finding(f"swift/KayaSwiftUI.swift:{n} ({func}) subscripts a table registry bare "
               f"on the harness thread: `{line}`. Wrap it in kayaOnMain({{ ... }}) — the "

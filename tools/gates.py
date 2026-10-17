@@ -350,22 +350,24 @@ def preflight(gates):
 # cross-compiles into the same target dirs the ios and android lanes
 # build into, and cargo's lock is per build dir, so it starts once the
 # lanes' own t0 builds are done rather than queueing them behind it.
-# WEIGHT: seconds measured standalone 2026-09-07 (57 gates, 378s in
-# series, 151s four wide, check-table-tier alone 136 of them;
-# docs/measurements/gate-sweep-2026-09-07.md); the
-# pool takes the heaviest first so no long gate is the tail, and a gate
-# not named runs after them in list order.
+# WEIGHT: seconds measured in a quiet sweep 2026-10-17, after check-verbs,
+# check-abort and check-table-tier went parallel inside
+# (docs/measurements/gate-sweep-2026-10-17.md); the pool takes the heaviest
+# first so no long gate is the tail, and a gate not named runs after them in
+# list order. A stale table starts a long gate late: check-verbs at weight 7
+# started twelfth and was the matrix sweep's 733s tail.
 WIDTH = max(1, int(os.environ.get("KAYA_GATE_JOBS", "") or "4"))
 ALONE = ("gen-header", "gen-bindings", "gen-guests")
 AFTER = {"js-app-checks": "js-typecheck"}
 LAST = ("check-targets",)
 WEIGHT = {
-    "check-table-tier": 136, "swift-typecheck": 57, "check-sugar-surface": 23,
-    "check-abort": 18, "check-assets": 15, "check-harness-ceiling": 12,
-    "check-empty-child": 10, "check-pane-ladder": 10, "check-pins": 10,
-    "check-window-memory": 15,
-    "check-canvas-blit": 9, "gen-guests": 8, "check-verbs": 7,
-    "check-app-identity": 6, "check-keyed": 6, "check-steps": 5,
+    "check-table-tier": 77, "check-abort": 71, "check-sugar-surface": 70,
+    "check-app-identity": 65, "check-verbs": 57, "check-universal-props": 43,
+    "check-winui-bindings": 42, "check-empty-child": 39, "java-typecheck": 37,
+    "check-assets": 31, "swift-typecheck": 31, "check-flightrec": 28,
+    "check-exclusive": 26, "check-window-memory": 25, "check-canvas-blit": 19,
+    "check-pane-ladder": 17, "check-steps": 17, "check-harness-ceiling": 12,
+    "check-keyed": 8, "check-pins": 8, "check-submit": 7, "go-typecheck": 7,
 }
 
 
@@ -383,6 +385,15 @@ def pool_order(rest):
             order.insert(at, g)
             names.insert(at, dep)
     return order
+
+
+def stale_weights(took):
+    """The gates whose run outgrew WEIGHT, which starts them late."""
+    return [(name, f"WEIGHT is stale for {name}: it ran {dt:.0f}s against a weight of "
+                   f"{WEIGHT.get(name, 0)}, so the pool may start it late — update "
+                   f"tools/gates.py's WEIGHT")
+            for name, dt in sorted(took.items())
+            if dt > 30 and dt > 2 * WEIGHT.get(name, 0)]
 
 
 def sweep(gates, label="gates", lib_root=None, lanes_root=None):
@@ -426,6 +437,7 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
     lanes_seen = {"stamp": host_lib_stamp(lanes_root) if lanes_root else None}
     running = set()
     relinked = []
+    took = {}
 
     def run_one(name, cmd, keyed):
         nonlocal ran
@@ -477,6 +489,7 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
                       f"inside the relink dies in dyld before main "
                       f"(docs/traps.md, 2026-09-21)", file=sys.stderr, flush=True)
             ran += 1
+            took[name] = dt
             print(f"[{ran:02d}/{declared:02d}] {name}")
             sys.stdout.write(got.stdout)
             if got.returncode == 0:
@@ -495,6 +508,8 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
         for fut in [pool.submit(run_one, *g[:3]) for g in rest]:
             fut.result()
 
+    for name, line in stale_weights(took):
+        print(f"{label}: {line}", flush=True)
     passed = ran - len(failed)
     print(f"{label}: declared {declared}, ran {ran}, passed {passed}", flush=True)
     if ran != declared:
@@ -650,6 +665,15 @@ def selftest():
             or matrix_target_refusal({"KAYA_MATRIX_GATES_TOKEN": "t"}, SWEEP_TARGET)):
         print("gates: SELF-TEST FAIL — a hand run or a sweep in its own target was "
               "refused", file=sys.stderr)
+        ok = False
+
+    # H. a gate that outgrew its WEIGHT is named after the sweep, and one
+    # inside it is not (the 733s matrix sweep of 2026-10-17).
+    stale = stale_weights({"check-verbs": 408.9, "check-abort": 70.0})
+    print(f"selftest-H: {stale}")
+    if [n for n, _ in stale] != ["check-verbs"]:
+        print("gates: SELF-TEST FAIL — a gate at 408s against its weight was not named, "
+              "or one inside its weight was", file=sys.stderr)
         ok = False
 
     if ok:

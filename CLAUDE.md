@@ -1195,7 +1195,12 @@ in docs/deferred.md.
    kayaApply, inside a kayaUserWrite block, or in an EXEMPT table with a
    reason that must still match a real site. The watched shadows remove
    each link separately. What no gate holds is whether a PHYSICAL device
-   reports the size class the simulator did),
+   reports the size class the simulator did. ITS TWELVE PROBES BUILD AND
+   RUN FOUR AT A TIME since 2026-10-17 (the prelude's `in_parallel`, which
+   raises a worker's failure: kaya_gate's selftest F11), judged in
+   declaration order; two made-up pool answers, a probe that did not build
+   and a negative that passed, are watched red
+   (docs/measurements/gate-sweep-2026-10-17.md)),
    `tools/check-window-memory.py` (THE MACOS WINDOW MEMORY, which no scene
    can see: `taskspersist.steps` asserts ONE size on ONE window and stays
    green with the by-value rule inverted, with the clamp gone, with a
@@ -1365,7 +1370,12 @@ in docs/deferred.md.
    proof, on all five lanes, the tasks scene's Dark-then-System round trip,
    and the `format*` legs under three locales),
    `tools/check-abort.py` (uniform abort
-   semantics, all languages. AND THE IDIOM PASS'S COMPILE-TIME WALLS
+   semantics, all languages, IN NINE CONCURRENT PARTS since 2026-10-17:
+   each section is guarded `if part("<name>"):`, the parent runs
+   `--part <name>` children four at a time and refuses a verdict unless
+   every part exited 0 after printing its end line, and unless the guarded
+   names are exactly PARTS, since a misspelt guard skips its section; four
+   watched negatives (docs/measurements/gate-sweep-2026-10-17.md). AND THE IDIOM PASS'S COMPILE-TIME WALLS
    SINCE 2026-09-16: the OCaml fixtures under bindings/ocaml/checks/negatives
    (a bool into a string signal, a string where Menu_role.t is taken, a
    bare value where a key is) must each fail to compile on the one line

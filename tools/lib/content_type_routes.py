@@ -12,7 +12,7 @@ A backend whose `depth_stub("autofill")` goes must take a row in BACKENDS."""
 import re
 
 from content_type_compose import COMPOSE, CUTS as COMPOSE_CUTS, HEADER, compose_findings
-from kaya_gate import ROOT
+from kaya_gate import ROOT, flat
 
 HARNESS = "crates/kaya/src/harness.rs"
 SWIFT = "swift/KayaSwiftUI.swift"
@@ -132,10 +132,6 @@ def halves(body):
 def row_present(half, row):
     const, platform, reads = row
     return re.search(rf"\(\s*{const}\s*,\s*{re.escape(platform)}\s*,\s*\"{reads}\"\s*\)", half)
-
-
-def flat(text):
-    return re.sub(r"\s+", "", text)
 
 
 def native_findings(sources):
