@@ -460,6 +460,11 @@ object KayaPresent {
      *  kaya_row_extent's JNI spelling. */
     @JvmStatic external fun rowExtent(container: Long, index: Long): Double
 
+    /** The index of the realized row whose copy root is [widget], or
+     *  [ROW_NOT_FOUND]: the band this tier's children ARE, which leads
+     *  them through the apply queue. kaya_window_row_of's JNI spelling. */
+    @JvmStatic external fun windowRowOf(container: Long, widget: Long): Long
+
     /**
      * The window's scale and appearance; the core re-rasters every canvas
      * at them (docs/canvas-plan.md §5, §6). Only these two numbers cross

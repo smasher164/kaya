@@ -17187,12 +17187,39 @@ scroll and re-parks only from a placement that placed these children
 into the park's account and waits for the apply. A forced-red run (varied.steps
 plus a final `expect_window ... 999 300`, restored from a copy) recorded twelve
 holds, among them `held: children from r144, the layout has not placed them`, and
-each park landed after one re-park where the red needed six. Compose's
-KayaTableWindow publishes `bandStart` from the core the same way and its
-stale-layout check compares the layout against that published value, not against
-the children, so it may share this class; not measured. GUARD:
+each park landed after one re-park where the red needed six. GUARD:
 tools/lib/band_routes.py (check-verbs), eleven clauses and four cuts, the shipped
 publish among them; scene::tests::a_drawn_rows_index_is_its_own_not_the_cores_band,
 watched failing with the index taken from the core's band. Validation: the iOS
 varied, table, scroll, scrollto, netimage and tracks legs (22) ALL PASS six runs
 in a row, four of them beside twelve CPU spinners; gates.py 64/64.
+
+COMPOSE HAD THE SAME CLASS (measured 2026-10-17). KayaTableWindow's park and
+visible report call `KayaPresent.windowMoved` (the same queued capi path) and
+then `publish()` in the same main-looper message, so `bandStart` moved before the
+pump's posted apply could deliver the children; the table Layout recorded
+`laidOutFirst = bandFirst`, and the stale-layout check compared that against
+`bandStart`, two published values, never the children. With the pump's apply
+forced late (`postDelayed(apply, 40)`) and a probe asking `windowRowOf` of the
+layout's first child at the point the report goes on to measure, varied-python
+logged three such layouts: `laid=91+27` carrying the heights of rows 141.., the band before it (120,
+144, 48, 96 where rows 91.. are 48, 72, 96, 144) and `laid=142+24` twice carrying
+rows 92..'s, each first child a copy the core had already torn down; all of
+them reached `rowsMeasured(laidOutFirst, …)`. Unforced it did not show in two
+runs (one beside three busy loops per emulator); the pump's post usually beats
+the next frame. The fix is the iOS one: `KayaPresent.windowRowOf` (the JNI door
+for kaya_window_row_of), the Layout recording its first child as `laidOutRow`,
+`publishIfDrawn` writing the band only when the children's first row and count
+are the core's, and the report holding (a `held table=…` record) before the end
+park, the park, the visible report and the measure unless the layout placed
+these children under their own index. Forced again: 0 mislabeled reports in 25,
+eleven holds in the forced-red bundle, each of the five parks scrolling once.
+GUARD: band_routes.py's Compose row, thirteen clauses and five cuts, the bare
+`publish()` as shipped among them. Validation: the Android varied, table,
+scroll, scrollto, netimage and tracks legs (20) ALL PASS six runs, three beside
+three busy loops per emulator (~80% of its four CPUs busy). GTK and WinUI do not
+have it: both call `scene.window_moved` on the UI thread and apply its ops
+synchronously before reading the geometry, GTK measuring each child widget's
+own allocation in band order (stopping at an unallocated row) and WinUI forcing
+`band.UpdateLayout()` before reading the Grid's tracks, so each publishes and
+measures from the rows it drew.

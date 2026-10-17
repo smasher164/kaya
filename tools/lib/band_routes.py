@@ -1,5 +1,5 @@
-"""The iOS synthesized table's band report (docs/traps.md, the band placed
-under the core's newer index).
+"""The iOS synthesized table's and Compose table window's band report
+(docs/traps.md, the band placed under the core's newer index).
 
 window_moved's applies reach the tier's children through the apply queue, so
 the core's band leads them. varied.steps goes red only when a report lands in
@@ -7,6 +7,8 @@ that gap under load, one run in many, so this reads the wall: the core's band
 is published only when the children's own first row IS its first, and nothing
 is measured, reported or re-parked from a placement that did not place those
 children under their own index."""
+
+import re
 
 from content_type_routes import flat
 from kaya_gate import ROOT
@@ -63,11 +65,88 @@ def findings(src):
     return out
 
 
+COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
+WINDOW = "internal class KayaTableWindow(private val node: KayaNode) {"
+K_REPORT = "fun report() {"
+K_PUBLISH = "private fun publishIfDrawn(drawnIndex: Long?): Boolean {"
+K_ASK = "val drawnIndex = drawnRow?.let { KayaPresent.windowRowOf(node.id, it) }"
+K_BAND = "else drawnIndex == start.toLong() && node.children.size == count"
+K_REFUSE = "if (!childrenAreBand) return false"
+K_PLACED = "val placementIsChildren = laidOutRow == drawnRow\n&& (drawnRow == null || drawnIndex == laidOutFirst.toLong())"
+K_HOLD = "if (!childrenAreBand || !placementIsChildren) {"
+K_LAYOUT = "window.laidOutFirst = bandFirst\nwindow.laidOutRow = rows.firstOrNull()?.id"
+K_AFTER = [
+    "if (anchorRow < 0 && endPark >= 0)",
+    "contentTopOf(anchorRow)",
+    "state.scrollTo(want)",
+    "visibleRange(scroll)",
+    "KayaPresent.windowMoved(node.id, first.toLong(), count.toLong())",
+    "KayaPresent.rowsMeasured(",
+]
+
+
+def compose_findings(src):
+    out = []
+    window = blocks(src, WINDOW)
+    if len(window) != 1:
+        return [f"band report: {WINDOW} is defined {len(window)} times in {COMPOSE}, wanted once"]
+    win = window[0]
+    report = blocks(win, K_REPORT)
+    publish = blocks(win, K_PUBLISH)
+    if len(report) != 1 or len(publish) != 1:
+        return [f"band report: {COMPOSE}'s window has {len(report)} {K_REPORT} and "
+                f"{len(publish)} {K_PUBLISH}, wanted one of each"]
+    body = flat(report[0])
+    door = flat(publish[0])
+    if flat(K_ASK) not in body:
+        out.append(f"band report: Compose: the children's own index is asked of the core no longer holds — the report lacks {K_ASK}")
+    if flat(K_BAND) not in door:
+        out.append("band report: Compose: the children are the core's band only at its first and count no longer holds")
+    refuse = door.find(flat(K_REFUSE))
+    if refuse < 0 or refuse > door.find(flat("bandStart = start")):
+        out.append("band report: Compose: the core's band is published before the children are it")
+    if re.search(r"\bpublish\(\)", win):
+        out.append("band report: Compose: a bare publish() writes the core's band whatever the children are")
+    if flat(K_PLACED) not in body:
+        out.append("band report: Compose: the placement must have placed these children under their index no longer holds")
+    hold = body.find(flat(K_HOLD))
+    if hold < 0:
+        out.append("band report: Compose: nothing holds the report while the children or the placement lag")
+    else:
+        for call in K_AFTER:
+            at = body.find(flat(call))
+            if at < 0 or at < hold:
+                out.append(f"band report: Compose: {call.split('(')[0]} runs before the lag is held")
+    if src.count("window.laidOutRow = ") != 1 or flat(K_LAYOUT) not in flat(src):
+        out.append("band report: Compose: the layout no longer records which row it laid out first")
+    return out
+
+
 def run(g):
     src = (ROOT / SWIFT).read_text(encoding="utf-8")
     g.counted("band report clauses held", 3 + 1 + 1 + len(AFTER) + 2, floor=9)
     for line in findings(src):
         g.finding(line)
+    kt = (ROOT / COMPOSE).read_text(encoding="utf-8")
+    g.counted("Compose band report clauses held", 6 + len(K_AFTER) + 1, floor=12)
+    for line in compose_findings(kt):
+        g.finding(line)
+    kt_cuts = [
+        ("Compose: the core's band published whatever the children are",
+         r"\n\s+if \(!childrenAreBand\) return false", "", "published before the children are it"),
+        ("Compose: the report's last publish bare, as shipped",
+         r"publishIfDrawn\(drawnIndex\)\n    \}", "publish()\n    }", "a bare publish()"),
+        ("Compose: a layout of other children read",
+         r"if \(!childrenAreBand \|\| !placementIsChildren\) \{", "if (false) {", "nothing holds the report"),
+        ("Compose: the children's index taken from the core's band",
+         r"drawnRow\?\.let \{ KayaPresent\.windowRowOf\(node\.id, it\) \}", "drawnRow?.let { bandStart.toLong() }",
+         "the children's own index is asked"),
+        ("Compose: the layout's first row unrecorded",
+         r"\n\s+window\.laidOutRow = rows\.firstOrNull\(\)\?\.id", "", "records which row it laid out first"),
+    ]
+    for label, pattern, repl, want in kt_cuts:
+        broken = g.doctor(f"band report: {label}", kt, pattern, repl)
+        g.negative(f"band report: {label}", lambda broken=broken: compose_findings(broken), want=want)
     cuts = [
         ("the core's band published whatever the children are, as shipped",
          r"if childrenAreBand \{\n(\s+let band = Int\(geometry\.first\))", r"do {\n\1",

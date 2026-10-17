@@ -15822,6 +15822,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
      *  top-to-top repeat distance, spacing included, which is what §2.1
      *  means by pitch. */
     @Volatile var laidOutFirst = 0
+    @Volatile var laidOutRow: Long? = null
     @Volatile var rowTops: IntArray = IntArray(0)
     @Volatile var rowExtents: IntArray = IntArray(0)
     /** The scroll container's own height — the viewport, read one
@@ -15848,6 +15849,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
     private var endLow = Int.MAX_VALUE
     private var contentPx = 0
     private var parkSeq = 0
+    private var lastHeld = ""
     private var scheduled = false
 
     fun measuredContent(height: Int) {
@@ -15963,7 +15965,26 @@ internal class KayaTableWindow(private val node: KayaNode) {
         // the wait against itself (measured — scroll_to_row r200 sat at
         // "0 400" until the step's deadline, the layout never learning
         // the band the core had already moved).
-        publish()
+        // THE CORE'S BAND REACHES THE CHILDREN THROUGH THE APPLY QUEUE, so
+        // it is published only once the children ARE it, and a layout is
+        // read only if it laid these children out under their own index
+        // (docs/traps.md, the band placed under the core's newer index).
+        val drawnRow = node.children.firstOrNull()?.id
+        val drawnIndex = drawnRow?.let { KayaPresent.windowRowOf(node.id, it) }
+        val childrenAreBand = publishIfDrawn(drawnIndex)
+        val placementIsChildren = laidOutRow == drawnRow
+            && (drawnRow == null || drawnIndex == laidOutFirst.toLong())
+        if (!childrenAreBand || !placementIsChildren) {
+            val held = "held table=${node.id}: children from r" + (drawnIndex ?: "?") + "+${node.children.size}" +
+                (if (childrenAreBand) "" else " are not the core's band yet") +
+                (if (placementIsChildren) "" else ", the layout has not placed them (laid r$laidOutFirst+${rowTops.size})")
+            if (held != lastHeld) {
+                lastHeld = held
+                KayaVTrace.note("window", held)
+            }
+            return
+        }
+        lastHeld = ""
         val scroll = node.scrollState.value
         if (anchorRow < 0 && endPark >= 0) {
             if (node.scrollState.maxValue != endMax) {
@@ -16071,15 +16092,19 @@ internal class KayaTableWindow(private val node: KayaNode) {
             }
             if (moved) KayaPresent.rowsMeasured(node.id, laidOutFirst.toLong(), heights)
         }
-        publish()
+        publishIfDrawn(drawnIndex)
     }
 
     /** The core's answer, into the four snapshot fields the composition
-     *  cuts its spacers from. */
-    private fun publish() {
+     *  cuts its spacers from, once [node]'s children are the band it
+     *  names; false while the apply queue still holds them. */
+    private fun publishIfDrawn(drawnIndex: Long?): Boolean {
         KayaPresent.windowGeometry(node.id, slots)
         val start = slots[KayaPresent.GEOMETRY_FIRST].toInt()
         val count = slots[KayaPresent.GEOMETRY_COUNT].toInt()
+        val childrenAreBand = if (node.children.isEmpty()) count == 0
+            else drawnIndex == start.toLong() && node.children.size == count
+        if (!childrenAreBand) return false
         if (start != bandStart || count != bandCount) {
             KayaVTrace.note("window", "<- band table=${node.id} $start+$count")
         }
@@ -16087,6 +16112,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
         bandCount = count
         offsetPx = slots[KayaPresent.GEOMETRY_OFFSET]
         extentPx = slots[KayaPresent.GEOMETRY_EXTENT]
+        return true
     }
 
     /** What expect_window compares: the first VISIBLE row and the
@@ -16498,6 +16524,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         }
         window.rowsTopPx = rowsTop
         window.laidOutFirst = bandFirst
+        window.laidOutRow = rows.firstOrNull()?.id
         window.rowExtents = rowExtents
         window.rowTops = tops
         window.measuredContent(contentH)

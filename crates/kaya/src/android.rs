@@ -1122,6 +1122,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(JJ)D".into(),
                 fn_ptr: present_row_extent as *mut _,
             },
+            NativeMethod {
+                name: "windowRowOf".into(),
+                sig: "(JJ)J".into(),
+                fn_ptr: present_window_row_of as *mut _,
+            },
             // The canvas channels (docs/canvas-plan.md §5, §6, §7.1).
             NativeMethod {
                 name: "presentation".into(),
@@ -1748,6 +1753,15 @@ extern "system" fn present_row_extent(
     index: jlong,
 ) -> jni::sys::jdouble {
     crate::capi::kaya_row_extent(container as u64, index.max(0) as u64)
+}
+
+extern "system" fn present_window_row_of(
+    _env: JNIEnv,
+    _class: JClass,
+    container: jlong,
+    widget: jlong,
+) -> jlong {
+    crate::capi::kaya_window_row_of(container as u64, widget as u64) as jlong
 }
 
 /// KayaPresent.presentation: the window's scale and appearance, which
