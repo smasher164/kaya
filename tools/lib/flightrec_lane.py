@@ -54,7 +54,7 @@ SECTIONS = {
     "ios": ("leg-log", "verb-trace", "shot", "desktop-shot", "panic", "app-log", "devices", "binary-stamp",
             "notifications", "stacks", "animations", "system-log"),
     "android": ("leg-log", "verb-trace", "shot", "desktop-shot", "logcat", "devices",
-                "system-events", "anr-history", "shade-history"),
+                "system-events", "anr-history", "shade-history", "media-server"),
     "linux": ("leg-log", "verb-trace", "shot", "desktop", "xvfb"),
 }
 
@@ -160,9 +160,12 @@ def android_system_events(text):
                r"GoldfishComponentStore: created component|binder threads in pool|"
                r"cannot dequeue buffer|"
                r"exceeded timeout|Detaching surface|media: player \d+ failed|"
-               r"init\s*: .*media-c2")
+               r"init\s*: .*media-c2|"
+               # docs/traps.md: The sockets a stale freeze destroyed.
+               r"InetDiagMessage: Destroyed live tcp sockets")
     lines = [line for line in text.splitlines() if re.search(pattern, line)]
-    return ("Selected focus, ANR, clipboard, drag and media codec events from this "
+    return ("Selected focus, ANR, clipboard, drag, media codec and socket destruction "
+            "events from this "
             "device's logcat.\n"
             "History can predate this leg; match timestamps against leg-log.txt.\n"
             f"Selected {len(lines)} line(s).\n" + "\n".join(lines) + "\n")
@@ -644,6 +647,8 @@ class LaneRecorder:
         self.lane = lane
         self.root = pathlib.Path(root)
         self.ok = False
+        # The media suite server's log while the lane serves it.
+        self.media_log = None
         self.run_id = ""
         self.run_dir = None
         self.spool = None
@@ -840,6 +845,43 @@ class LaneRecorder:
                  "empty" if size == 0 else "ok")
         self.mark(bundle, name, state, size)
 
+    def media_server(self, bundle, log, t0, t1=None):
+        """The media server's own lines while this leg ran (docs/traps.md,
+        the WinUI adaptive pipeline that goes idle): every request on arrival and
+        once answered, so a request the server never finished, or one the
+        guest never made, can be told apart. The server is lane-wide; the
+        local ports the leg's own still-opening line printed are named."""
+        if self.media_log is None or not pathlib.Path(self.media_log).is_file():
+            self.skip(bundle, "media-server",
+                      "flightrec: no media server ran in this lane run, so "
+                      "there is no request log for this leg")
+            return
+        lo = int((t0 - 2) * 1000)
+        hi = int(((time.time() if t1 is None else t1) + 2) * 1000)
+        picked = []
+        with open(self.media_log, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                m = re.match(r"media-server: (\d{13}) ", line)
+                if m and lo <= int(m.group(1)) <= hi:
+                    picked.append(line)
+        ports = []
+        if pathlib.Path(log).is_file():
+            text = pathlib.Path(log).read_text(encoding="utf-8", errors="replace")
+            for found in re.findall(r"by local port: (\{[^}]*\})", text):
+                ports += re.findall(r'"(\d+)"', found)
+        if not picked:
+            self.skip(bundle, "media-server",
+                      f"flightrec: the media server logged nothing between "
+                      f"host unix ms {lo} and {hi} ({self.media_log})")
+            return
+        dest = bundle / "media-server.txt"
+        head = (f"flightrec: {self.media_log}, host unix ms {lo}..{hi}, "
+                f"{len(picked)} line(s), LANE-WIDE (every pooled leg's requests).\n"
+                f"flightrec: this leg's own connections, as its still-opening "
+                f"line printed them: {sorted(set(ports)) or 'none printed'}\n")
+        dest.write_text(head + "".join(picked), encoding="utf-8")
+        self.mark(bundle, "media-server", "ok", dest.stat().st_size)
+
     def finish(self, bundle, out=None):
         """Close a bundle: every section this lane DECLARES (SECTIONS) is
         present or carries a sentence, and the report goes to the leg's
@@ -926,8 +968,6 @@ class WinRecorder(LaneRecorder):
         # leak from a neighbour's (docs/deferred.md, the LEAK entry).
         self.run_token = f"{int(time.time())}-{os.getpid()}"
         self._stopped_clean = False
-        # The media suite server's log while the lane serves it (deploy-win).
-        self.media_log = None
 
     def bind(self, run_ssh, run_ssh_out, scp_from):
         """run_ssh(cmd)->rc, run_ssh_out(cmd)->text|None,
@@ -1209,42 +1249,6 @@ class WinRecorder(LaneRecorder):
             return
         (bundle / "desktop-live.when").write_text(newest[2] + "\n", encoding="utf-8")
         self.mark(bundle, "desktop-live", "ok", dest.stat().st_size)
-
-    def media_server(self, bundle, log, t0):
-        """The media server's own lines while this leg ran (docs/traps.md,
-        the WinUI adaptive pipeline that goes idle): every request on arrival and
-        once answered, so a request the server never finished, or one the
-        guest never made, can be told apart. The server is lane-wide; the
-        local ports the leg's own still-opening line printed are named."""
-        if self.media_log is None or not pathlib.Path(self.media_log).is_file():
-            self.skip(bundle, "media-server",
-                      "flightrec: no media server ran in this lane run, so "
-                      "there is no request log for this leg")
-            return
-        lo, hi = (t0 - 2) * 1000, (int(time.time()) + 2) * 1000
-        picked = []
-        with open(self.media_log, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                m = re.match(r"media-server: (\d{13}) ", line)
-                if m and lo <= int(m.group(1)) <= hi:
-                    picked.append(line)
-        ports = []
-        if pathlib.Path(log).is_file():
-            text = pathlib.Path(log).read_text(encoding="utf-8", errors="replace")
-            for found in re.findall(r"by local port: (\{[^}]*\})", text):
-                ports += re.findall(r'"(\d+)"', found)
-        if not picked:
-            self.skip(bundle, "media-server",
-                      f"flightrec: the media server logged nothing between "
-                      f"host unix ms {lo} and {hi} ({self.media_log})")
-            return
-        dest = bundle / "media-server.txt"
-        head = (f"flightrec: {self.media_log}, host unix ms {lo}..{hi}, "
-                f"{len(picked)} line(s), LANE-WIDE (every pooled leg's requests).\n"
-                f"flightrec: this leg's own connections, as its still-opening "
-                f"line printed them: {sorted(set(ports)) or 'none printed'}\n")
-        dest.write_text(head + "".join(picked), encoding="utf-8")
-        self.mark(bundle, "media-server", "ok", dest.stat().st_size)
 
     def capture_devices(self, bundle, leg):
         """THE CAPTURE LEGS' DEVICES (docs/HACKING.md, the Windows capture
@@ -1661,7 +1665,7 @@ class AndroidRecorder(LaneRecorder):
         "process the system killed — has none; the leg log's `the app's own "
         "picture` line says what came back, and desktop-shot is the device's")
 
-    def android_leg(self, leg, verdict, secs, log, out=None):
+    def android_leg(self, leg, verdict, secs, log, out=None, serves=False):
         """The one per-leg entry point: the journal takes every leg,
         pass or fail; the bundle is collected on a failure alone. The
         device-side captures are the runner's, taken at fail time while
@@ -1700,6 +1704,19 @@ class AndroidRecorder(LaneRecorder):
                                 why_absent=self.SHOT_ABSENT,
                                 note_src=log.with_suffix(".desktopwhen"))
                 self.section(bundle, "devices", ["adb", "devices", "-l"])
+                window = log.with_suffix(".window")
+                if not serves:
+                    self.skip(bundle, "media-server",
+                              f"flightrec: {leg}'s scene fetches nothing from the "
+                              f"lane's media server")
+                elif not window.is_file():
+                    self.skip(bundle, "media-server",
+                              f"flightrec: the runner wrote no host clock window "
+                              f"({window.name}) for {leg}")
+                else:
+                    t0, t1 = (float(x) for x in
+                              window.read_text(encoding="utf-8").split())
+                    self.media_server(bundle, log, t0, t1)
                 self.finish(bundle, out=out)
         self.leg(leg, verdict, secs, fail, str(bundle) if bundle else "")
 

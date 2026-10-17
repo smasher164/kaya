@@ -1602,16 +1602,29 @@ func kayaDiag(_ msg: String) {
 /// attempt of every step, in a ring, written ONLY WHEN THE RUN FAILS to
 /// `KAYA_VERB_TRACE`'s file (relative: under kayaTempDir()). tools/check-verbs.py.
 enum KayaVTrace {
-    static let cap = 2048
+    /// Per step its first stepHead and last stepTail records, cap per run
+    /// (crates/kaya/src/vtrace.rs).
+    static let stepHead = 64
+    static let stepTail = 64
+    static let cap = 16384
+    typealias Rec = (atMs: Int, step: Int, verb: String, attempt: Int, what: String)
+    struct Segment {
+        let step: Int
+        var head: [Rec] = []
+        var tail: [Rec] = []
+        var tailAt = 0
+        var dropped = 0
+        var size: Int { head.count + tail.count }
+    }
     private static let lock = NSLock()
     nonisolated(unsafe) private static var on = false
     nonisolated(unsafe) private static var path = ""
     nonisolated(unsafe) private static var start = Date()
     nonisolated(unsafe) private static var step = 0
     nonisolated(unsafe) private static var steps: [String] = []
-    nonisolated(unsafe) private static var recs:
-        [(atMs: Int, step: Int, verb: String, attempt: Int, what: String)] = []
-    nonisolated(unsafe) private static var head = 0
+    nonisolated(unsafe) private static var segments: [Segment] = []
+    nonisolated(unsafe) private static var evicted: [(step: Int, n: Int)] = []
+    nonisolated(unsafe) private static var kept = 0
     nonisolated(unsafe) private static var dropped = 0
 
     static func begin(_ at: Date) {
@@ -1625,8 +1638,9 @@ enum KayaVTrace {
         start = at
         step = 0
         steps = []
-        recs = []
-        head = 0
+        segments = []
+        evicted = []
+        kept = 0
         dropped = 0
     }
 
@@ -1649,12 +1663,27 @@ enum KayaVTrace {
             atMs: Int(Date().timeIntervalSince(start) * 1000), step: step, verb: verb,
             attempt: n, what: what
         )
-        if recs.count < cap {
-            recs.append(rec)
+        if segments.last(where: { $0.step == rec.step }) == nil {
+            segments.append(Segment(step: rec.step))
+        }
+        let at = segments.lastIndex(where: { $0.step == rec.step })!
+        if segments[at].head.count < stepHead {
+            segments[at].head.append(rec)
+            kept += 1
+        } else if segments[at].tail.count < stepTail {
+            segments[at].tail.append(rec)
+            kept += 1
         } else {
-            recs[head] = rec
-            head = (head + 1) % cap
+            segments[at].tail[segments[at].tailAt] = rec
+            segments[at].tailAt = (segments[at].tailAt + 1) % stepTail
+            segments[at].dropped += 1
             dropped += 1
+        }
+        while kept > cap && segments.count > 1 {
+            let gone = segments.removeFirst()
+            kept -= gone.size
+            dropped += gone.size
+            evicted.append((step: gone.step, n: gone.size + gone.dropped))
         }
     }
 
@@ -1673,12 +1702,22 @@ enum KayaVTrace {
         if !on || path.isEmpty { return }
         let now = Int(Date().timeIntervalSince(start) * 1000)
         var out =
-            "KAYA_VERB_TRACE: dump reason=\(quoted(reason)) t=\(now) records=\(recs.count) dropped=\(dropped) steps=\(steps.count)\n"
+            "KAYA_VERB_TRACE: dump reason=\(quoted(reason)) t=\(now) records=\(kept) dropped=\(dropped) steps=\(steps.count)\n"
         for (i, text) in steps.enumerated() {
             out += "KAYA_VERB_TRACE: step=\(i) text=\(quoted(text))\n"
         }
-        for r in Array(recs[head...]) + Array(recs[..<head]) {
-            out += "KAYA_VERB_TRACE: t=\(r.atMs) step=\(r.step) verb=\(r.verb) try=\(r.attempt) what=\(quoted(r.what))\n"
+        func line(_ r: Rec) -> String {
+            "KAYA_VERB_TRACE: t=\(r.atMs) step=\(r.step) verb=\(r.verb) try=\(r.attempt) what=\(quoted(r.what))\n"
+        }
+        for gone in evicted {
+            out += "KAYA_VERB_TRACE: step=\(gone.step) dropped=\(gone.n)\n"
+        }
+        for seg in segments {
+            for r in seg.head { out += line(r) }
+            if seg.dropped > 0 {
+                out += "KAYA_VERB_TRACE: step=\(seg.step) dropped=\(seg.dropped)\n"
+            }
+            for r in Array(seg.tail[seg.tailAt...]) + Array(seg.tail[..<seg.tailAt]) { out += line(r) }
         }
         // O_APPEND and ONE write, the Rust ring's rule.
         let fd = open(path, O_WRONLY | O_APPEND | O_CREAT, 0o644)
@@ -1688,7 +1727,7 @@ enum KayaVTrace {
         close(fd)
         FileHandle.standardError.write(
             Data(
-                "KAYA_HARNESS: verb trace (\(recs.count) records, \(dropped) dropped) appended to \(path)\n"
+                "KAYA_HARNESS: verb trace (\(kept) records, \(dropped) dropped) appended to \(path)\n"
                     .utf8))
     }
 }

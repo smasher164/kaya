@@ -10052,10 +10052,24 @@ mod tests {
             Ok("cap") => {
                 crate::vtrace::begin(Instant::now());
                 crate::vtrace::step(0, format_args!("Overflow"));
-                for i in 0..crate::vtrace::CAP + 50 {
+                for i in 0..crate::vtrace::STEP_HEAD + crate::vtrace::STEP_TAIL + 50 {
                     crate::vtrace::note("cap", format_args!("record {i}"));
                 }
+                crate::vtrace::step(1, format_args!("Next"));
+                crate::vtrace::note("cap", format_args!("next step"));
                 crate::vtrace::dump("the ring test");
+                return;
+            }
+            Ok("evict") => {
+                crate::vtrace::begin(Instant::now());
+                let per = crate::vtrace::STEP_HEAD + crate::vtrace::STEP_TAIL;
+                for step in 0..=crate::vtrace::CAP / per {
+                    crate::vtrace::step(step, format_args!("Step"));
+                    for i in 0..per {
+                        crate::vtrace::note("cap", format_args!("s{step} r{i}"));
+                    }
+                }
+                crate::vtrace::dump("the eviction test");
                 return;
             }
             Ok("unmounted") => {
@@ -10171,19 +10185,50 @@ mod tests {
             "a PASSING run wrote a trace — retention is failure-only:\n{text}"
         );
 
+        let (head, tail) = (crate::vtrace::STEP_HEAD, crate::vtrace::STEP_TAIL);
         let (out, trace, text) = drive("cap");
         let _ = std::fs::remove_file(&trace);
         assert!(out.status.success(), "the ring child did not finish");
         assert!(
-            text.contains(&format!("records={} dropped=50", crate::vtrace::CAP)),
+            text.contains(&format!("records={} dropped=50", head + tail + 1)),
             "the ring does not report what it dropped:\n{}",
             text.lines().next().unwrap_or_default()
         );
-        assert!(!text.contains("what=\"record 0\""), "the oldest record was not dropped");
-        assert!(text.contains("what=\"record 50\""), "the ring dropped more than it said");
+        assert!(text.contains("what=\"record 0\""), "a step's first record was dropped");
         assert!(
-            text.contains(&format!("what=\"record {}\"", crate::vtrace::CAP + 49)),
+            text.contains(&format!("what=\"record {}\"", head - 1)),
+            "a step's first records were not all kept"
+        );
+        assert!(!text.contains(&format!("what=\"record {head}\"")), "the middle was not dropped");
+        assert!(
+            text.contains(&format!("what=\"record {}\"", head + 50)),
+            "the ring dropped more than it said"
+        );
+        assert!(
+            text.contains(&format!("what=\"record {}\"", head + tail + 49)),
             "the newest record is missing"
+        );
+        let gap = text.find("KAYA_VERB_TRACE: step=0 dropped=50\n").expect("the gap names its step and count");
+        assert!(
+            text[..gap].contains(&format!("what=\"record {}\"", head - 1))
+                && text[gap..].contains(&format!("what=\"record {}\"", head + 50)),
+            "the gap line is not between the step's first and last records"
+        );
+        assert!(text.contains("what=\"next step\""), "the next step's record is missing");
+
+        let (out, trace, text) = drive("evict");
+        let _ = std::fs::remove_file(&trace);
+        assert!(out.status.success(), "the eviction child did not finish");
+        let last = crate::vtrace::CAP / (head + tail);
+        assert!(
+            text.contains(&format!("KAYA_VERB_TRACE: step=0 dropped={}\n", head + tail)),
+            "the oldest step was not evicted whole and named"
+        );
+        assert!(!text.contains("what=\"s0 r0\""), "the evicted step's records are still there");
+        assert!(text.contains("what=\"s1 r0\""), "eviction went past the oldest step");
+        assert!(
+            text.contains(&format!("what=\"s{last} r{}\"", head + tail - 1)),
+            "the newest step lost its records"
         );
 
         let (out, trace, text) = drive("wedge");

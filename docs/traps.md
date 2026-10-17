@@ -17255,3 +17255,54 @@ synchronously before reading the geometry, GTK measuring each child widget's
 own allocation in band order (stopping at an unallocated row) and WinUI forcing
 `band.UpdateLayout()` before reading the Grid's tracks, so each publishes and
 measures from the rows it drew.
+
+## The sockets a stale freeze destroyed (measured 2026-10-17)
+
+The full matrix at f927f1b4 failed `netimage_http-compose`: every fetch failed
+(`errors: 15`, the 404 and 500 rows plus twelve cover rows and the trickle). The
+lane's media server was up the whole time (target/android-media-server.log,
+started 04:10:49, stopped at the lane's end 04:28:47). At 04:18:23.592 it logged
+six connections opening and all six closing 4 ms later having carried at most
+one request; a seventh (README.md, the junk row) was served. The device's full
+buffers named the cause one line later than the app: `04:18:22.971
+InetDiagMessage: Destroyed 6 sockets ... Destroyed live tcp sockets for
+uids={10091, 10186, 10208}`, 10208 being dev.kaya.rusthost (the device clock
+runs about 0.65 s behind the host's).
+
+Android 15's ConnectivityService (android15-release, `mDelayDestroySockets`)
+does not destroy a FROZEN or background-blocked uid's sockets while the cell
+radio is idle: it records the uid in `mDestroySocketPendingUids` and destroys
+every live TCP socket of every pending uid when the cell network next becomes
+active. The emulator's default network is cellular. Process 17887 (the app's
+KayaMediaService, restarted after a media leg's app exited) was frozen at
+04:17:47 and force-stopped by the next leg's setup at 04:17:53, with
+`am_uid_stopped` logged before `am_kill`; no UNFROZEN report followed, so the
+uid kept reason `frozen` through two later processes. The netimage leg's first
+fetches woke the radio and the platform destroyed them. Reproduced by hand on
+emulator-5554: launch, HOME, `am freeze dev.kaya.rusthost`, `am force-stop`
+leaves `10208: reasons=3`; a foreground relaunch clears the background bit and
+keeps `10208: reasons=1`; the netimage_http scene then fails exactly as the
+matrix did (`errors: 15`, six sockets destroyed 10 ms after the first fetch).
+One `ping -c 1 10.0.2.2` from the shell after the force-stop empties the set
+and the same leg passes.
+
+`flush_socket_kills` (tools/android/run-emulator.py) runs after the leg's
+force-stops: it reads `dumpsys connectivity`, and when the package's uid is
+pending it pings 10.0.2.2 until the platform has destroyed the pending sockets
+(the app has none yet), writing one leg-log line naming what was pending and
+how long the flush took; a leg that fetches from the media server fails if the
+uid stays pending. The dump runs its entries together with no separator
+(`10140: reasons=110208: reasons=1`); tools/lib/android_sockets.py reads it, its
+cases run at every runner start. GUARD: tools/lib/android-leg-order.py's
+`flush deferred socket kills` step and `sockets_problem`, five watched
+negatives (the flush cut, moved above the force-stop, a greedy reasons reader,
+the start self-test cut, the re-read cut).
+
+THE BUNDLE COULD NOT NAME IT, so the recorder grew: system-events selects the
+`InetDiagMessage: Destroyed live tcp sockets` lines; the android bundle carries
+`media-server` (the server's lines over the leg's host clock window); every
+binding's row-image helper prints `kaya: row image fetch failed: <url>: <why>`
+on a failed fetch; and the three verb-trace rings keep each step's first 64 and
+last 64 records with a `step=N dropped=K` line between them (16384 per run, the
+oldest step evicted whole and named), because the flat 2048 ring had dropped
+2266 records and with them every record of the first failing step.

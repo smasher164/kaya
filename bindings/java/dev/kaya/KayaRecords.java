@@ -1083,11 +1083,24 @@ public final class KayaRecords {
                 job.waiting.clear();
                 pump();
             }
+            Throwable why = error instanceof java.util.concurrent.CompletionException
+                    && error.getCause() != null ? error.getCause() : error;
+            if (why != null && !(why instanceof java.util.concurrent.CancellationException)) {
+                fetchFailed(job.url, why);
+            }
             if (!waiting.isEmpty()) {
-                Throwable why = error instanceof java.util.concurrent.CompletionException
-                        && error.getCause() != null ? error.getCause() : error;
                 app.post(tx -> write(tx, waiting, job.url, bytes, why));
             }
+        }
+
+        /** docs/traps.md, "The sockets a stale freeze destroyed": one write,
+         * the same line in all nine bindings. */
+        private static void fetchFailed(String url, Throwable error) {
+            String why = error.getMessage() != null ? error.getMessage()
+                    : error.getClass().getSimpleName();
+            System.err.print("kaya: row image fetch failed: " + url + ": "
+                    + why.replace('\n', ' ').replace('\r', ' ') + "\n");
+            System.err.flush();
         }
 
         @SuppressWarnings("unchecked")

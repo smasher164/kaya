@@ -19,7 +19,7 @@ CALLERS = {
     "tools/lib/lanes/mac.py": 1,
     "tools/run-leg.py": 1,
     "tools/ios/run-sim.py": 2,
-    "tools/android/run-emulator.py": 3,
+    "tools/android/run-emulator.py": 5,
     "tools/lib/lanes/win.py": 1,
 }
 SPELLED = re.compile(r"""startswith\(\s*\(?\s*["']media_""")

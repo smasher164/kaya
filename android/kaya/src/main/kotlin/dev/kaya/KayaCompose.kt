@@ -2001,8 +2001,18 @@ val kayaLayoutTrace: Boolean = System.getenv("KAYA_LAYOUT_TRACE") != null
  * tools/check-verbs.py holds the three rings level.
  */
 object KayaVTrace {
-    const val CAP = 2048
+    /** Per step its first STEP_HEAD and last STEP_TAIL records, CAP per run (crates/kaya/src/vtrace.rs). */
+    const val STEP_HEAD = 64
+    const val STEP_TAIL = 64
+    const val CAP = 16384
     private class Rec(val atMs: Long, val step: Int, val verb: String, val attempt: Int, val what: String)
+    private class Segment(val step: Int) {
+        val head = ArrayList<Rec>()
+        val tail = ArrayList<Rec>()
+        var tailAt = 0
+        var dropped = 0L
+        val size get() = head.size + tail.size
+    }
     private val lock = Object()
     private var on = false
     private var named: String? = null
@@ -2010,8 +2020,9 @@ object KayaVTrace {
     private var start = 0L
     private var step = 0
     private val steps = ArrayList<String>()
-    private val recs = ArrayList<Rec>()
-    private var head = 0
+    private val segments = ArrayList<Segment>()
+    private val evicted = ArrayList<Pair<Int, Long>>()
+    private var kept = 0
     private var dropped = 0L
 
     fun begin(startNanos: Long, filesDir: () -> java.io.File?) {
@@ -2023,8 +2034,9 @@ object KayaVTrace {
             start = startNanos
             step = 0
             steps.clear()
-            recs.clear()
-            head = 0
+            segments.clear()
+            evicted.clear()
+            kept = 0
             dropped = 0
         }
     }
@@ -2045,12 +2057,24 @@ object KayaVTrace {
         synchronized(lock) {
             if (!on) return
             val rec = Rec((System.nanoTime() - start) / 1_000_000, step, verb, n, what)
-            if (recs.size < CAP) {
-                recs.add(rec)
+            val seg = segments.lastOrNull { it.step == rec.step } ?: Segment(rec.step).also { segments.add(it) }
+            if (seg.head.size < STEP_HEAD) {
+                seg.head.add(rec)
+                kept++
+            } else if (seg.tail.size < STEP_TAIL) {
+                seg.tail.add(rec)
+                kept++
             } else {
-                recs[head] = rec
-                head = (head + 1) % CAP
+                seg.tail[seg.tailAt] = rec
+                seg.tailAt = (seg.tailAt + 1) % STEP_TAIL
+                seg.dropped++
                 dropped++
+            }
+            while (kept > CAP && segments.size > 1) {
+                val gone = segments.removeAt(0)
+                kept -= gone.size
+                dropped += gone.size
+                evicted.add(Pair(gone.step, gone.size + gone.dropped))
             }
         }
     }
@@ -2073,13 +2097,20 @@ object KayaVTrace {
             }
             val now = (System.nanoTime() - start) / 1_000_000
             val sb = StringBuilder()
-            sb.append("KAYA_VERB_TRACE: dump reason=${quoted(reason)} t=$now records=${recs.size} dropped=$dropped steps=${steps.size}\n")
+            sb.append("KAYA_VERB_TRACE: dump reason=${quoted(reason)} t=$now records=$kept dropped=$dropped steps=${steps.size}\n")
             for ((i, text) in steps.withIndex()) {
                 sb.append("KAYA_VERB_TRACE: step=$i text=${quoted(text)}\n")
             }
-            for (i in 0 until recs.size) {
-                val r = recs[(head + i) % recs.size]
+            fun line(r: Rec) {
                 sb.append("KAYA_VERB_TRACE: t=${r.atMs} step=${r.step} verb=${r.verb} try=${r.attempt} what=${quoted(r.what)}\n")
+            }
+            for ((gone, n) in evicted) {
+                sb.append("KAYA_VERB_TRACE: step=$gone dropped=$n\n")
+            }
+            for (seg in segments) {
+                seg.head.forEach(::line)
+                if (seg.dropped > 0) sb.append("KAYA_VERB_TRACE: step=${seg.step} dropped=${seg.dropped}\n")
+                for (i in 0 until seg.tail.size) line(seg.tail[(seg.tailAt + i) % seg.tail.size])
             }
             // Append mode and ONE write, the Rust ring's rule.
             try {
@@ -2088,7 +2119,7 @@ object KayaVTrace {
                 Log.e("kaya", "KAYA_HARNESS: verb trace could not be appended to $p: $e")
                 return
             }
-            Log.e("kaya", "KAYA_HARNESS: verb trace (${recs.size} records, $dropped dropped) appended to $p")
+            Log.e("kaya", "KAYA_HARNESS: verb trace ($kept records, $dropped dropped) appended to $p")
         }
     }
 }

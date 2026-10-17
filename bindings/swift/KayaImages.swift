@@ -167,6 +167,13 @@ public struct KayaImageFetchFailed: Error, CustomStringConvertible {
     public var description: String { "HTTP \(status)" }
 }
 
+// docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+// same line in all nine bindings.
+func kayaRowImageFetchFailed(_ u: String, _ why: String) {
+    let flat = why.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ")
+    FileHandle.standardError.write(Data("kaya: row image fetch failed: \(u): \(flat)\n".utf8))
+}
+
 /// Rows whose image loads on demand (N12). Each row holds the URL it wants,
 /// its bytes and its phase; a row realized `.loading` with no bytes is
 /// fetched, at most `limit` at a time, rows sharing a URL share one fetch,
@@ -274,7 +281,10 @@ public final class KayaRowImages<T: KayaRecord> {
             let fetch = self.fetch
             let task = Task { @KayaAppActor in
                 let got: Result<Data, Error>
-                do { got = .success(try await fetch(u)) } catch { got = .failure(error) }
+                do { got = .success(try await fetch(u)) } catch {
+                    got = .failure(error)
+                    if !Task.isCancelled { kayaRowImageFetchFailed(u, "\(error)") }
+                }
                 self.landed(u, id, got)
             }
             inFlight[u] = (id, task)

@@ -161,6 +161,7 @@ sealed class RowImages<T>
         catch (Exception e)
         {
             error = e.Message;
+            if (!cts.IsCancellationRequested) FetchFailed(u, error);
         }
         finally
         {
@@ -179,6 +180,14 @@ sealed class RowImages<T>
             else app.QueueAsync(Land);
         }
         Pump();
+    }
+
+    // docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+    // same line in all nine bindings.
+    static void FetchFailed(string u, string why)
+    {
+        Console.Error.Write($"kaya: row image fetch failed: {u}: {why.Replace('\n', ' ').Replace('\r', ' ')}\n");
+        Console.Error.Flush();
     }
 
     void Write(Tx tx, List<List<object>> keysList, string u, byte[]? bytes, string? error)

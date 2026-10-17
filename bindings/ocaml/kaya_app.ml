@@ -7886,6 +7886,13 @@ module Row_images = struct
             | _ -> ())
           instances)
 
+  (* docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+     same line in all nine bindings. *)
+  let fetch_failed url why =
+    let flat = String.map (function '\n' | '\r' -> ' ' | c -> c) why in
+    prerr_string ("kaya: row image fetch failed: " ^ url ^ ": " ^ flat ^ "\n");
+    flush stderr
+
   let rec work t =
     let next =
       locked t (fun () ->
@@ -7901,6 +7908,7 @@ module Row_images = struct
     | None -> ()
     | Some url ->
         let got = try t.fetch url with e -> Error (Printexc.to_string e) in
+        (match got with Error why -> fetch_failed url why | Ok _ -> ());
         let rows =
           locked t (fun () ->
               (match got with Ok bytes -> cache_put t url bytes | Error _ -> ());

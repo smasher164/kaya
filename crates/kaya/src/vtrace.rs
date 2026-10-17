@@ -21,9 +21,14 @@ use std::time::Instant;
 
 const ENV_VAR: &str = "KAYA_VERB_TRACE";
 
-/// Records kept before the oldest goes. A ring that silently forgets is a
-/// diagnostic that lies, so the drop count is in the dump's first line.
-pub(crate) const CAP: usize = 2048;
+/// Records kept per step: its first STEP_HEAD and its last STEP_TAIL, the
+/// middle counted — so a step retried hundreds of times cannot push an
+/// earlier failing step out of the dump (docs/traps.md, "The sockets a stale
+/// freeze destroyed": 2266 records dropped took the first failing step's
+/// whole history). CAP bounds the run; past it the oldest step goes whole.
+pub(crate) const STEP_HEAD: usize = 64;
+pub(crate) const STEP_TAIL: usize = 64;
+pub(crate) const CAP: usize = 16384;
 
 struct Rec {
     at_ms: u64,
@@ -34,15 +39,31 @@ struct Rec {
     what: String,
 }
 
+struct Segment {
+    step: usize,
+    head: Vec<Rec>,
+    tail: Vec<Rec>,
+    tail_at: usize,
+    dropped: u64,
+}
+
+impl Segment {
+    fn len(&self) -> usize {
+        self.head.len() + self.tail.len()
+    }
+}
+
 struct Trace {
     start: Option<Instant>,
     step: usize,
     /// The script's own text, by step ordinal — the records carry the
     /// ordinal, so a dropped record still knows which step it was in.
     steps: Vec<String>,
-    recs: Vec<Rec>,
-    head: usize,
+    segments: Vec<Segment>,
+    kept: usize,
     dropped: u64,
+    /// Steps evicted whole past CAP, with their record counts.
+    evicted: Vec<(usize, u64)>,
 }
 
 impl Trace {
@@ -51,19 +72,40 @@ impl Trace {
             start: None,
             step: 0,
             steps: Vec::new(),
-            recs: Vec::new(),
-            head: 0,
+            segments: Vec::new(),
+            kept: 0,
             dropped: 0,
+            evicted: Vec::new(),
         }
     }
 
     fn push(&mut self, rec: Rec) {
-        if self.recs.len() < CAP {
-            self.recs.push(rec);
+        let at = match self.segments.iter().rposition(|s| s.step == rec.step) {
+            Some(at) => at,
+            None => {
+                self.segments.push(Segment { step: rec.step, head: Vec::new(), tail: Vec::new(), tail_at: 0, dropped: 0 });
+                self.segments.len() - 1
+            }
+        };
+        let seg = &mut self.segments[at];
+        if seg.head.len() < STEP_HEAD {
+            seg.head.push(rec);
+            self.kept += 1;
+        } else if seg.tail.len() < STEP_TAIL {
+            seg.tail.push(rec);
+            self.kept += 1;
         } else {
-            self.recs[self.head] = rec;
-            self.head = (self.head + 1) % CAP;
+            seg.tail[seg.tail_at] = rec;
+            seg.tail_at = (seg.tail_at + 1) % STEP_TAIL;
+            seg.dropped += 1;
             self.dropped += 1;
+        }
+        while self.kept > CAP && self.segments.len() > 1 {
+            let gone = self.segments.remove(0);
+            let n = gone.len() as u64 + gone.dropped;
+            self.kept -= gone.len();
+            self.dropped += gone.len() as u64;
+            self.evicted.push((gone.step, n));
         }
     }
 
@@ -182,7 +224,7 @@ pub(crate) fn dump(reason: &str) {
     let (kept, dropped);
     {
         let t = locked();
-        kept = t.recs.len();
+        kept = t.kept;
         dropped = t.dropped;
         out.push_str(&format!(
             "KAYA_VERB_TRACE: dump reason={} t={} records={kept} dropped={dropped} steps={}\n",
@@ -193,7 +235,7 @@ pub(crate) fn dump(reason: &str) {
         for (i, text) in t.steps.iter().enumerate() {
             out.push_str(&format!("KAYA_VERB_TRACE: step={i} text={}\n", quoted(text)));
         }
-        for r in t.recs[t.head..].iter().chain(t.recs[..t.head].iter()) {
+        let line = |out: &mut String, r: &Rec| {
             out.push_str(&format!(
                 "KAYA_VERB_TRACE: t={} step={} verb={} try={} what={}\n",
                 r.at_ms,
@@ -202,6 +244,20 @@ pub(crate) fn dump(reason: &str) {
                 r.attempt,
                 quoted(&r.what)
             ));
+        };
+        for (step, n) in &t.evicted {
+            out.push_str(&format!("KAYA_VERB_TRACE: step={step} dropped={n}\n"));
+        }
+        for seg in &t.segments {
+            for r in &seg.head {
+                line(&mut out, r);
+            }
+            if seg.dropped > 0 {
+                out.push_str(&format!("KAYA_VERB_TRACE: step={} dropped={}\n", seg.step, seg.dropped));
+            }
+            for r in seg.tail[seg.tail_at..].iter().chain(seg.tail[..seg.tail_at].iter()) {
+                line(&mut out, r);
+            }
         }
     }
     // O_APPEND and ONE write: the block stays whole against any other

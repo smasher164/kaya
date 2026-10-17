@@ -5245,6 +5245,7 @@ export class RowImages<E> {
     }
     this._running -= 1;
     if (!signal.aborted) {
+      if (why !== null) fetchFailed(url, why);
       if (data !== null) this._put(url, data);
       if (this._waiting.get(url) === waiting) this._waiting.delete(url);
       this._land(waiting.rows, url, data, why);
@@ -5276,6 +5277,12 @@ export class RowImages<E> {
       if (why !== null && onError !== undefined) onError(rowHandle(this._rows as Collection<unknown, unknown>, keys) as RowHandle<E>, why);
     }
   }
+}
+
+// docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+// same line in all nine bindings.
+function fetchFailed(url: string, why: string): void {
+  process.stderr.write(`kaya: row image fetch failed: ${url}: ${why.replace(/[\n\r]/g, " ")}\n`);
 }
 
 function sameKeys(a: readonly Key[], b: readonly Key[]): boolean {

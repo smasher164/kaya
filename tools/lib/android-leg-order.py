@@ -67,6 +67,17 @@ STEPS = [
         "follow the picker's force-stop so the touch lands on no picker",
     ),
     (
+        "flush deferred socket kills",
+        r"if \(not flush_socket_kills\(serial, package, log\)\s*"
+        r"and media_server\.serves\(script\)\):\s*return False",
+        "force-stopping a FROZEN process leaves its uid pending socket "
+        "destruction, and Android 15 destroys every live TCP socket of a "
+        "pending uid when the cell radio next wakes: the new process's "
+        "first fetches (docs/traps.md, \"The sockets a stale freeze "
+        "destroyed\"); it must follow the force-stops that leave the entry "
+        "and precede the app's own first connection",
+    ),
+    (
         "logcat -c",
         r'adb\(serial, "logcat", "-c", stdout=log, stderr=log\)',
         "the force-stop's own noise must not land in this leg's verdict",
@@ -532,6 +543,33 @@ def steps_problems(body: str) -> list[str]:
     return problems
 
 
+SOCKETS_START = ("_socket_reds = android_sockets.self_test()\n"
+                 "if _socket_reds:\n"
+                 "    die(")
+SOCKETS_FLUSH = ['android_sockets.pending(', '"ping", "-c", "1"',
+                 "if uid not in after:", "return False"]
+
+
+def sockets_problem(text: str, reader=None) -> str | None:
+    """The deferred-destruction reader proven at every launch, and the
+    flush reading the pending set, waking the radio and re-reading it."""
+    sys.path.insert(0, str(ROOT / "tools" / "lib"))
+    import android_sockets
+    bad = android_sockets.self_test(reader or android_sockets.pending)
+    if bad:
+        return bad[0]
+    if SOCKETS_START not in text:
+        return ("the runner no longer runs android_sockets.self_test() at "
+                "start and dies on a finding")
+    body = py_function(text, "flush_socket_kills")
+    if body is None:
+        return "flush_socket_kills() not found in the runner"
+    for piece in SOCKETS_FLUSH:
+        if piece not in body:
+            return f"flush_socket_kills() no longer carries {piece!r}"
+    return None
+
+
 def teardown_problem(text: str) -> str | None:
     """Every module global kaya_teardown reads is assigned before the
     atexit registration, so a run stopped early tears down instead of
@@ -619,6 +657,10 @@ def main() -> int:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
     problem = teardown_problem(text)
+    if problem is not None:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+        return 1
+    problem = sockets_problem(text)
     if problem is not None:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
@@ -1104,6 +1146,48 @@ def main() -> int:
     for label, cut in upright_cuts:
         doctored, n = cut(label)
         problem = upright_problem(doctored)
+        if n != 1 or problem is None:
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {problem}")
+
+    # The deferred socket kills (docs/traps.md, "The sockets a stale freeze
+    # destroyed"): the flush cut and moved, the reader greedy, the start
+    # self-test and the flush's re-read cut.
+    flush_call = ("    if (not flush_socket_kills(serial, package, log)\n"
+                  "            and media_server.serves(script)):\n"
+                  "        return False\n")
+    force_stop = '    adb(serial, "shell", "am", "force-stop", package, stdout=log,\n'
+    for label, doctored_body, n in (
+            ("socket flush removed", *doctor("socket flush removed", body,
+                                             re.escape(flush_call), "")),
+            ("socket flush above the force-stop",
+             *move("socket flush above the force-stop", body, flush_call,
+                   force_stop))):
+        found = steps_problems(doctored_body)
+        if n != 1 or not any("flush deferred socket kills" in p for p in found):
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {found[0]}")
+    import android_sockets
+    greedy = re.compile(r"(\d+): reasons=(\d+)")
+    problem = sockets_problem(text, reader=lambda t: (
+        None if android_sockets.PENDING.search(t) is None else
+        {int(u): int(r) for u, r in
+         greedy.findall(android_sockets.PENDING.search(t).group(1))}))
+    if problem is None:
+        print("android-leg-order: SELF-TEST FAIL (a greedy reasons reader "
+              "read as good)", file=sys.stderr)
+        return 1
+    print(f"android-leg-order: greedy reasons reader -> {problem}")
+    for label, pattern in (
+            ("socket self-test at start removed", re.escape(SOCKETS_START)),
+            ("socket flush re-read removed", re.escape("if uid not in after:"))):
+        doctored, n = doctor(label, text, pattern,
+                             "if False:" if "after" in pattern else "")
+        problem = sockets_problem(doctored)
         if n != 1 or problem is None:
             print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
                   f"good)", file=sys.stderr)

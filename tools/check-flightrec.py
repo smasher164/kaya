@@ -251,6 +251,22 @@ def py_block(text, name):
     return ""
 
 
+def recorder_block(text, name):
+    """A lane recorder's class, with the LaneRecorder methods it calls
+    appended: a section writer shared through the base class is the lane's
+    collect as much as one of its own."""
+    body = py_block(text, name)
+    if not body:
+        return ""
+    lines = text.splitlines(keepends=True)
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.ClassDef) and node.name == "LaneRecorder":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and f"self.{item.name}(" in body:
+                    body += "".join(lines[item.lineno - 1:item.end_lineno])
+    return body
+
+
 def sh_block(text, start, end):
     """The text between two markers, or "" when either is missing."""
     a = text.find(start)
@@ -329,7 +345,7 @@ def census_sections(src):
                        if re.search(r'\$bundle" ' + re.escape(n) + r'(?![\w-])',
                                     body)]
         else:
-            body = py_block(src[LANE_PY], RECORDERS[lane])
+            body = recorder_block(src[LANE_PY], RECORDERS[lane])
             if not body:
                 found.append(f"{lane}: no {RECORDERS[lane]} in {LANE_PY}")
                 continue
@@ -1313,11 +1329,12 @@ def android_report_checks(src, echo=False):
               "kaya    : media: player 1 failed media3 1003 underlying 0: ERROR_CODE_TIMEOUT: "
               "Unexpected runtime error: Detaching surface timed out.",
               "init    : Service 'android-hardware-media-c2-goldfish-hal-1-0' (pid 394) "
-              "received signal 31"]
+              "received signal 31",
+              "InetDiagMessage: Destroyed live tcp sockets for uids={10091, 10208} in 1ms"]
     timeline = scope["android_system_events"]("\n".join([*events, "unrelated noise"]))
     if any(event not in timeline for event in events) or "unrelated noise" in timeline:
-        found.append("android: system timeline dropped a focus/ANR event, drag event or "
-                     "media codec event, or kept unrelated noise")
+        found.append("android: system timeline dropped a focus/ANR event, drag event, "
+                     "media codec event or socket destruction, or kept unrelated noise")
     if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
         found.append("android: empty system timeline did not report its zero count")
     shade = scope["android_shade_history"]
@@ -2783,6 +2800,8 @@ for label, before, after, want in (
         ("view drop", "VRI", "LostView", "drag event"),
         ("Kaya drag", "KAYA_DRAG_", "LOST_DRAG_", "drag event"),
         ("media codec", "C2Goldfish", "LostGoldfish", "media codec event"),
+        ("socket destruction", "InetDiagMessage: Destroyed", "LostDiag: Destroyed",
+         "socket destruction"),
         ("shade panel", "New panel State:|", "Lost panel State:|", "shade history dropped"),
         ("shade focus", "should be (?:visible and )?focusable|", "should be lost|",
          "shade history dropped"),
@@ -3340,6 +3359,6 @@ for verb, _ in GTK_MEDIA_NOTES:
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(230 + (5 if DRIVES else 0))
+gate.negatives_ran(231 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

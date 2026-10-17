@@ -759,6 +759,7 @@ VTRACE_LINES = [
     "KAYA_VERB_TRACE: dump reason=<v> t=<v> records=<v> dropped=<v> "
     "steps=<v>",
     "KAYA_VERB_TRACE: step=<v> text=<v>",
+    "KAYA_VERB_TRACE: step=<v> dropped=<v>",
     "KAYA_VERB_TRACE: t=<v> step=<v> verb=<v> try=<v> what=<v>",
     "KAYA_HARNESS: verb trace (<v> records, <v> dropped) appended to <v>",
 ]
@@ -2026,7 +2027,7 @@ VTRACE_NEGATIVES = [
      r'\n    KayaVTrace\.dump\("the verdict failed: [^\n]*\n', "\n",
      "verb-trace dump site(s), want exactly 2"),
     ("the Compose line shape drifted", KOTLIN,
-     r'records=\$\{recs\.size\} dropped=', "recs=${recs.size} dropped=",
+     r'records=\$kept dropped=', "recs=$kept dropped=",
      "does not carry the verb-trace line shape"),
     ("the SwiftUI env var renamed", SWIFT,
      r'environment\["KAYA_VERB_TRACE"\]', 'environment["KAYA_VTRACE"]',
@@ -2053,9 +2054,21 @@ VTRACE_NEGATIVES = [
      r'(\n    if failures\.isEmpty \{\n)',
      r'\1        KayaVTrace.dump("green")\n',
      "verb-trace dump site(s), want exactly 2"),
+    # The per-step gap line (docs/traps.md, "The sockets a stale freeze
+    # destroyed"), each ring's two spellings: a middle dropped, a step evicted.
+    ("the Rust ring's gap line drifted", VTRACE,
+     r'step=\{(\w*)\} dropped=', r'step={\1} lost=',
+     "does not carry the verb-trace line shape", 2),
+    ("the Compose ring's gap line drifted", KOTLIN,
+     r'step=\$(\{seg\.step\}|gone) dropped=', r'step=$\1 lost=',
+     "does not carry the verb-trace line shape", 2),
+    ("the SwiftUI ring's gap line drifted", SWIFT,
+     r'step=\\\((seg\.step|gone\.step)\) dropped=', r'step=\\(\1) lost=',
+     "does not carry the verb-trace line shape", 2),
 ]
-for label, rel, pattern, repl, want in VTRACE_NEGATIVES:
-    doctored = g.doctor(label, vtrace_texts[rel], pattern, repl)
+for label, rel, pattern, repl, want, *subs in VTRACE_NEGATIVES:
+    doctored = g.doctor(label, vtrace_texts[rel], pattern, repl,
+                        want=subs[0] if subs else 1)
     args = {HARNESS: "harness_src", SWIFT: "swift_src", KOTLIN: "kotlin_src",
             VTRACE: "vtrace_src"}
     out = verb_trace(**{args[rel]: doctored})

@@ -6682,6 +6682,7 @@ class RowImages(Generic[T]):
                 data = bytes(self._fetch(url))
             except Exception as error:
                 why = str(error) or type(error).__name__
+                _fetch_failed(url, why)
             with self._lock:
                 if data is not None:
                     self._cache_put(url, data)
@@ -6699,6 +6700,14 @@ class RowImages(Generic[T]):
                                             **changes)
             if why is not None and self._on_error is not None:
                 self._on_error(Row(self._rows, keys), why)
+
+
+def _fetch_failed(url: str, why: str) -> None:
+    """docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+    same line in all nine bindings."""
+    why = why.replace("\n", " ").replace("\r", " ")
+    sys.stderr.write(f"kaya: row image fetch failed: {url}: {why}\n")
+    sys.stderr.flush()
 
 
 class MediaSource:

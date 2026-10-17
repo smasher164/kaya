@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -384,6 +386,9 @@ func (r *RowImages[K, T]) work() {
 		r.mu.Unlock()
 
 		bytes, err := r.fetch(ctx, job.url)
+		if err != nil && ctx.Err() == nil {
+			fetchFailed(job.url, err.Error())
+		}
 		cancel()
 
 		r.mu.Lock()
@@ -400,6 +405,13 @@ func (r *RowImages[K, T]) work() {
 			r.app.Post(func(tx *Tx) { r.write(tx, rows, job.url, bytes, err) })
 		}
 	}
+}
+
+// docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+// same line in all nine bindings.
+func fetchFailed(url, why string) {
+	why = strings.NewReplacer("\n", " ", "\r", " ").Replace(why)
+	os.Stderr.WriteString("kaya: row image fetch failed: " + url + ": " + why + "\n")
 }
 
 func (r *RowImages[K, T]) write(tx *Tx, rows [][]any, url string, bytes []byte, err error) {

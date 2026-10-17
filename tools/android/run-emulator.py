@@ -39,6 +39,7 @@ import secure_scan
 import flightrec_lane
 import lane_health
 import media_server
+import android_sockets
 import emulator_capture
 
 # Device output is not clean UTF-8 (docs/traps.md, "NOT UTF-8").
@@ -1487,6 +1488,52 @@ def recording_duration_ms(video, log):
 
 TOUCH_MODE = re.compile(r"Display: 0 TouchMode: ([01])")
 SETTINGS_ACTIVITY = "com.android.settings/.Settings"
+PACKAGE_UID = re.compile(r"package:(\S+) uid:(\d+)")
+
+
+def flush_socket_kills(serial, package, log):
+    """docs/traps.md: The sockets a stale freeze destroyed. False only when
+    the package's uid is still pending after the pings."""
+    def read():
+        return android_sockets.pending(
+            adb_out(serial, "shell", "dumpsys", "connectivity"))
+
+    before = read()
+    if before is None:
+        print(f"sockets at leg start: `dumpsys connectivity` on {serial} "
+              f"carried no mDestroySocketPendingUids line", file=log)
+        return True
+    if not before:
+        return True
+    listed = adb_out(serial, "shell", "cmd", "package", "list", "packages",
+                     "-U", package)
+    uids = {name: int(uid) for name, uid in PACKAGE_UID.findall(listed)}
+    uid = uids.get(package)
+    said = ", ".join(f"{u} {android_sockets.named(r)}"
+                     for u, r in sorted(before.items()))
+    if uid not in before:
+        print(f"sockets at leg start: pending destruction on {serial}: "
+              f"{said}; {package} is uid {uid}, not among them", file=log)
+        return True
+    t0 = time.monotonic()
+    after = before
+    for ping in range(1, 6):
+        adb(serial, "shell", "ping", "-c", "1", "-W", "1", "10.0.2.2",
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.2)
+        after = read() or {}
+        if uid not in after:
+            print(f"sockets at leg start: {package} (uid {uid}) was pending "
+                  f"destruction on {serial} ({said}); {ping} ping(s) to "
+                  f"10.0.2.2 woke the radio and the platform destroyed them "
+                  f"in {int((time.monotonic() - t0) * 1000)} ms, before "
+                  f"the app had any", file=log)
+            return True
+    print(f"sockets at leg start: {package} (uid {uid}) still pending "
+          f"destruction on {serial} after 5 pings to 10.0.2.2 (before: "
+          f"{said}; after: {after}); the app's first TCP connections will "
+          f"be destroyed the moment the radio wakes", file=log)
+    return False
 
 
 def restore_touch_mode(serial, log):
@@ -1838,6 +1885,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
         adb(serial, "shell", "am", "force-stop", picker,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not restore_touch_mode(serial, log):
+        return False
+    if (not flush_socket_kills(serial, package, log)
+            and media_server.serves(script)):
         return False
     adb(serial, "logcat", "-c", stdout=log, stderr=log)
     # THE HARNESS'S EYES OUTSIDE THIS APP: the picker is a separate APK
@@ -2435,6 +2485,7 @@ def _leg_worker(name, script, args, tablet):
             slot = _claim_device()
             serial = SERIALS[slot]
         t0 = time.monotonic()
+        wall0 = time.time()
         try:
             ready = device_online(serial, log)
             # The ranges leg's slot-local IME re-assert: on the device
@@ -2460,6 +2511,8 @@ def _leg_worker(name, script, args, tablet):
         secs = int(time.monotonic() - t0)
         (LEGS_DIR / f"{name}.secs").write_text(f"{secs}\n",
                                                encoding="utf-8")
+        (LEGS_DIR / f"{name}.window").write_text(
+            f"{wall0:.3f} {time.time():.3f}\n", encoding="utf-8")
         (LEGS_DIR / f"{name}.verdict").write_text(
             f"{'PASS' if ok else 'FAIL'}\n", encoding="utf-8")
 
@@ -2551,7 +2604,8 @@ def drain():
         # THE JOURNAL TAKES EVERY LEG, pass or fail; the bundle carries
         # the device roster too, because only the roster tells an
         # offline emulator from a failed assertion.
-        FR.android_leg(name, verdict, secs, LEGS_DIR / f"{name}.log")
+        FR.android_leg(name, verdict, secs, LEGS_DIR / f"{name}.log",
+                       serves=media_server.serves(lane.scene_of(name)))
         print(f"{name}: {verdict} ({secs}s)", flush=True)
     _leg_names.clear()
 
@@ -2600,6 +2654,12 @@ def drop_block_selftest():
 
 
 drop_block_selftest()
+
+_socket_reds = android_sockets.self_test()
+if _socket_reds:
+    die("run-emulator: " + "; ".join(_socket_reds))
+print(f"run-emulator: android_sockets read {len(android_sockets.CASES)} "
+      f"pending-destruction dumps", flush=True)
 
 
 def scene_script_drop(scene, blocks):
@@ -4453,8 +4513,8 @@ def media_route(serial):
 
 
 if media_queued():
-    MEDIA.enter_context(media_server.serving(
-        port=MEDIA_PORT, log=ROOT / "target/android-media-server.log"))
+    FR.media_log = ROOT / "target/android-media-server.log"
+    MEDIA.enter_context(media_server.serving(port=MEDIA_PORT, log=FR.media_log))
     # MEASURED 2026-09-30: two of the five pool phones had lost eth0's and
     # wlan0's addresses after five days up, so nothing reached 10.0.2.2 and
     # every stream failed as network (docs/traps.md). The media legs go to

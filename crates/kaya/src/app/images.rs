@@ -124,6 +124,15 @@ impl<T: KayaSum + Send + Sync + 'static> RowImages<T> {
     }
 }
 
+/// docs/traps.md, "The sockets a stale freeze destroyed": a failed fetch
+/// names itself on stderr (logcat on Android) in all nine bindings. One
+/// write, like app.rs's notification_dropped.
+fn fetch_failed(url: &str, why: &str) {
+    use std::io::Write as _;
+    let line = format!("kaya: row image fetch failed: {url}: {}\n", why.replace(['\n', '\r'], " "));
+    let _ = std::io::stderr().write_all(line.as_bytes());
+}
+
 impl<T: KayaSum + Send + Sync + 'static> Shared<T> {
     fn instance(&self, path: &Path) -> Option<(Collection<T>, Value)> {
         let (key, prefix) = path.split_last()?;
@@ -200,6 +209,9 @@ impl<T: KayaSum + Send + Sync + 'static> Shared<T> {
                 }
             };
             let got = (self.fetch)(&url).map(|bytes| Arc::<[u8]>::from(bytes));
+            if let Err(why) = &got {
+                fetch_failed(&url, why);
+            }
             let rows = {
                 let mut state = self.state.lock().unwrap();
                 if let Ok(bytes) = &got {

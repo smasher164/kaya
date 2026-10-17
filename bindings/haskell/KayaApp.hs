@@ -564,13 +564,14 @@ import qualified Data.Map.Strict as Map
 import qualified Data.List as List
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import Data.Time.Calendar (Day, toGregorian)
 import Data.Time.LocalTime (TimeOfDay (..))
 import Data.Word (Word16, Word32, Word64)
 import System.Exit (ExitCode (..), exitSuccess, exitWith)
 
 import Control.Exception (SomeException, catch, evaluate)
-import System.IO (hPutStrLn, stderr)
+import System.IO (hFlush, hPutStrLn, stderr)
 import System.IO.Unsafe (unsafePerformIO)
 
 import KayaRuntime
@@ -6632,11 +6633,20 @@ rowImagesWork ri = do
     Nothing -> pure ()
     Just u -> do
       got <- ri.riFetch u `catch` \e -> pure (Left (T.pack (show (e :: SomeException))))
+      either (rowImageFetchFailed u) (const (pure ())) got
       rows <- modifyMVar (ri.riState) $ \st0 ->
         let st = either (const st0) (\bytes -> rowImagesCachePut u bytes st0) got
          in pure (st {rqWaiting = Map.delete u st.rqWaiting}, Map.findWithDefault [] u st.rqWaiting)
       if null rows then pure () else rowImagesWrite ri rows u got
       rowImagesWork ri
+
+-- docs/traps.md, "The sockets a stale freeze destroyed": one write, the
+-- same line in all nine bindings.
+rowImageFetchFailed :: Text -> Text -> IO ()
+rowImageFetchFailed u why = do
+  let flat = T.map (\c -> if c == '\n' || c == '\r' then ' ' else c) why
+  BS.hPut stderr (TE.encodeUtf8 ("kaya: row image fetch failed: " <> u <> ": " <> flat <> "\n"))
+  hFlush stderr
 
 rowImagesWrite :: RowImages a -> [[Key]] -> Text -> Either Text BS.ByteString -> IO ()
 rowImagesWrite ri rows u got = post (ri.riApp) $ do
