@@ -17306,3 +17306,33 @@ on a failed fetch; and the three verb-trace rings keep each step's first 64 and
 last 64 records with a `step=N dropped=K` line between them (16384 per run, the
 oldest step evicted whole and named), because the flat 2048 ring had dropped
 2266 records and with them every record of the first failing step.
+
+## The pause the loop undid (measured 2026-10-17)
+
+The full matrix at 6171460e failed `media_session-swift` on iOS: `ax_action
+video#0 "Pause"` returned, and the label and Now Playing read `playing` for
+15 s. The guest's player loops a 2.000 s clip, so KayaPlayer sets
+`actionAtItemEnd = .none` and restarts the item from its
+`didPlayToEndTimeNotification` observer. The app log's coremedia lines carry the
+whole sequence: 08:10:53.528 `itemfig_ReachedEndGuts ... ActionAtEnd == None`,
+the same millisecond `new playback state: Paused ... ClientInitiated` (the ax
+Pause), then 08:10:53.560 a seek to 0 and `Playing ... ClientInitiated`: the end
+notification reaches the main queue about 30 ms after the item ends, and the
+observer called `seek(to: .zero); play()` whatever had happened in between. A
+user's pause that lands in that window is undone. At a natural end the player
+still runs at rate 1 (under `.none` nothing pauses it), so the observer now plays
+only when `player.rate != 0`; a held player sits at 0 and plays from the start
+when asked. GTK only seeks on EOS, WinUI and Compose loop natively, so none of
+them had it. The mac lane's own media_session leg ran beside this one and is
+unrelated (the simulator's MediaRemote is its own).
+
+The bundle could not name it: the verb trace held one `<- ok` for the ax step.
+The ax action now records what it ran with the player's state before and after
+(`stateText`: status, rate, clock, duration, looping), every timeControlStatus
+transition is a `player#N` record, and the looping end records its state and
+whether it played or held. Forced by posting the end notification right after
+the ax pause: with the old observer the leg went red and the trace read `<-
+reached its end, paused rate=0.0 clock=1899ms of 2000ms looping=true: seek to 0
+and play`; with the fix it passed. GUARD: check-verbs' `loop_end_rows` in the
+media arms, four watched negatives (the shipped unconditional play, the ax
+record, the status record and the loop record each cut).

@@ -12460,7 +12460,12 @@ private func kayaRunScript(_ script: String) {
                 } else if kayaAxRead(ident) == nil {
                     failures.append("ax_action \(parts[1]): \(ident) is not in the accessibility tree")
                 } else if let action = actions.first(where: { $0.0 == name }) {
-                    DispatchQueue.main.sync { action.1() }
+                    DispatchQueue.main.sync {
+                        let p = kayaTarget(parts[1], "video", kayaScene.videos).flatMap { kayaPlayers[$0.videoPlayer] }
+                        KayaVTrace.attempt("ax_action", 0, "-> \(name) on player#\(p?.id ?? 0), before: \(p?.stateText ?? "no player")")
+                        action.1()
+                        KayaVTrace.attempt("ax_action", 0, "<- \(name) ran, after: \(p?.stateText ?? "no player")")
+                    }
                     kayaAwaitAnswer(answered)
                 } else {
                     failures.append(
@@ -32448,6 +32453,7 @@ final class KayaPlayer {
             let status = p.timeControlStatus
             DispatchQueue.main.async {
                 guard let self else { return }
+                KayaVTrace.attempt("player#\(self.id)", 0, "<- timeControlStatus=\(status.rawValue), now \(self.stateText)")
                 switch status {
                 case .playing: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 1) }
                 case .paused: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 0) }
@@ -32461,6 +32467,19 @@ final class KayaPlayer {
             let ms = UInt64(max(0, (t.seconds * 1000).rounded()))
             kayaPlayerReport(self.id) { KayaHost.api.player_position(self.id, ms) }
         }
+    }
+
+    var stateText: String {
+        let status: String
+        switch player.timeControlStatus {
+        case .playing: status = "playing"
+        case .paused: status = "paused"
+        default: status = "waiting"
+        }
+        let clock = player.currentTime()
+        let end = player.currentItem?.duration ?? .invalid
+        return "\(status) rate=\(player.rate) clock=\(clock.isNumeric ? Int(clock.seconds * 1000) : -1)ms"
+            + " of \(end.isNumeric ? Int(end.seconds * 1000) : -1)ms looping=\(looping)"
     }
 
     func release() {
@@ -32543,8 +32562,13 @@ final class KayaPlayer {
             let end = item.duration
             self.askCaption(at: end.isNumeric ? UInt64((end.seconds * 1000).rounded()) : nil)
             if self.looping {
+                // docs/traps.md, the pause the loop undid.
+                let playing = self.player.rate != 0
+                KayaVTrace.attempt(
+                    "player#\(self.id)", 0,
+                    "<- reached its end, \(self.stateText): seek to 0\(playing ? " and play" : ", held paused")")
                 self.player.seek(to: .zero)
-                self.player.play()
+                if playing { self.player.play() }
             } else {
                 kayaPlayerReport(self.id) { KayaHost.api.player_ended(self.id) }
             }

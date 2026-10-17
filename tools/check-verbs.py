@@ -3395,6 +3395,38 @@ def ios_media_rows(code):
     return bad
 
 
+def loop_end_rows(code):
+    """docs/traps.md, the pause the loop undid: a pause landing between the
+    item's end and the end notification's delivery must hold, so the looping
+    branch plays only a player still playing; and the ax action and the end
+    are on the verb trace with the player's state."""
+    bad = []
+    end = re.search(r"forName: AVPlayerItem\.didPlayToEndTimeNotification, object: item.*?"
+                    r"\n            if self\.looping \{(.*?)\n            \} else \{", code, re.S)
+    if end is None:
+        bad.append("KayaPlayer's end observer has no looping branch to read")
+    else:
+        b = end.group(1)
+        held = re.search(r"let (\w+) = self\.player\.rate != 0", b)
+        if held is None or not re.search(
+                r"if " + held.group(1) + r" \{ self\.player\.play\(\) \}", b) \
+                or re.search(r"\n\s*self\.player\.play\(\)", b):
+            bad.append("the looping end restarts with no check that the player was "
+                       "still playing — a pause landing in the ~30 ms before the end "
+                       "notification is undone (docs/traps.md, the pause the loop undid)")
+        if not re.search(r'KayaVTrace\.attempt\(\s*"player#', b):
+            bad.append("the looping end is not on the verb trace")
+    ax = re.search(r'\n            case "ax_action":(.*?)\n            case "', code, re.S)
+    if ax is None or ax.group(1).count('KayaVTrace.attempt("ax_action"') < 2 \
+            or "stateText" not in ax.group(1):
+        bad.append("ax_action does not record what it ran and the player's state "
+                   "before and after on the verb trace")
+    status = re.search(r"player\.observe\(\\\.timeControlStatus.*?\n        \}\n", code, re.S)
+    if status is None or 'KayaVTrace.attempt("player#' not in status.group(0):
+        bad.append("the timeControlStatus observer does not record transitions on the verb trace")
+    return bad
+
+
 def media_arms(swift_src=None, harness_src=None, helper_src=None):
     bad = []
     swift = swift_src if swift_src is not None else real(SWIFT)
@@ -3462,6 +3494,7 @@ def media_arms(swift_src=None, harness_src=None, helper_src=None):
                        "before it can return — macOS routes no media key "
                        "to an app that leaves it stale")
     bad += ios_media_rows(code)
+    bad += loop_end_rows(code)
     hm = re.search(r"const VIDEO_INK_TOLERANCE\s*:\s*\w+\s*=\s*(\d+)\s*;", harness)
     sm = re.search(r"let kayaVideoInkTolerance\b[^=\n]*=\s*(\d+)\b", swift)
     for label, m in (("harness.rs VIDEO_INK_TOLERANCE", hm),
@@ -3520,6 +3553,15 @@ for pattern, repl, label, rel, want in (
      "the picked scope kept past release", SWIFT, 1),
     (r"(// Out of process only[^\n]*\n)", "        _ = SCShareableContent.self\n",
      "an in-process ScreenCaptureKit read", SWIFT, 1),
+    (r"(\n {16}self\.player\.seek\(to: \.zero\)\n) {16}if \w+ \{ self\.player\.play\(\) \}",
+     " " * 16 + "self.player.play()", "the loop restarting a paused player (as shipped)",
+     SWIFT, 1),
+    (r'(\n) {24}KayaVTrace\.attempt\("ax_action", 0, "<- ', " " * 24 + '_ = ("<- ',
+     "the ax action's after state unrecorded", SWIFT, 1),
+    (r'(\n) {16}KayaVTrace\.attempt\("player#\\\(self\.id\)", 0, "<- timeControlStatus',
+     " " * 16 + '_ = ("<- timeControlStatus', "the status transition unrecorded", SWIFT, 1),
+    (r'(\n) {16}KayaVTrace\.attempt\(\n {20}"player#\\\(self\.id\)", 0,\n {20}"<- reached',
+     " " * 16 + "_ = (\n" + " " * 20 + '"<- reached', "the looping end unrecorded", SWIFT, 1),
     (r'(dlsym\(mr, )"MRMediaRemoteSendCommandWithReply"', '"MRMediaRemoteSendCommand"',
      "the helper on the plain asynchronous send", MEDIAREMOTE, 1),
     (r"(long late = )dispatch_semaphore_wait\(replied, [^;]*;", "0;",
