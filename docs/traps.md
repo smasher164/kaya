@@ -15181,6 +15181,38 @@ collapsed to gone and expanded again, three rounds, every reading in the leg
 log. check-exclusive holds the door; a red Android leg's bundle carries
 `shade-history`, SystemUI's three buffers (check-flightrec).
 
+## The reply under a collapsed group (measured 2026-10-17)
+
+chat-go's `notification_reply 7003` failed once in the matrix at d552bc97 with
+`replies=0`. The leg log showed the runner seeing the request, opening the
+shade with focus, and finding a row titled 'Alex' in all nine dumps across
+three tries. No dump had a Reply action near it. On each try the hand tapped
+"the nearest expand button below the title" once and then reported
+"already unfolded". Sam's tap that followed reported "'Sam' sits in a
+collapsed group". The dumps (now in the leg log) show why. Once the
+heads-up banner for Alex's message has gone, Android bundles Sam's and
+Alex's notifications under "Aurora Notes" with a count badge. Each title is
+then a one-line summary inside the group's row, with no actions. The nearest
+chevron below Alex's summary line belonged to the NEXT notification, the
+system's "Set a screen lock", so the hand expanded that one and never opened
+the group. A reply that ran while the banner was still up found Alex's Reply
+action directly, which is why the leg usually passed. Holding the hand 12 s
+or 6 s after the request reproduced the failure 3 of 3 times, every time.
+
+The rule: both shade hands find a collapsed group through `shade_group`,
+which looks for the count badge inside a notification row holding the
+title. The reply hand moves only by `reply_move`, which looks for Reply and
+for a chevron inside the title's OWN row (the innermost
+expandableNotificationRow around it). That takes four dumps: open the
+group, unfold Alex, Reply, then the field. The send button is drawn with
+the field, disabled, at the box it keeps, so no dump follows the typing.
+The hand took 11.2 s idle and 12.6 s beside twelve host spinners, so the
+Compose reply wait is NOTIFY_REPLY_WAIT_MS = 30 s, not the tap's 20 s.
+`reply_move_selftest` runs the three measured dumps (SHADE_DUMPS) when the
+runner starts. check-exclusive runs the same test and watches four cuts go
+red: the shipped nearest-chevron search, the group arm, the own-row scope,
+and the tap hand's group rule.
+
 ## The week-old notification that takes a reinstall's (measured 2026-10-07)
 
 ios `notify-swiftui` read "the platform holds no delivered notification 12"

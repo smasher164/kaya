@@ -641,6 +641,26 @@ def shade_door(runner, tools):
     if misread or wanted != {"gone", "open", "unfocusable", "unreadable"}:
         out.append(f"{rel}: shade_state misread its measured readings {misread} "
                    f"(readings {sorted(wanted)})")
+    # A REPLY UNDER A COLLAPSED GROUP (docs/traps.md): both hands open the
+    # bundle through shade_group, and the reply hand moves by reply_move alone.
+    if "shade_group(" not in py_function(runner, "tap_notification"):
+        out.append(f"{rel}: tap_notification does not open a collapsed group through shade_group")
+    reply = py_function(runner, "reply_notification")
+    if "reply_move(nodes, title)" not in reply or "nearest_below" in reply:
+        out.append(f"{rel}: reply_notification does not choose its tap through reply_move")
+    died = []
+    scope = {"die": died.append}
+    try:
+        exec("\n\n".join(py_def(runner, name) for name in
+                          ("shade_contains", "shade_rows", "shade_group", "reply_move",
+                           "SHADE_DUMPS", "REPLY_MOVES", "reply_move_selftest")), scope)
+        scope["reply_move_selftest"]()
+        cases = len(scope["REPLY_MOVES"])
+    except (KeyError, SyntaxError, NameError, TypeError, IndexError) as why:
+        died, cases = [repr(why)], 0
+    if died or cases < 6:
+        out.append(f"{rel}: reply_move misread the measured shade dumps "
+                   f"({died[0] if died else f'only {cases} case(s)'})")
     return out
 
 
@@ -1281,6 +1301,30 @@ watched("a reply that opens the shade without the door",
         {**REAL, "tools/android/run-emulator.py": _reply},
         "reply_notification does not open the shade through open_shade")
 
+# THE REPLY UNDER A COLLAPSED GROUP: the shipped chevron search, the
+# group arm cut, the own-row scope cut, and the tap hand's group rule cut.
+_near = gate.doctor("the shipped nearest chevron", _runner,
+                    r"            move, box = reply_move\(nodes, title\)\n",
+                    "            move, box = nearest_below(nodes, title)\n")
+watched("a reply hand that taps the nearest chevron below a summary line",
+        {**REAL, "tools/android/run-emulator.py": _near},
+        "reply_notification does not choose its tap through reply_move")
+_nogroup = gate.doctor("the reply's group arm cut", _runner,
+                       r"    badge = shade_group\(nodes, title\)\n    if badge is not None:\n"
+                       r"        return \"group\", badge\n", "")
+watched("a reply hand blind to a collapsed group",
+        {**REAL, "tools/android/run-emulator.py": _nogroup}, "reply_move misread")
+_unscoped = gate.doctor("the own-row scope cut", _runner,
+                        r"inside = \[n for n in nodes if shade_contains\(rows\[0\], n\[3\]\)\]",
+                        "inside = nodes")
+watched("a reply hand that reads another notification's chevron",
+        {**REAL, "tools/android/run-emulator.py": _unscoped}, "reply_move misread")
+_tapgroup = gate.doctor("the tap's group rule cut", _runner,
+                        r"badge = shade_group\(shade_nodes\(dump\), title\)", "badge = None")
+watched("a tap hand that taps a summary line",
+        {**REAL, "tools/android/run-emulator.py": _tapgroup},
+        "tap_notification does not open a collapsed group through shade_group")
+
 # 31-33. THE IDLE WAITS COUNTED AGAINST THE CEILING AGAIN.
 _unnetted = gate.doctor("the idle seconds cut from validate-all's net",
                         REAL["tools/validate-all.py"],
@@ -1329,7 +1373,7 @@ for _label, _pattern, _repl, _want in (
 from netimage_server_routes import run as check_netimage_server_routes  # noqa: E402
 check_netimage_server_routes(gate)
 
-gate.negatives_ran(67)
+gate.negatives_ran(71)
 
 gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",

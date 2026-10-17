@@ -5682,18 +5682,23 @@ object KayaCompose {
      * sentence saying what was seen, since a shade that never opened and
      * a row the runner could not find look identical from in here.
      * 20s, the drag's own budget: the runner's poll is half a second and
-     * a uiautomator dump takes ~2s of it.
+     * a uiautomator dump takes ~2s of it. The reply's budget is
+     * [NOTIFY_REPLY_WAIT_MS].
      */
     private fun kayaAwaitNotificationReply(before: Int): String? {
-        val deadline = System.nanoTime() + 20_000L * 1_000_000
+        val deadline = System.nanoTime() + NOTIFY_REPLY_WAIT_MS * 1_000_000
         while (System.nanoTime() < deadline) {
             if (kayaNotificationReplies != before) return null
             Thread.sleep(RETRY_PERIOD_MS)
         }
-        return "no reply reached this process in 20000ms — the runner expands " +
+        return "no reply reached this process in ${NOTIFY_REPLY_WAIT_MS}ms — the runner expands " +
             "the shade off the KAYA_REQUEST line, finds the row by its title, taps " +
             "its Reply action, types the text and sends it; replies=$kayaNotificationReplies"
     }
+
+    // A reply under a collapsed group takes four shade dumps (docs/traps.md,
+    // "The reply under a collapsed group"): 12.6 s measured beside load.
+    private const val NOTIFY_REPLY_WAIT_MS = 30_000L
 
     private fun kayaAwaitNotificationActivation(before: Int): String? {
         val deadline = System.nanoTime() + 20_000L * 1_000_000

@@ -3068,17 +3068,13 @@ def tap_notification(serial, title, log):
                     return f"the shade never opened with focus again ({said})"
                 continue
             centre = shade_row_centre(dump, title)
-            # A COLLAPSED GROUP TAKES THE TAP FOR ITSELF: two of an app's
-            # notifications are bundled under its name with a count badge
-            # (the chat app's Sam and Alex, measured 2026-09-27), and a tap on
-            # a title in the bundle's summary expands it and opens nothing.
-            # The bundle is opened first; the row is then tapped across its
-            # middle, where the title's own text node did not activate either.
-            badge = next((n for n in shade_nodes(dump)
-                          if n[2].endswith("expand_button_number")), None)
-            if centre is not None and badge is not None and badge[3][1] < centre[1]:
-                bx = (badge[3][0] + badge[3][2]) // 2
-                by = (badge[3][1] + badge[3][3]) // 2
+            # A collapsed group (shade_group) is opened first; the row is then
+            # tapped across its middle, where the title's own text node did not
+            # activate (measured 2026-09-27).
+            badge = shade_group(shade_nodes(dump), title)
+            if centre is not None and badge is not None:
+                bx = (badge[0] + badge[2]) // 2
+                by = (badge[1] + badge[3]) // 2
                 adb(serial, "shell", "input", "tap", str(bx), str(by), stdout=log, stderr=log)
                 print(f"run-emulator: {title!r} sits in a collapsed group; expanded it at "
                       f"{bx},{by}", file=log)
@@ -3116,6 +3112,143 @@ def shade_nodes(dump):
     return nodes
 
 
+def shade_contains(outer, inner):
+    return (outer[0] <= inner[0] and outer[1] <= inner[1]
+            and inner[2] <= outer[2] and inner[3] <= outer[3])
+
+
+def shade_rows(nodes, title):
+    """The notification rows holding the node whose text is `title`,
+    innermost first; empty when no node reads `title`."""
+    node = next((n for n in nodes if n[0] == title), None)
+    if node is None:
+        return []
+    rows = [n[3] for n in nodes if n[2].endswith("expandableNotificationRow")
+            and shade_contains(n[3], node[3])]
+    return sorted(rows, key=lambda b: (b[2] - b[0]) * (b[3] - b[1]))
+
+
+def shade_group(nodes, title):
+    """The count badge of the COLLAPSED GROUP holding `title`'s row, or
+    None: two of an app's notifications are bundled under its name, the
+    titles are summary lines carrying no actions, and the badge opens the
+    bundle (docs/traps.md, the reply under a collapsed group)."""
+    for row in shade_rows(nodes, title):
+        badge = next((n[3] for n in nodes if n[2].endswith("expand_button_number")
+                      and n[0] and shade_contains(row, n[3])), None)
+        if badge is not None:
+            return badge
+    return None
+
+
+def reply_move(nodes, title):
+    """What the reply hand does next with one dump: ("absent", None),
+    ("group", badge), ("reply", action), ("unfold", the row's own chevron)
+    or ("stuck", None). Only the row's OWN notification is searched, since
+    the nearest chevron below a summary line is the next app's."""
+    rows = shade_rows(nodes, title)
+    if not rows:
+        return "absent", None
+    badge = shade_group(nodes, title)
+    if badge is not None:
+        return "group", badge
+    inside = [n for n in nodes if shade_contains(rows[0], n[3])]
+    button = next((n[3] for n in inside if "reply" in (n[0].lower(), n[1].lower())), None)
+    if button is not None:
+        return "reply", button
+    chevron = next((n[3] for n in inside if n[2].endswith("expand_button")), None)
+    return ("unfold", chevron) if chevron is not None else ("stuck", None)
+
+
+# Three uiautomator dumps of the chat leg's shade, cut to the nodes the
+# shade hands read (emulator-5560, 2026-10-17): Sam and Alex bundled and
+# collapsed, the bundle opened with Alex folded, and Alex unfolded.
+SHADE_DUMPS = {
+    'collapsed': [
+        ('', '', 'expandableNotificationRow', (16, 216, 344, 326)),
+        ('Aurora Notes', '', 'app_name_text', (68, 235, 140, 252)),
+        ('', 'Expand', 'expand_button', (273, 216, 344, 272)),
+        ('2', '', 'expand_button_number', (289, 232, 304, 256)),
+        ('', '', 'expandableNotificationRow', (16, 264, 344, 283)),
+        ('Alex', '', 'notification_title', (68, 264, 98, 283)),
+        ('', '', 'expandableNotificationRow', (16, 291, 344, 310)),
+        ('Sam', '', 'notification_title', (68, 291, 100, 310)),
+        ('', '', 'expandableNotificationRow', (16, 328, 344, 411)),
+        ('Set a screen lock', '', 'title', (68, 348, 172, 367)),
+        ('', 'Expand', 'expand_button', (288, 328, 344, 411)),
+        ('', '', 'expandableNotificationRow', (16, 479, 344, 562)),
+        ('Serial console enabled', '', 'title', (68, 499, 205, 518)),
+        ('', 'Expand', 'expand_button', (288, 479, 344, 562)),
+    ],
+    'group_open': [
+        ('', '', 'expandableNotificationRow', (16, 216, 344, 438)),
+        ('Aurora Notes', '', 'app_name_text', (68, 235, 140, 252)),
+        ('', 'Collapse', 'expand_button', (288, 216, 344, 272)),
+        ('', '', 'expandableNotificationRow', (16, 272, 344, 355)),
+        ('Alex', '', 'title', (68, 292, 94, 311)),
+        ('', 'Expand', 'expand_button', (288, 272, 344, 355)),
+        ('', '', 'expandableNotificationRow', (16, 355, 344, 438)),
+        ('Sam', '', 'title', (68, 375, 96, 394)),
+        ('', 'Expand', 'expand_button', (288, 355, 344, 438)),
+        ('', '', 'expandableNotificationRow', (16, 440, 344, 523)),
+        ('Set a screen lock', '', 'title', (68, 460, 172, 479)),
+        ('', 'Expand', 'expand_button', (288, 440, 344, 523)),
+        ('', '', 'expandableNotificationRow', (16, 591, 344, 674)),
+        ('', 'Expand', 'expand_button', (288, 591, 344, 674)),
+    ],
+    'unfolded': [
+        ('', '', 'expandableNotificationRow', (16, 216, 344, 513)),
+        ('Aurora Notes', '', 'app_name_text', (68, 235, 140, 252)),
+        ('', 'Collapse', 'expand_button', (288, 216, 344, 272)),
+        ('', '', 'expandableNotificationRow', (16, 272, 344, 430)),
+        ('', 'Collapse', 'expand_button', (288, 272, 344, 328)),
+        ('Alex', '', 'title', (68, 322, 328, 344)),
+        ('Reply', 'Reply', 'action0', (56, 376, 114, 424)),
+        ('', '', 'expandableNotificationRow', (16, 430, 344, 513)),
+        ('Sam', '', 'title', (68, 450, 96, 469)),
+        ('', 'Expand', 'expand_button', (288, 430, 344, 513)),
+        ('', '', 'expandableNotificationRow', (16, 515, 344, 598)),
+        ('Set a screen lock', '', 'title', (68, 535, 172, 554)),
+        ('', 'Expand', 'expand_button', (288, 515, 344, 598)),
+    ],
+}
+
+REPLY_MOVES = {
+    ("collapsed", "Alex"): ("group", (289, 232, 304, 256)),
+    ("collapsed", "Sam"): ("group", (289, 232, 304, 256)),
+    ("group_open", "Alex"): ("unfold", (288, 272, 344, 355)),
+    ("group_open", "Sam"): ("unfold", (288, 355, 344, 438)),
+    ("unfolded", "Alex"): ("reply", (56, 376, 114, 424)),
+    ("unfolded", "Maya"): ("absent", None),
+}
+
+
+def reply_move_selftest():
+    wrong = {key: reply_move(SHADE_DUMPS[key[0]], key[1]) for key, want in REPLY_MOVES.items()
+             if reply_move(SHADE_DUMPS[key[0]], key[1]) != want}
+    if wrong:
+        die(f"run-emulator: SELF-TEST FAIL — reply_move misread the measured shade dumps "
+            f"{wrong} (wanted REPLY_MOVES)")
+
+
+reply_move_selftest()
+
+
+SHADE_SHAPES = {"expandableNotificationRow", "notification_children_container", "actions",
+                "remote_input_text", "remote_input_send"}
+
+
+def shade_reading(nodes):
+    """Every node that names something, top to bottom, as
+    `'text'[resource-id]@top`: what a shade hand saw when it gave up."""
+    said = []
+    for text, desc, rid, box in sorted(nodes, key=lambda n: (n[3][1], n[3][0])):
+        tail = rid.rsplit("/", 1)[-1]
+        if text or desc or tail in SHADE_SHAPES:
+            said.append(f"{text or desc!r}" + (f"[{tail}]" if tail else "") + f"@{box[1]}")
+    return ", ".join(said)
+
+
 def reply_notification(serial, title, text, log):
     """THE `notification_reply` VERB'S HAND (docs/notification-reply-plan.md
     §4), tap_notification's shape one action over: expand the shade, find
@@ -3134,56 +3267,59 @@ def reply_notification(serial, title, text, log):
         x, y = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
         adb(serial, "shell", "input", "tap", str(x), str(y), stdout=log, stderr=log)
 
-    def nearest_below(nodes, row, match):
-        hits = [n for n in nodes if match(n) and n[3][1] >= row[1] - 8]
-        return min(hits, key=lambda n: n[3][1] - row[1], default=None)
+    began = time.monotonic()
+
+    def since():
+        return int((time.monotonic() - began) * 1000)
 
     try:
         opened, said = open_shade(serial, log)
         if not opened:
             return f"the shade never opened with focus ({said})"
-        unfolded = False
-        for attempt in range(1, 4):
+        unfolded, saw = False, []
+        for attempt in range(1, 5):
             time.sleep(0.6)
             nodes = dump()
-            row = next((n[3] for n in nodes if n[0] == title), None)
-            if row is None:
-                texts = sorted({n[0] for n in nodes if n[0]})
-                print(f"run-emulator: the shade dump {attempt} on {serial} carries no "
-                      f"row {title!r}; it reads {texts}", file=log)
-                continue
-            button = nearest_below(nodes, row, lambda n: "reply" in (n[0].lower(), n[1].lower()))
-            if button is None:
-                chevron = nearest_below(nodes, row, lambda n: n[2].endswith("expand_button"))
-                if chevron is None:
-                    texts = sorted({n[0] or n[1] for n in nodes if n[0] or n[1]})
-                    return (f"the row {title!r} shows no Reply action and no expand "
-                            f"button to reveal one; the shade reads {texts}")
-                did = "already unfolded" if unfolded else "unfolded it"
-                if not unfolded:
-                    tap(chevron[3])
+            move, box = reply_move(nodes, title)
+            saw.append(move)
+            if move == "stuck":
+                return (f"the row {title!r} shows no Reply action and no expand button "
+                        f"of its own; the shade reads {shade_reading(nodes)}")
+            if move in ("absent", "group", "unfold"):
+                did = {"absent": "nothing to tap",
+                       "group": f"its group is collapsed; opened it at the badge {box}",
+                       "unfold": ("already unfolded" if unfolded
+                                  else f"unfolded its own row at {box}")}[move]
+                if move == "group":
+                    tap(box)
+                    unfolded = False
+                elif move == "unfold" and not unfolded:
+                    tap(box)
                     unfolded = True
-                print(f"run-emulator: the shade dump {attempt} on {serial} shows {title!r} "
-                      f"with no Reply action; {did}", file=log)
+                print(f"run-emulator: the shade dump {attempt} on {serial} at +{since()}ms "
+                      f"shows no Reply action under {title!r} ({move}); {did}; it reads "
+                      f"{shade_reading(nodes)}", file=log)
                 continue
-            tap(button[3])
+            tap(box)
             time.sleep(0.8)
             nodes = dump()
             if not any(n[2].endswith("remote_input_text") for n in nodes):
                 ids = sorted({n[2] for n in nodes if n[2]})
                 return (f"tapping the Reply action under {title!r} opened no reply "
                         f"field; the shade's ids read {ids}")
+            # The send button is drawn with the field, disabled until text
+            # arrives, at the box it keeps (measured 2026-10-17).
+            send = next((n for n in nodes if n[2].endswith("remote_input_send")), None)
             typed = text.replace("%", "%%").replace(" ", "%s")
             adb(serial, "shell", "input", "text", shlex.quote(typed), stdout=log, stderr=log)
             time.sleep(0.4)
-            nodes = dump()
-            send = next((n for n in nodes if n[2].endswith("remote_input_send")), None)
             if send is None:
                 adb(serial, "shell", "input", "keyevent", "ENTER", stdout=log, stderr=log)
-                return f"typed {text!r} under {title!r} and sent it with Enter (no send button)"
+                return (f"typed {text!r} under {title!r} and sent it with Enter (no send "
+                        f"button) at +{since()}ms")
             tap(send[3])
-            return f"typed {text!r} under {title!r} and pressed its send button"
-        return f"no row reading {title!r} in three shade dumps"
+            return f"typed {text!r} under {title!r} and pressed its send button at +{since()}ms"
+        return f"no Reply action under {title!r} in four shade dumps (each read: {', '.join(saw)})"
     finally:
         adb(serial, "shell", "cmd", "statusbar", "collapse", stdout=log, stderr=log)
 
