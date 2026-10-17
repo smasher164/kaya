@@ -129,12 +129,23 @@ def host_sentence(ps_text, ps_problem, load, boot_text, boot_problem, now, cores
             f"{busiest(rows) or 'nothing above 0%'}")
 
 
+def thermal_sentence(text, problem):
+    if problem:
+        return f"thermal state unreadable ({problem})"
+    said = [" ".join(line.split()).removeprefix("Note: ") for line in (text or "").splitlines()
+            if line.strip()]
+    if not said:
+        return "thermal state unreadable (pmset -g therm printed nothing)"
+    return "thermal (pmset -g therm): " + "; ".join(said)
+
+
 def host_line():
     t0 = time.monotonic()
     ps_text, ps_problem = host_ps_text()
     boot_text, boot_problem = host_boot_text()
     sentence = host_sentence(ps_text, ps_problem, os.getloadavg(), boot_text,
                              boot_problem, time.time(), os.cpu_count())
+    sentence += "; " + thermal_sentence(*_run(["pmset", "-g", "therm"]))
     return sentence, int((time.monotonic() - t0) * 1000)
 
 
@@ -1320,6 +1331,15 @@ def drive():
     cases.append(("host idle", "busiest now (ps's decaying share): nothing above 0%",
                   [host_sentence("  1 0 1:00 0:01.00 0.0 /sbin/launchd\n", None, (1, 1, 1),
                                  boot, None, 4600, 8)]))
+    cases.append(("thermal", "thermal (pmset -g therm): CPU_Scheduler_Limit = 100; CPU_Speed_Limit = 62; CPU_Available_CPUs = 12",
+                  [thermal_sentence("CPU_Scheduler_Limit \t= 100\nCPU_Speed_Limit = 62\n"
+                                    "CPU_Available_CPUs = 12\n", None)]))
+    cases.append(("thermal nominal", "thermal (pmset -g therm): No thermal warning level has been recorded",
+                  [thermal_sentence("Note: No thermal warning level has been recorded\n", None)]))
+    cases.append(("thermal no pmset", "thermal state unreadable (pmset exited 1",
+                  [thermal_sentence("", "pmset exited 1: x")]))
+    cases.append(("thermal silent", "thermal state unreadable (pmset -g therm printed nothing)",
+                  [thermal_sentence("\n", None)]))
     ios = ios_sentences(PS, ARGS, ["AAAA", "BBBB", "CCCC"])
     cases.append(("simulator", "simulator AAAA: up 1h00m (its launchd_sim), 2 processes; "
                   "busiest now: searchd 40%; most CPU since boot: searchd 30s, kaya 2s", ios))
