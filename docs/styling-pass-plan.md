@@ -443,6 +443,17 @@ On the macOS native table tier (an `NSTableView`), `on_activate` on the row
 template is the table's own double-click action and `selected` is the table's
 own selection, bound both ways; kaya paints nothing over a native row.
 
+AMENDED 2026-10-17 (the maintainer, "im okay with your recommendations"): on
+the macOS native table a user's click, and the arrow keys, move the table's
+own selection as any Mac table does, and the app is TOLD through a new
+selection-changed occurrence naming the row; the app's `selected` writes still
+set it. Return and a double-click activate the selected row. The first build
+(f188caba) refused a user's click so the table showed only the app's
+selection, which left a single click and the arrows doing nothing; that is
+replaced. The occurrence is a spec change, so it is swept across the nine
+bindings and the other tiers decide whether a press there also reports it.
+KEY: selection_changed, native table selection, doubleAction.
+
 Why: the sidebar rows, the cards and the track rows are all "a surface that
 takes a click and shows I am over it or on it", and today the only clickable
 thing is a button, which is why the task manager carries a details button in
