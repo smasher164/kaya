@@ -109,11 +109,29 @@ public static class KayaRelaunchDoor {
 }
 '@
 
+# EVERY GUEST STILL ALIVE AT THE PUSH, and again at a refusal: one held in
+# termination keeps the shared class registered, and COM routes the push to it
+# (docs/traps.md, the toast activator a terminating process kept).
+function Write-Guests([string]$When) {
+    $guests = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                Where-Object { $_.ExecutablePath -like 'C:\kaya\*' })
+    if ($guests.Count -eq 0) {
+        Write-Output "relaunch-com: $When, no process from C:\kaya is alive"
+    }
+    foreach ($p in $guests) {
+        Write-Output "relaunch-com: $When, alive: pid $($p.ProcessId) $($p.Name) threads=$($p.ThreadCount) handles=$($p.HandleCount) started=$($p.CreationDate.ToString('o')) cmd=$($p.CommandLine)"
+    }
+}
+$server = (Get-ItemProperty -LiteralPath "HKCU:\Software\Classes\CLSID\$Clsid\LocalServer32" -ErrorAction SilentlyContinue).'(default)'
+Write-Output "relaunch-com: HKCU LocalServer32 of $Clsid = $(if ($server) { $server } else { 'absent' })"
+Write-Guests 'at the push'
+
 $t0 = Get-Date
 $answer = [KayaRelaunchDoor]::Push($Clsid, $Aumid, $Launch)
 $ms = [int]((Get-Date) - $t0).TotalMilliseconds
 Write-Output "relaunch-com: $Clsid Activate('$Aumid', '$Launch') -> $answer in ${ms}ms"
 if ($answer -ne 'OK') {
+    Write-Guests 'at the refusal'
     Write-Output 'relaunch-com: the door did not open, so act two never started'
     Write-Output 'RELAUNCHDONE'
     exit 1

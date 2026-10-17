@@ -17127,3 +17127,31 @@ the owner that dies here never dumps its ring and the redirector, a child the sh
 started, has no log a runner keeps; it inherits `KAYA_VERB_TRACE` from the guest that
 called ShellExecute. GUARD: tools/lib/link_door_routes.py (check-verbs), four cuts
 watched, the shipped form among them.
+
+## The toast activator a terminating process kept (measured 2026-10-17)
+
+windows tasks_rust failed 3 of 3 when chat_go ran before it (a hand-picked order;
+the lane runs chat_go long after tasks): act one green, then the COM door's
+`CoCreateInstance` of `{E92B7311-…}` failed 0x8007000E (E_OUTOFMEMORY) after
+38-41 s and act two never started. Bisected on an unloaded VM: badge_rust then
+tasks_rust passes, chat_go then tasks_rust fails. Every guest declares
+`dev.kaya.aurora.notes`, so every unpackaged guest registers the SAME activator
+class with `REGCLS_MULTIPLEUSE`, and the cookie was dropped. chat_go publishes its
+verdict and then stays in kernel-held termination (KAYA_LINGER; "exit() is not
+final on Windows" above): Win32_Process listed `chat_go.exe threads=1
+handles=1318` 40 s later. The SCM still held its registration and sent the next
+activation to it. A hand push of the door while chat_go lingered failed in
+38406 ms; the corpse was gone right after, and the next push 1 s later opened
+in 184 ms. The HKCU LocalServer32 was correct (`tasks.exe`) all along, there was
+no DCOM 10010 and no Application event, so neither log names this cause.
+
+The registration now keeps its cookie and `withdraw_activator` revokes it
+(`CoRevokeClassObject` on a fresh MTA thread, 2 s bound) after
+`Application::Start` returns and in `exit_hard` before `TerminateProcess`. With
+the fix chat_go still lingers, but the door opens in 182 ms; with the exit_hard
+call cut, the same order is red again. The door records every process from
+C:\kaya alive at the push and at a refusal, with its thread and handle counts,
+plus the class's LocalServer32 (relaunch-com.ps1, in the leg log). The forced
+red read back `at the push, alive: pid 4236 chat_go.exe threads=1
+handles=1319`. GUARD: tools/lib/activator_routes.py (check-verbs), nine
+clauses, five cuts watched, the dropped cookie as shipped among them.

@@ -19131,6 +19131,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     tx_rx_put(tx_rx);
 
     Application::Start(&callback).expect("Application::Start failed");
+    withdraw_activator();
 
     // Start has returned; XAML has torn down its apartment. Rust TLS
     // destructors still run during process::exit on Windows, and releasing
@@ -31142,6 +31143,49 @@ fn register_unpackaged_activator(id: &str, braced: &str) -> Result<bool, String>
 /// The door's state, decided once: the braced class id when the activator is
 /// live, or the reason it is not.
 static ACTIVATOR: OnceLock<Result<String, String>> = OnceLock::new();
+/// The registration's cookie, 0 while none is live: a process leaving revokes
+/// it first (docs/traps.md, the toast activator a terminating process kept).
+static ACTIVATOR_COOKIE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// THE CLASS OBJECT WITHDRAWN BEFORE THE PROCESS LEAVES. A process held in
+/// termination keeps its registration in the SCM's class table, and every guest
+/// shares one class id, so the next activation is routed to the corpse and
+/// fails 0x8007000E after ~39 s (docs/traps.md). On a fresh MTA thread, since
+/// the caller may be the UI thread's STA, and bounded, since this runs on the
+/// exit path.
+pub(crate) fn withdraw_activator() {
+    use std::sync::atomic::Ordering;
+    let cookie = ACTIVATOR_COOKIE.swap(0, Ordering::SeqCst);
+    if cookie == 0 {
+        return;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new().name("kaya-withdraw".into()).spawn(move || {
+        const COINIT_MULTITHREADED: u32 = 0x0;
+        unsafe { CoInitializeEx(std::ptr::null(), COINIT_MULTITHREADED) };
+        let _ = tx.send(unsafe { windows::Win32::System::Com::CoRevokeClassObject(cookie) });
+    });
+    let answer = match spawned {
+        Ok(_) => rx.recv_timeout(std::time::Duration::from_secs(2)),
+        Err(e) => {
+            eprintln!("kaya: winui could not start the thread that revokes the toast activator: {e}");
+            return;
+        }
+    };
+    match answer {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!(
+            "kaya: winui CoRevokeClassObject({cookie:#x}) failed {:#010x} {} — the SCM keeps \
+             routing this app's activations here until the process is gone",
+            e.code().0 as u32,
+            e.message()
+        ),
+        Err(_) => eprintln!(
+            "kaya: winui CoRevokeClassObject({cookie:#x}) did not return in 2s; leaving with the \
+             toast activator still registered"
+        ),
+    }
+}
 
 fn activator() -> &'static Result<String, String> {
     ACTIVATOR.get_or_init(activator_install)
@@ -31161,7 +31205,7 @@ fn activator_install() -> Result<String, String> {
         register_unpackaged_activator(&declared_app_id()?, &braced)?;
     }
     let factory: IClassFactory = KayaToastActivatorFactory.into();
-    unsafe { CoRegisterClassObject(&clsid, &factory, CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE) }
+    let cookie = unsafe { CoRegisterClassObject(&clsid, &factory, CLSCTX_LOCAL_SERVER, REGCLS_MULTIPLEUSE) }
         .map_err(|e| {
             format!(
                 "CoRegisterClassObject({braced}) failed: {:#010x} {}",
@@ -31169,6 +31213,7 @@ fn activator_install() -> Result<String, String> {
                 e.message()
             )
         })?;
+    ACTIVATOR_COOKIE.store(cookie, std::sync::atomic::Ordering::SeqCst);
     Ok(braced)
 }
 

@@ -338,6 +338,8 @@ pub(crate) fn exit_hard(code: i32) -> ! {
     let _ = std::io::stderr().flush();
     let _ = std::io::stdout().flush();
     #[cfg(windows)]
+    winui::withdraw_activator();
+    #[cfg(windows)]
     unsafe {
         #[link(name = "kernel32")]
         unsafe extern "system" {
