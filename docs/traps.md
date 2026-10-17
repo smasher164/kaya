@@ -11967,7 +11967,8 @@ completes on a pool thread in an MTA and through the message queue in an
 STA — a caller blocking in `WaitForSingleObject` never sees it and
 `GetResults()` answers E_ILLEGAL_METHOD_CALL with the URI already
 delivered; the redirecting process may exit the instant the call
-RETURNS. `start "" "<scheme>://…"` starts a new process every time
+RETURNS — UNLOADED ONLY: under load that exit loses the link and kills the
+owner (the entry "The link redirect that exited before its owner read it"). `start "" "<scheme>://…"` starts a new process every time
 (8/8), a direct child of the calling cmd with its environment — unlike
 the COM door's LocalServer32 — so a link door can set the leg's variables
 in its own .cmd; the URL cannot be a `%1` there (`=` splits, `&` is an
@@ -16923,6 +16924,16 @@ GUARD: tools/lib/skin_routes.py's four CALLS and three cuts beside them
 ("an unmade row measured at the floor", "the first band sized at the floor",
 "a reused view kept by the node it drew before").
 
+MEASURING FIRST WAS NOT WAITING (the matrix at 145acc68, netimage-c): the first
+report's `measureRows` found no row with cells AppKit had made, measured nothing,
+and the report went on to send `window_moved first=0 count=12`, twelve rows at the
+24 pt floor; the 48 pt heights arrived 67 ms later and the band shrank to 6,
+releasing rows 6-11 before any scroll. The first report now waits while any stamped
+visible row has no extent in the core, re-asking every 16 ms up to 60 times, and its
+`band#<id>` trace says each wait and, past the bound, which rows it reported over.
+GUARD: skin_routes' "not reported over a stamped row with no cell" and "counts
+every stamped row with no height", each cut watched.
+
 ## The frame anchor that took the hit, and the mac table's rows left at the floor (measured 2026-10-16)
 
 The styling breadth put `KayaSkinFrameReader`, a bare NSViewRepresentable, behind
@@ -17098,3 +17109,21 @@ WinUI, SwiftUI and Compose refuses a probed frame its ancestors do not show
 whole (harness.rs's unseen_probe, its sentences; tools/lib/skin_routes.py's
 VISIBLE and nine cuts), and tools/scenes/netimage.steps reads the first row's
 shape, unscrolled.
+
+## The link redirect that exited before its owner read it (measured 2026-10-17)
+
+windows links_rust (the matrix at 145acc68): the warm `open_link` to task/t2 never
+reached the running app (`entries 0` for 30 s), and the app died 0.4-0.6 s into the
+NEXT link with 0xc0000409, faulting module ucrtbase.dll, with no panic text and no
+verb trace. The shell-started redirector called `RedirectActivationToAsync` and left
+through `exit_hard` the instant the call returned, as the 2026-09-09 entry above
+allowed. Reproduced with HEAD's code and four CPU spinners on the 6-vCPU VM: 4 of 5
+legs red, one of them the matrix's red to the step (lost link, then the crash); the
+others lost or delayed a link. The redirector now joins the action on the MTA
+(`on_notify`, 15 s bound) before it leaves, which completes in 5-9 ms once the owner
+has read it: 6 of 6 green under the same load. Both halves write a line straight to
+the leg's verb-trace file (`link_redirect`, `link_activated`, `vtrace::line`), because
+the owner that dies here never dumps its ring and the redirector, a child the shell
+started, has no log a runner keeps; it inherits `KAYA_VERB_TRACE` from the guest that
+called ShellExecute. GUARD: tools/lib/link_door_routes.py (check-verbs), four cuts
+watched, the shipped form among them.

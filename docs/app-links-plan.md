@@ -140,7 +140,9 @@ a served domain.
 2. **Windows: YES.** `start "" "<scheme>://…"` starts a second process every
    time; `GetActivatedEventArgs().Kind()` is Protocol with the URI byte for
    byte; `RedirectActivationToAsync` reaches the owner's `Activated` in 1-9
-   ms and the redirector may exit as soon as the call returns; no message
+   ms; the redirector joins the call on the MTA before it exits, since
+   leaving at the return loses the link under load (docs/traps.md, the link
+   redirect that exited before its owner read it); no message
    pump needed on either side; the apartment changes only who completes
    the async action. The activated process is a child of the calling cmd
    and inherits its environment, so the lane's door can carry

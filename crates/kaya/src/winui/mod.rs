@@ -31379,21 +31379,32 @@ fn links_startup_once() {
     let Some(keyed) = become_owner() else { return };
     if !keyed.IsCurrent().unwrap_or(false) {
         let owner = keyed.ProcessId().unwrap_or(0);
-        eprintln!(
-            "kaya: winui redirects {url} to the running app (pid {owner}) and exits"
-        );
-        // MEASURED 2026-09-09: the owner's handler has already run by the time
-        // this returns (8 of 8 activations), and the returned IAsyncAction is
-        // a different matter — in an STA its completion rides the apartment's
-        // message queue, so waiting for it here would hang a process that is
-        // meant to be invisible. Exit at the return, never before it.
-        match keyed.RedirectActivationToAsync(&args) {
-            Ok(_action) => {}
-            Err(e) => eprintln!(
-                "kaya: winui could not redirect {url} to pid {owner}: {} — the link reaches \
-                 neither process",
-                e.message()
-            ),
+        let said = |text: String| {
+            eprintln!("kaya: winui {text}");
+            #[cfg(feature = "harness")]
+            crate::vtrace::line(&format!("link_redirect pid={} {text}", std::process::id()));
+        };
+        said(format!("redirects {url} to the running app (pid {owner})"));
+        // THE REDIRECT COMPLETES BEFORE THIS PROCESS LEAVES, waited for on the
+        // MTA (docs/traps.md, the link redirect that exited before its owner
+        // read it).
+        let started = std::time::Instant::now();
+        let target = keyed.clone();
+        let handed = on_notify(move || {
+            target
+                .RedirectActivationToAsync(&args)
+                .and_then(|action| action.join())
+                .map_err(|e| format!("{:#010x} {}", e.code().0 as u32, e.message()))
+        });
+        let ms = started.elapsed().as_millis();
+        match handed {
+            Some(Ok(())) => said(format!("redirected {url} to pid {owner}; the redirect completed in {ms}ms")),
+            Some(Err(why)) => said(format!(
+                "could not redirect {url} to pid {owner} after {ms}ms: {why} — the link reaches neither process"
+            )),
+            None => said(format!(
+                "redirect of {url} to pid {owner} had not completed after {ms}ms; this process leaves with it outstanding"
+            )),
         }
         crate::exit_hard(0);
     }
@@ -31476,7 +31487,11 @@ fn become_owner() -> Option<&'static AppInstance> {
                 AppActivationArguments,
             >::new(|_sender, args: windows_core::Ref<'_, AppActivationArguments>| {
                 match args.as_ref().map(activation_url) {
-                    Some(Ok(url)) => crate::links::opened(&url),
+                    Some(Ok(url)) => {
+                        #[cfg(feature = "harness")]
+                        crate::vtrace::line(&format!("link_activated pid={} url={url}", std::process::id()));
+                        crate::links::opened(&url)
+                    }
                     Some(Err(why)) => eprintln!("kaya: winui was activated with no link — {why}"),
                     None => eprintln!("kaya: winui was activated with null arguments"),
                 }

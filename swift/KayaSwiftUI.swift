@@ -17470,6 +17470,10 @@ private struct KayaNativeTable: View {
                 measureRows(presumed)
             }
             let visible = visibleRows()
+            if reported == nil, firstBandWaits(visible) {
+                recordGeometry(visible)
+                return
+            }
             if reported.map({ !NSEqualRanges($0, visible) }) ?? true {
                 reported = visible
                 KayaVTrace.attempt("band#\(node.id)", 0, "-> window_moved first=\(visible.location) count=\(visible.length) viewport=\(kayaRectText(visibleRect())) scroll=\(kayaRectText(scrollView.frame))")
@@ -17477,6 +17481,29 @@ private struct KayaNativeTable: View {
             }
             measureRows(visible)
             recordGeometry(visible)
+        }
+
+        /// docs/traps.md, the mac table's first band at the floor: a stamped
+        /// visible row whose cells AppKit has not made has no height yet, and a
+        /// band reported over it is sized at the floor.
+        private var firstBandWaited = 0
+        private static let firstBandWaitBound = 60
+
+        private func firstBandWaits(_ visible: NSRange) -> Bool {
+            var unmade: [Int] = []
+            for offset in 0..<visible.length {
+                let row = visible.location + offset
+                if self.row(at: row) != nil, KayaHost.rowExtent(node.id, row) == 0 { unmade.append(row) }
+            }
+            if unmade.isEmpty { return false }
+            if firstBandWaited >= Self.firstBandWaitBound {
+                KayaVTrace.attempt("band#\(node.id)", firstBandWaited, "<- first band reported over \(unmade.count) unmeasured row(s) \(unmade.first!)...\(unmade.last!) after \(firstBandWaited) waits; their cells were never made")
+                return false
+            }
+            firstBandWaited += 1
+            KayaVTrace.attempt("band#\(node.id)", firstBandWaited, "<- first band waits: \(unmade.count) of \(visible.length) visible row(s) stamped with no cell made (\(unmade.first!)...\(unmade.last!))")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.016) { [weak self] in self?.scheduleReport() }
+            return true
         }
 
         private func reparkAnchor() {
