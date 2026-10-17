@@ -149,11 +149,19 @@ IDLE_SAYS = {
     "returned-held": ("in use again", "NOT RUN"),
     "deferred": ("HIDIdleTime {idle}", "deferred to the lane's end"),
     "under-token": ("holds the matrix-wide token", "before exclusive.hold()"),
+    "np-deferred": ("Now Playing is {holder}", "deferred to the lane's end"),
+    "np-waiting": ("Now Playing — {holder}", "(waited {waited}s of {bound}s)"),
+    "np-cleared": ("Now Playing — {holder}",),
+    "np-held": ("still {holder}", "NOT RUN"),
+    "np-returned-held": ("was {holder}", "NOT RUN"),
 }
 # Which function must print each key; the rest are idle_wait's.
 IDLE_SAYS_IN = {"summary": "idle_summary", "returned": "idle_admit",
                 "returned-anyway": "idle_admit", "returned-held": "idle_admit",
-                "deferred": "_defer", "under-token": "_not_under_token"}
+                "deferred": "_defer", "under-token": "_not_under_token",
+                "np-deferred": "_defer", "np-waiting": "session_wait",
+                "np-cleared": "session_wait", "np-held": "session_wait",
+                "np-returned-held": "idle_admit"}
 
 
 def literal(text, name):
@@ -328,6 +336,17 @@ def mac_idle(texts, mod, tools):
             out.append(f"{rel}: reads {door}, the mac idle wait's self-test door — a "
                        f"door with a second reader is no longer a door, and a doctored "
                        f"run would read as a real one")
+    np_door = getattr(mod, "NP_DOOR", "")
+    if not np_door or lane_text.count(f'"{np_door}"') != 1:
+        out.append(f"{MAC_LANE}: NP_DOOR is unnamed or spelled more than once — the Now "
+                   f"Playing reading's self-test door has one name and one reader")
+    elif "NP_DOOR, \"\")" not in py_function(lane_text, "_now_playing"):
+        out.append(f"{MAC_LANE}: _now_playing() does not read NP_DOOR — the session legs' "
+                   f"runtime cases would ask the real MediaRemote")
+    for rel, text in sorted(tools.items()):
+        if np_door and rel != MAC_LANE and np_door in text:
+            out.append(f"{rel}: reads {np_door}, the Now Playing reading's self-test door — "
+                       f"a doctored run would read as a real one")
     # A RED MAC LEG NAMES THE FRONTMOST APP, AT THE MOMENT OF THE RED.
     if "flightrec_lane.mac_frontmost(ROOT)" not in py_function(runner, "_leg_worker"):
         out.append(f"{MAC_RUNNER}: _leg_worker does not read "
@@ -410,13 +429,14 @@ def idle_netted(va, mod):
         return out + [f"{MAC_LANE}: no idle_waited_seconds() — validate-all has nothing to "
                       f"read the idle waits back with"]
     line = mod.IDLE_SENTENCES["summary"].format(legs=4, secs=240, budget=240, takeover=120,
-                                                deferred=9)
-    for text, want in ((f"exclusive: mac held 1 legs for 5s\n{line}\nmac: PASS\n", 360),
+                                                session=60, deferred=9)
+    for text, want in ((f"exclusive: mac held 1 legs for 5s\n{line}\nmac: PASS\n", 420),
                        ("mac: PASS\n", 0)):
         got = reader(text)
         if got != want:
             out.append(f"{MAC_LANE}: idle_waited_seconds read {got}s off {text!r}, wanted "
-                       f"{want}s (the summary's own seconds plus its takeover seconds)")
+                       f"{want}s (the summary's own seconds plus its takeover and session "
+                       f"seconds)")
     return out
 
 
@@ -457,13 +477,15 @@ def idle_under_token(mod):
     the human returns, and shares one bound across the lane's end."""
     import types
     out = []
-    panel = sorted(set(getattr(mod, "EXCLUSIVE", ())) - set(getattr(mod, "TAKEOVER_LEGS", ())))
+    session = sorted(getattr(mod, "SESSION_LEGS", ()))
+    panel = sorted(set(getattr(mod, "EXCLUSIVE", ())) - set(getattr(mod, "TAKEOVER_LEGS", ()))
+                   - set(session))
     display = sorted(getattr(mod, "TAKEOVER_LEGS", ()))
-    if not panel or len(display) < 2 or not hasattr(mod, "idle_admit"):
-        return [f"{MAC_LANE}: no idle_admit, or too few EXCLUSIVE and TAKEOVER_LEGS legs "
-                f"to run the token's idle rule against"]
+    if not panel or len(display) < 2 or len(session) < 2 or not hasattr(mod, "idle_admit"):
+        return [f"{MAC_LANE}: no idle_admit, or too few EXCLUSIVE, TAKEOVER_LEGS and "
+                f"SESSION_LEGS legs to run the token's idle rule against"]
     import exclusive
-    saved = (mod._hid_idle_ns, mod.time, dict(mod._idle))
+    saved = (mod._hid_idle_ns, mod.time, dict(mod._idle), mod._now_playing)
     quiet = exclusive._say
     exclusive._say = lambda _s: None
     # A busy host on a doubled clock: a cut wall must report, never sleep for real.
@@ -471,8 +493,10 @@ def idle_under_token(mod):
     mod.time = types.SimpleNamespace(monotonic=lambda: wall[0],
                                      sleep=lambda secs: wall.__setitem__(0, wall[0] + secs))
     mod._hid_idle_ns = lambda: (0, None)
+    mod._now_playing = lambda: ((44642, "firefox, playing"), None)
     with tempfile.TemporaryDirectory(prefix="check-exclusive-") as td:
-        for fn, leg in (("idle_wait", panel[0]), ("takeover_wait", display[0])):
+        for fn, leg in (("idle_wait", panel[0]), ("takeover_wait", display[0]),
+                        ("session_wait", session[0])):
             try:
                 with exclusive.hold("check-exclusive", leg, exclusive_dir_=pathlib.Path(td)):
                     getattr(mod, fn)(leg, say=lambda _s: None)
@@ -500,12 +524,14 @@ def idle_under_token(mod):
         finally:
             state["held"] = False
 
-    def run_case(leg, idles, deadline=None):
+    def run_case(leg, idles, deadline=None, playing=((0, "no app"),)):
         state.update(held=False, holds=0, slept_held=0, slept=0, ran=0)
         seq = list(idles)
+        np = list(playing)
         mod._idle.update(saved[2], spent=0.0, legs=0, deadline=deadline)
         mod._hid_idle_ns = lambda: ((int(seq.pop(0) * 1e9) if len(seq) > 1
                                      else int(seq[0] * 1e9)), None)
+        mod._now_playing = lambda: ((np.pop(0) if len(np) > 1 else np[0]), None)
         said = []
         try:
             got = mod.idle_admit(leg, hold, lambda: state.__setitem__("ran", state["ran"] + 1),
@@ -530,11 +556,31 @@ def idle_under_token(mod):
             ("a display leg at the lane's end on an idle host", display[0], [10_000], "start",
              "ran", 1),
         )
-        for label, leg, idles, deadline, want, holds in cases:
+        firefox = (44642, "firefox, playing")
+        paused = (44642, "firefox, not playing")
+        cases = tuple((*c, ((0, "no app"),)) for c in cases) + (
+            ("a session leg while a host app plays, in its queue position", session[0], [0],
+             None, "deferred", 0, (firefox,)),
+            ("a session leg whose holder starts inside the token", session[0], [0], None,
+             "deferred", 1, ((0, "no app"), (0, "no app"), firefox)),
+            ("a session leg on a host in use while a host app is paused", session[0], [0],
+             None, "deferred", 0, (paused,)),
+            ("a session leg on an idle host while a host app is paused", session[0],
+             [10_000], None, "ran", 1, (paused,)),
+            ("a session leg on a host in use with no Now Playing app", session[0], [0], None,
+             "ran", 1, ((0, "no app"),)),
+            ("a session leg at the lane's end while a host app keeps playing", session[0],
+             [0], "start", "not-run", 0, (firefox,)),
+            ("a second session leg after the shared bound", session[1], [0], "spent",
+             "not-run", 0, (firefox,)),
+            ("a session leg at the lane's end once the host app stops", session[0], [0],
+             "start", "ran", 1, (firefox, firefox, (0, "no app"))),
+        )
+        for label, leg, idles, deadline, want, holds, playing in cases:
             at = (None if deadline is None else
                   now[0] + mod.TAKEOVER_BOUND_S if deadline == "start" else now[0] - 1)
             t0 = now[0]
-            got, said, st = run_case(leg, idles, at)
+            got, said, st = run_case(leg, idles, at, playing)
             waited = now[0] - t0
             if got[0] != want:
                 out.append(f"{MAC_LANE}: idle_admit, {label}: answered {got!r}, wanted "
@@ -554,7 +600,7 @@ def idle_under_token(mod):
                            f"the lane's end had spent its shared {mod.TAKEOVER_BOUND_S:.0f}s")
     finally:
         exclusive._say = quiet
-        mod._hid_idle_ns, mod.time = saved[0], saved[1]
+        mod._hid_idle_ns, mod.time, mod._now_playing = saved[0], saved[1], saved[3]
         mod._idle.clear()
         mod._idle.update(saved[2])
     return out
@@ -739,6 +785,54 @@ def census(texts, lanes=None, tools=None):
                            f"a window fullscreen ({takes[0].strip()!r}), which covers the VM's "
                            f"display and presses F11 on the system input queue "
                            f"(docs/fullscreen-plan.md §5)")
+    # 5d. THE WINDOWS TOAST DISMISSAL IS ASKED ONLY WHEN A TOAST MAY BE UP, and
+    # then before the leg (docs/measurements/lane-ceilings-2026-10-16.md): the
+    # funnel asks lane.toasts_may_be_up over the scene-derived notification legs
+    # started since the last dismissal, and the rule answers four cases.
+    if win is not None:
+        funnel = py_function(texts["tools/deploy-win.py"], "run_suite")
+        ask = 'if lane.toasts_may_be_up(_TOASTS["started"], NOTIFY_LEGS, _TOASTS["dismissed"]):'
+        if not 0 <= funnel.find(ask) < funnel.find("if dismiss_toasts():") < funnel.find(
+                "_leg_worker(name)"):
+            out.append("tools/deploy-win.py: run_suite does not ask lane.toasts_may_be_up and "
+                       "then dismiss_toasts() before an exclusive leg — a toast left up holds "
+                       "the foreground against the typing leg (docs/deferred.md, the PopupHost "
+                       "WATCH)")
+        if "NOTIFY_LEGS = lane.notification_legs(" not in texts["tools/deploy-win.py"]:
+            out.append("tools/deploy-win.py: NOTIFY_LEGS is not lane.notification_legs, read "
+                       "out of the scene scripts")
+        some = sorted(win.notification_legs(str(ROOT / "tools/scenes")))[:1] or ["<none>"]
+        for started, dismissed, want in (([], False, True), ([], True, False),
+                                         (["cards_rust"], True, False), (some, True, True)):
+            got = win.toasts_may_be_up(started, win.notification_legs(
+                str(ROOT / "tools/scenes")), dismissed)
+            if got != want:
+                out.append(f"tools/lib/lanes/win.py: toasts_may_be_up(started={started}, "
+                           f"dismissed={dismissed}) answered {got}, not {want}")
+    # 5e. THE LINUX QUIET TAIL (the maintainer, 2026-10-16; lanes/linux.py's
+    # QUIET): every QUIET scene names legs run-suites.sh runs, run() takes or
+    # leaves them by KAYA_QUIET, and validate-linux hands the variable in.
+    linux = lanes.get("linux")
+    if linux is not None:
+        quiet = linux.quiet_legs(sh)
+        for scene in sorted(linux.QUIET):
+            if not any(leg.startswith(scene + "-") for leg in quiet):
+                out.append(f"tools/lib/lanes/linux.py: QUIET names {scene!r}, which no "
+                           f"`run \"$proto\" {scene}-<lang>` line in {LINUX} runs")
+        if len(quiet) < 2 * len(linux.QUIET):
+            out.append(f"tools/lib/lanes/linux.py: quiet_legs read {len(quiet)} legs for "
+                       f"{len(linux.QUIET)} scenes — a reader that finds that few agrees "
+                       f"with anything")
+    for want in ('only) case "$KAYA_QUIET_SCENES" in *" ${name%-*} "*) ;; *) return 0 ;; esac ;;',
+                 'skip) case "$KAYA_QUIET_SCENES" in *" ${name%-*} "*) return 0 ;; esac ;;'):
+        if want not in run_body:
+            out.append(f"{LINUX}: run() lacks `{want}`, so the matrix's two linux runs would "
+                       f"each run every leg")
+    if "scene-mods.py --quiet" not in sh:
+        out.append(f"{LINUX}: KAYA_QUIET_SCENES is not read through scene-mods.py --quiet")
+    if "\"-e\", f\"KAYA_QUIET={os.environ.get('KAYA_QUIET', '')}\"," not in texts[
+            "tools/validate-linux.py"]:
+        out.append("tools/validate-linux.py: does not hand KAYA_QUIET into the container")
     # 5c. THE ANDROID QUIET TAIL (the maintainer's ruling of 2026-10-05):
     # every QUIET leg is an EXCLUSIVE leg the lane runs, and the runner's leg
     # selection reads KAYA_QUIET; tools/check-gates.py holds validate-all's half.
@@ -801,6 +895,7 @@ FILES = [r for _, r, _, _ in LANES] + [LINUX, EXCLUSIVE_PY, EXCLUSIVE_SH, "tools
                                         "tools/run-leg.py", INTERPRETER]
 REAL = {rel: gate.read(rel) for rel in FILES}
 MODS = {lane: load_lane(r) for lane, _, _, r in LANES}
+MODS["linux"] = load_lane(ROOT / "tools/lib/lanes/linux.py")
 
 # EVERY RUNNER AND GATE IN tools/, for the door's one-reader clause: a
 # self-test door read by a second script is a knob, and a doctored run
@@ -885,6 +980,39 @@ _ghost_win.write_text(_moved, encoding="utf-8")
 watched("a windows pool whose notification leg the exclusive funnel drains", REAL,
         "is pooled before the exclusive leg 'notes_rust'",
         lanes={**MODS, "windows": load_lane(_ghost_win)})
+
+# 9b. THE TOAST RULE CUT, twice in a copy of win.py, and the funnel's ask cut.
+for _label, _pattern, _repl, _want in (
+        ("the first dismissal skipped", r"return not dismissed or bool",
+         "return bool", "dismissed=False) answered False"),
+        ("a notification leg's toast ignored", r"bool\(set\(started\) & set\(notify_legs\)\)",
+         "False", "dismissed=True) answered False, not True")):
+    _cut = gate.doctor(_label, gate.read(WIN_LANE), _pattern, _repl)
+    _cut_mod = gate.scratch() / f"win-toast-{len(_label)}.py"
+    _cut_mod.write_text(_cut, encoding="utf-8")
+    watched(_label, REAL, _want, lanes={**MODS, "windows": load_lane(_cut_mod)})
+_no_ask = gate.doctor("the windows funnel's toast dismissal cut", REAL["tools/deploy-win.py"],
+                      r"\n            if dismiss_toasts\(\):\n", "\n            if True:\n")
+watched("a windows funnel that never takes a toast down",
+        {**REAL, "tools/deploy-win.py": _no_ask}, "does not ask lane.toasts_may_be_up")
+
+# 9c. THE LINUX QUIET TAIL: a scene nothing runs, run()'s skip arm cut, and the
+# container never told.
+class _GhostLinux:
+    QUIET = {**MODS["linux"].QUIET, "media_ghost": "x"}
+    WAYLAND_ONLY = MODS["linux"].WAYLAND_ONLY
+    quiet_legs = staticmethod(MODS["linux"].quiet_legs)
+watched("a linux QUIET scene no leg runs", REAL, "QUIET names 'media_ghost'",
+        lanes={**MODS, "linux": _GhostLinux})
+_lin_skip = gate.doctor("the linux run()'s quiet skip arm cut", REAL[LINUX],
+                        r'\n        skip\) case "\$KAYA_QUIET_SCENES" in \*" \$\{name%-\*\} "\*\) '
+                        r'return 0 ;; esac ;;\n', "\n")
+watched("a linux run() that runs its quiet legs under the matrix",
+        {**REAL, LINUX: _lin_skip}, "run() lacks `skip) case")
+_lin_env = gate.doctor("validate-linux's KAYA_QUIET hand-in cut", REAL["tools/validate-linux.py"],
+                       r'\n +"-e", f"KAYA_QUIET=\{os\.environ\.get\(\'KAYA_QUIET\', \'\'\)\}",', "")
+watched("a container never told KAYA_QUIET", {**REAL, "tools/validate-linux.py": _lin_env},
+        "does not hand KAYA_QUIET into the container")
 
 # 10. THE MAC WAIT CUT OUT — the state the tree was in until 2026-09-18.
 _no_idle = gate.doctor("the mac idle admission cut from queue_leg", REAL[MAC_RUNNER],
@@ -1031,7 +1159,7 @@ watched("a hand run of a display leg that never waits", {**REAL, "tools/run-leg.
 # 20b. THE WAIT'S OWN WALL CUT: a wait under a held token no longer refuses.
 _LANE_TEXT = gate.read(MAC_LANE)
 _unwalled = gate.doctor("the under-token wall cut from both waits", _LANE_TEXT,
-                        r"\n    _not_under_token\(leg\)\n", "\n", want=2)
+                        r"\n    _not_under_token\(leg\)\n", "\n", want=3)
 _unwalled_mod = gate.scratch() / "mac-unwalled.py"
 _unwalled_mod.write_text(_unwalled, encoding="utf-8")
 watched("an idle wait that runs under a held token", REAL,
@@ -1052,7 +1180,8 @@ watched("idle_admit sleeping while it holds the token", REAL,
 
 # 20d. A BUSY DISPLAY LEG WAITING IN ITS QUEUE POSITION.
 _in_place = gate.doctor("the display deferral cut", _LANE_TEXT,
-                        r'in_place = leg in TAKEOVER_LEGS and _idle\["deadline"\] is None',
+                        r'in_place = \(leg in TAKEOVER_LEGS or leg in SESSION_LEGS\) and '
+                        r'_idle\["deadline"\] is None',
                         "in_place = False")
 _in_place_mod = gate.scratch() / "mac-display-in-place.py"
 _in_place_mod.write_text(_in_place, encoding="utf-8")
@@ -1168,15 +1297,41 @@ _half = gate.doctor("idle_waited_seconds dropping the display seconds", _LANE_TE
 _half_mod = gate.scratch() / "mac-idle-half.py"
 _half_mod.write_text(_half, encoding="utf-8")
 watched("an idle reader that misses the display waits", REAL,
-        "idle_waited_seconds read 240s", lanes={**MODS, "mac": load_lane(_half_mod)})
+        "idle_waited_seconds read 300s", lanes={**MODS, "mac": load_lane(_half_mod)})
+
+# 34-37. A SESSION LEG BACK ON THE HID CLOCK ALONE (docs/traps.md, the browser
+# that took Now Playing).
+for _label, _pattern, _repl, _want in (
+        ("the session wait cut from idle_wait",
+         r"    if leg in SESSION_LEGS:\n        return session_wait\(leg, say\)\n", "",
+         "while a host app keeps playing: answered"),
+        ("a session leg not deferred in place",
+         r'in_place = \(leg in TAKEOVER_LEGS or leg in SESSION_LEGS\) and ',
+         'in_place = leg in TAKEOVER_LEGS and ',
+         "while a host app plays, in its queue position: answered"),
+        ("a paused holder on a busy host called clear",
+         r'        return f"pid \{pid\} \(\{what\}\) while the host is in use '
+         r'\(HIDIdleTime \{idle\}\)", False',
+         '        return f"pid {pid} ({what})", True',
+         "while a host app is paused: answered"),
+        ("the token's reading of Now Playing cut",
+         r"    if leg in SESSION_LEGS:\n        holder, clear = _session_reading\(\)\n"
+         r"        return holder, clear, IDLE_S\n",
+         '    if leg in SESSION_LEGS:\n        return "no app", True, IDLE_S\n',
+         "whose holder starts inside the token: answered")):
+    _np_cut = gate.doctor(_label, _LANE_TEXT, _pattern, _repl)
+    _np_mod = gate.scratch() / f"mac-np-{len(_label)}.py"
+    _np_mod.write_text(_np_cut, encoding="utf-8")
+    watched(_label, REAL, _want, lanes={**MODS, "mac": load_lane(_np_mod)})
 
 # THE MEDIA SERVER STARTS FOR EVERY SCENE THAT FETCHES FROM IT
 # (tools/lib/netimage_server_routes.py; docs/network-images-plan.md §5).
 from netimage_server_routes import run as check_netimage_server_routes  # noqa: E402
 check_netimage_server_routes(gate)
 
-gate.negatives_ran(57)
+gate.negatives_ran(67)
 
+gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",
              sorted(MODS["windows"].notification_legs(str(ROOT / "tools/scenes"))), floor=2)
 gate.counted("tools/ scripts read for the idle wait's self-test door",

@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -870,8 +870,8 @@ negatives()
 # docs/traps.md). The other arm is reachable only by writing the user's
 # own setting, so both are driven here against the real matcher.
 if platform.system() == "Darwin":
-    if not (ROOT / "target" / "debug" / "libkaya.dylib").is_file():
-        print("check-canvas-blit: target/debug/libkaya.dylib is not "
+    if not (TARGET / "debug" / "libkaya.dylib").is_file():
+        print(f"check-canvas-blit: {TARGET}/debug/libkaya.dylib is not "
               "built — the ink probe links against it. Run "
               "tools/gates.py, which builds what its gates read.",
               file=sys.stderr)
@@ -886,7 +886,7 @@ if platform.system() == "Darwin":
          "swift-toolchain", str(ROOT),
          "-import-objc-header", "crates/kaya/include/kaya.h",
          SWIFTUI, "tools/checks/swiftui-ink-modes.swift",
-         "-L", "target/debug", "-lkaya",
+         "-L", str(TARGET / "debug"), "-lkaya",
          "-framework", "AppKit", "-framework", "Foundation",
          "-o", str(probe_bin)], check=False)
     if build.returncode != 0:
@@ -896,7 +896,7 @@ if platform.system() == "Darwin":
     ink = subprocess.run(
         [str(probe_bin)], check=False,
         env=dict(os.environ,
-                 DYLD_LIBRARY_PATH=str(ROOT / "target" / "debug")))
+                 DYLD_LIBRARY_PATH=str(TARGET / "debug")))
     if ink.returncode != 0:
         print(f"check-canvas-blit: FAIL — the SwiftUI ink-mode probe "
               f"exited {ink.returncode}. The lines above name each "

@@ -4,7 +4,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -102,7 +102,7 @@ blob_test.write_text(
              r"var referenceDocumentBlob = \[\]byte\{\n\t0x09,", "var referenceDocumentBlob = []byte{\n\t0x0a,"),
     encoding="utf-8")
 env = dict(os.environ)
-env["CGO_LDFLAGS"] = f"-L{ROOT / 'target/debug'} -Wl,-rpath,{ROOT / 'target/debug'}"
+env["CGO_LDFLAGS"] = f"-L{TARGET / 'debug'} -Wl,-rpath,{TARGET / 'debug'}"
 # cwd stays the root so the dylib's install name resolves; the package path
 # names the copy.
 red = subprocess.run(["go", "test", "-count=1", str(scratch / "bindings/go"), "-run",

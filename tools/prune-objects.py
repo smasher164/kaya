@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die
+from kaya_gate import TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -238,7 +238,7 @@ def selftest(gate):
 def main():
     gate = Gate("prune-objects")
     args = sys.argv[1:]
-    target = ROOT / "target"
+    target = TARGET
     if "--target" in args:
         target = pathlib.Path(args[args.index("--target") + 1])
     if not target.is_dir():

@@ -13,6 +13,15 @@ if [ ! -d /work ]; then
 fi
 cd /work || exit 1
 export CARGO_TARGET_DIR=/work/target-linux
+# The image carries no crates: unmounted, every core build fetches the index and
+# every dependency again (docs/traps.md, the linux lane's core build downloaded
+# its dependencies every run).
+if ! mountpoint -q /root/.cargo/registry; then
+    echo "run-suites: /root/.cargo/registry is not a mount, so this run's core build" \
+        "would download the crates.io index and every dependency (64 s against 1.5 s" \
+        "measured); tools/validate-linux.py mounts target-linux/cargo-registry there" >&2
+    exit 1
+fi
 # harness-extract.sh refuses to run outside the dev shell and the
 # container is not one; without the fingerprint every leg passes and
 # produces no stills at all.
@@ -375,6 +384,16 @@ gtk_layout_clean_selftest
 # exclusive.py): kaya's own x11 drag in the witness legs, three sightings
 # under a matrix (docs/deferred.md), and the wayland pastes.
 KAYA_EXCLUSIVE_LEGS=" dndwitness-in-x11 dndwitness-out-x11 dndwitness-in-wayland dndwitness-out-wayland clipboard-python-wayland clipboard-js-wayland clipboard-rust-wayland "
+# THE QUIET TAIL (tools/lib/lanes/linux.py's QUIET): validate-all runs this lane
+# with KAYA_QUIET=skip and then once more with KAYA_QUIET=only.
+case "${KAYA_QUIET:-}" in
+    ""|skip|only) ;;
+    *) echo "run-suites: KAYA_QUIET=$KAYA_QUIET is neither skip nor only" >&2; exit 1 ;;
+esac
+if ! KAYA_QUIET_SCENES=" $(python3 tools/linux/scene-mods.py --quiet) "; then
+    echo "run-suites: the QUIET scenes could not be read (above)" >&2
+    exit 1
+fi
 # A lane that dies mid-run is exactly when the journal matters, and this
 # runner has no other EXIT trap to share.
 trap 'flightrec_flush; focus_ring_stop; media_server_stop; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
@@ -495,6 +514,10 @@ run() {
     local proto="$1" name="$2"
     shift 2
     kaya_wanted "$name" "$proto" || return 0
+    case "${KAYA_QUIET:-}" in
+        only) case "$KAYA_QUIET_SCENES" in *" ${name%-*} "*) ;; *) return 0 ;; esac ;;
+        skip) case "$KAYA_QUIET_SCENES" in *" ${name%-*} "*) return 0 ;; esac ;;
+    esac
     KAYA_LEGS_TAKEN=$((KAYA_LEGS_TAKEN + 1))
     # THE MATRIX-WIDE TOKEN (tools/linux/exclusive.sh): start nothing while
     # another lane holds it; for this lane's exclusive legs, let the pool empty,
@@ -770,6 +793,11 @@ drain() {
                     "$FLIGHTREC_SCRATCH/$name.shot.png" \
                     "flightrec: no picture of this leg's display — the leg ran in serial mode (which keeps no per-leg state), or the session's screenshooter (import on x11, grim on wayland) failed; the desktop section beside this file is the window tree that was there" \
                     "$FLIGHTREC_SCRATCH/$name.shotwhen"
+                # The guest's own window at its first failed step, written
+                # beside its verb trace (crates/kaya/src/vtrace.rs, sibling).
+                flightrec_adopt_shot "$bundle" fail-shot \
+                    "$LEGS_DIR/$name-failshot.png" \
+                    "flightrec: the guest wrote no picture of its window at a failed step ($LEGS_DIR/$name-failshot.png) — its harness line \`failure picture:\` in the leg log says why, and a leg with none failed no step (a crash, an abort or the 180 s ceiling)"
                 flightrec_adopt "$bundle" desktop \
                     "$FLIGHTREC_SCRATCH/$name.desktop.txt" \
                     "flightrec: no window tree was read for this leg's session (xwininfo on x11, swaymsg -t get_tree on wayland) — the leg ran in serial mode, or the session was already gone"
@@ -2571,6 +2599,10 @@ flightrec_flush
 # Suites accumulate failures rather than abort, so a truncated log must
 # still end with the answer.
 kaya_exclusive_summary linux
+if [ "${KAYA_QUIET:-}" = only ] && [ -z "${KAYA_ONLY:-}" ] && [ "$KAYA_LEGS_TAKEN" = 0 ]; then
+    echo "run-suites: KAYA_QUIET=only ran no leg of the QUIET scenes ($KAYA_QUIET_SCENES) — no verdict" >&2
+    exit 1
+fi
 if [ -n "${KAYA_ONLY:-}" ] && [ "$KAYA_LEGS_TAKEN" = 0 ]; then
     echo "run-suites: KAYA_ONLY=$KAYA_ONLY matched no leg of this runner — no verdict" >&2
     exit 3

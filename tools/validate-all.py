@@ -7,7 +7,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
 import exclusive
 import lane_health
-from lanes import android as _android, ios as _ios, mac as _mac, win as _win
+from host_lib import SWEEP_TARGET
+from lanes import android as _android, ios as _ios, linux as _linux, mac as _mac, win as _win
 
 dev_shell_or_die()
 
@@ -103,12 +104,14 @@ def keep_lane_log(name, where=None):
 
 EXCLUSIVE_LEGS = {"mac": _mac.EXCLUSIVE, "windows": _win.EXCLUSIVE,
                   "ios": _ios.EXCLUSIVE, "android": _android.EXCLUSIVE,
-                  "android-quiet": _android.QUIET}
+                  "android-quiet": _android.QUIET, "linux-quiet": set()}
 # The four rosters the filter can consult before a launch; linux has none
 # in python and refuses at run time instead (its setup is a cached image).
 ROSTERS = {"mac": lambda: [name for name, _s, _l in _mac.legs()],
            "windows": _win.legs, "ios": _ios.legs, "android": _android.legs,
-           "android-quiet": lambda: sorted(_android.QUIET)}
+           "android-quiet": lambda: sorted(_android.QUIET),
+           "linux-quiet": lambda: sorted(_linux.quiet_legs(
+               (ROOT / "tools/linux/run-suites.sh").read_text(encoding="utf-8")))}
 ONLY_LEGS = {}
 
 
@@ -235,9 +238,13 @@ if MODE == "parallel":
     # it cost every lane 150-200s and every ceiling for a 116s gain
     # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
     #
-    # AND FOR THE MAC LANE (2026-09-21): its guests load the host libkaya
-    # by path, and a sweep that overlapped a token-slowed mac lane killed
-    # seven legs in dyld (docs/traps.md, the sweep-relinked-libkaya entry).
+    # IN A CARGO TARGET OF ITS OWN (2026-10-16): the mac guests load the
+    # lanes' libkaya by path, and a sweep that relinked it under a
+    # token-slowed mac lane killed seven legs in dyld (docs/traps.md, the
+    # sweep-relinked-libkaya entry). Built into SWEEP_TARGET it cannot, so
+    # it no longer waits for the mac lane (docs/measurements/
+    # lane-ceilings-2026-10-16.md); gates.py refuses a matrix sweep anywhere
+    # else and both runners still refuse a verdict if that library moved.
     #
     # The token is a t0 fingerprint of every keyed gate's inputs, so the
     # mac lane can skip its own sweep; a hand-run has none and sweeps.
@@ -272,7 +279,7 @@ if MODE == "parallel":
     # an android stall leg and an iOS picker leg in the same run, moving
     # the wall only 403 -> 394.
     run_lane("linux", ["tools/validate-linux.py"],
-             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", "")})
+             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "skip"})
     # KAYA_WIN_JOBS scopes the VM's leg pool under the matrix: six slots
     # on six vCPUs were measured for a VM with the host to itself, and
     # under the everyday matrix the lane is the wall — 644s at six, 589s
@@ -284,10 +291,20 @@ if MODE == "parallel":
     run_lane("android", ["tools/android/run-emulator.py"],
              env={"KAYA_QUIET": "skip"})
     android_lane_proc = lane_procs[-1]
-    mac_lane_proc = lane_procs[0]
+    sweep_warm = subprocess.Popen(
+        ["nice", "-n", "10", "tools/gates.py", "--warm"],
+        env=dict(os.environ, CARGO_TARGET_DIR=str(SWEEP_TARGET)),
+        stdout=open(LANES_DIR / "gates-warm.log", "w", encoding="utf-8"),
+        stderr=subprocess.STDOUT)
+    warm_t0 = time.monotonic()
     android_lane_proc.wait()
-    mac_lane_proc.wait()
-    run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])
+    warm_rc = sweep_warm.wait()
+    print(f"gates-warm: rc={warm_rc}, done within {time.monotonic() - warm_t0:.0f}s of "
+          f"the lanes' launch (the sweep's own target, compiled beside them)", flush=True)
+    if warm_rc != 0:
+        keep_lane_log("gates-warm")
+    run_lane("gates", ["nice", "-n", "10", "tools/gates.py"],
+             env={"CARGO_TARGET_DIR": str(SWEEP_TARGET)})
 else:
     run_lane("mac", ["tools/validate-mac.py"])
     run_lane("linux", ["tools/validate-linux.py"])
@@ -381,7 +398,12 @@ BUDGETS = {
     # suites 131-133s pooled -> 297s), and the full matrix on an idle host
     # read 1533s net (1686 wall, 153 of token waits) with all 394 legs
     # green; 1650 is about 1.08x over it.
-    "windows": 1650,
+    # 1900 since 2026-10-16 (the maintainer's ruling,
+    # docs/measurements/lane-ceilings-2026-10-16.md): the styling breadth
+    # took the roster 473 -> 503 legs and the matrix at ee6b56b6 read 1771s
+    # net with a cold build and deploy (285s against 47s); the warm matrix
+    # before it read 1742. 1900 is about 1.07x over the reading.
+    "windows": 1900,
     # 600 since 2026-09-01: the lane ran 113 legs from 2026-08-31, five
     # accepted matrices measuring 452-491s. 600 is 1.22x over that band's
     # top. HELD at 600 on 2026-09-03 with the roster at 116 (the dnd leg
@@ -422,7 +444,11 @@ BUDGETS = {
     # cost 48-49s each under a matrix where they cost 22-27s, roughly
     # +100s on a lane whose last five matrices read 458-495s; 660 is
     # 1.12x over 590, to be re-read on the next quiet matrices.
-    "android": 870,
+    # 960 since 2026-10-16 (the maintainer's ruling,
+    # docs/measurements/lane-ceilings-2026-10-16.md): 273 legs read 897s net
+    # on the matrix at ee6b56b6, the 258 shared legs 24% slower with no
+    # change in kind (the host's load under the matrix). 960 is about 1.07x.
+    "android": 960,
     # 490 since 2026-08-23, KEPT for the delayed-and-four-wide schedule
     # of 2026-09-07 until it has samples: one at a time the sweep read
     # 348s delayed behind Android (2026-08-24) and 422s on the last such
@@ -460,6 +486,13 @@ if MODE == "parallel":
                  env={"KAYA_QUIET": "only"})
         for waiter in lane_waiters:
             waiter.join()
+    # AND THE LINUX REAL-TIME MEDIA LEGS (the maintainer, 2026-10-16;
+    # lanes/linux.py's QUIET), after the android tail. Not exclusive, so an
+    # --exclusive run leaves them out and --no-exclusive keeps them.
+    run_lane("linux-quiet", ["tools/validate-linux.py"],
+             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "only"})
+    for waiter in lane_waiters:
+        waiter.join()
     for name in lane_names:
         verdict, secs = lane_done.get(name, ("FAIL", 0))
         log = LANES_DIR / f"{name}.log"

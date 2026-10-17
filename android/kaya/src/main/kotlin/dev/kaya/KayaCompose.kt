@@ -15815,8 +15815,15 @@ internal class KayaTableWindow(private val node: KayaNode) {
     private var endPark = -1
     private var endMax = -1
     private var endScroll = -1
+    private var endLow = Int.MAX_VALUE
+    private var contentPx = 0
     private var parkSeq = 0
     private var scheduled = false
+
+    fun measuredContent(height: Int) {
+        contentPx = height
+        if (endPark >= 0 && viewportPx > 0) endLow = minOf(endLow, height - viewportPx)
+    }
 
     fun schedule() {
         if (scheduled) return
@@ -15837,6 +15844,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
         anchorRow = row
         anchorScroll = -1
         endPark = -1
+        endLow = Int.MAX_VALUE
         parkSeq += 1
         val count = if (lastCount > 0) lastCount else 1
         lastFirst = row
@@ -15933,7 +15941,14 @@ internal class KayaTableWindow(private val node: KayaNode) {
                 anchorRow = endPark
                 anchorScroll = -1
                 endPark = -1
+            } else if (scroll != endScroll && endLow < endScroll) {
+                // docs/traps.md, the Compose park clamped by a dip of its end.
+                KayaVTrace.note("window", "re-park table=${node.id} row=$endPark: a layout measured the end at $endLow under the parked $endScroll and it came back to $endMax, the scroll left at $scroll")
+                anchorRow = endPark
+                anchorScroll = -1
+                endPark = -1
             } else if (scroll != endScroll) {
+                KayaVTrace.note("window", "end park yields table=${node.id} row=$endPark: scroll $scroll, parked at $endScroll, the end at $endMax and never measured under it")
                 endPark = -1
             }
         }
@@ -15984,6 +15999,8 @@ internal class KayaTableWindow(private val node: KayaNode) {
                                 endPark = row
                                 endMax = state.maxValue
                                 endScroll = state.value
+                                endLow = Int.MAX_VALUE
+                                KayaVTrace.note("window", "end park table=${node.id} row=$row at ${state.value}: content $contentPx, viewport $viewportPx")
                             }
                         }
                         schedule()
@@ -16453,6 +16470,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.laidOutFirst = bandFirst
         window.rowExtents = rowExtents
         window.rowTops = tops
+        window.measuredContent(contentH)
         window.schedule()
         layout(totalW, totalH) {
             // THE HEADER IS LOCKED TO THE BODY because ONE offset moves

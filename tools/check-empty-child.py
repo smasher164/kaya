@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -305,8 +305,8 @@ negative("the WinUI keep-the-old-picture perturbation", WINUI,
 
 # --- Clause A: the runtime negative, where a GUI toolkit exists. -----
 if platform.system() == "Darwin":
-    if not (ROOT / "target/debug/libkaya.dylib").is_file():
-        print("check-empty-child: target/debug/libkaya.dylib is not built "
+    if not (TARGET / "debug/libkaya.dylib").is_file():
+        print(f"check-empty-child: {TARGET}/debug/libkaya.dylib is not built "
               "— the probe links against it. Run tools/gates.py, which "
               "builds what its gates read.", file=sys.stderr)
         sys.exit(1)
@@ -318,17 +318,17 @@ if platform.system() == "Darwin":
              'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
              "kaya_swiftc "
              "-import-objc-header crates/kaya/include/kaya.h "
-             '"$2" "$3" -L target/debug -lkaya '
+             '"$2" "$3" -L "$5" -lkaya '
              "-framework AppKit -framework Foundation -o \"$4\"",
              "swift-toolchain", str(ROOT), str(interpreter), PROBE,
-             str(tmp / name)],
+             str(tmp / name), str(TARGET / "debug")],
             check=False)
         if build.returncode != 0:
             return None
         run = subprocess.run(
             [str(tmp / name)],
             env=dict(os.environ,
-                     DYLD_LIBRARY_PATH=str(ROOT / "target/debug")),
+                     DYLD_LIBRARY_PATH=str(TARGET / "debug")),
             check=False, capture_output=True, text=True, encoding="utf-8")
         return run.returncode, run.stdout + run.stderr
 

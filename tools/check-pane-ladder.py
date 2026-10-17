@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -79,8 +79,8 @@ if platform.system() != "Darwin":
     print("check-pane-ladder: OK (static clause; the runtime ladder needs "
           "macOS and was SKIPPED)")
 else:
-    if not (ROOT / "target/debug/libkaya.dylib").is_file():
-        print("check-pane-ladder: target/debug/libkaya.dylib is not built — "
+    if not (TARGET / "debug/libkaya.dylib").is_file():
+        print(f"check-pane-ladder: {TARGET}/debug/libkaya.dylib is not built — "
               "the probe links against it. Run tools/gates.py, which builds "
               "what its gates read.", file=sys.stderr)
         sys.exit(1)
@@ -92,10 +92,10 @@ else:
              'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
              "kaya_swiftc "
              "-import-objc-header crates/kaya/include/kaya.h "
-             '"$2" "$3" -L target/debug -lkaya '
+             '"$2" "$3" -L "$5" -lkaya '
              "-framework AppKit -framework Foundation -o \"$4\"",
              "swift-toolchain", str(ROOT), SWIFTUI, PROBE,
-             str(tmp / "swiftui-pane-ladder")],
+             str(tmp / "swiftui-pane-ladder"), str(TARGET / "debug")],
             check=False)
         if build.returncode != 0:
             print("check-pane-ladder: the ladder probe did not compile",
@@ -104,7 +104,7 @@ else:
         run = subprocess.run(
             [str(tmp / "swiftui-pane-ladder")],
             env=dict(os.environ,
-                     DYLD_LIBRARY_PATH=str(ROOT / "target/debug")),
+                     DYLD_LIBRARY_PATH=str(TARGET / "debug")),
             check=False)
         if run.returncode != 0:
             print(f"check-pane-ladder: FAIL — the ladder probe exited "

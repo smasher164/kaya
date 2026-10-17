@@ -9,17 +9,20 @@
  * (docs/traps.md, the session_send that never left perl).
  *
  *   KAYA_MR_ACTION=send:<MRCommand>:<guest pid>   send, or refuse
- *   KAYA_MR_ACTION=pid                            print the Now Playing pid
+ *   KAYA_MR_ACTION=pid                            print the Now Playing pid, its
+ *                                                 process name and whether it plays
  */
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
 #include <dlfcn.h>
+#include <libproc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 typedef void (*GetPid)(dispatch_queue_t, void (^)(int));
+typedef void (*GetPlaying)(dispatch_queue_t, void (^)(Boolean));
 typedef void (*Send)(int, CFDictionaryRef, dispatch_queue_t, void (^)(CFArrayRef));
 
 static int now_playing_pid(GetPid get) {
@@ -32,6 +35,33 @@ static int now_playing_pid(GetPid get) {
     if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 3LL * NSEC_PER_SEC)))
         return -2;
     return got;
+}
+
+static const char *now_playing_state(GetPlaying playing) {
+    __block int got = -1;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    playing(dispatch_get_global_queue(0, 0), ^(Boolean on) {
+        got = on ? 1 : 0;
+        dispatch_semaphore_signal(done);
+    });
+    if (dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, 3LL * NSEC_PER_SEC)))
+        return "playing unknown, no answer in 3 s";
+    return got ? "playing" : "not playing";
+}
+
+static void who(int pid, GetPlaying playing, char *out, size_t room) {
+    char name[2 * MAXCOMLEN + 1] = "";
+    if (pid == -2) {
+        snprintf(out, room, "no pid, MediaRemote gave no answer in 3 s");
+        return;
+    }
+    if (pid <= 0) {
+        snprintf(out, room, "no app");
+        return;
+    }
+    if (proc_name(pid, name, sizeof name) <= 0)
+        snprintf(name, sizeof name, "a process that has exited");
+    snprintf(out, room, "%s, %s", name, playing ? now_playing_state(playing) : "playing unread");
 }
 
 void kaya_mediaremote_run(void *interp, void *cv) {
@@ -51,10 +81,13 @@ void kaya_mediaremote_run(void *interp, void *cv) {
                 get ? "MRMediaRemoteSendCommandWithReply" : "MRMediaRemoteGetNowPlayingApplicationPID");
         return;
     }
+    GetPlaying playing = (GetPlaying)dlsym(mr, "MRMediaRemoteGetNowPlayingApplicationIsPlaying");
     int pid = now_playing_pid(get);
+    char named[256];
+    who(pid, playing, named, sizeof named);
     int command = -1, want = -1;
     if (!action || strcmp(action, "pid") == 0) {
-        fprintf(stderr, "mediaremote: now playing pid %d\n", pid);
+        fprintf(stderr, "mediaremote: now playing pid %d (%s)\n", pid, named);
         return;
     }
     if (sscanf(action, "send:%d:%d", &command, &want) != 2 || want <= 0) {
@@ -63,9 +96,9 @@ void kaya_mediaremote_run(void *interp, void *cv) {
     }
     if (pid != want) {
         fprintf(stderr,
-                "mediaremote: REFUSED command %d: the system's Now Playing is pid %d, not "
-                "the guest %d (-2: no answer in 3 s)\n",
-                command, pid, want);
+                "mediaremote: REFUSED command %d: the system's Now Playing is pid %d (%s), not "
+                "the guest %d\n",
+                command, pid, named, want);
         return;
     }
     __block long statuses = -1;

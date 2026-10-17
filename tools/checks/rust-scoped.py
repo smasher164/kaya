@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 
 import concurrent.futures
 import os
@@ -15,7 +15,7 @@ g = Gate("rust-scoped")
 # No build here: a `-p kaya` build is a different cargo unit from the sweep's
 # workspace build and relinks the shared host dylib under every guest and
 # probe loading it (docs/traps.md, the sweep-relinked-libkaya entry).
-DEPS = ROOT / "target/debug/deps"
+DEPS = TARGET / "debug/deps"
 RLIB = DEPS / "libkaya.rlib"
 BOUND = 60
 if not RLIB.is_file():

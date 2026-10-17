@@ -2325,6 +2325,12 @@ def _leg_worker_slot(name, grouped):
                    out=log)
 
 
+# The exclusive funnel's toast dismissal, asked only when one may be up
+# (lane.toasts_may_be_up).
+NOTIFY_LEGS = lane.notification_legs(ROOT / "tools/scenes")
+_TOASTS = {"dismissed": False, "started": []}
+
+
 def dismiss_toasts():
     """EVERY KAYA TOAST DOWN before an exclusive leg types: a pooled notify
     leg's banner outlives the leg by its display time, into the exclusive
@@ -2341,6 +2347,7 @@ def dismiss_toasts():
     # '~', never ';' or ',': both are cmd argument delimiters and %~1 in the
     # stub would carry the first AUMID alone (measured: one of three).
     joined = "~".join(aumids)
+    t0 = time.monotonic()
     run_ssh("del C:\\kaya\\out_dismisstoasts.txt 2>nul & schtasks /create /tn "
             f'kaya_dismisstoasts /tr "wscript C:\\kaya\\run-hidden-args.vbs '
             f'dismiss-toasts.cmd {joined}" /sc once /st 00:00 /it /rl highest /f '
@@ -2355,11 +2362,13 @@ def dismiss_toasts():
             print("deploy-win: the toast dismissal never answered; the exclusive "
                   "leg runs against whatever is up.", file=sys.stderr)
             print(f"  What it had written: {out!r}", file=sys.stderr)
-            return
+            return False
         time.sleep(0.5)
     for line in out.splitlines():
         if line.startswith("dismiss-toasts:"):
             print(f"== {line} ==")
+    print(f"== dismiss-toasts: {time.monotonic() - t0:.1f}s ==")
+    return True
 
 
 CAPTURE_LANE = {"on": False}
@@ -2438,10 +2447,18 @@ def run_suite(name):
         capture_devices_start()
     SUITES_RUN.append(name)
     _leg_names.append(name)
+    if name not in lane.EXCLUSIVE:
+        _TOASTS["started"].append(name)
     if name in lane.EXCLUSIVE:
         for t in _leg_threads:
             t.join()
-        dismiss_toasts()
+        if lane.toasts_may_be_up(_TOASTS["started"], NOTIFY_LEGS, _TOASTS["dismissed"]):
+            if dismiss_toasts():
+                _TOASTS["dismissed"], _TOASTS["started"] = True, []
+        else:
+            print(f"== dismiss-toasts: not asked for {name}; no notification leg started "
+                  f"since the last dismissal ==")
+        _TOASTS["started"].append(name)
         with exclusive.hold("windows", name):
             # THE USER'S TEXT SCALE around a scale leg (docs/compliance-plan.md
             # R5, U3): written before the process starts, since only a fresh

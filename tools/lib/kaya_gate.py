@@ -29,6 +29,20 @@ import tempfile
 # from any directory, and `cd "$ROOT"` is the shell habit this drops.
 ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
+
+def cargo_target(env=None):
+    """The directory cargo builds into from ROOT: CARGO_TARGET_DIR when set,
+    else ROOT/target. validate-all's sweep has one of its own
+    (host_lib.SWEEP_TARGET), so a gate names built files through this."""
+    got = (os.environ if env is None else env).get("CARGO_TARGET_DIR", "")
+    if not got:
+        return ROOT / "target"
+    p = pathlib.Path(got)
+    return p if p.is_absolute() else ROOT / p
+
+
+TARGET = cargo_target()
+
 # The two sentences, one per cause. Kept as module constants so the
 # self-test compares the bytes it will really print, and so
 # check-python.py can hold them against the shell preamble's.

@@ -8306,6 +8306,7 @@ mod skin {
     /// window content's coordinates, composited over the resolved ground.
     pub struct Shot {
         pub content: gtk4::Widget,
+        pub texture: gtk4::gdk::Texture,
         rgba: Vec<u8>,
         stride: usize,
         width: i32,
@@ -8374,6 +8375,7 @@ mod skin {
         let ground = [ground[0], ground[1], ground[2]];
         Ok(Shot {
             content,
+            texture,
             rgba: bytes.to_vec(),
             stride,
             width: tw,
@@ -19635,6 +19637,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         drain_transactions();
     });
 
+    #[cfg(feature = "harness")]
+    crate::harness::cpu::main_loop_here();
     let _ = app.run_with_args::<&str>(&[]);
 
     // GTK teardown is orderly; dropping CoreState here announces shutdown
@@ -23544,6 +23548,22 @@ impl crate::harness::Stage for GtkStage {
                 format!("gradient ({detail})")
             } else {
                 format!("unmatched ({detail})")
+            }
+        })
+    }
+    fn failure_picture(&self) -> String {
+        let Some(out) = crate::vtrace::sibling("failshot.png") else {
+            return "not taken: no verb trace file is set, so there is nowhere beside it to write".to_owned();
+        };
+        Self::on_main(move |core| {
+            let shot = match skin::shot_of(core.window.upcast_ref()) {
+                Ok(shot) => shot,
+                Err(why) => return format!("NOT WRITTEN ({}): {why}", out.display()),
+            };
+            let (w, h) = (shot.texture.width(), shot.texture.height());
+            match shot.texture.save_to_png(&out) {
+                Ok(()) => format!("this process's window content rendered offscreen, {w}x{h} -> {}", out.display()),
+                Err(e) => format!("NOT WRITTEN ({}): {e}", out.display()),
             }
         })
     }

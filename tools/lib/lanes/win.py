@@ -253,6 +253,15 @@ def notification_legs(scenes_dir):
     return {leg for leg in legs() if scene_lang(leg)[0] in scenes}
 
 
+def toasts_may_be_up(started, notify_legs, dismissed):
+    """Whether an exclusive leg takes kaya's toasts down before it runs: none
+    taken down yet in this lane, or a notification leg STARTED since the last
+    dismissal. Of the 25 dismissals on the matrix at ee6b56b6 the one after
+    chat_go and badge_rust alone found a toast up (docs/measurements/
+    lane-ceilings-2026-10-16.md); tools/check-exclusive.py runs this."""
+    return not dismissed or bool(set(started) & set(notify_legs))
+
+
 def pooled_pointer_legs(scenes_dir):
     """{leg: verb} for every leg that drives the real pointer and is NOT
     alone in its block — the pool may place any of them on a tile that

@@ -134,14 +134,15 @@ fn record(verb: &'static str, attempt: u32, what: Arguments<'_>) {
 }
 
 /// A file BESIDE the trace, for this leg: `KAYA_VERB_TRACE` names
-/// `…\<leg>-vtrace.txt`, so a capture written as `…\<leg>-<suffix>` is
-/// pulled into that leg's bundle (tools/lib/flightrec_lane.py's windows
-/// sections). None when nothing is recording — a hand-launched guest
-/// writes no captures.
-#[cfg(target_os = "windows")]
+/// `…\<leg>-vtrace.txt` on windows and `…/<leg>.vtrace` on linux, so a
+/// capture written as `…\<leg>-<suffix>` is pulled into that leg's bundle
+/// (tools/lib/flightrec_lane.py's windows sections, tools/linux/run-suites.sh).
+/// None when nothing is recording — a hand-launched guest writes no captures.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
 pub(crate) fn sibling(suffix: &str) -> Option<std::path::PathBuf> {
     let path = std::path::PathBuf::from(std::env::var_os(ENV_VAR)?);
-    let stem = path.file_name()?.to_str()?.strip_suffix("-vtrace.txt")?;
+    let name = path.file_name()?.to_str()?;
+    let stem = name.strip_suffix("-vtrace.txt").or_else(|| name.strip_suffix(".vtrace"))?;
     Some(path.with_file_name(format!("{stem}-{suffix}")))
 }
 

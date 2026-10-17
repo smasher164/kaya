@@ -90,6 +90,8 @@ CALLS = [
     ("the theme records the skin tokens", "KayaRecordSkinTokens()\ncontent()"),
     ("a park clamped at the end re-parks when the end grows (Y5)",
      "if (node.scrollState.maxValue != endMax) {\nKayaVTrace.note(\"window\", \"re-park table=${node.id} row=$endPark: the end moved from $endMax to ${node.scrollState.maxValue}\")\nanchorRow = endPark"),
+    ("a park clamped by a dip of its end re-parks (Y5)", "} else if (scroll != endScroll && endLow < endScroll) {"),
+    ("the table's content measure feeds the end park", "window.measuredContent(contentH)\nwindow.schedule()"),
 ]
 
 
@@ -160,6 +162,10 @@ CUTS = [
      "scheme.inverseOnSurface,", "overlay pair lacks"),
     ("Compose: a tall row's park left short of the grown end", r"if \(node\.scrollState\.maxValue != endMax\) \{",
      "if (false) {", "a park clamped at the end re-parks when the end grows"),
+    ("Compose: a park clamped by a dip of its end left short", r"scroll != endScroll && endLow < endScroll\)",
+     "scroll != endScroll && false)", "a park clamped by a dip of its end re-parks"),
+    ("Compose: the content measure unread by the park", r"window\.measuredContent\(contentH\)\n",
+     "", "the table's content measure feeds the end park"),
     ("Compose: the circle clip cut", r"KayaCompose\.SHAPE_CIRCLE -> Modifier\.clip\(CircleShape\)",
      "KayaCompose.SHAPE_CIRCLE -> Modifier", "image shape lacks"),
     ("Compose: the looks left unshaped",

@@ -525,7 +525,12 @@ def wired_scenes():
 #     swallowed with AX reporting success (docs/deferred.md, the
 #     swallowed-press entry).
 #   session: takes the host's Now Playing, so the system sends the guest
-#     media commands (docs/media-plan.md §5).
+#     media commands (docs/media-plan.md §5). Its reading is the system's Now
+#     Playing, not HIDIdleTime: macOS hands Now Playing to the app that last
+#     started playing, so a host app that starts during the leg takes the
+#     guest's commands (docs/traps.md, the browser that took Now Playing).
+#     A holder defers the leg to the lane's end and it is NOT RUN if the
+#     holder stays, as a takeover leg is.
 #   takeover: makes the guest the active app or moves the host's display, so
 #     a person typing types into the guest (docs/traps.md, the emoji leg took
 #     the maintainer's keystrokes). Never runs while the maintainer is active
@@ -572,6 +577,10 @@ IDLE_RECHECKS = 2
 # asking ioreg. Every sentence the wait then prints carries `(doctored)`,
 # so a doctored run can never read as a real one.
 IDLE_DOOR = "KAYA_HID_IDLE_NS_OVERRIDE"
+# The Now Playing reading's own door, read by _now_playing() alone: entries
+# `<pid> <what>` separated by `|`, answered one per reading with the last
+# repeating; pid 0 is no app.
+NP_DOOR = "KAYA_NOW_PLAYING_OVERRIDE"
 
 IDLE_SENTENCES = {
     "waiting": "mac: {leg} waits for an idle host — HIDIdleTime {idle}s, "
@@ -593,7 +602,8 @@ IDLE_SENTENCES = {
                        "the host is idle",
     "summary": "mac: idle waits — {legs} leg(s) waited {secs}s of the "
                "{budget}s budget for an idle host; takeover legs waited "
-               "{takeover}s, {deferred} deferred to the lane's end",
+               "{takeover}s, session legs {session}s for Now Playing, "
+               "{deferred} deferred to the lane's end",
     "returned": "mac: {leg} took the token and the host is in use again "
                 "(HIDIdleTime {idle}, wants {want}s) — released it to wait "
                 "again{door}",
@@ -607,6 +617,17 @@ IDLE_SENTENCES = {
     "deferred": "mac: {leg} {takes} and the host is in use "
                 "(HIDIdleTime {idle}, wants {want}s) — deferred to the lane's "
                 "end{door}",
+    "np-deferred": "mac: {leg} {takes} and the system's Now Playing is {holder} "
+                   "— deferred to the lane's end{door}",
+    "np-waiting": "mac: {leg} waits for the system's Now Playing — {holder} "
+                  "(waited {waited}s of {bound}s){door}",
+    "np-cleared": "mac: {leg} waited {waited}s for the system's Now Playing — "
+                  "{holder}{door}",
+    "np-held": "mac: {leg} {takes} and the system's Now Playing is still "
+               "{holder} after {waited}s — NOT RUN{door}",
+    "np-returned-held": "mac: {leg} {takes} and the system's Now Playing was "
+                        "{holder} each of the {tries} times it took the token "
+                        "— NOT RUN{door}",
     "under-token": "mac: {leg} would wait for an idle host while this process "
                    "holds the matrix-wide token for {held} — every other lane "
                    "would wait on the human too; wait before exclusive.hold() "
@@ -614,7 +635,8 @@ IDLE_SENTENCES = {
 }
 
 _idle = {"spent": 0.0, "legs": 0, "door": [], "cleared": False,
-         "takeover": 0.0, "deferred": 0, "deadline": None}
+         "takeover": 0.0, "session": 0.0, "np_door": [], "deferred": 0,
+         "deadline": None}
 
 
 def _hid_idle_ns():
@@ -648,6 +670,97 @@ def _hid_idle_ns():
     return int(m.group(1)), None
 
 
+def _now_playing():
+    """((pid, what), None) for the system's Now Playing, pid 0 for no app, as
+    tools/mac/mediaremote.c reads it inside /usr/bin/perl; or (None, why)."""
+    raw = os.environ.get(NP_DOOR, "")
+    if raw:
+        if not _idle["np_door"]:
+            _idle["np_door"] = [v.strip() for v in raw.split("|") if v.strip()]
+        rest = _idle["np_door"]
+        if not rest:
+            return None, f"{NP_DOOR} is set and names no value"
+        entry = rest.pop(0) if len(rest) > 1 else rest[0]
+        pid, _, what = entry.partition(" ")
+        if not pid.isdigit():
+            return None, f"{NP_DOOR} entry {entry!r} is not `<pid> <what>`"
+        return (int(pid), what or "no app"), None
+    lib = media_server.mediaremote_lib(_scenes_root())
+    if lib is None:
+        return None, "tools/mac/mediaremote.c would not build"
+    try:
+        got = subprocess.run(
+            ["/usr/bin/perl", "-e",
+             "use DynaLoader; my $l=DynaLoader::dl_load_file($ARGV[0],0) or die "
+             "DynaLoader::dl_error(); my $s=DynaLoader::dl_find_symbol($l,"
+             "'kaya_mediaremote_run') or die 'no symbol'; "
+             "DynaLoader::dl_install_xsub('main::run',$s); run();", lib],
+            env=dict(os.environ, KAYA_MR_ACTION="pid"), stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"the helper did not answer: {e}"
+    m = re.search(r"mediaremote: now playing pid (-?\d+) \((.*)\)", got.stdout)
+    if not m:
+        return None, f"the helper said {got.stdout.strip()!r}, exit {got.returncode}"
+    if int(m.group(1)) < 0:
+        return None, m.group(2)
+    return (int(m.group(1)), m.group(2)), None
+
+
+def _session_reading():
+    """(the holder as text, clear): no app, or a paused one on an idle host."""
+    got, why = _now_playing()
+    if got is None:
+        return f"unreadable ({why})", False
+    pid, what = got
+    if pid == 0:
+        return "no app", True
+    if "not playing" in what:
+        ns, _ = _hid_idle_ns()
+        if ns is not None and ns / 1e9 >= IDLE_S:
+            return f"pid {pid} ({what}) on an idle host", True
+        idle = "unreadable" if ns is None else f"{int(ns / 1e9)}s"
+        return f"pid {pid} ({what}) while the host is in use (HIDIdleTime {idle})", False
+    return f"pid {pid} ({what})", False
+
+
+def session_wait(leg, say=None):
+    """A SESSION_LEGS leg's wait for the system's Now Playing to clear, under the
+    lane's end's shared bound (takeover_deadline); in its queue position
+    idle_admit has read it clear already, so this returns at once. Returns None
+    or the NOT RUN sentence."""
+    say = say or _idle_say
+    _not_under_token(leg)
+    door = " (doctored)" if os.environ.get(NP_DOOR, "") else ""
+    started = time.monotonic()
+    deadline = _idle["deadline"]
+    bound = TAKEOVER_BOUND_S if deadline is None else max(0.0, deadline - started)
+    told = 0
+    while True:
+        waited = time.monotonic() - started
+        holder, clear = _session_reading()
+        if clear:
+            if waited >= IDLE_POLL_S:
+                say(IDLE_SENTENCES["np-cleared"].format(
+                    leg=leg, waited=int(waited), holder=holder, door=door))
+            _idle["session"] += waited
+            _idle["cleared"] = True
+            return None
+        if waited >= bound:
+            _idle["session"] += waited
+            refused = IDLE_SENTENCES["np-held"].format(
+                leg=leg, takes=SESSION_LEGS[leg], holder=holder, waited=int(waited),
+                door=door)
+            say(refused)
+            return refused
+        if waited >= (told + 1) * IDLE_TELL_S:
+            told += 1
+            say(IDLE_SENTENCES["np-waiting"].format(
+                leg=leg, holder=holder, waited=int(waited), bound=int(bound), door=door))
+        time.sleep(IDLE_POLL_S)
+
+
 def _idle_say(text):
     print(text, file=sys.stderr, flush=True)
 
@@ -673,6 +786,8 @@ def idle_wait(leg, say=None):
     _idle["cleared"] = False
     if leg in TAKEOVER_LEGS:
         return takeover_wait(leg, say)
+    if leg in SESSION_LEGS:
+        return session_wait(leg, say)
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     ns, why = _hid_idle_ns()
     if ns is None:
@@ -766,7 +881,11 @@ def takeover_wait(leg, say=None):
 
 
 def _reading(leg):
-    """(idle seconds as text, met) for the leg's own threshold: ONE reading."""
+    """(idle seconds as text, met) for the leg's own threshold: ONE reading.
+    A SESSION_LEGS leg's is the system's Now Playing holder instead."""
+    if leg in SESSION_LEGS:
+        holder, clear = _session_reading()
+        return holder, clear, IDLE_S
     want = TAKEOVER_IDLE_S if leg in TAKEOVER_LEGS else IDLE_S
     ns, why = _hid_idle_ns()
     if ns is None:
@@ -775,6 +894,13 @@ def _reading(leg):
 
 
 def _defer(leg, idle, want, say):
+    if leg in SESSION_LEGS:
+        door = " (doctored)" if os.environ.get(NP_DOOR, "") else ""
+        said = IDLE_SENTENCES["np-deferred"].format(leg=leg, takes=SESSION_LEGS[leg],
+                                                    holder=idle, door=door)
+        say(said)
+        _idle["deferred"] += 1
+        return "deferred", said
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
     said = IDLE_SENTENCES["deferred"].format(leg=leg, takes=TAKEOVER_LEGS[leg], idle=idle, want=int(want), door=door)
     say(said)
@@ -798,7 +924,7 @@ def idle_admit(leg, hold, run, say=None):
     runs the leg."""
     say = say or _idle_say
     door = " (doctored)" if os.environ.get(IDLE_DOOR, "") else ""
-    in_place = leg in TAKEOVER_LEGS and _idle["deadline"] is None
+    in_place = (leg in TAKEOVER_LEGS or leg in SESSION_LEGS) and _idle["deadline"] is None
     for tries in range(1, IDLE_RECHECKS + 2):
         if in_place:
             idle, met, want = _reading(leg)
@@ -815,6 +941,12 @@ def idle_admit(leg, hold, run, say=None):
             if in_place:
                 return _defer(leg, idle, want, say)
             if tries > IDLE_RECHECKS:
+                if leg in SESSION_LEGS:
+                    said = IDLE_SENTENCES["np-returned-held"].format(
+                        leg=leg, takes=SESSION_LEGS[leg], tries=tries, holder=idle,
+                        door=" (doctored)" if os.environ.get(NP_DOOR, "") else "")
+                    say(said)
+                    return "not-run", said
                 if leg in TAKEOVER_LEGS:
                     said = IDLE_SENTENCES["returned-held"].format(
                         leg=leg, takes=TAKEOVER_LEGS[leg], tries=tries, idle=idle, want=int(want), door=door)
@@ -835,7 +967,7 @@ def idle_summary(say=None):
     (say or _idle_say)(IDLE_SENTENCES["summary"].format(
         legs=_idle["legs"], secs=int(_idle["spent"]),
         budget=int(IDLE_BUDGET_S), takeover=int(_idle["takeover"]),
-        deferred=_idle["deferred"]))
+        session=int(_idle["session"]), deferred=_idle["deferred"]))
 
 
 def idle_waited_seconds(text):
@@ -844,10 +976,12 @@ def idle_waited_seconds(text):
     (docs/traps.md, the idle waits counted against the ceiling)."""
     pattern = re.escape(IDLE_SENTENCES["summary"])
     for key, group in (("legs", r"\d+"), ("secs", r"(?P<secs>\d+)"), ("budget", r"\d+"),
-                       ("takeover", r"(?P<takeover>\d+)"), ("deferred", r"\d+")):
+                       ("takeover", r"(?P<takeover>\d+)"), ("session", r"(?P<session>\d+)"),
+                       ("deferred", r"\d+")):
         pattern = pattern.replace(re.escape("{" + key + "}"), group)
     m = re.search("^" + pattern + "$", text, re.M)
-    return int(m.group("secs")) + int(m.group("takeover")) if m else 0
+    return (int(m.group("secs")) + int(m.group("takeover")) + int(m.group("session"))
+            if m else 0)
 
 
 def hid_idle_seconds():
@@ -1544,7 +1678,7 @@ def scene_host_verbs(root, scene):
 
 
 def _host_legs(root):
-    exclusive_legs, takeover = set(), {}
+    exclusive_legs, takeover, session = set(), {}, {}
     for name, scene, _lang in legs():
         verbs = scene_host_verbs(root, scene)
         if verbs:
@@ -1552,7 +1686,10 @@ def _host_legs(root):
         takes = sorted({what for kind, what in verbs.values() if kind == "takeover"})
         if takes:
             takeover[name] = " and ".join(takes)
-    return exclusive_legs, takeover
+        holds = sorted({what for kind, what in verbs.values() if kind == "session"})
+        if holds and not takes:
+            session[name] = " and ".join(holds)
+    return exclusive_legs, takeover, session
 
 
 def _scenes_root():
@@ -1565,5 +1702,5 @@ def _scenes_root():
                        f"{pathlib.Path.cwd()}, so no leg's host verbs can be read")
 
 
-EXCLUSIVE, TAKEOVER_LEGS = _host_legs(_scenes_root())
+EXCLUSIVE, TAKEOVER_LEGS, SESSION_LEGS = _host_legs(_scenes_root())
 TAKEOVER_SCENES = {scene for name, scene, _lang in legs() if name in TAKEOVER_LEGS}

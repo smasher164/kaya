@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -1298,8 +1298,8 @@ if platform.system() != "Darwin":
           "macOS and was SKIPPED)")
     raise SystemExit(g.status)
 
-if not (ROOT / "target" / "debug" / "libkaya.dylib").is_file():
-    print("check-table-tier: target/debug/libkaya.dylib is not built "
+if not (TARGET / "debug" / "libkaya.dylib").is_file():
+    print(f"check-table-tier: {TARGET}/debug/libkaya.dylib is not built "
           "— the probe links against it. Run tools/gates.py, which "
           "builds what its gates read.", file=sys.stderr)
     raise SystemExit(1)
@@ -1321,13 +1321,13 @@ def build_probe(source, out_bin):
          "swift-toolchain", str(ROOT),
          "-import-objc-header", "crates/kaya/include/kaya.h",
          str(source), PROBE,
-         "-L", "target/debug", "-lkaya",
+         "-L", str(TARGET / "debug"), "-lkaya",
          "-framework", "AppKit", "-framework", "Foundation",
          "-o", str(out_bin)], check=False).returncode == 0
 
 
 DYLD = dict(os.environ,
-            DYLD_LIBRARY_PATH=str(ROOT / "target" / "debug"))
+            DYLD_LIBRARY_PATH=str(TARGET / "debug"))
 
 if not build_probe(ROOT / SWIFTUI, T / "table-tier"):
     print("check-table-tier: the tier probe did not compile",

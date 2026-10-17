@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT
+from kaya_gate import ROOT, TARGET
 
 # A hash over an artifact's INPUT sources, and `--verify` to ask a built
 # file which sources it came from (docs/traps.md: "A failed build must not
@@ -264,10 +264,11 @@ def gate_key(name):
         paths = files([n for n in names if (root / n).exists()])
     h = hashlib.sha256(digest(paths).encode())
     # The artifact half: see ARTIFACT_GATES for why never the raw bytes.
-    artifact_root = pathlib.Path(
-        os.environ.get("KAYA_GATE_ARTIFACT_ROOT", root))
+    artifact_root = os.environ.get("KAYA_GATE_ARTIFACT_ROOT")
     for rel in ARTIFACT_GATES.get(name, []):
-        p = artifact_root / rel
+        # The built file under this run's cargo target (kaya_gate.TARGET).
+        p = (pathlib.Path(artifact_root) / rel if artifact_root
+             else TARGET / rel.removeprefix("target/"))
         h.update(f"artifact:{rel}\0".encode())
         if not p.is_file():
             h.update(b"absent")

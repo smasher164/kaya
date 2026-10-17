@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -61,7 +61,7 @@ with scratch_dir("check-wheel-") as tmp:
         print("check-wheel: wheel install failed", file=sys.stderr)
         sys.exit(1)
 
-    smoke_env = dict(bare, KAYA_LIB=str(ROOT / "target/debug/libkaya.dylib"))
+    smoke_env = dict(bare, KAYA_LIB=str(TARGET / "debug/libkaya.dylib"))
 
     # The smoke's cwd is PINNED to the scratch dir: `python -c` puts the
     # cwd at sys.path[0], so an unpinned run from bindings/python imports

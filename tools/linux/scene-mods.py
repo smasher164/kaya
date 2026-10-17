@@ -6,9 +6,11 @@ stderr; a refused drop exits 1 with the shared grammar's sentence.
 
     tools/linux/scene-mods.py <scene>
     tools/linux/scene-mods.py --protocols <scene>
+    tools/linux/scene-mods.py --quiet
 
 The second form prints the session protocols the scene's legs run on, and
-names on stderr each one the lane table (WAYLAND_ONLY) leaves out.
+names on stderr each one the lane table (WAYLAND_ONLY) leaves out. The third
+prints the QUIET scenes, which run in the matrix's linux-quiet row alone.
 """
 import pathlib
 import sys
@@ -32,8 +34,11 @@ def protocols(scene):
 def main(argv):
     if len(argv) == 2 and argv[0] == "--protocols":
         return protocols(argv[1])
+    if argv == ["--quiet"]:
+        print(" ".join(sorted(lane.QUIET)))
+        return 0
     if len(argv) != 1:
-        print("usage: tools/linux/scene-mods.py [--protocols] <scene>", file=sys.stderr)
+        print("usage: tools/linux/scene-mods.py [--protocols] <scene> | --quiet", file=sys.stderr)
         return 2
     scene = argv[0]
     path = ROOT / f"tools/scenes/{scene}.steps"

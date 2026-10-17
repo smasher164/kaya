@@ -4868,6 +4868,8 @@ fn run_with_log(
         }
         // Where this step's failures start, for the retraction below.
         let failures_before = failures.len();
+        #[cfg(target_os = "linux")]
+        let cpu_at = cpu::Snap::now();
         // Armed BEFORE the id normalization below, which hops as well
         // (Stage::resolve_id), and with the step as the script wrote it.
         watch.enter(format!("{step:?}"));
@@ -7113,6 +7115,8 @@ fn run_with_log(
                 let picture = if failures.is_empty() { stage.failure_picture() } else { String::new() };
                 if let Some((log, _)) = log {
                     log(&format!("KAYA_HARNESS: step-failed {e}"));
+                    #[cfg(target_os = "linux")]
+                    log(&format!("KAYA_HARNESS: cpu over the step: {}", cpu_at.account()));
                     for line in crate::media::visibility_account() {
                         log(&format!("KAYA_HARNESS: visibility {line}"));
                     }
@@ -7695,6 +7699,117 @@ impl StepWatchdog {
 
     fn clear(&self) {
         *self.watched.lock().unwrap() = None;
+    }
+}
+
+/// What a failed step's CPU was spent on (docs/traps.md, the media_tracks
+/// play-through under a load of 121): the main loop's own thread ran or
+/// waited for a CPU, the whole machine was short of one, or neither.
+#[cfg(target_os = "linux")]
+pub(crate) mod cpu {
+    use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+    use std::time::{Duration, Instant};
+
+    static MAIN_LOOP_TID: AtomicI32 = AtomicI32::new(0);
+    static SAMPLER_TID: AtomicI32 = AtomicI32::new(0);
+    static OVERSLEPT_MS: AtomicU64 = AtomicU64::new(0);
+    static OVERSLEPT_WALL_MS: AtomicU64 = AtomicU64::new(0);
+    const NAP: Duration = Duration::from_millis(20);
+
+    /// The sampler's nap overslept by more than its own run-queue wait is
+    /// time the whole machine was off every CPU, which no guest counter
+    /// shows (this VM reports no steal time; measured 2026-10-17).
+    pub(crate) fn main_loop_here() {
+        // SAFETY: gettid takes no arguments.
+        MAIN_LOOP_TID.store(unsafe { libc::gettid() }, Ordering::Relaxed);
+        let _ = std::thread::Builder::new().name("kaya-cpu-nap".into()).spawn(|| {
+            // SAFETY: gettid takes no arguments.
+            SAMPLER_TID.store(unsafe { libc::gettid() }, Ordering::Relaxed);
+            loop {
+                let at = Instant::now();
+                std::thread::sleep(NAP);
+                let late = at.elapsed().saturating_sub(NAP).as_millis() as u64;
+                if OVERSLEPT_MS.fetch_max(late, Ordering::Relaxed) < late {
+                    let wall = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
+                    OVERSLEPT_WALL_MS.store(wall.map_or(0, |d| d.as_millis() as u64), Ordering::Relaxed);
+                }
+            }
+        });
+    }
+
+    pub(crate) struct Snap {
+        at: Instant,
+        tid: i32,
+        thread: Result<(u64, u64), String>,
+        napper: Result<(u64, u64), String>,
+        pressure: Result<u64, String>,
+    }
+
+    fn schedstat(tid: i32) -> Result<(u64, u64), String> {
+        let path = format!("/proc/self/task/{tid}/schedstat");
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+        let mut it = text.split_whitespace().map(str::parse::<u64>);
+        match (it.next(), it.next()) {
+            (Some(Ok(ran)), Some(Ok(waited))) => Ok((ran, waited)),
+            _ => Err(format!("{path} reads {:?}", text.trim())),
+        }
+    }
+
+    fn pressure() -> Result<u64, String> {
+        let text = std::fs::read_to_string("/proc/pressure/cpu").map_err(|e| format!("/proc/pressure/cpu: {e}"))?;
+        text.lines()
+            .find(|l| l.starts_with("some "))
+            .and_then(|l| l.split_whitespace().find_map(|f| f.strip_prefix("total=")))
+            .and_then(|t| t.parse().ok())
+            .ok_or_else(|| format!("/proc/pressure/cpu has no `some ... total=`: {:?}", text.trim()))
+    }
+
+    impl Snap {
+        pub(crate) fn now() -> Snap {
+            OVERSLEPT_MS.store(0, Ordering::Relaxed);
+            let tid = MAIN_LOOP_TID.load(Ordering::Relaxed);
+            let thread = if tid == 0 { Err("no backend named its main loop's thread".to_owned()) } else { schedstat(tid) };
+            let napper = match SAMPLER_TID.load(Ordering::Relaxed) {
+                0 => Err("no nap sampler is running".to_owned()),
+                nap => schedstat(nap),
+            };
+            Snap { at: Instant::now(), tid, thread, napper, pressure: pressure() }
+        }
+
+        pub(crate) fn account(&self) -> String {
+            let wall = self.at.elapsed().as_millis();
+            let ms = |ns: u64| ns / 1_000_000;
+            let thread = match (&self.thread, &schedstat(self.tid)) {
+                (Ok((r0, w0)), Ok((r1, w1))) => format!(
+                    "the main loop's thread {} ran {} ms and waited {} ms for a CPU",
+                    self.tid,
+                    ms(r1.saturating_sub(*r0)),
+                    ms(w1.saturating_sub(*w0))
+                ),
+                (Err(e), _) | (_, Err(e)) => format!("the main loop's thread unread ({e})"),
+            };
+            let machine = match (&self.pressure, &pressure()) {
+                (Ok(p0), Ok(p1)) => format!("some task here stalled for a CPU {} ms of them", p1.saturating_sub(*p0) / 1000),
+                (Err(e), _) | (_, Err(e)) => format!("cpu pressure unread ({e})"),
+            };
+            let nap = match (&self.napper, &schedstat(SAMPLER_TID.load(Ordering::Relaxed))) {
+                (Ok((_, w0)), Ok((_, w1))) => format!(
+                    "a {} ms nap overslept by up to {} ms, waking at wall_ms {}, while the napping thread waited {} ms for a CPU in all",
+                    NAP.as_millis(),
+                    OVERSLEPT_MS.load(Ordering::Relaxed),
+                    OVERSLEPT_WALL_MS.load(Ordering::Relaxed),
+                    ms(w1.saturating_sub(*w0))
+                ),
+                (Err(e), _) | (_, Err(e)) => format!("the nap sampler unread ({e})"),
+            };
+            let load = std::fs::read("/proc/loadavg")
+                .map_or_else(|e| format!("unreadable: {e}"), |b| String::from_utf8_lossy(&b).into_owned());
+            format!(
+                "{wall} ms: {thread}; {machine}; {nap}; loadavg {} on {} cpus",
+                load.trim(),
+                std::thread::available_parallelism().map_or(0, usize::from)
+            )
+        }
     }
 }
 

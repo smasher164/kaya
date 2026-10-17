@@ -115,6 +115,9 @@ def mac_unified_log(pid, cap=SECTION_CAP, run=subprocess.run):
               ("MediaRemote's commands",
                '(process == "mediaremoted" AND eventMessage CONTAINS[c] "command") OR '
                '(process == "perl" AND subsystem BEGINSWITH "com.apple.amp.mediaremote")'),
+              ("Now Playing's owner, every app",
+               'process == "mediaremoted" AND (eventMessage CONTAINS "ActiveNowPlayingClient '
+               'changed" OR eventMessage CONTAINS "PlaybackState changed")'),
               ("replayd connections cut, every process",
                'eventMessage == "RPDaemonProxy: connection INTERRUPTED"')]
              if pid else

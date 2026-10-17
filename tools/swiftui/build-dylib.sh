@@ -22,7 +22,7 @@ source "$ROOT/tools/lib/swift-toolchain.sh"
 cargo build --locked --lib
 # The Swift dylib below compiles against this library's header and loads
 # it at run time; both must come from one tree.
-tools/build-id.py --verify target/debug/libkaya.dylib
+tools/build-id.py --verify "${CARGO_TARGET_DIR:-target}/debug/libkaya.dylib"
 tools/gen-header.py --check
 
 # The interpreter carries the id of the sources it was compiled from

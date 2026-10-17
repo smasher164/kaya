@@ -57,18 +57,23 @@ flightrec_home = pathlib.Path(
     os.environ.get("XDG_STATE_HOME",
                    str(pathlib.Path.home() / ".local/state"))) / "kaya"
 flightrec_home.mkdir(parents=True, exist_ok=True)
+# Cargo's registry outlives the --rm container (run-suites.sh refuses without it).
+cargo_registry = ROOT / "target-linux/cargo-registry"
+cargo_registry.mkdir(parents=True, exist_ok=True)
 
 # Hard ceiling on a suite that never returns. Generous: a cold
 # container compiles everything from scratch.
 rc = run(["timeout", "1800", "docker", "run", "--rm",
           "-v", f"{ROOT}:/work",
           "-v", f"{flightrec_home}:/flightrec-state/kaya",
+          "-v", f"{cargo_registry}:/root/.cargo/registry",
           "-e", "XDG_STATE_HOME=/flightrec-state",
           "-e", "KAYA_EXCLUSIVE_DIR=/flightrec-state/kaya/exclusive",
           "-e", f"KAYA_EXCLUSIVE={os.environ.get('KAYA_EXCLUSIVE', '')}",
           "-e", f"KAYA_RECORD={os.environ.get('KAYA_RECORD', '')}",
           "-e", f"KAYA_JOBS={os.environ.get('KAYA_JOBS', '')}",
           "-e", f"KAYA_ONLY={os.environ.get('KAYA_ONLY', '')}",
+          "-e", f"KAYA_QUIET={os.environ.get('KAYA_QUIET', '')}",
           "kaya-linux", "bash", "/work/tools/linux/run-suites.sh"
           ]).returncode
 print(f"TIMING container-suites {int(time.monotonic() - t0)}s",

@@ -3,9 +3,9 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, dev_shell_or_die
 import exclusive
-from host_lib import HOST_LIB, host_lib_stamp
+from host_lib import HOST_LIB, SWEEP_TARGET, host_lib_stamp
 
 dev_shell_or_die()
 
@@ -270,7 +270,7 @@ BUILD = [
     # holds the stamp honest.
     ("market data", ["python3", "tools/gen-market.py", "--ensure"]),
     ("libkaya", ["cargo", "build", "--locked", "--lib"]),
-    ("libkaya id", ["tools/build-id.py", "--verify", "target/debug/libkaya.dylib"]),
+    ("libkaya id", ["tools/build-id.py", "--verify", str(TARGET / "debug/libkaya.dylib")]),
     # RUNG 1, HERE BECAUSE IT RELINKS: `cargo test` builds the lib, which
     # no GATE may do (the relink refusal below), and nothing automatic ran
     # the ladder's first rung at all — two tests sat red on main across
@@ -280,6 +280,20 @@ BUILD = [
     # Last, after every cargo build above (docs/traps.md, the stale
     # split-debuginfo objects).
     ("stale objects", ["tools/prune-objects.py"]),
+]
+# Built elsewhere (validate-all's sweep), the bindings' baked library paths
+# (Go's cgo rpath, OCaml's runtime search) still load the lanes' copy, which
+# this run reads and never writes.
+if TARGET != ROOT / "target":
+    BUILD.insert(3, ("the lanes' libkaya id",
+                     ["tools/build-id.py", "--verify", "target/debug/libkaya.dylib"]))
+
+
+# What the sweep's own target needs compiled before the sweep: the lib BUILD
+# makes and the harness test binary check-abort's rust-async cases run.
+WARM = [
+    ["cargo", "build", "--locked", "--lib"],
+    ["cargo", "test", "--locked", "-p", "kaya", "--features", "harness", "--no-run"],
 ]
 
 
@@ -371,7 +385,7 @@ def pool_order(rest):
     return order
 
 
-def sweep(gates, label="gates", lib_root=None):
+def sweep(gates, label="gates", lib_root=None, lanes_root=None):
     """Run every gate; return True only if every declared one passed.
 
     COUNT IN, COUNT OUT. `declared` comes from the list itself and
@@ -404,7 +418,12 @@ def sweep(gates, label="gates", lib_root=None):
     # relinks it (any `cargo build` of the lib, in any spelling) is refused
     # by name below, because the mac lane's guests and the pool's own
     # probes load it by path (docs/traps.md, 2026-09-21).
-    lib_seen = {"stamp": host_lib_stamp(lib_root)}
+    lib_seen = {"stamp": host_lib_stamp(lib_root, None if lib_root else TARGET)}
+    # IN ITS OWN TARGET (validate-all's sweep) the lanes' copy must not move
+    # either: that would be a build that escaped CARGO_TARGET_DIR.
+    if lanes_root is None and lib_root is None and TARGET != ROOT / "target":
+        lanes_root = ROOT
+    lanes_seen = {"stamp": host_lib_stamp(lanes_root) if lanes_root else None}
     running = set()
     relinked = []
 
@@ -427,7 +446,18 @@ def sweep(gates, label="gates", lib_root=None):
         dt = time.monotonic() - t0
         with lock:
             running.discard(name)
-            now = host_lib_stamp(lib_root)
+            now = host_lib_stamp(lib_root, None if lib_root else TARGET)
+            lanes_now = host_lib_stamp(lanes_root) if lanes_root else None
+            if lanes_now != lanes_seen["stamp"]:
+                lanes_seen["stamp"] = lanes_now
+                relinked.append(name)
+                print(f"{label}: THE LANES' LIBKAYA RELINKED while {name} ran "
+                      f"(also running: {' '.join(sorted(running)) or 'nothing'}) — "
+                      f"{' and '.join(HOST_LIB)} under {lanes_root} changed identity "
+                      f"while this sweep builds into {lib_root or TARGET}, so something it ran "
+                      f"built outside CARGO_TARGET_DIR (a --target-dir, a cleared "
+                      f"environment). The mac lane's guests load that library by "
+                      f"path (docs/traps.md, 2026-09-21)", file=sys.stderr, flush=True)
             if now != lib_seen["stamp"]:
                 lib_seen["stamp"] = now
                 beside = sorted(running)
@@ -583,10 +613,44 @@ def selftest():
             ok = False
         del os.environ["KAYA_GATES_SELFTEST_RELINK"]
 
+    # F. in a target of its own, a gate that relinks the LANES' copy is
+    # refused too, and an untouched pair is not (2026-10-16).
+    with tempfile.TemporaryDirectory(prefix="kaya-gates-lanes-") as tmp:
+        own, lanes = pathlib.Path(tmp) / "own", pathlib.Path(tmp) / "lanes"
+        for base in (own, lanes):
+            for rel in HOST_LIB:
+                (base / rel).parent.mkdir(parents=True, exist_ok=True)
+                (base / rel).write_bytes(b"libkaya")
+        os.environ["KAYA_GATES_SELFTEST_RELINK"] = str(lanes / HOST_LIB[1])
+        if not sweep(green, "selftest-F0", lib_root=own, lanes_root=lanes):
+            print("gates: SELF-TEST FAIL — an all-green list over untouched own "
+                  "and lanes' libs was refused", file=sys.stderr)
+            ok = False
+        if sweep(relink, "selftest-F", lib_root=own, lanes_root=lanes):
+            print("gates: SELF-TEST FAIL — a sweep in its own target reported OK "
+                  "after a gate relinked the lanes' libkaya", file=sys.stderr)
+            ok = False
+        del os.environ["KAYA_GATES_SELFTEST_RELINK"]
+
+    # G. a matrix sweep outside SWEEP_TARGET is refused by name; a hand run
+    # and a sweep in SWEEP_TARGET are not.
+    said = matrix_target_refusal({"KAYA_MATRIX_GATES_TOKEN": "t"}, ROOT / "target")
+    print(f"selftest-G: {said}")
+    if not said or str(SWEEP_TARGET) not in said:
+        print("gates: SELF-TEST FAIL — a matrix sweep in the lanes' target was not "
+              "refused", file=sys.stderr)
+        ok = False
+    if (matrix_target_refusal({}, ROOT / "target")
+            or matrix_target_refusal({"KAYA_MATRIX_GATES_TOKEN": "t"}, SWEEP_TARGET)):
+        print("gates: SELF-TEST FAIL — a hand run or a sweep in its own target was "
+              "refused", file=sys.stderr)
+        ok = False
+
     if ok:
         print("gates: SELF-TEST OK — the count refused an under-run (1 of 3), "
-              "a failing gate, a missing script and a gate that relinked the "
-              "host libkaya")
+              "a failing gate, a missing script, a gate that relinked the "
+              "host libkaya and one that relinked the lanes' copy from a sweep "
+              "target of its own")
     return ok
 
 
@@ -624,6 +688,18 @@ def fingerprint_of(keys):
     return h.hexdigest()[:16]
 
 
+def matrix_target_refusal(env, target):
+    """validate-all's sweep must build into SWEEP_TARGET: it runs beside the
+    mac lane, whose guests load the lanes' libkaya by path (docs/traps.md,
+    the sweep-relinked-libkaya entry). A hand run carries no token."""
+    if not env.get("KAYA_MATRIX_GATES_TOKEN") or target == SWEEP_TARGET:
+        return None
+    return (f"gates: a matrix sweep (KAYA_MATRIX_GATES_TOKEN is set) building into "
+            f"{target}, not {SWEEP_TARGET}: its cargo builds would relink the "
+            f"libkaya the mac lane's guests load by path. validate-all launches the "
+            f"sweep with CARGO_TARGET_DIR={SWEEP_TARGET} (tools/check-gates.py)")
+
+
 def main(args):
     if args == ["--list"]:
         print(json.dumps({
@@ -641,6 +717,21 @@ def main(args):
         # bytes, so the token is taken only after the same builds the
         # sweep itself starts with.
         return 0 if build() else 1
+    if args == ["--warm"]:
+        # validate-all's t0, niced beside the lanes: the sweep's own target
+        # compiled before the sweep needs it, so its start after Android does
+        # not recompile the core (docs/measurements/lane-ceilings-2026-10-16.md).
+        if os.environ.get("KAYA_ONLY") or os.environ.get("KAYA_EXCLUSIVE") == "only":
+            print("warm: a filtered or exclusive-only matrix runs no sweep; nothing warmed",
+                  flush=True)
+            return 0
+        for cmd in WARM:
+            print(f"warm: {' '.join(cmd)} (cargo target {TARGET})", flush=True)
+            if subprocess.call(cmd, cwd=ROOT) != 0:
+                print(f"warm: {' '.join(cmd)} FAILED — the sweep builds it itself",
+                      file=sys.stderr)
+                return 1
+        return 0
     if args == ["--fingerprint"]:
         # Line one is the token; line two the per-gate keys behind it, so
         # a lane whose token misses can name the gate that moved.
@@ -653,12 +744,16 @@ def main(args):
 
     if args:
         print(f"gates.py: unknown argument {args[0]!r} — "
-              f"usage: gates.py [--list | --selftest | --fingerprint | --build]",
+              f"usage: gates.py [--list | --selftest | --fingerprint | --build | --warm]",
               file=sys.stderr)
         return 1
 
-    print(f"gates: {len(GATES)} declared — building what they read first",
-          flush=True)
+    refusal = matrix_target_refusal(os.environ, TARGET)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 1
+    print(f"gates: {len(GATES)} declared — building what they read first "
+          f"(cargo target {TARGET})", flush=True)
     if not build():
         return 1
     return 0 if sweep(GATES) else 1

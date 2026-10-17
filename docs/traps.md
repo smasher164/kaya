@@ -792,8 +792,14 @@ no earlier one: the mac lane ended at 864s against Android's 788s, after 470s
 of exclusive-token waits and one 60s host-idle wait; on every earlier matrix
 the mac lane finished first.
 
-Guards: tools/validate-all.py waits for the mac lane as well as Android before
-the sweep (tools/check-gates.py, N11b and N10b); tools/gates.py refuses its
+Guards: tools/validate-all.py launches the sweep with
+CARGO_TARGET_DIR=target/gate-sweep (tools/lib/host_lib.py's SWEEP_TARGET), so
+no sweep build can write the lanes' library, and since 2026-10-16 the sweep no
+longer waits for the mac lane (until then it did, which cost up to 360s of a
+matrix's wall while the maintainer was at the host); tools/gates.py refuses a
+matrix sweep outside SWEEP_TARGET and refuses its verdict if the lanes' copy
+moved while it built elsewhere (self-tests F and G); tools/check-gates.py holds
+the launch, N11b and N10b; tools/gates.py also refuses its
 verdict if the host libkaya's inode or mtime moved while a gate ran, naming
 the gate and what ran beside it (its self-test E); tools/validate-mac.py
 refuses its verdict if it moved during the legs; and rust-scoped.py builds
@@ -13906,6 +13912,31 @@ its newest 1 MB, and mediaremoted and perl were in no section. It now carries
 MediaRemote's command lines and perl's (tools/lib/flightrec_lane.py
 `mac_unified_log`).
 
+## The browser that took Now Playing (measured 2026-10-16, matrix at ee6b56b6)
+media_session-csharp-swiftui failed at `session_send next` with the helper
+refusing 37 times: "the system's Now Playing is pid 44642, not the guest".
+Pause and play had reached the guest and been replied to (2 and 10 ms), so
+b4a99a48's send was not the cause. 44642 was the maintainer's Firefox, on X,
+whose media session flips between Playing and Paused as he scrolls (dozens of
+times through that lane). macOS hands Now Playing to the app that last STARTED
+playing: mediaremoted logged the guest Paused -> Playing at 16:55:31.909,
+Firefox Paused -> Playing at .914, and `ActiveNowPlayingClient changed from
+dotnet (24944) to firefox (44642)` at .917, which Firefox held until 16:55:43,
+past the verb's 10 s. The three legs before it had taken Now Playing from a
+PLAYING Firefox because they started after it; HIDIdleTime, the lane's only
+reading, was 0-2 s for all ten and nine passed, so the idle clock does not
+measure this. The session legs (tools/lib/lanes/mac.py SESSION_LEGS, derived
+from HOST_VERBS' `session` kind) now read the system's Now Playing instead,
+through the helper's `pid` action: any app holding it while playing, or paused
+while the host is in use, defers the leg to the lane's end, where it waits
+under the takeover legs' shared bound and is NOT RUN if the holder stays
+(check-exclusive runs both, eight cases, four watched cuts). The bundle could
+not name the move: its MediaRemote section is command lines, and the
+`ActiveNowPlayingClient changed` / `PlaybackState changed` lines were read
+from the live system log. It now has an every-app Now Playing owner section,
+and the helper's refusal names the holder's process and whether it plays (it
+used to print "(-2: no answer in 3 s)" whatever it had read).
+
 ## A looping AVPlayer with `actionAtItemEnd = .pause` reports a pause at every loop (measured 2026-09-30)
 Seeking back to zero from the end notification is not seamless: the player's
 timeControlStatus goes `.paused` for the seek, the core publishes `paused`,
@@ -16858,6 +16889,18 @@ table's tall-rows class one tier over. A park clamped at the end now re-parks
 whenever the end moves, and yields only to a scroll that moved while the end
 did not. GUARD: tools/lib/skin_compose.py's re-park cut.
 
+That was half of it (measured 2026-10-17, the matrix at ee6b56b6, the same
+numbers): the end also DIPS. A layout measures the content 8 px short for one
+pass (content 2914 against 2922, the viewport 522), the ScrollState clamps its
+value to the dipped end, 2392, and the next pass puts the end back at 2400. A
+report that runs after the end is back sees the end unmoved and the scroll
+moved, and read that as a reader's scroll; the yield wrote no trace line, so
+the bundle could not say why the park let go. The table's content measure now
+records the lowest end it measured under a parked end, a scroll that moved
+while the end dipped re-parks, and both yields trace (`end park`, `re-park ...
+a layout measured the end at`, `end park yields`). GUARD: skin_compose.py's
+dip and content-measure cuts.
+
 ## The mac table's first band at the floor, and a reused cell's anchor (measured 2026-10-16)
 
 With netimage's art at 40 pt the mac native table released loading rows nobody
@@ -16961,3 +17004,47 @@ of 0" panic on the GTK lane. A path whose first component is not a guest
 GUARD: bindings/ocaml/checks/guest_isolation.ml, every guest executable's
 `link_deps`, so `dune build` fails naming the file, the module and the spelling;
 its two negatives in bindings/ocaml/checks/negatives.py (check-abort).
+
+## The linux lane's core build downloaded its dependencies every run (measured 2026-10-16)
+
+The linux lane's `core-build` read 67-90 s on every run, even with nothing in
+crates/ changed. Run in the image with
+`CARGO_LOG=cargo::core::compiler::fingerprint=info`, the build compiled no crate
+and spent the time on `Updating crates.io index` and 256 `Downloaded` lines:
+the image's /root/.cargo holds only bin/ and env, so the `--rm` container
+fetched the index and every dependency again each time. With
+target-linux/cargo-registry (222 MB) mounted at /root/.cargo/registry the same
+build took 1.45 s, and the `linux-quiet` tail measured 43 s instead of 108 s.
+GUARD: tools/validate-linux.py mounts it, and tools/linux/run-suites.sh refuses
+to start when /root/.cargo/registry is not a mount (watched firing on an
+unmounted run). tools/check-gtk.py runs its own container and still fetches.
+
+## A linux VM off every CPU for longer than a cue loses the cue (measured 2026-10-17)
+
+media_tracks' play-through asserts the second cue (1000-2000 ms) while the
+clip plays. In the matrix at ee6b56b6, at a host load of 121 on 18 cores, the
+ocaml and java x11 legs both missed it: the ocaml leg's boundary timer fired
+2308 ms after a 969 ms schedule with playbin already at 2000, and the java leg's
+fired on time while the caption ask it queued ran 1616 ms later, at 2000. A
+filtered run never fails; neither did 36 or 200 spinners inside the docker VM
+(load 192, the kernel shares fairly) nor a cpu quota of 0.3 s per second (the
+longest freeze stays under a period). Freezing the container for 1.5 s every
+3.5 s with `docker pause` reproduced the matrix's verdict byte for byte on four
+legs: a cue window that passes while the machine is stopped is lost by any
+implementation, since the pipeline's clock is the host's and keeps running.
+The docker VM reports no steal time (/proc/stat's column is 0), so a guest
+counter cannot see a host that stopped scheduling the VM. A failed linux step
+now logs `cpu over the step`: the GTK main loop's thread's run and run-queue
+wait (its schedstat), the container's cpu pressure, and a 20 ms nap's longest
+oversleep with the napping thread's own wait; an oversleep with no wait is the
+machine off every CPU (1541 ms against 1 ms under the pause). GUARD:
+check-flightrec's linux step cpu census (SC1-SC3). REMEDY (the maintainer,
+2026-10-16): the media_tracks legs run in the matrix's `linux-quiet` row after
+every lane, the sweep and the android tail (tools/lib/lanes/linux.py's QUIET;
+check-gates NQ3, check-exclusive 5e).
+
+The same pass gave a red linux leg the guest's own picture: the lane's `shot`
+is taken after the guest exits, so netimage-java-wayland's shape red had a
+picture of an empty desktop. GTK's failure_picture renders the window content
+offscreen at the first failed step to `<leg>-failshot.png` beside the verb
+trace, adopted as `fail-shot`. GUARD: check-flightrec FS1-FS2.

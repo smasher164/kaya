@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -24,7 +24,7 @@ import time
 
 g = Gate("check-abort")
 
-LIB = ROOT / "target/debug/libkaya.dylib"
+LIB = TARGET / "debug/libkaya.dylib"
 if not LIB.is_file():
     print("check-abort: build libkaya first (cargo build --locked --lib)")
     sys.exit(1)
@@ -131,8 +131,8 @@ with scratch_dir("check-abort-") as tmp:
           # MODULE (Package.swift); this arm compiles the same files as
           # one module with its probe, so it needs the modulemap's dir.
           "-I", "bindings/swift/CKaya",
-          "-L", "target/debug", "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
+          "-L", str(TARGET / "debug"), "-lkaya",
+          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
          tmp / "swift.log", env=NO_XCODE)
     step("swift", [str(tmp / "swift-abort")], tmp / "swift.log")
 
@@ -140,8 +140,8 @@ with scratch_dir("check-abort-") as tmp:
         "bash", "-c",
         'source "$1/tools/lib/swift-toolchain.sh" && shift && kaya_swift_guestc "$@"',
         "_", str(ROOT), "-I", "bindings/swift/CKaya",
-        "-L", "target/debug", "-lkaya", "-Xlinker", "-rpath", "-Xlinker",
-        str(ROOT / "target/debug"),
+        "-L", str(TARGET / "debug"), "-lkaya", "-Xlinker", "-rpath", "-Xlinker",
+        str(TARGET / "debug"),
     ]
     executor_sources = sorted(glob.glob(str(ROOT / "bindings/swift/*.swift")))
     executor_probe = str(ROOT / "tools/checks/swift-executor/main.swift")
@@ -353,8 +353,8 @@ with scratch_dir("check-abort-") as tmp:
           # MODULE (Package.swift); this arm compiles the same files as
           # one module with its probe, so it needs the modulemap's dir.
           "-I", "bindings/swift/CKaya",
-          "-L", "target/debug", "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
+          "-L", str(TARGET / "debug"), "-lkaya",
+          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
          tmp / "swift-notify.log", env=NO_XCODE)
     step("swift-notify", [str(tmp / "swift-notify")],
          tmp / "swift-notify.log", echo=("notify-order:", "link-route:"))
@@ -391,8 +391,8 @@ with scratch_dir("check-abort-") as tmp:
           # MODULE (Package.swift); this arm compiles the same files as
           # one module with its probe, so it needs the modulemap's dir.
           "-I", "bindings/swift/CKaya",
-          "-L", "target/debug", "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
+          "-L", str(TARGET / "debug"), "-lkaya",
+          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
          tmp / "swift-swapped.log", env=NO_XCODE)
     with (tmp / "swift-swapped-run.log").open("w", encoding="utf-8") as out:
         swapped_run = subprocess.run(
@@ -443,8 +443,8 @@ with scratch_dir("check-abort-") as tmp:
           # MODULE (Package.swift); this arm compiles the same files as
           # one module with its probe, so it needs the modulemap's dir.
           "-I", "bindings/swift/CKaya",
-          "-L", "target/debug", "-lkaya",
-          "-Xlinker", "-rpath", "-Xlinker", str(ROOT / "target/debug")],
+          "-L", str(TARGET / "debug"), "-lkaya",
+          "-Xlinker", "-rpath", "-Xlinker", str(TARGET / "debug")],
          tmp / "swift-route-zero.log", env=NO_XCODE)
     with (tmp / "swift-route-zero-run.log").open("w", encoding="utf-8") as out:
         zero_run = subprocess.run(
@@ -801,9 +801,9 @@ with scratch_dir("check-abort-") as tmp:
     for stale in glob.glob(str(hs_dist / "build/*/*/kaya-guests-0")):
         shutil.rmtree(stale, ignore_errors=True)
     cabal_args = [f"--builddir={hs_dist}",
-                  f"--extra-lib-dirs={ROOT}/target/debug",
-                  f"--ghc-options=-L{ROOT}/target/debug "
-                  f"-optl-Wl,-rpath,{ROOT}/target/debug", "-v0"]
+                  f"--extra-lib-dirs={TARGET}/debug",
+                  f"--ghc-options=-L{TARGET}/debug "
+                  f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
     step("haskell-build",
          ["cabal", "build", "kaya-abort-check", *cabal_args],
          tmp / "hs.log", cwd=ROOT / "guests/haskell")
@@ -1070,9 +1070,9 @@ with scratch_dir("check-abort-neg-") as tmp:
         "  extra-libraries: kaya\n", encoding="utf-8")
     hs_neg_dist = NEG_ROOT / "haskell/dist"
     hs_neg_args = [f"--builddir={hs_neg_dist}",
-                   f"--extra-lib-dirs={ROOT}/target/debug",
-                   f"--ghc-options=-L{ROOT}/target/debug "
-                   f"-optl-Wl,-rpath,{ROOT}/target/debug", "-v0"]
+                   f"--extra-lib-dirs={TARGET}/debug",
+                   f"--ghc-options=-L{TARGET}/debug "
+                   f"-optl-Wl,-rpath,{TARGET}/debug", "-v0"]
     step("haskell-notify-swapped-build",
          ["cabal", "build", "kaya-notify-order-check", *hs_neg_args],
          tmp / "hs-neg-build.log", cwd=hs / "src")

@@ -134,7 +134,7 @@ _fp_lines = (out_of([str(ROOT / "tools/gates.py"), "--fingerprint"])
              .strip().splitlines() if _token else [])
 if _token:
     # A MATRIX SWEEPS ONCE, AND IT IS NEVER THIS ONE. validate-all runs
-    # the sweep itself after Android and this lane exit, over the same
+    # the sweep itself after Android exits, over the same
     # tree, so a second sweep here decides nothing — and under a plain
     # matrix it decided nothing for 314s and 611s, twice breaching the
     # mac ceiling (docs/deferred.md's mac-lane re-sweep entry, measured

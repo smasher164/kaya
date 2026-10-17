@@ -1218,6 +1218,11 @@ def mac_unified_log_checks(src, echo=False):
         found.append("mac: no MediaRemote section — a remote command that never left the "
                      "helper reads as one the guest dropped (docs/traps.md, the session_send "
                      "that never left perl)")
+    if not any("ActiveNowPlayingClient changed" in p and "PlaybackState changed" in p
+               and "processID" not in p for p in asked):
+        found.append("mac: no every-app Now Playing owner section — a command refused because "
+                     "another app took Now Playing names a pid and not when or why it moved "
+                     "(docs/traps.md, the browser that took Now Playing)")
     if not any("RPDaemonProxy: connection INTERRUPTED" in p and "processID" not in p
                for p in asked):
         found.append("mac: no every-process replayd connection-loss section — the guest that "
@@ -1394,6 +1399,50 @@ def census_wedge_capture(src):
     if 'ceiling_capture("bytes", "head", &["-c", "1000000"' not in test:
         found.append("harness.rs: the unit test running ceiling_capture over "
                      "more than a pipe holds is gone")
+    return found
+
+
+def census_linux_step_cpu(src):
+    """A FAILED LINUX STEP SAYS WHERE ITS CPU WENT (docs/traps.md, the linux
+    VM off every CPU for longer than a cue): media_tracks lost its one-second
+    cue on two legs at a host load of 121, and the bundle could not tell a
+    frozen machine from a busy or an idle main loop."""
+    found = []
+    h, g = src[HARNESS], src[GTK_RS]
+    if "let cpu_at = cpu::Snap::now();" not in h:
+        found.append("harness.rs: no step takes a cpu snapshot at its entry")
+    if 'log(&format!("KAYA_HARNESS: cpu over the step: {}", cpu_at.account()));' not in h:
+        found.append("harness.rs: a failed step no longer logs its cpu account")
+    here = rust_fn(h, "pub(crate) fn main_loop_here()")
+    for needle, why in (("MAIN_LOOP_TID.store(", "the main loop's thread"),
+                        ("OVERSLEPT_MS.fetch_max(", "the nap sampler's oversleep")):
+        if needle not in here:
+            found.append(f"harness.rs: main_loop_here no longer records {why}")
+    for header, needle, why in (("fn schedstat(", "/proc/self/task/{tid}/schedstat",
+                                 "a thread's run-queue wait"),
+                                ("fn pressure(", '"/proc/pressure/cpu"', "the cpu pressure")):
+        if needle not in rust_fn(h, header):
+            found.append(f"harness.rs: the cpu account no longer reads {why}")
+    if "crate::harness::cpu::main_loop_here();\n    let _ = app.run_with_args" not in g:
+        found.append("gtk.rs: the GTK main loop's thread is not named to the harness "
+                     "before it runs")
+    return found
+
+
+def census_gtk_failshot(src):
+    """THE GTK GUEST'S OWN PICTURE AT ITS FIRST FAILED STEP (docs/traps.md, the
+    netimage shape read): the lane's `shot` is taken after the guest exits,
+    so a red linux leg had no picture of the window it failed on. The guest
+    writes it beside its verb trace and run-suites.sh adopts that name."""
+    found = []
+    picture = rust_fn(src[GTK_RS], "fn failure_picture(&self) -> String")
+    if 'crate::vtrace::sibling("failshot.png")' not in picture or "save_to_png(" not in picture:
+        found.append("gtk.rs: failure_picture no longer writes failshot.png beside the verb trace")
+    if not re.search(r'flightrec_adopt_shot "\$bundle" fail-shot \\\n'
+                     r'\s+"\$LEGS_DIR/\$name-failshot\.png"',
+                     src[LINUX]):
+        found.append(f"{LINUX}: no fail-shot section adopts $LEGS_DIR/<leg>-failshot.png, "
+                     f"the name the GTK guest writes")
     return found
 
 
@@ -2321,7 +2370,9 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("iOS app log", census_ios_app_log),
             ("iOS hang record", census_ios_hang_record),
             ("mac host apps", census_mac_apps),
-            ("GTK media ring", census_gtk_media_ring))
+            ("GTK media ring", census_gtk_media_ring),
+            ("linux step cpu", census_linux_step_cpu),
+            ("GTK failed-step picture", census_gtk_failshot))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -2774,6 +2825,12 @@ for label, before, after, want in (
          "               '(process == \"perl\" AND subsystem BEGINSWITH "
          "\"com.apple.amp.mediaremote\")'),\n",
          "", "no MediaRemote section"),
+        ("no Now Playing owner section",
+         "              (\"Now Playing's owner, every app\",\n"
+         "               'process == \"mediaremoted\" AND (eventMessage CONTAINS "
+         "\"ActiveNowPlayingClient '\n"
+         "               'changed\" OR eventMessage CONTAINS \"PlaybackState changed\")'),\n",
+         "", "no every-app Now Playing owner section"),
         ("no connection-loss section",
          "              (\"replayd connections cut, every process\",\n"
          "               'eventMessage == \"RPDaemonProxy: connection INTERRUPTED\"')]",
@@ -3256,12 +3313,33 @@ for label, pattern, repl, want in (
     changed = doctored(LANE_PY, pattern, repl, label)
     gate.negative(label, lambda: mac_timeout_checks(changed), want=want)
 
+for label, rel, pattern, repl, want, check in (
+        ("SC1 the cpu account dropped from a failed step", HARNESS,
+         r'^ +#\[cfg\(target_os = "linux"\)\]\n +log\(&format!\("KAYA_HARNESS: '
+         r'cpu over the step: \{\}", cpu_at\.account\(\)\)\);\n',
+         "", "no longer logs its cpu account", census_linux_step_cpu),
+        ("SC2 the GTK main loop's thread unnamed", GTK_RS,
+         r"^ +crate::harness::cpu::main_loop_here\(\);\n", "", "not named to the harness",
+         census_linux_step_cpu),
+        ("SC3 the nap sampler's oversleep unrecorded", HARNESS,
+         r"OVERSLEPT_MS\.fetch_max\(late, Ordering::Relaxed\)", "late",
+         "the nap sampler's oversleep", census_linux_step_cpu),
+        ("FS1 the GTK failed-step picture under another name", GTK_RS,
+         r'crate::vtrace::sibling\("failshot\.png"\)',
+         'crate::vtrace::sibling("failshot-elsewhere.png")',
+         "failshot.png", census_gtk_failshot),
+        ("FS2 the linux collect adopting no fail-shot", LINUX,
+         r'flightrec_adopt_shot "\$bundle" fail-shot', 'flightrec_adopt_shot "$bundle" other-shot',
+         "no fail-shot section", census_gtk_failshot)):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: check(changed), want=want)
+
 for verb, _ in GTK_MEDIA_NOTES:
     label = f"MG {verb} cut from the GTK media arm"
     changed = doctored(GTK_RS, rf'super::sheet_note\("{verb}", ', "drop((), ", label,
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(224 + (5 if DRIVES else 0))
+gate.negatives_ran(230 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

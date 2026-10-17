@@ -14,8 +14,9 @@ dev_shell_or_die()
 # reads and believes. Plus the CENSUS clause (every gate script ON DISK
 # is in the list or in gates.py's EXCLUDED table WITH A REASON; nothing
 # else in the tree can see a gate nobody runs) and the matrix launch
-# (five lanes queued together, the niced sweep after Android and the mac
-# lane exit, the runner and probe agreeing on the four-phone pool). CLAUDE.md alone,
+# (five lanes queued together, the niced sweep after Android exits in a
+# cargo target of its own, the runner and probe agreeing on the four-phone
+# pool). CLAUDE.md alone,
 # not AGENTS.md: check-mirror.py holds those two level.
 
 import ast
@@ -120,8 +121,8 @@ def direct_invocations(text):
 def mac_sweep_problem(text):
     """A MATRIX SWEEPS ONCE, and it is never the mac lane's.
 
-    validate-all runs the sweep itself after Android and the mac lane
-    exit, over the same tree, so a second sweep inside the lane decides
+    validate-all runs the sweep itself after Android exits, over the same
+    tree, so a second sweep inside the lane decides
     nothing — and under a plain matrix it cost 314s and 611s of
     `core-build+gates`, breaching the 1000s mac ceiling twice, because
     the token it compared against had been moved by the OTHER LANES'
@@ -174,11 +175,20 @@ PLATFORM_LAUNCHES = [
     'run_lane("ios", ["tools/ios/run-sim.py"])',
     'run_lane("android", ["tools/android/run-emulator.py"],',
 ]
-GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"])'
+GATE_LAUNCH = 'run_lane("gates", ["nice", "-n", "10", "tools/gates.py"],'
+GATE_TARGET = 'env={"CARGO_TARGET_DIR": str(SWEEP_TARGET)})'
 ANDROID_PID = "android_lane_proc = lane_procs[-1]"
 ANDROID_WAIT = "android_lane_proc.wait()"
-MAC_PID = "mac_lane_proc = lane_procs[0]"
-MAC_WAIT = "mac_lane_proc.wait()"
+# The sweep's own cargo target (docs/traps.md, the sweep-relinked-libkaya
+# entry): what lets it start before the mac lane exits.
+SWEEP_IMPORT = "from host_lib import SWEEP_TARGET"
+WARM_LAUNCH = '["nice", "-n", "10", "tools/gates.py", "--warm"],'
+WARM_ENV = "env=dict(os.environ, CARGO_TARGET_DIR=str(SWEEP_TARGET)),"
+WARM_WAIT = "warm_rc = sweep_warm.wait()"
+SWEEP_DEFINED = 'SWEEP_TARGET = ROOT / "target/gate-sweep"'
+SWEEP_REFUSED = "refusal = matrix_target_refusal(os.environ, TARGET)"
+SWEEP_LANES_WATCHED = "lanes_root = ROOT"
+MAC_REFUSES = "if host_lib_stamp() != LIB_STAMP:"
 # The runners are python and the probe is shell, so each default is
 # spelled in two languages; these clauses hold BOTH.
 ANDROID_RUNNER_POOL = 'POOL = int(os.environ.get("KAYA_ANDROID_EMUS", "4"))'
@@ -217,15 +227,22 @@ def matrix_parallel_problem(text):
     # THE SWEEP WAITS FOR ANDROID, and is four wide (2026-09-07): at t0
     # beside the lanes it cost every lane 150-200s for a 116s gain
     # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
-    # AND FOR THE MAC LANE (2026-09-21): the mac guests load the host
-    # libkaya by path and a gate's cargo build relinks it — seven legs died
-    # in dyld under a sweep that overlapped a token-slowed mac lane
-    # (docs/traps.md, the sweep-relinked-libkaya entry).
-    tail = lines[at:at + 5]
-    if tail != [ANDROID_PID, MAC_PID, ANDROID_WAIT, MAC_WAIT, GATE_LAUNCH]:
-        return ("tools/validate-all.py must record Android's and the mac "
-                "lane's exact lane processes, wait for both, then start the "
-                "one gate sweep at niceness 10")
+    # IN ITS OWN CARGO TARGET (2026-10-16), so it does not wait for the mac
+    # lane: the mac guests load the lanes' libkaya by path and a sweep build
+    # relinked it under them once (docs/traps.md, the sweep-relinked-libkaya
+    # entry); sweep_target_problem holds the rest of that wall.
+    # The target is WARMED beside the lanes (niced, before Android's wait)
+    # and joined before the sweep starts, so the sweep recompiles nothing.
+    tail = lines[at:]
+    waits = [line for line in tail if ".wait()" in line]
+    if (tail[:1] != [ANDROID_PID] or tail[-2:] != [GATE_LAUNCH, GATE_TARGET]
+            or waits != [ANDROID_WAIT, WARM_WAIT]
+            or not 0 < tail.index(WARM_LAUNCH) < tail.index(ANDROID_WAIT)
+            or tail[tail.index(WARM_LAUNCH) + 1] != WARM_ENV):
+        return ("tools/validate-all.py must record Android's exact lane "
+                "process, warm the sweep's target niced beside the lanes, wait "
+                "for Android and the warm alone, then start the one gate sweep "
+                "at niceness 10 with CARGO_TARGET_DIR=SWEEP_TARGET")
     run_lane = re.search(r"(?ms)^def run_lane\(.*?(?=^[A-Za-z_#])", text)
     if run_lane is None or not all(part in run_lane.group(0) for part in (
         "subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf)",
@@ -238,10 +255,10 @@ def matrix_parallel_problem(text):
     # made the mac lane sweep twice (docs/traps.md, 2026-09-01).
     build = 'if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:'
     fingerprint = 'got = subprocess.run(["tools/gates.py", "--fingerprint"],'
-    if gate_lines != [build, fingerprint, GATE_LAUNCH]:
+    if gate_lines != [build, fingerprint, WARM_LAUNCH, GATE_LAUNCH]:
         return ("tools/validate-all.py must invoke gates only for the "
                 "artifact build, the same-tree fingerprint taken after it, "
-                "and the one delayed niced sweep")
+                "the sweep target's warm and the one delayed niced sweep")
     return None
 
 
@@ -252,6 +269,32 @@ ANDROID_SKIP = 'env={"KAYA_QUIET": "skip"})'
 QUIET_LAUNCH = 'run_lane("android-quiet", ["tools/android/run-emulator.py"],'
 QUIET_ENV = 'env={"KAYA_QUIET": "only"})'
 JOIN = ["for waiter in lane_waiters:", "waiter.join()"]
+# The linux real-time media legs (the maintainer, 2026-10-16; lanes/linux.py's
+# QUIET), the same shape after the android tail.
+LINUX_SKIP = 'env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "skip"})'
+LINUX_QUIET_LAUNCH = 'run_lane("linux-quiet", ["tools/validate-linux.py"],'
+LINUX_QUIET_ENV = 'env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "only"})'
+
+
+def sweep_target_problem(matrix, hostlib, gates, mac):
+    """The sweep builds where the mac lane's guests never load from."""
+    if SWEEP_IMPORT not in matrix:
+        return ("tools/validate-all.py must take the sweep's cargo target from "
+                "tools/lib/host_lib.py's SWEEP_TARGET")
+    if hostlib.count(SWEEP_DEFINED) != 1:
+        return ("tools/lib/host_lib.py must define SWEEP_TARGET as target/gate-sweep, "
+                "a cargo target the lanes never build or load from")
+    main = gates[gates.find("\ndef main(args):"):]
+    if not 0 <= main.find(SWEEP_REFUSED) < main.find("if not build():"):
+        return ("tools/gates.py must refuse a matrix sweep outside SWEEP_TARGET "
+                "before it builds anything")
+    if SWEEP_LANES_WATCHED not in gates:
+        return ("tools/gates.py must watch the lanes' libkaya too when it builds "
+                "into a target of its own")
+    if MAC_REFUSES not in mac:
+        return ("tools/validate-mac.py must still refuse its verdict when the "
+                "library its legs load changed identity under them")
+    return None
 
 
 def quiet_tail_problem(text):
@@ -276,6 +319,18 @@ def quiet_tail_problem(text):
         return ("tools/validate-all.py must run the android-quiet lane with "
                 "KAYA_QUIET=only only after joining every lane and the sweep, and "
                 "join it before the collection")
+    linux = next((i for i, line in enumerate(lines)
+                  if line.startswith(PLATFORM_LAUNCHES[1])), None)
+    if linux is None or lines[linux + 1:linux + 2] != [LINUX_SKIP]:
+        return ("tools/validate-all.py must launch the parallel linux lane with "
+                "KAYA_QUIET=skip, or its real-time media legs run under the matrix's "
+                "load (docs/traps.md, a linux VM off every CPU for longer than a cue)")
+    lq = next((i for i, line in enumerate(body) if line.startswith(LINUX_QUIET_LAUNCH)), None)
+    if (lq is None or lq < at + 4 or body[lq + 1] != LINUX_QUIET_ENV
+            or body[lq + 2:lq + 4] != JOIN or body[lq - 2:lq] != JOIN):
+        return ("tools/validate-all.py must run the linux-quiet lane with "
+                "KAYA_QUIET=only after the android tail is joined, and join it "
+                "before the collection")
     return None
 
 
@@ -681,6 +736,8 @@ def hand_run_problems(hand, mac, pylib):
 
 
 matrix_text = (root / "tools" / "validate-all.py").read_text(encoding="utf-8")
+hostlib_text = (root / "tools" / "lib" / "host_lib.py").read_text(encoding="utf-8")
+sweep_gates_text = (root / "tools/gates.py").read_text(encoding="utf-8")
 run_leg_text = (root / "tools" / "run-leg.py").read_text(encoding="utf-8")
 android_text = (root / "tools" / "android" / "run-emulator.py").read_text(
     encoding="utf-8")
@@ -828,6 +885,24 @@ if n != 1:
 elif quiet_tail_problem(doctored) is None:
     fail("self-test NQ1: a quiet tail launched beside running lanes passed")
 
+# NQ3 — the parallel linux lane runs its real-time media legs in place, and
+# the linux tail launched beside the android one.
+for _label, _pattern, _repl in (
+        ("cut the linux lane's KAYA_QUIET=skip",
+         r'(env=\{"KAYA_JOBS": os\.environ\.get\("KAYA_LINUX_JOBS", ""\)), '
+         r'"KAYA_QUIET": "skip"\}\)',
+         r"\1})"),
+        ("ran the linux tail before the android tail was joined",
+         r'(?ms)^(        for waiter in lane_waiters:\n            waiter\.join\(\)\n)'
+         r'(    # AND THE LINUX REAL-TIME.*?\n)(    run_lane\("linux-quiet")',
+         "\\2\\3")):
+    doctored, n = re.subn(_pattern, _repl, matrix_text, count=1)
+    print(f"check-gates: self-test NQ3 {_label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test NQ3 ({_label}) did not apply exactly once")
+    elif quiet_tail_problem(doctored) is None:
+        fail(f"self-test NQ3: a matrix that {_label} passed")
+
 # NQ2 — the parallel Android lane runs its microphone legs in place.
 doctored, n = re.subn(r'\n +env=\{"KAYA_QUIET": "skip"\}\)', ")", matrix_text, count=1)
 print(f"check-gates: self-test NQ2 cut the Android lane's KAYA_QUIET=skip, {n} substitution(s)")
@@ -937,28 +1012,59 @@ if n != 1:
 elif matrix_parallel_problem(doctored) is None:
     fail("self-test N11: an immediate gate sweep passed as delayed")
 
-# N11b — the sweep must also wait for the mac lane: its guests load the
-# host libkaya by path (2026-09-21, seven dyld reds).
+# N11b — the sweep launched in the lanes' cargo target, which is the
+# relink of 2026-09-21 without the mac wait that used to prevent it.
 doctored, n = re.subn(
-    r"(?m)^    mac_lane_proc\.wait\(\)\n", "", matrix_text, count=1)
-print("check-gates: self-test N11b removed the mac wait, "
+    r'(?m)^(    run_lane\("gates", \["nice", "-n", "10", "tools/gates\.py"\]),\n'
+    r'             env=\{"CARGO_TARGET_DIR": str\(SWEEP_TARGET\)\}\)\n',
+    r"\1)\n", matrix_text, count=1)
+print("check-gates: self-test N11b launched the sweep in the lanes' target, "
       f"{n} substitution(s)")
 if n != 1:
-    fail("self-test N11b did not remove exactly one mac wait — the delayed "
-         "sweep clause is not reading the real matrix")
+    fail("self-test N11b did not drop exactly one sweep target — the "
+         "sweep-target clause is not reading the real matrix")
 elif matrix_parallel_problem(doctored) is None:
-    fail("self-test N11b: a sweep that waits for Android alone passed")
+    fail("self-test N11b: a sweep in the lanes' cargo target passed")
 
-# N10b — and it must wait for THIS invocation's mac child.
-doctored, n = re.subn(
-    re.escape(MAC_PID), "mac_lane_proc = lane_procs[1]", matrix_text, count=1)
-print("check-gates: self-test N10b replaced mac pid provenance, "
-      f"{n} substitution(s)")
-if n != 1:
-    fail("self-test N10b did not replace exactly one mac pid capture — the "
-         "provenance clause is not reading the real matrix")
-elif matrix_parallel_problem(doctored) is None:
-    fail("self-test N10b: an unproven mac pid passed")
+# N11c — the warm joined before Android's wait, which serializes it with the
+# lanes' end instead of hiding it beside them; and the mac wait put back.
+for _label, _pattern, _repl in (
+        ("the sweep's warm moved after Android's wait",
+         r"(?ms)^(    sweep_warm = subprocess\.Popen\(.*?\n)(    warm_t0 = .*?\n)"
+         r"(    android_lane_proc\.wait\(\)\n)",
+         r"\3\1\2"),
+        ("the mac wait put back before the sweep",
+         r"(?m)^(    android_lane_proc\.wait\(\)\n)",
+         "\\1    mac_lane_proc = lane_procs[0]\n    mac_lane_proc.wait()\n")):
+    doctored, n = re.subn(_pattern, _repl, matrix_text, count=1)
+    print(f"check-gates: self-test N11c {_label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test N11c ({_label}) did not apply exactly once")
+    elif matrix_parallel_problem(doctored) is None:
+        fail(f"self-test N11c: a matrix with {_label} passed")
+
+# N10b — and the sweep target, the refusal and both identity watches, each
+# cut from a copy.
+for label, which, cut, want in (
+        ("pointed SWEEP_TARGET at the lanes' target", "hostlib",
+         (SWEEP_DEFINED, 'SWEEP_TARGET = ROOT / "target"'), "target/gate-sweep"),
+        ("dropped gates.py's matrix refusal", "gates",
+         (SWEEP_REFUSED, "refusal = None"), "before it builds"),
+        ("dropped gates.py's watch of the lanes' library", "gates",
+         (SWEEP_LANES_WATCHED, "lanes_root = None"), "lanes' libkaya too"),
+        ("dropped the mac lane's identity refusal", "mac",
+         (MAC_REFUSES, "if False:"), "still refuse its verdict")):
+    texts = {"matrix": matrix_text, "hostlib": hostlib_text,
+             "gates": sweep_gates_text, "mac": mac_text}
+    n = texts[which].count(cut[0])
+    texts[which] = texts[which].replace(cut[0], cut[1])
+    print(f"check-gates: self-test N10b {label}, {n} substitution(s)")
+    problem = sweep_target_problem(texts["matrix"], texts["hostlib"],
+                                   texts["gates"], texts["mac"])
+    if n < 1:
+        fail(f"self-test N10b ({label}) applied no substitution")
+    elif problem is None or want not in problem:
+        fail(f"self-test N10b: a matrix that {label} passed ({problem})")
 
 # N12 — the sweep's lower priority is part of the measured schedule.
 doctored, n = re.subn(
@@ -1068,6 +1174,9 @@ if problem is not None:
     fail(problem)
 
 problem = matrix_parallel_problem(matrix_text)
+if problem is not None:
+    fail(problem)
+problem = sweep_target_problem(matrix_text, hostlib_text, sweep_gates_text, mac_text)
 if problem is not None:
     fail(problem)
 for problem in lane_log_problems(matrix_text, report=True):
@@ -1439,7 +1548,7 @@ elif only_problem({**only_texts, "tools/validate-all.py": doctored}) is None:
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
-          "niced sweep delayed behind Android and the mac lane, four-phone "
+          "niced sweep delayed behind Android in a cargo target of its own, four-phone "
           "Android pool, three-sim iOS pool, "
           "five lanes each ending with their verdict and journaling every leg, "
           "one matrix filter read by all five)")

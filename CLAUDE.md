@@ -312,21 +312,26 @@ in docs/deferred.md.
    gates.py's EXCLUDED table WITH A REASON — and it is what would have
    caught the four gates this paragraph was missing while the lane ran
    them. It also pins validate-all's launch order: ALL FIVE platform lanes
-   start together before the runner waits for Android's and the mac lane's
-   recorded lane pids; the one gate sweep starts at niceness 10 after both
-   exit, FOUR GATES WIDE since 2026-09-07, while any longer lanes continue.
-   THE MAC WAIT JOINED 2026-09-21: the mac guests load the host libkaya by
-   path, a gate's cargo build relinks it, and seven legs died in dyld when
-   the sweep overlapped a mac lane slowed by 470s of token waits; the sweep
-   and the mac lane now each refuse a verdict if that library's identity
-   moved under them, and the rust-scoped probe builds nothing
-   (docs/traps.md, the sweep-relinked-libkaya entry) Launched
+   start together before the runner waits for Android's recorded lane pid;
+   the one gate sweep starts at niceness 10 after it exits, FOUR GATES WIDE
+   since 2026-09-07, while any longer lanes continue. IN A CARGO TARGET OF
+   ITS OWN SINCE 2026-10-16 (CARGO_TARGET_DIR=target/gate-sweep,
+   host_lib.SWEEP_TARGET): the mac guests load the lanes' libkaya by path,
+   a gate's cargo build relinked it once and seven legs died in dyld, so
+   from 2026-09-21 the sweep waited for the mac lane too, and that wait was
+   up to 360s of the matrix wall whenever the maintainer was at the host
+   (docs/measurements/lane-ceilings-2026-10-16.md). gates.py refuses a
+   matrix sweep anywhere else, watches the lanes' copy as well as its own,
+   and the sweep and the mac lane each still refuse a verdict if that
+   library's identity moved under them; the rust-scoped probe builds
+   nothing (docs/traps.md, the sweep-relinked-libkaya entry). Launched
    at t0 beside the lanes instead, four wide and niced, it cost every lane
    150-200s and every ceiling for a 116s gain
    (docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
    same four-phone pool; its self-tests watch lane count, pool width,
-   concurrent platform launch, pid provenance, the mac wait and its
-   provenance, single-sweep shape and niceness red. gates.py's BUILD ends with
+   concurrent platform launch, pid provenance, the sweep's own target (its
+   launch, SWEEP_TARGET, gates.py's refusal and both identity watches, five
+   cuts), single-sweep shape and niceness red. gates.py's BUILD ends with
    tools/prune-objects.py and validate-mac runs it after its cargo build
    (docs/traps.md, the stale split-debuginfo objects), two cuts watched. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
    WIRING since 2026-09-18: tools/run-leg.py and validate-mac's pool both
@@ -1005,6 +1010,12 @@ in docs/deferred.md.
    SpringBoard's; KayaFailShot draws the app's windows before the verdict is
    published, the runner pulls it out of the container as `shot` and files
    the device's screen as `desktop-shot` (docs/traps.md); seven cuts watched.
+   AND A RED LINUX LEG'S PICTURE IS THE GUEST'S OWN since 2026-10-17: GTK
+   renders its window offscreen at the first failed step to
+   `<leg>-failshot.png` beside the verb trace, adopted as `fail-shot`, and
+   every failed linux step logs where its CPU went (the main loop's schedstat,
+   the cpu pressure, a nap's oversleep, since this VM reports no steal time;
+   docs/traps.md, the VM off every CPU for longer than a cue); five cuts watched.
    AND A SLOW LANE SAYS WHY since 2026-10-14 (docs/traps.md, the windows
    lane slowed by a rebooted VM's Defender): every lane prints
    tools/lib/lane_health.py's readings at its start and before its verdict
@@ -2167,8 +2178,9 @@ in docs/deferred.md.
    touched, in minutes, BEFORE the matrix — two locale races took two full
    matrices to find when six filtered legs would have said it. Never the
    record.
-   After Android and the mac lane exit (the mac wait since 2026-09-21,
-   docs/traps.md), the one `nice -n 10` gate sweep runs FOUR GATES
+   After Android exits, the one `nice -n 10` gate sweep runs in its own
+   cargo target (since 2026-10-16, so it no longer waits for the mac lane;
+   docs/traps.md, the sweep-relinked-libkaya entry) FOUR GATES
    WIDE (since 2026-09-07) and hides behind the longer lanes, so the wall
    is the slowest lane. One gate at a time it was Android plus the sweep
    in series, 654 + 422 = 1082s on the last such matrix; launched at t0
@@ -2180,6 +2192,14 @@ in docs/deferred.md.
    row runs its QUIET legs alone after every lane and the sweep
    (docs/traps.md, the emulator's audio input entry; check-gates holds the
    order, check-exclusive the set).
+   AND THE LINUX REAL-TIME MEDIA LEGS RUN AFTER IT (the maintainer,
+   2026-10-16): media_tracks' second cue is a 1 s window and a matrix stops
+   the docker VM for longer, so the parallel linux lane runs with
+   KAYA_QUIET=skip and a `linux-quiet` row runs tools/lib/lanes/linux.py's
+   QUIET scenes once the android tail is joined (docs/traps.md, a linux VM
+   off every CPU for longer than a cue; check-gates holds the order,
+   check-exclusive the set). They are not exclusive: --no-exclusive keeps
+   them and --exclusive leaves them out.
    `--serial` is for the special cases: single-lane benchmarking,
    debugging under contention, recording mode. The
    lanes remain individually runnable (`tools/validate-linux.py`,

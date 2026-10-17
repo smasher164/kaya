@@ -34,3 +34,26 @@ WAYLAND_ONLY = {
                   "one through _NET_WM_STATE: measured doing nothing there "
                   "(docs/fullscreen-plan.md §4.2)",
 }
+
+# THE QUIET TAIL (the maintainer's ruling of 2026-10-16, android's QUIET one lane
+# over): these scenes' legs run in a `linux-quiet` row after every lane and the
+# sweep (KAYA_QUIET=skip on the parallel lane, =only after), each with its
+# reason. tools/check-exclusive.py holds the set, tools/check-gates.py the order.
+QUIET = {
+    "media_tracks": "the play-through's second cue is a 1 s window, and a matrix "
+                    "stops the docker VM for longer (docs/traps.md, a linux VM off "
+                    "every CPU for longer than a cue loses the cue)",
+}
+
+
+def quiet_legs(run_suites):
+    """Every QUIET leg run-suites.sh runs, `<scene>-<lang>-<proto>`, read out of
+    its `run "$proto" <scene>-<lang>` lines on the protocols the scene runs on."""
+    import re
+    out = set()
+    for scene in QUIET:
+        protos = ("wayland",) if scene in WAYLAND_ONLY else ("x11", "wayland")
+        for stem in re.findall(r'^\s*run "\$proto" (' + re.escape(scene) + r'-[a-z]+) ',
+                               run_suites, re.M):
+            out.update(f"{stem}-{proto}" for proto in protos)
+    return out

@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die, scratch_dir
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
@@ -13,7 +13,7 @@ dev_shell_or_die()
 
 import subprocess
 
-LIB = ROOT / "target/debug/libkaya.dylib"
+LIB = TARGET / "debug/libkaya.dylib"
 if not LIB.is_file():
     print("check-build-id: build libkaya first (cargo build --locked --lib)")
     sys.exit(1)

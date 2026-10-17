@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, Gate, dev_shell_or_die
+from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
@@ -496,7 +496,7 @@ if app_after != app_before:
 # THE LIBRARY THE NOTIFY EXERCISER LOADS: it dispatches through a real
 # transaction, so the natives have to be there (AbortCheck's ring stub is
 # the other choice and it would redden every case for the wrong reason).
-LIBKAYA = ROOT / "target/debug/libkaya.dylib"
+LIBKAYA = TARGET / "debug/libkaya.dylib"
 if not LIBKAYA.is_file():
     print("java-typecheck: build libkaya first "
           "(cargo build -p kaya --features harness --locked)")
