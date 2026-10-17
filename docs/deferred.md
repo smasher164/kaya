@@ -417,6 +417,17 @@ leg's picture, and the picker's process log (check-steps holds them;
 docs/traps.md). Read those first on the next sighting (the bundle is kept
 under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
 
+## OPEN — the mac native table's scroll_to_row hides the first row under its header (2026-10-17)
+KEY: scroll_to_row, native table, floating header, content insets, first row
+
+Found while fixing netimage's shape read (docs/traps.md, the clipped-row
+entry): on the mac native table, `scroll_to_row` to the first row of an
+unscrolled table slides about 24 pt of that row under the floating header,
+because the scroll lands the row at the clip view's top and the header lies
+inside the clip. The readers now leave the content insets out of a row's
+visible part, so a shape or ground read refuses such a row instead of reading
+it; the scroll itself is unfixed. netimage.steps reads t000 unscrolled instead.
+
 ## WATCH — a mac caption cue never delivered after a seek (media_tracks-java-swiftui, 2026-10-13)
 KEY: media_tracks, caption cue, second cue, AVPlayerItemLegibleOutput, seek, caption delivery
 

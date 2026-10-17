@@ -218,9 +218,62 @@ def shell_logical(text):
     return out
 
 
+def _names_nested_target(node):
+    """`nested_target(...)`, bare or inside `str(...)`."""
+    if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "str" \
+            and len(node.args) == 1:
+        node = node.args[0]
+    return isinstance(node, ast.Call) \
+        and getattr(node.func, "id", None) == "nested_target"
+
+
+def _is_root(node):
+    if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "str" \
+            and len(node.args) == 1:
+        node = node.args[0]
+    return isinstance(node, ast.Name) and node.id == "ROOT"
+
+
+def nested_cargo_finding(path, argv, why):
+    """Building one of tools/' own cargo workspaces must name its target
+    through kaya_gate.nested_target: an inherited CARGO_TARGET_DIR puts its
+    kaya dependency's cdylib on the libkaya the sweep's probes load
+    (docs/traps.md, the nested generator relinked the sweep's libkaya)."""
+    elts = argv.elts
+    for i, e in enumerate(elts):
+        if isinstance(e, ast.Constant) and e.value == "--target-dir" \
+                and i + 1 < len(elts) and _names_nested_target(elts[i + 1]):
+            return []
+    return [f"{path}:{argv.lineno}: a cargo build of a nested workspace ({why}) "
+            f"without `--target-dir`, str(nested_target(...)) — an inherited "
+            f"CARGO_TARGET_DIR builds its kaya dependency's cdylib over the "
+            f"libkaya that target's loaders hold (docs/traps.md, the nested "
+            f"generator relinked the sweep's libkaya)."]
+
+
+def _cargo_argv(node):
+    if not isinstance(node, (ast.List, ast.Tuple)):
+        return False
+    got = {e.value for e in node.elts
+           if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    return "cargo" in got and bool(RESOLVING & got)
+
+
 def command_findings(path, node):
     """Rule 11 over one AST node, both spellings."""
     bad = []
+    if _cargo_argv(node) and any(isinstance(e, ast.Constant) and e.value == "--manifest-path"
+                                 for e in node.elts):
+        bad.extend(nested_cargo_finding(path, node, "--manifest-path"))
+    if isinstance(node, ast.Call):
+        cwd = next((k.value for k in node.keywords if k.arg == "cwd"), None)
+        if cwd is not None and not _is_root(cwd):
+            for a in node.args:
+                if _cargo_argv(a) and not any(
+                        isinstance(e, ast.Constant) and e.value == "--manifest-path"
+                        for e in a.elts):
+                    bad.extend(nested_cargo_finding(
+                        path, a, f"cwd={ast.unparse(cwd)}"))
     if isinstance(node, (ast.List, ast.Tuple)):
         elems = [e.value for e in node.elts
                  if isinstance(e, ast.Constant) and isinstance(e.value, str)]
@@ -600,7 +653,25 @@ gate.negative("N23 a tools/lib module leaving through a verdict",
               lambda b=_sub_verdict: lib_verdicts({"tools/lib/sub_gate.py": b}),
               want="a tools/lib module calls .verdict(")
 
-gate.negatives_ran(22)
+# N24-N26 — rule 11's nested-workspace clause: gen-bindings put back to the
+# form that relinked the sweep's libkaya at 42cd6c24, check-winui-bindings'
+# cwd form the same way, and a target dir that IS the sweep's own.
+_TD = r'\n\s*"--target-dir", str\(nested_target\("kaya-bindgen"\)\),'
+for label, file, pattern, repl, want in [
+    ("N24 rule 11 — gen-bindings' generator built into the inherited target",
+     "tools/gen-bindings.py", _TD, "", "cwd=ROOT / 'tools/kaya-bindgen'"),
+    ("N25 rule 11 — winui-bindgen's check built into the inherited target",
+     "tools/check-winui-bindings.py",
+     r'\n\s*"--target-dir", str\(nested_target\("winui-bindgen"\)\),', "",
+     "cwd=GEN"),
+    ("N26 rule 11 — a nested build named the sweep's own target",
+     "tools/gen-bindings.py", r'str\(nested_target\("kaya-bindgen"\)\)',
+     "str(TARGET)", "a cargo build of a nested workspace"),
+]:
+    body = gate.doctor(label, gate.read(file), pattern, repl, want=1)
+    gate.negative(label, lambda b=body, f=file: command_census({f: b}), want=want)
+
+gate.negatives_ran(25)
 
 # --------------------------------------------------------------- clauses
 

@@ -10994,6 +10994,20 @@ fn clipped_by_ancestors(
     Some(shown)
 }
 
+/// Why a pixel reader may not read `probed` in `content`'s coordinates:
+/// what `widget`'s ancestors and the window leave of it does not hold all of
+/// it (crate::harness::unseen_probe).
+#[cfg(feature = "harness")]
+fn unseen_in_shot(widget: &gtk4::Widget, content: &gtk4::Widget, probed: [f64; 4]) -> Option<String> {
+    use gtk4::prelude::WidgetExt;
+    let [x, y, w, h] = probed.map(|v| v as f32);
+    let whole = gtk4::graphene::Rect::new(0.0, 0.0, content.width() as f32, content.height() as f32);
+    let visible = clipped_by_ancestors(widget, content, gtk4::graphene::Rect::new(x, y, w, h))
+        .and_then(|r| r.intersection(&whole))
+        .map(|r| [r.x(), r.y(), r.width(), r.height()].map(f64::from));
+    crate::harness::unseen_probe(probed, visible)
+}
+
 /// What the window is showing under its chrome: the menu strip when one
 /// exists, otherwise the mounted root / nav entry / split view. A read that
 /// took the window's child would take the SHELL, which fills the window by
@@ -23521,6 +23535,9 @@ impl crate::harness::Stage for GtkStage {
             if fw <= 8.0 || fh <= 16.0 {
                 return format!("<no laid-out frame: {fw}x{fh}>");
             }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return why;
+            }
             let x = fx + fw - 4.0;
             let (Some(top), Some(bottom), Some(mid)) = (shot.at(x, fy + 4.0), shot.at(x, fy + fh - 4.0), shot.at(x, fy + fh / 2.0)) else {
                 return format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>");
@@ -23588,6 +23605,9 @@ impl crate::harness::Stage for GtkStage {
             if fw <= 12.0 || fh <= 12.0 {
                 return format!("<no laid-out frame: {fw}x{fh}>");
             }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return why;
+            }
             let Some(under) = shot.at(fx - 4.0, fy + fh / 2.0) else { return format!("<nothing left of {fx},{fy}>") };
             let art = |c: [f64; 3]| skin::gap(c, under) > 0.02;
             let (Some(c1), Some(c6), Some(centre)) =
@@ -23636,6 +23656,9 @@ impl crate::harness::Stage for GtkStage {
             let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
             if fw <= 2.0 || fh <= 2.0 {
                 return format!("<no laid-out frame: {fw}x{fh}>");
+            }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return why;
             }
             let step = 1.0 / shot.scale;
             let (mut ink, mut best) = (None, -1.0);

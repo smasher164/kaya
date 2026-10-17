@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die
+from kaya_gate import ROOT, dev_shell_or_die, nested_target
 
 dev_shell_or_die()
 
@@ -32,7 +32,8 @@ def kaya_generator_id():
 # crates/kaya/build.rs: the generator depends on the kaya crate, so
 # without it a generator edit deadlocks against its own staleness.
 r = subprocess.run(
-    ["cargo", "run", "--locked", "--quiet", "--", str(ROOT),
+    ["cargo", "run", "--locked", "--quiet",
+     "--target-dir", str(nested_target("kaya-bindgen")), "--", str(ROOT),
      *sys.argv[1:]],
     cwd=ROOT / "tools/kaya-bindgen",
     env=dict(os.environ, KAYA_REGENERATING="1"), check=False)

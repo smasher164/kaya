@@ -790,6 +790,36 @@ pub(super) mod read {
             Some((f64::from(origin.X), f64::from(origin.Y), fe.ActualWidth().ok()?, fe.ActualHeight().ok()?))
         }
 
+        /// What `element` draws of its box, relative to the window root: its
+        /// own layout slot crops an element larger than the slot (a wide
+        /// picture's circle; docs/traps.md, an element's own maxima crop an
+        /// overflowing fill).
+        pub(in super::super) fn drawn(&self, element: &UIElement) -> Option<(f64, f64, f64, f64)> {
+            let (x, y, w, h) = self.frame(element)?;
+            let fe: FrameworkElement = element.cast().ok()?;
+            let root: FrameworkElement = self.root.cast().ok()?;
+            let rtl = root.FlowDirection().ok()? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            let [l, t, r, b] = crate::winui::slot_cut(&fe, rtl).ok()?;
+            if r <= l || b <= t {
+                return Some((x, y, w, h));
+            }
+            Some((x + l, y + t, r - l, b - t))
+        }
+
+        /// Why the probes over `probed` (the root's units) may not be read:
+        /// what every ScrollViewer and ancestor slot above `element` and the
+        /// root leave of it does not hold all of it (crate::harness::unseen_probe).
+        pub(in super::super) fn unseen(&self, element: &UIElement, probed: [f64; 4]) -> windows_core::Result<Option<String>> {
+            let fe: FrameworkElement = element.cast()?;
+            let root: FrameworkElement = self.root.cast()?;
+            let rtl = root.FlowDirection()? == bindings::Microsoft::UI::Xaml::FlowDirection::RightToLeft;
+            let [x, y, w, h] = probed;
+            let s = crate::winui::ancestors_cut(&fe, &root, rtl, [x, y, x + w, y + h])?;
+            let s = [s[0].max(0.0), s[1].max(0.0), s[2].min(root.ActualWidth()?), s[3].min(root.ActualHeight()?)];
+            let visible = [s[0], s[1], (s[2] - s[0]).max(0.0), (s[3] - s[1]).max(0.0)];
+            Ok(crate::harness::unseen_probe(probed, Some(visible)))
+        }
+
         /// The pixel at a point of the root, 0-1 RGB.
         pub(in super::super) fn at(&self, x: f64, y: f64) -> Option<[f64; 3]> {
             let px = self.root_x + (x * self.scale).floor() as i32;
@@ -877,9 +907,12 @@ pub(super) mod read {
             Ok(shot) => shot,
             Err(why) => return Ok(format!("<no window pixels: {why}>")),
         };
-        let Some((fx, fy, fw, fh)) = shot.frame(&element) else { return Ok("<no laid-out frame>".into()) };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok("<no laid-out frame>".into()) };
         if fw <= 8.0 || fh <= 16.0 {
             return Ok(format!("<no laid-out frame: {fw}x{fh}>"));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(why);
         }
         let x = fx + fw - 4.0;
         let (Some(top), Some(bottom), Some(mid)) = (shot.at(x, fy + 4.0), shot.at(x, fy + fh - 4.0), shot.at(x, fy + fh / 2.0))
@@ -919,9 +952,12 @@ pub(super) mod read {
             Ok(shot) => shot,
             Err(why) => return Ok(format!("<no window pixels: {why}>")),
         };
-        let Some((fx, fy, fw, fh)) = shot.frame(&element) else { return Ok("<no laid-out frame>".into()) };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok("<no laid-out frame>".into()) };
         if fw <= 12.0 || fh <= 12.0 {
             return Ok(format!("<no laid-out frame: {fw}x{fh}>"));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(why);
         }
         let Some(under) = shot.at(fx - 4.0, fy + fh / 2.0) else { return Ok(format!("<nothing left of {fx},{fy}>")) };
         let art = |c: [f64; 3]| gap(c, under) > 0.02;
@@ -950,9 +986,12 @@ pub(super) mod read {
             Ok(shot) => shot,
             Err(why) => return Ok(format!("<no window pixels: {why}>")),
         };
-        let Some((fx, fy, fw, fh)) = shot.frame(&element) else { return Ok("<no laid-out frame>".into()) };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok("<no laid-out frame>".into()) };
         if fw <= 2.0 || fh <= 2.0 {
             return Ok(format!("<no laid-out frame: {fw}x{fh}>"));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(why);
         }
         let mut ink: Option<[f64; 3]> = None;
         let mut best = -1.0;

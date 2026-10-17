@@ -65,7 +65,7 @@ NATIVE = [
     # ancestor's clip (docs/traps.md, the landscape composer that read safe
     # while hidden; the desktops' half of it).
     (WINUI, "WinUI's expect_safe starts from what its own slot leaves",
-     "let mut shown = [frame[0] + l, frame[1] + t, frame[0] + r, frame[1] + b];"),
+     "let shown = [frame[0] + l, frame[1] + t, frame[0] + r, frame[1] + b];"),
     (WINUI, "WinUI's expect_safe walks every ancestor to the root",
      "let mut up = VisualTreeHelper::GetParent(&element).ok();\n while let Some(node) = up {"),
     (WINUI, "WinUI's expect_safe cuts by each scroll viewer's viewport and each ancestor's slot",
@@ -617,8 +617,8 @@ def run(g):
          "let mut up = VisualTreeHelper::GetParent(&element).ok().filter(|_| false);",
          "WinUI's expect_safe walks every ancestor"),
         ("WinUI's own slot cut left out of what shows", WINUI,
-         r"let mut shown = \[frame\[0\] \+ l, frame\[1\] \+ t, frame\[0\] \+ r, frame\[1\] \+ b\];",
-         "let mut shown = [frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]];",
+         r"let shown = \[frame\[0\] \+ l, frame\[1\] \+ t, frame\[0\] \+ r, frame\[1\] \+ b\];",
+         "let shown = [frame[0], frame[1], frame[0] + frame[2], frame[1] + frame[3]];",
          "WinUI's expect_safe starts from what its own slot leaves"),
         ("WinUI's verdict handed the unclipped frame", WINUI, r"frame,\n(\s+)visible,\n", r"frame,\n\1frame,\n",
          "WinUI's expect_safe hands the verdict what shows"),

@@ -20287,6 +20287,64 @@ struct KayaSkinFrameReader: View {
     #endif
 }
 
+#if os(macOS)
+    /// `rect` (harness coordinates) cut by every clip view above `view`, less
+    /// its content insets (a table's floating header lies inside its clip
+    /// view's bounds), and by the window's content.
+    @MainActor func kayaAnchorClips(_ view: NSView, _ rect: CGRect) -> CGRect {
+        guard let content = view.window?.contentView else { return .null }
+        var shown = rect.intersection(CGRect(origin: .zero, size: content.bounds.size))
+        var at = view.superview
+        while let v = at {
+            if let clip = v as? NSClipView {
+                let i = clip.contentInsets
+                var b = clip.bounds
+                b.origin.x += i.left
+                b.origin.y += clip.isFlipped ? i.top : i.bottom
+                b.size.width -= i.left + i.right
+                b.size.height -= i.top + i.bottom
+                shown = shown.intersection(kayaHarnessRect(b, in: clip))
+            }
+            at = v.superview
+        }
+        return shown
+    }
+#else
+    /// `rect` (window coordinates) cut by every clipping view above `view`
+    /// and by its window.
+    @MainActor func kayaAnchorClips(_ view: UIView, _ rect: CGRect) -> CGRect {
+        guard let window = view.window else { return .null }
+        var shown = rect.intersection(window.bounds)
+        var at = view.superview
+        while let v = at, v !== window {
+            if v.layer.masksToBounds || v.clipsToBounds { shown = shown.intersection(v.convert(v.bounds, to: window)) }
+            at = v.superview
+        }
+        return shown
+    }
+#endif
+
+/// Why a skin reader may not read the window's pixels over `probed`: what
+/// the node's enclosing scrolls, its root and its anchor's clipping views
+/// leave of it does not hold all of it (harness.rs's unseen_probe; docs/traps.md,
+/// the shape read of a clipped row).
+@MainActor func kayaSkinUnseen(_ node: KayaNode, _ probed: CGRect) -> String? {
+    var shown = kayaVisibleFrame(node, probed).shown
+    if let view = kayaSkinAnchors[node.id]?.reversed().lazy.compactMap(\.view).first(where: { $0.window != nil }) {
+        shown = shown.intersection(kayaAnchorClips(view, probed))
+    }
+    let tol: CGFloat = 1
+    if shown.isNull || shown.width <= 0 || shown.height <= 0 {
+        return "<nothing on screen, its parents clip all of it: frame \(kayaRectText(probed)), visible none>"
+    }
+    if shown.minX > probed.minX + tol || shown.minY > probed.minY + tol || shown.maxX < probed.maxX - tol
+        || shown.maxY < probed.maxY - tol
+    {
+        return "<clipped by its parents: frame \(kayaRectText(probed)), visible \(kayaRectText(shown))>"
+    }
+    return nil
+}
+
 /// expect_ground's read (docs/styling-pass-plan.md §5.1), off the pixels at
 /// the container's right edge, 4 units in from its top and its bottom and at
 /// its middle.
@@ -20294,6 +20352,7 @@ struct KayaSkinFrameReader: View {
     guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16 else {
         return "<no laid-out frame>"
     }
+    if let why = kayaSkinUnseen(node, frame) { return why }
     guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
     let x = frame.maxX - 4
     guard let top = shot.at(CGPoint(x: x, y: frame.minY + 4)),
@@ -20354,6 +20413,7 @@ struct KayaSkinFrameReader: View {
     guard let frame = frames.first, frame.width > 12, frame.height > 12 else {
         return "<no laid-out frame: \(frames.count) recorded \(frames); \(kayaAnchorState(node.id))>"
     }
+    if let why = kayaSkinUnseen(node, frame) { return why }
     guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
     // What the image sits on is read 4 units left of it at its middle (a
     // table row's stripe, a card's fill, the window), and reads back within a
@@ -20385,6 +20445,7 @@ struct KayaSkinFrameReader: View {
     else {
         return "<no laid-out frame: \(frames.count) recorded \(frames)>"
     }
+    if let why = kayaSkinUnseen(node, frame) { return why }
     guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
     var ink: [Double]? = nil
     var best = -1.0

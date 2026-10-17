@@ -43,6 +43,15 @@ def cargo_target(env=None):
 
 TARGET = cargo_target()
 
+
+def nested_target(workspace):
+    """The `--target-dir` for building one of tools/' own cargo workspaces:
+    inside TARGET, beside and never AT its debug/, since a nested workspace
+    that depends on kaya builds kaya's cdylib too and would relink the
+    libkaya that directory's loaders hold (docs/traps.md, the nested
+    generator relinked the sweep's libkaya; check-python's rule 11)."""
+    return TARGET / "nested" / workspace
+
 # The two sentences, one per cause. Kept as module constants so the
 # self-test compares the bytes it will really print, and so
 # check-python.py can hold them against the shell preamble's.

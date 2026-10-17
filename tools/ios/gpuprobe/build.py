@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "lib"))
-from kaya_gate import ROOT, dev_shell_or_die
+from kaya_gate import ROOT, dev_shell_or_die, nested_target
 
 dev_shell_or_die()
 
@@ -55,8 +55,8 @@ def out_of(argv, **kw):
 
 if mac:
     r = run(["cargo", "run", "--release", "--locked", "--manifest-path",
-             str(CRATE / "Cargo.toml")], stdout=subprocess.PIPE, text=True,
-            encoding="utf-8")
+             str(CRATE / "Cargo.toml"), "--target-dir", str(nested_target("gpuprobe"))],
+            stdout=subprocess.PIPE, text=True, encoding="utf-8")
     if out:
         out.write_text(r.stdout, encoding="utf-8")
     sys.stdout.write(r.stdout)
@@ -118,9 +118,10 @@ try:
     sdk = out_of(xcrun + ["--sdk", "iphoneos", "--show-sdk-path"], env=env).strip()
     cargo_env = dict(env, SDKROOT=sdk)
     if run(["cargo", "build", "--release", "--locked", "--target", "aarch64-apple-ios",
-            "--manifest-path", str(CRATE / "Cargo.toml")], env=cargo_env).returncode != 0:
+            "--manifest-path", str(CRATE / "Cargo.toml"),
+            "--target-dir", str(nested_target("gpuprobe"))], env=cargo_env).returncode != 0:
         sys.exit("gpuprobe: the Rust probe did not build for aarch64-apple-ios")
-    staticlib = CRATE / "target/aarch64-apple-ios/release/libkaya_gpuprobe.a"
+    staticlib = nested_target("gpuprobe") / "aarch64-apple-ios/release/libkaya_gpuprobe.a"
     if not staticlib.is_file():
         sys.exit(f"gpuprobe: {staticlib} is missing after the build")
 

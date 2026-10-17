@@ -4591,6 +4591,41 @@ fn slot_cut(element: &FrameworkElement, rtl: bool) -> windows_core::Result<[f64;
     Ok([left, top, right, bottom])
 }
 
+/// `shown` (left, top, right, bottom in `root`'s coordinates) cut by every
+/// ScrollViewer's viewport and every ancestor's layout slot between `element`
+/// and `root` (docs/safe-area-plan.md A9).
+#[cfg(feature = "harness")]
+fn ancestors_cut(
+    from: &FrameworkElement,
+    root: &FrameworkElement,
+    rtl: bool,
+    mut shown: [f64; 4],
+) -> windows_core::Result<[f64; 4]> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let element = from.clone();
+    let top: UIElement = root.cast()?;
+    let mut up = VisualTreeHelper::GetParent(&element).ok();
+    while let Some(node) = up {
+        if node.cast::<UIElement>().ok().as_ref() == Some(&top) {
+            break;
+        }
+        if let Ok(ancestor) = node.cast::<FrameworkElement>() {
+            let o = ancestor
+                .TransformToVisual(root)?
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            let (ox, oy) = (f64::from(o.X), f64::from(o.Y));
+            let [l, t, r, b] = if node.cast::<ScrollViewer>().is_ok() {
+                [0.0, 0.0, ancestor.ActualWidth()?, ancestor.ActualHeight()?]
+            } else {
+                slot_cut(&ancestor, rtl)?
+            };
+            shown = [shown[0].max(ox + l), shown[1].max(oy + t), shown[2].min(ox + r), shown[3].min(oy + b)];
+        }
+        up = VisualTreeHelper::GetParent(&node).ok();
+    }
+    Ok(shown)
+}
+
 /// The nearest ScrollViewer above an element, by the framework's own
 /// parent chain.
 fn scroll_ancestor(element: &UIElement) -> windows_core::Result<Option<ScrollViewer>> {
@@ -27588,7 +27623,6 @@ impl crate::harness::Stage for WinUiStage {
     /// A desktop window has no safe area: the mounted root's own box is the
     /// whole of it (docs/safe-area-plan.md A9, A13).
     fn safe(&self, t: crate::harness::Target) -> Result<crate::harness::SafeWord, String> {
-        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
         let spec = crate::harness::target_spec(&t);
         let failed = spec.clone();
         Self::on_ui_read(move |core| {
@@ -27616,33 +27650,14 @@ impl crate::harness::Stage for WinUiStage {
             let bled = core.bled.contains(&id);
             // docs/traps.md, an element's own maxima crop an overflowing fill.
             let [l, t, r, b] = slot_cut(&element, rtl)?;
-            let mut shown = [frame[0] + l, frame[1] + t, frame[0] + r, frame[1] + b];
+            let shown = [frame[0] + l, frame[1] + t, frame[0] + r, frame[1] + b];
             if bled && b > t {
                 (frame[1], frame[3]) = (shown[1], b - t);
             }
             if bled && r > l {
                 (frame[0], frame[2]) = (shown[0], r - l);
             }
-            let top: UIElement = root.cast()?;
-            let mut up = VisualTreeHelper::GetParent(&element).ok();
-            while let Some(node) = up {
-                if node.cast::<UIElement>().ok().as_ref() == Some(&top) {
-                    break;
-                }
-                if let Ok(ancestor) = node.cast::<FrameworkElement>() {
-                    let o = ancestor
-                        .TransformToVisual(&root)?
-                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
-                    let (ox, oy) = (f64::from(o.X), f64::from(o.Y));
-                    let [l, t, r, b] = if node.cast::<ScrollViewer>().is_ok() {
-                        [0.0, 0.0, ancestor.ActualWidth()?, ancestor.ActualHeight()?]
-                    } else {
-                        slot_cut(&ancestor, rtl)?
-                    };
-                    shown = [shown[0].max(ox + l), shown[1].max(oy + t), shown[2].min(ox + r), shown[3].min(oy + b)];
-                }
-                up = VisualTreeHelper::GetParent(&node).ok();
-            }
+            let shown = ancestors_cut(&element, &root, rtl, shown)?;
             let visible = [shown[0], shown[1], (shown[2] - shown[0]).max(0.0), (shown[3] - shown[1]).max(0.0)];
             Ok(crate::harness::safe_verdict(
                 &spec,

@@ -17048,3 +17048,53 @@ is taken after the guest exits, so netimage-java-wayland's shape red had a
 picture of an empty desktop. GTK's failure_picture renders the window content
 offscreen at the first failed step to `<leg>-failshot.png` beside the verb
 trace, adopted as `fail-shot`. GUARD: check-flightrec FS1-FS2.
+
+## The nested generator relinked the sweep's libkaya (measured 2026-10-17)
+
+The matrix at 42cd6c24 passed 64/64 gates and refused its verdict because the
+sweep's own libkaya moved while gen-bindings ran. tools/kaya-bindgen is a cargo
+workspace of its own whose one dependency is kaya (crate-type rlib, cdylib,
+staticlib), and cargo builds a dependency's cdylib too, under the unhashed name
+deps/libkaya.dylib. Run under the sweep's inherited CARGO_TARGET_DIR it writes
+that file inside target/gate-sweep whenever kaya's sources are newer than its
+unit there, which is every matrix on a new tree: with crates/kaya/src/lib.rs
+touched, a root `cargo build --locked --lib` then the generator's `cargo run`
+moved target/gate-sweep/debug/deps/libkaya.dylib and left the uplifted
+debug/libkaya.dylib and the lanes' target/debug copies alone; with both units
+fresh nothing moves, which is why no hand run saw it. Before 42cd6c24 the
+generator built into tools/kaya-bindgen/target. The refusal's sentence named
+`target/debug/libkaya.dylib and target/debug/deps/libkaya.dylib` because it
+printed the constant, not the files under the target it watched or the one that
+moved; it now names only the moved paths.
+
+Guard: every build of a tools/ cargo workspace passes
+`--target-dir`, str(kaya_gate.nested_target("<workspace>")), and
+tools/check-python.py's rule 11 refuses a cargo argv with `--manifest-path` or
+a non-ROOT `cwd=` without it (N24-N26, gen-bindings' old form among them).
+
+## A shape read of a row the table clips (measured 2026-10-17)
+
+linux netimage-java-wayland failed twice reading `expect_shape
+image@art[t001]` as unmatched: its fail-shot shows the window's content 503
+tall and the table's body ending near y=485, while t001's art was drawn at
+y=469 40 tall, so the probes at (1,1), (6,6) and the centre read the card and
+the window ground under the clip. The reader sampled the frame without asking
+what its parents leave of it. Reproduced on demand by resizing the window to
+540x460 before the read (both protocols refused with `<clipped by its parents:
+frame (28,469,40,40), visible (28,469,40,10)>`). Two more GTK facts the fix
+measured: the image's own cell clips at its box's left edge (x=28), so a
+visibility check over the reader's "under it" probe 4 left of the box refused
+every row, and a row scrolled to the top of the body sits under the
+ScrolledWindow's top undershoot, which shades its (1,1) probe F7F7F7 against a
+white "under it" and reads a rounded picture as `rect`. On the mac,
+`scroll_to_row` to the first row of an unscrolled native table scrolls it 24 pt
+under the floating header, and the header lies inside the NSClipView's bounds
+(the clip view's contentInsets hold it), so the visible part is the clip
+bounds less those insets: the first draft that took the bounds read four of
+ten netimage legs `unmatched` with the probes on the header.
+
+Guard: every expect_ground, expect_shape and expect_tint reader on GTK,
+WinUI, SwiftUI and Compose refuses a probed frame its ancestors do not show
+whole (harness.rs's unseen_probe, its sentences; tools/lib/skin_routes.py's
+VISIBLE and nine cuts), and tools/scenes/netimage.steps reads the first row's
+shape, unscrolled.

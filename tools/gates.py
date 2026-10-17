@@ -449,22 +449,28 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
             now = host_lib_stamp(lib_root, None if lib_root else TARGET)
             lanes_now = host_lib_stamp(lanes_root) if lanes_root else None
             if lanes_now != lanes_seen["stamp"]:
+                moved = [r for r, was, got in zip(HOST_LIB, lanes_seen["stamp"], lanes_now)
+                         if was != got]
                 lanes_seen["stamp"] = lanes_now
                 relinked.append(name)
                 print(f"{label}: THE LANES' LIBKAYA RELINKED while {name} ran "
                       f"(also running: {' '.join(sorted(running)) or 'nothing'}) — "
-                      f"{' and '.join(HOST_LIB)} under {lanes_root} changed identity "
+                      f"{' and '.join(moved)} under {lanes_root} changed identity "
                       f"while this sweep builds into {lib_root or TARGET}, so something it ran "
                       f"built outside CARGO_TARGET_DIR (a --target-dir, a cleared "
                       f"environment). The mac lane's guests load that library by "
                       f"path (docs/traps.md, 2026-09-21)", file=sys.stderr, flush=True)
             if now != lib_seen["stamp"]:
+                where = [str(pathlib.Path(lib_root) / r) if lib_root
+                         else str(TARGET / r.removeprefix("target/"))
+                         for r, was, got in zip(HOST_LIB, lib_seen["stamp"], now)
+                         if was != got]
                 lib_seen["stamp"] = now
                 beside = sorted(running)
                 relinked.append(name)
                 print(f"{label}: HOST LIBKAYA RELINKED while {name} ran "
                       f"(also running: {' '.join(beside) or 'nothing'}) — "
-                      f"{' and '.join(HOST_LIB)} changed identity. A gate may not "
+                      f"{' and '.join(where)} changed identity. A gate may not "
                       f"build the host lib in any spelling; BUILD is its one "
                       f"writer, before any gate, because the mac lane's guests "
                       f"and this pool's probes load it by path and a launch "

@@ -7242,6 +7242,25 @@ impl SafeWord {
     }
 }
 
+/// Why a pixel reader may not read the window's pixels over `probed` (x, y,
+/// w, h in the window shot's units): the part its ancestors' clips leave on
+/// screen (`visible`, None when nothing shows) does not hold all of it, so
+/// the probes would read pixels the user cannot see (docs/traps.md, the
+/// shape read of a clipped row). expect_safe's rule and words.
+pub(crate) fn unseen_probe(probed: [f64; 4], visible: Option<[f64; 4]>) -> Option<String> {
+    let tol = 1.0;
+    let [x, y, w, h] = probed;
+    let r = |[x, y, w, h]: [f64; 4]| format!("({x:.0},{y:.0},{w:.0},{h:.0})");
+    let Some([vx, vy, vw, vh]) = visible.filter(|v| v[2] > 0.0 && v[3] > 0.0) else {
+        return Some(format!("<nothing on screen, its parents clip all of it: frame {}, visible none>", r(probed)));
+    };
+    let holds = vx <= x + tol && vy <= y + tol && vx + vw >= x + w - tol && vy + vh >= y + h - tol;
+    if !holds {
+        return Some(format!("<clipped by its parents: frame {}, visible {}>", r(probed), r([vx, vy, vw, vh])));
+    }
+    None
+}
+
 /// The words `expect_insets` reads an edge as (docs/safe-area-plan.md A9).
 pub const INSET_WORDS: [&str; 3] = ["bar", "cutout", "none"];
 
@@ -9017,6 +9036,23 @@ mod tests {
             safe_verdict("image#0", bled, [16.0, 16.0, 388.0, 144.0], w, Some([true, false, true, true]), false),
             Ok(SafeWord::Bleeds)
         );
+    }
+
+    /// docs/traps.md, the shape read of a clipped row: linux
+    /// netimage-java-wayland read t001's art 40 tall with 11 of it showing.
+    #[test]
+    fn a_pixel_reader_refuses_what_its_parents_clip() {
+        let art = [24.0, 469.0, 44.0, 40.0];
+        let cut = unseen_probe(art, Some([24.0, 469.0, 44.0, 11.0])).unwrap();
+        assert_eq!(cut, "<clipped by its parents: frame (24,469,44,40), visible (24,469,44,11)>");
+        for visible in [None, Some([24.0, 469.0, 44.0, 0.0]), Some([24.0, 469.0, 0.0, 40.0])] {
+            let gone = unseen_probe(art, visible).unwrap();
+            assert!(gone.starts_with("<nothing on screen, its parents clip all of it: frame (24,469,44,40)"), "{gone}");
+        }
+        for visible in [[28.0, 469.0, 40.0, 40.0], [24.0, 474.0, 44.0, 35.0], [24.0, 469.0, 38.0, 40.0]] {
+            assert!(unseen_probe(art, Some(visible)).unwrap().starts_with("<clipped by its parents"));
+        }
+        assert_eq!(unseen_probe(art, Some([24.5, 469.5, 43.0, 39.0])), None);
     }
 
     /// docs/tables-plan.md, the pinned-header ruling (2026-10-14).

@@ -24,6 +24,7 @@ DOMINANT = "crates/kaya/src/dominant.rs"
 SWIFT = "swift/KayaSwiftUI.swift"
 GTK = "crates/kaya/src/gtk.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
+WINUI_SKIN = "crates/kaya/src/winui/skin.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 FEATURES = ("grounds", "shapes", "cards", "tracks", "dock")
 STUBBED = {
@@ -149,6 +150,48 @@ CALLS = [
     (HARNESS, "harness.rs reads the tree's selected state", "word_reading(&stage.selected_read(*t), want,"),
 ]
 
+# A pixel reader reads only what the user sees: a target its parents clip is
+# refused, never sampled (docs/traps.md, the shape read of a clipped row; no
+# scene can tell a refusal from a lucky read of the pixels under the clip).
+# (file, label, what must stand, how many times)
+VISIBLE = [
+    (HARNESS, "the readers' refusal of a clipped probe",
+     "let holds = vx <= x + tol && vy <= y + tol && vx + vw >= x + w - tol && vy + vh >= y + h - tol;\n"
+     "if !holds {\nreturn Some(format!(\"<clipped by its parents", 1),
+    (HARNESS, "the readers' refusal of a probe with nothing on screen",
+     "let Some([vx, vy, vw, vh]) = visible.filter(|v| v[2] > 0.0 && v[3] > 0.0) else {", 1),
+    (GTK, "GTK's ground, shape and tint readers refuse what their parents clip",
+     "if let Some(why) = unseen_in_shot(&widget, &shot.content,", 3),
+    (GTK, "GTK's visible part is its ancestors' clip and the window's",
+     "clipped_by_ancestors(widget, content, gtk4::graphene::Rect::new(x, y, w, h))\n.and_then(|r| r.intersection(&whole))", 1),
+    (WINUI_SKIN, "WinUI's ground, shape and tint readers refuse what their parents clip",
+     "if let Some(why) = shot.unseen(&element,", 3),
+    (WINUI_SKIN, "WinUI's ground, shape and tint readers read what the element draws, cut by its own slot",
+     "let Some((fx, fy, fw, fh)) = shot.drawn(&element) else", 3),
+    (WINUI_SKIN, "WinUI's visible part walks every ancestor's viewport and slot",
+     "crate::winui::ancestors_cut(&fe, &root, rtl, [x, y, x + w, y + h])?", 1),
+    (SWIFT, "SwiftUI's ground, shape and tint readers refuse what their parents clip",
+     "if let why = kayaSkinUnseen(node,", 3),
+    (SWIFT, "SwiftUI's visible part is its scrolls', its root's and its anchor's clips",
+     "var shown = kayaVisibleFrame(node, probed).shown", 1),
+    (SWIFT, "SwiftUI's visible part takes its anchor's clipping views",
+     "shown = shown.intersection(kayaAnchorClips(view, probed))", 1),
+    (SWIFT, "the mac clip view's visible part leaves its content insets, where a table's header floats",
+     "let i = clip.contentInsets", 1),
+    (COMPOSE, "Compose's ground, shape and tint readers refuse what their parents clip",
+     "onUi(activity) { kayaSkinUnseen(", 3),
+    (COMPOSE, "Compose's visible part is the node's bounds in the window", "val visible = kayaNodeVisible[id]", 1),
+]
+
+
+def visible_findings(sources):
+    out = []
+    for rel, label, need, want in VISIBLE:
+        got = flat(sources[rel]).count(flat(need))
+        if got != want:
+            out.append(f"skin: {label}: {rel} holds {need.splitlines()[0]} {got} time(s), wanted {want}")
+    return out
+
 
 # A platform view behind a node answers macOS's hit test at a point in place of
 # the control above it (docs/traps.md, the frame anchor that took the hit).
@@ -186,6 +229,7 @@ def findings(sources, backends=None):
             out.extend(mod.findings(sources[source_key(rel, mod)]))
     swift = sources[SWIFT]
     out.extend(behind_findings(swift))
+    out.extend(visible_findings(sources))
     for label, opener, needs, never in DOORS:
         found = blocks(swift, opener)
         if len(found) != 1:
@@ -223,13 +267,14 @@ def findings(sources, backends=None):
 
 def run(g):
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8")
-               for rel in [HARNESS, SCENE, BRAND, DOMINANT, SWIFT, *STUBBED]}
+               for rel in [HARNESS, SCENE, BRAND, DOMINANT, SWIFT, WINUI_SKIN, *STUBBED]}
     for rel, mod in arm_modules().items():
         key = source_key(rel, mod)
         sources.setdefault(key, "\n".join((ROOT / one).read_text(encoding="utf-8") for one in key.split("+")))
     still = [rel for rel, stubs in STUBBED.items() if all(stub in sources[rel] for stub in stubs)]
     g.counted("skin clauses held",
-              sum(len(n) + len(v) + 1 for *_, n, v in DOORS) + sum(len(n) + 2 for *_, n in READS) + len(CALLS),
+              sum(len(n) + len(v) + 1 for *_, n, v in DOORS) + sum(len(n) + 2 for *_, n in READS) + len(CALLS)
+              + len(VISIBLE),
               floor=70)
     g.counted("skin backends still stubbed", len(still), floor=0)
     for line in findings(sources):
@@ -310,6 +355,38 @@ def run(g):
          r"self.assert_bands_hold();\n\2out", "a band move's ops pass the lowering"),
         ("the dark clamp loosened", BRAND, r"GRADIENT_DARK_MAX_LSTAR: f64 = 48\.0;", "GRADIENT_DARK_MAX_LSTAR: f64 = 60.0;",
          "the dark clamp"),
+        ("the readers sampling a clipped probe", HARNESS,
+         r"let holds = vx <= x \+ tol && vy <= y \+ tol && ", "let holds = true || vx <= x + tol && vy <= y + tol && ",
+         "the readers' refusal of a clipped probe"),
+        ("GTK's shape read of a clipped row, as shipped", GTK,
+         r"if let Some\(why\) = unseen_in_shot\(&widget, &shot\.content, \[fx, fy, fw, fh\]\) \{\n(\s+)return why;\n(\s+)\}\n(\s+)let Some\(under\)",
+         r"if let Some(why) = None::<String> {\n\1return why;\n\2}\n\3let Some(under)", "GTK's ground, shape and tint readers refuse"),
+        ("GTK's visible part blind to the window's edge", GTK, r"\n\s+\.and_then\(\|r\| r\.intersection\(&whole\)\)",
+         "", "GTK's visible part is its ancestors' clip and the window's"),
+        ("WinUI's ground, shape and tint reads of a clipped target", WINUI_SKIN,
+         r"if let Some\(why\) = shot\.unseen\(&element, \[fx, fy, fw, fh\]\)\? \{",
+         "if let Some(why) = None::<String> {", "WinUI's ground, shape and tint readers refuse", 3),
+        ("WinUI's shape read over the wide picture's whole box, as first written", WINUI_SKIN,
+         r"let Some\(\(fx, fy, fw, fh\)\) = shot\.drawn\(&element\) else \{ return Ok\(\"<no laid-out frame>\"\.into\(\)\) \};\n(\s+)if fw <= 12\.0",
+         r"let Some((fx, fy, fw, fh)) = shot.frame(&element) else { return Ok(\"<no laid-out frame>\".into()) };\n\1if fw <= 12.0",
+         "WinUI's ground, shape and tint readers read what the element draws"),
+        ("WinUI's visible part walking no ancestor", WINUI_SKIN,
+         r"crate::winui::ancestors_cut\(&fe, &root, rtl, \[x, y, x \+ w, y \+ h\]\)\?", "[x, y, x + w, y + h]",
+         "WinUI's visible part walks every ancestor"),
+        ("SwiftUI's shape read of a clipped row", SWIFT,
+         r"if let why = kayaSkinUnseen\(node, frame\) \{ return why \}\n(\s+)guard let shot = kayaWindowPixels\(\) else \{ return \"<no window pixels>\" \}\n(\s+)// What the image sits on",
+         r"guard let shot = kayaWindowPixels() else { return \"<no window pixels>\" }\n\2// What the image sits on",
+         "SwiftUI's ground, shape and tint readers refuse"),
+        ("SwiftUI's visible part blind to its anchor's clip views", SWIFT,
+         r"shown = shown\.intersection\(kayaAnchorClips\(view, probed\)\)", "_ = view",
+         "SwiftUI's visible part takes its anchor's clipping views"),
+        ("the mac table's header read as visible, as first written", SWIFT, r"let i = clip\.contentInsets",
+         "let i = NSEdgeInsets()", "the mac clip view's visible part leaves its content insets"),
+        ("Compose's shape read of a clipped row", COMPOSE,
+         r"onUi\(activity\) \{ kayaSkinUnseen\(frame\.second, box, u\) \}", "null",
+         "Compose's ground, shape and tint readers refuse"),
+        ("Compose's visible part the unclipped frame", COMPOSE, r"val visible = kayaNodeVisible\[id\]",
+         "val visible = kayaNodeFrames[id]", "Compose's visible part is the node's bounds"),
         ("harness.rs reading the model", HARNESS, r"word_reading\(&stage\.shape_read\(\*t\), want,",
          'word_reading("rect", want,', "harness.rs reads the shape the backend drew"),
     ]

@@ -3,7 +3,7 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import Gate, dev_shell_or_die
+from kaya_gate import Gate, dev_shell_or_die, nested_target
 
 dev_shell_or_die()
 
@@ -29,7 +29,9 @@ gate = Gate("check-winui-bindings")
 
 def run_check(against):
     got = subprocess.run(
-        ["cargo", "run", "--locked", "--quiet", "--", "--check", "--against", str(against)],
+        ["cargo", "run", "--locked", "--quiet",
+         "--target-dir", str(nested_target("winui-bindgen")),
+         "--", "--check", "--against", str(against)],
         cwd=GEN, capture_output=True, text=True, encoding="utf-8", errors="replace",
         check=False)
     return got.returncode, (got.stdout + got.stderr)

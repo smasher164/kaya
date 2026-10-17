@@ -7952,6 +7952,29 @@ object KayaCompose {
         return kayaRgb(bitmap.getPixel(px, py))
     }
 
+    /** Why a skin reader may not read the window's pixels over [probed]
+     * (window pixels): what the node's ancestors leave on screen,
+     * [kayaNodeVisible], does not hold all of it (harness.rs's unseen_probe;
+     * docs/traps.md, the shape read of a clipped row). */
+    private fun kayaSkinUnseen(id: Long, probed: androidx.compose.ui.geometry.Rect, density: Float): String? {
+        val frame = kayaNodeFrames[id]
+        val visible = kayaNodeVisible[id]
+        val shown = if (frame == null || visible == null) null else {
+            val left = if (visible.left <= frame.left + density) probed.left else visible.left
+            val top = if (visible.top <= frame.top + density) probed.top else visible.top
+            val right = if (visible.right >= frame.right - density) probed.right else visible.right
+            val bottom = if (visible.bottom >= frame.bottom - density) probed.bottom else visible.bottom
+            androidx.compose.ui.geometry.Rect(left, top, right, bottom).intersect(probed)
+        }
+        if (shown == null || shown.width <= 0f || shown.height <= 0f) {
+            return "<nothing on screen, its parents clip all of it: frame ${kayaRectText(probed)}, visible none>"
+        }
+        if (shown.left > probed.left + density || shown.top > probed.top + density ||
+            shown.right < probed.right - density || shown.bottom < probed.bottom - density
+        ) return "<clipped by its parents: frame ${kayaRectText(probed)}, visible ${kayaRectText(shown)}>"
+        return null
+    }
+
     private fun kayaContainerTarget(spec: String): KayaNode? =
         target(spec, "column", KayaSceneModel.columns) ?: target(spec, "row", KayaSceneModel.rows)
 
@@ -7959,18 +7982,23 @@ object KayaCompose {
      * pixels 4 units inside the container's right edge, 4 units in from its
      * top and its bottom and at its middle; SwiftUI's kayaGroundRead. */
     private fun kayaGroundRead(activity: ComponentActivity, spec: String): String? {
-        val got = onUi(activity) {
+        val found = onUi(activity) {
             kayaContainerTarget(spec)?.let { node ->
                 val box = kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
                     android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
                 }
-                Triple(box, node.picture, node.groundTops)
+                Pair(Triple(box, node.picture, node.groundTops), node.id)
             }
         } ?: return null
+        val (got, nodeId) = found
         val box = got.first ?: return "<no laid-out frame>"
         val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
         val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
         val u = shot.density
+        val probed = androidx.compose.ui.geometry.Rect(
+            box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat(),
+        )
+        onUi(activity) { kayaSkinUnseen(nodeId, probed, u) }?.let { return it }
         val x = box.right - 4 * u
         val top = shot.at(x, box.top + 4 * u)
         val bottom = shot.at(x, box.bottom - 4 * u)
@@ -8007,6 +8035,7 @@ object KayaCompose {
         val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
         val u = shot.density
         if (box.width < 12 * u || box.height < 12 * u) return "<no laid-out frame: $box>"
+        onUi(activity) { kayaSkinUnseen(frame.second, box, u) }?.let { return it }
         val under = shot.at(box.left - 4 * u, box.center.y) ?: return "<nothing left of $box>"
         val c1 = shot.at(box.left + 1 * u, box.top + 1 * u)
         val c6 = shot.at(box.left + 6 * u, box.top + 6 * u)
@@ -8033,6 +8062,7 @@ object KayaCompose {
         val box = frame.first ?: return "<no laid-out frame>"
         val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
         val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
+        onUi(activity) { kayaSkinUnseen(frame.second, box, shot.density) }?.let { return it }
         val ground = kayaRgb(tokens.ground)
         var ink: DoubleArray? = null
         var best = -1.0

@@ -49,10 +49,14 @@ expect_image_size image@art[t000] "40x40"
 expect_shape image@art[t000] rounded
 click button@rows
 expect_image_phase image@art[t000] shown
-expect_shape image@art[t001] rounded
 expect image@art[t000] "600x600"
 expect image@art[t001] "320x320"
 expect image@art[t002] "1000x1000"
+# A shape is read off pixels the user sees, so off the first row, unscrolled:
+# the second runs under the table's edge in a short window, and a row scrolled
+# to the top sits under GTK's scroll shadow and the mac header (docs/traps.md,
+# the shape read of a clipped row).
+expect_shape image@art[t000] rounded
 scroll_to_row column@tracks t299
 expect_image_phase image@art[t299] loading
 # Rows torn down while still loading are released.
