@@ -17835,3 +17835,67 @@ hopped to the main thread.
 
 GUARD: check-verbs holds the mac kayaAxWhy's main-thread hop, the hop cut and
 watched refused.
+
+## The quadratic remove (measured 2026-10-18)
+
+The full matrix at 38a1403b failed android `portfolio-python`: the Retirement
+filter (10,305 of the ledger's 15,003 rows leave) kept the app's main thread
+from drawing for 15.5s under a host load of 90, and `expect label@count` took
+its one read when the thread came free, 40 ms before the app's answer landed,
+past the step's 15s deadline. By hand on a quiet host the same step held the
+main thread about 2s. simpleperf (`simpleperf record --app dev.kaya.pyhost -e
+cpu-clock -g`; the emulator has no `cpu-cycles` event) put 81% of the app's
+samples on `kaya-compose-pump`, inside `Scene::remove_entry`: every removed
+key ran `order.retain` over the whole order and reconciled the band, so the
+filter was 10,305 passes over 15,000 keys. A sort's `move_to_end` per row and
+a fill's insert per row had the same shape. In the core's debug build on the
+mac, 40,000 removes from 60,000 rows took 25.5s, 20,000 moves 5.3s and 60,000
+inserts 3.1s; applied as runs they take 57 ms, 25 ms and 117 ms.
+
+A run of consecutive inserts, removes or moves-to-the-end on one collection
+instance is now applied as one (`insert_entries`, `remove_entries`,
+`move_entries_to_end` in crates/kaya/src/scene.rs): one pass over the order
+and one band reconcile. The one exception is an undo group, which records
+each op's prior state before it runs and so still applies them one at a time.
+The bundle could not name this, because the batch line's `took=` is the UI
+thread's apply only. So `Scene::apply` now prints `KAYA_DIAG core apply took
+Nms over R record(s) (...)` for any transaction over 250 ms, on every lane.
+
+Not fixed, found on the way: `absorb_text_writes` asks `is_secure_field` for
+each text write, and for a stamped copy that walks every stamp, so a large
+collection that is NOT windowed costs text writes times stamps (a test filling
+60,000 rows before any window report sat in that walk for 17 minutes before
+it was stopped).
+
+GUARD: scene::tests' a_filter_and_a_sort_of_sixty_thousand_rows_are_one_pass_each
+(with each of the three runs cut, watched red at 3.1s, 25.5s and 5.3s against
+its 2s bound), a_run_of_removes_lands_where_the_removes_one_at_a_time_land,
+a_run_of_moves_to_the_end_lands_where_the_moves_one_at_a_time_land and
+a_slow_apply_names_its_time_and_its_records.
+
+## The media service the platform restarted (measured 2026-10-18)
+
+media3's `MediaSessionService.onStartCommand` returns START_STICKY (javap
+over media3-session 1.10.1), so when a leg's app exited with a session, the
+platform started its process again about a second later "for service
+{…/dev.kaya.KayaMediaService}" (`am_proc_start` in the events buffer), with
+no session in it. After matrix 20261018T163232Z, dev.kaya.pyhost was still
+cached on emulator-5554 14 minutes after its last leg. Running only the
+media_session and music_dock legs by hand left gohost, rusthost, pyhost and
+javahost running on all four phones, and they were still there four minutes
+later. The restarted process was idle and used no CPU (the lanes'
+lane-health readings at the android end show the phones idle), so it did not
+explain the matrix's slowdown. But it was another process's state on a
+pooled device until that package's next leg force-stopped it, and the same
+freeze that once cost netimage_http its sockets (the entry above about
+sockets a stale freeze destroyed).
+
+KayaMediaService answers START_NOT_STICKY, and run_apk_on now ends with
+`leg_app_stopped`: it force-stops the leg's package and waits up to 3s for
+it to be gone, and the leg fails naming the pid and its `am_proc_start`
+reason if it is not. A process found at the leg's end that the events buffer
+says was not started for an activity gets one leg-log line naming it.
+
+GUARD: tools/lib/android-leg-order.py's leg_stop_problem (the stop's call,
+its place after the disarm, its poll, and the service's START_NOT_STICKY,
+four cuts each watched red).

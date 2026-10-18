@@ -2422,6 +2422,8 @@ def run_apk_on(serial, name, apk, component, script, extras,
         failed = True
     if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):
         failed = True
+    if not leg_app_stopped(serial, name, package, log):
+        failed = True
     return not failed
 
 
@@ -3520,6 +3522,46 @@ def run_as(serial, package, *args):
 
 def app_pid(serial, package):
     return adb_out(serial, "shell", "pidof", package).strip()
+
+
+LEG_APP_GONE_S = 3.0
+PROC_START = re.compile(r"(\d\d-\d\d \S+) .*am_proc_start: \[\d+,(\d+),\d+,([^,]+),([^,]+),(.*)\]")
+
+
+def proc_start_record(serial, pid):
+    """The events buffer's own account of why `pid` was started: its
+    reason and component, or None when the buffer holds no start for it."""
+    events = adb_out(serial, "logcat", "-d", "-b", "events", "-s", "am_proc_start")
+    for line in reversed(events.splitlines()):
+        m = PROC_START.search(line)
+        if m and m.group(2) == pid.split()[0]:
+            return f"started {m.group(1)} for {m.group(4)} {m.group(5)}"
+    return None
+
+
+def leg_app_stopped(serial, name, package, log):
+    """docs/traps.md, the media service the platform restarted: the leg's
+    app is force-stopped at the leg's end and shown gone, so nothing it
+    left behind runs on under the pool's next legs."""
+    left = app_pid(serial, package)
+    record = proc_start_record(serial, left) if left else None
+    adb(serial, "shell", "am", "force-stop", package, stdout=log, stderr=log)
+    t0 = time.monotonic()
+    pid = app_pid(serial, package)
+    while pid and time.monotonic() - t0 < LEG_APP_GONE_S:
+        time.sleep(0.2)
+        pid = app_pid(serial, package)
+    unknown = "the events buffer holds no start for that pid"
+    if not pid and left and (record is None or "activity " not in record):
+        print(f"{name}: {package} was running at the leg's end as pid {left} "
+              f"({record or unknown}); the closing force-stop ended it",
+              file=log)
+    if pid:
+        print(f"{name}: {package} still runs as pid {pid} "
+              f"{LEG_APP_GONE_S:.0f}s after the leg's closing force-stop "
+              f"({proc_start_record(serial, pid) or unknown})", file=log)
+        return False
+    return True
 
 
 def act_two(serial, name, package, component, dump, log):

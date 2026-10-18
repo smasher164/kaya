@@ -270,7 +270,8 @@ def guarded_disarm_problem(body: str) -> str | None:
     )
     post = re.findall(
         r"if needs_a11y and not " + call + r":\s*failed = True\s*"
-        r"return not failed\s*\Z",
+        r"if not leg_app_stopped\(serial, name, package, log\):\s*"
+        r"failed = True\s*return not failed\s*\Z",
         body,
     )
     if len(calls) != 2:
@@ -280,7 +281,7 @@ def guarded_disarm_problem(body: str) -> str | None:
         return "the picker pre-leg disarm must remain guarded"
     if len(post) != 1:
         return ("the picker post-leg disarm must be the final action "
-                "before verdict")
+                "before the leg-end stop and the verdict")
     return None
 
 
@@ -570,6 +571,42 @@ def sockets_problem(text: str, reader=None) -> str | None:
     return None
 
 
+MEDIA_KT = ROOT / "android" / "kaya" / "src" / "main" / "kotlin" / "dev" / "kaya" / "KayaMedia.kt"
+LEG_END = ("    if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):\n"
+           "        failed = True\n"
+           "    if not leg_app_stopped(serial, name, package, log):\n"
+           "        failed = True\n"
+           "    return not failed\n")
+LEG_STOP = ['"am", "force-stop", package', "pid = app_pid(serial, package)",
+            "while pid and time.monotonic() - t0 < LEG_APP_GONE_S:",
+            "return False"]
+NOT_STICKY = re.compile(
+    r"override fun onStartCommand\(intent: Intent\?, flags: Int, startId: Int\): Int \{\s*"
+    r"super\.onStartCommand\(intent, flags, startId\)\s*return START_NOT_STICKY\s*\}")
+
+
+def leg_stop_problem(text: str, media: str) -> str | None:
+    """docs/traps.md, the media service the platform restarted: the leg's
+    app stopped and shown gone after its last step, and the session's
+    service never asking the platform to restart it."""
+    body = py_function(text, "run_apk_on")
+    if body is None or not body.endswith(LEG_END):
+        return ("run_apk_on() no longer ends by disarming the service and "
+                "then stopping the leg's app with leg_app_stopped()")
+    stop = py_function(text, "leg_app_stopped")
+    if stop is None:
+        return "leg_app_stopped() not found in the runner"
+    for piece in LEG_STOP:
+        if piece not in stop:
+            return f"leg_app_stopped() no longer carries {piece!r}"
+    service = media.split("class KayaMediaService", 1)
+    if len(service) != 2 or NOT_STICKY.search(service[1].split("\nclass ", 1)[0]) is None:
+        return ("KayaMediaService no longer answers START_NOT_STICKY from "
+                "onStartCommand: media3's START_STICKY has the platform "
+                "restart it after the app exits")
+    return None
+
+
 def teardown_problem(text: str) -> str | None:
     """Every module global kaya_teardown reads is assigned before the
     atexit registration, so a run stopped early tears down instead of
@@ -661,6 +698,11 @@ def main() -> int:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
     problem = sockets_problem(text)
+    if problem is not None:
+        print(f"android-leg-order: {problem}", file=sys.stderr)
+        return 1
+    media_text = MEDIA_KT.read_text(encoding="utf-8")
+    problem = leg_stop_problem(text, media_text)
     if problem is not None:
         print(f"android-leg-order: {problem}", file=sys.stderr)
         return 1
@@ -999,9 +1041,11 @@ def main() -> int:
         r"(?m)^    if needs_a11y and not a11y_disarm\(serial, package, "
         r"a11y, out=log\):\n        failed = True\n"
     )
-    post_match = re.search(post_pattern + r"    return not failed", body)
-    doctored, removed = re.subn(post_pattern + r"    return not failed",
-                                "    return not failed", body, count=1)
+    tail = (r"    if not leg_app_stopped\(serial, name, package, log\):\n"
+            r"        failed = True\n    return not failed")
+    post_match = re.search(post_pattern + tail, body)
+    doctored, removed = re.subn(post_pattern + r"(" + tail + r")",
+                                r"\1", body, count=1)
     inserted = 0
     if post_match is not None:
         doctored, inserted = re.subn(
@@ -1188,6 +1232,33 @@ def main() -> int:
         doctored, n = doctor(label, text, pattern,
                              "if False:" if "after" in pattern else "")
         problem = sockets_problem(doctored)
+        if n != 1 or problem is None:
+            print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
+                  f"good)", file=sys.stderr)
+            return 1
+        print(f"android-leg-order: {label} -> {problem}")
+
+    # N43..N46: the leg-end stop cut, moved above the disarm, its poll cut,
+    # and the service sticky again, each must red.
+    stop_call = ("    if not leg_app_stopped(serial, name, package, log):\n"
+                 "        failed = True\n")
+    for label, source, pattern, repl, on_media in (
+            ("leg-end stop removed", text, re.escape(stop_call), "", False),
+            ("leg-end stop above the disarm", text,
+             re.escape("    if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):\n"
+                       "        failed = True\n" + stop_call),
+             stop_call.replace("\\", "\\\\") +
+             "    if needs_a11y and not a11y_disarm(serial, package, a11y, out=log):\n"
+             "        failed = True\n", False),
+            ("leg-end stop's poll removed", text,
+             re.escape("while pid and time.monotonic() - t0 < LEG_APP_GONE_S:"),
+             "while False:", False),
+            ("media service sticky again", media_text,
+             re.escape("return START_NOT_STICKY"),
+             "return super.onStartCommand(intent, flags, startId)", True)):
+        doctored, n = doctor(label, source, pattern, repl)
+        problem = (leg_stop_problem(text, doctored) if on_media
+                   else leg_stop_problem(doctored, media_text))
         if n != 1 or problem is None:
             print(f"android-leg-order: SELF-TEST FAIL ({label} read as "
                   f"good)", file=sys.stderr)

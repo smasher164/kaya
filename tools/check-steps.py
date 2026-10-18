@@ -1099,11 +1099,11 @@ def title_lint(text, path):
 
 def title_wall_lint(scene_src):
     found = []
-    apply_at = scene_src.find("pub(crate) fn apply(&mut self, tx: Transaction)")
+    apply_at = scene_src.find("fn apply_records(&mut self, tx: Transaction)")
     apply_end = scene_src.find("\n    }\n", apply_at)
     body = scene_src[apply_at:apply_end]
     if "self.untitled_primary_message(mounted_primary, crate::prefs::selftest())" not in body:
-        found.append("crates/kaya/src/scene.rs: Scene::apply no longer asks "
+        found.append("crates/kaya/src/scene.rs: Scene::apply_records no longer asks "
                      "untitled_primary_message under the harness")
     if "mounted_primary |= window == crate::protocol::DEFAULT_WINDOW;" not in body:
         found.append("crates/kaya/src/scene.rs: the Mount arm no longer records a "

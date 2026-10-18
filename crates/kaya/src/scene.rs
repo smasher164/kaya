@@ -3792,6 +3792,16 @@ impl Scene {
     }
 
     pub(crate) fn apply(&mut self, tx: Transaction) -> Vec<ApplyOp> {
+        let census = record_census(&tx);
+        let began = std::time::Instant::now();
+        let out = self.apply_records(tx);
+        if let Some(line) = slow_apply_line(began.elapsed(), &census, out.len()) {
+            eprintln!("{line}");
+        }
+        out
+    }
+
+    fn apply_records(&mut self, tx: Transaction) -> Vec<ApplyOp> {
         self.preflight_number_rows(&tx);
         let number_before = self.number_ranges.clone();
         let mut out = Vec::new();
@@ -5155,7 +5165,21 @@ impl Scene {
                     key,
                     variant,
                     record,
-                } => self.insert_entry(id, path, key, variant, record, &mut out),
+                } => {
+                    let mut rows = vec![(key, variant, record)];
+                    if group.is_none() {
+                        while let Some((_, TxOp::CollectionInsert { id: next, path: at_path, .. })) = queue.front() {
+                            if *next != id || *at_path != path {
+                                break;
+                            }
+                            let Some((_, TxOp::CollectionInsert { key, variant, record, .. })) = queue.pop_front() else {
+                                unreachable!("the front was just matched")
+                            };
+                            rows.push((key, variant, record));
+                        }
+                    }
+                    self.insert_entries(id, path, rows, &mut out)
+                }
                 TxOp::CollectionUpdate {
                     id,
                     path,
@@ -5172,7 +5196,37 @@ impl Scene {
                     value,
                 } => self.update_field_entry(id, path, key, variant, field, value, &mut out),
                 TxOp::CollectionRemove { id, path, key } => {
-                    self.remove_entry(id, path, key, &mut out)
+                    let mut keys = vec![key];
+                    if group.is_none() {
+                        while let Some((_, TxOp::CollectionRemove { id: next, path: at_path, .. })) = queue.front() {
+                            if *next != id || *at_path != path {
+                                break;
+                            }
+                            let Some((_, TxOp::CollectionRemove { key, .. })) = queue.pop_front() else {
+                                unreachable!("the front was just matched")
+                            };
+                            keys.push(key);
+                        }
+                    }
+                    self.remove_entries(id, path, keys, &mut out)
+                }
+                TxOp::CollectionMove {
+                    id,
+                    path,
+                    key,
+                    before: None,
+                } if group.is_none() => {
+                    let mut keys = vec![key];
+                    while let Some((_, TxOp::CollectionMove { id: next, path: at_path, before: None, .. })) = queue.front() {
+                        if *next != id || *at_path != path {
+                            break;
+                        }
+                        let Some((_, TxOp::CollectionMove { key, .. })) = queue.pop_front() else {
+                            unreachable!("the front was just matched")
+                        };
+                        keys.push(key);
+                    }
+                    self.move_entries_to_end(id, path, keys, &mut out)
                 }
                 TxOp::CollectionMove {
                     id,
@@ -7338,10 +7392,10 @@ impl Scene {
                     record.clone(),
                     out,
                 ),
-                (None, true) => self.remove_entry(
+                (None, true) => self.remove_entries(
                     entry.collection,
                     entry.path.clone(),
-                    entry.key.clone(),
+                    vec![entry.key.clone()],
                     out,
                 ),
                 (None, false) => {}
@@ -9576,22 +9630,38 @@ impl Scene {
         record: Record,
         out: &mut Vec<ApplyOp>,
     ) {
-        let schema = self.variant_schema(id, variant, "insert");
-        check_record(&schema, &record, &format!("insert into {id:?}"));
+        self.insert_entries(id, path, vec![(key, variant, record)], out)
+    }
+
+    /// A run of consecutive inserts into one instance: a windowed band is
+    /// reconciled once for the run (docs/traps.md, the quadratic remove).
+    fn insert_entries(
+        &mut self,
+        id: CollectionId,
+        path: Vec<Value>,
+        rows: Vec<(Value, u32, Record)>,
+        out: &mut Vec<ApplyOp>,
+    ) {
         let path: PathKey = path.iter().map(Key::from_value).collect();
-        let key = Key::from_value(&key);
-        let inst = self.instance_mut(id, &path);
-        assert!(
-            !inst.entries.contains_key(&key),
-            "kaya: key {key:?} already present in {id:?} at {path:?} (update is explicit)"
-        );
-        inst.order.push(key.clone());
-        inst.entries.insert(key.clone(), (variant, record));
-        self.birth_nested(id, &path, &key, variant);
-        if self.windowed(id, &path) {
+        let windowed = self.windowed(id, &path);
+        for (key, variant, record) in rows {
+            let schema = self.variant_schema(id, variant, "insert");
+            check_record(&schema, &record, &format!("insert into {id:?}"));
+            let key = Key::from_value(&key);
+            let inst = self.instance_mut(id, &path);
+            assert!(
+                !inst.entries.contains_key(&key),
+                "kaya: key {key:?} already present in {id:?} at {path:?} (update is explicit)"
+            );
+            inst.order.push(key.clone());
+            inst.entries.insert(key.clone(), (variant, record));
+            self.birth_nested(id, &path, &key, variant);
+            if !windowed {
+                self.stamp_entry(id, &path, &key, out);
+            }
+        }
+        if windowed {
             self.window_order_moved(id, &path, out);
-        } else {
-            self.stamp_entry(id, &path, &key, out);
         }
     }
 
@@ -9797,29 +9867,89 @@ impl Scene {
         self.refresh_drag_binds(&(id, path, key), out);
     }
 
-    fn remove_entry(
+    /// A run of consecutive removes from one instance, applied as one: the
+    /// order is compacted in a single pass and a windowed band reconciled
+    /// once (docs/traps.md, the quadratic remove).
+    fn remove_entries(
         &mut self,
         id: CollectionId,
         path: Vec<Value>,
-        key: Value,
+        keys: Vec<Value>,
         out: &mut Vec<ApplyOp>,
     ) {
         let path: PathKey = path.iter().map(Key::from_value).collect();
-        let key = Key::from_value(&key);
+        let keys: Vec<Key> = keys.iter().map(Key::from_value).collect();
         let inst = self.instance_mut(id, &path);
-        assert!(
-            inst.entries.remove(&key).is_some(),
-            "kaya: remove of missing key {key:?} in {id:?}"
-        );
-        inst.order.retain(|k| k != &key);
-        if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
-            self.teardown(stamp, out);
+        for key in &keys {
+            assert!(
+                inst.entries.remove(key).is_some(),
+                "kaya: remove of missing key {key:?} in {id:?}"
+            );
         }
-        self.reap_nested(id, &path, &key);
+        if keys.len() == 1 {
+            inst.order.retain(|k| k != &keys[0]);
+        } else {
+            let gone: std::collections::HashSet<&Key> = keys.iter().collect();
+            inst.order.retain(|k| !gone.contains(k));
+        }
+        for key in &keys {
+            if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
+                self.teardown(stamp, out);
+            }
+            self.reap_nested(id, &path, key);
+        }
         if self.windowed(id, &path) {
             // Every row below shifted up: the band is a position, so one
             // more row at the bottom enters.
             self.window_order_moved(id, &path, out);
+        }
+    }
+
+    /// A run of consecutive moves to the end of one instance, applied as
+    /// one: each key lands where its LAST move put it, the order is rebuilt
+    /// in a single pass, and the stamped copies move exactly as the run of
+    /// single moves would have moved them.
+    fn move_entries_to_end(
+        &mut self,
+        id: CollectionId,
+        path: Vec<Value>,
+        keys: Vec<Value>,
+        out: &mut Vec<ApplyOp>,
+    ) {
+        let path: PathKey = path.iter().map(Key::from_value).collect();
+        let keys: Vec<Key> = keys.iter().map(Key::from_value).collect();
+        let inst = self.instance_mut(id, &path);
+        let mut last: HashMap<&Key, usize> = HashMap::with_capacity(keys.len());
+        for (at, key) in keys.iter().enumerate() {
+            assert!(
+                inst.entries.contains_key(key),
+                "kaya: move of missing key {key:?} in {id:?}"
+            );
+            last.insert(key, at);
+        }
+        inst.order.retain(|k| !last.contains_key(k));
+        let mut tail: Vec<(usize, &Key)> = last.into_iter().map(|(key, at)| (at, key)).collect();
+        tail.sort_unstable_by_key(|(at, _)| *at);
+        inst.order.extend(tail.into_iter().map(|(_, key)| key.clone()));
+        if self.windowed(id, &path) {
+            self.window_order_moved(id, &path, out);
+            return;
+        }
+        let Some(site) = self.for_sites.get(&(id, path.clone())) else {
+            return;
+        };
+        let container = site.container;
+        for key in &keys {
+            let Some(stamp) = self.stamps.get(&(id, path.clone(), key.clone())) else {
+                continue;
+            };
+            for &child in &stamp.roots {
+                out.push(ApplyOp::MoveChild {
+                    parent: container,
+                    child,
+                    before: None,
+                });
+            }
         }
     }
 
@@ -11032,6 +11162,45 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
+}
+
+/// A transaction the core spent this long applying is named on stderr, so
+/// a red leg's bundle says the app's answer was the core's time
+/// (docs/traps.md, the quadratic remove).
+const SLOW_APPLY: std::time::Duration = std::time::Duration::from_millis(250);
+
+fn record_census(tx: &[TxOp]) -> Vec<(String, usize)> {
+    let mut kinds: Vec<(std::mem::Discriminant<TxOp>, String, usize)> = Vec::new();
+    for op in tx {
+        let kind = std::mem::discriminant(op);
+        match kinds.iter_mut().find(|(k, _, _)| *k == kind) {
+            Some((_, _, n)) => *n += 1,
+            None => {
+                let name: String = format!("{op:?}")
+                    .chars()
+                    .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                    .collect();
+                kinds.push((kind, name, 1));
+            }
+        }
+    }
+    let mut census: Vec<(String, usize)> = kinds.into_iter().map(|(_, name, n)| (name, n)).collect();
+    census.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    census
+}
+
+fn slow_apply_line(took: std::time::Duration, census: &[(String, usize)], lowered: usize) -> Option<String> {
+    if took < SLOW_APPLY {
+        return None;
+    }
+    let records: usize = census.iter().map(|(_, n)| n).sum();
+    let kinds: Vec<String> = census.iter().take(3).map(|(name, n)| format!("{name} x{n}")).collect();
+    let more = if census.len() > 3 { format!(", {} more kind(s)", census.len() - 3) } else { String::new() };
+    Some(format!(
+        "KAYA_DIAG core apply took {}ms over {records} record(s) ({}{more}) and lowered to {lowered} apply op(s)",
+        took.as_millis(),
+        kinds.join(", ")
+    ))
 }
 
 #[cfg(test)]
@@ -21201,6 +21370,126 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         assert_eq!(creates(&ops).len(), 3, "key 60 arrived at the bottom");
         assert_eq!(destroys(&ops), 3, "and key 30 slid off the top");
         assert_eq!(realized(&scene), (31..61).collect::<Vec<i64>>());
+    }
+
+    #[test]
+    fn a_slow_apply_names_its_time_and_its_records() {
+        let tx = vec![remove_op(1), remove_op(2), to_end_op(3), TxOp::TemplateEnd, remove_op(4), to_end_op(5)];
+        let census = record_census(&tx);
+        assert_eq!(census, vec![("CollectionRemove".to_string(), 3), ("CollectionMove".to_string(), 2), ("TemplateEnd".to_string(), 1)]);
+        assert_eq!(slow_apply_line(std::time::Duration::from_millis(249), &census, 9), None);
+        assert_eq!(
+            slow_apply_line(std::time::Duration::from_millis(1500), &census, 9).as_deref(),
+            Some("KAYA_DIAG core apply took 1500ms over 6 record(s) (CollectionRemove x3, CollectionMove x2, TemplateEnd x1) and lowered to 9 apply op(s)")
+        );
+        let wide = vec![("A".to_string(), 4), ("B".to_string(), 3), ("C".to_string(), 2), ("D".to_string(), 1)];
+        assert_eq!(
+            slow_apply_line(std::time::Duration::from_millis(300), &wide, 0).as_deref(),
+            Some("KAYA_DIAG core apply took 300ms over 10 record(s) (A x4, B x3, C x2, 1 more kind(s)) and lowered to 0 apply op(s)")
+        );
+    }
+
+    fn remove_op(key: i64) -> TxOp {
+        TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: Value::I64(key) }
+    }
+
+    fn to_end_op(key: i64) -> TxOp {
+        TxOp::CollectionMove { id: CollectionId(1), path: vec![], key: Value::I64(key), before: None }
+    }
+
+    fn order_of(scene: &Scene) -> Vec<i64> {
+        scene.coll_instances[&(CollectionId(1), Vec::new())]
+            .order
+            .iter()
+            .map(|k| match k {
+                Key::I64(n) => *n,
+                other => panic!("unexpected key {other:?}"),
+            })
+            .collect()
+    }
+
+    /// A RUN OF REMOVES IS ONE REMOVE (docs/traps.md, the quadratic remove):
+    /// the same rows leave and the same band holds as when each remove is its
+    /// own transaction, and no row is stamped on the way only to be torn down.
+    #[test]
+    fn a_run_of_removes_lands_where_the_removes_one_at_a_time_land() {
+        let gone: Vec<i64> = (0..45).chain(50..55).chain(80..100).collect();
+        let mut run = rows_scene(100);
+        run.window_moved(4, 40, 10);
+        let ops = run.apply(gone.iter().map(|&k| remove_op(k)).collect());
+        let mut single = rows_scene(100);
+        single.window_moved(4, 40, 10);
+        let mut single_creates = 0;
+        for &k in &gone {
+            single_creates += creates(&single.apply(vec![remove_op(k)])).len();
+        }
+        assert_eq!(order_of(&run), order_of(&single));
+        assert_eq!(realized(&run), realized(&single));
+        assert_eq!(run.stamps.len(), single.stamps.len());
+        let entered = realized(&run).iter().filter(|k| !(30..60).contains(*k)).count();
+        assert_eq!(creates(&ops).len(), entered * 3, "only the rows that stayed in the band were stamped");
+        assert!(single_creates > creates(&ops).len(), "one at a time stamps rows a later remove takes");
+    }
+
+    /// A RUN OF MOVES TO THE END IS ONE REORDER: each key lands where its
+    /// last move put it, on a windowed site and on a plain one, where the
+    /// stamped copies move exactly as they would one move at a time.
+    #[test]
+    fn a_run_of_moves_to_the_end_lands_where_the_moves_one_at_a_time_land() {
+        let keys: Vec<i64> = vec![7, 3, 99, 7, 42, 0, 3, 64];
+        let mut run = rows_scene(100);
+        run.window_moved(4, 40, 10);
+        run.apply(keys.iter().map(|&k| to_end_op(k)).collect());
+        let mut single = rows_scene(100);
+        single.window_moved(4, 40, 10);
+        for &k in &keys {
+            single.apply(vec![to_end_op(k)]);
+        }
+        assert_eq!(order_of(&run), order_of(&single));
+        assert_eq!(realized(&run), realized(&single));
+        assert_eq!(&order_of(&run)[94..], &[99, 7, 42, 0, 3, 64]);
+
+        let plain = || {
+            let mut scene = Scene::new();
+            scene.apply(table_scene(2));
+            scene.apply((0..20).map(row_insert).collect());
+            scene
+        };
+        let mut run = plain();
+        let run_ops = run.apply(keys.iter().filter(|&&k| k < 20).map(|&k| to_end_op(k)).collect());
+        let mut single = plain();
+        let mut single_ops = Vec::new();
+        for &k in keys.iter().filter(|&&k| k < 20) {
+            single_ops.extend(single.apply(vec![to_end_op(k)]));
+        }
+        assert_eq!(order_of(&run), order_of(&single));
+        assert_eq!(format!("{run_ops:?}"), format!("{single_ops:?}"));
+    }
+
+    /// A TABLE'S FILL, A FILTER AND A SORT COST ONE PASS EACH, not one pass
+    /// per record (docs/traps.md, the quadratic remove).
+    #[test]
+    fn a_filter_and_a_sort_of_sixty_thousand_rows_are_one_pass_each() {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(table_scene(2));
+        scene.window_moved(4, 0, 20);
+        let began = std::time::Instant::now();
+        scene.apply((0..60_000).map(row_insert).collect());
+        let inserted = began.elapsed();
+        let began = std::time::Instant::now();
+        scene.apply((0..60_000).filter(|k| k % 3 != 0).map(remove_op).collect());
+        let removed = began.elapsed();
+        assert_eq!(order_of(&scene).len(), 20_000);
+        let began = std::time::Instant::now();
+        scene.apply((0..60_000).rev().filter(|k| k % 3 == 0).map(to_end_op).collect());
+        let sorted = began.elapsed();
+        assert_eq!(order_of(&scene)[0], 59_997);
+        assert!(
+            inserted.as_millis() < 2_000 && removed.as_millis() < 2_000 && sorted.as_millis() < 2_000,
+            "60,000 inserts took {inserted:?}, 40,000 removes {removed:?} and 20,000 moves {sorted:?}: \
+             a pass per record again"
+        );
     }
     // --- Grow along a scroll's own axis is refused (ruled 2026-09-02) ---
     //

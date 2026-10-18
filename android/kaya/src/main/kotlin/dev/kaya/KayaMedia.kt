@@ -1073,6 +1073,14 @@ class KayaMediaService : MediaSessionService() {
         super.onDestroy()
     }
 
+    // media3 answers START_STICKY, so the platform restarted this service
+    // after every app exit, with no session (docs/traps.md, the media
+    // service the platform restarted).
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        super.onStartCommand(intent, flags, startId)
+        return START_NOT_STICKY
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = KayaMediaSession.session
 
     companion object {
