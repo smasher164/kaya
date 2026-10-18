@@ -1727,6 +1727,10 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_headerdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_header \
         KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
+    run "$proto" music_artist-python env KAYA_SELFTEST=music_artist KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/music.py
+    run "$proto" music_artistdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_artist \
+        KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
     # The dock and the media session: MPRIS on the leg's own bus (media-leg.sh).
     run "$proto" music_dock-python env KAYA_SELFTEST=music_dock KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py

@@ -1258,6 +1258,9 @@ final class KayaSceneModel {
     /// The grounded containers a grouped flow keeps whole, whose gradient
     /// fades into the screen's grouped ground (Y2 on a D7.5 screen).
     var groupedGrounds: Set<UInt64> = []
+    /// The headings a grouped flow draws as section headers (footnote,
+    /// uppercased), which the clipping read measures in that dress.
+    var groupedHeads: Set<UInt64> = []
     /// entry id -> the window whose stack holds it.
     var entryWindow: [UInt64: UInt64] = [:]
     /// Live sections by surface id (the one surface namespace), and section
@@ -19659,6 +19662,7 @@ func kayaRecomputeGroupedSurfaces() {
         return nil
     }
     var grounds = Set<UInt64>()
+    var heads = Set<UInt64>()
     func register(_ root: KayaNode?, entry: UInt64?, window: UInt64?) {
         guard let root, containsCarrier(root) else { return }
         if let entry { entries.insert(entry) }
@@ -19668,6 +19672,7 @@ func kayaRecomputeGroupedSurfaces() {
             var flat: [KayaNode] = []
             kayaGroupedFlatten(flow, into: &flat)
             grounds.formUnion(flat.filter { $0.ground != groundNone }.map(\.id))
+            heads.formUnion(kayaGroupedSections(flow).compactMap { $0.header?.id })
         }
     }
     for (eid, model) in kayaScene.navEntries {
@@ -19681,6 +19686,7 @@ func kayaRecomputeGroupedSurfaces() {
     kayaScene.groupedWindows = windows
     kayaScene.groupedFlows = flows
     kayaScene.groupedGrounds = grounds
+    kayaScene.groupedHeads = heads
 }
 
 /// A section card's interior (the grouped section lowering): the standard
@@ -19708,6 +19714,7 @@ private struct KayaGroupedSection: Identifiable {
     var header: KayaNode?
     var content: Content = .none
     var footer: KayaNode?
+    var margin: KayaNode?
     var id: UInt64 {
         if let header { return header.id }
         switch content {
@@ -19723,22 +19730,36 @@ private struct KayaGroupedSection: Identifiable {
 /// row's heading/table/caption triple lives); tables, forms, leaves and
 /// horizontal containers are stream members that lay themselves out.
 private func kayaGroupedFlatten(_ node: KayaNode, into out: inout [KayaNode]) {
+    var margins: [UInt64: KayaNode] = [:]
+    kayaGroupedFlatten(node, into: &out, margins: &margins, margin: nil)
+}
+
+/// `margins` names, for each flattened node, the innermost dissolved wrapper
+/// that declared an inset: the section it opens keeps that margin
+/// (docs/adaptive-layout-plan.md D7.5, the dissolved wrapper's inset).
+private func kayaGroupedFlatten(
+    _ node: KayaNode, into out: inout [KayaNode], margins: inout [UInt64: KayaNode],
+    margin: KayaNode?
+) {
     for child in node.laidOut {
         let vertical = (child.axis ?? (child.kind == kindColumn ? 1 : 0)) == 1
         if vertical, child.kind == kindColumn || child.kind == kindRow,
             child.tableColumns.isEmpty, !kayaIsForm(child), !child.laidOut.isEmpty,
             child.ground == groundNone
         {
-            kayaGroupedFlatten(child, into: &out)
+            let kept = child.insetSet && child.inset > 0 ? child : margin
+            kayaGroupedFlatten(child, into: &out, margins: &margins, margin: kept)
         } else {
             out.append(child)
+            if let margin { margins[child.id] = margin }
         }
     }
 }
 
 private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
     var flat: [KayaNode] = []
-    kayaGroupedFlatten(flow, into: &flat)
+    var margins: [UInt64: KayaNode] = [:]
+    kayaGroupedFlatten(flow, into: &flat, margins: &margins, margin: nil)
     // A folded LEAF (or an empty container) is its own one-member stream.
     if flat.isEmpty { flat = [flow] }
     var out: [KayaGroupedSection] = []
@@ -19782,6 +19803,17 @@ private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
         }
     }
     flush()
+    for i in out.indices {
+        let first: UInt64? = {
+            if let header = out[i].header { return header.id }
+            switch out[i].content {
+            case .run(let nodes): return nodes.first?.id
+            case .table(let node), .form(let node), .ground(let node): return node.id
+            case .none: return out[i].footer?.id
+            }
+        }()
+        out[i].margin = first.flatMap { margins[$0] }
+    }
     return out
 }
 
@@ -19790,40 +19822,59 @@ private struct KayaGroupedSections: View {
 
     var body: some View {
         let sections = kayaGroupedSections(flow)
-        VStack(alignment: .leading, spacing: kayaFoldSeamGap) {
-            ForEach(sections) { section in
-                VStack(alignment: .leading, spacing: kayaGroupedHeaderGap) {
-                    if let header = section.header {
-                        kayaBare(header)
-                    }
-                    switch section.content {
-                    case .table(let table):
-                        KayaRender(node: table, flexVertical: true, flexStretch: true)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .background(
-                                KayaTrackReader(
-                                    id: table.id, vertical: true,
-                                    tableGeneration: kayaTableGeometryGeneration(table)))
-                    case .form(let form):
-                        // The form arm draws its own card (docs/forms-plan.md
-                        // §5.1), the same face kayaCarded gives a run.
-                        KayaRender(node: form, flexVertical: true, flexStretch: true)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                    case .run(let nodes):
-                        kayaCarded(nodes)
-                    case .ground(let node):
-                        KayaRender(node: node, flexVertical: true, flexStretch: true)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .environment(\.kayaOnGroupedGround, true)
-                    case .none:
-                        EmptyView()
-                    }
-                    if let footer = section.footer {
-                        kayaBare(footer)
+        // A margined section's own inset is its gap above (the M15 header).
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(sections.enumerated()), id: \.element.id) { i, section in
+                kayaMargined(section.margin, gap: i == 0 ? 0 : kayaFoldSeamGap) {
+                    VStack(alignment: .leading, spacing: kayaGroupedHeaderGap) {
+                        if let header = section.header {
+                            kayaBare(header)
+                        }
+                        switch section.content {
+                        case .table(let table):
+                            KayaRender(node: table, flexVertical: true, flexStretch: true)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .background(
+                                    KayaTrackReader(
+                                        id: table.id, vertical: true,
+                                        tableGeneration: kayaTableGeometryGeneration(table)))
+                        case .form(let form):
+                            // The form arm draws its own card (docs/forms-plan.md
+                            // §5.1), the same face kayaCarded gives a run.
+                            KayaRender(node: form, flexVertical: true, flexStretch: true)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        case .run(let nodes):
+                            kayaCarded(nodes)
+                        case .ground(let node):
+                            KayaRender(node: node, flexVertical: true, flexStretch: true)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                                .environment(\.kayaOnGroupedGround, true)
+                        case .none:
+                            EmptyView()
+                        }
+                        if let footer = section.footer {
+                            kayaBare(footer)
+                        }
                     }
                 }
             }
+        }
+    }
+
+    /// A section inside a dissolved wrapper keeps that wrapper's inset,
+    /// measured by expect_inset on the wrapper as its own padding would be.
+    @ViewBuilder private func kayaMargined<Content: View>(
+        _ margin: KayaNode?, gap: CGFloat, @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        if let margin {
+            content()
+                .background(KayaInsetReader(id: margin.id, outer: false))
+                .padding(margin.inset)
+                .background(KayaInsetReader(id: margin.id, outer: true))
+        } else {
+            content()
+                .padding(.top, gap)
         }
     }
 
@@ -20264,6 +20315,14 @@ private struct KayaSynthesizedTable: View {
                             node: node, generation: generation, synthesized: true))
                     .modifier(KayaTableCardFace())
                     .onAppear { window.registerColumns(node) }
+                    // AN UNGROWN TABLE REALIZES EVERY ROW, and says so: the core
+                    // seeds a declared table's band and holds its row images'
+                    // needs until the first report (docs/traps.md, the hugging
+                    // table that never reported).
+                    .task(id: node.children.count) {
+                        let total = KayaHost.windowGeometry(node.id).map { Int($0.total) } ?? 0
+                        KayaHost.windowMoved(node.id, 0, max(total, node.children.count))
+                    }
             }
         }
         // task(id:), not onChange: this tier compiles at the macOS 13 /
@@ -20998,8 +21057,10 @@ struct KayaLabelTint: ViewModifier {
     let probeAt = "(\(Int(probe.midX)),\(Int(probe.midY)))"
     // The overlay is the platform's dark panel over media (Y3): a material,
     // so it has no one colour to rank against, and over art it keeps a trace
-    // of the art's hue. It reads as overlay when the sample is dark and under
-    // half as bright as the picture the nearest image ground draws behind it.
+    // of the art's hue. It reads as overlay when the panel's light foreground
+    // passes 4.5:1 on the sample (Y3's legibility, Compose's rule) and the sample
+    // is under half as bright as the picture the nearest image ground draws
+    // behind it (docs/traps.md, the overlay read over a pale picture).
     func lum(_ c: [Double]) -> Double {
         let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
         return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
@@ -21010,7 +21071,7 @@ struct KayaLabelTint: ViewModifier {
         let art = kayaPictureAt(pictured, CGPoint(x: probe.midX - behind.minX, y: probe.midY - behind.minY), behind.size)
     {
         let (mine, theirs) = (lum(px), lum(art))
-        if mine < 0.06 && mine < theirs / 2 {
+        if 1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2 {
             return "overlay (sampled \(got) at \(probeAt), luminance \(String(format: "%.3f", mine)) over the picture's "
                 + "\(kayaHex(art)) at \(String(format: "%.3f", theirs)))"
         }
@@ -22846,7 +22907,7 @@ func kayaPlatformLocaleTag() -> String {
     for node in kayaScene.labels where !node.text.isEmpty {
         guard let size = kayaLabelFrames[node.id], size.width > 0 else { continue }
         measured += 1
-        let need = kayaTextNeed(node.text, kayaClippingFont(node), width: size.width)
+        let need = kayaTextNeed(kayaClippingText(node), kayaClippingFont(node), width: size.width)
         if need > size.height + 1.0 {
             return (
                 "label \(node.id) \(node.text.prefix(40).debugDescription) needs \(Int(need.rounded()))pt at \(Int(size.width.rounded()))pt wide and got \(Int(size.height.rounded()))pt",
@@ -22962,9 +23023,23 @@ func kayaLongestWord(_ text: String, _ font: KayaPlatformFont) -> CGFloat {
 /// `preferredFont` reads the application's, which a window trait override
 /// never moves, so a scale leg would measure unscaled text against scaled
 /// frames and pass on nothing.
+/// The label's text as drawn: a grouped section header is uppercased.
+@MainActor func kayaClippingText(_ node: KayaNode) -> String {
+    kayaIsSectionHead(node) ? node.text.uppercased() : node.text
+}
+
+@MainActor func kayaIsSectionHead(_ node: KayaNode) -> Bool {
+    #if os(macOS)
+        return false
+    #else
+        return node.role == roleHeading && kayaScene.groupedHeads.contains(node.id)
+    #endif
+}
+
 @MainActor func kayaClippingFont(_ node: KayaNode) -> KayaPlatformFont {
     let style: KayaPlatformTextStyle =
-        node.role == roleHeading ? .headline : node.role == roleCaption ? .footnote : .body
+        node.role == roleHeading && !kayaIsSectionHead(node)
+            ? .headline : node.role == roleHeading || node.role == roleCaption ? .footnote : .body
     if let brand = kayaPlatformFont(style) { return brand }
     #if os(macOS)
         let base = NSFont.preferredFont(forTextStyle: style)

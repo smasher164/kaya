@@ -288,6 +288,13 @@ never carded, and its gradient fades into `systemGroupedBackground`, the
 screen's ground there (docs/traps.md, the grouped flow that dissolved a
 gradient header).
 
+A DISSOLVED WRAPPER'S INSET IS KEPT (2026-10-18, the music demo's full-bleed
+header, docs/media-player-plan.md M15): a section whose first member was
+lifted out of a wrapper that declared an inset is padded by the innermost such
+wrapper's inset, which also stands for the seam gap above it, and
+`expect_inset` reads it on the wrapper. With the window inset 0 the card
+otherwise ran edge to edge, which no inset-grouped list does.
+
 ### D8 — the breakpoint speaks size classes (ruled and built 2026-08-31)
 
 THE RAW NUMBER DIED. `stack_below=<points>` made the author invent the

@@ -26452,8 +26452,10 @@ impl crate::harness::Stage for WinUiStage {
             let id = target_widget_id(core, t).map(WidgetId);
             let shot = skin::read::Shot::take(core);
             // THE OVERLAY (Y3) is a material, with no one colour to rank
-            // against: it reads as overlay when the sample is dark and under
-            // half as bright as the picture its image ground draws behind it.
+            // against: it reads as overlay when its light foreground passes 4.5:1
+            // on the sample and the sample is under half as bright as the picture
+            // its image ground draws behind it (docs/traps.md, the overlay read
+            // over a pale picture).
             if let (Some(id), Ok(shot)) = (id, &shot) {
                 if let Some(pictured) = skin::read::pictured_ancestor(core, id) {
                     let behind: UIElement = core.widgets[&pictured].inner_element()?;
@@ -26466,7 +26468,7 @@ impl crate::harness::Stage for WinUiStage {
                         skin::read::picture_at(pictured, m.0 + probe.0 - b.0, m.1 + probe.1 - b.1, b.2, b.3)
                     {
                         let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
-                        if own < 0.06 && own < theirs / 2.0 {
+                        if 1.05 / (own + 0.05) >= 4.5 && own < theirs / 2.0 {
                             return Ok(format!(
                                 "overlay (sampled {} at ({x},{y}), luminance {own:.3} over the picture's {} at {theirs:.3})",
                                 hex(&got),
@@ -28724,17 +28726,29 @@ impl crate::harness::Stage for WinUiStage {
             // ScrollViewer for a scroll-rooted scene (the portfolio
             // dashboard): the read broke on the cast alone before the scroll
             // arm existed, the same hole as the padding stamp's.
-            let origin = if let Ok(grid) = root.cast::<Grid>() {
-                let child: FrameworkElement = grid.Children()?.GetAt(0)?.cast()?;
-                let slot = LayoutInformation::GetLayoutSlot(&child)?;
-                bindings::Windows::Foundation::Point { X: slot.X, Y: slot.Y }
-            } else if let Ok(viewer) = root.cast::<ScrollViewer>() {
+            // A split window's content is the split: the primary root, laid
+            // out in its pane, carries the window's term.
+            let grid = root.cast::<Grid>().ok().or_else(|| {
+                core.mounted_roots
+                    .get(&0)
+                    .and_then(|id| core.widgets.get(id))
+                    .and_then(|w| w.inner_element().ok())
+                    .and_then(|e| e.cast::<Grid>().ok())
+                    .filter(|g| g.Children().and_then(|c| c.Size()).is_ok_and(|n| n > 0))
+            });
+            let origin = if let Ok(viewer) = root.cast::<ScrollViewer>() {
                 let child: UIElement = viewer.Content()?.cast()?;
                 child
                     .TransformToVisual(&root)?
                     .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
+            } else if let Some(grid) = grid {
+                let child: FrameworkElement = grid.Children()?.GetAt(0)?.cast()?;
+                let slot = LayoutInformation::GetLayoutSlot(&child)?;
+                bindings::Windows::Foundation::Point { X: slot.X, Y: slot.Y }
             } else {
-                return Ok("<the window content is neither a Grid nor a ScrollViewer>".into());
+                return Ok("<the window content is neither a Grid nor a ScrollViewer, and the \
+                           primary root is no laid-out Grid>"
+                    .into());
             };
             // The root's one Padding carries the root CONTAINER's own inset too
             // when it declares one (container_padding — WinUI has a single

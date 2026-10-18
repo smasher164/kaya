@@ -74,7 +74,7 @@ in all nine bindings unless said otherwise.
 | 4. Dock (player bar) | the dock (Y8), the player (docs/media-plan.md §2), a progress slider and a volume slider, transport buttons | dock, player and sliders built; the TRANSPORT SYMBOLS are NOT BUILT: crates/kaya/src/wire.rs's SYMBOLS has 25 entries and none is play, pause, next, previous, shuffle, repeat or volume (§2 M8) |
 | 4. Dock | the progress slider moved by the player's position every 250 ms (crates/kaya/src/media.rs `POSITION_TICK_MS`) while the user may be dragging it | NO RULE: every backend applies an app's write at once, mid-gesture (KayaSwiftUI.swift:15166, KayaCompose.kt:22118, gtk.rs:16488, winui/mod.rs:17873), so the thumb jumps back under the finger (§2 M10) |
 | 4. Dock, phones | the full player as a sheet with detents | built (docs/sheet-plan.md) |
-| 5. Artist page | the image ground with text inside an `overlay` panel (Y3), a round avatar (Y6) | built |
+| 5. Artist page | the image ground with text inside an `overlay` panel (Y3), a round avatar (Y6) | built; the demo's artist page 2026-10-18 (tools/scenes/music_artist.steps): reached from the album header's artist name, full bleed like M15's B, the top tracks as a hugging table and the albums as a shelf |
 | all | the media session with next and previous offered, so media keys skip | built: an action in the app's mask reaches it as `session_action` (media.rs:536-549) |
 | all | Now Playing artwork for a track whose art came from the network | NOT BUILT: `artwork` is an asset name only (crates/kaya/src/protocol.rs:581-582; media.rs:515-520 panics on anything else) (§2 M7) |
 | all | the next track | one source per player (spec.rs:428-439): no queue, no preload, no gapless; the app swaps `source` on `ended` or `next` (§2 M11) |

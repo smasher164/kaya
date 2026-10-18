@@ -161,7 +161,7 @@ READS = [
       "shot.at(CGPoint(x: box.minX - 4, y: box.midY))", "shot.at(CGPoint(x: box.minX - 4, y: box.minY + 1))",
       "shot.at(CGPoint(x: box.minX - 4, y: box.minY + 6))", "art(c1, under1), art(c6, under6), art(centre, under)"]),
     ("expect_fill's overlay reading", "func kayaFillRead(_ node: KayaNode) -> String {",
-     ["kayaPictureAt(pictured,", "mine < 0.06 && mine < theirs / 2"]),
+     ["kayaPictureAt(pictured,", "1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2"]),
     ("expect_tint's reader", "func kayaLabelTintRead(_ node: KayaNode) -> String {",
      ["kayaWindowPixels()", "kayaAnchoredFrame(node.id)", "shot.text", "tone(.systemGreen)"]),
     ("the platform's frame for a skinned node", "func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {",

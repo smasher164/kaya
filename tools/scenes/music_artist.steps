@@ -1,0 +1,40 @@
+# The media player demo's fifth screen (docs/media-player-plan.md §1, §6 step 5,
+# M2, M13; docs/styling-pass-plan.md Y3, Y6, Y11): an album's artist name opens
+# the artist page, full bleed like the album's (M15): the artist's picture (an
+# album cover, M2) as the header's ground, a round avatar, and the name with the
+# albums and songs line inside an overlay panel; then their most played
+# tracks as a table and their albums as a shelf of cards. A top track plays.
+# The desktops then open an album from the shelf and go Home; a phone reads its
+# three columns and goes back twice (tools/lib/lanes/ios.py, android.py).
+expect_image_phase image@art_116452 shown
+click column@card_116452
+expect_image_phase image@album_art shown
+expect_ax button@album_artist "button/Kellee Maize"
+click button@album_artist
+expect_image_phase image@artist_avatar shown
+expect_ground column@artist_header image
+expect_fill column@artist_panel overlay
+expect_shape image@artist_avatar circle
+expect_ax label@artist_name "heading/Kellee Maize"
+expect label@artist_about "2 albums · 4 songs, 1:20"
+expect_inset 0
+expect_inset column@artist_rest 16
+expect_image_phase image@top_track_art[989871] shown
+double_click row@top_track[989871]
+expect_selected row@top_track[989871] on
+expect label@dock_title "In Tune"
+# The page scrolls whole; at its end the table's rows and the shelf are shown.
+scroll_end scroll@artist_page
+expect_tint label@top_track_name[989871] accent
+expect_grid_columns grid@artist_shelf 2
+expect_image_phase image@artist_art_139585 shown
+expect_shape image@artist_art_139585 rounded
+expect_ax column@artist_card_139585 "button/The Remixes (2015), Kellee Maize"
+expect_no_clipping
+expect_title "Kellee Maize"
+expect_columns column@top_tracks "#|Title|Album|Time"
+expect_rows column@top_tracks "1,In Tune (J. Glaze Remix)/Kellee Maize,The Remixes (2015),0:20|2,In Tune/Kellee Maize,Owl Time (2013),0:20|3,Owl Time/Kellee Maize,Owl Time (2013),0:20|4,Mad Humans (J. Glaze Remix)/Kellee Maize,The Remixes (2015),0:20"
+click column@artist_card_139585
+expect_title "The Remixes (2015)"
+click row@go_home
+expect_title "Home"

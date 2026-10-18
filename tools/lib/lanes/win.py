@@ -367,6 +367,8 @@ ORDER = [
      # The album's gradient header, light and dark (docs/media-player-plan.md
      # M5): no hover, its player muted under the harness.
      "music_header_python", "music_headerdark_python",
+     # The artist page (docs/media-player-plan.md §6 step 5): no hover.
+     "music_artist_python", "music_artistdark_python",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -935,7 +937,8 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
-              "music_headerdark": "music", "music_dock": "music"}
+              "music_headerdark": "music", "music_dock": "music", "music_artist": "music",
+              "music_artistdark": "music"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

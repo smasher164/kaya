@@ -17918,3 +17918,71 @@ says was not started for an activity gets one leg-log line naming it.
 GUARD: tools/lib/android-leg-order.py's leg_stop_problem (the stop's call,
 its place after the disarm, its poll, and the service's START_NOT_STICKY,
 four cuts each watched red).
+
+## The overlay read over a pale picture (measured 2026-10-18)
+
+The artist page's overlay panel sits on the artist's picture, and on the mac
+in light, over a cream and pink cover, the material measured 4D4A46
+(luminance 0.07). expect_fill's overlay reading on the mac and on WinUI asked
+for a sample darker than luminance 0.06 as well as under half the picture's
+brightness, so a real overlay over a pale picture read as the nearest tint,
+`success`. The bound was a number calibrated on the grounds scene's one
+picture. Both readers now ask what Y3 asks of the panel: its light foreground
+passes 4.5:1 on the sample (luminance at most about 0.18), Compose's own rule,
+and the sample is under half as bright as the picture behind it.
+
+GUARD: music_artist's `expect_fill column@artist_panel overlay` on every lane
+(watched red on the mac with the old bound); tools/lib/skin_routes.py and
+tools/lib/skin_winui.py pin the new rule, and skin_winui's cut of it is still
+watched red.
+
+## The grouped flow that dropped a wrapper's inset (measured 2026-10-18)
+
+An iOS grouped screen renders its primary flow as a section stream and
+dissolves plain wrapper columns into it. The wrapper's inset went with it:
+with the music demo's window inset 0 (M15's full bleed) the album's track
+table, inside `column(inset=16)`, ran its inset-grouped card edge to edge,
+and `expect_inset` on the wrapper answered `no layout recorded`. A section now
+takes the inset of the innermost dissolved wrapper its first member came out
+of, and that inset also stands for the seam gap above it
+(docs/adaptive-layout-plan.md D7.5).
+
+GUARD: music_header's `expect_inset column@album_tracks 16` and
+music_artist's `expect_inset column@artist_rest 16` on iOS (the margin cut
+watched red).
+
+## The hugging table that never reported (measured 2026-10-18)
+
+The core seeds a declared table's band and holds its row images' needs until
+the tier's first window report (scene.rs need_images, the `seeded` test). The
+iOS synthesized tier reports only from its grown branch, the one that owns a
+scroll; an UNGROWN table (the artist page's top tracks, hugging its rows in
+the page's scroll) realized its rows and never reported, so every row's art
+stayed `loading` with no `image_needed` sent. The ungrown branch now reports
+the whole collection when its row count changes, as the mac native tier does.
+
+GUARD: music_artist's `expect_image_phase image@top_track_art[...] shown` on
+iOS (red before the report: `drew loading, wanted shown`).
+
+## The clipping read that measured a section header as a heading (measured 2026-10-18)
+
+On an iOS grouped screen a heading is drawn as a section header, footnote and
+uppercased; the clipping read measured it in the heading's headline font at
+the header's 80 pt and reported `"Top tracks" needs 41pt ... got 16pt`, a clip
+nobody could see. The read now takes the dress the grouped flow gives it
+(kayaScene.groupedHeads).
+
+GUARD: music_artist's `expect_no_clipping` on iOS, which carried the false clip.
+
+## The image ground read as none in the dark (measured 2026-10-18)
+
+GTK's expect_ground answered `none` whenever its top probe matched the window's
+ground, before it asked whether that probe was the picture. Kellee Maize's
+artist picture is a dark photo whose top right corner reads 2B201C, within the
+tolerance of the dark page's 222226, so the artist header read `none` in the
+dark while the picture filled it. The reader now asks first whether any of its
+three probes is drawn as the picture there and not as the page, and answers
+`none` only after that.
+
+GUARD: the music_artistdark legs on every lane (red on linux before:
+`ground reads none (top 2B201C, middle E10505, bottom DD0709, ground 222226)`).

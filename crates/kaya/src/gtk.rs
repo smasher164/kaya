@@ -24058,15 +24058,27 @@ impl crate::harness::Stage for GtkStage {
                 "top {}, middle {}, bottom {}, ground {}",
                 skin::hex(top), skin::hex(mid), skin::hex(bottom), skin::hex(shot.ground)
             );
-            if skin::gap(top, shot.ground) <= SKIN_TOLERANCE {
-                return format!("none ({seen})");
-            }
             let ground = id.and_then(|id| core.skin.grounds.borrow().get(&id).cloned()).unwrap_or_default();
-            let texture = id.and_then(|id| ground_texture(core, id));
-            if let Some(art) = texture.and_then(|t| skin::picture_at(&t, (fw - 4.0, 4.0), (fw, fh))) {
-                if skin::gap(art, top) <= SKIN_TOLERANCE * 2.0 {
+            // A probe drawn as the picture there and NOT as the page names the
+            // image: a dark photo's corner on the dark page matches both
+            // (docs/traps.md, the image ground read as none in the dark).
+            if let Some(t) = id.and_then(|id| ground_texture(core, id)) {
+                let probes = [
+                    (top, skin::picture_at(&t, (fw - 4.0, 4.0), (fw, fh))),
+                    (mid, skin::picture_at(&t, (fw - 4.0, fh / 2.0), (fw, fh))),
+                    (bottom, skin::picture_at(&t, (fw - 4.0, fh - 4.0), (fw, fh))),
+                ];
+                let shown = probes.iter().find_map(|&(drawn, art)| {
+                    art.filter(|&a| {
+                        skin::gap(a, drawn) <= SKIN_TOLERANCE * 2.0 && skin::gap(drawn, shot.ground) > SKIN_TOLERANCE
+                    })
+                });
+                if let Some(art) = shown {
                     return format!("image ({seen}, the picture there {})", skin::hex(art));
                 }
+            }
+            if skin::gap(top, shot.ground) <= SKIN_TOLERANCE {
+                return format!("none ({seen})");
             }
             let Some(tops) = ground.tops else { return format!("unmatched ({seen}, no stop was lowered here)") };
             let stop = if shot.dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };

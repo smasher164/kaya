@@ -3,14 +3,17 @@
 # cover, the title as a heading, the artist, year, track count and total time,
 # a Play button and the favourite heart, over a gradient from the cover's
 # dominant colour (kaya.image_dominant over the fetched bytes) clamped by the
-# core and fading into the window's ground. The dark leg runs this script
-# under KAYA_APPEARANCE=dark. Play starts the album's first track; the heart
+# core and fading into the window's ground, full bleed: the window gives no
+# margin and the page gives its own back to the track table (M15). The dark
+# leg runs this script under KAYA_APPEARANCE=dark. Play starts the album's first track; the heart
 # is the app's, so it is still on when the album is opened again.
 expect_image_phase image@art_201715 shown
 click column@card_201715
 expect_image_phase image@album_art shown
 expect_shape image@album_art rounded
 expect_ground column@album_header gradient
+expect_inset 0
+expect_inset column@album_tracks 16
 expect_ax label@album_title "heading/Through The Olive Branches"
 expect label@album_about "Pierce Murphy · 2021 · 2 songs, 0:40"
 expect_ax button@play_album "button/Play"
