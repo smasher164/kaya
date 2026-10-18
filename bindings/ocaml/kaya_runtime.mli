@@ -142,4 +142,5 @@ val capture_drive_samples : int64 -> bool
 val capture_thread_counts : unit -> int * int
 
 val fmt_timecode : int64 -> int64 -> int64 -> bool -> string option
+val fmt_duration : int64 -> string option
 val fmt_parse_timecode : string -> int64 -> int64 -> bool -> int64 option

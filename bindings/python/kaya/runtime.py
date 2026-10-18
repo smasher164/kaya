@@ -147,11 +147,17 @@ _lib.kaya_fmt_timecode.restype = ctypes.c_size_t
 _lib.kaya_fmt_parse_timecode.argtypes = [ctypes.c_char_p, ctypes.c_int64,
                                          ctypes.c_int64, ctypes.c_uint32]
 _lib.kaya_fmt_parse_timecode.restype = ctypes.c_int64
+_lib.kaya_fmt_duration.argtypes = [ctypes.c_int64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_fmt_duration.restype = ctypes.c_size_t
 
 
 def fmt_timecode(frames: int, numerator: int, denominator: int, drop: bool) -> str:
     return _filled("kaya_fmt_timecode", lambda o, c:
                    _lib.kaya_fmt_timecode(frames, numerator, denominator, int(drop), o, c))
+
+
+def fmt_duration(ms: int) -> str:
+    return _filled("kaya_fmt_duration", lambda o, c: _lib.kaya_fmt_duration(ms, o, c))
 
 
 def fmt_parse_timecode(text: str, numerator: int, denominator: int, drop: bool) -> int:

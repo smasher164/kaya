@@ -3973,6 +3973,10 @@ const fmtDoor = Object.freeze({
     if (!Number.isSafeInteger(frames)) throw new RangeError(`kaya: timecode frames must be a safe integer, got ${frames}`);
     return runtime.fmtTimecode(frames, rate.numerator, rate.denominator, rate.drop);
   },
+  duration(ms: number): string {
+    if (!Number.isSafeInteger(ms)) throw new RangeError(`kaya: duration ms must be a safe integer, got ${ms}`);
+    return runtime.fmtDuration(ms);
+  },
   parseTimecode(text: string, rate: TimecodeRate): number | null {
     timecodeRate(rate);
     runtime.fmtTimecode(0, rate.numerator, rate.denominator, rate.drop);

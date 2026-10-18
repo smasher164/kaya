@@ -141,6 +141,7 @@ public final class KayaRing {
     public static native byte[] fmtDateWeekday(long packed);
     public static native byte[] fmtTime(long packed, long length);
     public static native byte[] fmtTimecode(long frames, long numerator, long denominator, boolean drop);
+    public static native byte[] fmtDuration(long ms);
     public static native long fmtParseTimecode(String text, long numerator, long denominator, boolean drop);
     public static native byte[] fmtDateTime(long date, long time, long length);
     public static native byte[] fmtNumber(double value, int minFractionDigits, int maxFractionDigits, boolean grouping);

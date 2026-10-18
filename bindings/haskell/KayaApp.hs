@@ -41,6 +41,7 @@ module KayaApp
     NumberFormat (..),
     fmtTimecode,
     fmtParseTimecode,
+    fmtDuration,
     setNumberFormat,
     setNodeNumberFormat,
     fmtPercent,
@@ -749,6 +750,9 @@ numberFormatWire (Timecode (TimecodeRate numerator denominator drop)) =
 fmtTimecode :: TimecodeRate -> Int64 -> IO Text
 fmtTimecode (TimecodeRate numerator denominator drop) frames =
   door "kaya_fmt_timecode" (R.fmtTimecodeRaw frames numerator denominator drop)
+
+fmtDuration :: Int64 -> IO Text
+fmtDuration ms = door "kaya_fmt_duration" (R.fmtDurationRaw ms)
 
 fmtParseTimecode :: TimecodeRate -> Text -> IO (Maybe Int64)
 fmtParseTimecode rate@(TimecodeRate numerator denominator drop) text = do

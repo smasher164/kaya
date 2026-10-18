@@ -37,6 +37,8 @@ func App() *kaya.App {
 				label("last") // label#12
 			}) // row#0
 			label(kaya.Locale().Tag) // label#13
+			label(kaya.FormatDuration(185_000))   // label#14
+			label(kaya.FormatDuration(3_723_000)) // label#15
 		}))
 	})
 

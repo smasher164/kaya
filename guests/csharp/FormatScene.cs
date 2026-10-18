@@ -36,6 +36,8 @@ static class FormatScene
                     Label("last"); // label#12
                 }); // row#0
                 Label(Kaya.Fmt.Locale().Tag); // label#13
+                Label(Kaya.Fmt.Duration(185_000)); // label#14
+                Label(Kaya.Fmt.Duration(3_723_000)); // label#15
                 return root;
             }));
         });

@@ -472,6 +472,19 @@ Alternatives: (b) the native positional formatter where one exists and the
 core's elsewhere: two outputs that may differ by a separator; (c) none, the
 app composes it: the Arabic shell shows mixed digits.
 
+BUILT 2026-10-17: `crate::fmt::duration(ms)` truncates to whole seconds
+and maps the ASCII digits of `M:SS` or `H:MM:SS` onto the ten digits the
+platform's number formatter writes for 0 to 9, refusing a formatter that
+writes anything but one digit; the C floor's `kaya_fmt_duration` refuses a
+negative `ms` through kaya_fault, and the door is `duration` in all nine
+(`FormatDuration` on Go, `fmtDuration` on Haskell, `Fmt.Duration` on C#),
+held by check-sugar-surface's formatter rows. tools/scenes/format.steps and
+formatar.steps read labels 14 and 15 (`3:05`, `1:02:03`) against the
+platform's own number formatter asked digit by digit, so the Arabic shell
+reads `٣:٠٥` (watched red with the digit map cut: `label#14 reads "3:05",
+wanted "٣:٠٥"`); each lane's scene holds the duration to that lane's own
+number formatter's digits, whatever they are.
+
 ### M10: An app's write to a slider waits while the user's gesture is live (a GAP, measured first) (RULED 2026-10-17)
 
 RECOMMEND one rule on all four backends: while a pointer or keyboard gesture

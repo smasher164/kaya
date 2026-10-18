@@ -152,6 +152,7 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 fn_ptr: ring_fmt_date_time as *mut _,
             },
             NativeMethod { name: "fmtTimecode".into(), sig: "(JJJZ)[B".into(), fn_ptr: ring_fmt_timecode as *mut _ },
+            NativeMethod { name: "fmtDuration".into(), sig: "(J)[B".into(), fn_ptr: ring_fmt_duration as *mut _ },
             NativeMethod { name: "fmtParseTimecode".into(), sig: "(Ljava/lang/String;JJZ)J".into(), fn_ptr: ring_fmt_parse_timecode as *mut _ },
             NativeMethod { name: "fmtNumber".into(), sig: "(DIIZ)[B".into(), fn_ptr: ring_fmt_number as *mut _ },
             NativeMethod {
@@ -432,6 +433,10 @@ extern "system" fn ring_fmt_time<'a>(env: JNIEnv<'a>, _class: JClass<'a>, packed
 
 extern "system" fn ring_fmt_timecode<'a>(env: JNIEnv<'a>, _class: JClass<'a>, frames: jlong, numerator: jlong, denominator: jlong, drop: jboolean) -> JByteArray<'a> {
     filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_timecode(frames, numerator, denominator, u32::from(drop != 0), out, cap) })
+}
+
+extern "system" fn ring_fmt_duration<'a>(env: JNIEnv<'a>, _class: JClass<'a>, ms: jlong) -> JByteArray<'a> {
+    filled(&env, |out, cap| unsafe { crate::capi::kaya_fmt_duration(ms, out, cap) })
 }
 
 extern "system" fn ring_fmt_parse_timecode<'a>(mut env: JNIEnv<'a>, _class: JClass<'a>, text: jni::objects::JString<'a>, numerator: jlong, denominator: jlong, drop: jboolean) -> jlong {

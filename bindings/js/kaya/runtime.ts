@@ -42,6 +42,7 @@ type Floor = {
   // argument as [name, tag, i, f, s] in the C API's own record; a
   // refused input THROWS out of the addon with the core's sentence.
   fmtTimecode(frames: number, numerator: number, denominator: number, drop: number): string;
+  fmtDuration(ms: number): string;
   fmtParseTimecode(text: string, numerator: number, denominator: number, drop: number): number;
   fmtDate(packed: number, length: number): string;
   fmtDateWeekday(packed: number): string;
@@ -279,6 +280,10 @@ export function prefRemove(key: string): void {
 
 export function fmtTimecode(frames: number, numerator: number, denominator: number, drop: boolean): string {
   return lib.fmtTimecode(frames, numerator, denominator, drop ? 1 : 0);
+}
+
+export function fmtDuration(ms: number): string {
+  return lib.fmtDuration(ms);
 }
 
 export function fmtParseTimecode(text: string, numerator: number, denominator: number, drop: boolean): number {

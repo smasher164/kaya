@@ -28,6 +28,8 @@ KayaApp.run { app in
                 tx.label(bind: tx.signal(.str("last")))  // label#12
             }  // row#0
             tx.label(bind: tx.signal(.str(KayaApp.fmt.locale().tag)))  // label#13
+            tx.label(bind: tx.signal(.str(KayaApp.fmt.duration(185_000))))  // label#14
+            tx.label(bind: tx.signal(.str(KayaApp.fmt.duration(3_723_000))))  // label#15
             return root
         }
         tx.mount(root)

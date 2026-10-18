@@ -37,6 +37,8 @@ public final class Format {
                     tx.label(tx.signal("last")); // label#12
                 }); // row#0
                 tx.label(tx.signal(fmt.locale().tag())); // label#13
+                tx.label(tx.signal(fmt.duration(185_000))); // label#14
+                tx.label(tx.signal(fmt.duration(3_723_000))); // label#15
             }));
             return null;
         });

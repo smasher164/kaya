@@ -1878,6 +1878,10 @@ public enum KayaFmt {
         }
     }
 
+    public static func duration(_ ms: Int64) -> String {
+        kayaFilled("fmt.duration") { kaya_fmt_duration(ms, $0, $1) }
+    }
+
     public static func parseTimecode(_ text: String, _ rate: KayaTimecodeRate) -> Int64? {
         _ = timecode(0, rate)
         guard !text.utf8.contains(0) else { return nil }

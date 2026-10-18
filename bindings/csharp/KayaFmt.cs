@@ -102,6 +102,9 @@ static partial class Kaya
     static extern nuint kaya_fmt_timecode(long frames, long numerator, long denominator, uint drop, byte[]? into, nuint cap);
 
     [DllImport("kaya")]
+    static extern nuint kaya_fmt_duration(long ms, byte[]? into, nuint cap);
+
+    [DllImport("kaya")]
     static extern long kaya_fmt_parse_timecode(byte[] text, long numerator, long denominator, uint drop);
 
     static byte[] CStr(string s) => Encoding.UTF8.GetBytes(s + "\0");
@@ -144,6 +147,9 @@ static partial class Kaya
         public static string Timecode(long frames, TimecodeRate rate) =>
             Filled("Fmt.Timecode", (into, cap) => kaya_fmt_timecode(frames,
                 rate.Numerator, rate.Denominator, rate.Drop ? 1u : 0u, into, cap));
+
+        public static string Duration(long ms) =>
+            Filled("Fmt.Duration", (into, cap) => kaya_fmt_duration(ms, into, cap));
 
         public static long? ParseTimecode(string text, TimecodeRate rate)
         {

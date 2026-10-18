@@ -2522,6 +2522,19 @@ pub unsafe extern "C" fn kaya_fmt_parse_timecode(text: *const std::ffi::c_char, 
     crate::fmt::parse_timecode(text, rate).unwrap_or(-1)
 }
 
+/// Elapsed time, positional (`3:45`, `1:02:03`) in the locale's digits.
+///
+/// # Safety
+/// `out` must be null or valid for `cap` bytes. Zero reports a negative `ms` through kaya_fault.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_fmt_duration(ms: i64, out: *mut u8, cap: usize) -> usize {
+    let Ok(ms) = u64::try_from(ms) else {
+        crate::fault::report(format!("kaya: format duration ms {ms}: expected 0 or more"));
+        return 0;
+    };
+    unsafe { fill(crate::fmt::duration(ms).as_bytes(), out, cap) }
+}
+
 #[cfg(test)]
 mod timecode_floor_tests {
     use super::*;
@@ -2539,6 +2552,8 @@ mod timecode_floor_tests {
             assert_eq!(kaya_fmt_parse_timecode(c"00:01:00;00".as_ptr(), 30000, 1001, 1), -1);
             assert_eq!(kaya_fmt_parse_timecode(std::ptr::null(), 25, 1, 0), -1);
             assert_eq!(kaya_fmt_parse_timecode([0xffu8, 0].as_ptr().cast(), 25, 1, 0), -1);
+            let mut out = [b'x'; 8];
+            assert_eq!(kaya_fmt_duration(3_723_000, out.as_mut_ptr(), 8), crate::fmt::duration(3_723_000).len());
         }
     }
 
@@ -2551,6 +2566,7 @@ mod timecode_floor_tests {
                 "flag" => { kaya_fmt_timecode(0, 25, 1, 2, std::ptr::null_mut(), 0); }
                 "rate" => { kaya_fmt_timecode(0, 25, 0, 0, std::ptr::null_mut(), 0); }
                 "frames" => { kaya_fmt_timecode(-1, 25, 1, 0, std::ptr::null_mut(), 0); }
+                "duration" => { kaya_fmt_duration(-1, std::ptr::null_mut(), 0); }
                 _ => panic!("unknown refusal {case}"),
             }
         }
@@ -2561,7 +2577,8 @@ mod timecode_floor_tests {
     fn timecode_floor_refusals_are_named() {
         for (case, sentence) in [("flag", "format timecode drop flag 2"),
                                  ("rate", "format timecode rate 25/0"),
-                                 ("frames", "format timecode frames -1")] {
+                                 ("frames", "format timecode frames -1"),
+                                 ("duration", "format duration ms -1")] {
             let out = std::process::Command::new(std::env::current_exe().unwrap())
                 .args(["--ignored", "--exact", "capi::timecode_floor_tests::refusal_child", "--nocapture"])
                 .env("KAYA_TIMECODE_REFUSAL", case).output().unwrap();

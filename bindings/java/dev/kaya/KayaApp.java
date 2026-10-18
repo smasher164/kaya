@@ -2650,6 +2650,10 @@ public final class KayaApp {
             return answer(KayaRing.fmtTimecode(frames, rate.numerator(), rate.denominator(), rate.drop()), "fmt.timecode");
         }
 
+        public String duration(long ms) {
+            return answer(KayaRing.fmtDuration(ms), "fmt.duration");
+        }
+
         public java.util.OptionalLong parseTimecode(String text, TimecodeRate rate) {
             Objects.requireNonNull(text, "kaya: fmt.parseTimecode needs text");
             timecode(0, rate);

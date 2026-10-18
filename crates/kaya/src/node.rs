@@ -175,6 +175,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("fmtDateTime", fmt_date_time),
         ("fmtNumber", fmt_number),
         ("fmtTimecode", fmt_timecode),
+        ("fmtDuration", fmt_duration),
         ("fmtParseTimecode", fmt_parse_timecode),
         ("fmtPercent", fmt_percent),
         ("fmtCurrency", fmt_currency),
@@ -547,6 +548,12 @@ unsafe extern "C" fn fmt_timecode(env: Env, info: CbInfo) -> Value {
     let frames = try_or_throw!(env, unsafe { i64_arg(env, frames, "format timecode frames") });
     let (n, d, drop) = try_or_throw!(env, unsafe { timecode_args(env, n, d, drop) });
     unsafe { filled(env, "fmtTimecode", |out, cap| capi::kaya_fmt_timecode(frames, n, d, drop, out, cap)) }
+}
+
+unsafe extern "C" fn fmt_duration(env: Env, info: CbInfo) -> Value {
+    let [ms] = unsafe { args::<1>(env, info) };
+    let ms = try_or_throw!(env, unsafe { i64_arg(env, ms, "format duration ms") });
+    unsafe { filled(env, "fmtDuration", |out, cap| capi::kaya_fmt_duration(ms, out, cap)) }
 }
 
 unsafe extern "C" fn fmt_parse_timecode(env: Env, info: CbInfo) -> Value {

@@ -12,5 +12,9 @@ expect_script label#2 Arab
 expect label#8 "عنصر واحد"
 expect label#10 "مرحبًا، Ada"
 expect label#13 "ar-EG"
+# The positional duration (docs/media-player-plan.md M9), its digits what
+# this platform's number formatter writes for each one.
+expect label#14 "{fmt:number 3 medium}:{fmt:number 0 medium}{fmt:number 5 medium}"
+expect label#15 "{fmt:number 1 medium}:{fmt:number 0 medium}{fmt:number 2 medium}:{fmt:number 0 medium}{fmt:number 3 medium}"
 expect_direction rtl
 expect_mirrored row#0

@@ -2936,6 +2936,14 @@ int64_t kaya_fmt_parse_timecode(const char *text,
                                 uint32_t drop_frame);
 
 /**
+ * Elapsed time, positional (`3:45`, `1:02:03`) in the locale's digits.
+ *
+ * # Safety
+ * `out` must be null or valid for `cap` bytes. Zero reports a negative `ms` through kaya_fault.
+ */
+uintptr_t kaya_fmt_duration(int64_t ms, uint8_t *out, uintptr_t cap);
+
+/**
  * A fraction as the locale's percentage; `options` may be null.
  *
  * # Safety

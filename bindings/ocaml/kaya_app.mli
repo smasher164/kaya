@@ -685,6 +685,7 @@ val set_format : widget -> number_format -> unit
 module Fmt : sig
   val timecode : timecode_rate -> int64 -> string
   val parse_timecode : timecode_rate -> string -> int64 option
+  val duration : int64 -> string
 
   type length = [ `Short | `Medium | `Long ]
 

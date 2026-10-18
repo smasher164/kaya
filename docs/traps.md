@@ -17396,3 +17396,14 @@ each artist's image from one of that artist's BY or BY-SA album covers
 (`artist_cover`, refusing an artist with none; check-assets N42);
 `--check`, run by check-assets' C14, refuses any `client_id` in the
 committed answers (N41) and any address the mirror does not serve (N40).
+## The restored file cargo skips (measured 2026-10-17)
+
+tools/mac/scene-negative.py restored its cut with `shutil.copy2`, which
+keeps the saved copy's mtime, older than the doctored build's outputs. Cargo
+fingerprints a path source by mtime, so the next `cargo build --lib` finished
+in 0.11 s and left the DOCTORED libkaya in target/debug; gates.py's BUILD
+refused it (`STALE — carries 1d8a265375d5d787, but core in this tree is
+0319a9071ceaafe0`). The restore now sets the file's mtime to the present, so
+the next build recompiles. build-id's `--verify` is the wall that caught it:
+any lane or gate run after a negative refuses the artifact rather than
+running it.

@@ -21,6 +21,7 @@ dev_shell_or_die()
 
 import datetime
 import hashlib
+import os
 import re
 import shutil
 import subprocess
@@ -103,6 +104,9 @@ def main(argv):
                             "something rebuilt it while the leg ran: " + "; ".join(stale))
     finally:
         shutil.copy2(saved, target)
+        # copy2 keeps the saved copy's older mtime, and cargo then calls the
+        # doctored build fresh (docs/traps.md, the restored file cargo skips).
+        os.utime(target)
         after = sha(target)
         print(f"scene-negative: restored {rel} from {saved}, sha256 {after[:16]} "
               f"{'==' if after == before else '!='} {before[:16]}")

@@ -350,6 +350,36 @@ pub fn currency(value: f64, code: &str) -> String {
     platform::currency(value, code)
 }
 
+/// Elapsed time, positional (docs/media-player-plan.md M9): `3:45` under an
+/// hour, `1:02:03` from one, whole seconds truncated, in the digits the
+/// locale's number formatter writes, so every platform prints one string.
+pub fn duration(ms: u64) -> String {
+    install_locale_knob();
+    positional(ms, &locale_digits())
+}
+
+fn locale_digits() -> [char; 10] {
+    let plain = NumberOptions { min_fraction_digits: Some(0), max_fraction_digits: Some(0), grouping: false };
+    std::array::from_fn(|d| {
+        let written = platform::number(d as f64, plain);
+        let mut found = written.chars().filter(|c| c.is_numeric());
+        match (found.next(), found.next()) {
+            (Some(c), None) => c,
+            _ => panic!(
+                "kaya: the platform's number formatter wrote {written:?} for {d}, which is not one digit, \
+                 so no duration can be spelled in its digits (crates/kaya/src/fmt.rs)"
+            ),
+        }
+    })
+}
+
+fn positional(ms: u64, digits: &[char; 10]) -> String {
+    let s = ms / 1000;
+    let (h, m, s) = (s / 3600, s / 60 % 60, s % 60);
+    let ascii = if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") };
+    ascii.chars().map(|c| c.to_digit(10).map_or(c, |d| digits[d as usize])).collect()
+}
+
 /// The `{fmt:…}` template's answer on the backends whose harness is this
 /// crate (GTK, WinUI): kind, value and length as the template spells them
 /// (harness.rs's `expand_template`), empty when the value does not parse.
@@ -1628,6 +1658,22 @@ mod tests {
         assert_eq!(direction_of("ar-Latn-DZ"), Direction::Ltr);
         assert_eq!(direction_of("pa-Arab-PK"), Direction::Rtl);
         assert_eq!(direction_of(""), Direction::Ltr);
+    }
+
+    #[test]
+    fn duration_is_positional_in_the_locales_digits() {
+        let latn: [char; 10] = std::array::from_fn(|d| char::from(b'0' + d as u8));
+        assert_eq!(positional(0, &latn), "0:00");
+        assert_eq!(positional(999, &latn), "0:00");
+        assert_eq!(positional(185_000, &latn), "3:05");
+        assert_eq!(positional(225_999, &latn), "3:45");
+        assert_eq!(positional(3_599_000, &latn), "59:59");
+        assert_eq!(positional(3_600_000, &latn), "1:00:00");
+        assert_eq!(positional(3_723_000, &latn), "1:02:03");
+        assert_eq!(positional(360_000_000, &latn), "100:00:00");
+        let arab: [char; 10] = std::array::from_fn(|d| char::from_u32(0x660 + d as u32).unwrap());
+        assert_eq!(positional(3_723_000, &arab), "١:٠٢:٠٣");
+        assert_eq!(duration(185_000).chars().filter(|c| *c == ':').count(), 1);
     }
 
     #[test]

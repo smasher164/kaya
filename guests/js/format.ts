@@ -32,6 +32,8 @@ app.window({ title: "format", width: 540, height: 560 }, () => {
       kaya.label({ bind: kaya.signal("last") }); // label#12
     });
     kaya.label({ bind: kaya.signal(kaya.fmt.locale().tag) }); // label#13
+    kaya.label({ bind: kaya.signal(kaya.fmt.duration(185_000)) }); // label#14
+    kaya.label({ bind: kaya.signal(kaya.fmt.duration(3_723_000)) }); // label#15
   });
 });
 

@@ -52,6 +52,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let info = fmt::locale();
                 let s = tx.signal(info.tag);
                 tx.label(s); // label#13
+                let s = tx.signal(fmt::duration(185_000));
+                tx.label(s); // label#14
+                let s = tx.signal(fmt::duration(3_723_000));
+                tx.label(s); // label#15
                 });
             })
             .id();

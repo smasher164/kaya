@@ -126,6 +126,10 @@ def timecode(frames: int, rate: TimecodeRate) -> str:
     return runtime.fmt_timecode(_integer("timecode frames", frames), rate.numerator, rate.denominator, rate.drop)
 
 
+def duration(ms: int) -> str:
+    return runtime.fmt_duration(_integer("duration ms", ms))
+
+
 def parse_timecode(text: str, rate: TimecodeRate) -> int | None:
     timecode(0, rate)
     if "\0" in text:

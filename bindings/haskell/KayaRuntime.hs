@@ -22,6 +22,7 @@ module KayaRuntime
     fmtNumberRaw,
     fmtTimecodeRaw,
     fmtParseTimecodeRaw,
+    fmtDurationRaw,
     fmtPercentRaw,
     fmtCurrencyRaw,
     localeLine,
@@ -207,6 +208,9 @@ foreign import ccall unsafe "kaya_fmt_date_time"
 
 foreign import ccall unsafe "kaya_fmt_timecode"
   c_kaya_fmt_timecode :: Int64 -> Int64 -> Int64 -> Word32 -> Ptr Word8 -> CSize -> IO CSize
+
+foreign import ccall unsafe "kaya_fmt_duration"
+  c_kaya_fmt_duration :: Int64 -> Ptr Word8 -> CSize -> IO CSize
 
 foreign import ccall unsafe "kaya_fmt_parse_timecode"
   c_kaya_fmt_parse_timecode :: Ptr Word8 -> Int64 -> Int64 -> Word32 -> IO Int64
@@ -426,6 +430,9 @@ withNumberOptions minD maxD grouped body =
 fmtTimecodeRaw :: Int64 -> Int64 -> Int64 -> Bool -> IO (Maybe Text)
 fmtTimecodeRaw frames numerator denominator drop =
   fillDoor (c_kaya_fmt_timecode frames numerator denominator (if drop then 1 else 0))
+
+fmtDurationRaw :: Int64 -> IO (Maybe Text)
+fmtDurationRaw ms = fillDoor (c_kaya_fmt_duration ms)
 
 fmtParseTimecodeRaw :: Text -> Int64 -> Int64 -> Bool -> IO (Maybe Int64)
 fmtParseTimecodeRaw text numerator denominator drop

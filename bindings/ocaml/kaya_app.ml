@@ -1762,6 +1762,8 @@ module Fmt = struct
   let timecode rate frames =
     door "kaya_fmt_timecode" (Kaya_runtime.fmt_timecode frames rate.numerator rate.denominator rate.drop)
 
+  let duration ms = door "kaya_fmt_duration" (Kaya_runtime.fmt_duration ms)
+
   let parse_timecode rate text =
     ignore (timecode rate 0L);
     Kaya_runtime.fmt_parse_timecode text rate.numerator rate.denominator rate.drop

@@ -25,6 +25,8 @@ main = kayaMain $ \app -> do
   three <- tr "items" [("count", arg (3 :: Int))]
   hello <- tr "greeting" [("name", arg ("Ada" :: Text))]
   tag <- (.localeTag) <$> locale
+  short <- fmtDuration 185000
+  long <- fmtDuration 3723000
   buildTx app $ do
     -- Fourteen labels and a row: taller than the default window.
     window primary [WTitle "format", WSize 540 560]
@@ -43,6 +45,8 @@ main = kayaMain $ \app -> do
           labelText three, -- label#9
           labelText hello, -- label#10
           row [] [labelText "first", spacer, labelText "last"], -- row#0, label#11, label#12
-          labelText tag -- label#13
+          labelText tag, -- label#13
+          labelText short, -- label#14
+          labelText long -- label#15
         ]
     mount root

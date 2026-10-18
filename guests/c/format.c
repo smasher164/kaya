@@ -12,7 +12,7 @@
 
 /* Guest-allocated ids (tools/check-c-ids.py). CREATION ORDER IS READ BY
  * THE SCRIPT: labels #0..#10, then row#0 holding label#11, a spacer and
- * label#12, then label#13. */
+ * label#12, then label#13, label#14 and label#15. */
 #define W_COLUMN 1
 #define W_LABEL0 2 /* label#0 .. label#10 are W_LABEL0 .. W_LABEL0 + 10 */
 #define W_ROW 13
@@ -20,6 +20,7 @@
 #define W_SPACER 15 /* a column that grows */
 #define W_LAST 16   /* label#12 */
 #define W_TAG 17    /* label#13 */
+#define W_DURATION 18 /* label#14 and label#15 */
 
 #define SIG_FIRST 1 /* one signal per label, in the same order */
 
@@ -88,6 +89,10 @@ static uintptr_t ask_locale(void *ctx, uint8_t *out, uintptr_t cap) {
     return kaya_locale(out, cap);
 }
 
+static uintptr_t ask_duration(void *ctx, uint8_t *out, uintptr_t cap) {
+    return kaya_fmt_duration(*(const int64_t *)ctx, out, cap);
+}
+
 static void label(KayaTx *tx, uint64_t widget, uint64_t signal, const char *text) {
     kaya_tx_create_signal(tx, signal, kaya_str(text));
     kaya_tx_create_widget(tx, widget, KAYA_KIND_LABEL);
@@ -136,6 +141,11 @@ static void build_scene(void) {
     if (space != NULL)
         *space = '\0';
 
+    char durations[2][64];
+    const int64_t ms[2] = {185000, 3723000};
+    for (int i = 0; i < 2; i++)
+        fill("kaya_fmt_duration", ask_duration, (void *)&ms[i], durations[i], sizeof durations[i]);
+
     /* Fourteen labels and a row: taller than the default window. */
     window_prop(&tx, 0, KAYA_WPROP_TITLE, kaya_str("format"));
     window_prop(&tx, 0, KAYA_WPROP_WIDTH, kaya_f64(540.0));
@@ -157,6 +167,10 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_COLUMN, W_ROW);
     label(&tx, W_TAG, SIG_FIRST + 13, locale_line);
     kaya_tx_add_child(&tx, W_COLUMN, W_TAG);
+    for (int i = 0; i < 2; i++) {
+        label(&tx, W_DURATION + i, SIG_FIRST + 14 + i, durations[i]);
+        kaya_tx_add_child(&tx, W_COLUMN, W_DURATION + i);
+    }
     kaya_tx_mount(&tx, 0, W_COLUMN); /* window 0: the default */
 
     kaya_submit(tx.buf, tx.len);

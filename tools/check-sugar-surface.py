@@ -4848,6 +4848,7 @@ L10N_DOOR = [
     ("currency", "Currency", "currency", "fmtCurrency"),
     ("timecode", "Timecode", "timecode", "fmtTimecode"),
     ("parse_timecode", "ParseTimecode", "parseTimecode", "fmtParseTimecode"),
+    ("duration", "Duration", "duration", "fmtDuration"),
     ("locale", "Locale", "locale", "locale"),
     ("direction", "Direction", "direction", "direction"),
     ("text_scale", "TextScale", "textScale", "textScale"),

@@ -34,6 +34,8 @@ let () =
              ]
            (* row#0 *);
            label ~text:(Fmt.locale ()).tag (* label#13 *);
+           label ~text:(Fmt.duration 185_000L) (* label#14 *);
+           label ~text:(Fmt.duration 3_723_000L) (* label#15 *);
          ]
          ()
      in
