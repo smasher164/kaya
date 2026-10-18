@@ -6186,9 +6186,9 @@ deploy stamp and paid another 42s for the source rebuilds on the guest.
 The timestamp identified the writer exactly: a 494s gate sweep began at
 18:35:34, `check-keyed` occupied its +310s window, and `crates/` moved at
 18:40:46.551 while no file below it had moved after 18:00. An outside-key probe
-therefore lives under ignored `target/`, which is outside both the fixture's
-declared inputs and every shipped artifact's source set; `check-keyed` refuses
-any other root before it creates the file.
+therefore lived under ignored `target/`. Since 2026-10-17 both probes live
+in a scratch git tree outside the repo entirely (the probe a gate key read as
+it vanished, below), which no artifact's sources or Cargo can see either.
 
 ## A deep worktree MADE deploy-win.py unreachable, and the error named ssh
 
@@ -17445,3 +17445,49 @@ platform:
 - Windows: the hold presses the VM's one real left button, so pooled sliders
   legs collided (four of six red in the pool, all green alone); they are in
   tools/lib/lanes/win.py's EXCLUSIVE set.
+
+## The ItemContainer that clips its child (measured 2026-10-17)
+
+On WinUI an activatable container sits in an `ItemContainer`, and that
+container clips its child to its own bounds. The selected look's accent pill
+(3x16, ListView's) was first drawn outset from a declared table's row so the
+row's cells could stay on the header's edges; the windows `tracks` capture of
+the 2026-10-17 styling preview showed the selected row with no pill at all.
+Outsetting the item itself instead, so the pill had room, moved the cells off
+the header and `expect_column_edges` went red (both measured on the windows
+lane). So a table's row wears the selected fill alone
+(`seat_in_table` in crates/kaya/src/winui/skin.rs); whether a table's selected
+surface should reach into the card's interior is an open ruling, and on WinUI
+the table would have to draw it, since the item cannot.
+
+## The dock host that rebuilt the window's content (measured 2026-10-17)
+
+The SwiftUI dock host first branched around the window's whole content
+(`if dock { content.safeAreaInset(...) } else { content }`). Each time the
+dock came or went SwiftUI rebuilt the content as a new structural identity,
+and the frame records of its widgets then read `(0,0,0x0)`: on the compat
+design generation (the python, C#, Java and JS hosts) the mac `dock` legs
+failed with `dock reads misplaced (content widget 11 (kind 3 "Library") ...
+has nothing on screen at (0,0,0x0))`, while the kaya-linked legs passed. It
+is one `safeAreaInset` now whose bar is conditional inside it
+(`KayaDockHost` in swift/KayaSwiftUI.swift); tools/lib/skin_routes.py's cut
+that restores the branch is watched red. It was also a state bug no scene
+could see: a window's content re-created on every dock toggle.
+
+## The probe a gate key read as it vanished (measured 2026-10-17)
+
+`check-keyed` proved "a change under tools/ re-runs the gate" by touching
+`tools/.keyed-probe (gone)` and removing it. tools/ rides EVERY gate's key, and
+the sweep runs four wide, so another gate's `tools/build-id.py --gate` could
+list the probe through `git ls-files -o` and find it gone at `read_bytes`:
+check-pins died of `FileNotFoundError` in 0.1s on one sweep of the styling
+preview and the rerun passed. Measured on the mac host: three keyers looping
+`--gate check-pins` beside `check-keyed` failed 3 of 868 and 6 of 1290 runs,
+and a whole gates.py sweep failed the same way (63/64). A poller reading what a
+key lists (`git ls-files -o --exclude-standard` and `git diff --name-only`
+every 20 ms, 5561 polls over one sweep) saw no other path appear. Now the
+fixture's clauses key a scratch git tree (build-id.py's
+`KAYA_GATE_SOURCE_ROOT`, refused for any gate but `keyed-selftest`), the loop
+read 0 of 1700 failures, and a key input that vanishes is refused naming the
+tools/ files that spell its name. check-keyed refuses a probe inside the repo
+and watches both refusals fire.

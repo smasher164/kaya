@@ -21226,9 +21226,7 @@ struct KayaDockHost: ViewModifier {
     let windowId: UInt64
     @State private var scene = kayaScene
 
-    // ONE STRUCTURE whether or not the dock shows: a branch around `content`
-    // rebuilt the window's whole content each time the dock came or went, and
-    // its frame records read (0,0,0x0) after (measured 2026-10-17).
+    // One structure whether or not the dock shows (docs/traps.md, the dock host that rebuilt the window's content).
     func body(content: Content) -> some View {
         content.safeAreaInset(edge: .bottom, spacing: 0) {
             if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {

@@ -346,9 +346,8 @@ fn paint_selected(id: WidgetId) -> windows_core::Result<()> {
 }
 
 /// A declared table's row keeps its cells on the header's edges and has no
-/// room for the pill, so it wears the selected fill alone (DataGrid's row);
-/// ItemContainer clips its child, so an outset pill is cut away (measured,
-/// the 2026-10-17 preview fixes).
+/// room for the pill, so it wears the selected fill alone (DataGrid's row;
+/// docs/traps.md, the ItemContainer that clips its child).
 pub(super) fn seat_in_table(id: WidgetId, in_table: bool) -> windows_core::Result<()> {
     SKIN.with_borrow_mut(|s| {
         if in_table {

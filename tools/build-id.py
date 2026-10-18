@@ -238,11 +238,35 @@ def files(names):
     return sorted(out)
 
 
+def spellers(name):
+    """The tools/ files that spell `name`: who could have written it."""
+    hits = []
+    for f in sorted((ROOT / "tools").rglob("*")):
+        if f.suffix not in (".py", ".sh") or "__pycache__" in f.parts:
+            continue
+        try:
+            if name in f.read_text(encoding="utf-8", errors="replace"):
+                hits.append(str(f.relative_to(ROOT)))
+        except OSError:
+            continue
+    return hits
+
+
 def digest(paths):
     h = hashlib.sha256()
     for f in paths:
         rel = str(f.relative_to(root)).replace("\\", "/")
-        body = f.read_bytes()
+        try:
+            body = f.read_bytes()
+        except FileNotFoundError:
+            # docs/traps.md, the probe a gate key read as it vanished.
+            who = spellers(f.name)
+            sys.exit(f"build-id: {rel} was listed as a key input and gone "
+                     f"before it was read: something wrote it inside the "
+                     f"tree and removed it while this key was taken. tools/ "
+                     f"files spelling {f.name!r}: "
+                     f"{', '.join(who) if who else 'none'}. A gate's scratch "
+                     f"belongs in kaya_gate.scratch_dir, outside {ROOT}.")
         # Length-delimited: a rename or a byte crossing a file boundary
         # has to change the digest.
         h.update(f"{rel}\0{len(body)}\0".encode())
@@ -280,6 +304,7 @@ def gate_key(name):
 
 
 def main(args):
+    global root
     if not args:
         sys.exit("usage: build-id.py <component> | --gate NAME "
                  "| --verify [--component NAME] FILE...")
@@ -288,6 +313,16 @@ def main(args):
         if len(args) != 2 or args[1] not in GATES:
             sys.exit(f"build-id: --gate wants one of: "
                      f"{', '.join(sorted(GATES))}")
+        # check-keyed's probes live in a scratch tree, never this one
+        # (docs/traps.md, the probe a gate key read as it vanished).
+        source_root = os.environ.get("KAYA_GATE_SOURCE_ROOT")
+        if source_root:
+            if args[1] != "keyed-selftest":
+                sys.exit(f"build-id: KAYA_GATE_SOURCE_ROOT={source_root} "
+                         f"re-roots keyed-selftest alone, and was set for "
+                         f"{args[1]}; a live gate keyed on another tree "
+                         f"would hand back that tree's verdict")
+            root = pathlib.Path(source_root).resolve()
         print(gate_key(args[1]))
         return 0
 

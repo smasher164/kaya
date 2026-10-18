@@ -12,30 +12,48 @@ dev_shell_or_die()
 
 import atexit
 import contextlib
+import importlib.util
 import json
 import os
 import subprocess
 
 FIXTURE = "keyed-selftest"
 STORE = ROOT / "target/.kaya-gates"
-INSIDE = ROOT / "tools/.keyed-probe"  # tools/ rides every gate key
-# target/ is NOT in the fixture's set
-OUTSIDE = ROOT / "target/.keyed-probe-outside"
 
-# docs/traps.md, "A cache self-test outside its own key can still
-# invalidate Cargo".
-if not str(OUTSIDE).startswith(str(ROOT / "target") + os.sep):
-    print(f"check-keyed: OUTSIDE probe has 1 unsafe target: {OUTSIDE}.",
-          file=sys.stderr)
-    print(f"  Keep it under {ROOT}/target/ — outside keyed-selftest's "
-          f"inputs and Cargo's source inputs.", file=sys.stderr)
+# Clauses 1-5b key the fixture over a scratch git tree of their own
+# (build-id.py's KAYA_GATE_SOURCE_ROOT), never this one: a probe inside
+# tools/ rides every live gate's key while the sweep runs four wide
+# (docs/traps.md, the probe a gate key read as it vanished).
+stack = contextlib.ExitStack()
+atexit.register(stack.close)
+SRC = stack.enter_context(scratch_dir("check-keyed-src-"))
+(SRC / "tools").mkdir()
+(SRC / "tools/fixture.txt").write_text("fixture\n", encoding="utf-8")
+(SRC / "flake.nix").write_text("{}\n", encoding="utf-8")
+(SRC / "flake.lock").write_text("{}\n", encoding="utf-8")
+(SRC / "elsewhere").mkdir()
+if subprocess.run(["git", "init", "-q", str(SRC)], check=False).returncode:
+    print(f"check-keyed: git init {SRC} failed, so the fixture's key would "
+          f"take the walker's path instead of git's", file=sys.stderr)
     sys.exit(1)
+INSIDE = SRC / "tools/.keyed-probe"  # tools/ rides every gate key
+# elsewhere/ is NOT in the fixture's set
+OUTSIDE = SRC / "elsewhere/.keyed-probe-outside"
+
+for probe in (INSIDE, OUTSIDE):
+    if probe.resolve().is_relative_to(ROOT.resolve()):
+        print(f"check-keyed: probe {probe} is inside {ROOT}, where every "
+              f"gate key taken during the sweep can list it and then lose "
+              f"it (docs/traps.md, the probe a gate key read as it "
+              f"vanished).", file=sys.stderr)
+        print("  Keep it under the scratch tree kaya_gate.scratch_dir "
+              "made.", file=sys.stderr)
+        sys.exit(1)
 
 
 def cleanup():
-    for p in (INSIDE, OUTSIDE, STORE / FIXTURE):
-        with contextlib.suppress(FileNotFoundError):
-            p.unlink()
+    with contextlib.suppress(FileNotFoundError):
+        (STORE / FIXTURE).unlink()
 
 
 atexit.register(cleanup)
@@ -54,7 +72,7 @@ def keyed(*cmd, fast=True):
     """tools/keyed.py on the fixture; (rc, combined-output). `true`/
     `false` rather than a real gate: what is under test is the wrapper's
     decision."""
-    env = dict(os.environ)
+    env = dict(os.environ, KAYA_GATE_SOURCE_ROOT=str(SRC))
     if fast:
         env["KAYA_FAST"] = "1"
     else:
@@ -157,6 +175,36 @@ with scratch_dir("check-keyed-art-") as art:
     lib_b.write_text("no marker here at all", encoding="utf-8")
     if ka == gate_key(art / "b"):
         fail("an artifact with NO build-id marker keyed like a marked one")
+
+
+# 5d. THE KEY WALK REFUSES A FILE THAT VANISHED, naming the tools/ files
+# that spell it, and the source re-root serves the fixture alone.
+spec = importlib.util.spec_from_file_location("build_id",
+                                              ROOT / "tools/build-id.py")
+build_id = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(build_id)
+build_id.root = SRC
+watched = 0
+try:
+    build_id.digest([SRC / "tools/.keyed-vanished-probe"])
+    fail("a key input that vanished before its read was hashed as though "
+         "it were there")
+except SystemExit as gone:
+    watched += 1
+    said = str(gone.code)
+    if "tools/check-keyed.py" not in said or "scratch_dir" not in said:
+        fail(f"the vanished-input refusal did not name its writer: {said}")
+relive = subprocess.run(
+    ["tools/build-id.py", "--gate", "check-pins"], cwd=ROOT,
+    env=dict(os.environ, KAYA_GATE_SOURCE_ROOT=str(SRC)),
+    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    check=False)
+watched += 1
+if relive.returncode == 0 or "keyed-selftest alone" not in relive.stderr:
+    fail(f"a live gate was keyed on the fixture's scratch tree: "
+         f"{relive.stderr.strip()}")
+print(f"check-keyed: {watched} watched negative(s) ran (vanished input, "
+      f"re-rooted live gate)")
 
 
 # 6 and 7 read tools/gates.py's list, with a vacuity floor inside.
