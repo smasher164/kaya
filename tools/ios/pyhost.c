@@ -12,6 +12,7 @@
 #include <string.h>
 
 extern int32_t kaya_run(void);
+extern void kaya_prepare_process(void);
 
 static char bundle_root[PATH_MAX];
 
@@ -63,6 +64,9 @@ int main(int argc, char **argv) {
     }
     snprintf(bundle_root, sizeof bundle_root, "%s", dirname(exe));
     setenv("LANG", "en_US.UTF-8", 0);
+    /* kaya's environment writes before CPython's thread reads environ
+     * (docs/traps.md, the iOS Python host's environment race). */
+    kaya_prepare_process();
     pthread_t t;
     if (pthread_create(&t, NULL, worker, NULL) != 0) {
         printf("pyhost: pthread_create failed\n");

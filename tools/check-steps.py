@@ -2363,6 +2363,8 @@ AX_VERB = {
     # without the wrapper and every expect_selected read "no accessibility
     # bus" (2026-10-17).
     "selected_read": "expect_selected",
+    # A checkbox's checked or pressed state (docs/media-player-plan.md M8).
+    "checked_read": "expect_checked",
     "expanded": "expect_expanded",
 }
 

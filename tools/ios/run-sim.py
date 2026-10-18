@@ -3680,6 +3680,9 @@ if SUITE in ("python", "all"):
     for entry in lane.PYTHON_SCENES:
         queue_scene_leg("python", entry, f"{entry}-python", app,
                         "dev.kaya.pyhost", entry, entry)
+        if entry in lane.PYTHON_DARK:
+            queue_scene_leg("python", entry, f"{entry}dark-python", app,
+                            "dev.kaya.pyhost", entry, entry, appearance="dark")
     suite_end("python")
 
 if SUITE in ("rust-swiftui", "all"):

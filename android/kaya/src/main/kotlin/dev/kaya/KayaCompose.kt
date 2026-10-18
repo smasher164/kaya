@@ -8175,15 +8175,20 @@ object KayaCompose {
         val u = shot.density
         if (box.width < 12 * u || box.height < 12 * u) return "<no laid-out frame: $box>"
         onUi(activity) { kayaSkinUnseen(frame.second, box, u) }?.let { return it }
-        val under = shot.at(box.left - 4 * u, box.center.y) ?: return "<nothing left of $box>"
+        // Each probe against the ground at its own height: a gradient ground
+        // changes down the image (docs/traps.md).
+        val under1 = shot.at(box.left - 4 * u, box.top + 1 * u)
+        val under6 = shot.at(box.left - 4 * u, box.top + 6 * u)
+        val under = shot.at(box.left - 4 * u, box.center.y)
+        if (under1 == null || under6 == null || under == null) return "<nothing left of $box>"
         val c1 = shot.at(box.left + 1 * u, box.top + 1 * u)
         val c6 = shot.at(box.left + 6 * u, box.top + 6 * u)
         val centre = shot.at(box.center.x, box.center.y)
         if (c1 == null || c6 == null || centre == null) return "<the probes fall outside the window: $box>"
-        fun art(c: DoubleArray) = kayaGap(c, under) > 0.02
-        val seen = "(1,1) ${kayaHexOf(c1)}, (6,6) ${kayaHexOf(c6)}, centre ${kayaHexOf(centre)}, " +
-            "under it ${kayaHexOf(under)}, drawn at $box"
-        return when (Triple(art(c1), art(c6), art(centre))) {
+        fun art(c: DoubleArray, ground: DoubleArray) = kayaGap(c, ground) > 0.02
+        val seen = "(1,1) ${kayaHexOf(c1)} over ${kayaHexOf(under1)}, (6,6) ${kayaHexOf(c6)} over ${kayaHexOf(under6)}, " +
+            "centre ${kayaHexOf(centre)} over ${kayaHexOf(under)}, drawn at $box"
+        return when (Triple(art(c1, under1), art(c6, under6), art(centre, under))) {
             Triple(true, true, true) -> "rect ($seen)"
             Triple(false, true, true) -> "rounded ($seen)"
             Triple(false, false, true) -> "circle ($seen)"
@@ -8251,6 +8256,32 @@ object KayaCompose {
             true -> "on"
             false -> "off"
             null -> "none (the node publishes no selected state)"
+        }
+    }
+
+    /** expect_checked: a checkbox's state off its semantics node's
+     * ToggleableState, whatever role it is drawn as (docs/media-player-plan.md M8). */
+    private fun kayaCheckedRead(activity: ComponentActivity, spec: String): String? = onUi(activity) {
+        val node = target(spec, "checkbox", KayaSceneModel.checkboxes) ?: return@onUi null
+        if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
+        val view = kayaComposeRoot(activity.window.decorView) ?: return@onUi "<no Compose root>"
+        val root = view as RootForTest
+        root.measureAndLayoutForTest()
+        val states = mutableListOf<androidx.compose.ui.state.ToggleableState>()
+        var tagged = 0
+        fun walk(n: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (n.config.getOrNull(SemanticsProperties.TestTag) == node.a11yId) {
+                tagged++
+                n.config.getOrNull(SemanticsProperties.ToggleableState)?.let { states.add(it) }
+            }
+            n.children.forEach { walk(it, depth + 1) }
+        }
+        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        when {
+            states.size != 1 -> "<$tagged nodes carry tag '${node.a11yId}', ${states.size} publish a ToggleableState>"
+            states[0] == androidx.compose.ui.state.ToggleableState.On -> "on (ToggleableState.On)"
+            else -> "off (ToggleableState.${states[0]})"
         }
     }
 
@@ -13661,6 +13692,8 @@ object KayaCompose {
                         kayaSkinExpect(parts, failures) { kayaLabelTintRead(activity, parts[1]) }?.let { observed.add(it) }
                     "expect_selected" ->
                         kayaSkinExpect(parts, failures) { kayaSelectedRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_checked" ->
+                        kayaSkinExpect(parts, failures) { kayaCheckedRead(activity, parts[1]) }?.let { observed.add(it) }
                     "expect_dock" -> {
                         val want = parts.getOrElse(1) { "" }
                         var got = kayaDockRead(activity)
@@ -16487,8 +16520,11 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     // EVERY REALIZED ROW, no cap of this tier's own: the core seeds a
     // declared table's band at a screenful before any layout can report
     // one (docs/deferred.md, the declares-windowing entry), so
-    // `children` is a band's worth from the first frame.
-    val rows = node.children
+    // `children` is a band's worth from the first frame. One snapshot, the
+    // fold's reason below: a measure forced between a row write and the
+    // recomposition read the live count against the old children and threw
+    // (docs/traps.md, the table measure's live row count).
+    val rows = node.children.toList()
     // THE FOLD (D7): a stacked row's hugging children render inside this
     // viewport, above row 0, and scroll away with the rows — this
     // backend cannot nest a second vertical scrollable, so they join the

@@ -1,6 +1,7 @@
 """The media player demo (docs/media-player-plan.md): the library sidebar
-and Home (tools/scenes/music_home.steps), and an album's track table that
-plays through kaya's player (tools/scenes/music_playlist.steps)."""
+and Home (tools/scenes/music_home.steps), an album's track table that plays
+through kaya's player (tools/scenes/music_playlist.steps), and the album's
+gradient header (tools/scenes/music_header.steps)."""
 
 import html
 import json
@@ -24,6 +25,9 @@ SHELVES = [("jazz", "Jazz"), ("electronic", "Electronic"), ("rock", "Rock")]
 SHELF_CARDS = 12
 CARD_ART = 120
 ROW_ART = 40
+HEADER_ART = 200 if kaya.capabilities().aux_windows else 180
+# The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
+UNKNOWN_COLOUR = kaya.Color(0x8E, 0x8E, 0x93)
 CLIENT_ID_PREF = "jamendo.client_id"
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
@@ -173,6 +177,7 @@ known = {}
 pages = {}
 songs = {}
 playback = {"key": None, "queue": [], "start": False}
+favorites = set()
 entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
 
 
@@ -237,7 +242,11 @@ def show_album(album, surface):
     pages[surface] = page
     with app.push_entry(entry, title=album["name"], window=surface,
                         on_popped=lambda: page_closed(surface, entry)):
-        page["about"] = kaya.signal(f"Album · {album['artist']}")
+        page["about"] = kaya.signal(album["artist"])
+        page["cover"] = kaya.signal(b"")
+        page["cover_phase"] = kaya.signal(kaya.ImagePhase.LOADING)
+        page["colour"] = kaya.signal(UNKNOWN_COLOUR)
+        page["liked"] = kaya.signal(album["id"] in favorites)
         page["tracks"] = kaya.collection(Track)
         page["art"] = kaya.RowImages(app, page["tracks"], url="art_url", art="art",
                                      phase="phase", fetch=catalogue.fetch)
@@ -248,13 +257,7 @@ def show_album(album, surface):
 def album_body(album, page):
     with kaya.column(spacing=12, align="stretch") as body:
         body.a11y_id("album")
-        # The gradient header replaces this column (docs/media-player-plan.md §6
-        # step 5, the third screen).
-        with kaya.column(spacing=2) as header:
-            header.a11y_id("album_header")
-            kaya.heading(album["name"])
-            kaya.caption(bind=page["about"])
-            kaya.caption(bind=now_line).a11y_id("now")
+        album_header(album, page)
         # A phone's width holds no album column (the album is the page).
         names = ("#", "Title", "Album", "Time") if desktop else ("#", "Title", "Time")
         for track in page["tracks"].columns(*names, a11y_id="tracks", grow=1):
@@ -275,6 +278,38 @@ def album_body(album, page):
                 kaya.label(bind=track.duration).a11y_id("track_time")
 
 
+def album_header(album, page):
+    with kaya.column(inset=24, ground_gradient=page["colour"]) as header:
+        header.a11y_id("album_header")
+        with kaya.row(spacing=24, align="end") if desktop else \
+                kaya.column(spacing=16, align="center"):
+            kaya.image(page["cover"], fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                       phase=page["cover_phase"]) \
+                .max_width(HEADER_ART).max_height(HEADER_ART).a11y_id("album_art")
+            with kaya.column(spacing=6, align="start"):
+                kaya.heading(album["name"]).a11y_id("album_title")
+                kaya.caption(bind=page["about"]).a11y_id("album_about")
+                with kaya.row(spacing=12, align="center"):
+                    kaya.button("Play", on_click=lambda: play_album(page),
+                                symbol=kaya.Symbol.PLAY) \
+                        .role(kaya.Role.PROMINENT).a11y_id("play_album")
+                    kaya.checkbox("Favorite", checked=page["liked"],
+                                  on_toggle=lambda on: set_favorite(album["id"], on)) \
+                        .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
+                        .a11y_id("favorite")
+                kaya.caption(bind=now_line).a11y_id("now")
+
+
+def set_favorite(album_id, on):
+    if on:
+        favorites.add(album_id)
+    else:
+        favorites.discard(album_id)
+    for page in pages.values():
+        if page["album"] == album_id:
+            page["liked"].set(on)
+
+
 def page_closed(surface, entry):
     if pages.get(surface, {}).get("entry") == entry:
         del pages[surface]
@@ -287,6 +322,33 @@ def load_album(album, surface, entry):
         print(f"music: album {album['id']} did not load: {e!r}", file=sys.stderr)
         answer = None
     app.post(album_arrived, album, surface, entry, answer)
+    if answer is None:
+        return
+    try:
+        cover = catalogue.fetch(catalogue.address(answer["image"]))
+    except OSError as e:
+        print(f"music: album {album['id']}'s cover did not load: {e!r}", file=sys.stderr)
+        cover = None
+    colour = kaya.image_dominant(cover) if cover else None
+    app.post(cover_arrived, surface, entry, cover, colour)
+
+
+def cover_arrived(surface, entry, cover, colour):
+    page = pages.get(surface)
+    if page is None or page["entry"] != entry:
+        return
+    if cover is None:
+        page["cover_phase"].set(kaya.ImagePhase.FAILED)
+        return
+    page["cover"].set(cover)
+    page["cover_phase"].set(kaya.ImagePhase.SHOWN)
+    if colour is not None:
+        page["colour"].set(colour)
+
+
+def songs_line(count, seconds):
+    songs_word = "1 song" if count == 1 else f"{count} songs"
+    return f"{songs_word}, {kaya.fmt.duration(seconds * 1000)}"
 
 
 def album_arrived(album, surface, entry, answer):
@@ -298,8 +360,10 @@ def album_arrived(album, surface, entry, answer):
         return
     artist = html.unescape(answer["artist_name"])
     year = answer.get("releasedate", "")[:4]
-    page["about"].set(" · ".join(p for p in ("Album", artist, year) if p))
-    for t in sorted(answer["tracks"], key=lambda t: int(t["position"])):
+    listed = sorted(answer["tracks"], key=lambda t: int(t["position"]))
+    total = songs_line(len(listed), sum(int(t["duration"]) for t in listed))
+    page["about"].set(" · ".join(p for p in (artist, year, total) if p))
+    for t in listed:
         key = t["id"]
         songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"]}
         page["keys"].append(key)
@@ -330,6 +394,14 @@ def on_play(row):
     keys = pages_holding(row.key)[0]["keys"]
     # The queue is the app's: the album from this track on (M11).
     playback["queue"] = keys[keys.index(row.key):]
+    play_next()
+
+
+def play_album(page):
+    if not page["keys"]:
+        return
+    select_track(page["keys"][0])
+    playback["queue"] = list(page["keys"])
     play_next()
 
 

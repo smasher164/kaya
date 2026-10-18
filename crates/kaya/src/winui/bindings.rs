@@ -20286,6 +20286,23 @@ pub mod Microsoft {
                             Peers::AutomationControlType,
                         ) -> windows_core::HRESULT,
                 }
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct ToggleState(pub i32);
+                impl ToggleState {
+                    pub const Off: Self = Self(0i32);
+                    pub const On: Self = Self(1i32);
+                    pub const Indeterminate: Self = Self(2i32);
+                }
+                impl windows_core::TypeKind for ToggleState {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for ToggleState {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Automation.ToggleState;i4)",
+                        );
+                }
                 pub mod Peers {
                     #[repr(transparent)]
                     #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -34378,6 +34395,19 @@ pub mod Microsoft {
                                 .and_then(|| windows_core::Type::from_abi(result__))
                             })
                         }
+                        pub fn ToggleState(&self) -> windows_core::Result<super::ToggleState> {
+                            let this = &windows_core::Interface::cast::<
+                                super::Provider::IToggleProvider,
+                            >(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ToggleState)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn Toggle(&self) -> windows_core::Result<()> {
                             let this = &windows_core::Interface::cast::<
                                 super::Provider::IToggleProvider,
@@ -34820,6 +34850,17 @@ pub mod Microsoft {
                         windows_core::IInspectable
                     );
                     impl IToggleProvider {
+                        pub fn ToggleState(&self) -> windows_core::Result<super::ToggleState> {
+                            let this = self;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).ToggleState)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
                         pub fn Toggle(&self) -> windows_core::Result<()> {
                             let this = self;
                             unsafe {
@@ -34835,11 +34876,32 @@ pub mod Microsoft {
                             "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider";
                     }
                     pub trait IToggleProvider_Impl: windows_core::IUnknownImpl {
+                        fn ToggleState(&self) -> windows_core::Result<super::ToggleState>;
                         fn Toggle(&self) -> windows_core::Result<()>;
                     }
                     impl IToggleProvider_Vtbl {
                         pub const fn new<Identity: IToggleProvider_Impl, const OFFSET: isize>(
                         ) -> Self {
+                            unsafe extern "system" fn ToggleState<
+                                Identity: IToggleProvider_Impl,
+                                const OFFSET: isize,
+                            >(
+                                this: *mut core::ffi::c_void,
+                                result__: *mut super::ToggleState,
+                            ) -> windows_core::HRESULT {
+                                unsafe {
+                                    let this: &Identity = &*((this as *const *const ())
+                                        .offset(OFFSET)
+                                        as *const Identity);
+                                    match IToggleProvider_Impl::ToggleState(this) {
+                                        Ok(ok__) => {
+                                            result__.write(core::mem::transmute_copy(&ok__));
+                                            windows_core::HRESULT(0)
+                                        }
+                                        Err(err) => err.into(),
+                                    }
+                                }
+                            }
                             unsafe extern "system" fn Toggle<
                                 Identity: IToggleProvider_Impl,
                                 const OFFSET: isize,
@@ -34859,7 +34921,7 @@ pub mod Microsoft {
                                     IToggleProvider,
                                     OFFSET,
                                 >(),
-                                ToggleState: 0,
+                                ToggleState: ToggleState::<Identity, OFFSET>,
                                 Toggle: Toggle::<Identity, OFFSET>,
                             }
                         }
@@ -34871,7 +34933,11 @@ pub mod Microsoft {
                     #[doc(hidden)]
                     pub struct IToggleProvider_Vtbl {
                         pub base__: windows_core::IInspectable_Vtbl,
-                        ToggleState: usize,
+                        pub ToggleState: unsafe extern "system" fn(
+                            *mut core::ffi::c_void,
+                            *mut super::ToggleState,
+                        )
+                            -> windows_core::HRESULT,
                         pub Toggle: unsafe extern "system" fn(
                             *mut core::ffi::c_void,
                         )

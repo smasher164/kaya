@@ -280,6 +280,14 @@ tools/check-table-card.py holds the divider, the button-row
 environment and the borderless centred style. The placeholder the same
 review asked for went into S2 itself.
 
+A GROUNDED CONTAINER IS KEPT WHOLE (2026-10-18, built with the music demo's
+album header; the maintainer has not looked at it yet): a row or column
+wearing a ground (docs/styling-pass-plan.md Y2, Y3) is not flattened into the
+section stream; it is a section of its own, bare on the screen's ground and
+never carded, and its gradient fades into `systemGroupedBackground`, the
+screen's ground there (docs/traps.md, the grouped flow that dissolved a
+gradient header).
+
 ### D8 — the breakpoint speaks size classes (ruled and built 2026-08-31)
 
 THE RAW NUMBER DIED. `stack_below=<points>` made the author invent the

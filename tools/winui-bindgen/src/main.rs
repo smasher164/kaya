@@ -557,6 +557,8 @@ fn main() {
         "Microsoft.UI.Xaml.Automation.Peers.MenuBarItemAutomationPeer".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IInvokeProvider".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IToggleProvider".to_string(),
+        // expect_checked reads the pattern's state (docs/media-player-plan.md M8).
+        "Microsoft.UI.Xaml.Automation.ToggleState".to_string(),
         "Microsoft.UI.Xaml.Automation.Provider.IExpandCollapseProvider".to_string(),
         // The secure field's masked read asks the peer's Value pattern
         // what it publishes (docs/secure-entry-plan.md §3).

@@ -16955,6 +16955,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let icon = symbol_icon_name(symbol)
                         .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
                     button.set_icon_name(icon);
+                    // The icon child the LABELLED_BY relation points at has no
+                    // name (toggle_name's measurement, one kind over).
+                    button.reset_relation(gtk4::AccessibleRelation::LabelledBy);
                     button.update_property(&[gtk4::accessible::Property::Label(&title)]);
                     symbol_button_classes(button);
                 }
@@ -24117,18 +24120,24 @@ impl crate::harness::Stage for GtkStage {
             if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
                 return why;
             }
-            let Some(under) = shot.at(fx - 4.0, fy + fh / 2.0) else { return format!("<nothing left of {fx},{fy}>") };
-            let art = |c: [f64; 3]| skin::gap(c, under) > 0.02;
+            // Each probe against the ground at its own height: a gradient
+            // ground changes down the image (docs/traps.md).
+            let (Some(under1), Some(under6), Some(under)) =
+                (shot.at(fx - 4.0, fy + 1.0), shot.at(fx - 4.0, fy + 6.0), shot.at(fx - 4.0, fy + fh / 2.0))
+            else {
+                return format!("<nothing left of {fx},{fy}>");
+            };
+            let art = |c: [f64; 3], ground: [f64; 3]| skin::gap(c, ground) > 0.02;
             let (Some(c1), Some(c6), Some(centre)) =
                 (shot.at(fx + 1.0, fy + 1.0), shot.at(fx + 6.0, fy + 6.0), shot.at(fx + fw / 2.0, fy + fh / 2.0))
             else {
                 return format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>");
             };
             let seen = format!(
-                "(1,1) {}, (6,6) {}, centre {}, under it {}, drawn at {fx},{fy} {fw}x{fh}",
-                skin::hex(c1), skin::hex(c6), skin::hex(centre), skin::hex(under)
+                "(1,1) {} over {}, (6,6) {} over {}, centre {} over {}, drawn at {fx},{fy} {fw}x{fh}",
+                skin::hex(c1), skin::hex(under1), skin::hex(c6), skin::hex(under6), skin::hex(centre), skin::hex(under)
             );
-            match (art(c1), art(c6), art(centre)) {
+            match (art(c1, under1), art(c6, under6), art(centre, under)) {
                 (true, true, true) => format!("rect ({seen})"),
                 (false, true, true) => format!("rounded ({seen})"),
                 (false, false, true) => format!("circle ({seen})"),
@@ -24149,6 +24158,23 @@ impl crate::harness::Stage for GtkStage {
                     "{} (the bus's button #{rank}: selectable {}, selected {on})",
                     if on { "on" } else { "off" },
                     states.contains(atspi::State::Selectable)
+                )
+            }
+            Err(why) => atspi_miss(&why),
+        }
+    }
+    fn checked_read(&self, t: crate::harness::Target) -> String {
+        let found = Self::on_main(move |core| {
+            let widget = target_widget(core, t)?;
+            Some((atspi_role_of(&widget)?, atspi_rank(&core.window, &widget)?))
+        });
+        let Some((role, rank)) = found else { return "<not in the accessibility tree>".to_owned() };
+        match atspi_states(role, rank) {
+            Ok(states) => {
+                let (checked, pressed) = (states.contains(atspi::State::Checked), states.contains(atspi::State::Pressed));
+                format!(
+                    "{} (the bus's {role:?} #{rank}: checked {checked}, pressed {pressed})",
+                    if checked || pressed { "on" } else { "off" }
                 )
             }
             Err(why) => atspi_miss(&why),

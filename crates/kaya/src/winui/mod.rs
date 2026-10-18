@@ -26350,6 +26350,23 @@ impl crate::harness::Stage for WinUiStage {
     fn selected_read(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| skin::read::selected(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn checked_read(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+            use bindings::Microsoft::UI::Xaml::Automation::Provider::IToggleProvider;
+            use bindings::Microsoft::UI::Xaml::Automation::ToggleState;
+            let Some(element) = target_element(core, t)? else { return Ok("<no such target>".to_owned()) };
+            let fe: FrameworkElement = element.cast()?;
+            let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&fe)?;
+            let Ok(toggle) = peer.cast::<IToggleProvider>() else {
+                return Ok(format!("<the {} peer carries no Toggle pattern>", peer.GetClassName()?));
+            };
+            let state = toggle.ToggleState()?;
+            let word = if state == ToggleState::On { "on" } else { "off" };
+            Ok(format!("{word} (the {} peer's ToggleState {})", peer.GetClassName()?, state.0))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
     fn label_tint(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| skin::read::tint(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

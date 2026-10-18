@@ -446,6 +446,22 @@ def check(root):
              "package told no entry claims one — `links_entry=None` is how "
              "a machine that already holds another claimant asks for "
              "nothing")
+    # --- THE iOS PYTHON HOST PREPARES KAYA BEFORE CPYTHON'S THREAD
+    # (docs/traps.md, the iOS Python host's environment race): kaya_run's
+    # environment writes raced CPython's reading of environ on its worker
+    # and the host died of SIGSEGV in convertenviron.
+    pyhost = (pathlib.Path(root) / "tools/ios/pyhost.c").read_text(
+        encoding="utf-8")
+    prep, spawn = pyhost.find("kaya_prepare_process();"), pyhost.find("pthread_create(")
+    if spawn < 0:
+        fail("tools/ios/pyhost.c starts no pthread, so this clause reads a host it "
+             "no longer describes")
+    elif prep < 0 or prep > spawn:
+        fail("tools/ios/pyhost.c starts CPython's thread before it calls "
+             "kaya_prepare_process() — kaya_run's environment writes then race "
+             "CPython's read of environ (docs/traps.md, the iOS Python host's "
+             "environment race)")
+
     # ONCE, on the real tree: the shadows run this same clause and their
     # answer is the same module's.
     if pathlib.Path(root) == ROOT:
@@ -461,7 +477,7 @@ def check(root):
 SHADOW_RELS = ["tools/deploy-win.py", "tools/lib/flightrec_lane.py",
                "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
-               "tools/scenes", "tools/guest", "guests/python"]
+               "tools/scenes", "tools/guest", "guests/python", "tools/ios/pyhost.c"]
 
 
 def shadow(name):
@@ -554,6 +570,12 @@ negative(
     "    <key>UIGhostOrientations</key>",
     "declares no <UISupportedInterfaceOrientations>",
     "N5 (an iOS bundle that inherits the device's orientation)")
+
+negative(
+    "N5b", "started CPython before kaya prepared the process", "tools/ios/pyhost.c",
+    r"^    kaya_prepare_process\(\);\n", "",
+    "before it calls kaya_prepare_process()",
+    "N5b (the iOS Python host booting CPython beside kaya's environment writes)")
 
 # Both directions of the one-list census: a name dropped from the list,
 # and a file appearing on disk that the list does not know.

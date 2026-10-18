@@ -2099,6 +2099,15 @@ fn state() -> &'static CState {
     })
 }
 
+/// What kaya_run does first, for a host that must start a thread of its
+/// own before it (a language runtime booting beside the main thread): the
+/// process's environment writes are done when this returns. Idempotent;
+/// kaya_run then skips it.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_prepare_process() {
+    crate::prepare_process();
+}
+
 /// Take over the calling thread, which must be the process main thread,
 /// and run the core. Returns when the app exits, with the exit code; the
 /// host decides how to terminate its own process.

@@ -713,6 +713,16 @@ Gates that grow (each with watched negatives, counts printed):
    built: the library sidebar and Home, the playlist table, the gradient
    header, the dock with the session and media keys, the artist page, then
    search and the toasts.
+   BUILT so far: the library sidebar and Home (6a0fb1bf,
+   tools/scenes/music_home.steps), the playlist table (e115ba33,
+   music_playlist.steps), and the gradient header (2026-10-18,
+   music_header.steps, light and dark on every lane): the 600 px cover's
+   `image_dominant` computed by the app on its loader thread, a neutral grey
+   until the cover decodes, the title as a heading, "Artist · Year · N songs,
+   M:SS" with the total through the duration formatter, Play from the
+   album's first track, and the favourite heart (the toggle role) kept by
+   the app in memory; `expect_checked` reads the heart off each platform's
+   accessibility tree.
 6. The matrix once, then the review page: every lane's capture of every
    screen in light and dark, a card hovered on the desktops and selected,
    the playing row's tinted title, the dock on the desktops and above the tab

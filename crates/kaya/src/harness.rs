@@ -535,6 +535,9 @@ pub enum Step {
     ExpectShape(Target, String),
     /// A container's selected state off the accessibility tree (Y4).
     ExpectSelected(Target, bool),
+    /// A checkbox's checked state off the accessibility tree, whatever its
+    /// role draws it as (docs/media-player-plan.md M8's toggle).
+    ExpectChecked(Target, bool),
     /// A label's ink classified against the standalone tints, `none` the
     /// primary text colour (Y7).
     ExpectTint(Target, String),
@@ -1053,6 +1056,7 @@ impl Step {
             | Step::ExpectGround(t, _)
             | Step::ExpectShape(t, _)
             | Step::ExpectSelected(t, _)
+            | Step::ExpectChecked(t, _)
             | Step::ExpectTint(t, _)
             | Step::ExpectFill(t, _) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
@@ -1297,6 +1301,7 @@ impl Step {
             Step::ExpectGround { .. }
             | Step::ExpectShape { .. }
             | Step::ExpectSelected { .. }
+            | Step::ExpectChecked { .. }
             | Step::ExpectTint { .. }
             | Step::ExpectDock { .. } => true,
             Step::ExpectLines { .. } => true,
@@ -1884,6 +1889,9 @@ pub trait Stage: Send + 'static {
     /// `on` or `off` off the accessibility tree's selected state, `<...>`
     /// when unread.
     fn selected_read(&self, target: Target) -> String;
+    /// A checkbox's `on` or `off` off the accessibility tree's checked or
+    /// pressed state, `<...>` when unread.
+    fn checked_read(&self, target: Target) -> String;
     /// A label's ink against the standalone tints: `none`, `accent`,
     /// `success`, `warning`, `critical`, then what it sampled.
     fn label_tint(&self, target: Target) -> String;
@@ -2864,18 +2872,23 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 step(parse_target(target.trim())?, word.to_owned())
             }
-            "expect_selected" => {
+            "expect_selected" | "expect_checked" => {
                 let (target, state) = rest
                     .split_once(char::is_whitespace)
-                    .ok_or_else(|| format!("expect_selected wants a target and on|off: {line:?}"))?;
-                Step::ExpectSelected(
-                    parse_target(target.trim())?,
-                    match state.trim() {
-                        "on" => true,
-                        "off" => false,
-                        other => return Err(format!("expect_selected takes on or off, got {other:?}")),
-                    },
-                )
+                    .ok_or_else(|| format!("{op} wants a target and on|off: {line:?}"))?;
+                let target = parse_target(target.trim())?;
+                let on = match state.trim() {
+                    "on" => true,
+                    "off" => false,
+                    other => return Err(format!("{op} takes on or off, got {other:?}")),
+                };
+                if op == "expect_selected" {
+                    Step::ExpectSelected(target, on)
+                } else if target.kind == TargetKind::Checkbox {
+                    Step::ExpectChecked(target, on)
+                } else {
+                    return Err(format!("expect_checked reads a checkbox, not {target:?}: {line:?}"));
+                }
             }
             "expect_dock" => {
                 let word = rest.trim();
@@ -6799,6 +6812,10 @@ fn run_with_log(
                 let want = if *on { "on" } else { "off" };
                 word_reading(&stage.selected_read(*t), want, || format!("{} selected", target_spec(t)))
             })),
+            Step::ExpectChecked(t, on) => Some(poll(|| {
+                let want = if *on { "on" } else { "off" };
+                word_reading(&stage.checked_read(*t), want, || format!("{} checked", target_spec(t)))
+            })),
             Step::ExpectDock(want) => Some(poll(|| word_reading(&stage.dock_read(), want, || "dock".to_owned()))),
             Step::ExpectHeightFits(t) => Some(poll(|| {
                 let off = stage.height_fits(*t);
@@ -8547,6 +8564,18 @@ mod tests {
     /// asserts against its first word, and `file_save save` would parse
     /// as something and press nothing.
     #[test]
+    fn expect_checked_reads_a_checkbox_only() {
+        assert!(matches!(
+            parse("expect_checked checkbox@favorite on").unwrap()[0],
+            Step::ExpectChecked(_, true)
+        ));
+        assert!(matches!(parse("expect_checked checkbox#0 off").unwrap()[0], Step::ExpectChecked(_, false)));
+        for bad in ["expect_checked label#0 on", "expect_checked checkbox#0 yes", "expect_checked checkbox#0"] {
+            parse(bad).unwrap_err();
+        }
+    }
+
+    #[test]
     fn picker_verbs_parse_fixed_digits_only() {
         let steps = parse(
             "set_date date_picker#0 2026-09-04\nset_time time_picker#1 14:30\n\
@@ -9827,6 +9856,9 @@ mod tests {
         fn selected_read(&self, t: Target) -> String {
             if t.index == 0 { "on".into() } else { "off".into() }
         }
+        fn checked_read(&self, t: Target) -> String {
+            if t.index == 0 { "on".into() } else { "off".into() }
+        }
         fn label_tint(&self, _: Target) -> String {
             "accent".into()
         }
@@ -10877,6 +10909,9 @@ mod tests {
             fn selected_read(&self, _: Target) -> String {
                 String::new()
             }
+            fn checked_read(&self, _: Target) -> String {
+                String::new()
+            }
             fn label_tint(&self, _: Target) -> String {
                 String::new()
             }
@@ -11359,6 +11394,9 @@ mod tests {
                 String::new()
             }
             fn selected_read(&self, _: Target) -> String {
+                String::new()
+            }
+            fn checked_read(&self, _: Target) -> String {
                 String::new()
             }
             fn label_tint(&self, _: Target) -> String {

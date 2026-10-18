@@ -1255,6 +1255,9 @@ final class KayaSceneModel {
     var groupedEntries: Set<UInt64> = []
     var groupedWindows: Set<UInt64> = []
     var groupedFlows: Set<UInt64> = []
+    /// The grounded containers a grouped flow keeps whole, whose gradient
+    /// fades into the screen's grouped ground (Y2 on a D7.5 screen).
+    var groupedGrounds: Set<UInt64> = []
     /// entry id -> the window whose stack holds it.
     var entryWindow: [UInt64: UInt64] = [:]
     /// Live sections by surface id (the one surface namespace), and section
@@ -7763,6 +7766,28 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         return role + "/" + label
     }
 
+    /// expect_checked: a checkbox's state off its AXValue, whatever role it is
+    /// drawn as (docs/media-player-plan.md M8).
+    func kayaAxCheckedRead(_ identifier: String) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            var matches: [AXUIElement] = []
+            kayaAxFindAll(app, identifier, 0, &matches)
+            let boxes = matches.filter { kayaAxCopy($0, kAXRoleAttribute) as? String == kAXCheckBoxRole }
+            guard boxes.count == 1, let hit = boxes.first else {
+                return "<\(matches.count) elements carry id '\(identifier)', \(boxes.count) of them AXCheckBox>"
+            }
+            let subrole = kayaAxCopy(hit, kAXSubroleAttribute) as? String ?? "none"
+            guard let value = kayaAxCopy(hit, kAXValueAttribute) as? NSNumber else {
+                return "<the AXCheckBox (subrole \(subrole)) publishes no numeric AXValue>"
+            }
+            return "\(value.intValue == 1 ? "on" : "off") (AXCheckBox subrole \(subrole), AXValue \(value))"
+        }
+    }
+
     /// The tree's selected state for one identifier (docs/styling-pass-plan.md
     /// Y4): `on` or `off` from AXSelected, or what the walk found instead.
     /// A stamped copy shares its id with its siblings, so the element is the
@@ -8291,6 +8316,39 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
                 }
             }
             return nil
+        }
+    }
+
+    /// expect_checked: a checkbox's state off the element UIKit publishes for
+    /// it (docs/media-player-plan.md M8), its value and its selected trait.
+    func kayaAxCheckedRead(_ identifier: String) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> String in
+            var hits: [NSObject] = []
+            func walk(_ element: NSObject, _ depth: Int) {
+                if depth > 64 { return }
+                if kayaAxIdentifier(element) == identifier { hits.append(element) }
+                let count = element.accessibilityElementCount()
+                if count != NSNotFound && count > 0 {
+                    for i in 0..<count {
+                        if let child = element.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                    }
+                }
+                if let view = element as? UIView { view.subviews.forEach { walk($0, depth + 1) } }
+            }
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { walk(window, 0) }
+            }
+            let readings = Set(hits.map { h -> String in
+                let value = h.accessibilityValue ?? ""
+                let on = value == "1" || h.accessibilityTraits.contains(.selected)
+                return "\(on ? "on" : "off") (value \"\(value)\", selected trait \(h.accessibilityTraits.contains(.selected)))"
+            })
+            guard readings.count == 1, let reading = readings.first else {
+                return "<\(hits.count) elements carry id '\(identifier)', reading \(readings.sorted())>"
+            }
+            return reading
         }
     }
 
@@ -12399,6 +12457,25 @@ private func kayaRunScript(_ script: String) {
             case "expect_selected":
                 let (ok, fail) = kayaSkinReading(parts)
                 if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_checked":
+                let want = parts.count > 2 ? String(parts[2]) : ""
+                func read() -> String? {
+                    DispatchQueue.main.sync { kayaTarget(parts[1], "checkbox", kayaScene.checkboxes)?.a11yId }
+                        .map(kayaAxCheckedRead)
+                }
+                var got = read()
+                let deadline = Date().addingTimeInterval(5)
+                while got?.split(separator: " ").first.map(String.init) != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    got = read()
+                }
+                if let got, got.split(separator: " ").first.map(String.init) == want {
+                    observed.append("\(parts[1]) checked \(want)")
+                } else if let got {
+                    failures.append("\(parts[1]) reads checked \(got), wanted \(want)")
+                } else {
+                    failures.append("no such target \(parts[1])")
+                }
             case "expect_dock":
                 let want = parts.count > 1 ? String(parts[1]) : ""
                 var got = DispatchQueue.main.sync { kayaDockRead() }
@@ -19488,11 +19565,17 @@ func kayaRecomputeGroupedSurfaces() {
         if carriers.count == 1 { return primaryFlow(carriers[0]) }
         return nil
     }
+    var grounds = Set<UInt64>()
     func register(_ root: KayaNode?, entry: UInt64?, window: UInt64?) {
         guard let root, containsCarrier(root) else { return }
         if let entry { entries.insert(entry) }
         if let window { windows.insert(window) }
-        if let flow = primaryFlow(root) { flows.insert(flow.id) }
+        if let flow = primaryFlow(root) {
+            flows.insert(flow.id)
+            var flat: [KayaNode] = []
+            kayaGroupedFlatten(flow, into: &flat)
+            grounds.formUnion(flat.filter { $0.ground != groundNone }.map(\.id))
+        }
     }
     for (eid, model) in kayaScene.navEntries {
         register(model.root, entry: eid, window: nil)
@@ -19504,6 +19587,7 @@ func kayaRecomputeGroupedSurfaces() {
     kayaScene.groupedEntries = entries
     kayaScene.groupedWindows = windows
     kayaScene.groupedFlows = flows
+    kayaScene.groupedGrounds = grounds
 }
 
 /// A section card's interior (the grouped section lowering): the standard
@@ -19523,6 +19607,9 @@ private struct KayaGroupedSection: Identifiable {
         case run([KayaNode])
         case table(KayaNode)
         case form(KayaNode)
+        /// A container wearing a ground (Y2, Y3): the app's own surface, bare
+        /// on the screen's ground, never carded or dissolved.
+        case ground(KayaNode)
         case none
     }
     var header: KayaNode?
@@ -19532,7 +19619,7 @@ private struct KayaGroupedSection: Identifiable {
         if let header { return header.id }
         switch content {
         case .run(let nodes): return nodes[0].id
-        case .table(let node), .form(let node): return node.id
+        case .table(let node), .form(let node), .ground(let node): return node.id
         case .none: return footer?.id ?? 0
         }
     }
@@ -19546,7 +19633,8 @@ private func kayaGroupedFlatten(_ node: KayaNode, into out: inout [KayaNode]) {
     for child in node.laidOut {
         let vertical = (child.axis ?? (child.kind == kindColumn ? 1 : 0)) == 1
         if vertical, child.kind == kindColumn || child.kind == kindRow,
-            child.tableColumns.isEmpty, !kayaIsForm(child), !child.laidOut.isEmpty
+            child.tableColumns.isEmpty, !kayaIsForm(child), !child.laidOut.isEmpty,
+            child.ground == groundNone
         {
             kayaGroupedFlatten(child, into: &out)
         } else {
@@ -19583,6 +19671,9 @@ private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
                 flush()
                 out.append(KayaGroupedSection(content: body))
             }
+        } else if node.ground != groundNone {
+            flush()
+            out.append(KayaGroupedSection(content: .ground(node)))
         } else if node.role == roleHeading {
             flush()
             header = node
@@ -19627,6 +19718,11 @@ private struct KayaGroupedSections: View {
                             .frame(maxWidth: .infinity, alignment: .topLeading)
                     case .run(let nodes):
                         kayaCarded(nodes)
+                    case .ground(let node):
+                        KayaRender(node: node, flexVertical: true, flexStretch: true)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .environment(\.kayaOnGroupedGround, true)
                     case .none:
                         EmptyView()
                     }
@@ -20508,6 +20604,19 @@ private struct KayaInFillKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+private struct KayaOnGroupedGroundKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// Whether a grounded container stands on a grouped screen's ground,
+    /// which is then its gradient's bottom stop (D7.5, Y2).
+    var kayaOnGroupedGround: Bool {
+        get { self[KayaOnGroupedGroundKey.self] }
+        set { self[KayaOnGroupedGroundKey.self] = newValue }
+    }
+}
+
 extension EnvironmentValues {
     /// Whether a view sits on a filled or selected surface, whose foreground
     /// a label's tint yields to (docs/styling-pass-plan.md Y7).
@@ -20517,12 +20626,13 @@ extension EnvironmentValues {
     }
 }
 
-/// The platform's window ground, the gradient's bottom stop (Y2).
-@MainActor func kayaWindowGround() -> Color {
+/// The platform's window ground, the gradient's bottom stop (Y2); on a
+/// grouped screen the screen's grouped ground (D7.5).
+@MainActor func kayaWindowGround(grouped: Bool = false) -> Color {
     #if os(macOS)
         Color(nsColor: .windowBackgroundColor)
     #else
-        Color(uiColor: .systemBackground)
+        Color(uiColor: grouped ? .systemGroupedBackground : .systemBackground)
     #endif
 }
 
@@ -20538,6 +20648,7 @@ private func kayaPackedRGB(_ rgb: Int64) -> Color {
 struct KayaGroundSurface: ViewModifier {
     let node: KayaNode
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.kayaOnGroupedGround) private var grouped
 
     func body(content: Content) -> some View {
         switch node.ground {
@@ -20545,7 +20656,7 @@ struct KayaGroundSurface: ViewModifier {
             let top = scheme == .dark ? node.groundTops & 0xFF_FFFF : (node.groundTops >> 24) & 0xFF_FFFF
             content.background(
                 LinearGradient(
-                    colors: [kayaPackedRGB(top), kayaWindowGround()],
+                    colors: [kayaPackedRGB(top), kayaWindowGround(grouped: grouped)],
                     startPoint: .top, endPoint: .bottom))
         case groundImage:
             content
@@ -20821,6 +20932,8 @@ struct KayaLabelTint: ViewModifier {
     let height: Int
     let scale: CGFloat
     let ground: [Double]
+    /// A grouped screen's ground (D7.5); the window's on macOS.
+    let groupedGround: [Double]
     let text: [Double]
     let dark: Bool
 
@@ -20849,6 +20962,7 @@ struct KayaLabelTint: ViewModifier {
             return out
         }
         let ground = rgba(.windowBackgroundColor), text = rgba(.labelColor)
+        let groupedGround = ground
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let points = content.bounds.width
     #else
@@ -20864,6 +20978,7 @@ struct KayaLabelTint: ViewModifier {
             return [Double(r), Double(g), Double(b), Double(a)]
         }
         let ground = rgba(.systemBackground), text = rgba(.label)
+        let groupedGround = rgba(.systemGroupedBackground)
         let dark = traits.userInterfaceStyle == .dark
         let points = window.bounds.width
     #endif
@@ -20883,7 +20998,8 @@ struct KayaLabelTint: ViewModifier {
     guard drawn, points > 0 else { return nil }
     return KayaWindowPixels(
         rgba: buf, width: w, height: h, scale: CGFloat(w) / points,
-        ground: Array(ground.prefix(3)), text: Array(text.prefix(3)), dark: dark)
+        ground: Array(ground.prefix(3)), groupedGround: Array(groupedGround.prefix(3)),
+        text: Array(text.prefix(3)), dark: dark)
 }
 
 func kayaHex(_ c: [Double]) -> String {
@@ -21086,8 +21202,9 @@ struct KayaSkinFrameReader: View {
         let bottom = shot.at(CGPoint(x: x, y: frame.maxY - 4)),
         let mid = shot.at(CGPoint(x: x, y: frame.midY))
     else { return "<the probes fall outside the window: \(frame)>" }
-    let seen = "top \(kayaHex(top)), middle \(kayaHex(mid)), bottom \(kayaHex(bottom)), ground \(kayaHex(shot.ground))"
-    if kayaColourGap(top, shot.ground) <= kayaSkinTolerance {
+    let page = kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground
+    let seen = "top \(kayaHex(top)), middle \(kayaHex(mid)), bottom \(kayaHex(bottom)), ground \(kayaHex(page))"
+    if kayaColourGap(top, page) <= kayaSkinTolerance {
         return "none (\(seen))"
     }
     if let art = kayaPictureAt(node, CGPoint(x: frame.width - 4, y: 4), frame.size),
@@ -21099,7 +21216,7 @@ struct KayaSkinFrameReader: View {
     let want = [Double((stop >> 16) & 0xFF) / 255, Double((stop >> 8) & 0xFF) / 255, Double(stop & 0xFF) / 255]
     let contrast = kayaContrast(mid, shot.text)
     let detail = "\(seen), the clamped stop \(kayaHex(want)), text \(String(format: "%.1f", contrast)):1 at the middle"
-    if kayaColourGap(top, want) <= kayaSkinTolerance && kayaColourGap(bottom, shot.ground) <= kayaSkinTolerance
+    if kayaColourGap(top, want) <= kayaSkinTolerance && kayaColourGap(bottom, page) <= kayaSkinTolerance
         && contrast >= 4.5
     {
         return "gradient (\(detail))"
@@ -21142,20 +21259,24 @@ struct KayaSkinFrameReader: View {
     }
     if let why = kayaSkinUnseen(node, frame) { return why }
     guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
-    // What the image sits on is read 4 units left of it at its middle (a
-    // table row's stripe, a card's fill, the window), and reads back within a
-    // unit of itself; iOS's loading look is 3 units from its ground, so a gap
-    // over 0.02 tells the picture from it.
-    guard let under = shot.at(CGPoint(x: frame.minX - 4, y: frame.midY)) else { return "<nothing left of \(frame)>" }
-    func art(_ c: [Double]) -> Bool { kayaColourGap(c, under) > 0.02 }
+    // What the image sits on is read 4 units left of it at each probe's own
+    // height (a table row's stripe, a card's fill, the window, a gradient
+    // ground that changes with the height, docs/traps.md), and reads back
+    // within a unit of itself; iOS's loading look is 3 units from its ground,
+    // so a gap over 0.02 tells the picture from it.
     let box = frame
+    guard let under1 = shot.at(CGPoint(x: box.minX - 4, y: box.minY + 1)),
+        let under6 = shot.at(CGPoint(x: box.minX - 4, y: box.minY + 6)),
+        let under = shot.at(CGPoint(x: box.minX - 4, y: box.midY))
+    else { return "<nothing left of \(frame)>" }
+    func art(_ c: [Double], _ ground: [Double]) -> Bool { kayaColourGap(c, ground) > 0.02 }
     guard let c1 = shot.at(CGPoint(x: box.minX + 1, y: box.minY + 1)),
         let c6 = shot.at(CGPoint(x: box.minX + 6, y: box.minY + 6)),
         let centre = shot.at(CGPoint(x: box.midX, y: box.midY))
     else { return "<the probes fall outside the window: \(box)>" }
-    let seen = "(1,1) \(kayaHex(c1)), (6,6) \(kayaHex(c6)), centre \(kayaHex(centre)), under it \(kayaHex(under)), "
-        + "drawn at \(kayaRectText(box))"
-    switch (art(c1), art(c6), art(centre)) {
+    let seen = "(1,1) \(kayaHex(c1)) over \(kayaHex(under1)), (6,6) \(kayaHex(c6)) over \(kayaHex(under6)), "
+        + "centre \(kayaHex(centre)) over \(kayaHex(under)), drawn at \(kayaRectText(box))"
+    switch (art(c1, under1), art(c6, under6), art(centre, under)) {
     case (true, true, true): return "rect (\(seen))"
     case (false, true, true): return "rounded (\(seen))"
     case (false, false, true): return "circle (\(seen))"

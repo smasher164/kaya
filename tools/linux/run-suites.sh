@@ -1723,6 +1723,10 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_playlist-python env KAYA_SELFTEST=music_playlist KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
+    run "$proto" music_header-python env KAYA_SELFTEST=music_header KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/music.py
+    run "$proto" music_headerdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_header \
+        KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
     # THE SKIN (docs/styling-pass-plan.md §5): grounds and cards read the
     # accessibility tree (expect_ax, expect_selected), so they run through
     # a11y-leg.sh; hover moves the leg's own pointer (tools/linux/dragdrive.py).

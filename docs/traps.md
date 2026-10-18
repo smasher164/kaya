@@ -17664,3 +17664,71 @@ the red's own sentences, the stale-report delete before the request, the
 give-up arms, the ceiling under the step's, the gave-up ack read by the
 runner's ack pattern, and the failed-step listing run over a doctored
 buffer; thirteen cuts watched, the shipped fixed 20 s wait among them.
+
+## The shape probes that read a gradient as the art (measured 2026-10-18)
+
+expect_shape tells rect from rounded from circle by comparing three probes in
+the image, (1,1), (6,6) and the centre, against what the image sits on, and
+every reader (SwiftUI, GTK, WinUI, Compose) read that ground ONCE, 4 units
+left of the image at its middle. The music demo's album header put a 200 pt
+rounded cover on a gradient ground, which changes with the height: the corner
+probe saw the gradient at the top (6F6A63 on the mac, FEF5E5 on GTK) and the
+ground was read at the middle (52504D, FCF7EF), so the rounded corner counted
+as art and the cover read `rect` on the mac and linux. No scene had put an
+image on anything but a flat ground. Each probe is now compared with the
+ground 4 units left of the image at that probe's own height, and the
+observation prints each pair.
+
+GUARD: tools/scenes/music_header.steps' `expect_shape image@album_art
+rounded` on every lane, watched red on the mac and linux before the change.
+
+## The grouped flow that dissolved a gradient header (measured 2026-10-18)
+
+On iOS a screen holding a table is a grouped screen (docs/adaptive-layout-plan.md
+D7.5) and its primary flow is flattened through its vertical containers into
+the section stream. The album page's header is a column wearing a gradient
+ground, and the flatten dissolved it like any wrapper: its heading became an
+uppercased section header, its buttons a card, and the ground was drawn by
+nothing (`column@album_header reads ground <no laid-out frame>`). A container
+with a ground is now kept whole and is a section of its own, bare on the
+screen's ground, never carded; its gradient's bottom stop is the screen's
+`systemGroupedBackground` there, and the reader compares against the same
+(kayaScene.groupedGrounds). The section renders at its own fixed height: laid
+out with the stream's flexible height it was compressed and its last line
+(the now-playing caption) was drawn under the table's card while
+expect_no_clipping still reported nothing clipped, since an overlap by a
+sibling is not a clip.
+
+GUARD: music_header's `expect_ground column@album_header gradient` on the iOS
+lane, watched red before the change. The overlap is not read by any verb
+(docs/media-player-plan.md's screen-3 notes ask for one).
+
+## The iOS Python host's environment race (measured 2026-10-18)
+
+tools/ios/pyhost.c started CPython on a worker pthread and then called
+kaya_run on the main thread, whose prepare_process writes the environment
+(act2::arm, the locale knob). CPython's posix module reads `environ` while it
+initializes, so the two raced: one music_headerdark-python leg died of
+SIGSEGV in `_platform_strchr` under `convertenviron`, with the main thread in
+`kaya::prefs::domain` under `act::arm` (crash report pyhost-2026-10-18-055416).
+kaya_prepare_process() is now a C export that does exactly what kaya_run does
+first, run once (a std::sync::Once), and the host calls it before
+pthread_create; kaya_run's own call is then a no-op.
+
+GUARD: check-staging refuses a pyhost.c whose pthread_create precedes its
+kaya_prepare_process() call, watched red as N5b.
+
+## The table measure's live row count (measured 2026-10-18)
+
+KayaTableSurface's measure block read `rows.size` from the model's live
+`children` while its measurables were the last composition's, so a measure
+forced between a row write and the recomposition took
+`subList(nFolded + cols + 1 + nRows, size - 3)` with the first index past the
+second (`fromIndex (6) is greater than toIndex (4)`) and the app died. The
+harness's `measureAndLayoutForTest` (the expect_checked read on the music
+album page, right after the track rows arrived) is what forced it. The rows
+are one snapshot now, as the fold's children already were, so the content
+and the measure count the same list.
+
+GUARD: check-table-card holds the snapshot and watches the live read refused.
+

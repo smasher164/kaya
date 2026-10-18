@@ -1,0 +1,36 @@
+# The media player demo's third screen (docs/media-player-plan.md §6 step 5,
+# M9, M13; docs/styling-pass-plan.md Y2): an album's header is its rounded
+# cover, the title as a heading, the artist, year, track count and total time,
+# a Play button and the favourite heart, over a gradient from the cover's
+# dominant colour (kaya.image_dominant over the fetched bytes) clamped by the
+# core and fading into the window's ground. The dark leg runs this script
+# under KAYA_APPEARANCE=dark. Play starts the album's first track; the heart
+# is the app's, so it is still on when the album is opened again.
+expect_image_phase image@art_201715 shown
+click column@card_201715
+expect_image_phase image@album_art shown
+expect_shape image@album_art rounded
+expect_ground column@album_header gradient
+expect_ax label@album_title "heading/Through The Olive Branches"
+expect label@album_about "Pierce Murphy · 2021 · 2 songs, 0:40"
+expect_ax button@play_album "button/Play"
+expect_ax checkbox@favorite "toggle/Favorite"
+expect_checked checkbox@favorite off
+toggle checkbox@favorite on
+expect_checked checkbox@favorite on
+click button@play_album
+expect_selected row@track[1860160] on
+expect label@now "Playing · Seven Chimes"
+expect_tint label@track_name[1860160] accent
+expect_no_clipping
+# The desktops go Home through the sidebar (docs/media-player-plan.md §1); a
+# phone goes back (tools/lib/lanes/ios.py, android.py).
+click row@go_home
+expect_title "Home"
+click column@card_581719
+expect_title "Fellow Traveler"
+expect_checked checkbox@favorite off
+click row@saved[201715]
+expect_checked checkbox@favorite on
+toggle checkbox@favorite off
+expect_checked checkbox@favorite off

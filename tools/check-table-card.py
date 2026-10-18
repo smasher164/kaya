@@ -612,6 +612,7 @@ PIN_COMPOSE = (
 )
 PIN_GROUND = ("Box(Modifier.drawBehind { if (pinned()) drawRect(ground) }"
               ".padding(bottom = KAYA_TABLE_SEGMENT_GAP))")
+ROWS_SNAPSHOT = "    val rows = node.children.toList()\n"
 PIN_REPORTER = 'key: "h/\\(col)", generation: generation))'
 PIN_TITLE = ".modifier(KayaHeaderPin(node: node, lead: kayaTableCardInsetY, on: pinned))"
 
@@ -628,6 +629,11 @@ def pins(files):
         out.append(f"check-table-card: {SWIFTUI}: pinned header — the titles' pin "
                    "is not applied once and AFTER their edge reporter, so the "
                    "reporter reads the resting frame while the pinned one is drawn")
+    if files[COMPOSE].count(ROWS_SNAPSHOT) != 1:
+        out.append(f"check-table-card: {COMPOSE}: the table's rows are not one "
+                   f"snapshot (`{ROWS_SNAPSHOT}`), so a measure forced between a row "
+                   "write and the recomposition reads the live count against the old "
+                   "children and throws (docs/traps.md, the table measure's live row count)")
     if files[COMPOSE].count(PIN_GROUND) != 1:
         out.append(f"check-table-card: {COMPOSE}: pinned header — the header "
                    "segment does not stand on the ground through the segment gap "
@@ -833,6 +839,8 @@ PIN = (
     ("the compose pinned header with no ground under it", COMPOSE,
      PIN_GROUND, "Box(Modifier.padding(bottom = KAYA_TABLE_SEGMENT_GAP))",
      "stand on the ground through the segment gap"),
+    ("the compose rows read live", COMPOSE,
+     ROWS_SNAPSHOT, "    val rows = node.children\n", "are not one snapshot"),
     ("the compose titles under the rows", COMPOSE,
      "p.place(padX + colX[c], headerY + padY, zIndex = 1f)",
      "p.place(padX + colX[c], headerY + padY)", "the titles paint over"),

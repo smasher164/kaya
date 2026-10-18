@@ -1075,18 +1075,24 @@ pub(super) mod read {
         if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
             return Ok(why);
         }
-        let Some(under) = shot.at(fx - 4.0, fy + fh / 2.0) else { return Ok(format!("<nothing left of {fx},{fy}>")) };
-        let art = |c: [f64; 3]| gap(c, under) > 0.02;
+        // Each probe against the ground at its own height: a gradient ground
+        // changes down the image (docs/traps.md).
+        let (Some(under1), Some(under6), Some(under)) =
+            (shot.at(fx - 4.0, fy + 1.0), shot.at(fx - 4.0, fy + 6.0), shot.at(fx - 4.0, fy + fh / 2.0))
+        else {
+            return Ok(format!("<nothing left of {fx},{fy}>"));
+        };
+        let art = |c: [f64; 3], ground: [f64; 3]| gap(c, ground) > 0.02;
         let (Some(c1), Some(c6), Some(centre)) =
             (shot.at(fx + 1.0, fy + 1.0), shot.at(fx + 6.0, fy + 6.0), shot.at(fx + fw / 2.0, fy + fh / 2.0))
         else {
             return Ok(format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>"));
         };
         let seen = format!(
-            "(1,1) {}, (6,6) {}, centre {}, under it {}, drawn at {fx},{fy} {fw}x{fh}",
-            hex(c1), hex(c6), hex(centre), hex(under)
+            "(1,1) {} over {}, (6,6) {} over {}, centre {} over {}, drawn at {fx},{fy} {fw}x{fh}",
+            hex(c1), hex(under1), hex(c6), hex(under6), hex(centre), hex(under)
         );
-        Ok(match (art(c1), art(c6), art(centre)) {
+        Ok(match (art(c1, under1), art(c6, under6), art(centre, under)) {
             (true, true, true) => format!("rect ({seen})"),
             (false, true, true) => format!("rounded ({seen})"),
             (false, false, true) => format!("circle ({seen})"),
