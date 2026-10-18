@@ -17496,6 +17496,29 @@ read that would see it again. Beside it, Android: the platform
 MediaController's bitmap for a 600x600 cover is 300x300, so the read compares
 a colour, never a size.
 
+## The thumbnail the session manager dropped (measured 2026-10-18)
+
+On the windows lane's VM beside four CPU spinners, about one music_dock leg in
+four failed `expect_now_playing_art 4CC0BF` for its whole 15 s with the
+session manager (`GlobalSystemMediaTransportControlsSessionManager`) holding
+this process's session, title and status right and NO thumbnail, while this
+process's own SMTC display still held one and the reference it was handed had
+been opened once, at SetThumbnail, exactly as on a green leg (3 of 8 and 1 of
+8 loaded; 12 of 12 and three music-filtered runs green unloaded). The art had
+arrived before the declaration: the app declares the session with the bytes,
+and a declaration made without them and repeated 3 s later with them reaches
+the session manager in under 30 ms, so the ordering race is not the cause.
+Nothing sends a dropped thumbnail again, so it stays dropped. Handing the same
+thumbnail over once more a second later (crates/kaya/src/winui/media.rs,
+`rehand_later`) rescued both drops in 16 loaded legs (16 of 16 green), each
+read flipping to the cover right after the second open. Two facts the why-not
+leans on: the in-memory stream's Position stays 0 after the system reads it
+(the reference hands out a clone), so the reference kaya hands over is its own
+`CountedArt`, which records each OpenReadAsync; and the SMTC opens it once per
+SetThumbnail/Update, never on a session-manager read. check-verbs holds the
+second hand-over, its key on the declaration still standing and the counted
+reference, three watched cuts.
+
 ## The slider held under a pointer (measured 2026-10-17)
 
 Five things the `hold` verb (docs/media-player-plan.md M10) met, one per

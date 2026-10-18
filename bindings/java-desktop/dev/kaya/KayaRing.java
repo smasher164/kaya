@@ -159,6 +159,10 @@ public final class KayaRing {
     /** The dominant colour, 0xRRGGBB, or -1 (docs/styling-pass-plan.md Y2). */
     public static native int imageDominant(byte[] bytes);
 
+    /** The main colours as (0xRRGGBB, share) pairs flat, or null
+     * (docs/media-player-plan.md M15). */
+    public static native double[] imagePalette(byte[] bytes, int n);
+
     /** kaya_reader_peaks: a finished peaks read's pairs, pair-major i16
      * (min then max per channel); null for none. */
     public static native short[] readerPeaks(long reader, long read);

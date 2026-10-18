@@ -23,6 +23,10 @@ public readonly record struct PickedFile(ulong Handle, string Name, string? Loca
         => Kaya.OpenPicked(Handle, access);
 }
 
+/// One of a picture's main colours and the fraction of the picture it stands
+/// for (docs/media-player-plan.md M15).
+public readonly record struct PaletteColor(Color Color, double Share);
+
 /// An sRGB colour, 8 bits a channel, straight alpha: a colour picker's
 /// value (docs/color-picker-plan.md §2), 0xRRGGBBAA on the wire.
 public readonly record struct Color(byte R, byte G, byte B, byte A = 0xFF)
@@ -428,6 +432,25 @@ static partial class Kaya
         kaya_image_dominant(bytes, (nuint)bytes.Length, out uint rgb) == 1
             ? new Color((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb)
             : null;
+
+    [DllImport("kaya")]
+    static extern nint kaya_image_palette(byte[] bytes, nuint len, nuint n, [Out] uint[] rgb, [Out] double[] share);
+
+    /// The main colours of a PNG or JPEG, at most `n` (and at most 16),
+    /// largest share first: the one quantizer every binding reaches
+    /// (docs/media-player-plan.md M15), or null for bytes that do not decode.
+    public static PaletteColor[]? ImagePalette(byte[] bytes, int n)
+    {
+        int k = Math.Clamp(n, 0, 16);
+        var rgb = new uint[k + 1];
+        var share = new double[k + 1];
+        nint got = kaya_image_palette(bytes, (nuint)bytes.Length, (nuint)k, rgb, share);
+        if (got < 0) return null;
+        var found = new PaletteColor[got];
+        for (int i = 0; i < found.Length; i++)
+            found[i] = new PaletteColor(new Color((byte)(rgb[i] >> 16), (byte)(rgb[i] >> 8), (byte)rgb[i]), share[i]);
+        return found;
+    }
 
     // The asset table (docs/assets-plan.md). No mode argument anywhere on
     // this floor: assets are read-only structurally.

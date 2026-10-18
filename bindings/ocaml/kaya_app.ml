@@ -1739,6 +1739,13 @@ let string_of_color = Color.to_string
    do not decode. *)
 let image_dominant data =
   Option.map (fun rgb -> Color.of_hex ((rgb lsl 8) lor 0xFF)) (Kaya_runtime.image_dominant data)
+
+type palette_color = { color : color; share : float }
+
+let image_palette data n =
+  Option.map
+    (List.map (fun (rgb, share) -> { color = Color.of_hex ((rgb lsl 8) lor 0xFF); share }))
+    (Kaya_runtime.image_palette data n)
 let pack_color c = Int64.of_int (Color.hex c)
 
 let color_of_packed packed =

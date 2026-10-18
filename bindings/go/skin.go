@@ -28,6 +28,34 @@ func ImageDominant(bytes []byte) (Color, bool) {
 	return ColorRGB(uint8(rgb>>16), uint8(rgb>>8), uint8(rgb)), true
 }
 
+// PaletteColor is one of a picture's main colours and the fraction of the
+// picture it stands for (docs/media-player-plan.md M15).
+type PaletteColor struct {
+	Color Color
+	Share float64
+}
+
+// ImagePalette is a PNG or JPEG's main colours, at most n (and at most 16),
+// largest share first, the core's one quantizer; false for bytes that do not
+// decode.
+func ImagePalette(bytes []byte, n int) ([]PaletteColor, bool) {
+	if len(bytes) == 0 {
+		return nil, false
+	}
+	k := min(max(n, 0), C.KAYA_PALETTE_MAX)
+	rgb := make([]C.uint32_t, k+1)
+	share := make([]C.double, k+1)
+	got := C.kaya_image_palette((*C.uint8_t)(unsafe.Pointer(&bytes[0])), C.uintptr_t(len(bytes)), C.uintptr_t(k), &rgb[0], &share[0])
+	if got < 0 {
+		return nil, false
+	}
+	out := make([]PaletteColor, int(got))
+	for i := range out {
+		out[i] = PaletteColor{ColorRGB(uint8(rgb[i]>>16), uint8(rgb[i]>>8), uint8(rgb[i])), float64(share[i])}
+	}
+	return out, true
+}
+
 // SetGroundGradient gives a row or column a ground fading from color,
 // clamped by the core for the appearance's text, into the window's ground.
 func (tx *Tx) SetGroundGradient(w Widget, color Color) {

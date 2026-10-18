@@ -12522,6 +12522,24 @@ private func kayaRunScript(_ script: String) {
                 // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
                 let (ok, fail) = kayaSkinReading(parts)
                 if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_ground_reach":
+                // docs/safe-area-plan.md A2; harness.rs Step::ExpectGroundReach.
+                let (ok, fail) = kayaSkinReading(parts)
+                if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_system_bars":
+                // docs/safe-area-plan.md A2; harness.rs Step::ExpectSystemBars.
+                let wantBars = kayaQuoted(Array(parts[1...]))
+                var gotBars = kayaSystemBarWords()
+                let barsDeadline = Date().addingTimeInterval(5)
+                while gotBars.0 != wantBars && Date() < barsDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotBars = kayaSystemBarWords()
+                }
+                if gotBars.0 == wantBars {
+                    observed.append("system bars \"\(wantBars)\"")
+                } else {
+                    failures.append("system bars \"\(gotBars.0)\", wanted \"\(wantBars)\": \(gotBars.1)")
+                }
             case "expect_shape":
                 let (ok, fail) = kayaSkinReading(parts)
                 if let ok { observed.append(ok) } else { failures.append(fail) }
@@ -21381,6 +21399,83 @@ struct KayaSkinFrameReader: View {
     return "unmatched (\(detail))"
 }
 
+/// expect_ground_reach's read (docs/safe-area-plan.md A2): the window's pixel
+/// in each system bar's strip, 4 units inside the container's right edge,
+/// against the container's own pixel 2 units inside that edge and the page's
+/// ground; a bar is reached when its strip is not the page's ground and is
+/// nearer the container's than the page's. Compose's kayaGroundReachRead.
+@MainActor func kayaGroundReachRead(_ node: KayaNode) -> String {
+    #if os(macOS)
+        return "none (a macOS window has no system bars)"
+    #else
+        guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 8 else { return "<no laid-out frame>" }
+        guard let window = kayaHarnessWindow() else { return "<no window>" }
+        guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+        let page = kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground
+        let insets = window.safeAreaInsets
+        let x = frame.maxX - 4
+        var seen: [String] = []
+        func reached(_ bar: String, _ height: CGFloat, _ stripY: CGFloat, _ edgeY: CGFloat) -> Bool {
+            guard height > 0 else {
+                seen.append("no \(bar) inset")
+                return false
+            }
+            guard let strip = shot.at(CGPoint(x: x, y: stripY)), let edge = shot.at(CGPoint(x: x, y: edgeY)) else {
+                seen.append("the \(bar) probes fall outside the window at (\(x), \(stripY)) and (\(x), \(edgeY))")
+                return false
+            }
+            seen.append("\(bar) strip \(kayaHex(strip)) at y \(Int(stripY)), the container \(kayaHex(edge)) at y \(Int(edgeY))")
+            return kayaColourGap(strip, page) > kayaSkinTolerance && kayaColourGap(strip, edge) < kayaColourGap(strip, page)
+        }
+        let top = reached("status", insets.top, insets.top / 2, frame.minY + 2)
+        let bottom = reached("home indicator", insets.bottom, window.bounds.height - insets.bottom / 2, frame.maxY - 2)
+        let word = top && bottom ? "both" : top ? "top" : bottom ? "bottom" : "none"
+        return "\(word) (\(seen.joined(separator: ", ")), page ground \(kayaHex(page)), frame \(frame))"
+    #endif
+}
+
+/// expect_system_bars' reading (docs/safe-area-plan.md A2): the status bar's
+/// style off the window scene against the window's pixel in its strip, 4
+/// points in from the left edge; `legible` where the icons are the shade that
+/// contrasts more with that pixel. iOS draws no navigation bar icons (its home
+/// indicator adapts by itself), so the second word is `none`; the mac has no
+/// system bars. The words, then what was read.
+func kayaSystemBarWords() -> (String, String) {
+    #if os(macOS)
+        return ("none/none", "a macOS window has no system bars")
+    #else
+        return DispatchQueue.main.sync { () -> (String, String) in
+            guard let window = kayaHarnessWindow(), let manager = window.windowScene?.statusBarManager else {
+                return ("unreadable", "no window scene to read the status bar of")
+            }
+            if manager.isStatusBarHidden { return ("none/none", "the status bar is hidden") }
+            guard let shot = kayaWindowPixels() else { return ("unreadable", "no window pixels") }
+            let y = window.safeAreaInsets.top / 2
+            guard let strip = shot.at(CGPoint(x: 4, y: y)) else {
+                return ("unreadable", "the status strip falls outside the window at y \(Int(y))")
+            }
+            let style = manager.statusBarStyle
+            let darkIcons: Bool
+            let how: String
+            switch style {
+            case .darkContent: (darkIcons, how) = (true, "darkContent")
+            case .lightContent: (darkIcons, how) = (false, "lightContent")
+            default:
+                darkIcons = window.traitCollection.userInterfaceStyle != .dark
+                how = "default under a \(darkIcons ? "light" : "dark") interface"
+            }
+            func lum(_ c: [Double]) -> Double {
+                let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+                return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+            }
+            let y0 = lum(strip)
+            let wantDark = (y0 + 0.05) / 0.05 >= 1.05 / (y0 + 0.05)
+            return ("\(wantDark == darkIcons ? "legible" : "illegible")/none",
+                    "status icons \(darkIcons ? "dark" : "light") (\(how)) over \(kayaHex(strip)) at y \(Int(y))")
+        }
+    #endif
+}
+
 /// The picture an image ground shows at a point of its container, as cover
 /// places it, or nil when it shows none.
 @MainActor func kayaPictureAt(_ node: KayaNode, _ p: CGPoint, _ box: CGSize) -> [Double]? {
@@ -21515,6 +21610,11 @@ func kayaSkinReading(_ parts: [Substring]) -> (String?, String) {
             return DispatchQueue.main.sync {
                 (kayaTarget(parts[1], "column", kayaScene.columns)
                     ?? kayaTarget(parts[1], "row", kayaScene.rows)).map(kayaGroundRead)
+            }
+        } else if verb == "expect_ground_reach" {
+            return DispatchQueue.main.sync {
+                (kayaTarget(parts[1], "column", kayaScene.columns)
+                    ?? kayaTarget(parts[1], "row", kayaScene.rows)).map(kayaGroundReachRead)
             }
         } else if verb == "expect_shape" {
             return DispatchQueue.main.sync { kayaTarget(parts[1], "image", kayaScene.images).map(kayaShapeRead) }

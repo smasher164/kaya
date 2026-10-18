@@ -716,6 +716,19 @@ image_dominant, the picture's main colours with their shares, in the core and
 all nine bindings and the C floor; the header picks the most vivid colour with
 enough share. The fade line at the header's
 edge and the Mac's colour stopping under the title bar stay as they are.
+BUILT 2026-10-18: `image_palette(bytes, n)` in crates/kaya/src/dominant.rs
+(at most n and at most 16 colours, each with its share, largest first; a
+greedy squared-error cut of a 2^15-bin histogram in integer arithmetic, so
+every platform answers the same bits), the C ABI's `kaya_image_palette`, and
+all nine bindings' spellings, held by the skin census. guests/python/music.py's
+`header_colour` takes the palette entry with the highest chroma times the root
+of its share among those over 2% of the picture, between L* 8 and 96 and at
+chroma 15 or more, and the dominant colour when none qualifies. The dark wash
+now matches the comparison's B on all four covers. In light the header is
+still a near grey (C0BABB on Through The Olive Branches, BBBCB8 on This
+Painted Life): the core's light clamp lifts L* 30 to 75 by mixing with white,
+which drops the chroma Y2 says it keeps. Whether to change that clamp is still
+open.
 
 ## §6: Build order
 

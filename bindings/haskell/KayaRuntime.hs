@@ -11,6 +11,7 @@ module KayaRuntime
     wake,
     registerBlob,
     imageDominantRaw,
+    imagePaletteRaw,
     Asset,
     openAsset,
     assetMissSentence,
@@ -84,7 +85,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Word (Word16, Word32, Word64, Word8)
-import Foreign.C.Types (CBool (..), CInt (..), CSize (..))
+import Foreign.C.Types (CBool (..), CDouble (..), CInt (..), CPtrdiff (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullFunPtr, nullPtr, plusPtr, wordPtrToPtr)
 import Foreign.Marshal.Array (allocaArray, peekArray)
@@ -164,6 +165,9 @@ foreign import ccall unsafe "kaya_submit"
 
 foreign import ccall unsafe "kaya_image_dominant"
   c_kaya_image_dominant :: Ptr Word8 -> CSize -> Ptr Word32 -> IO Word8
+
+foreign import ccall unsafe "kaya_image_palette"
+  c_kaya_image_palette :: Ptr Word8 -> CSize -> CSize -> Ptr Word32 -> Ptr CDouble -> IO CPtrdiff
 
 foreign import ccall unsafe "kaya_blob_register"
   c_kaya_blob_register :: Ptr Word8 -> CSize -> IO Word64
@@ -344,6 +348,23 @@ imageDominantRaw bytes = unsafePerformIO $
     alloca $ \out -> do
       ok <- c_kaya_image_dominant (castPtr p) (fromIntegral len) out
       if ok == 0 then return Nothing else Just <$> peek out
+
+-- | An image's main colours as (0xRRGGBB, share), at most @n@ and at most
+-- 16, largest first (docs\/media-player-plan.md M15); 'Nothing' for bytes
+-- that do not decode.
+imagePaletteRaw :: BS.ByteString -> Int -> Maybe [(Word32, Double)]
+imagePaletteRaw bytes n = unsafePerformIO $
+  unsafeUseAsCStringLen bytes $ \(p, len) ->
+    allocaArray (k + 1) $ \rgb -> allocaArray (k + 1) $ \share -> do
+      got <- c_kaya_image_palette (castPtr p) (fromIntegral len) (fromIntegral k) rgb share
+      if got < 0
+        then return Nothing
+        else do
+          colours <- peekArray (fromIntegral got) rgb
+          shares <- peekArray (fromIntegral got) share
+          return (Just (zip colours (map realToFrac shares)))
+  where
+    k = max 0 (min n 16)
 
 -- | An open asset: the bytes kaya read, held by the core until this is
 -- released.

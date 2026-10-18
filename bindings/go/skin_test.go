@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"math"
 	"testing"
 )
 
@@ -138,5 +139,33 @@ func TestImageDominantThroughTheCore(t *testing.T) {
 	}
 	if _, ok := ImageDominant([]byte("not an image")); ok {
 		t.Fatal("undecodable bytes answered a colour")
+	}
+}
+
+// The palette of the same picture answers both colours with their shares,
+// largest first.
+func TestImagePaletteThroughTheCore(t *testing.T) {
+	pic := image.NewRGBA(image.Rect(0, 0, 10, 10))
+	for y := 0; y < 10; y++ {
+		for x := 0; x < 10; x++ {
+			c := color.RGBA{0x1D, 0xB9, 0x54, 0xFF}
+			if x >= 7 {
+				c = color.RGBA{0x30, 0x40, 0xC0, 0xFF}
+			}
+			pic.Set(x, y, c)
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, pic); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := ImagePalette(buf.Bytes(), 6)
+	want := []PaletteColor{{ColorRGB(0x1D, 0xB9, 0x54), 0.7}, {ColorRGB(0x30, 0x40, 0xC0), 0.3}}
+	if !ok || len(got) != 2 || got[0].Color != want[0].Color || got[1].Color != want[1].Color ||
+		math.Abs(got[0].Share-0.7) > 1e-9 || math.Abs(got[1].Share-0.3) > 1e-9 {
+		t.Fatalf("a picture 70%% green and 30%% blue answered %v (ok %v)", got, ok)
+	}
+	if _, ok := ImagePalette([]byte("not an image"), 6); ok {
+		t.Fatal("undecodable bytes answered a palette")
 	}
 }

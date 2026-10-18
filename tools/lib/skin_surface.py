@@ -5,7 +5,7 @@ file: the two grounds, an image's shape, a label's tint, `selected` and
 `on_activate` and `on_select` in the live and template zones, the dock in the window
 construct, the binding's dispatch of the `activated` and `selection_changed`
 occurrences, the core's
-dominant colour, and the Tint `none`/`overlay` and Shape vocabularies. The
+dominant colour and palette, and the Tint `none`/`overlay` and Shape vocabularies. The
 wire records reach every binding through the generator whether or not a
 guest can spell a part, so only these rows see one missing."""
 
@@ -48,6 +48,7 @@ ROWS = [
     ("rust template on_select", RS, r"pub fn on_select<M: 'static>\(\n\s+&mut self,\n\s+node: TemplateNodeId,", "on_select"),
     ("rust selection dispatch", RS, r"Occurrence::InstanceSelectionChanged \{ path, \.\. \} => Some\(f\(path\.clone\(\)\)\),", "InstanceSelectionChanged"),
     ("rust image_dominant", RSD, r"^pub fn image_dominant\(bytes: &\[u8\]\) -> Option<crate::Color>", "image_dominant"),
+    ("rust image_palette", RSD, r"^pub fn image_palette\(bytes: &\[u8\], n: usize\) -> Option<Vec<PaletteColor>>", "image_palette"),
     ("rust tint none", RS, r"Tint::None => 0,", "None"),
     ("rust tint overlay", RS, r"Tint::Overlay => 6,", "Overlay"),
     ("rust shape vocabulary", RS, r"^pub enum Shape \{\n    Rect,\n    Rounded,\n    Circle,", "Shape"),
@@ -70,6 +71,7 @@ ROWS = [
     ("python template on_select", PY, r"^def _set_skin\([^)]*\bon_select: Handler \| None\)", "on_select"),
     ("python selection dispatch", PY, r"_app\._register\(handle, wire\.OCC_SELECTION_CHANGED, on_select\)", "OCC_SELECTION_CHANGED"),
     ("python image_dominant", PY, r"^def image_dominant\(data: bytes \| bytearray \| memoryview \| Asset\) -> Color \| None:", "image_dominant"),
+    ("python image_palette", PY, r"^def image_palette\(data: bytes \| bytearray \| memoryview \| Asset, n: int\) -> list\[PaletteColor\] \| None:", "image_palette"),
     ("python tint none", PY, r"^    NONE = wire\.TINT_NONE", "TINT_NONE"),
     ("python tint overlay", PY, r"^    OVERLAY = wire\.TINT_OVERLAY", "TINT_OVERLAY"),
     ("python shape vocabulary", PY, r"^class Shape\(enum\.IntEnum\):", "Shape"),
@@ -92,6 +94,7 @@ ROWS = [
     ("js template on_select", JS, r"app\(\)\._register\(handle, wire\.OCC_SELECTION_CHANGED, opts\.onSelect\);", "onSelect"),
     ("js selection dispatch", JS, r"app\(\)\._register\(handle, wire\.OCC_SELECTION_CHANGED,", "OCC_SELECTION_CHANGED"),
     ("js image_dominant", JS, r"^export function imageDominant\(bytes: Uint8Array \| Asset\): Color \| null \{", "imageDominant"),
+    ("js image_palette", JS, r"^export function imagePalette\(bytes: Uint8Array \| Asset, n: number\): PaletteColor\[\] \| null \{", "imagePalette"),
     ("js tint none", JS, r"^  NONE: wire\.TINT_NONE,", "TINT_NONE"),
     ("js tint overlay", JS, r"^  OVERLAY: wire\.TINT_OVERLAY,", "TINT_OVERLAY"),
     ("js shape vocabulary", JS, r"^export const Shape = Object\.freeze\(\{ RECT: wire\.SHAPE_RECT, ROUNDED: wire\.SHAPE_ROUNDED, CIRCLE: wire\.SHAPE_CIRCLE \}\);", "Shape"),
@@ -115,6 +118,7 @@ ROWS = [
     ("go template on_select", GO, r"^func \(n Node\) OnSelect\(fn func\(\*Tx, \[\]any\)\) Node \{", "OnSelect"),
     ("go selection dispatch", GOA, r"case kind == occSelectionChanged:\n\s+if fn := a\.nodeSelects\[id\]; fn != nil \{", "nodeSelects"),
     ("go image_dominant", GO, r"^func ImageDominant\(bytes \[\]byte\) \(Color, bool\) \{", "ImageDominant"),
+    ("go image_palette", GO, r"^func ImagePalette\(bytes \[\]byte, n int\) \(\[\]PaletteColor, bool\) \{", "ImagePalette"),
     ("go tint none", GOW, r"^\tTintNone Tint = 0", "TintNone"),
     ("go tint overlay", GOW, r"^\tTintOverlay Tint = 6", "TintOverlay"),
     ("go shape vocabulary", GO, r"^type Shape int64", "Shape"),
@@ -138,6 +142,7 @@ ROWS = [
     ("csharp template on_select", CS, r"public void OnSelect\(Node n, Action<Tx, List<object>> handler\)", "OnSelect"),
     ("csharp selection dispatch", CS, r"case SelectionChanged pickRow\n\s+when nodeSelects\.TryGetValue\(pickRow\.Id, out var onSelectRow\):", "nodeSelects"),
     ("csharp image_dominant", CSK, r"public static Color\? ImageDominant\(byte\[\] bytes\) =>", "ImageDominant"),
+    ("csharp image_palette", CSK, r"public static PaletteColor\[\]\? ImagePalette\(byte\[\] bytes, int n\)", "ImagePalette"),
     ("csharp tint none", CS, r"^    None = KayaWire\.TintNone,", "TintNone"),
     ("csharp tint overlay", CS, r"^    Overlay = KayaWire\.TintOverlay,", "TintOverlay"),
     ("csharp shape vocabulary", CS, r"^enum Shape : long\n\{\n    Rect = KayaWire\.ShapeRect,", "Shape"),
@@ -161,6 +166,7 @@ ROWS = [
     ("java template on_select", JV, r"public void onSelect\(Node n, BiConsumer<Tx, List<Object>> handler\) \{", "onSelect"),
     ("java selection dispatch", JV, r"\} else if \(occ\.kind == KayaWire\.OCC_KIND_SELECTION_CHANGED\) \{\n\s+BiConsumer<Tx, List<Object>> handler = nodeSelects\.get\(occ\.id\);", "nodeSelects"),
     ("java image_dominant", JV, r"public static java\.util\.Optional<Color> imageDominant\(byte\[\] bytes\) \{", "imageDominant"),
+    ("java image_palette", JV, r"public static java\.util\.Optional<List<PaletteColor>> imagePalette\(byte\[\] bytes, int n\) \{", "imagePalette"),
     ("java tint none", JV, r"^        NONE\(KayaWire\.TINT_NONE\),", "TINT_NONE"),
     ("java tint overlay", JV, r"^        OVERLAY\(KayaWire\.TINT_OVERLAY\);", "TINT_OVERLAY"),
     ("java shape vocabulary", JV, r"public enum Shape \{\n\s+RECT\(KayaWire\.SHAPE_RECT\), ROUNDED\(KayaWire\.SHAPE_ROUNDED\), CIRCLE\(KayaWire\.SHAPE_CIRCLE\);", "Shape"),
@@ -186,6 +192,7 @@ ROWS = [
     ("swift template on_select", SW, r"public func onSelect\(_ n: KayaNodeHandle, _ handler: @escaping \(KayaAppTx, \[KayaValue\]\) throws -> Void\) \{", "onSelect"),
     ("swift selection dispatch", SW, r"case \(UInt16\(KAYA_OCCURRENCE_SELECTION_CHANGED\), false\):", "KAYA_OCCURRENCE_SELECTION_CHANGED"),
     ("swift image_dominant", SW, r"public static func imageDominant\(_ bytes: Data\) -> KayaColor\? \{", "imageDominant"),
+    ("swift image_palette", SW, r"public static func imagePalette\(_ bytes: Data, _ n: Int\) -> \[KayaPaletteColor\]\? \{", "imagePalette"),
     ("swift tint none", SW, r"^    case none = 0\n(?:    case [a-z]+ = [1-5]\n){5}", "none"),
     ("swift tint overlay", SW, r"^    case overlay = 6", "overlay"),
     ("swift shape vocabulary", SW, r"^public enum KayaShape: Int64, Sendable \{", "KayaShape"),
@@ -208,6 +215,7 @@ ROWS = [
     ("ocaml template on_select", ML, r"^  val on_select : node -> \(key list -> unit\) -> unit", "on_select"),
     ("ocaml selection dispatch", MLI, r"else if kind = Kaya_wire\.occ_kind_selection_changed then\n(?:.*\n){0,4}\s+\(match Hashtbl\.find_opt app\.widget_selects id with", "widget_selects"),
     ("ocaml image_dominant", ML, r"^val image_dominant : bytes -> color option", "image_dominant"),
+    ("ocaml image_palette", ML, r"^val image_palette : bytes -> int -> palette_color list option", "image_palette"),
     ("ocaml tint none", ML, r"^  type t = None \| Accent \| Success \| Warning \| Critical \| Neutral \| Overlay", "None"),
     ("ocaml tint overlay", ML, r"^  type t = None \| Accent \| Success \| Warning \| Critical \| Neutral \| Overlay", "Overlay"),
     ("ocaml shape vocabulary", ML, r"^type shape = \[ `Rect \| `Rounded \| `Circle \]", "shape"),
@@ -231,6 +239,7 @@ ROWS = [
     ("haskell template on_select", HS, r"^  TplOnSelect :: \(\[Key\] -> IO \(\)\) -> TplAttr", "TplOnSelect"),
     ("haskell selection dispatch", HS, r"\| kind == W\.occKindSelectionChanged -> do\n\s+case keys of\n\s+\[\] -> do\n\s+handlers <- readIORef \(app\.appWidgetSelects\)", "appWidgetSelects"),
     ("haskell image_dominant", HS, r"^imageDominant :: BS\.ByteString -> Maybe Color", "imageDominant"),
+    ("haskell image_palette", HS, r"^imagePalette :: BS\.ByteString -> Int -> Maybe \[PaletteColor\]", "imagePalette"),
     ("haskell tint none", HS, r"^  TintNone -> W\.tintNone", "TintNone"),
     ("haskell tint overlay", HS, r"^  TintOverlay -> W\.tintOverlay", "TintOverlay"),
     ("haskell shape vocabulary", HS, r"^data Shape = ShapeRect \| ShapeRounded \| ShapeCircle", "Shape"),
@@ -240,6 +249,8 @@ LANGS = ("rust", "python", "js", "go", "csharp", "java", "swift", "ocaml", "hask
 PARTS = ("ground gradient", "ground image", "image shape", "label tint", "selected", "on_activate",
          "template ground gradient", "template ground image", "template image shape", "template label tint",
          "template selected", "template on_activate", "dock", "activated dispatch", "image_dominant",
+         # M15, RULED 2026-10-18: the picture's main colours beside the dominant.
+         "image_palette",
          "tint none", "tint overlay", "shape vocabulary",
          # Y4, AMENDED 2026-10-17: the user's pick, beside the activation.
          "on_select", "template on_select", "selection dispatch")

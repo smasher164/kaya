@@ -4483,6 +4483,19 @@ export function imageDominant(bytes: Uint8Array | Asset): Color | null {
   return rgb === null ? null : new Color((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
 }
 
+/** One of a picture's main colours and the fraction of the picture it
+ * stands for (docs/media-player-plan.md M15). */
+export type PaletteColor = { readonly color: Color; readonly share: number };
+
+/** The main colours of encoded image bytes, at most `n` (and at most 16),
+ * largest share first: the core's one quantizer, so every binding answers
+ * the same palette for the same art. null when the bytes do not decode. */
+export function imagePalette(bytes: Uint8Array | Asset, n: number): PaletteColor[] | null {
+  if (!Number.isInteger(n)) throw new TypeError(`kaya: imagePalette's n is an integer, not ${runtime.describe(n)}`);
+  const found = runtime.imagePalette(bytes instanceof Asset ? bytes.bytes() : bytes, Math.max(0, n));
+  return found === null ? null : found.map(([rgb, share]) => ({ color: new Color((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff), share }));
+}
+
 function setGrow(handle: Handle, opts: GrowOption): void {
   if (opts.grow !== undefined) records().push(wire.tx_set_grow(handle.id, Number(opts.grow)));
 }

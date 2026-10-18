@@ -251,6 +251,29 @@ NATIVE = [
      " reading, nudged = settle_until(serial, log, wanted)"),
     (EMULATOR, "the android lane reads the display's rotation after a landscape leg",
      "if pinned or serial in LANDSCAPE_RAN:\n if not leg_rotation(serial, log, pinned):"),
+    # A2: a ground runs under the bars it touches and the bars' icons read on
+    # what is drawn behind them. The phone tails read the album header's reach
+    # and the icons with the header up and after it is popped, but in both
+    # appearances the clamped header and the page agree on the icons, so a
+    # claim that outlived its screen is green on every leg.
+    (COMPOSE, "Compose's gradient ground runs through the safe area it touches",
+     "val reach = kayaGroundReach(node, stops[0], stops[1])"),
+    (COMPOSE, "Compose's reaching gradient is drawn past its box",
+     "Brush.verticalGradient(stops, startY = -up, endY = size.height + down),\n topLeft = Offset(-left, -up),"),
+    (COMPOSE, "Compose's ground reaches the bars only where the window gives no inset",
+     "val edges = if (pads == null || KayaSceneModel.windowInset != 0.0) null\n else kayaBleedEdges(node)"),
+    (COMPOSE, "Compose's ground's claim on the bars ends with its composition",
+     "onDispose { kayaBarGrounds.remove(node.id) }"),
+    (COMPOSE, "Compose's bar icons follow what is drawn behind them",
+     "controller.isAppearanceLightStatusBars = kayaDarkIconsOn(status)\n"
+     " controller.isAppearanceLightNavigationBars = kayaDarkIconsOn(nav)"),
+    (COMPOSE, "Compose's bar icons are set from the root",
+     "KayaToastHost(Modifier.align(Alignment.BottomCenter))\n KayaSystemBarIcons()"),
+    (COMPOSE, "Compose's expect_system_bars reads the controller against the strip's pixel",
+     "val strip = shot.at(4 * shot.density, y)"),
+    (SWIFT, "SwiftUI's expect_system_bars reads the scene's status bar style", "let style = manager.statusBarStyle"),
+    (HARNESS, "harness.rs reads the system bars", "Step::ExpectSystemBars(want) => Some(poll(|| match stage.system_bars() {"),
+    (HARNESS, "harness.rs reads a ground's reach", "word_reading(&stage.ground_reach(*t), want,"),
 ]
 # What a backend's read may never name: its own model of the answer.
 NEVER = [
@@ -578,6 +601,25 @@ def run(g):
          "the lane's one spelling of the setting"),
     ]
     cuts += [
+        ("Compose's gradient stopping at the safe area, as shipped", COMPOSE,
+         r"val reach = kayaGroundReach\(node, stops\[0\], stops\[1\]\)",
+         "val reach: Pair<WindowInsets, BooleanArray>? = null", "Compose's gradient ground runs through"),
+        ("Compose's ground reaching through the window's inset", COMPOSE,
+         r"KayaSceneModel\.windowInset != 0\.0\) null", "false) null",
+         "Compose's ground reaches the bars only where the window gives no inset"),
+        ("Compose's claim outliving a popped screen", COMPOSE,
+         r"onDispose \{ kayaBarGrounds\.remove\(node\.id\) \}", "onDispose { }",
+         "Compose's ground's claim on the bars ends with its composition"),
+        ("Compose's status icons left to the system, as shipped", COMPOSE,
+         r"controller\.isAppearanceLightStatusBars = kayaDarkIconsOn\(status\)\n", "Unit\n",
+         "Compose's bar icons follow what is drawn behind them"),
+        ("Compose's bar icons never set", COMPOSE, r"\n(\s+)KayaSystemBarIcons\(\)\n(\s+)\}\n", r"\n\2}\n",
+         "Compose's bar icons are set from the root"),
+        ("SwiftUI's status bar read off the interface style alone", SWIFT,
+         r"let style = manager\.statusBarStyle", "let style = UIStatusBarStyle.default",
+         "SwiftUI's expect_system_bars reads the scene's status bar style"),
+        ("harness.rs answering its own system bars", HARNESS, r"match stage\.system_bars\(\) \{",
+         "match Ok::<String, String>(want.clone()) {", "harness.rs reads the system bars"),
         ("GTK's bleed margins gone", GTK, r"\.kaya-bleed-top \{\{ margin-top: -\{px\}px; \}\}", "",
          "GTK's bleed leaves the root's padding"),
         ("GTK's drain not refreshing the bleed", GTK, r"presentation_report\(core\);\n(\s+)refresh_bleeds\(core\);",

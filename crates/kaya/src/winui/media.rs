@@ -33,6 +33,7 @@ use super::bindings::Windows::Media::Streaming::Adaptive::{
     AdaptiveMediaSource, AdaptiveMediaSourceCreationResult, AdaptiveMediaSourceCreationStatus,
 };
 use super::bindings::Windows::Web::Http::{HttpClient, HttpCompletionOption, HttpMethod, HttpRequestMessage};
+use super::bindings::Windows::Storage::Streams::IRandomAccessStreamReference;
 use super::{CoreState, CORE, DISPATCHER};
 use crate::media::Report;
 use crate::protocol::{PlayerCommand, PlayerId, PlayerProp, SessionAction, TrackKind, Value, WidgetId};
@@ -371,6 +372,24 @@ struct SessionView {
     artist: String,
     album: String,
     artwork: Option<super::bindings::Windows::Storage::Streams::RandomAccessStreamReference>,
+    /// What expect_now_playing_art's why-not says this process handed over.
+    art: ArtHanded,
+}
+
+#[derive(Default)]
+struct ArtHanded {
+    said: String,
+    stream: Option<ArtStream>,
+    declared: Option<std::time::Instant>,
+    /// Just before SetThumbnail, and once Update has returned.
+    set: Option<std::time::Instant>,
+    published: Option<std::time::Instant>,
+    /// The first playback statuses set after the publish.
+    statuses: std::cell::RefCell<Vec<(std::time::Instant, i32)>>,
+    /// The one later hand-over of the same thumbnail (docs/traps.md, the
+    /// thumbnail the session manager dropped), and when it ran.
+    rehand: Option<DispatcherQueueTimer>,
+    rehanded: Option<std::time::Instant>,
 }
 
 #[derive(Default)]
@@ -2185,31 +2204,44 @@ pub(super) struct SessionSpec {
 
 pub(super) fn set_session(core: &mut CoreState, spec: SessionSpec) -> windows_core::Result<()> {
     let SessionSpec { player, offered, stated, title, artist, album, artwork } = spec;
-    let artwork = session_thumbnail(&artwork)?;
-    core.media.session = SessionView { player, offered, stated, title, artist, album, artwork };
+    let (artwork, stream, said) = session_thumbnail(&artwork)?;
+    if let Some(timer) = core.media.session.art.rehand.take() {
+        timer.Stop()?;
+    }
+    let art = ArtHanded { said, stream, declared: Some(std::time::Instant::now()), ..ArtHanded::default() };
+    core.media.session = SessionView { player, offered, stated, title, artist, album, artwork, art };
     session_publish(core)
+}
+
+type Thumbnail = (
+    Option<super::bindings::Windows::Storage::Streams::RandomAccessStreamReference>,
+    Option<ArtStream>,
+    String,
+);
+
+struct ArtStream {
+    stream: super::bindings::Windows::Storage::Streams::InMemoryRandomAccessStream,
+    opens: Arc<std::sync::Mutex<Vec<std::time::Instant>>>,
 }
 
 /// The SMTC's thumbnail, made once per declaration from the picture's bytes
 /// in an in-memory stream, the asset's read from its file
 /// (docs/media-player-plan.md M7).
-fn session_thumbnail(
-    artwork: &Value,
-) -> windows_core::Result<Option<super::bindings::Windows::Storage::Streams::RandomAccessStreamReference>> {
+fn session_thumbnail(artwork: &Value) -> windows_core::Result<Thumbnail> {
     use super::bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference};
     let (bytes, from) = match artwork {
-        Value::Str(url) if url.is_empty() => return Ok(None),
+        Value::Str(url) if url.is_empty() => return Ok((None, None, "no artwork".to_owned())),
         Value::Str(url) => {
             let read = crate::edit_list::file_url_path(url).map(std::fs::read);
             match read {
                 Some(Ok(bytes)) => (std::sync::Arc::from(bytes), url.as_str()),
                 Some(Err(why)) => {
                     eprintln!("KAYA_DIAG winui session thumbnail: {url} is unreadable: {why}");
-                    return Ok(None);
+                    return Ok((None, None, format!("{url}, unreadable: {why}")));
                 }
                 None => {
                     eprintln!("KAYA_DIAG winui session thumbnail: {url} is not a file URL");
-                    return Ok(None);
+                    return Ok((None, None, format!("{url}, not a file URL")));
                 }
             }
         }
@@ -2222,8 +2254,35 @@ fn session_thumbnail(
     writer.StoreAsync()?.join()?;
     writer.DetachStream()?;
     stream.Seek(0)?;
-    eprintln!("KAYA_DIAG winui session thumbnail: {} bytes from {from}, stream size {}", bytes.len(), stream.Size()?);
-    Ok(Some(RandomAccessStreamReference::CreateFromStream(&stream)?))
+    let said = format!("{} bytes from {from}", bytes.len());
+    eprintln!("KAYA_DIAG winui session thumbnail: {said}, stream size {}", stream.Size()?);
+    let opens = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let counted: IRandomAccessStreamReference =
+        CountedArt { inner: RandomAccessStreamReference::CreateFromStream(&stream)?, opens: opens.clone() }.into();
+    Ok((Some(counted.cast()?), Some(ArtStream { stream, opens }), said))
+}
+
+/// The session's thumbnail reference, forwarding to the in-memory stream's
+/// own and noting each time something opens it, which is the only record of
+/// whether the system ever read the bytes: the stream it hands out is a clone,
+/// so the handed stream's position stays 0 (measured 2026-10-18).
+#[windows_core::implement(IRandomAccessStreamReference)]
+struct CountedArt {
+    inner: super::bindings::Windows::Storage::Streams::RandomAccessStreamReference,
+    opens: Arc<std::sync::Mutex<Vec<std::time::Instant>>>,
+}
+
+impl super::bindings::Windows::Storage::Streams::IRandomAccessStreamReference_Impl for CountedArt_Impl {
+    fn OpenReadAsync(
+        &self,
+    ) -> windows_core::Result<
+        windows_future::IAsyncOperation<super::bindings::Windows::Storage::Streams::IRandomAccessStreamWithContentType>,
+    > {
+        if let Ok(mut opens) = self.opens.lock() {
+            opens.push(std::time::Instant::now());
+        }
+        self.inner.OpenReadAsync()
+    }
 }
 
 /// The SMTC the session speaks through: the attached player's own, or with
@@ -2294,10 +2353,17 @@ fn session_publish(core: &mut CoreState) -> windows_core::Result<()> {
             props.SetArtist(&HSTRING::from(s.artist.as_str()))?;
             props.SetAlbumTitle(&HSTRING::from(s.album.as_str()))?;
         }
+        let set = std::time::Instant::now();
         if let Some(thumbnail) = &s.artwork {
             display.SetThumbnail(thumbnail)?;
         }
         display.Update()?;
+        core.media.session.art.set = Some(set);
+        core.media.session.art.statuses.borrow_mut().clear();
+        if core.media.session.artwork.is_some() && core.media.session.art.rehand.is_none() {
+            core.media.session.art.rehand = rehand_later(core.media.session.art.declared)?;
+        }
+        core.media.session.art.published = Some(std::time::Instant::now());
     }
     if let Some(old) = core.media.live_smtc.take() {
         if Some(&old) != wanted.as_ref() {
@@ -2307,6 +2373,47 @@ fn session_publish(core: &mut CoreState) -> windows_core::Result<()> {
     core.media.live_smtc = wanted;
     session_follow(core);
     Ok(())
+}
+
+/// The session manager can drop a thumbnail the SMTC opened and read, with
+/// this process's display still holding it and nothing later sending it
+/// again; measured on a loaded VM (docs/traps.md, the thumbnail the session
+/// manager dropped). The same thumbnail is handed over once more a second
+/// later, for the declaration that is still standing.
+const REHAND_MS: i64 = 1000;
+
+fn rehand_later(declared: Option<std::time::Instant>) -> windows_core::Result<Option<DispatcherQueueTimer>> {
+    let Some(dispatcher) = DISPATCHER.get() else { return Ok(None) };
+    let timer = dispatcher.0.CreateTimer()?;
+    timer.SetInterval(TimeSpan { Duration: REHAND_MS * 10_000 })?;
+    timer.SetIsRepeating(false)?;
+    timer.Tick(&TypedEventHandler::new(move |_, _| {
+        CORE.with(|slot| {
+            if let Ok(mut core) = slot.try_borrow_mut() {
+                if let Some(core) = core.as_mut() {
+                    crate::fault::guard("the session's thumbnail", || rehand(core, declared));
+                }
+            }
+        });
+        Ok(())
+    }))?;
+    timer.Start()?;
+    Ok(Some(timer))
+}
+
+fn rehand(core: &mut CoreState, declared: Option<std::time::Instant>) {
+    if core.media.session.art.declared != declared {
+        return;
+    }
+    let (Some(smtc), Some(thumbnail)) = (&core.media.live_smtc, &core.media.session.artwork) else { return };
+    let handed = smtc.DisplayUpdater().and_then(|display| {
+        display.SetThumbnail(thumbnail)?;
+        display.Update()
+    });
+    match handed {
+        Ok(()) => core.media.session.art.rehanded = Some(std::time::Instant::now()),
+        Err(e) => eprintln!("KAYA_DIAG winui session thumbnail: handing it over again failed: {}", e.message()),
+    }
 }
 
 fn window_smtc(core: &mut CoreState) -> windows_core::Result<SystemMediaTransportControls> {
@@ -2337,6 +2444,10 @@ fn session_follow(core: &CoreState) {
     };
     if let Err(e) = smtc.SetPlaybackStatus(status) {
         eprintln!("KAYA_DIAG winui session: setting the playback status failed: {}", e.message());
+    }
+    let mut statuses = core.media.session.art.statuses.borrow_mut();
+    if statuses.len() < 8 {
+        statuses.push((std::time::Instant::now(), status.0));
     }
 }
 
@@ -2532,8 +2643,77 @@ pub(super) mod stage {
         Ok(Err(format!("the system's session manager holds {names:?}, none of them this process ({aumid:?})")))
     }
 
+    fn playback_type(raw: i32) -> String {
+        ["unknown", "music", "video", "image"].get(raw as usize).map_or(format!("{raw}"), |n| (*n).to_owned())
+    }
+
+    /// expect_now_playing_art's account of this process's half: the artwork
+    /// the last declaration handed over and when, the live SMTC's own
+    /// display, and how far into the handed stream anything has read.
+    pub(in super::super) fn session_here(core: &CoreState) -> String {
+        let art = &core.media.session.art;
+        let now = std::time::Instant::now();
+        let ago = |at: Option<std::time::Instant>| at.map_or("never".to_owned(), |t| format!("{}ms ago", (now - t).as_millis()));
+        let after = |t: std::time::Instant| match art.set {
+            Some(set) if t >= set => format!("{}ms after SetThumbnail", (t - set).as_millis()),
+            Some(set) => format!("{}ms before SetThumbnail", (set - t).as_millis()),
+            None => format!("{}ms ago", (now - t).as_millis()),
+        };
+        let stream = match &art.stream {
+            Some(a) => {
+                let size = a.stream.Size().map_or_else(|e| format!("<{}>", e.message()), |n| n.to_string());
+                let opens: Vec<String> = a.opens.lock().map_or_else(
+                    |_| vec!["<the record's lock is poisoned>".to_owned()],
+                    |o| o.iter().map(|t| after(*t)).collect(),
+                );
+                match opens.as_slice() {
+                    [] => format!("a {size}-byte stream nothing has opened"),
+                    [only] => format!("a {size}-byte stream opened once, {only}"),
+                    [first, .., last] => format!("a {size}-byte stream opened {} times, first {first}, last {last}", opens.len()),
+                }
+            }
+            None => "no stream".to_owned(),
+        };
+        let smtc = match &core.media.live_smtc {
+            None => "no live SMTC".to_owned(),
+            Some(smtc) => {
+                let display = smtc.DisplayUpdater();
+                let thumb = match display.as_ref().map_err(Clone::clone).and_then(|d| d.Thumbnail()) {
+                    Ok(_) => "a thumbnail".to_owned(),
+                    Err(e) if e.code().is_ok() => "no thumbnail".to_owned(),
+                    Err(e) => format!("a thumbnail unreadable ({})", e.message()),
+                };
+                let kind = display.and_then(|d| d.Type()).map_or_else(|e| e.message(), |t| playback_type(t.0));
+                let status = smtc.PlaybackStatus().map_or_else(|e| e.message(), |s| {
+                    ["closed", "changing", "stopped", "playing", "paused"].get(s.0 as usize).map_or(format!("{}", s.0), |n| (*n).to_owned())
+                });
+                let enabled = smtc.IsEnabled().map_or_else(|e| e.message(), |e| e.to_string());
+                format!("its SMTC enabled {enabled}, status {status}, display {kind} holding {thumb}")
+            }
+        };
+        let statuses: Vec<String> = art
+            .statuses
+            .borrow()
+            .iter()
+            .map(|(t, raw)| {
+                let name = ["closed", "changing", "stopped", "playing", "paused"].get(*raw as usize).copied().unwrap_or("?");
+                format!("{name} {}", after(*t))
+            })
+            .collect();
+        let stream = if statuses.is_empty() { stream } else { format!("{stream}, status set {}", statuses.join(", ")) };
+        format!(
+            "here: artwork {}, declared {}, published {}{}{}, {stream}; {smtc}",
+            if art.said.is_empty() { "never declared" } else { &art.said },
+            ago(art.declared),
+            ago(art.published),
+            art.published.map_or(String::new(), |t| format!(" (Update returned {})", after(t))),
+            art.rehanded.map_or(String::new(), |t| format!(", handed over again {}", after(t)))
+        )
+    }
+
     /// The thumbnail the system's session manager holds for this process:
-    /// crate::harness::art_reading over its bytes, or `none`.
+    /// crate::harness::art_reading over its bytes, or `none`, then what the
+    /// session manager said beside it.
     pub(crate) fn now_playing_art(aumid: String) -> String {
         in_mta(move || {
             use super::super::bindings::Windows::Storage::Streams::DataReader;
@@ -2541,20 +2721,32 @@ pub(super) mod stage {
                 Ok(session) => session,
                 Err(why) => return Ok(format!("<{why}>")),
             };
-            let thumbnail = match session.TryGetMediaPropertiesAsync()?.join()?.Thumbnail() {
+            let props = session.TryGetMediaPropertiesAsync()?.join()?;
+            let status = session.GetPlaybackInfo()?.PlaybackStatus().map_or_else(|e| e.message(), |s| {
+                ["closed", "opened", "changing", "stopped", "playing", "paused"].get(s.0 as usize).map_or(format!("{}", s.0), |n| (*n).to_owned())
+            });
+            let kind = props.PlaybackType().and_then(|t| t.Value()).map_or_else(|e| format!("<{}>", e.message()), |t| playback_type(t.0));
+            let said = format!(
+                "the system's session: title {:?}, artist {:?}, album {:?}, type {kind}, status {status}",
+                props.Title().map(|t| t.to_string()).unwrap_or_default(),
+                props.Artist().map(|t| t.to_string()).unwrap_or_default(),
+                props.AlbumTitle().map(|t| t.to_string()).unwrap_or_default(),
+            );
+            let thumbnail = match props.Thumbnail() {
                 Ok(t) => t,
-                Err(e) if e.code().is_ok() => return Ok("none".to_owned()),
-                Err(e) => return Err(e),
+                Err(e) if e.code().is_ok() => return Ok(format!("none ({said}, no thumbnail)")),
+                Err(e) => return Ok(format!("<its thumbnail: {}> ({said})", e.message())),
             };
             let stream = thumbnail.OpenReadAsync()?.join()?;
+            let kind = stream.ContentType().map_or_else(|e| format!("<{}>", e.message()), |t| t.to_string());
             let size = stream.Size()? as u32;
             let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0)?)?;
             let loaded = reader.LoadAsync(size)?.join()?;
             let mut bytes = vec![0u8; loaded as usize];
             reader.ReadBytes(&mut bytes)?;
             Ok(match crate::reader::decode_straight(&bytes) {
-                Some((w, h, rgba)) => crate::harness::art_reading(w, h, &rgba),
-                None => format!("<a thumbnail of {loaded} bytes that are not a PNG or JPEG>"),
+                Some((w, h, rgba)) => format!("{} ({said}, a thumbnail of {loaded} bytes of {kind:?})", crate::harness::art_reading(w, h, &rgba)),
+                None => format!("<a thumbnail of {loaded} bytes of {kind:?} that are not a PNG or JPEG> ({said})"),
             })
         })
         .unwrap_or_else(|e| format!("<the session manager: {}>", e.message()))

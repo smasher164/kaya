@@ -5574,6 +5574,22 @@ try:
           isinstance(sk_colour, kaya.Color) and sk_colour.a == 0xFF)
     check("image_dominant answers None for bytes that do not decode",
           kaya.image_dominant(b"not an image") is None)
+    sk_palette = kaya.image_palette(sk_art, 6)
+    check("image_palette answers the core's main colours for the cover, largest first",
+          sk_palette is not None and len(sk_palette) == 6
+          and all(isinstance(s, kaya.PaletteColor) and isinstance(s.color, kaya.Color) for s in sk_palette)
+          and (sk_palette[0].color.r, sk_palette[0].color.g, sk_palette[0].color.b) == (0xF3, 0xED, 0xD7)
+          and round(sk_palette[0].share, 3) == 0.283
+          and all(a.share >= b.share for a, b in zip(sk_palette, sk_palette[1:]))
+          and abs(sum(s.share for s in sk_palette) - 1) < 1e-9)
+    check("image_palette answers at most 16 and None for bytes that do not decode",
+          len(kaya.image_palette(sk_art, 40) or []) == 16
+          and kaya.image_palette(b"not an image", 6) is None)
+    try:
+        kaya.image_palette(sk_art, "6")  # type: ignore[arg-type]
+        check("image_palette refuses an n that is not an int", False)
+    except TypeError:
+        check("image_palette refuses an n that is not an int", True)
     for sk_name, sk_call in [
             ("a gradient ground refuses a colour name",
              lambda: kaya.column(ground_gradient="red")),  # type: ignore[arg-type]

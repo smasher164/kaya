@@ -19,7 +19,8 @@ LABEL = "the Compose arm"
 # (label, opener, what the block must hold, what it may never name)
 DOORS = [
     ("gradient and image ground", "fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {",
-     ["Brush.verticalGradient(listOf(Color(0xFF00_0000L or top), scheme.background))",
+     ["val stops = listOf(Color(0xFF00_0000L or top), scheme.background)",
+      "Modifier.background(Brush.verticalGradient(stops))", "Brush.verticalGradient(stops, startY = -up,",
       "if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF",
       "else (node.groundTops shr 24) and 0xFF_FFFF", "KayaPictureDoor(node)", "ContentScale.Crop.computeScaleFactor(painter.intrinsicSize, size)", ".clipToBounds().drawBehind {"],
      ["node.color", "Color.Black", "Color.Gray", "Color(red", "Color(0xFF1"]),

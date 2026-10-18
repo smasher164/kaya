@@ -101,6 +101,11 @@ val asset_bytes : asset -> bytes
    decode (docs/styling-pass-plan.md Y2). *)
 val image_dominant : bytes -> int option
 
+(* An image's main colours as (0xRRGGBB, share), at most [n] and at most 16,
+   largest first, or [None] for bytes that do not decode
+   (docs/media-player-plan.md M15). *)
+val image_palette : bytes -> int -> (int * float) list option
+
 (* Register this asset's bytes into the pending table and answer with
    the handle the record carries. *)
 val asset_blob : asset -> int64

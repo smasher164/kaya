@@ -971,7 +971,25 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
         val scheme = MaterialTheme.colorScheme
         val top = if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF
             else (node.groundTops shr 24) and 0xFF_FFFF
-        Modifier.background(Brush.verticalGradient(listOf(Color(0xFF00_0000L or top), scheme.background)))
+        val stops = listOf(Color(0xFF00_0000L or top), scheme.background)
+        val reach = kayaGroundReach(node, stops[0], stops[1])
+        if (reach == null) {
+            Modifier.background(Brush.verticalGradient(stops))
+        } else {
+            val (pads, edges) = reach
+            Modifier.drawBehind {
+                val ltr = layoutDirection == LayoutDirection.Ltr
+                val up = if (edges[0]) pads.getTop(this).toFloat() else 0f
+                val down = if (edges[1]) pads.getBottom(this).toFloat() else 0f
+                val left = if (edges[if (ltr) 2 else 3]) pads.getLeft(this, layoutDirection).toFloat() else 0f
+                val right = if (edges[if (ltr) 3 else 2]) pads.getRight(this, layoutDirection).toFloat() else 0f
+                drawRect(
+                    Brush.verticalGradient(stops, startY = -up, endY = size.height + down),
+                    topLeft = Offset(-left, -up),
+                    size = Size(size.width + left + right, size.height + up + down),
+                )
+            }
+        }
     }
     KayaCompose.GROUND_IMAGE -> {
         KayaPictureDoor(node)
@@ -992,6 +1010,66 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
         }
     }
     else -> Modifier
+}
+
+/** What a ground draws under each system bar, by container id, as ARGB
+ * (status, navigation), null where it reaches no bar: KayaSystemBarIcons reads
+ * it (docs/safe-area-plan.md A2). */
+internal val kayaBarGrounds = androidx.compose.runtime.mutableStateMapOf<Long, Pair<Int?, Int?>>()
+
+/**
+ * The safe area a container's ground runs through and the sides it does, or
+ * null: the sides it touches the safe area's edge on with the window giving no
+ * inset, as SwiftUI's ShapeStyle background ignores the safe area's edges
+ * there (docs/safe-area-plan.md A2, A3; kayaBleedEdges' walk). Its claim on the
+ * bars it reaches lasts while it is composed.
+ */
+@Composable
+internal fun kayaGroundReach(node: KayaNode, top: Color, bottom: Color): Pair<WindowInsets, BooleanArray>? {
+    val pads = LocalKayaSafePads.current?.bleed
+    val density = LocalDensity.current
+    val edges = if (pads == null || KayaSceneModel.windowInset != 0.0) null
+        else kayaBleedEdges(node).takeIf { it.any { side -> side } }
+    val claim = if (pads == null || edges == null) null else Pair(
+        if (edges[0] && pads.getTop(density) > 0) top.toArgb() else null,
+        if (edges[1] && pads.getBottom(density) > 0) bottom.toArgb() else null,
+    ).takeIf { it.first != null || it.second != null }
+    DisposableEffect(node.id, claim) {
+        if (claim != null) kayaBarGrounds[node.id] = claim else kayaBarGrounds.remove(node.id)
+        onDispose { kayaBarGrounds.remove(node.id) }
+    }
+    return if (pads == null || edges == null) null else Pair(pads, edges)
+}
+
+/** Dark icons where black reads better than white on [argb]: the larger of
+ * the two WCAG contrast ratios. */
+internal fun kayaDarkIconsOn(argb: Int): Boolean {
+    val y = Color(argb).luminance()
+    return (y + 0.05f) / 0.05f >= 1.05f / (y + 0.05f)
+}
+
+/**
+ * The system bars' icons take the appearance that reads on what is drawn
+ * behind them (docs/safe-area-plan.md A2): a ground that runs under the bar,
+ * else the ground composed there, so a popped screen gives the default back.
+ */
+@Composable
+internal fun KayaSystemBarIcons() {
+    val view = LocalView.current
+    val scheme = MaterialTheme.colorScheme
+    val claims = kayaBarGrounds.values.toList()
+    val status = claims.firstNotNullOfOrNull { it.first } ?: scheme.background.toArgb()
+    val barred = KayaSceneModel.sections.isNotEmpty() || KayaSceneModel.dockId != 0L
+    val nav = claims.firstNotNullOfOrNull { it.second }
+        ?: (if (barred) scheme.surfaceContainer else scheme.background).toArgb()
+    SideEffect {
+        var context = view.context
+        while (context !is android.app.Activity && context is android.content.ContextWrapper) context = context.baseContext
+        val window = (context as? android.app.Activity)?.window ?: return@SideEffect
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = kayaDarkIconsOn(status)
+        controller.isAppearanceLightNavigationBars = kayaDarkIconsOn(nav)
+    }
 }
 
 /** What each activatable container's composition registered as its press,
@@ -8163,6 +8241,59 @@ object KayaCompose {
         return "unmatched ($detail)"
     }
 
+    /** expect_ground_reach's read (docs/safe-area-plan.md A2): the window's
+     * pixel in each system bar's strip, 4 units inside the container's right
+     * edge, against the container's own pixel 2 units inside that edge and the
+     * window ground; a bar is reached when its strip is not the window's
+     * ground and is nearer the container's than the window's. */
+    private fun kayaGroundReachRead(activity: ComponentActivity, spec: String): String? {
+        val found = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                val box = kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }
+                val decor = activity.window.decorView
+                val bars = ViewCompat.getRootWindowInsets(decor)?.let { insets ->
+                    Triple(insets.getInsets(WindowInsetsCompat.Type.statusBars()).top,
+                        insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom, decor.height)
+                }
+                Pair(box, bars)
+            }
+        } ?: return null
+        val box = found.first ?: return "<no laid-out frame>"
+        val (statusH, navH, h) = found.second ?: return "<unreadable (the decor view has no root insets)>"
+        val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
+        val shot = kayaSkinShot(activity) ?: return "<no window pixels>"
+        val u = shot.density
+        val x = box.right - 4 * u
+        val ground = kayaRgb(tokens.ground)
+        val seen = mutableListOf<String>()
+        fun reached(bar: String, barH: Int, stripY: Float, edgeY: Float): Boolean {
+            if (barH <= 0) {
+                seen.add("no $bar bar")
+                return false
+            }
+            val strip = shot.at(x, stripY)
+            val edge = shot.at(x, edgeY)
+            if (strip == null || edge == null) {
+                seen.add("the $bar probes fall outside the window at ($x, $stripY) and ($x, $edgeY)")
+                return false
+            }
+            val hit = kayaGap(strip, ground) > KAYA_SKIN_TOLERANCE && kayaGap(strip, edge) < kayaGap(strip, ground)
+            seen.add("$bar strip ${kayaHexOf(strip)} at y ${stripY.toInt()}, the container ${kayaHexOf(edge)} at y ${edgeY.toInt()}")
+            return hit
+        }
+        val top = reached("status", statusH, statusH / 2f, box.top + 2 * u)
+        val bottom = reached("navigation", navH, h - navH / 2f, box.bottom - 2 * u)
+        val word = when {
+            top && bottom -> "both"
+            top -> "top"
+            bottom -> "bottom"
+            else -> "none"
+        }
+        return "$word (${seen.joinToString(", ")}, window ground ${kayaHexOf(ground)}, box $box)"
+    }
+
     /** expect_shape's read (§5.2): the probe 1 unit inside the top-left
      * corner, the one 6 units in, and the centre, each the picture or what
      * the image sits on, read 4 units left of it; SwiftUI's kayaShapeRead. */
@@ -8714,6 +8845,44 @@ object KayaCompose {
     private fun kayaImeShown(activity: ComponentActivity): Boolean =
         ViewCompat.getRootWindowInsets(activity.window.decorView)
             ?.isVisible(WindowInsetsCompat.Type.ime()) == true
+
+    /** `expect_system_bars`' reading (docs/safe-area-plan.md A2): each bar's
+     * icon appearance off the window's insets controller against the window's
+     * pixel in that bar's strip, 4 units in from the left edge; `legible` where
+     * the icons are the shade that contrasts more with that pixel, `none` for
+     * a bar the root's insets say is not shown. The words, then what was read. */
+    private fun kayaSystemBarWords(activity: ComponentActivity): Pair<String, String> {
+        val read = onUi(activity) {
+            val decor = activity.window.decorView
+            ViewCompat.getRootWindowInsets(decor)?.let { insets ->
+                val controller = WindowCompat.getInsetsController(activity.window, decor)
+                listOf(
+                    Triple(insets.isVisible(WindowInsetsCompat.Type.statusBars()), controller.isAppearanceLightStatusBars,
+                        insets.getInsets(WindowInsetsCompat.Type.statusBars()).top / 2f),
+                    Triple(insets.isVisible(WindowInsetsCompat.Type.navigationBars()),
+                        controller.isAppearanceLightNavigationBars,
+                        decor.height - insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom / 2f),
+                )
+            }
+        } ?: return Pair("unreadable", "the decor view has no root insets")
+        val shot = kayaSkinShot(activity) ?: return Pair("unreadable", "no window pixels")
+        val seen = mutableListOf<String>()
+        val words = read.zip(listOf("status", "navigation")).map { (bar, name) ->
+            val (shown, darkIcons, y) = bar
+            val strip = shot.at(4 * shot.density, y)
+            when {
+                !shown -> { seen.add("no $name bar"); "none" }
+                strip == null -> { seen.add("the $name strip falls outside the window at y ${y.toInt()}"); "unreadable" }
+                else -> {
+                    val want = kayaDarkIconsOn(android.graphics.Color.rgb(
+                        (strip[0] * 255).roundToInt(), (strip[1] * 255).roundToInt(), (strip[2] * 255).roundToInt()))
+                    seen.add("$name icons ${if (darkIcons) "dark" else "light"} over ${kayaHexOf(strip)} at y ${y.toInt()}")
+                    if (want == darkIcons) "legible" else "illegible"
+                }
+            }
+        }
+        return Pair(words.joinToString("/"), seen.joinToString(", "))
+    }
 
     /** `expect_insets`' reading: the top and bottom platform insets as words. */
     private fun kayaInsetWords(activity: ComponentActivity): String? {
@@ -11703,6 +11872,19 @@ object KayaCompose {
                                 else -> failures.add("${parts[1]} reads $got, wanted $wantSafe")
                             }
                         }
+                    }
+                    "expect_ground_reach" ->
+                        kayaSkinExpect(parts, failures) { kayaGroundReachRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_system_bars" -> {
+                        val wantBars = quoted(parts.drop(1))
+                        var gotBars = kayaSystemBarWords(activity)
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (gotBars.first != wantBars && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            gotBars = kayaSystemBarWords(activity)
+                        }
+                        if (gotBars.first == wantBars) observed.add("system bars \"${gotBars.first}\"")
+                        else failures.add("system bars \"${gotBars.first}\", wanted \"$wantBars\": ${gotBars.second}")
                     }
                     "expect_insets" -> {
                         val wantInsets = quoted(parts.drop(1))
@@ -20448,6 +20630,7 @@ fun KayaRoot() {
             }
         }
         KayaToastHost(Modifier.align(Alignment.BottomCenter))
+        KayaSystemBarIcons()
     }
 
     // The system back gesture, the user-sovereign POP: enabled only

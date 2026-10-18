@@ -4326,6 +4326,24 @@ def winui_media_arms(media_src=None):
         bad.append("fn shown_fraction does not answer through crate::media::shown_in_device_pixels "
                    "— a DIP fraction read the resting feed's last row 0.2 px clipped, `in` "
                    "(docs/traps.md, the feed's last row read `in`)")
+    # THE THUMBNAIL IS HANDED OVER TWICE (docs/traps.md, the thumbnail the
+    # session manager dropped): on a loaded VM about one publish in four is
+    # dropped by the session manager after the SMTC read it, so only a lane
+    # under load sees a red, and expect_now_playing_art's why-not can say so
+    # only while the handed reference counts its opens.
+    publish = rust_fn(code, "session_publish") or ""
+    if "rehand_later(core.media.session.art.declared)" not in publish:
+        bad.append("fn session_publish does not hand the thumbnail over again a second later — "
+                   "a thumbnail the session manager dropped stays dropped")
+    rehand = rust_fn(code, "rehand") or ""
+    if "if core.media.session.art.declared != declared" not in rehand \
+            or "SetThumbnail(thumbnail)" not in rehand or "display.Update()" not in rehand:
+        bad.append("fn rehand does not hand the same thumbnail over and Update, for the "
+                   "declaration still standing alone")
+    thumbnail = rust_fn(code, "session_thumbnail") or ""
+    if "CountedArt {" not in thumbnail:
+        bad.append("fn session_thumbnail hands over a reference that records no opens — "
+                   "expect_now_playing_art's why-not cannot say whether the SMTC read the bytes")
     return bad
 
 
@@ -4454,6 +4472,15 @@ for pattern, repl, label, want in (
     (r"(\n +)Ok\(crate::media::shown_in_device_pixels\(view, &clips, scale\)\)",
      "Ok(clips.iter().fold(1.0, |f, _| f))",
      "the visibility fraction taken without the device-pixel snap", 1),
+    (r"(\n +)core\.media\.session\.art\.rehand = "
+     r"rehand_later\(core\.media\.session\.art\.declared\)\?;",
+     "", "the thumbnail handed over once", 1),
+    (r"(\n    )if core\.media\.session\.art\.declared != declared \{\n        return;\n    \}", "",
+     "a later declaration's thumbnail replaced by an earlier one", 1),
+    (r"(\n +)CountedArt \{ inner: (RandomAccessStreamReference::CreateFromStream\(&stream\)\?), "
+     r"opens: opens\.clone\(\) \}\.into\(\);",
+     "RandomAccessStreamReference::CreateFromStream(&stream)?.cast()?;",
+     "the thumbnail's opens not recorded", 1),
 ):
     cut = g.doctor(f"winui media: {label}", real(WINUI_MEDIA), pattern,
                    lambda m, repl=repl: m.group(1) + repl, want=want)

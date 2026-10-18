@@ -2909,6 +2909,16 @@ if (isMainThread) {
     const colour = kaya.imageDominant(art);
     check("imageDominant answers the core's colour for the cover", colour instanceof kaya.Color && colour.a === 0xff);
     check("imageDominant answers null for bytes that do not decode", kaya.imageDominant(new TextEncoder().encode("not an image")) === null);
+    const palette = kaya.imagePalette(art, 6);
+    check("imagePalette answers the core's main colours for the cover, largest first",
+      palette !== null && palette.length === 6 && palette[0]!.color instanceof kaya.Color
+      && palette[0]!.color.r === 0xf3 && palette[0]!.color.g === 0xed && palette[0]!.color.b === 0xd7
+      && Math.round(palette[0]!.share * 1000) === 283
+      && palette.every((s, i) => i === 0 || palette[i - 1]!.share >= s.share)
+      && Math.abs(palette.reduce((sum, s) => sum + s.share, 0) - 1) < 1e-9);
+    check("imagePalette answers at most 16 and null for bytes that do not decode",
+      (kaya.imagePalette(art, 40) ?? []).length === 16 && kaya.imagePalette(new TextEncoder().encode("not an image"), 6) === null);
+    check("imagePalette refuses an n that is not an integer", throws(() => kaya.imagePalette(art, 2.5), /imagePalette's n is an integer/));
     const refusals: [string, () => void, RegExp][] = [
       ["a gradient ground refuses a colour name", () => kaya.column({ groundGradient: "red" as unknown as K.Color }), /gradient ground takes/],
       ["an image ground refuses text", () => kaya.column({ groundImage: "cover.jpg" as unknown as Uint8Array }), /image ground takes/],

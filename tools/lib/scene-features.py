@@ -141,6 +141,8 @@ VERB_FEATURE = {
     "expect_keyboard": "safearea",
     "expect_safe": "safearea",
     "expect_insets": "safearea",
+    "expect_ground_reach": "safearea",
+    "expect_system_bars": "safearea",
     # docs/network-images-plan.md §5, the same reasoning.
     "expect_image_phase": "netimage",
     # docs/styling-pass-plan.md §5, the same reasoning: a scene reading a

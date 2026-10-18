@@ -561,6 +561,18 @@ its last field from the accessibility tree; a detented sheet goes to its full
 anchor and pans; foundation's own bring-into-view is kept inside a scroll and
 the pan covers what it leaves (docs/traps.md, the 2026-10-11 entries).
 
+AS BUILT on Compose (2026-10-18, the album header's status bar): a container's
+gradient ground (docs/styling-pass-plan.md Y2) runs under the system bars on the
+sides where it touches the safe area's edge, as SwiftUI's ShapeStyle background
+does on iOS: through plain rows and columns to the mounted root (the bleed's
+touching walk), with the window giving no inset, never inside a scroll; its
+content keeps the inset. An image ground (Y3) does not, on either phone (iOS
+draws it with the ViewBuilder background). Each bar's icons take the shade with
+the higher contrast against what is drawn behind it: a reaching ground while it
+is composed, the ground composed there otherwise, so a popped screen gives the
+default back. Read by `expect_ground_reach` and `expect_system_bars` (the
+music_header and music_artist phone tails); held by tools/lib/safearea_routes.py.
+
 ## §4 — The wire
 
 - One new widget prop, `bleed` (Bool, false), legal on `image`, the video

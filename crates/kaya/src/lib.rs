@@ -13,7 +13,7 @@ mod canvas;
 mod content_id;
 // docs/styling-pass-plan.md Y2: one quantizer for every binding.
 mod dominant;
-pub use dominant::image_dominant;
+pub use dominant::{image_dominant, image_palette, PaletteColor};
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
 mod image_header;
 // The nounwind boundaries' one report path (docs/deferred.md, "A GUARD

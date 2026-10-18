@@ -4735,6 +4735,39 @@ pub unsafe extern "C" fn kaya_image_dominant(bytes: *const u8, len: usize, rgb: 
     }
 }
 
+/// A PNG or JPEG's main colours (docs/media-player-plan.md M15), the one
+/// quantizer every binding reaches: writes at most `n` (and at most
+/// KAYA_PALETTE_MAX) entries, largest share first, 0xRRGGBB to `rgb` and the
+/// fraction of the picture to `share`, and answers how many; -1 for bytes
+/// that do not decode.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_image_palette(
+    bytes: *const u8,
+    len: usize,
+    n: usize,
+    rgb: *mut u32,
+    share: *mut f64,
+) -> isize {
+    assert!(n == 0 || (!rgb.is_null() && !share.is_null()), "kaya: kaya_image_palette's out-pointers are null");
+    if bytes.is_null() || len == 0 {
+        return -1;
+    }
+    let bytes = unsafe { std::slice::from_raw_parts(bytes, len) };
+    let Some(found) = crate::dominant::palette_rgb(bytes, n) else { return -1 };
+    for (i, &(colour, part)) in found.iter().enumerate() {
+        unsafe {
+            *rgb.add(i) = colour;
+            *share.add(i) = part;
+        }
+    }
+    found.len() as isize
+}
+
+/// The most entries kaya_image_palette writes.
+pub const KAYA_PALETTE_MAX: usize = 16;
+
+const _: () = assert!(KAYA_PALETTE_MAX == crate::dominant::PALETTE_MAX, "kaya: KAYA_PALETTE_MAX moved off the core's");
+
 /// A tag naming a torn-down stamped copy is dropped with one sentence: the
 /// app never asked to hear from a row it removed, and a backend's registry
 /// keeping the dead copy addressable is exactly the hole this closes

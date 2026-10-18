@@ -4809,6 +4809,29 @@ def image_dominant(data: bytes | bytearray | memoryview | Asset) -> Color | None
     return None if rgb is None else Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF)
 
 
+@dataclasses.dataclass(frozen=True)
+class PaletteColor:
+    """One of a picture's main colours and the fraction of the picture it
+    stands for (docs/media-player-plan.md M15)."""
+    color: Color
+    share: float
+
+
+def image_palette(data: bytes | bytearray | memoryview | Asset, n: int) -> list[PaletteColor] | None:
+    """The main colours of encoded image bytes, at most n (and at most 16),
+    largest share first: the core's one quantizer, so every binding answers
+    the same palette for the same art. None when the bytes do not decode."""
+    if isinstance(n, bool) or not isinstance(n, int):
+        raise KayaTypeError(f"kaya: image_palette's n is an int, not {type(n).__name__}")
+    if isinstance(data, Asset):
+        data = data.bytes()
+    found = runtime.image_palette(bytes(data), n)
+    if found is None:
+        return None
+    return [PaletteColor(Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF), share)
+            for rgb, share in found]
+
+
 class Role(enum.IntEnum):
     """The role enum: SEMANTIC EMPHASIS, the closed vocabulary
     (docs/styling-plan.md D4). Plain names accepted too.

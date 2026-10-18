@@ -416,6 +416,13 @@ val string_of_color : color -> string
 (* The colour an album's header fades from (docs/styling-pass-plan.md Y2):
    the core's one quantizer, [None] for bytes that do not decode. *)
 val image_dominant : bytes -> color option
+
+(* One of a picture's main colours and the fraction of the picture it stands
+   for; [image_palette bytes n] answers at most [n] (and at most 16), largest
+   share first, the same quantizer (docs/media-player-plan.md M15). *)
+type palette_color = { color : color; share : float }
+
+val image_palette : bytes -> int -> palette_color list option
 val pack_color : color -> int64
 val color_of_packed : int64 -> color
 

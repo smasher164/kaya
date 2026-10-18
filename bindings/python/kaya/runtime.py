@@ -203,6 +203,11 @@ _lib.kaya_image_pixels.restype = ctypes.c_size_t
 _lib.kaya_image_dominant.argtypes = [ctypes.c_char_p, ctypes.c_size_t,
                                      ctypes.POINTER(ctypes.c_uint32)]
 _lib.kaya_image_dominant.restype = ctypes.c_uint8
+_lib.kaya_image_palette.argtypes = [ctypes.c_char_p, ctypes.c_size_t, ctypes.c_size_t,
+                                    ctypes.POINTER(ctypes.c_uint32),
+                                    ctypes.POINTER(ctypes.c_double)]
+_lib.kaya_image_palette.restype = ctypes.c_ssize_t
+PALETTE_MAX = 16
 _lib.kaya_catalog.argtypes = [ctypes.c_char_p]
 _lib.kaya_catalog.restype = None
 
@@ -267,6 +272,18 @@ def image_dominant(data: bytes) -> int | None:
     if not _lib.kaya_image_dominant(data, len(data), ctypes.byref(rgb)):
         return None
     return rgb.value
+
+
+def image_palette(data: bytes, n: int) -> list[tuple[int, float]] | None:
+    """The core's main colours of encoded bytes as (0xRRGGBB, share), largest
+    first, None when they do not decode (docs/media-player-plan.md M15)."""
+    k = max(0, min(n, PALETTE_MAX))
+    rgb = (ctypes.c_uint32 * max(k, 1))()
+    share = (ctypes.c_double * max(k, 1))()
+    got = _lib.kaya_image_palette(data, len(data), k, rgb, share)
+    if got < 0:
+        return None
+    return [(rgb[i], share[i]) for i in range(got)]
 
 
 def submit(*records: bytes) -> None:

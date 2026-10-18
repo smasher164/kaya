@@ -896,6 +896,14 @@ pub enum Step {
     /// `expect_insets "<top>/<bottom>"`: each edge's platform inset as a word,
     /// `bar`, `cutout` or `none` (docs/safe-area-plan.md A9).
     ExpectInsets(String),
+    /// `expect_ground_reach <container> <top|bottom|both|none>`: which system
+    /// bars the container's ground runs under, read off the window's pixels
+    /// (docs/safe-area-plan.md A2, A3).
+    ExpectGroundReach(Target, String),
+    /// `expect_system_bars "<status>/<navigation>"`: whether each system bar's
+    /// icons read on what the window draws behind them, `legible`, `illegible`
+    /// or `none` for a bar not shown (docs/safe-area-plan.md A2).
+    ExpectSystemBars(String),
     /// Expect the grid to lay its children out in exactly N columns with
     /// each column's cells sharing their leading edge — geometry from the
     /// toolkit, never a model copy.
@@ -1058,6 +1066,7 @@ impl Step {
             | Step::ExpectHeightFits(t)
             | Step::Hover(t)
             | Step::ExpectGround(t, _)
+            | Step::ExpectGroundReach(t, _)
             | Step::ExpectShape(t, _)
             | Step::ExpectSelected(t, _)
             | Step::ExpectChecked(t, _)
@@ -1213,6 +1222,7 @@ impl Step {
             | Step::ExpectNoToast
             | Step::ExpectKeyboard(_)
             | Step::ExpectInsets(_)
+            | Step::ExpectSystemBars(_)
             | Step::ExpectToastAnnounced(..)
             | Step::ToastAction
             | Step::ToastClose
@@ -1399,6 +1409,8 @@ impl Step {
             Step::ExpectKeyboard(..) => true,
             Step::ExpectSafe(..) => true,
             Step::ExpectInsets(..) => true,
+            Step::ExpectGroundReach(..) => true,
+            Step::ExpectSystemBars(..) => true,
             Step::ExpectGridColumns { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
@@ -2018,8 +2030,9 @@ pub trait Stage: Send + 'static {
     /// `"<title>" <state>` as this process published them to the system.
     fn now_playing(&self) -> String;
     /// The picture the system holds for this process's Now Playing,
-    /// [`art_reading`]'s `RRGGBB WxH` or `none`; anything else says why it
-    /// could not be read.
+    /// [`art_reading`]'s `RRGGBB WxH` or `none` as its first word, then
+    /// what the platform said beside it; anything else says why it could not
+    /// be read.
     fn now_playing_art(&self) -> String;
     /// Whether this process holds the display-awake assertion.
     fn display_awake(&self) -> bool;
@@ -2191,6 +2204,18 @@ pub trait Stage: Send + 'static {
     /// The window's top and bottom platform insets as words (`bar`, `cutout`,
     /// `none`), or a sentence saying what was measured instead.
     fn insets(&self) -> Result<(String, String), String>;
+    /// Which system bars a container's ground runs under, a [`REACH_WORDS`]
+    /// word first, then what was read. A desktop window has no system bars
+    /// (docs/safe-area-plan.md A13).
+    fn ground_reach(&self, _target: Target) -> String {
+        "none (a desktop window has no system bars)".to_owned()
+    }
+    /// Whether each system bar's icons read on what is drawn behind them,
+    /// `<status>/<navigation>` in [`BAR_ICON_WORDS`]. A desktop window has no
+    /// system bars (A13).
+    fn system_bars(&self) -> Result<String, String> {
+        Ok("none/none".to_owned())
+    }
     /// The grid observation: empty when the grid lays out in exactly `want`
     /// columns whose cells share their leading edges (within two device
     /// units); otherwise the toolkit's own description of the mismatch, for
@@ -3726,6 +3751,28 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_insets wants \"<top>/<bottom>\", each one of {INSET_WORDS:?}: {line:?}"));
                 }
                 Step::ExpectInsets(want)
+            }
+            "expect_ground_reach" => {
+                let (target, word) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_ground_reach wants a container and a word: {line:?}"))?;
+                let word = word.trim();
+                if !REACH_WORDS.contains(&word) {
+                    return Err(format!("expect_ground_reach's word is one of {}, got {word:?}", REACH_WORDS.join(", ")));
+                }
+                Step::ExpectGroundReach(parse_target(target.trim())?, word.to_owned())
+            }
+            "expect_system_bars" => {
+                let want = parse_string(rest)?;
+                let ok = want.split_once('/').is_some_and(|(status, nav)| {
+                    BAR_ICON_WORDS.contains(&status) && BAR_ICON_WORDS.contains(&nav)
+                });
+                if !ok {
+                    return Err(format!(
+                        "expect_system_bars wants \"<status>/<navigation>\", each one of {BAR_ICON_WORDS:?}: {line:?}"
+                    ));
+                }
+                Step::ExpectSystemBars(want)
             }
             "expect_grid_columns" => {
                 let (target, n) = rest
@@ -5912,7 +5959,7 @@ fn run_with_log(
             Step::ExpectNowPlayingArt(want) => Some(poll(|| {
                 let got = stage.now_playing_art();
                 let read = got.split_whitespace().next().unwrap_or_default();
-                if (want == "none" && got == "none")
+                if (want == "none" && read == "none")
                     || (want != "none" && video_ink_within(read, want, NOW_PLAYING_ART_TOLERANCE))
                 {
                     Ok(format!("now playing art {want}"))
@@ -6105,6 +6152,14 @@ fn run_with_log(
                 Err(why) => Err(why),
                 Ok((top, bottom)) if format!("{top}/{bottom}") == *want => Ok(format!("insets \"{want}\"")),
                 Ok((top, bottom)) => Err(format!("insets \"{top}/{bottom}\", wanted \"{want}\"")),
+            })),
+            Step::ExpectGroundReach(t, want) => Some(poll(|| {
+                word_reading(&stage.ground_reach(*t), want, || format!("{} ground_reach", target_spec(t)))
+            })),
+            Step::ExpectSystemBars(want) => Some(poll(|| match stage.system_bars() {
+                Err(why) => Err(why),
+                Ok(got) if got == *want => Ok(format!("system bars \"{want}\"")),
+                Ok(got) => Err(format!("system bars \"{got}\", wanted \"{want}\"")),
             })),
             Step::ExpectOutOfReach(t) => Some(poll(|| match stage.collapsed_ancestor(*t) {
                 Some(i) => Ok(format!("out of reach inside expander#{i}")),
@@ -7433,6 +7488,12 @@ pub(crate) fn unseen_probe(probed: [f64; 4], visible: Option<[f64; 4]>) -> Optio
 
 /// The words `expect_insets` reads an edge as (docs/safe-area-plan.md A9).
 pub const INSET_WORDS: [&str; 3] = ["bar", "cutout", "none"];
+
+/// The words `expect_ground_reach` reads (docs/safe-area-plan.md A2).
+pub const REACH_WORDS: [&str; 4] = ["top", "bottom", "both", "none"];
+
+/// The words `expect_system_bars` reads a bar's icons as (docs/safe-area-plan.md A2).
+pub const BAR_ICON_WORDS: [&str; 3] = ["legible", "illegible", "none"];
 
 /// `expect_safe` on a desktop window, which has no safe area and no software
 /// keyboard: the frame, what every ancestor's clip leaves of it (`visible`,
@@ -9302,6 +9363,29 @@ mod tests {
         assert!(parse("expect_safe image#0 hidden").is_err());
         assert!(parse("expect_insets \"bar\"").is_err());
         assert!(parse("expect_insets \"bar/notch\"").is_err());
+    }
+
+    /// docs/safe-area-plan.md A2: a desktop's grounds reach no system bar and
+    /// it has no bar icons; each reading names both sides when it disagrees.
+    #[test]
+    fn system_bar_readings_answer_none_on_a_desktop() {
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        let (code, verdict) = run("expect_ground_reach column#0 none\nexpect_system_bars \"none/none\"");
+        assert_eq!(code, 0, "{verdict}");
+        assert!(verdict.contains("column#0 ground_reach none") && verdict.contains("system bars \"none/none\""), "{verdict}");
+        let (code, verdict) = run("expect_ground_reach column#0 top");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("reads none (a desktop window has no system bars), wanted top"), "{verdict}");
+        let (_, verdict) = run("expect_system_bars \"legible/legible\"");
+        assert!(verdict.contains("system bars \"none/none\", wanted \"legible/legible\""), "{verdict}");
+        assert!(parse("expect_ground_reach column#0 under").is_err());
+        assert!(parse("expect_system_bars \"legible\"").is_err());
+        assert!(parse("expect_system_bars \"legible/dark\"").is_err());
     }
 
     /// THE SECURE FIELD'S TEXT REACHES NO TRANSCRIPT (docs/secure-entry-plan.md

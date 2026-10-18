@@ -2,8 +2,9 @@
 # M9, M13; docs/styling-pass-plan.md Y2): an album's header is its rounded
 # cover, the title as a heading, the artist, year, track count and total time,
 # a Play button and the favourite heart, over a gradient from the cover's
-# dominant colour (kaya.image_dominant over the fetched bytes) clamped by the
-# core and fading into the window's ground, full bleed: the window gives no
+# most vivid colour (kaya.image_palette over the fetched bytes, the dominant
+# when none is vivid) clamped by the core and fading into the window's
+# ground, full bleed: the window gives no
 # margin and the page gives its own back to the track table (M15). The dark
 # leg runs this script under KAYA_APPEARANCE=dark. Play starts the album's first track; the heart
 # is the app's, so it is still on when the album is opened again.

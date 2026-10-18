@@ -30,6 +30,7 @@ const NAPI_NULL: c_int = 1;
 const NAPI_FUNCTION: c_int = 7;
 const NAPI_UINT8_ARRAY: c_int = 1;
 const NAPI_INT16_ARRAY: c_int = 3;
+const NAPI_FLOAT64_ARRAY: c_int = 8;
 const NAPI_TSFN_RELEASE: c_int = 0;
 const NAPI_TSFN_ABORT: c_int = 1;
 const NAPI_TSFN_NONBLOCKING: c_int = 0;
@@ -186,6 +187,7 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("readerPeaks", reader_peaks),
         ("imagePixels", image_pixels),
         ("imageDominant", image_dominant),
+        ("imagePalette", image_palette),
         ("catalog", catalog),
         ("tr", tr),
         // The capture worker's two listeners and their teardown
@@ -657,6 +659,34 @@ unsafe extern "C" fn image_dominant(env: Env, info: CbInfo) -> Value {
         return unsafe { null(env) };
     }
     unsafe { number(env, f64::from(rgb)) }
+}
+
+/// `imagePalette(bytes, n)`: kaya_image_palette as a Float64Array of
+/// (0xRRGGBB, share) pairs, null for bytes that do not decode
+/// (docs/media-player-plan.md M15).
+unsafe extern "C" fn image_palette(env: Env, info: CbInfo) -> Value {
+    let [b, k] = unsafe { args::<2>(env, info) };
+    let bytes = try_or_throw!(env, unsafe { bytes_arg(env, b, "imagePalette") });
+    let n = try_or_throw!(env, unsafe { u64_arg(env, k, "imagePalette n") }) as usize;
+    let n = n.min(capi::KAYA_PALETTE_MAX);
+    let (mut rgb, mut share) = (vec![0u32; n], vec![0f64; n]);
+    let got = unsafe { capi::kaya_image_palette(bytes.as_ptr(), bytes.len(), n, rgb.as_mut_ptr(), share.as_mut_ptr()) };
+    if got < 0 {
+        return unsafe { null(env) };
+    }
+    let pairs: Vec<f64> = (0..got as usize).flat_map(|i| [f64::from(rgb[i]), share[i]]).collect();
+    let api = api();
+    let mut data: *mut c_void = ptr::null_mut();
+    let mut ab: Value = ptr::null_mut();
+    let mut out: Value = ptr::null_mut();
+    unsafe {
+        (api.napi_create_arraybuffer)(env, pairs.len() * 8, &mut data, &mut ab);
+        if !pairs.is_empty() && !data.is_null() {
+            ptr::copy_nonoverlapping(pairs.as_ptr(), data as *mut f64, pairs.len());
+        }
+        (api.napi_create_typedarray)(env, NAPI_FLOAT64_ARRAY, pairs.len(), ab, 0, &mut out);
+    }
+    out
 }
 
 unsafe extern "C" fn catalog(env: Env, info: CbInfo) -> Value {

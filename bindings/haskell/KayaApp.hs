@@ -263,6 +263,8 @@ module KayaApp
     Shape (..),
     signalTint,
     imageDominant,
+    PaletteColor (..),
+    imagePalette,
     dock,
     Axis (..),
     ContentType (..),
@@ -2855,6 +2857,19 @@ imageDominant :: BS.ByteString -> Maybe Color
 imageDominant bytes = toColor <$> R.imageDominantRaw bytes
   where
     toColor rgb = Color (byte 16 rgb) (byte 8 rgb) (byte 0 rgb) 255
+    byte k rgb = fromIntegral ((rgb `div` (2 ^ (k :: Int))) `mod` 256)
+
+-- | One of a picture's main colours and the fraction of the picture it
+-- stands for (docs\/media-player-plan.md M15).
+data PaletteColor = PaletteColor {paletteColor :: Color, paletteShare :: Double}
+  deriving (Eq, Show)
+
+-- | A picture's main colours, at most @n@ (and at most 16), largest share
+-- first: the same quantizer, 'Nothing' for bytes that do not decode.
+imagePalette :: BS.ByteString -> Int -> Maybe [PaletteColor]
+imagePalette bytes n = map toPaletteColor <$> R.imagePaletteRaw bytes n
+  where
+    toPaletteColor (rgb, share) = PaletteColor (Color (byte 16 rgb) (byte 8 rgb) (byte 0 rgb) 255) share
     byte k rgb = fromIntegral ((rgb `div` (2 ^ (k :: Int))) `mod` 256)
 
 -- | A row or column filled with a platform tint: kaya chooses the fill, the

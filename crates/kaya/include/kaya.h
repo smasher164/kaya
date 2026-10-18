@@ -2066,6 +2066,11 @@
 #define KAYA_OCCURRENCE_WOKEN 1
 
 /**
+ * The most entries kaya_image_palette writes.
+ */
+#define KAYA_PALETTE_MAX 16
+
+/**
  * `kaya_scroll_to_row_*`'s no-answer: the scene is not up, or the target
  * or key was refused. The FAULT carries the sentence.
  */
@@ -3472,6 +3477,19 @@ void kaya_emit_selection_changed(const uint8_t *tag, uintptr_t len);
  * 1, or answers 0 for bytes that do not decode.
  */
 uint8_t kaya_image_dominant(const uint8_t *bytes, uintptr_t len, uint32_t *rgb);
+
+/**
+ * A PNG or JPEG's main colours (docs/media-player-plan.md M15), the one
+ * quantizer every binding reaches: writes at most `n` (and at most
+ * KAYA_PALETTE_MAX) entries, largest share first, 0xRRGGBB to `rgb` and the
+ * fraction of the picture to `share`, and answers how many; -1 for bytes
+ * that do not decode.
+ */
+intptr_t kaya_image_palette(const uint8_t *bytes,
+                            uintptr_t len,
+                            uintptr_t n,
+                            uint32_t *rgb,
+                            double *share);
 
 /**
  * Presentation side: emit a column-header click, exactly as a

@@ -2596,6 +2596,24 @@ public final class KayaApp {
                 : java.util.Optional.of(Color.rgb(rgb >>> 16 & 0xFF, rgb >>> 8 & 0xFF, rgb & 0xFF));
     }
 
+    /** One of a picture's main colours and the fraction of the picture it
+     * stands for (docs/media-player-plan.md M15). */
+    public record PaletteColor(Color color, double share) {}
+
+    /** The main colours of a PNG or JPEG, at most {@code n} (and at most
+     * 16), largest share first: the one quantizer every binding reaches, or
+     * empty for bytes that do not decode. */
+    public static java.util.Optional<List<PaletteColor>> imagePalette(byte[] bytes, int n) {
+        double[] flat = KayaRing.imagePalette(bytes, Math.max(0, Math.min(n, 16)));
+        if (flat == null) return java.util.Optional.empty();
+        List<PaletteColor> found = new ArrayList<>(flat.length / 2);
+        for (int i = 0; i + 1 < flat.length; i += 2) {
+            int rgb = (int) flat[i];
+            found.add(new PaletteColor(Color.rgb(rgb >>> 16 & 0xFF, rgb >>> 8 & 0xFF, rgb & 0xFF), flat[i + 1]));
+        }
+        return java.util.Optional.of(List.copyOf(found));
+    }
+
     /** Which way the layout runs, decided by the locale's script. */
     public enum Direction {
         LTR, RTL

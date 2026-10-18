@@ -40,6 +40,9 @@ FULL_ART = 300
 # The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
 UNKNOWN_COLOUR = kaya.Color(0x47, 0x47, 0x4A)
 HEADER_L = 30
+VIVID_SHARE = 0.02
+VIVID_L = (8, 96)
+VIVID_CHROMA = 15
 CLIENT_ID_PREF = "jamendo.client_id"
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
@@ -401,21 +404,39 @@ def load_album(album, surface, entry):
     app.post(cover_arrived, surface, entry, cover, colour)
 
 
-def header_colour(cover):
-    """The header's wash (M15): the cover's colour taken down to a deep,
-    muted L* 30 that the core keeps in dark and lifts to its pale floor in
-    light (Y2). The one place a palette's vivid pick would replace
-    image_dominant (the M15 notes, G5)."""
-    seed = kaya.image_dominant(cover)
-    if seed is None:
-        return None
-    lin = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
-           for c in (seed.r / 255, seed.g / 255, seed.b / 255)]
+def lab(c):
+    lin = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
+           for v in (c.r / 255, c.g / 255, c.b / 255)]
     x = (0.4124 * lin[0] + 0.3576 * lin[1] + 0.1805 * lin[2]) / 0.95047
     y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
     z = (0.0193 * lin[0] + 0.1192 * lin[1] + 0.9505 * lin[2]) / 1.08883
     f = [t ** (1 / 3) if t > 216 / 24389 else (24389 / 27 * t + 16) / 116 for t in (x, y, z)]
-    a, b = 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+    return 116 * f[1] - 16, 500 * (f[0] - f[1]), 200 * (f[1] - f[2])
+
+
+def vivid(cover):
+    """The palette's most vivid colour with a share worth a header, its
+    chroma weighted by the root of its share; paper and ink, and a cover
+    with nothing vivid, answer None."""
+    best, score = None, 0.0
+    for entry in kaya.image_palette(cover, 6) or []:
+        light, a, b = lab(entry.color)
+        chroma = math.hypot(a, b)
+        if entry.share < VIVID_SHARE or not VIVID_L[0] < light < VIVID_L[1] or chroma < VIVID_CHROMA:
+            continue
+        if chroma * math.sqrt(entry.share) > score:
+            best, score = entry.color, chroma * math.sqrt(entry.share)
+    return best
+
+
+def header_colour(cover):
+    """The header's wash (M15): the cover's most vivid colour, or its
+    dominant one, taken down to a deep, muted L* 30 that the core keeps in
+    dark and lifts to its pale floor in light (Y2)."""
+    seed = vivid(cover) or kaya.image_dominant(cover)
+    if seed is None:
+        return None
+    _, a, b = lab(seed)
     chroma = min(math.hypot(a, b), 40) * 0.55
     hue = math.atan2(b, a)
     fy = (HEADER_L + 16) / 116

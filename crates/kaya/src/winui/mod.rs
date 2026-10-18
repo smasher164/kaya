@@ -27216,7 +27216,11 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn now_playing_art(&self) -> String {
-        media::stage::now_playing_art(declared_app_id().unwrap_or_default())
+        let system = media::stage::now_playing_art(declared_app_id().unwrap_or_default());
+        let here = Self::on_ui(|core| Ok(media::stage::session_here(core)));
+        let read = format!("{system}; {here}");
+        eprintln!("KAYA_DIAG winui now playing art: {read}");
+        read
     }
 
     fn display_awake(&self) -> bool {

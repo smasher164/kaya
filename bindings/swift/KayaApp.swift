@@ -2545,6 +2545,24 @@ public final class KayaApp {
                          b: UInt8(truncatingIfNeeded: rgb))
     }
 
+    /// A picture's main colours, at most `n` (and at most 16), largest share
+    /// first: the same quantizer for all nine bindings
+    /// (docs/media-player-plan.md M15). nil when the bytes do not decode.
+    public static func imagePalette(_ bytes: Data, _ n: Int) -> [KayaPaletteColor]? {
+        let k = max(0, min(n, Int(KAYA_PALETTE_MAX)))
+        var rgb = [UInt32](repeating: 0, count: k + 1)
+        var share = [Double](repeating: 0, count: k + 1)
+        let got = bytes.withUnsafeBytes { raw in
+            kaya_image_palette(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count), UInt(k), &rgb, &share)
+        }
+        guard got >= 0 else { return nil }
+        return (0..<got).map { i in
+            KayaPaletteColor(color: KayaColor(r: UInt8(truncatingIfNeeded: rgb[i] >> 16), g: UInt8(truncatingIfNeeded: rgb[i] >> 8),
+                                        b: UInt8(truncatingIfNeeded: rgb[i])),
+                       share: share[i])
+        }
+    }
+
     /// The message `key` with `args` filled from the loaded catalog; dates
     /// and times are formatted through the door. A missing message or
     /// argument is the core's panic naming the key and the locale.

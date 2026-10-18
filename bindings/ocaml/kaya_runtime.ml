@@ -531,6 +531,24 @@ let image_dominant data =
   if Unsigned.UInt8.to_int (kaya_image_dominant s (Unsigned.Size_t.of_int (String.length s)) rgb) = 0 then None
   else Some (Unsigned.UInt32.to_int !@rgb)
 
+(* An image's main colours as (0xRRGGBB, share), largest first
+   (docs/media-player-plan.md M15); [None] when the bytes do not decode. *)
+let kaya_image_palette =
+  foreign ~from:lib "kaya_image_palette"
+    (string @-> size_t @-> size_t @-> ptr uint32_t @-> ptr double @-> returning intptr_t)
+
+let image_palette data n =
+  let s = Bytes.to_string data in
+  let k = max 0 (min n 16) in
+  let rgb = CArray.make uint32_t (k + 1) and share = CArray.make double (k + 1) in
+  let got =
+    Intptr.to_int
+      (kaya_image_palette s (Unsigned.Size_t.of_int (String.length s)) (Unsigned.Size_t.of_int k)
+         (CArray.start rgb) (CArray.start share))
+  in
+  if got < 0 then None
+  else Some (List.init got (fun i -> (Unsigned.UInt32.to_int (CArray.get rgb i), CArray.get share i)))
+
 (* An open asset. A RECORD rather than a bare int64: [Gc.finalise]
    refuses an immediate, it needs a heap block to attach to. *)
 type asset = { handle : int64; mutable live : bool }

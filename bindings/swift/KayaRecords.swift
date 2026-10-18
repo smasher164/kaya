@@ -68,6 +68,13 @@ public struct KayaTime: Hashable, Sendable, CustomStringConvertible {
     public var description: String { String(format: "%02d:%02d", hour, minute) }
 }
 
+/// One of a picture's main colours and the fraction of the picture it stands
+/// for (docs/media-player-plan.md M15).
+public struct KayaPaletteColor: Hashable, Sendable {
+    public let color: KayaColor
+    public let share: Double
+}
+
 /// An sRGB colour, 8 bits a channel, straight alpha (docs/color-picker-plan.md §2).
 public struct KayaColor: Hashable, Sendable, CustomStringConvertible {
     public var r: UInt8
