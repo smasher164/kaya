@@ -5774,40 +5774,73 @@ object KayaCompose {
         return if (provider.performAction(node.id, action.id, null)) null else "the provider refused ${action.id}"
     }
 
-    /**
-     * THE TAP'S ACK: an activation reached the core — the content
-     * PendingIntent landed on the Activity and
-     * [notificationIntent] answered it. Null when it did; otherwise ONE
-     * sentence saying what was seen, since a shade that never opened and
-     * a row the runner could not find look identical from in here.
-     * 20s, the drag's own budget: the runner's poll is half a second and
-     * a uiautomator dump takes ~2s of it. The reply's budget is
-     * [NOTIFY_REPLY_WAIT_MS].
-     */
-    private fun kayaAwaitNotificationReply(before: Int): String? {
-        val deadline = System.nanoTime() + NOTIFY_REPLY_WAIT_MS * 1_000_000
-        while (System.nanoTime() < deadline) {
-            if (kayaNotificationReplies != before) return null
-            Thread.sleep(RETRY_PERIOD_MS)
+    /** The runner's report format is tools/android/run-emulator.py's
+     * shade_report_line (docs/traps.md, "The tap that outlasted its wait"). */
+    private fun kayaAwaitShadeHand(
+        activity: ComponentActivity, seq: Int, request: String, landed: () -> Boolean,
+    ): String? {
+        val file = java.io.File(activity.filesDir, "kaya-shade-$seq.txt")
+        file.delete()
+        Log.i("kaya", request)
+        val began = System.nanoTime()
+        val ceiling = began + SHADE_HAND_CEILING_MS * 1_000_000
+        val heard = mutableListOf<String>()
+        var last = ""
+        var finalAt = 0L
+        var finalActed = false
+        try {
+            while (System.nanoTime() < ceiling) {
+                if (landed()) return null
+                val said = if (file.isFile) file.readText(Charsets.UTF_8) else ""
+                if (said.endsWith("\n") && said != last) {
+                    last = said
+                    val now = System.nanoTime()
+                    heard.add("+${(now - began) / 1_000_000}ms ${said.trim()}")
+                    val head = said.trim().split(" ", limit = 3)
+                    val tries = head.getOrNull(0)?.split("/")
+                    val attempt = tries?.getOrNull(0)?.toIntOrNull() ?: 0
+                    val of = tries?.getOrNull(1)?.toIntOrNull() ?: Int.MAX_VALUE
+                    if (attempt >= of) {
+                        if (head.getOrNull(1) != "acted") {
+                            return "the runner's last try did not act: ${heard.joinToString("; ")}"
+                        }
+                        finalActed = true
+                        finalAt = now
+                    }
+                }
+                if (finalActed && System.nanoTime() - finalAt > SHADE_DELIVERY_MS * 1_000_000) {
+                    return "nothing arrived in ${SHADE_DELIVERY_MS}ms after the runner's last " +
+                        "try acted: ${heard.joinToString("; ")}"
+                }
+                Thread.sleep(RETRY_PERIOD_MS)
+            }
+            return "nothing arrived in ${SHADE_HAND_CEILING_MS}ms; " +
+                (if (heard.isEmpty()) "no report reached ${file.name}"
+                 else "the runner said ${heard.joinToString("; ")}")
+        } finally {
+            file.delete()
         }
-        return "no reply reached this process in ${NOTIFY_REPLY_WAIT_MS}ms — the runner expands " +
-            "the shade off the KAYA_REQUEST line, finds the row by its title, taps " +
-            "its Reply action, types the text and sends it; replies=$kayaNotificationReplies"
     }
 
-    // A reply under a collapsed group takes four shade dumps (docs/traps.md,
-    // "The reply under a collapsed group"): 12.6 s measured beside load.
-    private const val NOTIFY_REPLY_WAIT_MS = 30_000L
+    private const val SHADE_HAND_CEILING_MS = 50_000L
+    private const val SHADE_DELIVERY_MS = 8_000L
 
-    private fun kayaAwaitNotificationActivation(before: Int): String? {
-        val deadline = System.nanoTime() + 20_000L * 1_000_000
-        while (System.nanoTime() < deadline) {
-            if (kayaNotificationActivations != before) return null
-            Thread.sleep(RETRY_PERIOD_MS)
-        }
-        return "no activation reached this process in 20000ms — the runner " +
-            "expands the shade off the KAYA_REQUEST line, finds the row by its " +
-            "title and taps it; activations=$kayaNotificationActivations"
+    private fun kayaAwaitNotificationReply(activity: ComponentActivity, seq: Int, request: String): String? {
+        val before = kayaNotificationReplies
+        val off = kayaAwaitShadeHand(activity, seq, request) { kayaNotificationReplies != before }
+            ?: return null
+        return "no reply reached this process — the runner expands the shade off the " +
+            "KAYA_REQUEST line, finds the row by its title, taps its Reply action, types the " +
+            "text and sends it; $off; replies=$kayaNotificationReplies"
+    }
+
+    private fun kayaAwaitNotificationActivation(activity: ComponentActivity, seq: Int, request: String): String? {
+        val before = kayaNotificationActivations
+        val off = kayaAwaitShadeHand(activity, seq, request) { kayaNotificationActivations != before }
+            ?: return null
+        return "no activation reached this process — the runner expands the shade off the " +
+            "KAYA_REQUEST line, finds the row by its title and taps it; $off; " +
+            "activations=$kayaNotificationActivations"
     }
 
     /**
@@ -11263,12 +11296,12 @@ object KayaCompose {
                         } else {
                             kayaAwaitQuiet()
                             val answered = kayaBatches
-                            val activations = kayaNotificationActivations
                             kayaNotifyTaps += 1
                             val seq = kayaNotifyTaps
-                            Log.i("kaya", "KAYA_REQUEST: notify_tap $seq $title")
-                            val off = kayaAwaitNotificationActivation(activations)
+                            val off = kayaAwaitNotificationActivation(
+                                activity, seq, "KAYA_REQUEST: notify_tap $seq $title")
                             if (off != null) {
+                                Log.i("kaya", "KAYA_ACK: notify_tap $seq gave up")
                                 failures.add("notification_activate $nid: $off")
                             } else {
                                 // THE ACK the runner stops re-tapping on,
@@ -11295,12 +11328,12 @@ object KayaCompose {
                         } else {
                             kayaAwaitQuiet()
                             val answered = kayaBatches
-                            val replies = kayaNotificationReplies
                             kayaNotifyTaps += 1
                             val seq = kayaNotifyTaps
-                            Log.i("kaya", "KAYA_REQUEST: notify_reply $seq $title\t$text")
-                            val off = kayaAwaitNotificationReply(replies)
+                            val off = kayaAwaitNotificationReply(
+                                activity, seq, "KAYA_REQUEST: notify_reply $seq $title\t$text")
                             if (off != null) {
+                                Log.i("kaya", "KAYA_ACK: notify_reply $seq gave up")
                                 failures.add("notification_reply $nid: $off")
                             } else {
                                 Log.i("kaya", "KAYA_ACK: notify_reply $seq")

@@ -1378,7 +1378,12 @@ check_netimage_server_routes(gate)
 from catalogue_server_routes import run as check_catalogue_server_routes  # noqa: E402
 check_catalogue_server_routes(gate)
 
-gate.negatives_ran(82)
+# AN ANDROID SHADE HAND'S EVERY TRY IS REPORTED TO THE WAITING VERB
+# (tools/lib/shade_hand_routes.py; docs/traps.md, the tap that outlasted its wait).
+from shade_hand_routes import run as check_shade_hand_routes  # noqa: E402
+check_shade_hand_routes(gate)
+
+gate.negatives_ran(95)
 
 gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",

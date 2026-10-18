@@ -15228,8 +15228,9 @@ for a chevron inside the title's OWN row (the innermost
 expandableNotificationRow around it). That takes four dumps: open the
 group, unfold Alex, Reply, then the field. The send button is drawn with
 the field, disabled, at the box it keeps, so no dump follows the typing.
-The hand took 11.2 s idle and 12.6 s beside twelve host spinners, so the
-Compose reply wait is NOTIFY_REPLY_WAIT_MS = 30 s, not the tap's 20 s.
+The hand took 11.2 s idle and 12.6 s beside twelve host spinners. The
+Compose reply wait was then raised to 30 s; neither shade wait carries a
+fixed budget any more (see "The tap that outlasted its wait" below).
 `reply_move_selftest` runs the three measured dumps (SHADE_DUMPS) when the
 runner starts. check-exclusive runs the same test and watches four cuts go
 red: the shipped nearest-chevron search, the group arm, the own-row scope,
@@ -17596,3 +17597,44 @@ every gates.py run and matrix), tools/validate-mac.py's build and
 tools/run-leg.py's; watched red on the real compile with the `.id()` removed
 (one substitution, restored by hash), and two doctored transcripts in
 unit-suite's own negatives.
+
+## The tap that outlasted its wait (measured 2026-10-18)
+
+chat-go's `notification_activate 7002` failed once in the matrix at f85f75f4
+(run 20261018T094114Z-083511, host load 127 on 18 cores) with
+`no activation reached this process in 20000ms ... activations=0`, beside a
+runner line saying it had tapped Sam's row at 180,392. The tap had worked.
+The verb trace shows step 47 (Sam's conversation open) going green 2.1 s
+after step 46 gave up, and step 49 (`expect_no_notification 7002`) green
+because the tap had auto-cancelled the notification, which is also why the
+runner's tries 2 and 3 found no 'Sam' row. The hand had taken 21.6 s: the
+reply just before it had left SystemUI's RemoteInput on Alex's notification
+active until 8 s after the send (NotifRemoteInputLog's `onDefocus`), and
+until then `cmd statusbar collapse` left the shade visible and unfocusable,
+so open_shade needed all three rounds. The shade door alone is bounded at
+about 20.5 s (1 + 2.5 + 2 x (6 + 2.5)) before any dump, so a fixed 20 s app
+wait lost to a hand that was working as designed. Holding the tap 22 s on
+the shipped code reproduced the red's exact signature.
+
+The rule: an Android shade hand reports every try to the app, and the verb
+waits on the reports, not on a budget of its own. The runner writes
+`<try>/<tries> acted|missed <its sentence>` to `files/kaya-shade-<seq>.txt`
+(`report_shade_hand`, `shade_report_line`); KayaCompose's
+`kayaAwaitShadeHand` deletes a stale report before printing its request,
+ends on the activation or reply, on a final try that did not act, 8 s after
+a final try that did (SHADE_DELIVERY_MS), or at 50 s (SHADE_HAND_CEILING_MS,
+under the 60 s step ceiling), and its failure sentence lists every report
+with its arrival time after the request. A verb that gives up logs
+`KAYA_ACK: <verb> <seq> gave up` so the runner stops tapping over the steps
+that follow. And a red Android leg's log lists the app's failed-step
+sentences, first first, and says when no verdict reached the poll: a forced
+red with the tap withheld ran its later steps past the poll, and the
+existing 60-line trace tail held nothing but one repeated diagnostic, so the
+bundle carried no failed step at all.
+
+GUARD: tools/lib/shade_hand_routes.py, run by check-exclusive: the report
+call after both hands, the file name on both sides, the report line run over
+the red's own sentences, the stale-report delete before the request, the
+give-up arms, the ceiling under the step's, the gave-up ack read by the
+runner's ack pattern, and the failed-step listing run over a doctored
+buffer; thirteen cuts watched, the shipped fixed 20 s wait among them.

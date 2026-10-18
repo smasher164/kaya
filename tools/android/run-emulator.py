@@ -2125,8 +2125,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
             began = time.monotonic()
             told = reply_notification(serial, title, text, log)
             replied[seq] = (tries + 1, time.monotonic())
+            reported = report_shade_hand(serial, package, seq, tries + 1, told)
             print(f"{name}: notify_reply #{seq} try {tries + 1} -> {told} in "
-                  f"{int((time.monotonic() - began) * 1000)}ms", file=log)
+                  f"{int((time.monotonic() - began) * 1000)}ms; {reported}", file=log)
         for seq, title in re.findall(r"KAYA_REQUEST: notify_tap (\d+) (.*)",
                                      dump):
             title = title.rstrip("\r")
@@ -2138,8 +2139,9 @@ def run_apk_on(serial, name, apk, component, script, extras,
             began = time.monotonic()
             told = tap_notification(serial, title, log)
             tapped[seq] = (tries + 1, time.monotonic())
+            reported = report_shade_hand(serial, package, seq, tries + 1, told)
             print(f"{name}: notify_tap #{seq} try {tries + 1} -> {told} in "
-                  f"{int((time.monotonic() - began) * 1000)}ms", file=log)
+                  f"{int((time.monotonic() - began) * 1000)}ms; {reported}", file=log)
         # THE MEDIA VERBS' HAND (docs/media-plan.md §5): a media key
         # dispatched THROUGH THE SYSTEM, re-dispatched until the app acks
         # its arrival, and the window manager's keep-screen-on read back
@@ -2381,6 +2383,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
               f"android-{name}-buffers.log", file=log)
         full_buffers = (keep / f"android-{name}-buffers.log").read_text(
             encoding="utf-8", errors="replace")
+        print(failed_steps_said(name, out, full_buffers), file=log)
         sidecar = LEGS_DIR / f"{name}.log"
         sidecar.with_suffix(".system-events").write_text(
             flightrec_lane.android_system_events(full_buffers), encoding="utf-8")
@@ -3053,6 +3056,44 @@ def answer_video_ink(serial, package, seq, box, ground_x, log):
 NOTIFY_TAP_RETRY_S = 4.0
 
 
+def failed_steps_said(name, verdict, buffers):
+    """The app's own failed-step sentences, first first and whole, and
+    whether a verdict reached the poll: the trace tail above can be all
+    one repeated diagnostic, and a leg whose later steps fail slowly runs
+    past the poll with no verdict to carry the first one."""
+    failed = [ln for ln in buffers.splitlines() if "KAYA_HARNESS: step-failed" in ln]
+    head = (f"{name}: the verdict the poll read: {verdict.strip()!r}" if verdict.strip()
+            else f"{name}: no KAYA_SELFTEST verdict reached the runner's poll")
+    listed = "\n".join(failed[:8]) if failed else "  none in the full buffers"
+    return f"{head}; the app logged {len(failed)} failed step(s), first first:\n{listed}"
+
+
+def shade_hand_acted(told):
+    """Whether a shade hand's sentence says it made its final act: the tap
+    on the row, or the reply's send."""
+    return told.startswith(("tapped ", "typed "))
+
+
+def shade_report_line(attempt, told):
+    """What one try of a shade hand tells the app: `<try>/<tries> acted|missed
+    <the hand's sentence>`, one line."""
+    said = " ".join(told.split())
+    return (f"{attempt}/{NOTIFY_TAP_TRIES} {'acted' if shade_hand_acted(told) else 'missed'} "
+            f"{said}\n")
+
+
+def report_shade_hand(serial, package, seq, attempt, told):
+    """Every try of a shade hand is written into the app's files directory,
+    where the verb waiting on it reads it (docs/traps.md, the tap that
+    outlasted its wait)."""
+    got = subprocess.run(
+        ["timeout", "20", "adb", "-s", serial, "exec-in",
+         f"run-as {package} sh -c 'cat > files/kaya-shade-{seq}.txt'"],
+        input=shade_report_line(attempt, told), stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, check=False, **TEXT)
+    return f"reported to files/kaya-shade-{seq}.txt, exit {got.returncode} {got.stdout.strip()!r}"
+
+
 def shade_row_centre(dump, title):
     """The centre of the node whose text is exactly `title`, or None. The
     dump is XML, and a title is free text, so the attribute is compared
@@ -3562,7 +3603,7 @@ def act_two(serial, name, package, component, dump, log):
               f"{nid} {title!r}", file=log)
         told = tap_notification(serial, title, log)
         print(f"{name}: door notify_tap -> {told}", file=log)
-        if not told.startswith("tapped"):
+        if not shade_hand_acted(told):
             # NOTHING WAS TAPPED, so nothing will arrive: the poll below
             # would spend its whole budget proving what this sentence
             # already says.
