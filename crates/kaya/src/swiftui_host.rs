@@ -415,6 +415,8 @@ pub struct KayaHostApi {
     pub video_view_box: unsafe extern "C" fn(u32, u32, i64, *mut u32),
     /// docs/styling-pass-plan.md Y4: an activatable container pressed.
     pub emit_activated: unsafe extern "C" fn(*const u8, usize),
+    /// docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the user's pick.
+    pub emit_selection_changed: unsafe extern "C" fn(*const u8, usize),
 }
 
 /// # Safety
@@ -709,6 +711,7 @@ pub(crate) fn run() -> i32 {
         capture_self_view_box: crate::capi::kaya_capture_self_view_box,
         video_view_box: crate::capi::kaya_video_view_box,
         emit_activated: crate::capi::kaya_emit_activated,
+        emit_selection_changed: crate::capi::kaya_emit_selection_changed,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

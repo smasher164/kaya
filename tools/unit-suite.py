@@ -35,6 +35,8 @@ dev_shell_or_die()
 import re
 import subprocess
 
+import guest_warnings
+
 sys.stdout.reconfigure(line_buffering=True)
 
 g = Gate("unit-suite")
@@ -106,7 +108,18 @@ if __name__ == "__main__":
     g.negative("the harness tests silently gone",
                lambda: census("test result: ok. 172 passed; 0 failed\n", 0)[0],
                want="below the floor")
-    g.negatives_ran(4)
+    # A GUEST'S WARNING IS A REFUSAL (tools/lib/guest_warnings.py): the
+    # unused ActionRef in guests/rust/menus.rs, as cargo printed it.
+    planted = ("warning: unused `ActionRef` that must be used\n"
+               "  --> crates/kaya/../../guests/rust/menus.rs:71:21\n"
+               "warning: `kaya` (example \"menus\" test) generated 1 warning\n")
+    g.negative("a guest's warning under a green suite",
+               lambda: guest_warnings.findings(green + planted),
+               want="rustc warns in a Rust guest")
+    g.negative("a guest's warning whose site went unread",
+               lambda: guest_warnings.findings(planted.split("\n", 2)[2]),
+               want="found no guests/ site")
+    g.negatives_ran(6)
 
     print("unit-suite: cargo test -p kaya --features harness --locked",
           flush=True)
@@ -115,6 +128,7 @@ if __name__ == "__main__":
         cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=False)
     transcript = run.stdout + run.stderr
     findings, passed = census(transcript, run.returncode)
+    findings += guest_warnings.findings(transcript)
     if findings:
         print(transcript, file=sys.stderr)
     for line in findings:

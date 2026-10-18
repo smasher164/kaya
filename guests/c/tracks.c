@@ -2,7 +2,8 @@
  * Y5, Y6, Y7) with every field explicit: two tables whose title cell is a
  * `rounded` image beside a name over a caption, the name's `tint` bound to
  * the row's field, and each row `activatable` with `selected` bound to its
- * field, the app writing it from the `activated` occurrence (Y4). See
+ * field, the app writing it from the `selection_changed` and `activated`
+ * occurrences and naming each in its own label (Y4). See
  * guests/rust/tracks.rs. */
 
 #include <kaya.h>
@@ -35,6 +36,11 @@
 #define N_T_NAME 17
 #define N_T_ARTIST 18
 #define N_T_ALBUM 19
+#define W_PICKED 20
+#define W_PLAYED 21
+
+#define SIG_PICKED 1
+#define SIG_PLAYED 2
 
 #define C_ALBUM 1
 #define C_PLAYLIST 2
@@ -152,6 +158,16 @@ static void build_scene(void) {
     window_prop(&tx, KAYA_WPROP_HEIGHT, kaya_f64(640.0));
     kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
     kaya_tx_set_spacing(&tx, W_ROOT, 12.0);
+    kaya_tx_create_signal(&tx, SIG_PICKED, kaya_str("picked: none"));
+    kaya_tx_create_signal(&tx, SIG_PLAYED, kaya_str("played: none"));
+    kaya_tx_create_widget(&tx, W_PICKED, KAYA_KIND_LABEL);
+    kaya_tx_bind_text(&tx, W_PICKED, SIG_PICKED);
+    kaya_tx_set_a11y_id(&tx, W_PICKED, "picked");
+    kaya_tx_add_child(&tx, W_ROOT, W_PICKED);
+    kaya_tx_create_widget(&tx, W_PLAYED, KAYA_KIND_LABEL);
+    kaya_tx_bind_text(&tx, W_PLAYED, SIG_PLAYED);
+    kaya_tx_set_a11y_id(&tx, W_PLAYED, "played");
+    kaya_tx_add_child(&tx, W_ROOT, W_PLAYED);
     uint32_t schema[] = {KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_STR, KAYA_VALUE_BLOB,
                          KAYA_VALUE_I64, KAYA_VALUE_BOOL};
     kaya_tx_create_collection(&tx, C_ALBUM, (KayaVariantSchema[]){{schema, 7}}, 1);
@@ -205,9 +221,14 @@ static void select_in(KayaTx *tx, uint64_t collection, char prefix, int count, c
     }
 }
 
-static void on_row(const KayaVal *picked) {
+/* A pick names the row in `picked`, an activation in `played`. */
+static void on_row(const KayaVal *picked, uint64_t signal, const char *verb) {
     static uint8_t buf[8192];
     KayaTx tx = {buf, 0, sizeof buf};
+    char text[32];
+    snprintf(text, sizeof text, "%s: %.*s", verb, picked->type == KAYA_VALUE_STR ? (int)picked->s_len : 0,
+             picked->type == KAYA_VALUE_STR ? picked->s : "");
+    kaya_tx_write_signal(&tx, signal, kaya_str(text));
     select_in(&tx, C_ALBUM, 'a', 3, picked);
     select_in(&tx, C_PLAYLIST, 't', PLAYLIST, picked);
     submit(&tx);
@@ -226,9 +247,12 @@ static void *app(void *arg) {
         uint64_t id;
         KayaVal keys[2];
         uint32_t n_keys;
-        if (kaya_parse_activated(rec, &id, keys, 2, &n_keys) && n_keys == 1 &&
+        if (kaya_parse_selection_changed(rec, &id, keys, 2, &n_keys) && n_keys == 1 &&
             (id == N_A_LINE || id == N_T_LINE))
-            on_row(&keys[0]);
+            on_row(&keys[0], SIG_PICKED, "picked");
+        else if (kaya_parse_activated(rec, &id, keys, 2, &n_keys) && n_keys == 1 &&
+                 (id == N_A_LINE || id == N_T_LINE))
+            on_row(&keys[0], SIG_PLAYED, "played");
     }
     return NULL;
 }

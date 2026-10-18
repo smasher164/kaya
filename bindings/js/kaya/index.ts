@@ -4422,13 +4422,14 @@ function setLayout(handle: Handle, opts: ContainerOptions): void {
  * clamped by the core, into the window's ground; `groundImage` covers the
  * container with a picture, text over which sits in a row filled
  * "overlay"; `onActivate` makes the whole container take a click (a
- * stamped copy's handler getting its row), and `selected` then wears the
- * platform's selected surface. */
+ * stamped copy's handler getting its row), `onSelect` hears the user's pick
+ * of it, and `selected` then wears the platform's selected surface. */
 export type SkinOptions = {
   groundGradient?: Color | Signal<Color> | FieldRef;
   groundImage?: ImageSource;
   selected?: boolean | Signal<boolean> | FieldRef;
   onActivate?: Handler;
+  onSelect?: Handler;
 };
 
 function setSkin(handle: Handle, opts: SkinOptions): void {
@@ -4450,6 +4451,10 @@ function setSkin(handle: Handle, opts: SkinOptions): void {
   if (opts.onActivate !== undefined) {
     records().push(wire.tx_set_activatable(handle.id, true));
     app()._register(handle, wire.OCC_ACTIVATED, opts.onActivate);
+  }
+  if (opts.onSelect !== undefined) {
+    records().push(wire.tx_set_activatable(handle.id, true));
+    app()._register(handle, wire.OCC_SELECTION_CHANGED, opts.onSelect);
   }
   const on = opts.selected;
   if (on !== undefined) {

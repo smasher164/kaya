@@ -2957,6 +2957,31 @@ if (isMainThread) {
     });
     check("the dock attaches to the primary window and mounts its root",
       sent(dockFrom, wire.tx_attach_dock(0, 40)) && sent(dockFrom, wire.tx_mount(40, root.id)));
+    // Y4, AMENDED 2026-10-17: the user's pick, apart from the activation.
+    const pickFrom = shipped.length;
+    const heard: string[] = [];
+    let pick!: K.Widget;
+    let open!: K.Widget;
+    app.build(() => {
+      kaya.column({ onSelect: () => { heard.push("pick"); } }, (w) => {
+        pick = w;
+        kaya.label("pick me");
+      });
+      kaya.column({ onActivate: () => { heard.push("open"); } }, (w) => {
+        open = w;
+        kaya.label("open me");
+      });
+    });
+    const table = (app as unknown as { _widgetHandlers: Map<string, unknown> })._widgetHandlers;
+    check("onSelect sends activatable and registers under selection_changed alone",
+      sent(pickFrom, wire.tx_set_activatable(pick.id, true))
+        && table.has(`${wire.OCC_SELECTION_CHANGED}:${pick.id}`) && !table.has(`${wire.OCC_ACTIVATED}:${pick.id}`));
+    for (const [kind, id] of [[wire.OCC_SELECTION_CHANGED, pick.id], [wire.OCC_ACTIVATED, pick.id],
+      [wire.OCC_SELECTION_CHANGED, open.id], [wire.OCC_ACTIVATED, open.id]] as [number, number][]) {
+      fire({ kind, id, keys: [], payload: null });
+    }
+    check("a pick reaches onSelect, and a pick or an activation nobody handles is ignored",
+      heard.join(",") === "pick,open");
   }
 
   if (failures.length > 0) {

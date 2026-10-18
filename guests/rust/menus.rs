@@ -68,7 +68,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     ("Queue", kaya::Symbol::Queue),
                     ("Favorite", kaya::Symbol::Favorite),
                 ] {
-                    m.item(title).symbol(symbol);
+                    m.item(title).symbol(symbol).id();
                 }
                 details
             })

@@ -454,6 +454,24 @@ replaced. The occurrence is a spec change, so it is swept across the nine
 bindings and the other tiers decide whether a press there also reports it.
 KEY: selection_changed, native table selection, doubleAction.
 
+BUILT 2026-10-18. The occurrence is `selection_changed` (activated's encoding),
+received by an `on_select` handler written where each binding writes
+`on_activate`; like it, `on_select` makes the container activatable, so a row
+with only `on_select` still takes the platform's press everywhere. THE OTHER
+TIERS REPORT IT: on every tier but the macOS native table (the iOS synthesized
+table, the cards and sidebars on every platform, GTK, WinUI and Compose) a
+press reports `selection_changed` and then `activated`, and skips the first
+when the pressed container already carries `selected`. A press is the only
+gesture those tiers give a row, so it is both the user's pick and the open.
+Reporting it keeps the principle above: kaya tells the app what the user
+picked and writes no `selected` itself. And an app that selects on `on_select`
+and acts on `on_activate` is right on every tier, which it would not be if the
+pick were reported only where a table has a selection of its own. On the
+native table a click below the last row keeps the pick, because the
+occurrence always names a row, and a shift or command click narrows to the
+clicked row, because a user's pick is one row (the app may still write
+several).
+
 Why: the sidebar rows, the cards and the track rows are all "a surface that
 takes a click and shows I am over it or on it", and today the only clickable
 thing is a button, which is why the task manager carries a details button in

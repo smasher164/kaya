@@ -21641,7 +21641,9 @@ impl WinUiStage {
                         PostMessageW(site, WM_CHAR, ch as usize, 1);
                     }
                     Key::Vk(vk) => {
-                        let scan = (MapVirtualKeyW(u32::from(vk), 0) as isize) << 16;
+                        // The arrows (and page/home/end) are extended keys.
+                        let extended: isize = if (0x21..=0x28).contains(&vk) { 1 << 24 } else { 0 };
+                        let scan = (MapVirtualKeyW(u32::from(vk), 0) as isize) << 16 | extended;
                         PostMessageW(site, WM_KEYDOWN, usize::from(vk), 1 | scan);
                         PostMessageW(site, WM_KEYUP, usize::from(vk), 1 | scan | (3 << 30));
                     }
@@ -23605,6 +23607,8 @@ impl crate::harness::Stage for WinUiStage {
             // Focus keys move no caret (docs/reveal-plan.md V10).
             "tab" => Self::post_keys("press tab", &[Key::Vk(0x09)]),
             "space" => Self::post_keys("press space", &[Key::Vk(0x20)]),
+            "up" => Self::post_keys("press up", &[Key::Vk(0x26)]),
+            "down" => Self::post_keys("press down", &[Key::Vk(0x28)]),
             other => panic!("kaya: press {other:?}: not one of harness::PRESS_KEYS"),
         }
     }
@@ -24503,14 +24507,13 @@ impl crate::harness::Stage for WinUiStage {
                     }
                 }
                 crate::harness::TargetKind::Row | crate::harness::TargetKind::Column => {
-                    // The item's own route (docs/styling-pass-plan.md Y4): an
-                    // activatable container reports `activated` with its tag.
+                    // The item's own press door (docs/styling-pass-plan.md Y4).
                     let Some(id) = target_widget_id(core, t) else {
                         eprintln!("kaya: click {t:?}: no such container");
                         return Ok(());
                     };
                     match skin::activation_tag(core, WidgetId(id)) {
-                        Some(tag) => core.occurrences.send_activated_tag(&tag),
+                        Some(tag) => skin::press(&core.occurrences, WidgetId(id), &tag),
                         None => eprintln!("kaya: click {t:?}: the container is not activatable"),
                     }
                 }

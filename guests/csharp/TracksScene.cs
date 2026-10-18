@@ -15,7 +15,7 @@ static class TracksScene
     };
 
     static Widget Table(Tx tx, RecordCollection<PlaylistTrack> tracks, string id, string rowId,
-        System.Action<Tx, string> pick)
+        System.Action<Tx, string> pick, System.Action<Tx, string> play)
     {
         var table = PlaylistTrackKaya.Each(tx, tracks, row =>
         {
@@ -42,7 +42,8 @@ static class TracksScene
             });
             row.SetA11yId(line, rowId);
             row.SetSelected(line, row.Selected);
-            row.OnActivate(line, (t, keys) => pick(t, (string)keys[0]));
+            row.OnSelect(line, (t, keys) => pick(t, (string)keys[0]));
+            row.OnActivate(line, (t, keys) => play(t, (string)keys[0]));
         });
         tx.Columns(table, new[] { "#", "Title", "Album" }, Sort.None);
         tx.SetA11yId(table, id);
@@ -66,17 +67,31 @@ static class TracksScene
             using (var asset = tx.Asset("covers/cover-600.jpg")) art = asset.Bytes();
             var album = PlaylistTrackKaya.Collection(tx);
             var playlist = PlaylistTrackKaya.Collection(tx);
-            void Pick(Tx t, string picked)
+            var pickedText = tx.Signal("picked: none");
+            var played = tx.Signal("played: none");
+            void Select(Tx t, string picked)
             {
                 for (int i = 0; i < Names.Length; i++)
                     PlaylistTrackKaya.Patch(t, album, $"a{i + 1}").Selected($"a{i + 1}" == picked);
                 for (int i = 0; i < Playlist; i++)
                     PlaylistTrackKaya.Patch(t, playlist, $"t{i + 1}").Selected($"t{i + 1}" == picked);
             }
+            void Pick(Tx t, string picked)
+            {
+                t.Write(pickedText, $"picked: {picked}");
+                Select(t, picked);
+            }
+            void Play(Tx t, string picked)
+            {
+                t.Write(played, $"played: {picked}");
+                Select(t, picked);
+            }
             tx.Mount(tx.Column(root =>
             {
-                Table(tx, album, "album", "a", Pick);
-                var lng = Table(tx, playlist, "tracks", "t", Pick);
+                tx.SetA11yId(tx.Label(bind: pickedText), "picked");
+                tx.SetA11yId(tx.Label(bind: played), "played");
+                Table(tx, album, "album", "a", Pick, Play);
+                var lng = Table(tx, playlist, "tracks", "t", Pick, Play);
                 tx.SetGrow(lng, 1);
                 return root;
             }, spacing: 12));

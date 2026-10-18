@@ -593,6 +593,7 @@ static class Program
         Set("SetSelected", ["Node n", "Signal s"], "n, s");
         Set("SetSelected", ["Node n", "Field<bool> f", "uint level = 0"], "n, f, level");
         Set("OnActivate", ["Node n", "System.Action<Tx, System.Collections.Generic.List<object>> handler"], "n, handler");
+        Set("OnSelect", ["Node n", "System.Action<Tx, System.Collections.Generic.List<object>> handler"], "n, handler");
         // Fwd leaves a trailing blank line; the class brace closes on it.
         b.Length -= System.Environment.NewLine.Length;
         b.AppendLine("}");

@@ -249,6 +249,8 @@ type App struct {
 	// The activatable containers (docs/styling-pass-plan.md Y4).
 	widgetActivates map[uint64]func(*Tx)
 	nodeActivates   map[uint64]func(*Tx, []any)
+	widgetSelects   map[uint64]func(*Tx)
+	nodeSelects     map[uint64]func(*Tx, []any)
 	widgetChanges  map[uint64]func(*Tx, string)
 	nodeChanges    map[uint64]func(*Tx, []any, string)
 	widgetSubmits  map[uint64]func(*Tx, string)
@@ -408,6 +410,8 @@ func NewApp() *App {
 		nodeHandlers:   make(map[uint64]func(*Tx, []any)),
 		widgetActivates: make(map[uint64]func(*Tx)),
 		nodeActivates:   make(map[uint64]func(*Tx, []any)),
+		widgetSelects:   make(map[uint64]func(*Tx)),
+		nodeSelects:     make(map[uint64]func(*Tx, []any)),
 		widgetChanges:  make(map[uint64]func(*Tx, string)),
 		nodeChanges:    make(map[uint64]func(*Tx, []any, string)),
 		widgetSubmits:  make(map[uint64]func(*Tx, string)),
@@ -7123,6 +7127,14 @@ func (a *App) Serve() {
 			}
 		case kind == occActivated:
 			if fn := a.nodeActivates[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys) })
+			}
+		case kind == occSelectionChanged && len(keys) == 0:
+			if fn := a.widgetSelects[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occSelectionChanged:
+			if fn := a.nodeSelects[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys) })
 			}
 		case kind == occTextChanged && len(keys) == 0:

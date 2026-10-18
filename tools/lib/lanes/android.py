@@ -428,6 +428,9 @@ MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
     # ends at its first hover.
     "cards": {"cut": ("hover", "expect_selected expect_ax", "")},
+    # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
+    # AMENDED 2026-10-17): this tier's table has no selection of its own to move.
+    "tracks": {"cut": ("press down", "expect_tint expect_rows", "")},
     # The media player demo on a phone (docs/media-player-plan.md M6): no
     # pointer, and the library is the Library section, not the sidebar.
     "music_home": {"cut": ("hover", "expect_ax expect_grid_columns", ""),

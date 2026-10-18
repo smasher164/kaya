@@ -1350,6 +1350,7 @@ abstract record Occurrence(ulong Id, List<object> Keys)
 
 sealed record ButtonClicked(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 sealed record Activated(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+sealed record SelectionChanged(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record TextChanged(ulong Id, List<object> Keys, string Text) : Occurrence(Id, Keys);
 
@@ -1948,6 +1949,8 @@ sealed class KayaApp
     readonly Dictionary<ulong, Action<Tx>> widgetHandlers = new();
     readonly Dictionary<ulong, Action<Tx>> widgetActivates = new();
     readonly Dictionary<ulong, Action<Tx, List<object>>> nodeActivates = new();
+    readonly Dictionary<ulong, Action<Tx>> widgetSelects = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>>> nodeSelects = new();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     readonly Dictionary<ulong, Action<Tx, uint>> sortHandlers = new();
@@ -2340,6 +2343,10 @@ sealed class KayaApp
     internal void OnActivate(Widget w, Action<Tx> handler) => widgetActivates[w.Id] = handler;
 
     internal void OnActivate(Node n, Action<Tx, List<object>> handler) => nodeActivates[n.Id] = handler;
+
+    internal void OnSelect(Widget w, Action<Tx> handler) => widgetSelects[w.Id] = handler;
+
+    internal void OnSelect(Node n, Action<Tx, List<object>> handler) => nodeSelects[n.Id] = handler;
 
     Task<T> RequestAsync<T>(Action<Tx, Action<T>> send)
     {
@@ -3503,6 +3510,7 @@ sealed class KayaApp
         {
             case KayaWire.OccKindButtonClicked: return new ButtonClicked(id, keys);
             case KayaWire.OccKindActivated: return new Activated(id, keys);
+            case KayaWire.OccKindSelectionChanged: return new SelectionChanged(id, keys);
             case KayaWire.OccKindTextChanged:
                 return new TextChanged(id, keys, payload as string ?? "");
             case KayaWire.OccKindSubmitted:
@@ -3732,6 +3740,14 @@ sealed class KayaApp
                 case Activated activeRow
                     when nodeActivates.TryGetValue(activeRow.Id, out var onActivateRow):
                     Dispatch(tx => onActivateRow(tx, activeRow.Keys));
+                    break;
+                case SelectionChanged { Live: true } pickLive
+                    when widgetSelects.TryGetValue(pickLive.Id, out var onSelect):
+                    Dispatch(onSelect);
+                    break;
+                case SelectionChanged pickRow
+                    when nodeSelects.TryGetValue(pickRow.Id, out var onSelectRow):
+                    Dispatch(tx => onSelectRow(tx, pickRow.Keys));
                     break;
                 case TextChanged { Live: true } textLive
                     when widgetChanges.TryGetValue(textLive.Id, out var onText):
@@ -4390,6 +4406,15 @@ sealed class Tx : IDisposable
     {
         Records.Add(KayaWire.TxSetActivatable(w.Id, true));
         App.OnActivate(w, handler);
+    }
+
+    /// The user picked this row or column (docs/styling-pass-plan.md Y4,
+    /// AMENDED 2026-10-17); activatable in the same act. The app writes
+    /// `selected` itself.
+    public void OnSelect(Widget w, Action<Tx> handler)
+    {
+        Records.Add(KayaWire.TxSetActivatable(w.Id, true));
+        App.OnSelect(w, handler);
     }
 
     /// A textarea one line tall at rest that grows with its text to `lines`
@@ -5478,17 +5503,18 @@ sealed class Tx : IDisposable
     public void Column(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, Tint? filled = null, Color? groundGradient = null,
-        byte[]? groundImage = null, Action<Tx>? onActivate = null) =>
+        byte[]? groundImage = null, Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf<object?>(KayaWire.KindColumn, c => { body(c); return null; },
             grow, spacing, align, inset, filled: filled, groundGradient: groundGradient,
-            groundImage: groundImage, onActivate: onActivate);
+            groundImage: groundImage, onActivate: onActivate, onSelect: onSelect);
 
     public T Column<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, Tint? filled = null, Color? groundGradient = null,
-        byte[]? groundImage = null, Action<Tx>? onActivate = null) =>
+        byte[]? groundImage = null, Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset, filled: filled,
-            groundGradient: groundGradient, groundImage: groundImage, onActivate: onActivate);
+            groundGradient: groundGradient, groundImage: groundImage, onActivate: onActivate,
+            onSelect: onSelect);
 
     /// `stackWhen:` stacks this row's children vertically while the
     /// window's SIZE CLASS is the named one (SizeClass.Compact, the only
@@ -5500,22 +5526,22 @@ sealed class Tx : IDisposable
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
         Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
-        Action<Tx>? onActivate = null) =>
+        Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         Row<object?>(c => { body(c); return null; },
             grow, spacing, align, inset, stackWhen, filled, role, groundGradient, groundImage,
-            onActivate);
+            onActivate, onSelect);
 
     public T Row<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
         double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
         Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
-        Action<Tx>? onActivate = null) =>
+        Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf(KayaWire.KindRow, c =>
         {
             if (role is Role r) SetRole(c, r);
             return body(c);
         }, grow, spacing, align, inset, stackWhen, filled, groundGradient, groundImage,
-            onActivate);
+            onActivate, onSelect);
 
     /// A scroll viewport over EXACTLY ONE child. Pass grow: so the
     /// enclosing track CONSTRAINS it — an unconstrained viewport hugs its
@@ -5649,7 +5675,7 @@ sealed class Tx : IDisposable
         uint kind, Func<Widget, T> body, double? grow = null, double? spacing = null,
         Align? align = null, double? inset = null, SizeClass? stackWhen = null,
         Tint? filled = null, Color? groundGradient = null, byte[]? groundImage = null,
-        Action<Tx>? onActivate = null)
+        Action<Tx>? onActivate = null, Action<Tx>? onSelect = null)
     {
         var parent = Widget(kind);
         if (grow is double g) SetGrow(parent, g);
@@ -5659,6 +5685,7 @@ sealed class Tx : IDisposable
         if (groundGradient is Color top) SetGroundGradient(parent, top);
         if (groundImage != null) SetGroundImage(parent, groundImage);
         if (onActivate != null) OnActivate(parent, onActivate);
+        if (onSelect != null) OnSelect(parent, onSelect);
         if (inset is double pad) SetInset(parent, pad);
         if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
@@ -7174,6 +7201,14 @@ sealed class Tpl
     {
         tx.Records.Add(KayaWire.TxSetActivatable(n.Id, true));
         tx.App.OnActivate(n, handler);
+    }
+
+    /// The user picked a stamped copy of this container, the handler handed
+    /// the copy's keys (Tx.OnSelect).
+    public void OnSelect(Node n, Action<Tx, List<object>> handler)
+    {
+        tx.Records.Add(KayaWire.TxSetActivatable(n.Id, true));
+        tx.App.OnSelect(n, handler);
     }
 
     /// A stamped image's bound (Tx.SetMaxWidth, Tx.SetMaxHeight).

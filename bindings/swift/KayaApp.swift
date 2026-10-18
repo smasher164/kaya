@@ -2619,6 +2619,9 @@ public final class KayaApp {
     /// by widget and by template node.
     private var widgetActivates: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var nodeActivates: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
+    /// The user's pick of one (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17).
+    private var widgetSelects: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var nodeSelects: [UInt64: (KayaAppTx, [KayaValue]) throws -> Void] = [:]
     private var widgetChanges: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
     private var nodeChanges: [UInt64: (KayaAppTx, [KayaValue], String) throws -> Void] = [:]
     private var widgetSubmits: [UInt64: (KayaAppTx, String) throws -> Void] = [:]
@@ -3058,6 +3061,17 @@ public final class KayaApp {
         node n: UInt64, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void
     ) {
         nodeActivates[n] = handler
+    }
+
+    /// The registration half of `KayaAppTx.onSelect` / `KayaTpl.onSelect`.
+    fileprivate func registerSelect(_ w: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        widgetSelects[w] = handler
+    }
+
+    fileprivate func registerSelect(
+        node n: UInt64, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void
+    ) {
+        nodeSelects[n] = handler
     }
 
     /// Register a change handler for a live entry: the widget owns its
@@ -3827,6 +3841,14 @@ public final class KayaApp {
                 if let handler = nodeActivates[id] {
                     dispatch { try build { tx in try handler(tx, keys) } }
                 }
+            case (UInt16(KAYA_OCCURRENCE_SELECTION_CHANGED), true):
+                if let handler = widgetSelects[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_SELECTION_CHANGED), false):
+                if let handler = nodeSelects[id] {
+                    dispatch { try build { tx in try handler(tx, keys) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_TEXT_CHANGED), true):
                 if let handler = widgetChanges[id] {
                     dispatch { try build { tx in try handler(tx, text ?? "") } }
@@ -4465,6 +4487,14 @@ public final class KayaAppTx {
     /// activatable are one act.
     public func onActivate(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
         app.registerActivate(w.id, handler)
+        tx.setActivatable(w.id, true)
+    }
+
+    /// The user picked this row or column (docs/styling-pass-plan.md Y4,
+    /// AMENDED 2026-10-17); activatable in the same act. The app writes
+    /// `selected` itself.
+    public func onSelect(_ w: KayaWidget, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        app.registerSelect(w.id, handler)
         tx.setActivatable(w.id, true)
     }
 
@@ -5412,11 +5442,13 @@ public final class KayaAppTx {
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil,
+        onSelect: ((KayaAppTx) throws -> Void)? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
             UInt32(KAYA_KIND_COLUMN), { w in
                 if let onActivate { self.onActivate(w, onActivate) }
+                if let onSelect { self.onSelect(w, onSelect) }
                 return try children(w)
             }, grow: grow, spacing: spacing,
             inset: inset, align: align, filled: filled)
@@ -5449,12 +5481,14 @@ public final class KayaAppTx {
         grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil, role: KayaRole? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil,
+        onSelect: ((KayaAppTx) throws -> Void)? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
             UInt32(KAYA_KIND_ROW), { w in
                 if let role { setRole(w, role) }
                 if let onActivate { self.onActivate(w, onActivate) }
+                if let onSelect { self.onSelect(w, onSelect) }
                 return try children(w)
             }, grow: grow, spacing: spacing,
             inset: inset, align: align, filled: filled)
@@ -6803,6 +6837,13 @@ public final class KayaTpl {
     /// (docs/styling-pass-plan.md Y4).
     public func onActivate(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
         tx.app.registerActivate(node: n.id, handler)
+        tx.tx.setActivatable(n.id, true)
+    }
+
+    /// The user picked a stamped copy of this container, the handler handed
+    /// the copy's keys (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17).
+    public func onSelect(_ n: KayaNodeHandle, _ handler: @escaping (KayaAppTx, [KayaValue]) throws -> Void) {
+        tx.app.registerSelect(node: n.id, handler)
         tx.tx.setActivatable(n.id, true)
     }
 

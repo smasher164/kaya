@@ -1158,6 +1158,9 @@ type app = {
      (docs/submit-plan.md S7). *)
   widget_submits : (int64, string -> unit) Hashtbl.t;
   node_submits : (int64, Kaya_wire.value list -> string -> unit) Hashtbl.t;
+  (* The user's pick (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17). *)
+  widget_selects : (int64, unit -> unit) Hashtbl.t;
+  node_selects : (int64, Kaya_wire.value list -> unit) Hashtbl.t;
   (* The rich mirror, one document per [rich] textarea
      (docs/rich-text-plan.md R1): folded from the two occurrences and
      from the app's own [set_document]/[apply_edit] as they are SENT. *)
@@ -1398,6 +1401,8 @@ let create () =
     widget_changes = Hashtbl.create 8;
     node_changes = Hashtbl.create 8;
     widget_submits = Hashtbl.create 8;
+    widget_selects = Hashtbl.create 8;
+    node_selects = Hashtbl.create 8;
     node_submits = Hashtbl.create 8;
     documents = Hashtbl.create 8;
     document_binds = Hashtbl.create 8;
@@ -3543,7 +3548,7 @@ let draw (Widget id) body =
    them left to right ([List.iter]'s specified order IS document order).
    Props are labeled optional arguments, the lablgtk idiom. *)
 let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
-    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind kind children () =
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
   Option.iter (fun v -> set_fill parent v) fill;
@@ -3563,6 +3568,13 @@ let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?h
       let (Widget id) = parent in
       let tx = the_tx () in
       Hashtbl.replace tx.app.widget_handlers id handler;
+      emit tx (Kaya_wire.tx_set_activatable id true)
+  | None -> ());
+  (match on_select with
+  | Some handler ->
+      let (Widget id) = parent in
+      let tx = the_tx () in
+      Hashtbl.replace tx.app.widget_selects id handler;
       emit tx (Kaya_wire.tx_set_activatable id true)
   | None -> ());
   Option.iter (fun on -> set_selected parent on) selected;
@@ -3656,9 +3668,9 @@ let spacer ?(grow = 1.0) () =
   w
 
 let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
-    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind children =
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind children =
   container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
-    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind Kaya_wire.kind_column children
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind Kaya_wire.kind_column children
 
 (* A scroll viewport over EXACTLY ONE child (the signature says so; the
    scene enforces it too). Pass [~grow] so the enclosing track CONSTRAINS
@@ -3680,10 +3692,10 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
 let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
-    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind ?role ?stack_when ?wrap children () =
+    ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind ?role ?stack_when ?wrap children () =
   let parent =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?filled
-      ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?selected ?selected_bind Kaya_wire.kind_row children ()
+      ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind Kaya_wire.kind_row children ()
   in
   (* [Composer] (docs/composer-plan.md §4). *)
   Option.iter (fun r -> set_role parent r) role;
@@ -5723,6 +5735,15 @@ module Tpl = struct
 
   let activate_node = on_activate
 
+  (* The user picked a stamped copy, the handler handed its keys
+     (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17). *)
+  let on_select (Node id) (handler : key list -> unit) =
+    let tx = the_tx () in
+    Hashtbl.replace tx.app.node_selects id (fun keys -> handler (List.map key_of_wire keys));
+    emit tx (Kaya_wire.tx_set_activatable id true)
+
+  let select_node = on_select
+
   let set_max_width n points = Floor.set_max_width n points
   let set_max_height n points = Floor.set_max_height n points
 
@@ -6426,7 +6447,7 @@ module Tpl = struct
      right; [()] realizes, omitting it nominates a child. *)
   let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?(level = 0) ?inset
-      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field kind children () =
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field kind children () =
     let parent = Floor.widget kind in
     Option.iter (fun g -> Floor.set_grow parent g) grow;
     Option.iter (fun v -> Floor.set_fill parent v) fill;
@@ -6440,6 +6461,7 @@ module Tpl = struct
     Option.iter (fun d -> set_ground_image parent d) ground_image;
     Option.iter (fun fd -> bind_ground_image_field ~level parent fd) ground_image_field;
     Option.iter (fun h -> activate_node parent h) on_activate;
+    Option.iter (fun h -> select_node parent h) on_select;
     Option.iter (fun on -> set_selected parent on) selected;
     Option.iter (fun fd -> bind_selected_field ~level parent fd) selected_field;
     List.iter (fun child -> Floor.add_child parent (child ())) children;
@@ -6527,10 +6549,10 @@ module Tpl = struct
      and swallowed the caller's. *)
   let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
-      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field children =
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field children =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
-      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field Kaya_wire.kind_column children
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field Kaya_wire.kind_column children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE child.
      Pass [~grow] so the enclosing track CONSTRAINS it. CAUTION: the scene
@@ -6548,11 +6570,11 @@ module Tpl = struct
      Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
-      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field ?wrap children () =
+      ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field ?wrap children () =
     let parent =
       container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
         ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset
-        ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?selected ?selected_field Kaya_wire.kind_row children ()
+        ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field Kaya_wire.kind_row children ()
     in
     Option.iter (fun v -> Floor.set_wrap parent v) wrap;
     parent
@@ -7746,6 +7768,18 @@ let dispatch_loop app =
                in
                (match Hashtbl.find_opt table id with
                | Some handler -> dispatch app (fun () -> handler label delta)
+               | None -> ()))
+         else if kind = Kaya_wire.occ_kind_selection_changed then
+           (* Its own tables: an unhandled pick never reaches a container's
+              on_activate, which shares widget_handlers with a click. *)
+           (match keys with
+           | [] ->
+               (match Hashtbl.find_opt app.widget_selects id with
+               | Some handler -> build app handler
+               | None -> ())
+           | keys ->
+               (match Hashtbl.find_opt app.node_selects id with
+               | Some handler -> dispatch app (fun () -> handler keys)
                | None -> ()))
          else if kind = Kaya_wire.occ_kind_menu_activated then
            (* Menu occurrences key the menu-item tables — their own id

@@ -1,9 +1,9 @@
 //! The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md Y5,
 //! Y6, Y7): a playlist's table whose title cell is rounded art beside the
 //! track's name over its artist, at a row height every tier honours, the
-//! playing track's name in the accent, and a row the app selects on
-//! activation (Y4). A three-row album table carries the reading of every row;
-//! the long playlist carries the scroll.
+//! playing track's name in the accent, and a row the app selects when the
+//! user picks it and names when it is activated (Y4). A three-row album table
+//! carries the reading of every row; the long playlist carries the scroll.
 
 use kaya::{Fit, Path, PathKey, Shape, Tint};
 
@@ -16,6 +16,12 @@ struct Track {
     art: Vec<u8>,
     tint: Tint,
     selected: bool,
+}
+
+#[derive(Clone)]
+enum Msg {
+    Pick(Path),
+    Play(Path),
 }
 
 const PLAYLIST: usize = 60;
@@ -31,7 +37,7 @@ fn table(
     tracks: &kaya::Collection<Track>,
     id: &str,
     row_id: &str,
-    msgs: &kaya::Messages<Path>,
+    msgs: &kaya::Messages<Msg>,
 ) -> kaya::WidgetId {
     let rows = tracks.rows(tx).columns(&["#", "Title", "Album"], kaya::Sort::none());
     let table = rows.id();
@@ -56,7 +62,8 @@ fn table(
         });
         row.a11y_id(line, row_id);
         row.selected(line, Track::selected());
-        row.on_activate(line, msgs, |path| path);
+        row.on_select(line, msgs, Msg::Pick);
+        row.on_activate(line, msgs, Msg::Play);
     }
     tx.a11y_id(table, id);
     table
@@ -77,13 +84,17 @@ fn track(i: usize, art: &[u8]) -> Track {
 
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::new();
-    let (album, playlist) = ctx.apply(|tx| {
+    let (album, playlist, picked_text, played) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("tracks").size(720.0, 640.0);
         let art = tx.asset("covers/cover-600.jpg").bytes().to_vec();
         let album = tx.collection::<Track>();
         let playlist = tx.collection::<Track>();
+        let picked_text = tx.signal("picked: none");
+        let played = tx.signal("played: none");
         let root = tx
             .column(|tx| {
+                tx.label(picked_text).a11y_id("picked");
+                tx.label(played).a11y_id("played");
                 table(tx, &album, "album", "a", &msgs);
                 let long = table(tx, &playlist, "tracks", "t", &msgs);
                 tx.grow(long, 1.0);
@@ -97,11 +108,20 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         for i in 0..PLAYLIST {
             tx.insert(&playlist, format!("t{}", i + 1).as_str(), track(i, &art));
         }
-        (album, playlist)
+        (album, playlist, picked_text, played)
     });
-    while let Some(path) = msgs.next(&ctx) {
+    while let Some(msg) = msgs.next(&ctx) {
+        let (path, play) = match msg {
+            Msg::Pick(path) => (path, false),
+            Msg::Play(path) => (path, true),
+        };
         let picked = path.key::<String>(0);
         ctx.apply(|tx| {
+            if play {
+                tx.write(played, format!("played: {picked}"));
+            } else {
+                tx.write(picked_text, format!("picked: {picked}"));
+            }
             for i in 0..NAMES.len() {
                 let key = format!("a{}", i + 1);
                 album.patch(tx, key.as_str()).selected(key == picked);

@@ -998,12 +998,20 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
  * by node id: the `click` verb presses through it. */
 val kayaActivators = java.util.concurrent.ConcurrentHashMap<Long, () -> Unit>()
 
+/** THE ONE PRESS DOOR (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17): the
+ * user's pick unless the app already selected the container, then the
+ * activation. */
+fun kayaPress(node: KayaNode) {
+    if (!node.selected) KayaPresent.emitSelectionChanged(node.tag)
+    KayaPresent.emitActivated(node.tag)
+}
+
 /** An activatable container (docs/styling-pass-plan.md Y4): Material's own
  * press, hover and focus state layers through the ripple, the button role,
  * and the selected state where the app declared one. */
 @Composable
 fun kayaActivatable(node: KayaNode): Modifier {
-    val activate = remember(node) { { KayaPresent.emitActivated(node.tag) } }
+    val activate = remember(node) { { kayaPress(node) } }
     DisposableEffect(node) {
         kayaActivators[node.id] = activate
         onDispose { kayaActivators.remove(node.id) }
@@ -2904,7 +2912,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xb281543d9811b0e5uL
+    private const val SPEC_HASH: ULong = 0x1f0df237536d7515uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -10553,6 +10561,25 @@ object KayaCompose {
                             }
                         }
                     }
+                    "double_click" -> {
+                        // A row's activating gesture (docs/styling-pass-plan.md
+                        // Y4, AMENDED 2026-10-17): on this tier the press twice,
+                        // each answered.
+                        for (press in 1..2) {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val ok = onUi(activity) {
+                                kayaContainerTarget(parts[1])
+                                    ?.let { kayaActivators[it.id] }
+                                    ?.also { it() } != null
+                            }
+                            if (!ok) {
+                                failures.add("no activatable row or column ${parts[1]}")
+                                break
+                            }
+                            kayaAwaitAnswer(answered)
+                        }
+                    }
                     "toggle" -> {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
@@ -11703,7 +11730,9 @@ object KayaCompose {
                             if (parts.size == 2 && parts[1] == "return") kayaTypeAtFocus(activity, "\n")
                             else if (parts.size == 2 && parts[1] == "tab") kayaPressKey(activity, KeyEvent.KEYCODE_TAB)
                             else if (parts.size == 2 && parts[1] == "space") kayaPressKey(activity, KeyEvent.KEYCODE_SPACE)
-                            else "press wants one of the named keys (return, tab, space): $line"
+                            else if (parts.size == 2 && parts[1] == "up") kayaPressKey(activity, KeyEvent.KEYCODE_DPAD_UP)
+                            else if (parts.size == 2 && parts[1] == "down") kayaPressKey(activity, KeyEvent.KEYCODE_DPAD_DOWN)
+                            else "press wants one of the named keys (return, tab, space, up, down): $line"
                         if (why != null) failures.add(why)
                         else kayaAwaitAnswer(answered)
                         if (why == null) kayaKeyboardWall(activity, "press ${parts[1]}")?.let { failures.add(it) }

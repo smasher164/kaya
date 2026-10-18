@@ -5634,6 +5634,32 @@ try:
           kaya.wire.tx_attach_dock(0, 40) in sk_flat
           and kaya.wire.tx_mount(40, sk_dock_root.id) in sk_flat
           and kaya.wire.tx_mount(0, sk_root.id) in sk_flat)
+
+    # Y4, AMENDED 2026-10-17: the user's pick, apart from the activation.
+    sk_shipped.clear()
+    sk_heard = []
+    with sk_app.build():
+        with kaya.column(on_select=lambda: sk_heard.append("pick")) as sk_pick:
+            kaya.label("pick me")
+        with kaya.column(on_activate=lambda: sk_heard.append("open")) as sk_open:
+            kaya.label("open me")
+    sk_flat = [r for batch in sk_shipped for r in batch]
+    check("on_select sends activatable and registers under selection_changed alone",
+          kaya.wire.tx_set_activatable(sk_pick.id, True) in sk_flat
+          and (kaya.wire.OCC_SELECTION_CHANGED, sk_pick.id) in sk_app._widget_handlers
+          and (kaya.wire.OCC_ACTIVATED, sk_pick.id) not in sk_app._widget_handlers)
+    sk_queue = [(kaya.wire.OCC_SELECTION_CHANGED, sk_pick.id, [], None),
+                (kaya.wire.OCC_ACTIVATED, sk_pick.id, [], None),
+                (kaya.wire.OCC_SELECTION_CHANGED, sk_open.id, [], None),
+                (kaya.wire.OCC_ACTIVATED, sk_open.id, [], None)]
+    _sk_real_next = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: sk_queue.pop(0) if sk_queue else None
+    try:
+        sk_app._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = _sk_real_next
+    check("a pick reaches on_select, and a pick or an activation nobody handles is ignored",
+          sk_heard == ["pick", "open"])
 finally:
     kaya.runtime.submit = _sk_real_submit
 

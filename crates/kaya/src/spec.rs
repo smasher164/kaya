@@ -4171,6 +4171,22 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   path_len 0 names a widget, otherwise a template node and the \
                   copy's key path, outermost first.",
         },
+        Record {
+            kind: 59,
+            name: "selection_changed",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The user picked an activatable row or column \
+                  (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17): the macOS \
+                  native table's own selection moved onto it, or elsewhere a \
+                  press reached one not carrying `selected`, sent before that \
+                  press's activated. activated's encoding. Selection stays the \
+                  app's: kaya writes no `selected`.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -5188,6 +5204,7 @@ mod tests {
                 ("image_needed", crate::ring::REC_IMAGE_NEEDED),
                 ("image_released", crate::ring::REC_IMAGE_RELEASED),
                 ("activated", crate::ring::REC_ACTIVATED),
+                ("selection_changed", crate::ring::REC_SELECTION_CHANGED),
             ]
         );
     }

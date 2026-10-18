@@ -53,6 +53,29 @@ func TestOnActivateDeclaresActivatable(t *testing.T) {
 	}
 }
 
+// OnSelect is the user's pick (Y4, AMENDED 2026-10-17): a container that
+// hears it takes the platform's press, so it is activatable too, and its
+// handler is kept apart from the activation's.
+func TestOnSelectDeclaresActivatable(t *testing.T) {
+	var w Widget
+	var n Node
+	app := NewApp()
+	var recs [][]byte
+	app.Build(func(tx *Tx) {
+		w = tx.Column(func() {}).OnSelect(func(*Tx) {})
+		tx.When(tx.Signal(true), func(tp *Tpl) {
+			n = tp.Row(func() {}).OnSelect(func(*Tx, []any) {})
+		})
+		recs = append(recs, tx.records...)
+	})
+	if !holds(recs, TxSetActivatable(w.id, true)) || app.widgetSelects[w.id] == nil || app.widgetActivates[w.id] != nil {
+		t.Fatal("a live OnSelect queued no activatable record or kept its handler in the wrong table")
+	}
+	if !holds(recs, TxSetActivatable(n.id, true)) || app.nodeSelects[n.id] == nil || app.nodeActivates[n.id] != nil {
+		t.Fatal("a template OnSelect queued no activatable record or kept its handler in the wrong table")
+	}
+}
+
 // A gradient whose colour rides without its ground (or the reverse) is
 // refused at the root; both ride together.
 func TestGroundsQueueTheirPair(t *testing.T) {

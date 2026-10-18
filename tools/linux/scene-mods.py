@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Print a scene's script as the Linux lane runs it: tools/scenes/<scene>.steps
-with this lane's MODS drops taken out and its appends added
+with this lane's MODS cut and drops taken out and its appends added
 (tools/lib/lanes/linux.py), one step per line, for the leg's KAYA_SELFTEST_SCRIPT. Every dropped step is named on
 stderr; a refused drop exits 1 with the shared grammar's sentence.
 
@@ -45,6 +45,17 @@ def main(argv):
     lines = [" ".join(line.split()) for line in
              path.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
+    cut = lane.MODS.get(scene, {}).get("cut")
+    if cut:
+        try:
+            prefix, _gone = scene_cut.scene_prefix(path, cut[0], cut[1], who="linux")
+        except scene_cut.CutRefused as e:
+            print(f"scene-mods: {e}", file=sys.stderr)
+            return 1
+        kept = len([line for line in prefix if line.strip()])
+        for line in lines[kept:]:
+            print(f"scene-mods: NOT RUN on this host (cut at `{cut[0]}`): {line}", file=sys.stderr)
+        lines = lines[:kept]
     try:
         scene_cut.drop_block_selftest()
         lines, taken = scene_cut.drop_blocks(lines, lane.MODS.get(scene, {}).get("drop", ()))

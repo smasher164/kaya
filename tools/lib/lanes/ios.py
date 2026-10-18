@@ -247,6 +247,11 @@ MODS = {
     ("rust-swiftui", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
     ("swift", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
     ("go", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
+    # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
+    # AMENDED 2026-10-17): a phone's table has no selection of its own to move.
+    ("rust-swiftui", "tracks"): {"cut": "press down", "keep": "expect_tint expect_rows"},
+    ("swift", "tracks"): {"cut": "press down", "keep": "expect_tint expect_rows"},
+    ("go", "tracks"): {"cut": "press down", "keep": "expect_tint expect_rows"},
     # The declared NAME is read off an auxiliary window this host does
     # not have; the icon reads survive (docs/app-identity-plan.md
     # ruling 3).

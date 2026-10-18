@@ -28,6 +28,7 @@ from lanes import mac as lane
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import guest_warnings
 import lane_health
 import media_server
 from host_lib import HOST_LIB, host_lib_stamp
@@ -79,8 +80,11 @@ def kaya_swiftc(args, **kw):
 BUILD_EXAMPLES = []
 for _s in [*lane.SCENES, *lane.DEPTH_SCENES]:
     BUILD_EXAMPLES += ["--example", _s]
-if run(["cargo", "build", "--locked", "--lib",
-        *BUILD_EXAMPLES]).returncode != 0:
+_code, _warned = guest_warnings.build(["cargo", "build", "--locked", "--lib",
+                                      *BUILD_EXAMPLES], ROOT)
+for _line in _warned:
+    print(f"validate-mac: {_line}", file=sys.stderr)
+if _code != 0 or _warned:
     sys.exit(1)
 # The library the legs load must be the one this build produced — a
 # build whose failure went unnoticed leaves the previous one in place

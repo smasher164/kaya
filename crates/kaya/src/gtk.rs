@@ -9357,7 +9357,16 @@ fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: boo
     widget.set_accessible_role(gtk4::AccessibleRole::Button);
     widget.set_focusable(true);
     let sink = core.occurrences.clone();
-    let activate: Rc<dyn Fn()> = Rc::new(move || sink.send_activated_tag(&tag));
+    let door = widget.downgrade();
+    // THE ONE PRESS DOOR (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17):
+    // the user's pick unless the app already selected it, then the activation.
+    let activate: Rc<dyn Fn()> = Rc::new(move || {
+        let selected = door.upgrade().is_some_and(|w| w.state_flags().contains(gtk4::StateFlags::SELECTED));
+        if !selected {
+            sink.send_selection_changed_tag(&tag);
+        }
+        sink.send_activated_tag(&tag);
+    });
     let press = gtk4::GestureClick::new();
     press.set_button(gdk::BUTTON_PRIMARY);
     {
@@ -20964,6 +20973,8 @@ impl crate::harness::Stage for GtkStage {
             // Focus keys move no caret (docs/reveal-plan.md V10).
             "tab" => Self::press_key("Tab"),
             "space" => Self::press_key("space"),
+            "up" => Self::press_key("Up"),
+            "down" => Self::press_key("Down"),
             other => panic!("kaya: press {other:?}: not one of harness::PRESS_KEYS"),
         }
     }
@@ -21868,7 +21879,7 @@ impl crate::harness::Stage for GtkStage {
                     match id.and_then(|id| core.skin.activations.get(&id).cloned()) {
                         Some(activate) => activate(),
                         None => panic!(
-                            "kaya: click {}: the container is not activatable (no on_activate reached this backend)",
+                            "kaya: click {}: the container is not activatable (no on_activate or on_select reached this backend)",
                             crate::harness::target_spec(&t)
                         ),
                     }

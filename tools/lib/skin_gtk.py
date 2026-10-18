@@ -32,7 +32,9 @@ DOORS = [
      ["c.allocate(width + left + right, height + top + bottom, -1, Some(transform));"], []),
     ("the activatable container", "fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: bool) {",
      ['widget.add_css_class("activatable");', "widget.set_accessible_role(gtk4::AccessibleRole::Button);",
-      "Rc::new(move || sink.send_activated_tag(&tag))", "press.connect_released(", "activate();",
+      "let selected = door.upgrade().is_some_and(|w| w.state_flags().contains(gtk4::StateFlags::SELECTED));",
+      "if !selected {\nsink.send_selection_changed_tag(&tag);\n}\nsink.send_activated_tag(&tag);",
+      "press.connect_released(", "activate();",
       "gtk4::StateFlags::ACTIVE"],
      ["RGBA", "add_css_provider"]),
     ("the selected surface", "fn set_selected(widget: &gtk4::Widget, on: bool) {",
@@ -174,6 +176,11 @@ def findings(text):
         if re.search(MODEL, found[0]):
             out.append(f"skin: {LABEL}'s {label} reaches kaya's model, so it could answer from what the arm "
                        f"stamped instead of what it drew")
+    for call in ("send_activated_tag(", "send_selection_changed_tag("):
+        sites = src.count(call)
+        if sites != 1:
+            out.append(f"skin: {LABEL}: {call[:-1]} is sent from {sites} sites in {REL}, wanted one, the press "
+                       f"door's (docs/styling-pass-plan.md Y4)")
     for label, call in CALLS:
         if flat(call) not in flat(src):
             out.append(f"skin: {LABEL}: {label} no longer holds — {REL} lacks {call.splitlines()[0][:90]}")
@@ -199,8 +206,19 @@ CUTS = [
     ("GTK: an activatable container no button to the tree",
      r"\n\s+widget\.set_accessible_role\(gtk4::AccessibleRole::Button\);", "",
      "the activatable container lacks widget.set_accessible_role"),
-    ("GTK: an activation sent as a click", r"Rc::new\(move \|\| sink\.send_activated_tag\(&tag\)\)",
-     "Rc::new(move || sink.send_click_tag(&tag))", "the activatable container lacks Rc::new"),
+    ("GTK: an activation sent as a click", r"\n(\s+)sink\.send_activated_tag\(&tag\);",
+     r"\n\1sink.send_click_tag(&tag);", "the activatable container lacks if !selected"),
+    # docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the pick, guarded, first.
+    ("GTK: the pick sent over the app's selection", r"if !selected \{\n(\s+)sink\.send_selection_changed_tag\(&tag\);\n\s+\}",
+     r"sink.send_selection_changed_tag(&tag);", "the activatable container lacks if !selected"),
+    ("GTK: the pick sent after the activation",
+     r"if !selected \{\n(\s+)sink\.send_selection_changed_tag\(&tag\);\n(\s+)\}\n(\s+)sink\.send_activated_tag\(&tag\);",
+     r"sink.send_activated_tag(&tag);\n\3if !selected {\n\1sink.send_selection_changed_tag(&tag);\n\2}",
+     "the activatable container lacks if !selected"),
+    ("GTK: the pick read off nothing", r"door\.upgrade\(\)\.is_some_and\(\|w\| w\.state_flags\(\)\.contains\(gtk4::StateFlags::SELECTED\)\)",
+     "false", "the activatable container lacks let selected"),
+    ("GTK: a press beside the door", r"Some\(activate\) => activate\(\),",
+     "Some(_) => core.occurrences.send_activated_tag(&[]),", "send_activated_tag is sent from 2 sites"),
     ("GTK: selected painted without the tree's state",
      r"\n\s+widget\.update_state\(&\[gtk4::accessible::State::Selected\(Some\(on\)\)\]\);", "",
      "the selected surface lacks widget.update_state"),

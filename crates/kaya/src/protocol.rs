@@ -1089,6 +1089,8 @@ pub enum Occurrence {
     /// (docs/styling-pass-plan.md Y4).
     Activated { id: WidgetId },
     InstanceActivated { node: TemplateNodeId, path: Path },
+    SelectionChanged { id: WidgetId },
+    InstanceSelectionChanged { node: TemplateNodeId, path: Path },
     /// The user edited an entry the guest created directly. The widget
     /// owns its text; there is no read-back, by doctrine.
     TextChanged { id: WidgetId, text: String },
@@ -3320,6 +3322,14 @@ impl OccSink {
                     let tag = crate::wire::click_tag(node.0, &path);
                     ring.push_record(crate::ring::REC_ACTIVATED, &tag);
                 }
+                Occurrence::SelectionChanged { id } => {
+                    let tag = crate::wire::click_tag(id.0, &[]);
+                    ring.push_record(crate::ring::REC_SELECTION_CHANGED, &tag);
+                }
+                Occurrence::InstanceSelectionChanged { node, path } => {
+                    let tag = crate::wire::click_tag(node.0, &path);
+                    ring.push_record(crate::ring::REC_SELECTION_CHANGED, &tag);
+                }
                 Occurrence::TextChanged { id, text } => {
                     let tag = crate::wire::click_tag(id.0, &[]);
                     let body = crate::wire::text_changed_body(&tag, &text);
@@ -3715,6 +3725,20 @@ impl OccSink {
             }
             OccSink::Ring(ring) => {
                 ring.push_record(crate::ring::REC_ACTIVATED, tag);
+            }
+        }
+    }
+
+    /// The same fast path for a user's pick of an activatable container
+    /// (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17).
+    pub(crate) fn send_selection_changed_tag(&self, tag: &[u8]) {
+        match self {
+            OccSink::Mpsc(tx) => {
+                crate::stall::enqueued();
+                let _ = tx.send(Inbox::Occ(crate::wire::decode_selection_changed_tag(tag)));
+            }
+            OccSink::Ring(ring) => {
+                ring.push_record(crate::ring::REC_SELECTION_CHANGED, tag);
             }
         }
     }

@@ -1,8 +1,9 @@
 """The Linux lane's tables (tools/linux/run-suites.sh reads them through
 tools/linux/scene-mods.py). `MODS` has the phone lanes' drop grammar
 (tools/lib/scene_cut.py): a TUPLE OF BLOCKS, each (step specs, keep,
-reason), each spec a leading run of words naming exactly one step; and
-their `append`, steps after the scene's last, `;`-separated."""
+reason), each spec a leading run of words naming exactly one step; their
+`append`, steps after the scene's last, `;`-separated; and the phones' `cut`,
+(verb, keep), everything from that step on dropped."""
 
 MODS = {
     # NO LINUX DESKTOP DRAWS A REPLY FIELD (docs/notification-reply-plan.md
@@ -14,6 +15,9 @@ MODS = {
                         'expect label@unread[alex]'),
                        "expect_notification expect_badge",
                        "no Linux desktop draws a notification's reply field (R1)"),)},
+    # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
+    # AMENDED 2026-10-17): GTK's table has no selection of its own to move.
+    "tracks": {"cut": ("press down", "expect_tint expect_rows")},
     # GNOME'S FULLSCREEN HEADER BAR (docs/fullscreen-plan.md §9): hidden over
     # the content, revealed at the top edge. No other lane has a bar to read,
     # so this lane appends the reading after the shared scene.

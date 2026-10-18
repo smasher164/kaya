@@ -422,8 +422,7 @@ fn wrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
             if !armed.swap(false, std::sync::atomic::Ordering::Relaxed) || !pointer_inside(id) {
                 return;
             }
-            restore_selected(id);
-            tapped_sink.send_activated_tag(&tapped_tag);
+            press(&tapped_sink, id, &tapped_tag);
         })
     };
     let released = fire.clone();
@@ -440,8 +439,7 @@ fn wrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
             let key = args.Key()?;
             if key == VirtualKey::Enter || key == VirtualKey::Space {
                 args.SetHandled(true)?;
-                restore_selected(id);
-                sink.send_activated_tag(&tag);
+                press(&sink, id, &tag);
             }
         }
         Ok(())
@@ -534,6 +532,17 @@ fn unwrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
     SKIN.with_borrow_mut(|s| s.host_fills.remove(&id.0));
     reseat_element(core, id, &host.cast()?, &inner)?;
     stamp_container_padding(core, id)
+}
+
+/// THE ONE PRESS DOOR (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17): the
+/// user's pick unless the app already selected the container, then the
+/// activation, the item showing what the app last wrote.
+pub(super) fn press(sink: &OccSink, id: WidgetId, tag: &[u8]) {
+    restore_selected(id);
+    if !SKIN.with_borrow(|s| s.selected.get(&id.0).copied().unwrap_or(false)) {
+        sink.send_selection_changed_tag(tag);
+    }
+    sink.send_activated_tag(tag);
 }
 
 /// The selection is the app's (Y4): whatever the item did with the press, it

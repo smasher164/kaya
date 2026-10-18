@@ -286,7 +286,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # to the row's ImagePhase field.
              "phase",
              # docs/styling-pass-plan.md Y10: the skin in the template zone.
-             "ground_gradient", "ground_image", "shape", "tint", "selected", "on_activate"]
+             "ground_gradient", "ground_image", "shape", "tint", "selected", "on_activate",
+             # Y4, AMENDED 2026-10-17: the user's pick of a stamped container.
+             "on_select"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -306,7 +308,7 @@ PROP_MEMBERS = {
         "summary": "summary",
         "phase": "phase",
         "ground_gradient": "ground_gradient", "ground_image": "ground_image", "shape": "shape",
-        "tint": "tint", "selected": "selected", "on_activate": "on_activate",
+        "tint": "tint", "selected": "selected", "on_activate": "on_activate", "on_select": "on_select",
     },
     "go": {
         "format": "SetFormat",
@@ -323,7 +325,7 @@ PROP_MEMBERS = {
         "summary": "SetSummary",
         "phase": "SetPhase",
         "ground_gradient": "BindGroundGradient", "ground_image": "BindGroundImage", "shape": "SetShape",
-        "tint": "BindTint", "selected": "BindSelected", "on_activate": "OnActivate",
+        "tint": "BindTint", "selected": "BindSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
     },
     "csharp": {
         "format": "SetFormat",
@@ -340,7 +342,7 @@ PROP_MEMBERS = {
         "summary": "SetSummary",
         "phase": "SetPhase",
         "ground_gradient": "SetGroundGradient", "ground_image": "SetGroundImage", "shape": "SetShape",
-        "tint": "SetTint", "selected": "SetSelected", "on_activate": "OnActivate",
+        "tint": "SetTint", "selected": "SetSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
     },
     "java": {
         "format": "setFormat",
@@ -357,7 +359,7 @@ PROP_MEMBERS = {
         "summary": "setSummary",
         "phase": "setPhase",
         "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
-        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate",
+        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
     },
     "swift": {
         "format": "setFormat",
@@ -374,7 +376,7 @@ PROP_MEMBERS = {
         "summary": "setSummary",
         "phase": "setPhase",
         "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
-        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate",
+        "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
     },
     "ocaml": {
         "format": "set_format",
@@ -391,7 +393,7 @@ PROP_MEMBERS = {
         "summary": "set_summary",
         "phase": "set_phase",
         "ground_gradient": "set_ground_gradient", "ground_image": "set_ground_image", "shape": "set_shape",
-        "tint": "set_tint", "selected": "set_selected", "on_activate": "on_activate",
+        "tint": "set_tint", "selected": "set_selected", "on_activate": "on_activate", "on_select": "on_select",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -410,7 +412,7 @@ PROP_MEMBERS = {
         "summary": "TplSummary",
         "phase": "TplPhaseField",
         "ground_gradient": "TplGroundGradientField", "ground_image": "TplGroundImageField", "shape": "TplShapeAs",
-        "tint": "TplTintField", "selected": "TplSelectedField", "on_activate": "TplOnActivate",
+        "tint": "TplTintField", "selected": "TplSelectedField", "on_activate": "TplOnActivate", "on_select": "TplOnSelect",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -429,7 +431,7 @@ PROP_MEMBERS = {
         "summary": "summary",
         "phase": "phase",
         "ground_gradient": "groundGradient", "ground_image": "groundImage", "shape": "shape",
-        "tint": "tint", "selected": "selected", "on_activate": "onActivate",
+        "tint": "tint", "selected": "selected", "on_activate": "onActivate", "on_select": "onSelect",
     },
 }
 
@@ -445,7 +447,7 @@ def members_go(_):
     # A stamped container's handler is a method on the Node it is
     # declared on (the Go handler rule), so the skin's is read there.
     return set(re.findall(r"^func \(t \*Tpl\) ([A-Za-z][A-Za-z0-9]*)\s*[\(\[]", src + skin, re.M)) | set(
-        re.findall(r"^func \(n Node\) (OnActivate)\(", skin, re.M))
+        re.findall(r"^func \(n Node\) (OnActivate|OnSelect)\(", skin, re.M))
 
 
 def members_csharp(_):
@@ -530,7 +532,7 @@ def members_js(_):
     # is counted from its writer alone, never from the class block.
     names.discard("document")
     names.discard("phase")
-    names -= {"groundGradient", "groundImage", "shape", "tint", "selected", "onActivate"}
+    names -= {"groundGradient", "groundImage", "shape", "tint", "selected", "onActivate", "onSelect"}
     for prop, writer, emitter in (("grow", grow, "wire.tx_set_grow("),
                                   ("inset", layout, "wire.tx_set_inset("),
                                   ("align", layout, "wire.tx_set_align("),
@@ -541,6 +543,7 @@ def members_js(_):
                                   ("groundImage", skin, "sourceRecord(\"an image ground\""),
                                   ("selected", skin, "wire.tx_bind_selected_element("),
                                   ("onActivate", skin, "wire.OCC_ACTIVATED"),
+                                  ("onSelect", skin, "wire.OCC_SELECTION_CHANGED"),
                                   ("tint", label, "wire.tx_bind_tint_element(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)

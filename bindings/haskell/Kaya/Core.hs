@@ -507,6 +507,9 @@ data Pending
   | PToggleNode !Word64 ([Key] -> Bool -> IO ())
   -- A stamped container's activation (docs/styling-pass-plan.md Y4).
   | PActivateNode !Word64 ([Key] -> IO ())
+  -- The user's pick of one (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17).
+  | PSelect !Word64 (IO ())
+  | PSelectNode !Word64 ([Key] -> IO ())
   -- The template node's document bind, recorded at the transaction
   -- boundary because the collection is BuildState's and the table is
   -- the App's (docs/rich-text-plan.md §19).
@@ -2298,6 +2301,10 @@ data App = App
     -- The submit gesture's own tables (docs/submit-plan.md S7).
     appWidgetSubmits :: IORef (Map.Map Word64 (Text -> IO ())),
     appNodeSubmits :: IORef (Map.Map Word64 ([Key] -> Text -> IO ())),
+    -- The user's pick, apart from a click's table so an unhandled one
+    -- never reaches on_activate (docs/styling-pass-plan.md Y4).
+    appWidgetSelects :: IORef (Map.Map Word64 (IO ())),
+    appNodeSelects :: IORef (Map.Map Word64 ([Key] -> IO ())),
     -- The rich mirror, one Document per @rich@ textarea
     -- (docs/rich-text-plan.md R1): folded from the two occurrences here
     -- and from the app's own setDocument/applyEdit as they are SENT.

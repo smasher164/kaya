@@ -530,6 +530,9 @@ sealed class RevealAccountRow
 
     public void OnActivate(Node n, System.Action<Tx, System.Collections.Generic.List<object>> handler) =>
         t.OnActivate(n, handler);
+
+    public void OnSelect(Node n, System.Action<Tx, System.Collections.Generic.List<object>> handler) =>
+        t.OnSelect(n, handler);
 }
 
 /// <summary>The duck-typed enumerable behind Rows(): no IEnumerable,

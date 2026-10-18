@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xb281543d9811b0e5ULL
+#define KAYA_SPEC_HASH 0x1f0df237536d7515ULL
 
 
 /* Create a signal holding `initial`. */
@@ -3414,6 +3414,25 @@ static inline int kaya_parse_activated(const uint8_t *rec, uint64_t *id,
                                         uint32_t *n_keys) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_ACTIVATED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len && k < max_keys; k++)
+        at = kaya_parse_value(rec, at, &keys[k]);
+    return 1;
+}
+
+/* Decode a selection_changed occurrence: the click identity shape — id plus
+ * path_len key-path values (a node-anchored context activation
+ * carries the stamped copy's keys; path_len is 0 for a bar or
+ * live-widget item). Returns 1 and fills the outputs, or 0 for
+ * other kinds. */
+static inline int kaya_parse_selection_changed(const uint8_t *rec, uint64_t *id,
+                                                KayaVal *keys, uint32_t max_keys,
+                                                uint32_t *n_keys) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_SELECTION_CHANGED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

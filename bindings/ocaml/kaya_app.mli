@@ -1575,6 +1575,7 @@ val column :
   ?ground_image:bytes ->
   ?ground_image_bind:bytes signal ->
   ?on_activate:(unit -> unit) ->
+  ?on_select:(unit -> unit) ->
   ?selected:bool ->
   ?selected_bind:bool signal ->
   (unit -> widget) list -> unit -> widget
@@ -1611,6 +1612,7 @@ val row :
   ?ground_image:bytes ->
   ?ground_image_bind:bytes signal ->
   ?on_activate:(unit -> unit) ->
+  ?on_select:(unit -> unit) ->
   ?selected:bool ->
   ?selected_bind:bool signal ->
   ?role:role ->
@@ -2201,6 +2203,10 @@ module Tpl : sig
   (* Every stamped copy takes a click as a whole, the handler handed that
      copy's keys; registering and declaring are one act (Y4). *)
   val on_activate : node -> (key list -> unit) -> unit
+
+  (* The user picked a stamped copy, the handler handed its keys
+     (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17). *)
+  val on_select : node -> (key list -> unit) -> unit
   val set_max_width : node -> float -> unit
   val set_max_height : node -> float -> unit
   val when_ : bool signal -> (unit -> 'a) -> unit -> node * 'a
@@ -2779,6 +2785,7 @@ module Tpl : sig
     ?ground_image:bytes ->
     ?ground_image_field:('h, bytes) field ->
     ?on_activate:(key list -> unit) ->
+    ?on_select:(key list -> unit) ->
     ?selected:bool ->
     ?selected_field:('i, bool) field ->
     int -> (unit -> node) list -> unit -> node
@@ -2865,6 +2872,7 @@ module Tpl : sig
     ?ground_image:bytes ->
     ?ground_image_field:('h, bytes) field ->
     ?on_activate:(key list -> unit) ->
+    ?on_select:(key list -> unit) ->
     ?selected:bool ->
     ?selected_field:('i, bool) field ->
     (unit -> node) list -> unit -> node
@@ -2903,6 +2911,7 @@ module Tpl : sig
     ?ground_image:bytes ->
     ?ground_image_field:('h, bytes) field ->
     ?on_activate:(key list -> unit) ->
+    ?on_select:(key list -> unit) ->
     ?selected:bool ->
     ?selected_field:('i, bool) field ->
     ?wrap:bool -> (unit -> node) list -> unit -> node

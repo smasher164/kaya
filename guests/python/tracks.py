@@ -1,7 +1,8 @@
 """The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md Y5,
 Y6, Y7): a playlist's table whose title cell is rounded art beside the
 track's name over its artist, the playing track's name in the accent, and a
-row the app selects on activation (Y4). See guests/rust/tracks.rs."""
+row the app selects when the user picks it and names when it is activated
+(Y4). See guests/rust/tracks.rs."""
 
 import sys
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ art = kaya.asset("covers/cover-600.jpg").bytes()
 
 def table(tracks, table_id, row_id, grow=None):
     for track in tracks.columns("#", "Title", "Album", a11y_id=table_id, grow=grow):
-        with kaya.row(selected=track.selected, on_activate=on_pick) as line:
+        with kaya.row(selected=track.selected, on_select=on_pick, on_activate=on_play) as line:
             line.a11y_id(row_id)
             kaya.label(bind=track.number)
             with kaya.row():
@@ -45,10 +46,20 @@ def table(tracks, table_id, row_id, grow=None):
 
 
 def on_pick(row):
+    picked.set(f"picked: {row.key}")
+    select(row.key)
+
+
+def on_play(row):
+    played.set(f"played: {row.key}")
+    select(row.key)
+
+
+def select(key):
     for i in range(len(NAMES)):
-        album.patch(f"a{i + 1}", selected=f"a{i + 1}" == row.key)
+        album.patch(f"a{i + 1}", selected=f"a{i + 1}" == key)
     for i in range(PLAYLIST):
-        playlist.patch(f"t{i + 1}", selected=f"t{i + 1}" == row.key)
+        playlist.patch(f"t{i + 1}", selected=f"t{i + 1}" == key)
 
 
 def track(i):
@@ -60,7 +71,11 @@ def track(i):
 with app.window(title="tracks", width=720, height=640):
     album = kaya.collection(Track)
     playlist = kaya.collection(Track)
+    picked = kaya.signal("picked: none")
+    played = kaya.signal("played: none")
     with kaya.column(spacing=12):
+        kaya.label(bind=picked).a11y_id("picked")
+        kaya.label(bind=played).a11y_id("played")
         table(album, "album", "a")
         table(playlist, "tracks", "t", grow=1)
     for i in range(len(NAMES)):

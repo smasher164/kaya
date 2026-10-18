@@ -67,7 +67,7 @@ in all nine bindings unless said otherwise.
 | 1. Home | cards that take a click as a whole with the platform's hover (Y4), rounded art, the caption role, a fitting grid (`min_column_width`, docs/layout-knobs-plan.md §3) | built for a LIVE grid; a collection's For cannot be laid out as a grid (crates/kaya/src/scene.rs:1552 holds `columns` to the Grid widget, and a For is its own container, scene.rs:7398-7410); a For in a sideways scroll (a shelf) is built (guests/rust/scrollto.rs:63-77) |
 | 1. Home | art per card from the network, phases and the fetch helper (docs/network-images-plan.md N2, N7, N8, N12) | built |
 | 2. Playlist | a table whose title cell is art beside two lines, the pinned header, the playing track's tinted name (Y5-Y7, tools/scenes/tracks.steps) | built |
-| 2. Playlist | a row that plays on double-click or Return | built 2026-10-17 (Y4, §6 step 2): on the macOS native table `on_activate` is the NSTableView's `doubleAction` and Return, `selected` its own selection, a user's click proposing none the app did not write; the iOS synthesized tier, Compose and WinUI table rows activate and wear the selection too, and tools/scenes/tracks.steps clicks and reads two album rows on every lane (docs/traps.md, "The table row nobody rendered") |
+| 2. Playlist | a row that plays on double-click or Return | built 2026-10-17 (Y4, §6 step 2): on the macOS native table `on_activate` is the NSTableView's `doubleAction` and Return, `selected` its own selection; since the Y4 amendment (built 2026-10-18) a user's click and the arrows move that selection and tell the app through `selection_changed` / `on_select`; the iOS synthesized tier, Compose and WinUI table rows activate and wear the selection too, and tools/scenes/tracks.steps clicks and reads two album rows on every lane (docs/traps.md, "The table row nobody rendered") |
 | 2. Playlist | a context menu on a track (Add to queue, Go to artist) | built for stamped rows (a template's context catalog, docs/traps.md's catalog entries); on the macOS native table UNMEASURED |
 | 2. Playlist | track and playlist durations ("3:45", "1 hr 12 min") | NOT BUILT: crates/kaya/src/fmt.rs has date, time, number, percent, currency and timecode, no duration (§2 M9) |
 | 3. Gradient header | the gradient ground from one data colour, `image_dominant` (Y2) | built |
@@ -618,7 +618,7 @@ Why: the demo applies the pass, it does not extend it.
 | background playback | n/a | the `audio` background mode in the Python host's Info.plist (tools/ios/run-sim.py `make_bundle` writes it for a bundle whose app sets a session; the Python host is shared by every Python scene) | n/a | n/a | the media session's foreground service (docs/media-plan.md §5) |
 | media keys and Now Playing | MPRemoteCommandCenter, `playbackState` | the same, lock screen | MPRIS2, GNOME's media card | SMTC | media3 MediaSession, the media notification |
 | artwork from bytes (M7) | MPMediaItemArtwork | the same | a cache file, `file://` | an in-memory stream | `setArtworkData` |
-| table row activation | the native table's double-click and Return: NOT BUILT (§0) | the synthesized tier's tap | built | built | built |
+| table row activation | the native table's double-click and Return, a click and the arrows reporting `selection_changed`: built (Y4, AMENDED 2026-10-17) | the synthesized tier's tap, which reports the pick first | built | built | built |
 
 ## §4: The wire and the sweep
 

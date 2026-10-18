@@ -127,6 +127,23 @@ func (n Node) OnActivate(fn func(*Tx, []any)) Node {
 	return n
 }
 
+// OnSelect hears the user's pick of a row or column
+// (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17); the container is
+// activatable in the same act, and the app writes SetSelected itself.
+func (w Widget) OnSelect(fn func(*Tx)) Widget {
+	w.tx.app.widgetSelects[w.id] = fn
+	w.tx.emit(TxSetActivatable(w.id, true))
+	return w
+}
+
+// OnSelect hears the user's pick of a stamped copy, with the copy's keys,
+// outermost first.
+func (n Node) OnSelect(fn func(*Tx, []any)) Node {
+	n.tx.app.nodeSelects[n.id] = fn
+	n.tx.emit(TxSetActivatable(n.id, true))
+	return n
+}
+
 // SetGroundGradient gives every stamped copy the gradient ground from one
 // colour, the blueprint twin of Tx.SetGroundGradient.
 func (t *Tpl) SetGroundGradient(n Node, color Color) {

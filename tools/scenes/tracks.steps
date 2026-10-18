@@ -3,8 +3,9 @@
 # cell, so the art is whole, the header stays pinned over the taller rows,
 # and the last row of a long playlist scrolls into view; the playing track's
 # name is in the accent's standalone colour. A row takes the platform's
-# activation (on the mac's native table, its double-click) and wears the
-# selection the app writes on it (Y4).
+# activation and wears the selection the app writes on it (Y4). A click is the
+# user's pick, which the app answers with `selected`; a double-click activates
+# (on the mac's native table, its own; elsewhere the press twice).
 expect_title "tracks"
 # FIRST, before any read measures the playlist's rows: the scroll lands on a
 # document of presumed heights and must survive their correction. In view is
@@ -22,11 +23,31 @@ expect_shape image@art[a1] rounded
 expect_tint label@name[a3] accent
 expect_tint label@name[a2] none
 click row@a[a2]
+expect label@picked "picked: a2"
 expect_selected row@a[a2] on
 expect_selected row@a[a1] off
 click row@a[a3]
+expect label@picked "picked: a3"
 expect_selected row@a[a3] on
 expect_selected row@a[a2] off
 # The playing row selected keeps its tint where the selected surface is neutral
 # (Y4, Y7); read once more after the selection lands on it.
 expect_tint label@name[a3] accent
+double_click row@a[a1]
+expect label@picked "picked: a1"
+expect_selected row@a[a1] on
+expect_selected row@a[a3] off
+expect label@played "played: a1"
+# The macOS native table's own keyboard (Y4, AMENDED 2026-10-17): the arrows
+# move its selection and the app is told, Return activates the selected row.
+# The other tiers have no table selection to move and their lanes cut here.
+press down
+expect label@picked "picked: a2"
+expect_selected row@a[a2] on
+expect_selected row@a[a1] off
+press return
+expect label@played "played: a2"
+press up
+expect label@picked "picked: a1"
+expect_selected row@a[a1] on
+expect label@played "played: a2"

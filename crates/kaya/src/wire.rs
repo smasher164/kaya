@@ -3720,6 +3720,15 @@ pub fn decode_activated_tag(tag: &[u8]) -> Occurrence {
     }
 }
 
+/// `selection_changed`'s body is activated's (docs/styling-pass-plan.md Y4).
+pub fn decode_selection_changed_tag(tag: &[u8]) -> Occurrence {
+    match decode_click_tag(tag) {
+        Occurrence::ButtonClicked { id } => Occurrence::SelectionChanged { id },
+        Occurrence::InstanceButtonClicked { node, path } => Occurrence::InstanceSelectionChanged { node, path },
+        _ => unreachable!("decode_click_tag answers a click"),
+    }
+}
+
 // A sort-requested occurrence body IS the sort tag with the column
 // index patched into the reserved slot — { u64 id; u32 path_len;
 // u32 column; path_len values } — so the backend hands the tag back

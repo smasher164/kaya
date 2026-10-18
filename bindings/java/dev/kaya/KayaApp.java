@@ -326,6 +326,8 @@ public final class KayaApp {
     private final Map<Long, Consumer<Tx>> widgetHandlers = new HashMap<>();
     private final Map<Long, Consumer<Tx>> widgetActivates = new HashMap<>();
     private final Map<Long, BiConsumer<Tx, List<Object>>> nodeActivates = new HashMap<>();
+    private final Map<Long, Consumer<Tx>> widgetSelects = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, List<Object>>> nodeSelects = new HashMap<>();
     // Table sort requests, keyed by the For container's widget id
     // (docs/tables-plan.md): the handler receives the 0-based column.
     private final Map<Long, BiConsumer<Tx, Integer>> sortHandlers = new HashMap<>();
@@ -4787,6 +4789,12 @@ public final class KayaApp {
             return this;
         }
 
+        /** The user picked this row or column (Tx#onSelect), chained. */
+        public Widget onSelect(Consumer<Tx> handler) {
+            building("onSelect").onSelect(this, handler);
+            return this;
+        }
+
         /** This widget carries attribute runs: Tx.setDocument,
          * Tx.applyEdit, KayaApp.onEdit (docs/rich-text-plan.md R1) — a
          * textarea edits them, a LABEL draws them read-only over the
@@ -6219,6 +6227,11 @@ public final class KayaApp {
             t.onActivate(n, handler);
         }
 
+        /** The user picked this row's copy of that container (Tpl.onSelect). */
+        public void onSelect(Node n, BiConsumer<Tx, List<Object>> handler) {
+            t.onSelect(n, handler);
+        }
+
         /** This row's copy of that image's bound ({@link Tpl#setMaxWidth}). */
         public void setMaxWidth(Node n, double points) {
             t.setMaxWidth(n, points);
@@ -7214,6 +7227,14 @@ public final class KayaApp {
         public void onActivate(Widget w, Consumer<Tx> handler) {
             emit(KayaWire.txSetActivatable(w.id, true));
             widgetActivates.put(w.id, handler);
+        }
+
+        /** The user picked this row or column (docs/styling-pass-plan.md Y4,
+         * AMENDED 2026-10-17); activatable in the same act. The app writes
+         * {@code selected} itself. */
+        public void onSelect(Widget w, Consumer<Tx> handler) {
+            emit(KayaWire.txSetActivatable(w.id, true));
+            widgetSelects.put(w.id, handler);
         }
 
         /** An image's bound in points (docs/photo-attach-plan.md §2). */
@@ -9619,6 +9640,13 @@ public final class KayaApp {
         public void onActivate(Node n, BiConsumer<Tx, List<Object>> handler) {
             tx.emit(KayaWire.txSetActivatable(n.id, true));
             nodeActivates.put(n.id, handler);
+        }
+
+        /** The user picked a stamped copy of this container, the handler
+         * handed the copy's keys ({@link Tx#onSelect}). */
+        public void onSelect(Node n, BiConsumer<Tx, List<Object>> handler) {
+            tx.emit(KayaWire.txSetActivatable(n.id, true));
+            nodeSelects.put(n.id, handler);
         }
 
         /** A stamped image's bound, the blueprint twin of
@@ -12530,6 +12558,18 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_ACTIVATED) {
                 BiConsumer<Tx, List<Object>> handler = nodeActivates.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SELECTION_CHANGED && occ.keys.isEmpty()) {
+                Consumer<Tx> handler = widgetSelects.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_SELECTION_CHANGED) {
+                BiConsumer<Tx, List<Object>> handler = nodeSelects.get(occ.id);
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys);

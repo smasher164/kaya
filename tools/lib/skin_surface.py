@@ -2,8 +2,9 @@
 
 Each row is one skin surface in one binding, read out of that binding's own
 file: the two grounds, an image's shape, a label's tint, `selected` and
-`on_activate` in the live and template zones, the dock in the window
-construct, the binding's dispatch of the `activated` occurrence, the core's
+`on_activate` and `on_select` in the live and template zones, the dock in the window
+construct, the binding's dispatch of the `activated` and `selection_changed`
+occurrences, the core's
 dominant colour, and the Tint `none`/`overlay` and Shape vocabularies. The
 wire records reach every binding through the generator whether or not a
 guest can spell a part, so only these rows see one missing."""
@@ -43,6 +44,9 @@ ROWS = [
     ("rust template on_activate", RS, r"pub fn on_activate<M: 'static>\(\n\s+&mut self,\n\s+node: TemplateNodeId,", "on_activate"),
     ("rust dock", RS, r"pub fn dock<R>\(self, dock: WindowId, build: impl FnOnce\(&mut Tx<'_>\) -> \(WidgetId, R\)\) -> R", "dock"),
     ("rust activated dispatch", RS, r"Occurrence::Activated \{ \.\. \} => Some\(msg\.clone\(\)\),", "Activated"),
+    ("rust on_select", RS, r"pub fn on_select<M: Clone \+ 'static>\(self, msgs: &Messages<M>, msg: M\) -> Self", "on_select"),
+    ("rust template on_select", RS, r"pub fn on_select<M: 'static>\(\n\s+&mut self,\n\s+node: TemplateNodeId,", "on_select"),
+    ("rust selection dispatch", RS, r"Occurrence::InstanceSelectionChanged \{ path, \.\. \} => Some\(f\(path\.clone\(\)\)\),", "InstanceSelectionChanged"),
     ("rust image_dominant", RSD, r"^pub fn image_dominant\(bytes: &\[u8\]\) -> Option<crate::Color>", "image_dominant"),
     ("rust tint none", RS, r"Tint::None => 0,", "None"),
     ("rust tint overlay", RS, r"Tint::Overlay => 6,", "Overlay"),
@@ -53,15 +57,18 @@ ROWS = [
     ("python image shape", PY, r"^\s+shape: Shape \| str \| None = None\) -> Widget:", "shape"),
     ("python label tint", PY, r"tint: Tint \| str \| Source \| None = None\) -> Widget:", "tint"),
     ("python selected", PY, r"^\s+selected: FlagSource \| None = None,\n\s+on_activate", "selected"),
-    ("python on_activate", PY, r"^\s+on_activate: Handler \| None = None\) -> _Container:", "on_activate"),
+    ("python on_activate", PY, r"^\s+on_activate: Handler \| None = None,\n\s+on_select: Handler \| None = None\) -> _Container:", "on_activate"),
     ("python template ground gradient", PY, r"elif isinstance\(ground_gradient, FieldRef\):", "ground_gradient"),
     ("python template ground image", PY, r"elif isinstance\(ground_image, FieldRef\):", "ground_image"),
     ("python template image shape", PY, r"^def image\(source: [^)]*\bshape: Shape \| str \| None = None\)", "shape"),
     ("python template label tint", PY, r"_picker_field\(\"a label's tint\", tint, Tint\)", "tint"),
     ("python template selected", PY, r"^def _set_skin\([^)]*\bselected: FlagSource \| None,", "selected"),
-    ("python template on_activate", PY, r"^def _set_skin\([^)]*\bon_activate: Handler \| None\)", "on_activate"),
+    ("python template on_activate", PY, r"^def _set_skin\([^)]*\bon_activate: Handler \| None,", "on_activate"),
     ("python dock", PY, r"def dock\(self, dock_id: int, \*, window: int = 0\) -> _TxScope:", "dock"),
     ("python activated dispatch", PY, r"_app\._register\(handle, wire\.OCC_ACTIVATED, on_activate\)", "OCC_ACTIVATED"),
+    ("python on_select", PY, r"^\s+on_activate: Handler \| None = None,\n\s+on_select: Handler \| None = None\) -> _Container:", "on_select"),
+    ("python template on_select", PY, r"^def _set_skin\([^)]*\bon_select: Handler \| None\)", "on_select"),
+    ("python selection dispatch", PY, r"_app\._register\(handle, wire\.OCC_SELECTION_CHANGED, on_select\)", "OCC_SELECTION_CHANGED"),
     ("python image_dominant", PY, r"^def image_dominant\(data: bytes \| bytearray \| memoryview \| Asset\) -> Color \| None:", "image_dominant"),
     ("python tint none", PY, r"^    NONE = wire\.TINT_NONE", "TINT_NONE"),
     ("python tint overlay", PY, r"^    OVERLAY = wire\.TINT_OVERLAY", "TINT_OVERLAY"),
@@ -81,6 +88,9 @@ ROWS = [
     ("js template on_activate", JS, r"app\(\)\._register\(handle, wire\.OCC_ACTIVATED, opts\.onActivate\);", "onActivate"),
     ("js dock", JS, r"^  dock<T = void>\(dockId: number, optsOrBody: DockOptions \| \(\(\) => T\), body\?: \(\) => T\): T \{", "dock"),
     ("js activated dispatch", JS, r"app\(\)\._register\(handle, wire\.OCC_ACTIVATED,", "OCC_ACTIVATED"),
+    ("js on_select", JS, r"^export type SkinOptions = \{[^}]*\bonSelect\?: Handler;", "onSelect"),
+    ("js template on_select", JS, r"app\(\)\._register\(handle, wire\.OCC_SELECTION_CHANGED, opts\.onSelect\);", "onSelect"),
+    ("js selection dispatch", JS, r"app\(\)\._register\(handle, wire\.OCC_SELECTION_CHANGED,", "OCC_SELECTION_CHANGED"),
     ("js image_dominant", JS, r"^export function imageDominant\(bytes: Uint8Array \| Asset\): Color \| null \{", "imageDominant"),
     ("js tint none", JS, r"^  NONE: wire\.TINT_NONE,", "TINT_NONE"),
     ("js tint overlay", JS, r"^  OVERLAY: wire\.TINT_OVERLAY,", "TINT_OVERLAY"),
@@ -101,6 +111,9 @@ ROWS = [
     ("go template on_activate", GO, r"^func \(n Node\) OnActivate\(fn func\(\*Tx, \[\]any\)\) Node \{", "OnActivate"),
     ("go dock", GO, r"^func \(w WindowRef\) Dock\(dock uint64, build func\(\) Widget\) WindowRef \{", "Dock"),
     ("go activated dispatch", GOA, r"case kind == occActivated:\n\s+if fn := a\.nodeActivates\[id\]; fn != nil \{", "nodeActivates"),
+    ("go on_select", GO, r"^func \(w Widget\) OnSelect\(fn func\(\*Tx\)\) Widget \{", "OnSelect"),
+    ("go template on_select", GO, r"^func \(n Node\) OnSelect\(fn func\(\*Tx, \[\]any\)\) Node \{", "OnSelect"),
+    ("go selection dispatch", GOA, r"case kind == occSelectionChanged:\n\s+if fn := a\.nodeSelects\[id\]; fn != nil \{", "nodeSelects"),
     ("go image_dominant", GO, r"^func ImageDominant\(bytes \[\]byte\) \(Color, bool\) \{", "ImageDominant"),
     ("go tint none", GOW, r"^\tTintNone Tint = 0", "TintNone"),
     ("go tint overlay", GOW, r"^\tTintOverlay Tint = 6", "TintOverlay"),
@@ -112,7 +125,8 @@ ROWS = [
     ("csharp image shape", CS, r"ImagePhase\? phase = null, Shape\? shape = null\)", "shape"),
     ("csharp label tint", CS, r"Role\? role = null, bool rich = false, Tint\? tint = null\)", "tint"),
     ("csharp selected", CS, r"public void SetSelected\(Widget w, Signal s\)", "SetSelected"),
-    ("csharp on_activate", CS, r"byte\[\]\? groundImage = null, Action<Tx>\? onActivate = null\)", "onActivate"),
+    ("csharp on_activate", CS, r"byte\[\]\? groundImage = null, Action<Tx>\? onActivate = null, Action<Tx>\? onSelect = null\)", "onActivate"),
+    ("csharp on_select", CS, r"Action<Tx>\? onActivate = null, Action<Tx>\? onSelect = null\)", "onSelect"),
     ("csharp template ground gradient", CS, r"public void SetGroundGradient\(Node n, Field<Color> f, uint level = 0\)", "SetGroundGradient"),
     ("csharp template ground image", CS, r"public void SetGroundImage\(Node n, Field<byte\[\]> f, uint level = 0\)", "SetGroundImage"),
     ("csharp template image shape", CS, r"public void SetShape\(Node n, Shape shape\) =>", "SetShape"),
@@ -121,6 +135,8 @@ ROWS = [
     ("csharp template on_activate", CS, r"public void OnActivate\(Node n, Action<Tx, List<object>> handler\)", "OnActivate"),
     ("csharp dock", CS, r"public T Dock<T>\(ulong dock, Func<\(Widget Root, T Value\)> body, ulong window = 0\)", "Dock"),
     ("csharp activated dispatch", CS, r"case Activated activeRow\n\s+when nodeActivates\.TryGetValue\(activeRow\.Id, out var onActivateRow\):", "nodeActivates"),
+    ("csharp template on_select", CS, r"public void OnSelect\(Node n, Action<Tx, List<object>> handler\)", "OnSelect"),
+    ("csharp selection dispatch", CS, r"case SelectionChanged pickRow\n\s+when nodeSelects\.TryGetValue\(pickRow\.Id, out var onSelectRow\):", "nodeSelects"),
     ("csharp image_dominant", CSK, r"public static Color\? ImageDominant\(byte\[\] bytes\) =>", "ImageDominant"),
     ("csharp tint none", CS, r"^    None = KayaWire\.TintNone,", "TintNone"),
     ("csharp tint overlay", CS, r"^    Overlay = KayaWire\.TintOverlay,", "TintOverlay"),
@@ -141,6 +157,9 @@ ROWS = [
     ("java template on_activate", JV, r"public void onActivate\(Node n, BiConsumer<Tx, List<Object>> handler\) \{", "onActivate"),
     ("java dock", JV, r"public <R> R dock\(long dock, java\.util\.function\.Supplier<Built<R>> body\) \{", "dock"),
     ("java activated dispatch", JV, r"\} else if \(occ\.kind == KayaWire\.OCC_KIND_ACTIVATED\) \{\n\s+BiConsumer<Tx, List<Object>> handler = nodeActivates\.get\(occ\.id\);", "nodeActivates"),
+    ("java on_select", JV, r"public Widget onSelect\(Consumer<Tx> handler\) \{", "onSelect"),
+    ("java template on_select", JV, r"public void onSelect\(Node n, BiConsumer<Tx, List<Object>> handler\) \{", "onSelect"),
+    ("java selection dispatch", JV, r"\} else if \(occ\.kind == KayaWire\.OCC_KIND_SELECTION_CHANGED\) \{\n\s+BiConsumer<Tx, List<Object>> handler = nodeSelects\.get\(occ\.id\);", "nodeSelects"),
     ("java image_dominant", JV, r"public static java\.util\.Optional<Color> imageDominant\(byte\[\] bytes\) \{", "imageDominant"),
     ("java tint none", JV, r"^        NONE\(KayaWire\.TINT_NONE\),", "TINT_NONE"),
     ("java tint overlay", JV, r"^        OVERLAY\(KayaWire\.TINT_OVERLAY\);", "TINT_OVERLAY"),
@@ -162,6 +181,10 @@ ROWS = [
     ("swift template on_activate", SW, r"public func onActivate\(_ n: KayaNodeHandle, _ handler: @escaping \(KayaAppTx, \[KayaValue\]\) throws -> Void\) \{", "onActivate"),
     ("swift dock", SW, r"public func dock<R>\(", "dock"),
     ("swift activated dispatch", SW, r"case \(UInt16\(KAYA_OCCURRENCE_ACTIVATED\), false\):", "KAYA_OCCURRENCE_ACTIVATED"),
+    ("swift on_select", SW, r"public func onSelect\(_ w: KayaWidget, _ handler: @escaping \(KayaAppTx\) throws -> Void\) \{", "onSelect"),
+    ("swift on_select on the container", SW, r"^\s+onSelect: \(\(KayaAppTx\) throws -> Void\)\? = nil,", "onSelect"),
+    ("swift template on_select", SW, r"public func onSelect\(_ n: KayaNodeHandle, _ handler: @escaping \(KayaAppTx, \[KayaValue\]\) throws -> Void\) \{", "onSelect"),
+    ("swift selection dispatch", SW, r"case \(UInt16\(KAYA_OCCURRENCE_SELECTION_CHANGED\), false\):", "KAYA_OCCURRENCE_SELECTION_CHANGED"),
     ("swift image_dominant", SW, r"public static func imageDominant\(_ bytes: Data\) -> KayaColor\? \{", "imageDominant"),
     ("swift tint none", SW, r"^    case none = 0\n(?:    case [a-z]+ = [1-5]\n){5}", "none"),
     ("swift tint overlay", SW, r"^    case overlay = 6", "overlay"),
@@ -171,8 +194,9 @@ ROWS = [
     ("ocaml ground image", ML, r"^  \?ground_image:bytes ->\n  \?ground_image_bind:bytes signal ->", "ground_image"),
     ("ocaml image shape", ML, r"^  \?shape:shape ->", "shape"),
     ("ocaml label tint", ML, r"^  \?tint:Tint\.t ->", "tint"),
-    ("ocaml selected", ML, r"^  \?on_activate:\(unit -> unit\) ->\n  \?selected:bool ->", "selected"),
-    ("ocaml on_activate", ML, r"^  \?on_activate:\(unit -> unit\) ->\n  \?selected:bool ->", "on_activate"),
+    ("ocaml selected", ML, r"^  \?on_activate:\(unit -> unit\) ->\n  \?on_select:\(unit -> unit\) ->\n  \?selected:bool ->", "selected"),
+    ("ocaml on_activate", ML, r"^  \?on_activate:\(unit -> unit\) ->\n  \?on_select:\(unit -> unit\) ->\n  \?selected:bool ->", "on_activate"),
+    ("ocaml on_select", ML, r"^  \?on_activate:\(unit -> unit\) ->\n  \?on_select:\(unit -> unit\) ->\n  \?selected:bool ->", "on_select"),
     ("ocaml template ground gradient", ML, r"^    \?ground_gradient_field:\('g, color\) field ->", "ground_gradient_field"),
     ("ocaml template ground image", ML, r"^  val bind_ground_image_field : \?level:int -> node -> \('e, bytes\) field -> unit", "bind_ground_image_field"),
     ("ocaml template image shape", ML, r"^  val set_shape : node -> shape -> unit", "set_shape"),
@@ -181,6 +205,8 @@ ROWS = [
     ("ocaml template on_activate", ML, r"^  val on_activate : node -> \(key list -> unit\) -> unit", "on_activate"),
     ("ocaml dock", ML, r"^val dock : \?window:int64 -> int64 -> \(unit -> widget \* 'a\) -> 'a", "dock"),
     ("ocaml activated dispatch", MLI, r"Hashtbl\.replace tx\.app\.widget_handlers id handler;\n\s+emit tx \(Kaya_wire\.tx_set_activatable id true\)", "tx_set_activatable"),
+    ("ocaml template on_select", ML, r"^  val on_select : node -> \(key list -> unit\) -> unit", "on_select"),
+    ("ocaml selection dispatch", MLI, r"else if kind = Kaya_wire\.occ_kind_selection_changed then\n(?:.*\n){0,4}\s+\(match Hashtbl\.find_opt app\.widget_selects id with", "widget_selects"),
     ("ocaml image_dominant", ML, r"^val image_dominant : bytes -> color option", "image_dominant"),
     ("ocaml tint none", ML, r"^  type t = None \| Accent \| Success \| Warning \| Critical \| Neutral \| Overlay", "None"),
     ("ocaml tint overlay", ML, r"^  type t = None \| Accent \| Success \| Warning \| Critical \| Neutral \| Overlay", "Overlay"),
@@ -201,6 +227,9 @@ ROWS = [
     ("haskell template on_activate", HS, r"^  TplOnActivate :: \(\[Key\] -> IO \(\)\) -> TplAttr", "TplOnActivate"),
     ("haskell dock", HS, r"^dock :: Word64 -> Word64 -> Build \(Widget, a\) -> Build a", "dock"),
     ("haskell activated dispatch", HS, r"^applyAttr \(OnActivate handler\) \(Widget n\) = do\n  emitB \(W\.txSetActivatable n True\)\n  pendB \(PClick n handler\)", "OnActivate"),
+    ("haskell on_select", HS, r"^  OnSelect :: IO \(\) -> Attr 'BoxW", "OnSelect"),
+    ("haskell template on_select", HS, r"^  TplOnSelect :: \(\[Key\] -> IO \(\)\) -> TplAttr", "TplOnSelect"),
+    ("haskell selection dispatch", HS, r"\| kind == W\.occKindSelectionChanged -> do\n\s+case keys of\n\s+\[\] -> do\n\s+handlers <- readIORef \(app\.appWidgetSelects\)", "appWidgetSelects"),
     ("haskell image_dominant", HS, r"^imageDominant :: BS\.ByteString -> Maybe Color", "imageDominant"),
     ("haskell tint none", HS, r"^  TintNone -> W\.tintNone", "TintNone"),
     ("haskell tint overlay", HS, r"^  TintOverlay -> W\.tintOverlay", "TintOverlay"),
@@ -211,7 +240,9 @@ LANGS = ("rust", "python", "js", "go", "csharp", "java", "swift", "ocaml", "hask
 PARTS = ("ground gradient", "ground image", "image shape", "label tint", "selected", "on_activate",
          "template ground gradient", "template ground image", "template image shape", "template label tint",
          "template selected", "template on_activate", "dock", "activated dispatch", "image_dominant",
-         "tint none", "tint overlay", "shape vocabulary")
+         "tint none", "tint overlay", "shape vocabulary",
+         # Y4, AMENDED 2026-10-17: the user's pick, beside the activation.
+         "on_select", "template on_select", "selection dispatch")
 FAKE = "kayaFakeSkin"
 
 

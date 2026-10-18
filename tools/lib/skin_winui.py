@@ -44,11 +44,16 @@ DOORS = [
      ["ItemContainer::new()", "AutomationProperties::SetAutomationControlType(&host, AutomationControlType::Button)?;",
       "inner.PointerPressed(", "inner.PointerReleased(", "host.PointerCaptureLost(",
       "if !armed.swap(false, std::sync::atomic::Ordering::Relaxed) || !pointer_inside(id) {",
-      "restore_selected(id);\ntapped_sink.send_activated_tag(&tapped_tag);", "host.PreviewKeyDown(",
-      "if key == VirtualKey::Enter || key == VirtualKey::Space {", "restore_selected(id);\nsink.send_activated_tag(&tag);",
+      "press(&tapped_sink, id, &tapped_tag);", "host.PreviewKeyDown(",
+      "if key == VirtualKey::Enter || key == VirtualKey::Space {", "press(&sink, id, &tag);",
       "reseat_element(core, id, &inner, &host.cast()?)?;", "host.SetChild(&frame)?;",
       "for key in ITEM_RING_KEYS {", "XamlReader::Load(&HSTRING::from(ITEM_FRAME_XAML))?", "paint_selected(id)?;\nstamp_container_padding(core, id)"],
      ["SetBackground", "PointerEntered", "PointerExited", "SolidColorBrush", "GoToState", "SetIsSelected(true)"]),
+    # docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the pick, guarded, first.
+    ("press door", "pub(super) fn press(sink: &OccSink, id: WidgetId, tag: &[u8]) {",
+     ["restore_selected(id);\nif !SKIN.with_borrow(|s| s.selected.get(&id.0).copied().unwrap_or(false)) {\n"
+      "sink.send_selection_changed_tag(tag);\n}\nsink.send_activated_tag(tag);"],
+     []),
     ("item's corner and hit area", "fn round_host(core: &CoreState, id: WidgetId, host: &ItemContainer) -> windows_core::Result<()> {",
      ['theme_resource::<IReference<CornerRadius>>("OverlayCornerRadius")?.Value()?',
       'grid.SetBackground(&theme_resource::<Brush>("SubtleFillColorTransparentBrush")?)?;'],
@@ -121,7 +126,7 @@ CALLS = [
     ("a row reaching its parent restamps its inset",
      "if skin::is_activatable(child) {\nstamp_container_padding(core, child)?;\nskin::seat_in_table(child, in_declared_table(core, child))?;"),
     ("expect_ax reads the host", "let element = skin::ax_element(&element);"),
-    ("a click reaches an activatable container", "match skin::activation_tag(core, WidgetId(id)) {\nSome(tag) => core.occurrences.send_activated_tag(&tag),"),
+    ("a click reaches an activatable container", "match skin::activation_tag(core, WidgetId(id)) {\nSome(tag) => skin::press(&core.occurrences, WidgetId(id), &tag),"),
     ("a shaped image hides its Image behind its picture",
      "image.SetOpacity(if failed || super::skin::shaped(id) { 0.0 } else { 1.0 })"),
     ("a shaped image's picture is reshaped when it lands",
@@ -173,6 +178,11 @@ def findings(text):
     for label, call in CALLS:
         if flat(call) not in flat(src):
             out.append(f"skin: {LABEL}: {label} no longer holds — lacks {call.splitlines()[0]}")
+    for call in ("send_activated_tag(", "send_selection_changed_tag("):
+        sites = src.count(call)
+        if sites != 1:
+            out.append(f"skin: {LABEL}: {call[:-1]} is sent from {sites} sites, wanted one, the press door's "
+                       f"(docs/styling-pass-plan.md Y4)")
     looks = flat(src).count(flat(LOOK_CORNER))
     if looks != 2:
         out.append(f"skin: {LABEL}'s looks take the shape {looks} times, wanted 2 (loading and failed)")
@@ -197,10 +207,19 @@ CUTS = [
     ("WinUI: an activatable container no button to UIA",
      r"\n(\s+)AutomationProperties::SetAutomationControlType\(&host, AutomationControlType::Button\)\?;", "",
      "activatable host lacks AutomationProperties::SetAutomationControlType"),
-    ("WinUI: a tap that activates nothing", r"tapped_sink\.send_activated_tag\(&tapped_tag\);", "let _ = &tapped_tag;",
-     "activatable host lacks restore_selected(id);"),
-    ("WinUI: a press that keeps the item's own selection", r"restore_selected\(id\);\n(\s+)tapped_sink", r"\1tapped_sink",
-     "activatable host lacks restore_selected(id);"),
+    ("WinUI: a tap that activates nothing", r"press\(&tapped_sink, id, &tapped_tag\);", "let _ = &tapped_tag;",
+     "activatable host lacks press(&tapped_sink"),
+    ("WinUI: a press that keeps the item's own selection", r"(pub\(super\) fn press\(sink: &OccSink, id: WidgetId, tag: &\[u8\]\) \{\n)\s+restore_selected\(id\);\n",
+     r"\1", "press door lacks restore_selected(id);"),
+    ("WinUI: the pick sent over the app's selection",
+     r"if !SKIN\.with_borrow\(\|s\| s\.selected\.get\(&id\.0\)\.copied\(\)\.unwrap_or\(false\)\) \{\n(\s+)sink\.send_selection_changed_tag\(tag\);\n\s+\}",
+     r"sink.send_selection_changed_tag(tag);", "press door lacks restore_selected(id);"),
+    ("WinUI: the pick sent after the activation",
+     r"(\s+)if !SKIN(.*)\n(\s+)sink\.send_selection_changed_tag\(tag\);\n(\s+)\}\n\s+sink\.send_activated_tag\(tag\);",
+     r"\1sink.send_activated_tag(tag);\1if !SKIN\2\n\3sink.send_selection_changed_tag(tag);\n\4}",
+     "press door lacks restore_selected(id);"),
+    ("WinUI: a press beside the door", r"\n(\s+)press\(&sink, id, &tag\);", r"\n\1sink.send_activated_tag(&tag);",
+     "send_activated_tag is sent from 2 sites"),
     ("WinUI: the shaped picture left square", r"\n(\s+)shaper\.SetCornerRadius\(radius\)\?;", "",
      "shaped picture lacks shaper.SetCornerRadius"),
     ("WinUI: the loading look left square",

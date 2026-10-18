@@ -49,6 +49,7 @@ from packaging import identity as app_identity
 from packaging import windows as win_package
 import exclusive
 import only  # noqa: E402
+import scene_cut
 import flightrec_lane
 import lane_health
 import secure_scan
@@ -590,8 +591,13 @@ must_ssh("cmd /c if not exist C:\\kaya\\bindings\\go mkdir "
 # EVERY run, not the --provision block: a provisioning-only ship means a
 # scene edit never arrives.
 must_ssh("cmd /c if not exist C:\\kaya\\scenes mkdir C:\\kaya\\scenes")
-if scp_to(sorted((ROOT / "tools/scenes").glob("*.steps")),
-          "C:/kaya/scenes/") != 0:
+_scene_stage = tempfile.mkdtemp(prefix="kaya-win-scenes-")
+atexit.register(shutil.rmtree, _scene_stage, True)
+try:
+    _scenes_shipped = lane.staged_scenes(ROOT / "tools/scenes", _scene_stage)
+except scene_cut.CutRefused as e:
+    die(f"deploy-win: a scene cut was refused: {e}")
+if scp_to(_scenes_shipped, "C:/kaya/scenes/") != 0:
     die("deploy-win: could not ship the scene scripts")
 # Set once for the machine rather than in forty checked-in .cmd files:
 # every leg runs through schtasks, which inherits the user environment.

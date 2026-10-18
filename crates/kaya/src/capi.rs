@@ -164,6 +164,7 @@ pub const KAYA_OCCURRENCE_IMAGE_NEEDED: u16 = 56;
 pub const KAYA_OCCURRENCE_IMAGE_RELEASED: u16 = 57;
 /// ACTIVATED { button_clicked's layout } (docs/styling-pass-plan.md Y4).
 pub const KAYA_OCCURRENCE_ACTIVATED: u16 = 58;
+pub const KAYA_OCCURRENCE_SELECTION_CHANGED: u16 = 59;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -203,6 +204,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_IMAGE_NEEDED == ring::REC_IMAGE_NEEDED
         && KAYA_OCCURRENCE_IMAGE_RELEASED == ring::REC_IMAGE_RELEASED
         && KAYA_OCCURRENCE_ACTIVATED == ring::REC_ACTIVATED
+        && KAYA_OCCURRENCE_SELECTION_CHANGED == ring::REC_SELECTION_CHANGED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -1330,7 +1332,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 58,
+    crate::spec::SPEC.occurrence.len() == 59,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -4686,6 +4688,23 @@ pub unsafe extern "C" fn kaya_emit_activated(tag: *const u8, len: usize) {
         return;
     }
     state().ring.push_record(ring::REC_ACTIVATED, tag);
+}
+
+/// Presentation side: the user picked an activatable row or column
+/// (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17), the container's CREATE
+/// tag verbatim, as kaya_emit_activated takes it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_selection_changed(tag: *const u8, len: usize) {
+    assert!(!tag.is_null() && len != 0, "kaya: empty selection tag");
+    let tag = unsafe { std::slice::from_raw_parts(tag, len) };
+    if !stamped_tag_is_live(tag, "selection") {
+        return;
+    }
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send_selection_changed_tag(tag);
+        return;
+    }
+    state().ring.push_record(ring::REC_SELECTION_CHANGED, tag);
 }
 
 /// The dominant colour of a PNG or JPEG (docs/styling-pass-plan.md Y2), the

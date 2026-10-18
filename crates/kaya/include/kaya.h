@@ -269,6 +269,8 @@
  */
 #define KAYA_OCCURRENCE_ACTIVATED 58
 
+#define KAYA_OCCURRENCE_SELECTION_CHANGED 59
+
 /**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
@@ -2706,6 +2708,10 @@ typedef struct KayaHostApi {
    * docs/styling-pass-plan.md Y4: an activatable container pressed.
    */
   void (*emit_activated)(const uint8_t*, uintptr_t);
+  /**
+   * docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the user's pick.
+   */
+  void (*emit_selection_changed)(const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -3444,6 +3450,13 @@ void kaya_emit_clicked(const uint8_t *tag, uintptr_t len);
  * handed back verbatim, as kaya_emit_clicked takes a button's.
  */
 void kaya_emit_activated(const uint8_t *tag, uintptr_t len);
+
+/**
+ * Presentation side: the user picked an activatable row or column
+ * (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17), the container's CREATE
+ * tag verbatim, as kaya_emit_activated takes it.
+ */
+void kaya_emit_selection_changed(const uint8_t *tag, uintptr_t len);
 
 /**
  * The dominant colour of a PNG or JPEG (docs/styling-pass-plan.md Y2), the

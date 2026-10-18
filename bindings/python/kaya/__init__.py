@@ -4728,9 +4728,10 @@ def _set_filled(handle: _Handle, tint: Tint | str | None) -> None:
 
 def _set_skin(handle: _Handle, ground_gradient: Color | Source | None,
               ground_image: bytes | bytearray | memoryview | Asset | Source | None,
-              selected: FlagSource | None, on_activate: Handler | None) -> None:
-    """A container's ground, activation and selected surface
-    (docs/styling-pass-plan.md Y2-Y4)."""
+              selected: FlagSource | None, on_activate: Handler | None,
+              on_select: Handler | None) -> None:
+    """A container's ground, activation, the user's pick and selected
+    surface (docs/styling-pass-plan.md Y2-Y4)."""
     if ground_gradient is not None:
         _records().append(wire.tx_set_ground(handle.id, wire.GROUND_GRADIENT))
         if isinstance(ground_gradient, Signal):
@@ -4762,6 +4763,9 @@ def _set_skin(handle: _Handle, ground_gradient: Color | Source | None,
     if on_activate is not None:
         _records().append(wire.tx_set_activatable(handle.id, True))
         _app._register(handle, wire.OCC_ACTIVATED, on_activate)
+    if on_select is not None:
+        _records().append(wire.tx_set_activatable(handle.id, True))
+        _app._register(handle, wire.OCC_SELECTION_CHANGED, on_select)
     if selected is not None:
         if isinstance(selected, Signal):
             _records().append(wire.tx_bind_selected(handle.id, selected.id))
@@ -5104,7 +5108,8 @@ def column(*, grow: float | None = None, spacing: float | None = None,
            ground_gradient: Color | Source | None = None,
            ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
            selected: FlagSource | None = None,
-           on_activate: Handler | None = None) -> _Container:
+           on_activate: Handler | None = None,
+           on_select: Handler | None = None) -> _Container:
     """A column container: parents everything declared inside it. `grow`
     is its flex weight; `spacing` its inter-child gap (main axis, DIP,
     default 8); `inset` its own padding; `filled` a platform tint.
@@ -5112,16 +5117,16 @@ def column(*, grow: float | None = None, spacing: float | None = None,
     `ground_gradient` fades from a colour, clamped by the core, into the
     window's ground; `ground_image` covers it with a picture, text over
     which sits in a row `filled="overlay"`. `on_activate` makes the whole
-    container take a click (template copies getting their `Row`), and
-    `selected` then wears the platform's selected surface
-    (docs/styling-pass-plan.md Y2-Y4)."""
+    container take a click (template copies getting their `Row`),
+    `on_select` hears the user's pick of it, and `selected` then wears the
+    platform's selected surface (docs/styling-pass-plan.md Y2-Y4)."""
     handle = _widget(wire.KIND_COLUMN)
     _set_grow(handle, grow)
     _set_spacing(handle, spacing)
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
-    _set_skin(handle, ground_gradient, ground_image, selected, on_activate)
+    _set_skin(handle, ground_gradient, ground_image, selected, on_activate, on_select)
     return _Container(handle)
 
 
@@ -5180,7 +5185,8 @@ def row(*, grow: float | None = None, spacing: float | None = None,
         ground_gradient: Color | Source | None = None,
         ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
         selected: FlagSource | None = None,
-        on_activate: Handler | None = None) -> _Container:
+        on_activate: Handler | None = None,
+        on_select: Handler | None = None) -> _Container:
     """A row container: column turned sideways. `grow` is its flex
     weight; `spacing` its inter-child gap (main axis, DIP, default 8);
     `inset` its own padding; `filled` a platform tint (a chat thread's
@@ -5218,7 +5224,7 @@ def row(*, grow: float | None = None, spacing: float | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
-    _set_skin(handle, ground_gradient, ground_image, selected, on_activate)
+    _set_skin(handle, ground_gradient, ground_image, selected, on_activate, on_select)
     if role is not None:
         handle.role(role)
     return _Container(handle)

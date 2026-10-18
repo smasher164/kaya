@@ -2085,6 +2085,15 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// The user picked this row or column and it means `msg`
+    /// (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17); the container is
+    /// activatable in the same act. The app writes `selected` itself.
+    pub fn on_select<M: Clone + 'static>(self, msgs: &Messages<M>, msg: M) -> Self {
+        msgs.register_select(self.id, msg);
+        self.tx.set(self.id, Prop::Activatable, true);
+        self
+    }
+
     /// This image's bound in points — [`Tx::max_width`] chained.
     pub fn max_width(self, points: f64) -> Self {
         self.tx.max_width(self.id, points);
@@ -5398,6 +5407,15 @@ impl<'b> Row<'_, 'b> {
         self.tpl().on_activate(node, msgs, f)
     }
 
+    pub fn on_select<M: 'static>(
+        &mut self,
+        node: TemplateNodeId,
+        msgs: &Messages<M>,
+        f: impl Fn(Path) -> M + 'static,
+    ) {
+        self.tpl().on_select(node, msgs, f)
+    }
+
     pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
         self.tpl().max_width(node, points)
     }
@@ -5770,6 +5788,25 @@ impl<M> Messages<M> {
     fn register_activate_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
         self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::InstanceActivated { path, .. } => Some(f(path.clone())),
+                _ => None,
+            }),
+        );
+    }
+
+    fn register_select(&self, w: WidgetId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::SelectionChanged { .. } => Some(msg.clone()),
+                _ => None,
+            }),
+        );
+    }
+
+    fn register_select_node(&self, n: TemplateNodeId, f: impl Fn(Path) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceSelectionChanged { path, .. } => Some(f(path.clone())),
                 _ => None,
             }),
         );
@@ -6549,6 +6586,7 @@ impl<M> Messages<M> {
                 }
                 Occurrence::ButtonClicked { id }
                 | Occurrence::Activated { id }
+                | Occurrence::SelectionChanged { id }
                 | Occurrence::TextChanged { id, .. }
                 | Occurrence::Submitted { id, .. }
                 | Occurrence::Toggled { id, .. }
@@ -6572,6 +6610,7 @@ impl<M> Messages<M> {
                     .and_then(|fs| fs.iter().rev().find_map(|f| f(&occ))),
                 Occurrence::InstanceButtonClicked { node, .. }
                 | Occurrence::InstanceActivated { node, .. }
+                | Occurrence::InstanceSelectionChanged { node, .. }
                 | Occurrence::InstanceTextChanged { node, .. }
                 | Occurrence::InstanceSubmitted { node, .. }
                 | Occurrence::InstanceToggled { node, .. }
@@ -9009,6 +9048,18 @@ impl<'b> Tpl<'_, 'b> {
         self.set(node, Prop::Activatable, true);
     }
 
+    /// The user picked a stamped copy of this container, `f` handed the
+    /// copy's key path (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17).
+    pub fn on_select<M: 'static>(
+        &mut self,
+        node: TemplateNodeId,
+        msgs: &Messages<M>,
+        f: impl Fn(Path) -> M + 'static,
+    ) {
+        msgs.register_select_node(node, f);
+        self.set(node, Prop::Activatable, true);
+    }
+
     /// A stamped image's bound, the blueprint twin of [`Tx::max_width`].
     pub fn max_width(&mut self, node: TemplateNodeId, points: f64) {
         self.set(node, Prop::MaxWidth, points);
@@ -10487,6 +10538,7 @@ mod tests {
                     }
                     Occurrence::InstanceButtonClicked { .. } => {}
                     Occurrence::Activated { .. } | Occurrence::InstanceActivated { .. } => {}
+                    Occurrence::SelectionChanged { .. } | Occurrence::InstanceSelectionChanged { .. } => {}
                     Occurrence::TextChanged { .. }
                     | Occurrence::InstanceTextChanged { .. }
                     | Occurrence::Submitted { .. }

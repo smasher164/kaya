@@ -17386,6 +17386,8 @@ the AX walk (the row views answer AXUnknown), so expect_selected on a native
 row reads `AXRows[index].AXSelected` off the AXTable named
 `kaya.native-table.<id>`. `selectionIndexesForProposedSelection` returning the
 current set refuses a user's click and the `doubleAction` still fires.
+That refusal is gone since the Y4 amendment (docs/styling-pass-plan.md,
+AMENDED 2026-10-17): see "The native table's selection a reload empties".
 
 On linux the leg ran without tools/linux/a11y-leg.sh and every
 expect_selected read "no accessibility bus": check-steps' bus clause found
@@ -17546,3 +17548,51 @@ charts loaded, and the lane's mirror (which checks no agent) stayed green.
 GUARD: none in the toolkit; guests/python/music.py passes its own fetch
 naming the app. Whether the nine bindings' default fetches should name an
 agent is a question on the media player screen 1 notes.
+
+## The native table's selection a reload empties (measured 2026-10-18)
+
+Building the Y4 amendment (a user's click and arrows move the NSTableView's
+own selection and the app is told), three AppKit findings. `reloadData()`
+EMPTIES the table's selection with the row count unchanged (3 rows before and
+after, `[1]` before and `[]` after, kayaDiag around the driver's `update`) and
+posts no `tableViewSelectionDidChange`; f188caba never saw it because it
+re-applied the app's `selected` on every report. A user's pick that the app
+had not yet answered, or never answers, was lost at the next model batch, and
+the arrows then started from no row. The driver now holds the selection by
+row tag (a user's pick replaces it, an app's write adds or removes one) and
+re-applies it after every reload.
+
+A synthesized mouseDown selects nothing in a window that CAN become key and is
+not, whether sent to `tableView.mouseDown` or through `window.sendEvent` with
+`acceptsFirstMouse` true; the same event selects when the window's
+`canBecomeKey` is false (scratchpad probe, two window variants, five routes).
+The table's accessibility selection, `accessibilitySelectedRows` set on the
+NSTableView, runs the delegate's `selectionIndexesForProposedSelection` and
+posts the change notification in both variants, so the harness's `click` on a
+native row takes that route (the one VoiceOver's select takes) and makes the
+table first responder, as a click would. A keyDown through `NSApp.sendEvent`
+with the window's number reaches the first-responder table in a window that is
+not key and moves its selection (`press up`/`down`). Two Swift traps: the typed
+`accessibilityRows()` traps at run time, since the rows are `NSTableRow`, not
+`NSAccessibilityRow` (read and set through KVC); and `kayaSendNamedKey` called
+off the main thread dies in ViewBridge's `nextEventEqualToEvent:` assertion.
+GUARD: skin_routes' NATIVE_TABLE and CALLS rows (the press door's order, the
+pick told only for a user's proposal, the edge-triggered write, the reload's
+re-apply, the harness reaching the table's own doors), each cut watched red;
+tools/scenes/tracks.steps reads `picked:` after every click, arrow and
+double-click.
+
+## The unused ActionRef no build refused (measured 2026-10-18)
+
+guests/rust/menus.rs built its Queue and Favorite items as
+`m.item(title).symbol(symbol);`, a chain whose `ActionRef` is `#[must_use]`
+(its note: end the chain with `.id()`). rustc printed the warning and every
+build and leg went on green, since nothing reads a guest's warnings: the Rust
+guests are examples of the kaya crate, and Cargo's `[lints]` table and
+RUSTFLAGS would reach the library as well, which carries target-specific dead
+code. GUARD: tools/lib/guest_warnings.py reads the build's own transcript and
+refuses any warning sited under guests/ in tools/unit-suite.py (rung 1, so
+every gates.py run and matrix), tools/validate-mac.py's build and
+tools/run-leg.py's; watched red on the real compile with the `.id()` removed
+(one substitution, restored by hash), and two doctored transcripts in
+unit-suite's own negatives.

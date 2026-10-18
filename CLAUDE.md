@@ -666,7 +666,8 @@ in docs/deferred.md.
    the reference, a fake-name census firing every row, a rename in a copy
    per row and a withheld row refused; tpl-surfaces holds the six template
    props in every zone's own block (prop probes d8-d15 watched red),
-   counts printed),
+   counts printed; `on_select` beside `on_activate` in both zones since
+   2026-10-18, docs/styling-pass-plan.md Y4's amendment, nine rows watched red),
    `tools/check-universal-props.py` (the lowering-side sibling: every
    backend applies the universal a11y props to every kind — Compose
    per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm

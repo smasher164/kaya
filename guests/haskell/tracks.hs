@@ -38,11 +38,11 @@ names =
     ("Naima", "John Coltrane", "Giant Steps")
   ]
 
-table :: RecordCollection Track -> Text -> Text -> ([Key] -> IO ()) -> Build Widget
-table tracks ident rowId open = do
+table :: RecordCollection Track -> Text -> Text -> ([Key] -> IO ()) -> ([Key] -> IO ()) -> Build Widget
+table tracks ident rowId pick play = do
   (list, _) <- forEach (recordHandle tracks) $
     withTplAttrs
-      [TplA11yId rowId, TplSelectedField (field @"selected" @Track), TplOnActivate open]
+      [TplA11yId rowId, TplSelectedField (field @"selected" @Track), TplOnSelect pick, TplOnActivate play]
       ( rowOf
           [ label (field @"number" @Track),
             rowOf
@@ -73,8 +73,11 @@ main = kayaMain $ \app -> do
     window primary [WTitle "tracks", WSize 720 640]
     albumRows <- collectionOf @Track
     playlist <- collectionOf @Track
-    let open keys = case keys of
+    pickedText <- signalText "picked: none"
+    played <- signalText "played: none"
+    let answer said prefix keys = case keys of
           picked : _ -> submitTx app $ do
+            writeSignal said (prefix <> keyText picked)
             forM_ [0 .. length names - 1] $ \i ->
               let key = textKey ("a" <> tshow (i + 1))
                in patch albumRows key [set (field @"selected" @Track) (key == picked)]
@@ -82,10 +85,14 @@ main = kayaMain $ \app -> do
               let key = textKey ("t" <> tshow (i + 1))
                in patch playlist key [set (field @"selected" @Track) (key == picked)]
           [] -> return ()
-    albumTable <- table albumRows "album" "a" open
-    long <- table playlist "tracks" "t" open
+        pick = answer pickedText "picked: "
+        play = answer played "played: "
+    pickedLabel <- labelBound pickedText [A11yId "picked"]
+    playedLabel <- labelBound played [A11yId "played"]
+    albumTable <- table albumRows "album" "a" pick play
+    long <- table playlist "tracks" "t" pick play
     setGrow long 1
-    root <- column [Spacing 12] [pure albumTable, pure long]
+    root <- column [Spacing 12] [pure pickedLabel, pure playedLabel, pure albumTable, pure long]
     mount root
     forM_ [0 .. length names - 1] $ \i -> insertRecord albumRows (textKey ("a" <> tshow (i + 1))) (track i bytes)
     forM_ [0 .. playlistLength - 1] $ \i -> insertRecord playlist (textKey ("t" <> tshow (i + 1))) (track i bytes)

@@ -986,3 +986,33 @@ def alone(leg):
 def wired_scenes():
     """The scenes some leg runs — the gates' census surface."""
     return {scene_lang(leg)[0] for leg in legs()}
+
+
+# THE PHONES' CUT ON THIS LANE (tools/lib/scene_cut.py's grammar): everything
+# from the cut step on is not run here. tracks: the macOS native table's own
+# keyboard (docs/styling-pass-plan.md Y4, AMENDED 2026-10-17); WinUI's table
+# has no selection of its own to move.
+MODS = {
+    "tracks": {"cut": "press down", "keep": "expect_tint expect_rows"},
+}
+
+
+def staged_scenes(scenes_dir, out_dir):
+    """The scene scripts this lane ships: each one as written, or its MODS
+    prefix written into `out_dir` under the same name. Prints every step not
+    run; a refused cut raises scene_cut.CutRefused with the grammar's sentence."""
+    import scene_cut
+    shipped = []
+    for path in sorted(pathlib.Path(scenes_dir).glob("*.steps")):
+        cut = MODS.get(path.stem)
+        if cut is None:
+            shipped.append(path)
+            continue
+        prefix, dropped = scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="windows")
+        for line in dropped:
+            if line.strip():
+                print(f"deploy-win: NOT RUN on this host (cut at `{cut['cut']}`): {path.stem}: {line.strip()}")
+        staged = pathlib.Path(out_dir) / path.name
+        staged.write_text("\n".join(prefix) + "\n", encoding="utf-8")
+        shipped.append(staged)
+    return shipped

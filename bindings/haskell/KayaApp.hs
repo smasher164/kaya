@@ -3121,6 +3121,9 @@ data Attr (c :: WClass) where
   -- | This row or column takes a click as a whole (Y4): registering the
   -- handler and declaring the container activatable are one act.
   OnActivate :: IO () -> Attr 'BoxW
+  -- | The user picked this row or column (Y4, AMENDED 2026-10-17); the
+  -- container is activatable in the same act. The app writes 'Selected'.
+  OnSelect :: IO () -> Attr 'BoxW
   -- | An activatable container's selected surface, the app's state (Y4).
   Selected :: Bool -> Attr 'BoxW
   SelectedBound :: Signal Bool -> Attr 'BoxW
@@ -3286,6 +3289,9 @@ applyAttr (GroundImageBound (Signal s)) (Widget n) = do
 applyAttr (OnActivate handler) (Widget n) = do
   emitB (W.txSetActivatable n True)
   pendB (PClick n handler)
+applyAttr (OnSelect handler) (Widget n) = do
+  emitB (W.txSetActivatable n True)
+  pendB (PSelect n handler)
 applyAttr (Selected on) (Widget n) = emitB (W.txSetSelected n on)
 applyAttr (SelectedBound (Signal s)) (Widget n) = emitB (W.txBindSelected n s)
 applyAttr (ShapeAs sh) (Widget n) = emitB (W.txSetShape n (shapeWire sh))
@@ -4685,6 +4691,8 @@ data TplAttr where
   -- | Every stamped copy takes a click as a whole, the handler handed that
   -- copy's keys; registering and declaring are one act (Y4).
   TplOnActivate :: ([Key] -> IO ()) -> TplAttr
+  -- | The user picked a stamped copy, the handler handed its keys (Y4).
+  TplOnSelect :: ([Key] -> IO ()) -> TplAttr
   TplSelected :: Bool -> TplAttr
   TplSelectedBound :: Signal Bool -> TplAttr
   TplSelectedField :: KField Bool -> TplAttr
@@ -4729,6 +4737,9 @@ applyTplAttr (TplGroundImageField src) n = groundT n W.groundImage (bindImageSou
 applyTplAttr (TplOnActivate handler) (Node n) = do
   emitT (W.txSetActivatable n True)
   pendT (PActivateNode n handler)
+applyTplAttr (TplOnSelect handler) (Node n) = do
+  emitT (W.txSetActivatable n True)
+  pendT (PSelectNode n handler)
 applyTplAttr (TplSelected on) (Node n) = emitT (W.txSetSelected n on)
 applyTplAttr (TplSelectedBound (Signal s)) (Node n) = emitT (W.txBindSelected n s)
 applyTplAttr (TplSelectedField (KField i)) (Node n) = emitT (W.txBindSelectedElement n 0 i)
@@ -5307,6 +5318,8 @@ register app pending = case pending of
   PCommit n handler -> modifyIORef' (app.appWidgetCommits) (Map.insert n handler)
   PToggleNode n handler -> modifyIORef' (app.appNodeToggles) (Map.insert n handler)
   PActivateNode n handler -> modifyIORef' (app.appNodeHandlers) (Map.insert n handler)
+  PSelect n handler -> modifyIORef' (app.appWidgetSelects) (Map.insert n handler)
+  PSelectNode n handler -> modifyIORef' (app.appNodeSelects) (Map.insert n handler)
   PDocumentBind n cid i level ->
     modifyIORef' (app.appDocumentBinds) (Map.insert n (cid, i, level))
   PEditNode n handler -> modifyIORef' (app.appNodeEdits) (Map.insert n handler)
@@ -5986,6 +5999,8 @@ newApp =
     <*> newIORef Map.empty -- appNodeChanges
     <*> newIORef Map.empty -- appWidgetSubmits
     <*> newIORef Map.empty -- appNodeSubmits
+    <*> newIORef Map.empty -- appWidgetSelects
+    <*> newIORef Map.empty -- appNodeSelects
     <*> newIORef Map.empty -- appDocuments
     <*> newIORef Map.empty -- appDocumentBinds
     <*> newIORef Map.empty -- appNodeEdits
@@ -6225,6 +6240,15 @@ dispatchLoop app = do
             _ -> do
               handlers <- readIORef (app.appNodeChanges)
               dispatch (mapM_ (\h -> h (keyPath keys) content) (Map.lookup ident handlers))
+          dispatchLoop app
+      | kind == W.occKindSelectionChanged -> do
+          case keys of
+            [] -> do
+              handlers <- readIORef (app.appWidgetSelects)
+              dispatch (mapM_ id (Map.lookup ident handlers))
+            _ -> do
+              handlers <- readIORef (app.appNodeSelects)
+              dispatch (mapM_ ($ keyPath keys) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindSubmitted -> do
           let content = case payload of Just (W.VStr s) -> T.pack s; _ -> ""

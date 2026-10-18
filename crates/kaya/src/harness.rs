@@ -296,6 +296,9 @@ pub enum Step {
     /// that reports a stall on a HEALTHY app").
     ExpectNoStall,
     Click(Target),
+    /// A row's activating gesture (docs/styling-pass-plan.md Y4, AMENDED
+    /// 2026-10-17): on these tiers the click's press twice, each answered.
+    DoubleClick(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
     /// `hold slider#0` / `hold slider#0 at 80`: the platform's pointer goes
@@ -1024,6 +1027,7 @@ impl Step {
     fn targets_mut(&mut self) -> Vec<&mut Target> {
         match self {
             Step::Click(t)
+            | Step::DoubleClick(t)
             | Step::ExpectFocused(t)
             | Step::ExpectEyeFocused(t)
             | Step::ExpectFills(t)
@@ -1228,6 +1232,7 @@ impl Step {
         match self {
             Step::Settle { .. } => false,
             Step::Click { .. } => false,
+            Step::DoubleClick { .. } => false,
             Step::Toggle { .. } => false,
             Step::SetValue { .. } => false,
             Step::Hold { .. } => false,
@@ -2487,6 +2492,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             "expect_stall" => Step::ExpectStall,
             "expect_no_stall" => Step::ExpectNoStall,
             "click" => Step::Click(parse_target(rest)?),
+            "double_click" => {
+                let target = parse_target(rest)?;
+                if !matches!(target.kind, TargetKind::Row | TargetKind::Column) {
+                    return Err(format!("double_click wants an activatable row or column: {line:?}"));
+                }
+                Step::DoubleClick(target)
+            }
             "toggle" => {
                 let (target, state) = rest
                     .split_once(char::is_whitespace)
@@ -4110,7 +4122,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 let key = rest.trim();
                 if !PRESS_KEYS.contains(&key) {
                     return Err(format!(
-                        "press wants one of the named keys (return, tab, space), got {key:?}: {line:?}"
+                        "press wants one of the named keys (return, tab, space, up, down), got {key:?}: {line:?}"
                     ));
                 }
                 Step::Press(key.to_owned())
@@ -5074,6 +5086,16 @@ fn run_with_log(
                 stage.click(*t);
                 vtrace::note("click", format_args!("<- stage.click {}", target_spec(t)));
                 await_answer(answered);
+                None
+            }
+            Step::DoubleClick(t) => {
+                for press in 1..=2 {
+                    await_quiet();
+                    let answered = crate::scene::answers();
+                    vtrace::note("double_click", format_args!("-> press {press} stage.click {}", target_spec(t)));
+                    stage.click(*t);
+                    await_answer(answered);
+                }
                 None
             }
             // WRAPPED IN `poll` because the watchdog needs its threshold
@@ -7682,9 +7704,9 @@ fn await_quiet() {
 
 /// The secure field's refusals (docs/secure-entry-plan.md P6), the same
 /// bytes in the SwiftUI harness.
-/// The keys `press` names: Return, and Tab and Space for keyboard reach
-/// (docs/reveal-plan.md V10).
-pub const PRESS_KEYS: [&str; 3] = ["return", "tab", "space"];
+/// The keys `press` names: Return, Tab and Space for keyboard reach
+/// (docs/reveal-plan.md V10), and the arrows (docs/styling-pass-plan.md Y4).
+pub const PRESS_KEYS: [&str; 5] = ["return", "tab", "space", "up", "down"];
 pub const SECURE_EXPECT: &str = "expect never reads a secure field's text; expect_masked reads how many characters it masks";
 pub const SECURE_SET_TEXT: &str = "set_text never writes a secure field; type_secret types into one";
 pub const TYPE_INTO_SECURE: &str =
@@ -8752,6 +8774,11 @@ mod tests {
         assert!(parse("press").is_err());
         assert_eq!(parse("press tab").unwrap()[0], Step::Press("tab".into()));
         assert_eq!(parse("press space").unwrap()[0], Step::Press("space".into()));
+        assert_eq!(parse("press up").unwrap()[0], Step::Press("up".into()));
+        assert_eq!(parse("press down").unwrap()[0], Step::Press("down".into()));
+        assert!(parse("press left").is_err());
+        assert!(matches!(parse("double_click row@a[a1]").unwrap()[0], Step::DoubleClick(_)));
+        assert!(parse("double_click button#0").is_err());
         assert!(parse("type \"héllo\"").is_err());
         assert!(parse("type \"\"").is_err());
         assert!(parse("type").is_err());

@@ -617,9 +617,10 @@ final class KayaDrive: XCTestCase {
             field.typeText(text)
             return (true, "typed \(text.count) character(s)")
         case "key":
-            // `press tab|space` (docs/reveal-plan.md V10): a hardware key.
-            let keys = ["tab": XCUIKeyboardKey.tab.rawValue, "space": XCUIKeyboardKey.space.rawValue]
-            guard words.count == 2, let key = keys[words[1]] else { return (false, "key tab|space") }
+            // `press tab|space|up|down` (docs/reveal-plan.md V10): a hardware key.
+            let keys = ["tab": XCUIKeyboardKey.tab.rawValue, "space": XCUIKeyboardKey.space.rawValue,
+                        "up": XCUIKeyboardKey.upArrow.rawValue, "down": XCUIKeyboardKey.downArrow.rawValue]
+            guard words.count == 2, let key = keys[words[1]] else { return (false, "key tab|space|up|down") }
             a.typeKey(key, modifierFlags: [])
             return (true, "pressed \(words[1])")
         case "keyboard_done":

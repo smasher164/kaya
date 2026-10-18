@@ -24,14 +24,15 @@ let names =
     ("Naima", "John Coltrane", "Giant Steps");
   |]
 
-let table tracks id row_id pick =
+let table tracks id row_id pick play =
   let table =
     each (record_handle tracks)
       (fun () ->
         ignore
           Tpl.(
             row ~a11y_id:row_id ~selected_field:track_selected
-              ~on_activate:(fun keys -> pick (key_text (List.hd keys)))
+              ~on_select:(fun keys -> pick (key_text (List.hd keys)))
+              ~on_activate:(fun keys -> play (key_text (List.hd keys)))
               [
                 label ~bind_field:track_number;
                 row
@@ -72,7 +73,9 @@ let () =
       let art = asset_bytes (asset "covers/cover-600.jpg") in
       let album = collection_of track_record in
       let playlist = collection_of track_record in
-      let pick picked =
+      let picked_text = signal Scalar.Str "picked: none" in
+      let played = signal Scalar.Str "played: none" in
+      let select picked =
         Array.iteri
           (fun i _ ->
             let key = Printf.sprintf "a%d" (i + 1) in
@@ -83,10 +86,22 @@ let () =
           track_patch ~selected:(key = picked) playlist (Key.str key)
         done
       in
-      let album_table = table album "album" "a" pick in
-      let long = table playlist "tracks" "t" pick in
+      let pick picked =
+        write picked_text ("picked: " ^ picked);
+        select picked
+      in
+      let play picked =
+        write played ("played: " ^ picked);
+        select picked
+      in
+      let picked_label = label ~bind:picked_text ~a11y_id:"picked" () in
+      let played_label = label ~bind:played ~a11y_id:"played" () in
+      let album_table = table album "album" "a" pick play in
+      let long = table playlist "tracks" "t" pick play in
       set_grow long 1.0;
-      let root = column ~spacing:12.0 [ w album_table; w long ] () in
+      let root =
+        column ~spacing:12.0 [ w picked_label; w played_label; w album_table; w long ] ()
+      in
       mount root;
       Array.iteri
         (fun i _ -> insert_record album (Key.str (Printf.sprintf "a%d" (i + 1))) (track i art))

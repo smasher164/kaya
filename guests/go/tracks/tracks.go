@@ -1,7 +1,8 @@
 // The tracks scene (tools/scenes/tracks.steps; docs/styling-pass-plan.md Y5,
 // Y6, Y7): a playlist's table whose title cell is rounded art beside the
 // track's name over its artist, the playing track's name in the accent, and a
-// row the app selects on activation (Y4).
+// row the app selects when the user picks it and names when it is activated
+// (Y4). See guests/rust/tracks.rs.
 package tracks
 
 import (
@@ -31,7 +32,7 @@ var names = [][3]string{
 	{"Naima", "John Coltrane", "Giant Steps"},
 }
 
-func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID string, pick func(*kaya.Tx, string)) kaya.Widget {
+func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID string, pick, play func(*kaya.Tx, string)) kaya.Widget {
 	rows := TrackRows(tx, tracks).Columns([]string{"#", "Title", "Album"}, kaya.SortNone())
 	for row := range rows.All() {
 		line := row.Row(func() {
@@ -54,8 +55,10 @@ func table(tx *kaya.Tx, tracks kaya.RecordCollection[string, Track], id, rowID s
 		})
 		row.SetA11yID(line, rowID)
 		row.BindSelected(line, row.Selected())
-		line.OnActivate(func(tx *kaya.Tx, keys []any) {
+		line.OnSelect(func(tx *kaya.Tx, keys []any) {
 			pick(tx, keys[0].(string))
+		}).OnActivate(func(tx *kaya.Tx, keys []any) {
+			play(tx, keys[0].(string))
 		})
 	}
 	return rows.Widget().A11yID(id)
@@ -79,7 +82,9 @@ func App() *kaya.App {
 		a.Close()
 		album := TrackCollection(tx)
 		list := TrackCollection(tx)
-		pick := func(tx *kaya.Tx, picked string) {
+		pickedText := tx.Signal("picked: none")
+		played := tx.Signal("played: none")
+		sel := func(tx *kaya.Tx, picked string) {
 			for i := range names {
 				key := fmt.Sprintf("a%d", i+1)
 				TrackPatch(album, tx, key).Selected(key == picked)
@@ -89,9 +94,19 @@ func App() *kaya.App {
 				TrackPatch(list, tx, key).Selected(key == picked)
 			}
 		}
+		pick := func(tx *kaya.Tx, key string) {
+			tx.Write(pickedText, "picked: "+key)
+			sel(tx, key)
+		}
+		play := func(tx *kaya.Tx, key string) {
+			tx.Write(played, "played: "+key)
+			sel(tx, key)
+		}
 		tx.Mount(tx.Column(func() {
-			table(tx, album, "album", "a", pick)
-			long := table(tx, list, "tracks", "t", pick)
+			tx.Label(pickedText).A11yID("picked")
+			tx.Label(played).A11yID("played")
+			table(tx, album, "album", "a", pick, play)
+			long := table(tx, list, "tracks", "t", pick, play)
 			tx.SetGrow(long, 1)
 		}).Spacing(12))
 		for i := range names {

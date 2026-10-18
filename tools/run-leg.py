@@ -33,6 +33,7 @@ import tempfile
 import time
 
 import flightrec_lane
+import guest_warnings
 import media_server
 from lanes import mac as lane
 
@@ -104,7 +105,10 @@ if _spec is not None:
 if lang == "rust":
     stem = lane.guest_stem(scene)
     build = ["cargo", "build", "--locked", "-p", "kaya", "--example", stem]
-    if subprocess.run(build, cwd=ROOT).returncode != 0:
+    _code, _warned = guest_warnings.build(build, ROOT)
+    for _line in _warned:
+        print(f"run-leg: {_line}", file=sys.stderr)
+    if _code != 0 or _warned:
         print(f"run-leg: build failed: {' '.join(build)}", file=sys.stderr)
         sys.exit(1)
     # The lane's own staging, one copy (tools/lib/lanes/mac.py): the fresh

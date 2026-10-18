@@ -28,11 +28,14 @@ DOORS = [
       "surface.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium)",
       "surface.then(kayaActivatable(node))"], ["Color("]),
     ("activatable container", "fun kayaActivatable(node: KayaNode): Modifier {",
-     ["remember(node) { { KayaPresent.emitActivated(node.tag) } }", "kayaActivators[node.id] = activate",
+     ["remember(node) { { kayaPress(node) } }", "kayaActivators[node.id] = activate",
       "Modifier.selectable(", "selected = node.selected,", "indication = androidx.compose.material3.ripple(),",
       "role = Role.Button,\nonClick = activate,\n)\n} else {", "role = Role.Button,\nonClick = activate,\n)\n}\nreturn",
       ".semantics(mergeDescendants = true)"],
      [".background(", "Color(", "hoverable", ".alpha(", "indication = null"]),
+    # docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the pick, guarded, first.
+    ("press door", "fun kayaPress(node: KayaNode) {",
+     ["if (!node.selected) KayaPresent.emitSelectionChanged(node.tag)\nKayaPresent.emitActivated(node.tag)"], []),
     ("filled foreground", "inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable () -> Unit) {",
      ["if (node.selected) MaterialTheme.colorScheme.onSecondaryContainer"], []),
     ("overlay pair", "fun kayaTintPair(tint: Long): Pair<Color, Color> {",
@@ -139,10 +142,23 @@ def findings(text):
     for label, call in CALLS:
         if flat(call) not in flat(src):
             out.append(f"skin: {LABEL}: {label} no longer holds — {REL} lacks {call.splitlines()[0]}")
+    for call in ("KayaPresent.emitActivated(", "KayaPresent.emitSelectionChanged("):
+        sites = src.count(call)
+        if sites != 1:
+            out.append(f"skin: {LABEL}: {call[:-1]} is sent from {sites} sites in {REL}, wanted one, the press "
+                       f"door's (docs/styling-pass-plan.md Y4)")
     return out
 
 
 CUTS = [
+    ("Compose: a press beside the door", r"remember\(node\) \{ \{ kayaPress\(node\) \} \}",
+     "remember(node) { { KayaPresent.emitActivated(node.tag) } }", "KayaPresent.emitActivated is sent from 2 sites"),
+    ("Compose: the pick sent over the app's selection", r"if \(!node\.selected\) KayaPresent\.emitSelectionChanged",
+     "KayaPresent.emitSelectionChanged", "press door lacks if (!node.selected)"),
+    ("Compose: the pick sent after the activation",
+     r"if \(!node\.selected\) KayaPresent\.emitSelectionChanged\(node\.tag\)\n(\s+)KayaPresent\.emitActivated\(node\.tag\)",
+     r"KayaPresent.emitActivated(node.tag)\n\1if (!node.selected) KayaPresent.emitSelectionChanged(node.tag)",
+     "press door lacks if (!node.selected)"),
     ("Compose: the gradient's top stop a literal", r"listOf\(Color\(0xFF00_0000L or top\), scheme\.background\)",
      "listOf(Color(0xFF5B2A86), scheme.background)", "gradient and image ground lacks"),
     ("Compose: the bottom stop a literal", r"listOf\(Color\(0xFF00_0000L or top\), scheme\.background\)",
