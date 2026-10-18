@@ -3673,7 +3673,7 @@ if SUITE in ("python", "all"):
     shutil.copytree(pyhome, app / "python")
     shutil.copy2(ROOT / "tools/pyhost-main.py", app / "app/main.py")
     for entry in lane.PYTHON_SCENES:
-        shutil.copy2(ROOT / f"guests/python/{entry}.py",
+        shutil.copy2(ROOT / f"guests/python/{lane.PYTHON_GUEST.get(entry, entry)}.py",
                      app / f"app/{entry}.py")
     shutil.copytree(ROOT / "bindings/python/kaya", app / "app/kaya")
     shutil.rmtree(app / "app/kaya/__pycache__", ignore_errors=True)

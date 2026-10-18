@@ -20302,6 +20302,13 @@ private func kayaRGB(_ rgb: UInt32) -> Color {
         blue: Double(rgb & 0xFF) / 255.0)
 }
 
+/// A selected activatable container wears the selected surface in place of
+/// its fill (Y4): under it, iOS's translucent systemFill over the neutral
+/// fill drew a third grey neither token names.
+@MainActor func kayaShownFill(_ node: KayaNode) -> Int64 {
+    node.activatable && node.selected ? 0 : node.filled
+}
+
 struct KayaFilledSurface: ViewModifier {
     let tint: Int64
 
@@ -21145,7 +21152,8 @@ func kayaCellText(_ node: KayaNode) -> String? {
         var entered = 0
         func walk(_ view: NSView) {
             let here = view.convert(inWindow, from: nil)
-            for area in view.trackingAreas where area.rect.contains(here) {
+            for area in view.trackingAreas
+            where (area.options.contains(.inVisibleRect) ? view.visibleRect : area.rect).contains(here) {
                 guard let owner = area.owner as? NSResponder else { continue }
                 if area.options.contains(.mouseEnteredAndExited),
                     let enter = NSEvent.enterExitEvent(
@@ -24350,7 +24358,7 @@ struct KayaRender: View {
             .background(KayaInsetReader(id: node.id, outer: false))
             .padding(kayaFilledInset(node))
             .background(KayaInsetReader(id: node.id, outer: true))
-            .modifier(KayaFilledSurface(tint: node.filled))
+            .modifier(KayaFilledSurface(tint: kayaShownFill(node)))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
             .background(KayaSkinFrameReader(id: node.id))

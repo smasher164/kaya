@@ -2494,6 +2494,12 @@ fn tint_brush_key(tint: i64) -> &'static str {
 /// element's own theme; the neutral card wears Fluent's card stroke, since
 /// its fill alone is a translucent white.
 fn filled_style(tint: i64) -> windows_core::Result<Style> {
+    tinted_style(tint, tint_brush_key(tint))
+}
+
+/// A filled container's shape and stroke over another ground: a selected
+/// activatable card shows the item's selected fill through it (Y4).
+fn tinted_style(tint: i64, background: &str) -> windows_core::Result<Style> {
     let stroke = if tint == 5 {
         "<Setter Property=\"BorderBrush\" Value=\"{ThemeResource CardStrokeColorDefaultBrush}\"/>\
          <Setter Property=\"BorderThickness\" Value=\"1\"/>"
@@ -2504,7 +2510,7 @@ fn filled_style(tint: i64) -> windows_core::Result<Style> {
         "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Grid\">\
          <Setter Property=\"Background\" Value=\"{{ThemeResource {}}}\"/>\
          <Setter Property=\"CornerRadius\" Value=\"{{ThemeResource OverlayCornerRadius}}\"/>{stroke}</Style>",
-        tint_brush_key(tint)
+        background
     );
     XamlReader::Load(&HSTRING::from(markup))?.cast()
 }
@@ -3853,6 +3859,37 @@ fn unicode_name(ch: char) -> Option<String> {
         .then(|| String::from_utf8_lossy(&buffer[..len as usize]).into_owned())
 }
 
+/// The colour a container sits on, 0-255 RGBA: the nearest ancestor whose
+/// panel or border paints a solid brush, over the page's ground. A pane's
+/// layer is not the page: the panes window's content pane reads F9F9F9 where
+/// the page token is F3F3F3, and expect_fill there read every fill against
+/// the wrong ground.
+#[cfg(feature = "harness")]
+fn ground_under(element: &UIElement, page: [f64; 4]) -> windows_core::Result<[f64; 4]> {
+    use bindings::Microsoft::UI::Xaml::Controls::{Border, Panel};
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let mut at = VisualTreeHelper::GetParent(element).ok();
+    while let Some(node) = at {
+        let brush = if let Ok(panel) = node.cast::<Panel>() {
+            panel.Background().ok()
+        } else if let Ok(border) = node.cast::<Border>() {
+            border.Background().ok()
+        } else {
+            None
+        };
+        if let Some(solid) = brush.and_then(|b| b.cast::<SolidColorBrush>().ok()) {
+            let c = solid.Color()?;
+            if c.A > 0 {
+                let a = f64::from(c.A) / 255.0;
+                let mix = |k: usize, v: u8| f64::from(v) * a + page[k] * (1.0 - a);
+                return Ok([mix(0, c.R), mix(1, c.G), mix(2, c.B), 255.0]);
+            }
+        }
+        at = VisualTreeHelper::GetParent(&node).ok();
+    }
+    Ok(page)
+}
+
 #[cfg(feature = "harness")]
 fn off_screen(
     element: &FrameworkElement,
@@ -3880,8 +3917,10 @@ fn off_screen(
     // ground and no further: the window's own root ScrollViewer sits above
     // it and excused every element (docs/traps.md, the WinUI off-screen read).
     let (mut carried_across, mut carried_down) = (false, false);
+    // THE VISUAL TREE, presented()'s rule: the logical chain breaks at an
+    // ItemContainer, so a card's labels in a scrolled pane read as clipped.
     let ground_node: bindings::Microsoft::UI::Xaml::DependencyObject = ground.cast()?;
-    let mut parent = element.Parent().ok();
+    let mut parent = bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper::GetParent(element).ok();
     while let Some(p) = parent {
         if p == ground_node {
             break;
@@ -3890,7 +3929,7 @@ fn off_screen(
             carried_across |= viewer.HorizontalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
             carried_down |= viewer.VerticalScrollBarVisibility()? != ScrollBarVisibility::Disabled;
         }
-        parent = windows_core::Interface::cast::<FrameworkElement>(&p).ok().and_then(|f| f.Parent().ok());
+        parent = bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper::GetParent(&p).ok();
     }
     let across = !carried_across && (x0 < -1.0 || x1 > room_w + 1.0);
     let down = !carried_down && (y0 < -1.0 || y1 > room_h + 1.0);
@@ -17875,6 +17914,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     ensure_accent_surface()?;
                     grid.SetStyle(&filled_style(tint)?)?;
                     core.filled.insert(id, tint);
+                    skin::repaint_selected(id)?;
                     stamp_container_padding(core, id)?;
                 }
                 // docs/submit-plan.md S2: the set the field's KeyDown reads.
@@ -26355,7 +26395,8 @@ impl crate::harness::Stage for WinUiStage {
                 Ok([c.R, c.G, c.B, c.A].map(f64::from))
             };
             ensure_accent_surface()?;
-            let ground = resolve("ApplicationPageBackgroundThemeBrush")?;
+            let page = resolve("ApplicationPageBackgroundThemeBrush")?;
+            let ground = ground_under(&skin::ax_element(&element.cast()?), page)?;
             let mut candidates = vec![("none", [ground[0], ground[1], ground[2]])];
             for (name, tint) in [("accent", 1), ("success", 2), ("warning", 3), ("critical", 4), ("neutral", 5)] {
                 let c = resolve(tint_brush_key(tint))?;
@@ -26443,12 +26484,13 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
             Ok(format!(
-                "{} (sampled {} at ({x},{y}) of a {}x{} print, {}; {})",
+                "{} (sampled {} at ({x},{y}) of a {}x{} print, {}, on a ground of {}; {})",
                 candidates[0].0,
                 hex(&got),
                 grab.width,
                 grab.height,
                 if dark { "dark" } else { "light" },
+                hex(&[ground[0], ground[1], ground[2]]),
                 candidates.iter().take(3).map(|(n, c)| format!("{n} {}", hex(c))).collect::<Vec<_>>().join(", ")
             ))
         })

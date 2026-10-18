@@ -334,15 +334,28 @@ const ITEM_RING_KEYS: [&str; 4] = [
 
 /// The selected fill and the pill shown while the app's selection is on.
 fn paint_selected(id: WidgetId) -> windows_core::Result<()> {
-    let (frame, on, table) = SKIN.with_borrow(|s| {
-        (s.frames.get(&id.0).cloned(), s.selected.get(&id.0).copied().unwrap_or(false), s.table_rows.contains(&id.0))
+    let (frame, on, table, fill) = SKIN.with_borrow(|s| {
+        (s.frames.get(&id.0).cloned(), s.selected.get(&id.0).copied().unwrap_or(false), s.table_rows.contains(&id.0),
+         s.host_fills.get(&id.0).copied().unwrap_or(0))
     });
     let Some(frame) = frame else { return Ok(()) };
     let vis = |shown: bool| if shown { Visibility::Visible } else { Visibility::Collapsed };
     let children = frame.Children()?;
     children.GetAt(0)?.SetVisibility(vis(on))?;
     children.GetAt(2)?.SetVisibility(vis(on && !table))?;
+    // A filled card's own fill sat over the selected fill and hid it: the
+    // selected surface takes the fill's place, its shape and stroke kept.
+    if fill != 0 {
+        if let Ok(card) = windows_core::Interface::cast::<Grid>(&children.GetAt(1)?) {
+            card.SetStyle(&if on { tinted_style(fill, "SubtleFillColorTransparentBrush")? } else { filled_style(fill)? })?;
+        }
+    }
     Ok(())
+}
+
+/// The selected surface again, after the container's fill was restyled.
+pub(super) fn repaint_selected(id: WidgetId) -> windows_core::Result<()> {
+    paint_selected(id)
 }
 
 /// A declared table's row keeps its cells on the header's edges and has no

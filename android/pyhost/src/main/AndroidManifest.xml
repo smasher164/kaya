@@ -10,6 +10,10 @@
          what this app IS — a reminders app qualifies, and a library may
          not make that claim for every app built on it. SCHEDULE_EXACT_ALARM
          is its pre-33 spelling, granted at install there. -->
+    <!-- The media player demo fetches its catalogue over sockets
+         (docs/media-player-plan.md M3): without this every connect fails
+         EACCES. -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission

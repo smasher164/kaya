@@ -17512,3 +17512,15 @@ tools/android/run-emulator.py also asks the emulator for its AVD directory and
 restarts an instance running another checkout's or a deleted one
 (`avd_dir_refusal`, self-tested at every lane start), and the `capture lane:`
 line reads the device's own directory and marks a missing picture `(MISSING)`.
+
+## The catalogue that refuses Python-urllib (measured 2026-10-17)
+
+Jamendo's image host (`usercontent.jamendo.com`) answers 403 Forbidden to a
+request carrying urllib's own User-Agent (`Python-urllib/3.x`) and 19,115
+bytes to the same address with `User-Agent: kaya-music/1`; the API host
+answers both. The Python binding's `RowImages.default_fetch` sends urllib's
+default, so on Jamendo every card and row drew the failed look while the
+charts loaded, and the lane's mirror (which checks no agent) stayed green.
+GUARD: none in the toolkit; guests/python/music.py passes its own fetch
+naming the app. Whether the nine bindings' default fetches should name an
+agent is a question on the media player screen 1 notes.

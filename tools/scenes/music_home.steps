@@ -1,0 +1,40 @@
+# The media player demo's first screen (docs/media-player-plan.md §6 step 5,
+# M6, M12): Home's shelves are fitting grids of activatable album cards whose
+# rounded art comes from the lane's mirror (tools/lib/catalogue.py); a card
+# activated is selected and joins the sidebar's library. The phones have no
+# pointer and no sidebar: their lanes cut at the hover and read the library
+# in its section instead (tools/lib/lanes/ios.py, android.py).
+expect_grid_columns grid@shelf_jazz 2
+expect_grid_columns grid@shelf_electronic 2
+expect_grid_columns grid@shelf_rock 1
+expect_image_phase image@art_201715 shown
+expect_image_phase image@art_581719 shown
+expect_image_phase image@art_139585 shown
+expect_image_phase image@art_116452 shown
+expect_image_phase image@art_149020 shown
+expect image@art_201715 "300x300"
+expect_shape image@art_139585 rounded
+expect_ax column@card_201715 "button/Through The Olive Branches, Pierce Murphy"
+expect_fill column@card_201715 neutral
+click column@card_201715
+expect_selected column@card_201715 on
+expect_selected column@card_581719 off
+expect_fill column@card_201715 selected
+click column@card_139585
+expect_selected column@card_139585 on
+expect_selected column@card_201715 off
+expect_no_clipping
+# The desktops: the pointer, the sidebar and the panes.
+hover column@card_581719
+expect_fill column@card_581719 hovered
+expect_title "Home"
+expect_selected row@saved[139585] on
+expect_selected row@saved[201715] off
+expect_image_phase image@saved_art[139585] shown
+expect_shape image@saved_art[139585] rounded
+click row@saved[201715]
+expect_selected row@saved[201715] on
+expect_selected column@card_201715 on
+expect_selected column@card_139585 off
+resize_window 1400x800
+expect_panes "regular/0,1"

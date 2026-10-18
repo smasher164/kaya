@@ -100,7 +100,8 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media",
-              "media_reader": "media", "capture_denied": "capture"}
+              "media_reader": "media", "capture_denied": "capture",
+              "music_home": "music"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -180,7 +181,10 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                "media_timeout": "rust",
                # The capture's denied prompt, one prompt per process
                # (docs/capture-plan.md §2), rust-only at depth.
-               "capture_denied": "rust"}
+               "capture_denied": "rust",
+               # The media player demo, one Python app under a script per
+               # screen (docs/media-player-plan.md M3, §5).
+               "music_home": "python"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -334,6 +338,7 @@ ORDER = [
     ("safearea", LANGS + ("c",)),
     ("netimage", LANGS + ("c",)),
     ("netimage_http", LANGS),
+    ("music_home", ("python",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

@@ -4212,8 +4212,8 @@ def stage_python_assets():
         shutil.copy2(f, target)
     app = dest / "app"
     shutil.copy2(ROOT / "tools/pyhost-main.py", app / "main.py")
-    for scene in ("portfolio", "varied"):
-        shutil.copy2(ROOT / f"guests/python/{scene}.py",
+    for scene, guest in lane.PYTHON_GUESTS.items():
+        shutil.copy2(ROOT / f"guests/python/{guest}.py",
                      app / f"{scene}.py")
     shutil.copytree(ROOT / "bindings/python/kaya", app / "kaya",
                     ignore=shutil.ignore_patterns("__pycache__"))

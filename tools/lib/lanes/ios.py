@@ -80,7 +80,13 @@ GO_SCENES = [
 
 # CPython embedded in ONE bundle carrying every python scene
 # (docs/python-mobile-plan.md).
-PYTHON_SCENES = ["portfolio", "varied"]
+PYTHON_SCENES = ["portfolio", "varied", "music_home"]
+# A scene whose guest file is another's: staged under the scene's name, the
+# one the host's main.py runs (tools/pyhost-main.py).
+PYTHON_GUEST = {"music_home": "music"}
+# The media player demo on a phone (docs/media-player-plan.md M6): no pointer,
+# and the library is the Library section rather than the sidebar.
+MUSIC_PHONE_TAIL = ('expect_title "Music"; select_section 1; expect_selected row@saved[139585] on; expect_selected row@saved[201715] off; expect_image_phase image@saved_art[139585] shown; expect_shape image@saved_art[139585] rounded; click row@saved[201715]; expect_selected row@saved[201715] on; select_section 0; expect_selected column@card_201715 on; expect_selected column@card_139585 off')
 
 # The rust-swiftui suite: one cargo example per scene, milestone2 first
 # (its leg is the bare `rust-swiftui`). The EXAMPLE a scene builds is
@@ -313,6 +319,8 @@ MODS = {
     # (docs/adaptive-layout-plan.md D7): the cut takes the
     # resize-driven round trip a phone cannot command, the extra
     # asserts the always-stacked truth this host CAN express.
+    ("python", "music_home"): {"cut": "hover", "keep": "expect_ax expect_grid_columns",
+                               "extra": MUSIC_PHONE_TAIL},
     ("python", "portfolio"): {
         "extra": "expect_folded column@summary column@ledger",
         "cut": "resize_window",

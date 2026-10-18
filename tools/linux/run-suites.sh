@@ -1716,6 +1716,11 @@ for proto in x11 wayland; do
     run "$proto" netimage_http-haskell env KAYA_SELFTEST=netimage_http "$(hs_bin netimage_http)"
     run "$proto" netimage_http-java env KAYA_SELFTEST=netimage_http KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE MEDIA PLAYER DEMO (docs/media-player-plan.md M3): python alone by
+    # design, against this lane's mirror; through a11y-leg.sh for the cards'
+    # expect_ax and expect_selected, and hover moves the leg's own pointer.
+    run "$proto" music_home-python env KAYA_SELFTEST=music_home KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/music.py
     # THE SKIN (docs/styling-pass-plan.md §5): grounds and cards read the
     # accessibility tree (expect_ax, expect_selected), so they run through
     # a11y-leg.sh; hover moves the leg's own pointer (tools/linux/dragdrive.py).

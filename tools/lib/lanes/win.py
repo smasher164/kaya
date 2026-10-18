@@ -92,6 +92,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # §5): no in-process route reaches a ListViewItem's PointerOver
              # state, so a neighbour under the pointer would take it.
              "cards_rust", "cards_python", "cards_js", "cards_go", "cards_csharp", "cards_java",
+             "music_home_python",
              # THE HELD SLIDER presses and holds the VM's real left button
              # (docs/media-player-plan.md M10): in the pool four of six legs
              # went red and every one is green alone (measured 2026-10-17).
@@ -192,7 +193,7 @@ GO_ONLY_SCENES = ["editor", "chat"]
 # Python BY DESIGN: the portfolio (docs/portfolio-plan.md) and the
 # variable-height scene (docs/virtualization-plan.md §5). They join
 # the .py ship and stamp, and no exe family.
-PY_ONLY_SCENES = ["portfolio", "varied"]
+PY_ONLY_SCENES = ["portfolio", "varied", "music"]
 
 # milestone2's six legs are the bare language names; their scene is
 # milestone2 and their launchers are run_rust.cmd and kin. The js legs
@@ -557,6 +558,9 @@ ORDER = [
     ["cards_go"],
     ["cards_csharp"],
     ["cards_java"],
+    # The media player demo's Home hovers a card the same way
+    # (docs/media-player-plan.md M3), against the media server.
+    ["music_home_python"],
     [
      "dnd_rust",
     ],
@@ -917,7 +921,8 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
-              "media_timeout": "media", "media_reader": "media", "capture_denied": "capture"}
+              "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
+              "music_home": "music"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

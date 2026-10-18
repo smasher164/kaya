@@ -252,9 +252,13 @@ LEGS = {
         "capture-go", "capture_denied-go",
     ],
     "python": [
-        "varied-python", "portfolio-python",
+        "varied-python", "portfolio-python", "music_home-python",
     ],
 }
+
+# A python scene whose guest file is another's, staged under the scene's
+# name, the one the host's main.py runs (tools/pyhost-main.py).
+PYTHON_GUESTS = {"portfolio": "portfolio", "varied": "varied", "music_home": "music"}
 
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
@@ -424,6 +428,10 @@ MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
     # ends at its first hover.
     "cards": {"cut": ("hover", "expect_selected expect_ax", "")},
+    # The media player demo on a phone (docs/media-player-plan.md M6): no
+    # pointer, and the library is the Library section, not the sidebar.
+    "music_home": {"cut": ("hover", "expect_ax expect_grid_columns", ""),
+                   "append": "expect_title \"Music\";select_section 1;expect_selected row@saved[139585] on;expect_selected row@saved[201715] off;expect_image_phase image@saved_art[139585] shown;expect_shape image@saved_art[139585] rounded;click row@saved[201715];expect_selected row@saved[201715] on;select_section 0;expect_selected column@card_201715 on;expect_selected column@card_139585 off;"},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),
     # so the file drop and the one assertion it feeds do not run here;
     # every drag between this app's own widgets does.
