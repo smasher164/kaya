@@ -885,7 +885,11 @@ const val KAYA_FILLED_DEFAULT_INSET = 12.0
 fun kayaFilledInset(node: KayaNode): Double =
     if (node.insetSet) node.inset
     else if (node.role == KayaCompose.ROLE_COMPOSER) KAYA_COMPOSER_INSET
-    else if (node.filled != 0L) KAYA_FILLED_DEFAULT_INSET else node.inset
+    else if (node.filled != 0L || node.activatable && !kayaInDeclaredTable(node)) KAYA_FILLED_DEFAULT_INSET else node.inset
+
+/** A stamped row of a declared table, whose cells keep the header's edges. */
+fun kayaInDeclaredTable(node: KayaNode): Boolean =
+    KayaSceneModel.parents[node.id]?.let { KayaSceneModel.nodes[it] }?.tableColumns?.isNotEmpty() == true
 
 /** The composer's pill (docs/composer-plan.md §4, Signal's): surface
  * variant, a radius of half the one-line height, no outline. */
@@ -8229,7 +8233,33 @@ object KayaCompose {
         val above = kayaDockAbove
         val ends = above != null && above.bottom <= frame.top + 1
         val detail = "dock $frame, window ${w.toInt()}x${h.toInt()}, section bar ${bar.toInt()}px, surface above $above"
-        if (spans && atFoot && ends) "shown ($detail)" else "misplaced ($detail)"
+        val fault = kayaDockContentFault(frame)
+        if (fault != null) "misplaced ($fault; $detail)"
+        else if (spans && atFoot && ends) "shown ($detail)" else "misplaced ($detail)"
+    }
+
+    /** expect_dock's content half (docs/styling-pass-plan.md Y8, §5.4): every
+     * widget of the window's own root laid out, on screen and wholly above the
+     * dock, so a dock drawn over the content or in its place reads misplaced. */
+    private fun kayaDockContentFault(dock: androidx.compose.ui.geometry.Rect): String? {
+        val root = KayaSceneModel.root ?: return null
+        val leaves = mutableListOf<KayaNode>()
+        fun walk(n: KayaNode) {
+            if (n.kind == KIND_ROW || n.kind == KIND_COLUMN) n.children.forEach(::walk) else leaves.add(n)
+        }
+        walk(root)
+        for (n in leaves) {
+            val name = n.a11yId.ifEmpty { "content widget ${n.id}" }
+            val f = kayaNodeFrames[n.id] ?: return "$name of the window's content was never laid out"
+            val shown = kayaNodeVisible[n.id] ?: androidx.compose.ui.geometry.Rect.Zero
+            if (shown.width <= 0f || shown.height <= 0f) {
+                return "$name of the window's content has nothing on screen at ${kayaRectText(f)}"
+            }
+            if (f.bottom > dock.top + 1) {
+                return "$name of the window's content at ${kayaRectText(f)} does not end above the dock's top ${dock.top.toInt()}"
+            }
+        }
+        return null
     }
 
     private fun kayaCanvasInk(
@@ -22172,6 +22202,24 @@ internal fun kayaSliderVertical(node: KayaNode): Boolean =
  * the SwiftUI arm's stand-in. */
 internal val KAYA_FADER_LENGTH = 200.dp
 
+/** A horizontal slider's natural width in a flex row, the same stand-in
+ * (DESIGN.md Layout): Material's intrinsics are its thumb's, so the row's
+ * shrink squeezed it to a few dp beside its siblings. */
+private object KayaSliderNatural : androidx.compose.ui.layout.LayoutModifier {
+    override fun androidx.compose.ui.layout.MeasureScope.measure(
+        measurable: androidx.compose.ui.layout.Measurable,
+        constraints: Constraints,
+    ): androidx.compose.ui.layout.MeasureResult {
+        val p = measurable.measure(constraints)
+        return layout(p.width, p.height) { p.place(0, 0) }
+    }
+
+    override fun androidx.compose.ui.layout.IntrinsicMeasureScope.maxIntrinsicWidth(
+        measurable: androidx.compose.ui.layout.IntrinsicMeasurable,
+        height: Int,
+    ): Int = maxOf(KAYA_FADER_LENGTH.roundToPx(), measurable.maxIntrinsicWidth(height))
+}
+
 /**
  * WHERE EACH SLIDER AND RANGE WAS LAID OUT, and each of its thumbs: the
  * layout's own coordinates as its composables last placed them, keyed by the
@@ -22383,7 +22431,7 @@ private fun KayaSliderSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier)
         )
     }
     if (!kayaSliderVertical(node)) {
-        slider(boxFill.then(a11y))
+        slider(boxFill.then(KayaSliderNatural).then(a11y))
         return
     }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {

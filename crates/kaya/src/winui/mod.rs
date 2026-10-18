@@ -1516,6 +1516,8 @@ thread_local! {
     /// Whether the two presentation edges are wired yet
     /// (`presentation_report`). UI thread only, like CORE.
     static PRESENTATION_WATCHED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The caption's dark mode as last written (`follow_caption`).
+    static CAPTION_DARK: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
     /// A canvas-track report is already queued for this turn, because
     /// LayoutUpdated fires per canvas per pass.
     static CANVAS_TRACKS_DUE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -1686,6 +1688,7 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
     } else {
         crate::canvas::Mode::Light
     };
+    follow_caption(core, mode == crate::canvas::Mode::Dark);
     let ops = crate::fault::guard("reporting the window's scale and appearance", || {
         core.scene.set_presentation(crate::canvas::Presentation { scale, mode })
     })
@@ -1698,6 +1701,34 @@ fn presentation_report(core: &mut CoreState) -> windows_core::Result<()> {
         }
     }
     Ok(())
+}
+
+/// The system caption wears the theme the content resolved to: DWM draws it
+/// from the system's mode, so a window kaya turned dark kept a light caption
+/// (the 2026-10-17 preview). expect_appearance reads it back.
+fn follow_caption(core: &CoreState, dark: bool) {
+    if CAPTION_DARK.get() == Some(dark) {
+        return;
+    }
+    let Ok(native) = windows_core::Interface::cast::<IWindowNative>(&core.window) else { return };
+    let Ok(hwnd) = native.window_handle() else { return };
+    let value = i32::from(dark);
+    // SAFETY: one BOOL read by DWM for the call's length.
+    let hr = unsafe {
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, std::ptr::from_ref(&value).cast(), 4)
+    };
+    if hr == 0 {
+        CAPTION_DARK.set(Some(dark));
+    } else {
+        crate::fault::report(format!("kaya: winui: DWM refused the caption's dark mode {dark}: HRESULT {hr:#010x}"));
+    }
+}
+
+const DWMWA_USE_IMMERSIVE_DARK_MODE: u32 = 20;
+
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    fn DwmSetWindowAttribute(hwnd: isize, attr: u32, value: *const c_void, size: u32) -> i32;
 }
 
 /// The report, from a XAML event handler: those run on the UI thread but
@@ -2393,6 +2424,11 @@ fn trace_enabled() -> bool {
     *ON.get_or_init(|| std::env::var_os("KAYA_WINUI_TRACE").is_some())
 }
 
+/// A stamped row of a declared table, whose cells keep the header's edges.
+fn in_declared_table(core: &CoreState, id: WidgetId) -> bool {
+    core.child_order.parent_of(id).is_some_and(|table| TABLES.with_borrow(|t| t.contains_key(&table.0)))
+}
+
 /// The Padding a container Grid must carry: the inset the container itself
 /// declares (prop 17), plus the WINDOW inset when it is a mounted surface
 /// root (wprop 8). WinUI folds two boxes into one — SwiftUI and Compose NEST
@@ -2400,7 +2436,7 @@ fn trace_enabled() -> bool {
 /// is the SUM, and every writer goes through here.
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
     let own = core.container_insets.get(&id).copied().unwrap_or(
-        if core.filled.contains_key(&id) {
+        if core.filled.contains_key(&id) || skin::is_activatable(id) && !in_declared_table(core, id) {
             FILLED_DEFAULT_INSET
         } else if core.composers.contains_key(&id) {
             COMPOSER_INSET
@@ -18696,6 +18732,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // A new child means a new track and a shifted set of indices —
             // stamped once for the whole batch (winui/order.rs).
             core.child_order.append(parent, child);
+            if skin::is_activatable(child) {
+                stamp_container_padding(core, child)?;
+                skin::seat_in_table(child, in_declared_table(core, child))?;
+            }
             // THE FORM MARK (docs/forms-plan.md §2), `stamps_rows`' shape: a
             // column that has taken a labelled row re-stamps all of them at
             // every flush, so the shared label track follows the widest one.
@@ -26368,23 +26408,33 @@ impl crate::harness::Stage for WinUiStage {
                     }
                 }
             }
-            // A SELECTED item is ItemContainer's selection ring, the accent
-            // drawn 3 units wide around the item, over a fill left
-            // transparent: read off both side edges at the middle.
+            // A SELECTED item is ListView's own (Y4): the accent pill at the
+            // item's leading edge, read at its middle, over
+            // ListViewItemBackgroundSelected, read at the probe.
             if let (Some(_), Ok(shot)) = (id, &shot) {
-                let ring = resolve("ItemContainerSelectionVisualBackground")?;
-                let ring = [ring[0] / 255.0, ring[1] / 255.0, ring[2] / 255.0];
+                let pill = resolve("ListViewItemSelectionIndicatorBrush")?;
+                let pill = [pill[0] / 255.0, pill[1] / 255.0, pill[2] / 255.0];
+                let fill = layered("ListViewItemBackgroundSelected", bare)?.map(|v| v / 255.0);
                 let mine: UIElement = skin::ax_element(&element.cast()?);
                 if let Some((fx, fy, fw, fh)) = shot.frame(&mine) {
-                    let edge = |x: f64| shot.at(x, fy + fh / 2.0);
-                    let (left, right) = (edge(fx + 1.0), edge(fx + fw - 1.5));
-                    if let (Some(l), Some(r)) = (left, right) {
-                        if skin::read::gap(l, ring) <= 0.12 && skin::read::gap(r, ring) <= 0.12 {
+                    // The pill alone: accent at the leading edge's middle and
+                    // nowhere along the top or the trailing edge, which is
+                    // where ItemContainer's own ring would also be accent.
+                    let is_pill = |x: f64, y: f64| shot.at(x, y).is_some_and(|c| skin::read::gap(c, pill) <= 0.12);
+                    if let Some(lead) = shot.at(fx + 1.5, fy + fh / 2.0) {
+                        let sample = got.map(|v| v / 255.0);
+                        let ground = bare.map(|v| v / 255.0);
+                        let pilled = is_pill(fx + 1.5, fy + fh / 2.0)
+                            && !is_pill(fx + 1.5, fy + 1.5)
+                            && !is_pill(fx + fw - 1.5, fy + fh / 2.0);
+                        let marked = pilled || id.is_some_and(|id| skin::is_table_row(id.0));
+                        let filled = skin::read::gap(sample, fill) < skin::read::gap(sample, ground);
+                        if marked && filled {
                             return Ok(format!(
-                                "selected (the selection ring {} at both edges, {} and {}; sampled {} at ({x},{y}), {})",
-                                skin::read::hex(ring),
-                                skin::read::hex(l),
-                                skin::read::hex(r),
+                                "selected (the pill {} at the leading edge reads {}, the fill {} reads {} at ({x},{y}), {})",
+                                skin::read::hex(pill),
+                                skin::read::hex(lead),
+                                skin::read::hex(fill),
                                 hex(&got),
                                 if dark { "dark" } else { "light" }
                             ));
@@ -28748,6 +28798,25 @@ impl crate::harness::Stage for WinUiStage {
             } else {
                 "override"
             };
+            // The caption is the window's too: DWM's own answer, or the
+            // mode is the two halves'.
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            let mut caption = 0i32;
+            // SAFETY: one BOOL written by DWM into a local.
+            let hr = unsafe {
+                DwmGetWindowAttribute(
+                    native.window_handle()?,
+                    DWMWA_USE_IMMERSIVE_DARK_MODE,
+                    std::ptr::from_mut(&mut caption).cast(),
+                    4,
+                )
+            };
+            if hr != 0 {
+                return Ok(format!("unreadable (content {mode} {source}; DWM answered HRESULT {hr:#010x} for the caption)"));
+            }
+            if (caption != 0) != dark {
+                return Ok(format!("mixed (content {mode} {source}, the caption {})", if caption != 0 { "dark" } else { "light" }));
+            }
             Ok(format!("{mode} {source}"))
         })
         .unwrap_or_else(|_| "light system".to_string())

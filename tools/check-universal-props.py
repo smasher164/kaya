@@ -532,7 +532,8 @@ def compose_slider_names(compose_text):
         bad.append(f"{COMPOSE}: KayaSliderThumb carries a modifier with semantics, so the slider's "
                    "node has a child again and its name leaves the node info")
     for head, needles in (
-        ("private fun KayaSliderSurface(", ("slider(boxFill.then(a11y))", "slider(a11y)")),
+        ("private fun KayaSliderSurface(",
+         ("slider(boxFill.then(KayaSliderNatural).then(a11y))", "slider(a11y)")),
         ("private fun KayaRangeSurface(",
          ("modifier = boxFill.then(a11y)",
           "CompositionLocalProvider(LocalContext provides words)")),
@@ -1478,7 +1479,9 @@ for label, pattern, repl in (
      r"KayaSliderThumb\(\n(\s+)endSource,", r"SliderDefaults.Thumb(\n\1endSource,"),
     ("kaya's thumb painted through background",
      r"\.hoverable\(source\)\.drawBehind \{", ".hoverable(source).background(color).drawBehind {"),
-    ("the plain slider's a11y dropped", r"slider\(boxFill\.then\(a11y\)\)", "slider(boxFill)"),
+    ("the plain slider's a11y dropped",
+     r"slider\(boxFill\.then\(KayaSliderNatural\)\.then\(a11y\)\)",
+     "slider(boxFill.then(KayaSliderNatural))"),
     ("the range's thumb words dropped",
      r"CompositionLocalProvider\(LocalContext provides words\) \{\n        RangeSlider",
      "run {\n        RangeSlider"),

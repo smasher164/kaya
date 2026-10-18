@@ -34,6 +34,9 @@ struct Skin {
     /// the wrapped grid's COM identity (`element()` answers it).
     hosts: HashMap<u64, ItemContainer>,
     host_keys: HashMap<usize, ItemContainer>,
+    /// The item's child: the selected fill, the container, the accent pill.
+    frames: HashMap<u64, Grid>,
+    table_rows: std::collections::HashSet<u64>,
     /// The filled activatable containers whose item took the fill's corner.
     host_fills: HashMap<u64, i64>,
     selected: HashMap<u64, bool>,
@@ -85,7 +88,11 @@ pub(super) fn host_of(inner: &UIElement) -> Option<UIElement> {
 /// control, for the walks that meet the item in its place (a table's rows).
 pub(super) fn inner_of(outer: &UIElement) -> Option<UIElement> {
     use windows_core::Interface;
-    outer.cast::<ItemContainer>().ok()?.Child().ok()
+    let child = outer.cast::<ItemContainer>().ok()?.Child().ok()?;
+    match child.cast::<Grid>() {
+        Ok(frame) if frame.Name().is_ok_and(|n| n.to_string() == ITEM_FRAME_NAME) => frame.Children().ok()?.GetAt(1).ok(),
+        _ => Some(child),
+    }
 }
 
 #[cfg(feature = "harness")]
@@ -192,6 +199,7 @@ pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &V
             if let Some(host) = SKIN.with_borrow(|s| s.hosts.get(&id.0).cloned()) {
                 host.SetIsSelected(*on)?;
             }
+            paint_selected(id)?;
         }
         (Prop::Shape, Value::I64(shape)) if is_image => {
             SKIN.with_borrow_mut(|s| s.shapes.insert(id.0, *shape));
@@ -214,6 +222,8 @@ pub(super) fn forget(core: &mut CoreState, id: WidgetId) {
             s.host_keys.retain(|_, h| *h != host);
         }
         s.host_fills.remove(&id.0);
+        s.frames.remove(&id.0);
+        s.table_rows.remove(&id.0);
         s.selected.remove(&id.0);
         s.shapes.remove(&id.0);
         s.shapers.remove(&id.0);
@@ -300,6 +310,66 @@ fn overlay_style() -> windows_core::Result<Style> {
 
 // --- Y4: activatable and selected --------------------------------------
 
+const ITEM_FRAME_NAME: &str = "kayaItemFrame";
+
+/// Y4's WinUI selected surface, ListView's own: `ListViewItemBackgroundSelected`
+/// under the container and the accent pill at its leading edge, 3x16 as
+/// ListViewItemPresenter draws it. ItemContainer's own selection is a ring,
+/// which the item's resources clear (the 2026-10-17 preview).
+const ITEM_FRAME_XAML: &str = "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+     Name=\"kayaItemFrame\">\
+     <Border Visibility=\"Collapsed\" Background=\"{ThemeResource ListViewItemBackgroundSelected}\" \
+       CornerRadius=\"{ThemeResource ListViewItemCornerRadius}\"/>\
+     <Border Visibility=\"Collapsed\" Width=\"3\" Height=\"16\" HorizontalAlignment=\"Left\" VerticalAlignment=\"Center\" \
+       Background=\"{ThemeResource ListViewItemSelectionIndicatorBrush}\" \
+       CornerRadius=\"{ThemeResource ListViewItemSelectionIndicatorCornerRadius}\"/>\
+   </Grid>";
+
+const ITEM_RING_KEYS: [&str; 4] = [
+    "ItemContainerSelectionVisualBackground",
+    "ItemContainerSelectionVisualPointerOverBackground",
+    "ItemContainerSelectionVisualPressedBackground",
+    "ItemContainerSelectedInnerBorderBrush",
+];
+
+/// The selected fill and the pill shown while the app's selection is on.
+fn paint_selected(id: WidgetId) -> windows_core::Result<()> {
+    let (frame, on, table) = SKIN.with_borrow(|s| {
+        (s.frames.get(&id.0).cloned(), s.selected.get(&id.0).copied().unwrap_or(false), s.table_rows.contains(&id.0))
+    });
+    let Some(frame) = frame else { return Ok(()) };
+    let vis = |shown: bool| if shown { Visibility::Visible } else { Visibility::Collapsed };
+    let children = frame.Children()?;
+    children.GetAt(0)?.SetVisibility(vis(on))?;
+    children.GetAt(2)?.SetVisibility(vis(on && !table))?;
+    Ok(())
+}
+
+/// A declared table's row keeps its cells on the header's edges and has no
+/// room for the pill, so it wears the selected fill alone (DataGrid's row);
+/// ItemContainer clips its child, so an outset pill is cut away (measured,
+/// the 2026-10-17 preview fixes).
+pub(super) fn seat_in_table(id: WidgetId, in_table: bool) -> windows_core::Result<()> {
+    SKIN.with_borrow_mut(|s| {
+        if in_table {
+            s.table_rows.insert(id.0);
+        } else {
+            s.table_rows.remove(&id.0);
+        }
+    });
+    paint_selected(id)
+}
+
+/// Whether a container is a declared table's row, which wears no pill.
+pub(super) fn is_table_row(id: u64) -> bool {
+    SKIN.with_borrow(|s| s.table_rows.contains(&id))
+}
+
+/// Whether a container takes a click as a whole (its inset follows, Y4).
+pub(super) fn is_activatable(id: WidgetId) -> bool {
+    SKIN.with_borrow(|s| s.hosts.contains_key(&id.0))
+}
+
 /// A container that takes a click as a whole is the child of an
 /// ItemContainer, Fluent's own item: its template draws the platform's hover
 /// and press layers OVER the child and its selection ring around it, from its
@@ -365,14 +435,26 @@ fn wrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
         Ok(())
     }))?;
     host.SetIsSelected(SKIN.with_borrow(|s| s.selected.get(&id.0).copied().unwrap_or(false)))?;
+    let clear = theme_resource::<Brush>("SubtleFillColorTransparentBrush")?;
+    let resources = host.Resources()?;
+    for key in ITEM_RING_KEYS {
+        resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;
+    }
+    let frame: Grid = XamlReader::Load(&HSTRING::from(ITEM_FRAME_XAML))?.cast()?;
     reseat_element(core, id, &inner, &host.cast()?)?;
-    host.SetChild(&inner)?;
+    let pill = frame.Children()?.GetAt(1)?;
+    frame.Children()?.RemoveAt(1)?;
+    frame.Children()?.Append(&inner)?;
+    frame.Children()?.Append(&pill)?;
+    host.SetChild(&frame)?;
     let key = key_of(&inner).expect("a live control has a COM identity");
     SKIN.with_borrow_mut(|s| {
         s.hosts.insert(id.0, host.clone());
         s.host_keys.insert(key, host);
+        s.frames.insert(id.0, frame);
     });
-    Ok(())
+    paint_selected(id)?;
+    stamp_container_padding(core, id)
 }
 
 /// Whether the pointer is over a container's laid-out box now.
@@ -434,8 +516,12 @@ fn unwrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
     };
     let inner = core.widgets.get(&id).expect("scene validated the id").inner_element()?;
     host.SetChild(None::<&UIElement>)?;
+    if let Some(frame) = SKIN.with_borrow_mut(|s| s.frames.remove(&id.0)) {
+        frame.Children()?.Clear()?;
+    }
     SKIN.with_borrow_mut(|s| s.host_fills.remove(&id.0));
-    reseat_element(core, id, &host.cast()?, &inner)
+    reseat_element(core, id, &host.cast()?, &inner)?;
+    stamp_container_padding(core, id)
 }
 
 /// The selection is the app's (Y4): whatever the item did with the press, it
@@ -445,6 +531,7 @@ fn restore_selected(id: WidgetId) {
     if let Some(host) = host {
         let _ = host.SetIsSelected(on);
     }
+    let _ = paint_selected(id);
 }
 
 /// The accessible name of an activatable container: its labels' text in
@@ -1098,6 +1185,68 @@ pub(super) mod read {
         let at_foot = (y + h - gh).abs() <= 2.0;
         let above = panes.iter().all(|p| p.1 + p.3 <= y + 1.0);
         let detail = format!("dock {x},{y} {w}x{h}, window {gw}x{gh}, content {panes:?}");
+        if let Some(fault) = dock_content_fault(core, &ground_el, y)? {
+            return Ok(format!("misplaced ({fault}; {detail})"));
+        }
         Ok(if spans && at_foot && above { format!("shown ({detail})") } else { format!("misplaced ({detail})") })
+    }
+
+    /// expect_dock's content half (docs/styling-pass-plan.md Y8, §5.4): every
+    /// shown widget of the window's own root laid out, on screen and wholly
+    /// above the dock's top, so a dock drawn over the content or in its place
+    /// reads misplaced.
+    fn dock_content_fault(core: &CoreState, ground: &UIElement, dock_top: f64) -> windows_core::Result<Option<String>> {
+        let Some(root) = core.mounted_roots.get(&0).copied() else {
+            return Ok(None);
+        };
+        let panel_of = |g: &Grid| {
+            core.widgets
+                .iter()
+                .find(|(_, w)| matches!(w, NativeWidget::Column(p) | NativeWidget::Row(p) if p == g))
+                .map(|(id, _)| *id)
+        };
+        let mut leaves: Vec<WidgetId> = core
+            .widgets
+            .iter()
+            .filter(|(_, w)| !matches!(w, NativeWidget::Column(_) | NativeWidget::Row(_)))
+            .map(|(id, _)| *id)
+            .collect();
+        leaves.sort_by_key(|id| id.0);
+        'leaf: for id in leaves {
+            let mut chain = vec![id];
+            let mut at = id;
+            while at != root {
+                let Some(up) = core.parents.get(&at).and_then(panel_of) else {
+                    continue 'leaf;
+                };
+                chain.push(up);
+                at = up;
+            }
+            for link in &chain {
+                let fe: FrameworkElement = core.widgets[link].element()?.cast()?;
+                if fe.Visibility()? != Visibility::Visible {
+                    continue 'leaf;
+                }
+            }
+            let e = core.widgets[&id].element()?;
+            let fe: FrameworkElement = e.cast()?;
+            let Ok(o) = e
+                .TransformToVisual(ground)
+                .and_then(|t| t.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 }))
+            else {
+                return Ok(Some(format!("content widget {} was never laid out", id.0)));
+            };
+            let (top, w, h) = (f64::from(o.Y), fe.ActualWidth()?, fe.ActualHeight()?);
+            if w < 1.0 || h < 1.0 {
+                return Ok(Some(format!("content widget {} has nothing on screen at {},{} {w}x{h}", id.0, o.X, o.Y)));
+            }
+            if top + h > dock_top + 1.0 {
+                return Ok(Some(format!(
+                    "content widget {} at {},{} {w}x{h} does not end above the dock's top {dock_top}",
+                    id.0, o.X, o.Y
+                )));
+            }
+        }
+        Ok(None)
     }
 }

@@ -8268,6 +8268,8 @@ const TINT_CSS: &str = "\
 .kaya-filled { border-radius: 12px; }
 .kaya-filled.card { margin: 1px 2px 3px 2px; }
 .kaya-filled-pad { padding: 12px; }
+.kaya-activatable-pad { padding: 12px; }
+.kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 0px; }
 .kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
@@ -9277,6 +9279,7 @@ fn symbol_button_classes(button: &gtk4::Button) {
 
 const FILLED_CLASS: &str = "kaya-filled";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
+const ACTIVATABLE_PAD_CLASS: &str = "kaya-activatable-pad";
 const TINT_CLASSES: [&str; 6] =
     ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card", "osd"];
 
@@ -9336,8 +9339,15 @@ fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: boo
     if !on {
         widget.remove_css_class(ACTIVATABLE_CLASS);
         widget.remove_css_class("activatable");
+        widget.remove_css_class(ACTIVATABLE_PAD_CLASS);
         core.skin.activations.remove(&id);
         return;
+    }
+    // The filled inset, so the hover and selected surface do not run flush
+    // against the content (the 2026-10-17 preview); TINT_CSS takes it off a
+    // declared table's row.
+    if !widget.css_classes().iter().any(|c| c.starts_with(INSET_CLASS)) {
+        widget.add_css_class(ACTIVATABLE_PAD_CLASS);
     }
     let Some(tag) = core.widget_tags.get(&id).cloned() else {
         panic!("kaya: an activatable container {id} carries no occurrence tag (WidgetKind::carries_tag)")
@@ -11078,6 +11088,44 @@ fn unseen_in_shot(widget: &gtk4::Widget, content: &gtk4::Widget, probed: [f64; 4
 /// construction and would make `expect_root_fills` pass for a root that hugs.
 fn window_content(core: &CoreState, window: u64) -> Option<gtk4::Widget> {
     core.toolbar_views.get(&window).and_then(adw::ToolbarView::content)
+}
+
+/// expect_dock's content half (docs/styling-pass-plan.md Y8, §5.4): every
+/// shown widget of the window's own content laid out, on screen and wholly
+/// above the dock's top, so a dock drawn over the content or in its place
+/// reads misplaced.
+fn dock_content_fault(core: &CoreState, view: &adw::ToolbarView, dock_top: f64) -> Option<String> {
+    use gtk4::prelude::WidgetExt;
+    let content = window_content(core, 0)?;
+    let mut leaves: Vec<(u64, gtk4::Widget)> = core
+        .widgets
+        .iter()
+        .filter(|(_, w)| !matches!(w, NativeWidget::Column(_) | NativeWidget::Row(_)))
+        .map(|(id, w)| (id.0, w.widget()))
+        .filter(|(_, w)| w.is_ancestor(&content))
+        .collect();
+    leaves.sort_by_key(|(id, _)| *id);
+    for (id, w) in leaves {
+        let mut at = Some(w.clone());
+        let mut shown = true;
+        while let Some(x) = at.filter(|x| *x != content) {
+            shown &= x.is_visible();
+            at = x.parent();
+        }
+        if !shown {
+            continue;
+        }
+        let Some(f) = w.compute_bounds(view) else {
+            return Some(format!("content widget {id} was never laid out"));
+        };
+        if !w.is_mapped() || f.width() < 1.0 || f.height() < 1.0 {
+            return Some(format!("content widget {id} has nothing on screen at {f:?}"));
+        }
+        if f64::from(f.y() + f.height()) > dock_top + 1.0 {
+            return Some(format!("content widget {id} at {f:?} does not end above the dock's top {dock_top}"));
+        }
+    }
+    None
 }
 
 /// The window's live content width in pixels, read from its ALLOCATION and
@@ -17838,6 +17886,7 @@ fn set_container_inset(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
     }
     widget.add_css_class(&format!("{INSET_CLASS}{px}"));
     widget.remove_css_class(FILLED_PAD_CLASS);
+    widget.remove_css_class(ACTIVATABLE_PAD_CLASS);
     if core.container_insets.insert(px) {
         let sheet: String = core
             .container_insets
@@ -24037,6 +24086,9 @@ impl crate::harness::Stage for GtkStage {
                 "dock {x},{y} {w}x{h}, window {vw}x{vh}, panes {}",
                 panes.map_or("none".to_owned(), |p| format!("{},{} {}x{}", p.x(), p.y(), p.width(), p.height()))
             );
+            if let Some(fault) = dock_content_fault(core, &view, y) {
+                return format!("misplaced ({fault}; {detail})");
+            }
             if spans && at_foot && above {
                 format!("shown ({detail})")
             } else {

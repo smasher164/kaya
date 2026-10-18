@@ -27,3 +27,6 @@ expect_selected row@a[a1] off
 click row@a[a3]
 expect_selected row@a[a3] on
 expect_selected row@a[a2] off
+# The playing row selected keeps its tint where the selected surface is neutral
+# (Y4, Y7); read once more after the selection lands on it.
+expect_tint label@name[a3] accent

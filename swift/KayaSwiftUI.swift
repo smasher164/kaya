@@ -18479,7 +18479,7 @@ private struct KayaTableRowPress: ViewModifier {
         if row.activatable {
             content
                 .foregroundStyle(row.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
-                .environment(\.kayaInFill, row.selected)
+                .environment(\.kayaInFill, row.selected && kayaSelectionTakesText)
                 .contentShape(Rectangle())
                 .onTapGesture { KayaHost.emitActivated(row.tag) }
         } else {
@@ -20254,8 +20254,16 @@ let kayaFollowSlack: Double = 22
 let kayaFilledRadius: CGFloat = 12
 let kayaFilledDefaultInset: Double = 10
 
-func kayaFilledInset(_ node: KayaNode) -> Double {
-    node.filled != 0 && !node.insetSet ? kayaFilledDefaultInset : node.inset
+/// An activatable container takes it too, so its hover and selected surface
+/// do not run flush against its content (the 2026-10-17 preview); a declared
+/// table's row keeps its cells on the header's edges.
+@MainActor func kayaFilledInset(_ node: KayaNode) -> Double {
+    (node.filled != 0 || node.activatable && !kayaInDeclaredTable(node)) && !node.insetSet
+        ? kayaFilledDefaultInset : node.inset
+}
+
+@MainActor func kayaInDeclaredTable(_ node: KayaNode) -> Bool {
+    kayaScene.parents[node.id].flatMap { kayaScene.nodes[$0] }?.tableColumns.isEmpty == false
 }
 
 /// The platform's fill for a tint, and the foreground paired with it.
@@ -20406,6 +20414,16 @@ struct KayaImageShape: ViewModifier {
 
 /// The selected surface's fill and foreground (Y4): AppKit's selected
 /// content pair, the grouped list's on iOS.
+/// Whether the selected surface recolours the text on it: the mac's accent
+/// fill does, iOS's neutral systemFill keeps a tinted label's colour (Y4, Y7).
+let kayaSelectionTakesText: Bool = {
+    #if os(macOS)
+        true
+    #else
+        false
+    #endif
+}()
+
 @MainActor func kayaSelectedPair() -> (fill: Color, fore: Color) {
     #if os(macOS)
         (Color(nsColor: .selectedContentBackgroundColor), Color(nsColor: .alternateSelectedControlTextColor))
@@ -20440,7 +20458,7 @@ struct KayaActivatable: ViewModifier {
             let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
             content
                 .foregroundStyle(node.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
-                .environment(\.kayaInFill, node.selected || node.filled != 0)
+                .environment(\.kayaInFill, node.selected && kayaSelectionTakesText || node.filled != 0)
                 .background {
                     if node.selected { shape.fill(kayaSelectedPair().fill) }
                 }
@@ -21208,10 +21226,17 @@ struct KayaDockHost: ViewModifier {
     let windowId: UInt64
     @State private var scene = kayaScene
 
+    // ONE STRUCTURE whether or not the dock shows: a branch around `content`
+    // rebuilt the window's whole content each time the dock came or went, and
+    // its frame records read (0,0,0x0) after (measured 2026-10-17).
     func body(content: Content) -> some View {
-        if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {
-            content.safeAreaInset(edge: .bottom, spacing: 0) {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {
+                // A root fills what it is offered and an inset is offered the
+                // window, so the bar takes its ideal height (expect_dock's
+                // content half reads the fill as misplaced).
                 KayaRender(node: dock, isRoot: true)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, scene.windows[windowId]?.inset ?? 16)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -21224,8 +21249,6 @@ struct KayaDockHost: ViewModifier {
                                 .onDisappear { kayaDockFrame = nil }
                         })
             }
-        } else {
-            content
         }
     }
 }
@@ -21266,8 +21289,33 @@ struct KayaDockHost: ViewModifier {
     let atFoot = abs(frame.maxY - bottom) <= 2 || frame.maxY >= bottom - 2 && frame.maxY <= bounds.height + 2
     let above = panes.allSatisfy { $0.maxY <= frame.minY + 1 }
     let detail = "dock \(frame), window \(bounds.size), panes \(panes.map(\.debugDescription))"
+    if let fault = kayaDockContentFault(frame) { return "misplaced (\(fault); \(detail))" }
     if spans && atFoot && above { return "shown (\(detail))" }
     return "misplaced (\(detail))"
+}
+
+/// expect_dock's content half (docs/styling-pass-plan.md Y8, §5.4): every
+/// widget of the window's own root laid out, on screen and wholly above the
+/// dock, so a dock drawn over the content or in its place reads misplaced.
+@MainActor func kayaDockContentFault(_ dock: CGRect) -> String? {
+    guard let root = kayaScene.windows[0]?.root else { return "the window has no root mounted" }
+    var leaves: [KayaNode] = []
+    func walk(_ n: KayaNode) {
+        if n.kind == kindRow || n.kind == kindColumn { n.children.forEach(walk) } else { leaves.append(n) }
+    }
+    walk(root)
+    for n in leaves {
+        let name = n.a11yId.isEmpty ? "content widget \(n.id) (kind \(n.kind) \"\(n.text)\")" : n.a11yId
+        guard let f = kayaPlatformFrame(n) else { return "\(name) of the window's content was never laid out" }
+        let shown = kayaVisibleFrame(n, f).shown
+        if shown.width <= 0 || shown.height <= 0 {
+            return "\(name) of the window's content has nothing on screen at \(kayaRectText(f))"
+        }
+        if f.maxY > dock.minY + 1 {
+            return "\(name) of the window's content at \(kayaRectText(f)) does not end above the dock's top \(Int(dock.minY))"
+        }
+    }
+    return nil
 }
 
 /// The brand tint for the CURRENT appearance, or nil for "no request". A
