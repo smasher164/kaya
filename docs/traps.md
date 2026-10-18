@@ -17491,3 +17491,24 @@ fixture's clauses key a scratch git tree (build-id.py's
 read 0 of 1700 failures, and a key input that vanishes is refused naming the
 tools/ files that spell its name. check-keyed refuses a probe inside the repo
 and watches both refusals fire.
+
+## The pool another worktree started (measured 2026-10-17)
+
+The matrix at 2832de73 failed `capture-compose`, `capture-jvm` and
+`capture-go` on the `android-quiet` row alone: every camera frame read
+`FF00FF` and the self-view's box was 100% `FF01FE`, on both cameras. The five
+pool emulators had been started hours earlier by an agent working in a git
+worktree under the session scratchpad (`preview-wt`): `adb emu avd path`
+answered that worktree's `target/avd/kaya.avd`, and the worktree had since been
+deleted, so the AVD, its `imagefile:` camera pictures and its disks were
+unlinked files the running emulators still held. The guest read
+magenta from each camera. The main tree's runner adopted the pool,
+because the live-instance identity (tools/lib/android-emulator-state.sh) is
+the emulator binary, the system image, the AVD NAME and the serial, the same
+in every checkout; and the leg's `capture lane:` line printed the cameras out
+of the MAIN tree's config.ini, so the bundle named the right pictures for a
+device that was not using them. Now `live_instance_current` in
+tools/android/run-emulator.py also asks the emulator for its AVD directory and
+restarts an instance running another checkout's or a deleted one
+(`avd_dir_refusal`, self-tested at every lane start), and the `capture lane:`
+line reads the device's own directory and marks a missing picture `(MISSING)`.

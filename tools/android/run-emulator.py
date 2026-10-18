@@ -573,10 +573,65 @@ def make_snapshot(avd, port):
     return rc == 0
 
 
+# docs/traps.md, the pool another worktree started: the guest identity names
+# the AVD and the toolchain, both the same in every checkout, so the AVD's
+# DIRECTORY is asked of the emulator itself.
+def avd_dir_of(serial):
+    for line in adb_out(serial, "emu", "avd", "path").splitlines():
+        line = line.strip()
+        if line and line != "OK":
+            return line
+    return None
+
+
+def avd_dir_refusal(reported, avd):
+    want = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{avd}.avd"
+    if reported is None:
+        return "the emulator console did not answer `avd path`"
+    if not pathlib.Path(reported).is_dir():
+        return (f"it runs {avd} out of {reported}, which no longer exists, "
+                f"so its cameras and disks are files nobody can read; this "
+                f"lane's is {want}")
+    if pathlib.Path(reported).resolve() != want.resolve():
+        return (f"it runs {avd} out of {reported}, another checkout's AVD; "
+                f"this lane's is {want}")
+    return None
+
+
+def avd_dir_refusal_selftest():
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="kaya-avd-dir-"))
+    try:
+        mine = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{AVD}.avd"
+        other = scratch / "other" / f"{AVD}.avd"
+        other.mkdir(parents=True)
+        gone = scratch / "gone" / f"{AVD}.avd"
+        mine.mkdir(parents=True, exist_ok=True)
+        cases = [(str(mine), None), (str(other), "another checkout's"),
+                 (str(gone), "no longer exists"), (None, "did not answer")]
+        reds = 0
+        for reported, want in cases:
+            got = avd_dir_refusal(reported, AVD)
+            if (got is None) != (want is None) or (want and want not in got):
+                die(f"run-emulator: SELF-TEST FAIL — the AVD directory check "
+                    f"answered {got!r} for {reported!r}, wanted {want!r}")
+            reds += got is not None
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    print(f"run-emulator: the AVD directory check refused {reds} of "
+          f"{len(cases)} directories (another checkout's, a deleted one, "
+          f"no answer) and admitted this lane's", flush=True)
+
+
 def live_instance_current(serial, avd):
     rc, _ = aestate("android_live_instance_current", serial, avd,
                     EMULATOR_EXE, SYSTEM_IMAGE_DIR, GUEST_EMULATOR_ID)
-    return rc == 0
+    if rc != 0:
+        return False
+    why = avd_dir_refusal(avd_dir_of(serial), avd)
+    if why is not None:
+        print(f"run-emulator: {serial} is not this lane's: {why}")
+        return False
+    return True
 
 
 READERS = []
@@ -654,6 +709,7 @@ def finish_reader(port, expected_avd, proc):
     return True
 
 
+avd_dir_refusal_selftest()
 shape_pool_panel(AVD)
 shape_pool_cameras(AVD)
 if not make_snapshot(AVD, 5554):
@@ -2861,15 +2917,28 @@ def lane_capture_state(serial):
     """The lane's capture devices as this device runs them, for a capture
     leg's log: the cameras the AVD declares and the gRPC endpoint the tone
     goes through."""
-    ini = pathlib.Path(os.environ["ANDROID_AVD_HOME"]) / f"{AVD}.avd/config.ini"
-    lines = ini.read_text(encoding="utf-8").splitlines()
+    running = avd_dir_of(serial)
+    ini = pathlib.Path(running or "<no avd path>") / "config.ini"
+    try:
+        lines = ini.read_text(encoding="utf-8").splitlines()
+    except OSError as err:
+        lines = []
+        running = f"{running} ({err.strerror})"
     have = dict(ln.split("=", 1) for ln in lines if "=" in ln)
+
+    def camera(key):
+        spec = have.get(key)
+        path = (spec or "").removeprefix("imagefile:")
+        if spec and spec.startswith("imagefile:") and not pathlib.Path(path).is_file():
+            return f"{spec} (MISSING)"
+        return spec
     port, token = emulator_capture.discovery(serial)
     grpc = f"gRPC 127.0.0.1:{port}" if port else f"no gRPC ({token})"
     cams = adb_out(serial, "shell", "dumpsys", "media.camera").replace("\r", "")
     facings = re.findall(r"Facing: (\w+)", cams)
-    return (f"capture lane: hw.camera.front={have.get('hw.camera.front')} "
-            f"hw.camera.back={have.get('hw.camera.back')}; the guest lists "
+    return (f"capture lane: the device runs {running}; "
+            f"hw.camera.front={camera('hw.camera.front')} "
+            f"hw.camera.back={camera('hw.camera.back')}; the guest lists "
             f"{len(facings)} camera(s) {facings}; {grpc}")
 
 
