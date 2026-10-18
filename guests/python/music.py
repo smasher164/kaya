@@ -4,12 +4,15 @@ through kaya's player (tools/scenes/music_playlist.steps), and the album's
 gradient header (tools/scenes/music_header.steps), and the dock with the
 media session and the phones' full player (tools/scenes/music_dock.steps)."""
 
+import contextlib
 import html
 import json
 import os
 import random
+import struct
 import sys
 import threading
+import zlib
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +34,8 @@ CARD_ART = 120
 ROW_ART = 40
 HEADER_ART = 200 if kaya.capabilities().aux_windows else 180
 DOCK_ART = 48
+# Previous restarts the track past this point (docs/media-player-plan.md M14).
+RESTART_AFTER_MS = 3000
 FULL_ART = 300
 # The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
 UNKNOWN_COLOUR = kaya.Color(0x8E, 0x8E, 0x93)
@@ -40,6 +45,13 @@ SAMPLER = "sampler:"
 # A lane's leg takes the host's Now Playing only in the scene that reads it
 # (tools/lib/lanes/mac.py HOST_VERBS derives the session legs from the verbs).
 SESSION = os.environ.get("KAYA_SELFTEST", "") in ("", "music_dock")
+# A lane's legs play on the maintainer's desk, so they play silently.
+SILENT = bool(os.environ.get("KAYA_SELFTEST"))
+# The album header's comparison (docs/media-player-plan.md M15), read by its
+# captures only: `B:RRGGBB` a full-bleed gradient, `C:RRGGBB` a full-bleed solid.
+HEADER_VARIANT = os.environ.get("KAYA_MUSIC_HEADER", "")
+BLEED = HEADER_VARIANT[:1] in ("B", "C")
+PAGE_INSET = 16
 
 
 @dataclass
@@ -186,7 +198,8 @@ known = {}
 pages = {}
 songs = {}
 playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
-            "shuffle": False, "repeat": "off", "seconds": 0}
+            "shuffle": False, "repeat": "off", "seconds": 0, "ms": 0,
+            "muted": False}
 favorites = set()
 liked = set()
 covers = {}
@@ -268,49 +281,87 @@ def show_album(album, surface):
     threading.Thread(target=load_album, args=(album, surface, entry), daemon=True).start()
 
 
+def padded(**props):
+    """The page's own margin when the window gives none (M15's bleed)."""
+    return kaya.column(inset=PAGE_INSET, **props) if BLEED else contextlib.nullcontext()
+
+
+def solid_png(rgb):
+    row = b"\0" + bytes(rgb) * 8
+    chunk = lambda kind, data: (struct.pack(">I", len(data)) + kind + data
+                                + struct.pack(">I", zlib.crc32(kind + data)))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 8, 8, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(row * 8)) + chunk(b"IEND", b""))
+
+
 def album_body(album, page):
     with kaya.column(spacing=12, align="stretch") as body:
         body.a11y_id("album")
-        album_header(album, page)
+        if HEADER_VARIANT[:1] == "C":
+            solid_header(album, page)
+        else:
+            album_header(album, page)
         # A phone's width holds no album column (the album is the page).
         names = ("#", "Title", "Album", "Time") if desktop else ("#", "Title", "Time")
-        for track in page["tracks"].columns(*names, a11y_id="tracks", grow=1):
-            with kaya.row(selected=track.selected, on_select=on_pick,
-                          on_activate=on_play) as line:
-                line.a11y_id("track")
-                kaya.label(bind=track.number)
-                with kaya.row(spacing=8):
-                    kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
-                               phase=track.phase, on_needed=page["art"].needed,
-                               on_released=page["art"].released) \
-                        .max_width(ROW_ART).max_height(ROW_ART).a11y_id("track_art")
-                    with kaya.column(spacing=0):
-                        kaya.label(bind=track.title, tint=track.tint).a11y_id("track_name")
-                        kaya.caption(bind=track.artist)
-                if desktop:
-                    kaya.label(bind=track.album)
-                kaya.label(bind=track.duration).a11y_id("track_time")
+        with padded(grow=1, align="stretch"):
+            track_table(page, names)
+
+
+def track_table(page, names):
+    for track in page["tracks"].columns(*names, a11y_id="tracks", grow=1):
+        with kaya.row(selected=track.selected, on_select=on_pick,
+                      on_activate=on_play) as line:
+            line.a11y_id("track")
+            kaya.label(bind=track.number)
+            with kaya.row(spacing=8):
+                kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                           phase=track.phase, on_needed=page["art"].needed,
+                           on_released=page["art"].released) \
+                    .max_width(ROW_ART).max_height(ROW_ART).a11y_id("track_art")
+                with kaya.column(spacing=0):
+                    kaya.label(bind=track.title, tint=track.tint).a11y_id("track_name")
+                    kaya.caption(bind=track.artist)
+            if desktop:
+                kaya.label(bind=track.album)
+            kaya.label(bind=track.duration).a11y_id("track_time")
 
 
 def album_header(album, page):
-    with kaya.column(inset=24, ground_gradient=page["colour"]) as header:
+    colour = page["colour"]
+    if HEADER_VARIANT[:1] == "B":
+        colour = kaya.Color(*bytes.fromhex(HEADER_VARIANT[2:]))
+    with kaya.column(inset=24, ground_gradient=colour) as header:
         header.a11y_id("album_header")
-        with kaya.row(spacing=24, align="end") if desktop else \
-                kaya.column(spacing=16, align="center"):
-            kaya.image(page["cover"], fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
-                       phase=page["cover_phase"]) \
-                .max_width(HEADER_ART).max_height(HEADER_ART).a11y_id("album_art")
-            with kaya.column(spacing=6, align="start"):
-                kaya.heading(album["name"]).a11y_id("album_title")
-                kaya.caption(bind=page["about"]).a11y_id("album_about")
-                with kaya.row(spacing=12, align="center"):
-                    kaya.button("Play", on_click=lambda: play_album(page),
-                                symbol=kaya.Symbol.PLAY) \
-                        .role(kaya.Role.PROMINENT).a11y_id("play_album")
-                    kaya.checkbox("Favorite", checked=page["liked"],
-                                  on_toggle=lambda on: set_favorite(album["id"], on)) \
-                        .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
-                        .a11y_id("favorite")
+        header_content(album, page)
+
+
+def solid_header(album, page):
+    """M15's C: a solid ground, which only an image ground can carry, so the
+    text sits in the overlay panel Y3 demands over an image."""
+    rgb = bytes.fromhex(HEADER_VARIANT[2:])
+    with kaya.column(inset=24, ground_image=solid_png(rgb)) as header:
+        header.a11y_id("album_header")
+        header_content(album, page, panel=True)
+
+
+def header_content(album, page, panel=False):
+    with kaya.row(spacing=24, align="end") if desktop else \
+            kaya.column(spacing=16, align="center"):
+        kaya.image(page["cover"], fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                   phase=page["cover_phase"]) \
+            .max_width(HEADER_ART).max_height(HEADER_ART).a11y_id("album_art")
+        with kaya.column(spacing=6, align="start", inset=12 if panel else None,
+                         filled=kaya.Tint.OVERLAY if panel else None):
+            kaya.heading(album["name"]).a11y_id("album_title")
+            kaya.caption(bind=page["about"]).a11y_id("album_about")
+            with kaya.row(spacing=12, align="center"):
+                kaya.button("Play", on_click=lambda: play_album(page),
+                            symbol=kaya.Symbol.PLAY) \
+                    .role(kaya.Role.PROMINENT).a11y_id("play_album")
+                kaya.checkbox("Favorite", checked=page["liked"],
+                              on_toggle=lambda on: set_favorite(album["id"], on)) \
+                    .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
+                    .a11y_id("favorite")
 
 
 def set_favorite(album_id, on):
@@ -509,7 +560,7 @@ def advance(by_user):
 def skip_previous():
     if playback["key"] is None:
         return
-    if playback["at"] == 0:
+    if playback["at"] == 0 or playback["ms"] > RESTART_AFTER_MS:
         seek_to(0)
         return
     playback["at"] -= 1
@@ -572,6 +623,7 @@ def show_play_state(playing):
 
 
 def show_position(ms):
+    playback["ms"] = ms
     seconds = playback["seconds"]
     at = min(ms / 1000, seconds) if seconds else 0
     position.set(at / seconds if seconds else 0.0)
@@ -625,8 +677,10 @@ def on_player_failed(why, detail):
 
 def transport(full):
     """Shuffle, previous, play or pause, next and repeat: the dock's on the
-    desktops, the full player's on the phones."""
-    with kaya.row(spacing=8, align="center"):
+    desktops, the full player's on the phones, centred in its row."""
+    with kaya.row(spacing=8, align="center") as row:
+        row.a11y_id("full_transport" if full else "transport")
+        kaya.spacer()
         kaya.checkbox("Shuffle", checked=shuffle_on, on_toggle=set_shuffle) \
             .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.SHUFFLE).a11y_id("shuffle")
         kaya.button("Previous", on_click=skip_previous, symbol=kaya.Symbol.PREVIOUS) \
@@ -637,6 +691,7 @@ def transport(full):
         live["repeat"].append(
             kaya.button("Repeat", on_click=cycle_repeat, symbol=repeat_symbol())
             .a11y_label(repeat_name).a11y_id("repeat"))
+        kaya.spacer()
 
 
 def play_button(full):
@@ -656,6 +711,28 @@ def scrubber():
         kaya.caption(bind=remaining).a11y_id("remaining")
 
 
+def set_volume(value):
+    volume.set(value)
+    player.set_volume(value)
+
+
+def set_muted(on):
+    playback["muted"] = on
+    muted_now.set(on)
+    player.set_muted(on or SILENT)
+
+
+def volume_zone():
+    """The heart, mute and the volume slider, which takes the zone's rest."""
+    with kaya.row(spacing=8, align="center", grow=1) as zone:
+        zone.a11y_id("dock_end")
+        like_box()
+        kaya.checkbox("Mute", checked=muted_now, on_toggle=set_muted) \
+            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.VOLUME).a11y_id("mute")
+        kaya.slider(volume, min=0.0, max=1.0, on_change=set_volume, on_commit=set_volume,
+                    grow=1).a11y_label("Volume").a11y_id("volume")
+
+
 def like_box():
     kaya.checkbox("Like", checked=liked_now, on_toggle=set_liked) \
         .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE).a11y_id("like")
@@ -670,12 +747,13 @@ def build_dock():
         if desktop:
             with kaya.row(spacing=16, align="center") as bar:
                 bar.a11y_id("dock_bar")
+                # Equal side zones keep the transport on the window's centre
+                # whatever the title's length (M14).
                 now_playing(grow=1)
-                with kaya.column(spacing=4, align="center", grow=2):
+                with kaya.column(spacing=4, align="stretch", grow=2):
                     transport(full=False)
                     scrubber()
-                with kaya.row(grow=1, align="center"):
-                    like_box()
+                volume_zone()
         else:
             with kaya.row(spacing=12, align="center") as bar:
                 bar.a11y_id("dock_bar")
@@ -715,8 +793,7 @@ def open_full_player():
                     kaya.caption(bind=dock_artist)
                 like_box()
             scrubber()
-            with kaya.column(align="center"):
-                transport(full=True)
+            transport(full=True)
 
 
 def full_player_closed():
@@ -788,7 +865,8 @@ connect_draft = {"text": ""}
 
 def home_body(shelves):
     with kaya.scroll(grow=1):
-        with kaya.column(spacing=20, align="stretch") as home:
+        with kaya.column(spacing=20, align="stretch",
+                         inset=PAGE_INSET if BLEED else None) as home:
             home.a11y_id("home")
             if catalogue.sampler:
                 with kaya.row(align="center"):
@@ -810,7 +888,7 @@ def home_body(shelves):
 
 
 def library_body():
-    with kaya.column(spacing=4) as side:
+    with kaya.column(spacing=4, inset=PAGE_INSET if BLEED else None) as side:
         side.a11y_id("library")
         if desktop:
             # Home is a sidebar destination (docs/media-player-plan.md §1).
@@ -862,7 +940,7 @@ def load_home():
 
 
 with app.window(title="Music", width=1100, height=720,
-                panes=2 if desktop else None,
+                panes=2 if desktop else None, inset=0 if BLEED else None,
                 sections_presentation=None if desktop else kaya.SectionsPresentation.BAR):
     notice = kaya.signal("Browsing the bundled sampler.")
     library_hint = kaya.signal(library_caption())
@@ -881,8 +959,9 @@ with app.window(title="Music", width=1100, height=720,
     position = kaya.signal(0.0)
     elapsed = kaya.signal(kaya.fmt.duration(0))
     remaining = kaya.signal("-" + kaya.fmt.duration(0))
-    # A lane's legs play on the maintainer's desk, so they play silently.
-    player = kaya.player(muted=bool(os.environ.get("KAYA_SELFTEST")),
+    volume = kaya.signal(1.0)
+    muted_now = kaya.signal(False)
+    player = kaya.player(muted=SILENT,
                          on_state=on_player_state, on_failed=on_player_failed,
                          on_position=on_position)
     if desktop:

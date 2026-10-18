@@ -41,6 +41,11 @@ expect_no_clipping
 # player's position waits (M10); the slider runs 0 to 1 over the track.
 click button@play_pause
 expect_title "Owl Time (2013)"
+# Three zones (M14): the track's art and lines, the transport over the
+# scrubber, and the heart, mute and volume; the side zones are equal, so the
+# middle sits on the window's centre whatever the title's length.
+expect_shares row@dock_bar "25,50,25"
+expect_fills row@dock_bar
 expect_ax button@play_pause "button/Play"
 set_value slider@progress 0.5
 expect_value slider@progress "0.5"
@@ -85,3 +90,26 @@ expect_checked checkbox@like off
 click button@previous
 expect label@dock_title "In Tune"
 expect_checked checkbox@like on
+# Volume reaches the player through the slider; mute is a toggle (M14).
+expect_ax slider@volume "slider/Volume"
+set_value slider@volume 0.25
+expect_value slider@volume "0.25"
+expect_ax checkbox@mute "toggle/Mute"
+toggle checkbox@mute on
+expect_checked checkbox@mute on
+toggle checkbox@mute off
+expect_checked checkbox@mute off
+# Previous restarts a track that has played past three seconds and goes
+# back a track otherwise (M14).
+click button@next
+expect label@dock_title "Owl Time"
+expect_ax button@play_pause "button/Pause"
+click button@play_pause
+expect_ax button@play_pause "button/Play"
+set_value slider@progress 0.5
+expect label@elapsed "0:10"
+click button@previous
+expect label@dock_title "Owl Time"
+expect label@elapsed "0:00"
+click button@previous
+expect label@dock_title "In Tune"
