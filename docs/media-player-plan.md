@@ -683,6 +683,26 @@ Gates that grow (each with watched negatives, counts printed):
   and its selection, the Y4 rule that was never wired.
 - check-staging: the Python app's file in both phone hosts' staged lists.
 
+### M14: The dock's layout, volume and previous (RULED 2026-10-18)
+
+The maintainer, 2026-10-18, on the dock's review page: the dock's transport
+is centred on the window as Spotify's is, the track's art and lines in a left
+zone and the heart and volume in a right zone of EQUAL width, so the middle
+stays centred whatever the title's length; the phone sheet's transport row is
+centred the same way. The dock carries a VOLUME slider ("yeah we definitely
+want a volume slider"). PREVIOUS restarts the playing track when it has played
+more than about three seconds and goes to the previous track otherwise ("we
+should probably restart the track after three seconds").
+
+### M15: The album header's gradient (OPEN, the maintainer's visual ruling)
+
+The maintainer, 2026-10-18: the inset gradient "looks a bit tacky", maybe the
+wrong colours, maybe darker and subtler, maybe full bleed (the inset leaves a
+border around it), maybe a solid colour. To be ruled from a comparison page
+showing, on several real covers in light and dark: (A) the current inset
+gradient; (B) full bleed, the cover's most vivid colour darkened and muted, a
+long soft fade into the page; (C) full bleed, a solid muted colour.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on
