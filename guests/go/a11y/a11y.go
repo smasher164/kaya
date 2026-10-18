@@ -43,6 +43,15 @@ func App() *kaya.App {
 			tx.Button("Rename", func(tx *kaya.Tx) {
 				tx.Write(spoken, "After")
 			}).A11yID("rename")
+			favorite := tx.Signal("favorite off")
+			tx.Checkbox("Favorite", func(tx *kaya.Tx, on bool) {
+				if on {
+					tx.Write(favorite, "favorite on")
+				} else {
+					tx.Write(favorite, "favorite off")
+				}
+			}).Role(kaya.RoleToggle).Symbol(kaya.SymbolFavorite).A11yID("favorite")
+			tx.Label(favorite).A11yID("favorite_state")
 		}).A11yID("form").A11yLabel("Form"))
 	})
 

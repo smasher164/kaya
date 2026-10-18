@@ -98,7 +98,7 @@ is held by the core's unit tests in both zones rather than by a guest forced to
 die once per run. Reduce Transparency and Windows High Contrast stay hand
 captures (§7). Trigger: the breadth, or the demo's sectioned phone window.
 
-## RULING — the filled favourite: how a symbol button shows its on state (docs/media-player-plan.md M8; 2026-10-17)
+## ~~BUILD — the filled favourite: a checkbox with a symbol and a button look, drawn as the platform's toggle button (RULED 2026-10-17; docs/media-player-plan.md M8)~~ LANDED 2026-10-17: role `toggle` (9) on a checkbox, which also takes a `symbol` (the root refuses a checkbox symbol without the role, in both zones); SwiftUI `Toggle` in the button style on macOS and iOS, GtkToggleButton, WinUI ToggleButton and Compose IconToggleButton, the filled glyph while on for `favorite` (SF heart.fill, Material Favorite, Fluent EB52; GTK the pressed look); the AX word `toggle` joins harness.rs's ROLES, read as AXCheckBox/AXToggle on the mac, the toggle-button trait with the declared role on iOS, AT-SPI TOGGLE_BUTTON on GTK, UIA Button with the toggle pattern and class ToggleButton on WinUI, and KayaAxKind on Compose, which has no toggle-button Role; tools/scenes/a11y.steps reads and flips `checkbox@favorite` in all ten guests. GUARDS: check-symbol-parity N9 and check-symbols over the filled forms; the scene's AXToggle mapping cut watched red; the root's wall in four unit tests.
 KEY: favorite, SYMBOL_FAVORITE, heart.fill, FavoriteBorder, HeartFill, emote-love-symbolic, checked on a button, toggle button, filled favourite
 
 M8 built `favorite` as the platform's heart (SF `heart`, Material
@@ -115,6 +115,17 @@ the filled heart, so GTK shows the on state by the toggle's own pressed
 look), with a `toggled` occurrence; (b) a second concept `favorite_on` the
 app swaps in, no new state; (c) nothing, the app tints the label. Trigger:
 the media player's dock (docs/media-player-plan.md §6 step 5).
+
+RULED 2026-10-17 (the maintainer: "instead of turning a button into a checkbox,
+enhance the checkbox so it can have the heart icon and stuff"): option (a)
+built on the CHECKBOX, which already owns `checked` and `toggled`: a checkbox
+gains a symbol and a button presentation, lowered to SwiftUI `Toggle` in the
+button style, `GtkToggleButton`, WinUI `ToggleButton` and Compose
+`IconToggleButton`, its on state the platform's filled glyph where one exists
+(SF `heart.fill`, Material `Favorite`, Fluent EB52; GTK the toggle's pressed
+look), its accessibility role the platform's toggle button (a new word in
+harness.rs's ROLES). Shuffle uses it; repeat's three states stay a button whose
+symbol the app swaps. A button never gains `checked`.
 
 ## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13) and breadth on GTK, WinUI, Compose and all nine bindings with the C floor (2026-10-13); the media player's art (N17) and the review page are open
 KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage, netimage_gtk, netimage_winui, netimage_compose, netimage_surface, KayaRowImages, RowImages, PatchIf, patchIf, OnNeeded, onNeeded, FetchHTTP, HttpFetch, kayaURLSessionFetch, Row_images, rowImages, blobContentId, drain_when_free, winbuild/clang, SYMBOL_IMAGE_MISSING

@@ -64,6 +64,13 @@ def check(src, text):
     if not rows:
         bad.append(f"no symbol rows extracted from {src}: the gate itself "
                    f"broke")
+    # The toggle button's filled forms (docs/media-player-plan.md M8).
+    on_table = re.search(r"let kayaSymbolOnTable\b.*?\n\]", text, re.S)
+    if on_table is None:
+        bad.append(f"no kayaSymbolOnTable in {src}: the gate itself broke")
+    else:
+        rows = rows + [(c, f"{c} (filled)", sf) for c, sf in re.findall(
+            r'\(\s*(symbol\w+),\s*"([^"]+)"\s*\)', on_table.group(0))]
 
     for _const, name, sf in rows:
         year = symbols.get(sf)

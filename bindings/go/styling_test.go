@@ -229,7 +229,7 @@ func stylingTrap(trap string) {
 		case "role-unknown":
 			// Go spells the vocabulary as int constants, so a caller can hand
 			// it a number that is not in it.
-			tx.Mount(tx.Column(func() { tx.Button("Delete", nil).Role(9) }))
+			tx.Mount(tx.Column(func() { tx.Button("Delete", nil).Role(10) }))
 		case "inset-negative":
 			tx.Window(0).Inset(-1)
 			tx.Mount(tx.Column(func() { tx.LabelText("Sections") }))
@@ -282,7 +282,7 @@ func TestTheRootIsTheStylingWall(t *testing.T) {
 		want    string
 	}{
 		{"role-on-label", true, "role destructive does not fit Label"},
-		{"role-unknown", true, "9 is not a role (destructive=1, prominent=2, heading=3, caption=4, plain=5, switch=6, link=7, composer=8)"},
+		{"role-unknown", true, "10 is not a role (destructive=1, prominent=2, heading=3, caption=4, plain=5, switch=6, link=7, composer=8, toggle=9)"},
 		{"inset-negative", true, "window inset must be finite and non-negative, got -1"},
 		{"brand-twice", true, "set_brand_accent called twice"},
 		{"role-on-button", false, "THE ROOT ACCEPTED IT"},

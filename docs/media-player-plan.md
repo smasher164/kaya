@@ -461,10 +461,16 @@ adwaita-icon-theme 51.0 (Adwaita has no heart but the filled
 E102, Pause E103, Next E101, Previous E100, Shuffle E14B, RepeatAll E1CD,
 RepeatOne E1CC, Volume E15D, List E14C) and Heart is the glyph EB51, every
 code point present in the VM's SegoeIcons.ttf and segmdl2.ttf. Read back on
-every lane by tools/scenes/menus.steps' View menu. NOT BUILT: `favorite`'s
-filled state. A button has no `checked` (scene.rs holds `checked` to the
-checkbox), so "heart.fill when on" needs a ruling (docs/deferred.md, the
-filled favourite). The existing `star` stays the generic favourite.
+every lane by tools/scenes/menus.steps' View menu. The filled state, RULED
+2026-10-17 on the checkbox and BUILT the same day: role `toggle` (9) draws a
+checkbox as the platform's toggle button around its `symbol` (SwiftUI
+`Toggle` in the button style, GtkToggleButton, WinUI ToggleButton, Compose
+IconToggleButton), filled while on where the symbol has a filled form (SF
+heart.fill, Material Favorite, Fluent EB52; Adwaita's one heart is filled,
+so GTK shows the pressed look); its AX word is `toggle`, and
+tools/scenes/a11y.steps reads and flips `checkbox@favorite` (docs/deferred.md,
+the filled favourite). Shuffle uses it; repeat stays a button whose symbol
+the app swaps. The existing `star` stays the generic favourite.
 
 Why: a player bar of text buttons ("Play", "Next") is not the reference and
 not any platform's music app; the chat composer's icon-only buttons are the

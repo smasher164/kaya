@@ -1317,8 +1317,8 @@ for label, kwargs, findings in (
     ("the mac switch word renamed",
      dict(swift_src=perturb("ax-words (the mac switch word renamed)",
                             SWIFT, r'(subrole == "AXSwitch" \? )"switch"',
-                            '"toggle"')),
-     (r"^KayaSwiftUI\.swift answers ax toggle, which harness\.rs's ROLES",
+                            '"flipswitch"')),
+     (r"^KayaSwiftUI\.swift answers ax flipswitch, which harness\.rs's ROLES",
       )),
 ):
     base = set(words_out)

@@ -2948,6 +2948,9 @@ data Role
   | -- | A row drawn as ONE text field in the platform's own style around
     -- its field and buttons (docs\/composer-plan.md §4). Rows only.
     Composer
+  | -- | A checkbox drawn as the platform's toggle button, its glyph its
+    -- 'Symbol' (docs\/media-player-plan.md M8). Checkboxes only.
+    Toggle
   deriving (Eq, Show)
 
 roleWire :: Role -> Int64
@@ -2959,6 +2962,7 @@ roleWire Plain = 5
 roleWire Switch = 6
 roleWire Link = 7
 roleWire Composer = 8
+roleWire Toggle = 9
 
 -- | The dynamic path; the declarative spelling is the 'Role' attr.
 setRole :: Widget -> Role -> Build ()

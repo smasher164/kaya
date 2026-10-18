@@ -16,6 +16,7 @@ main = kayaMain $ \app -> do
   _ <- buildTx app $ do
     window primary [WTitle "a11y"]
     spoken <- signalText "Before"
+    favorite <- signalText "favorite off"
     root <-
       column
         [A11yId "form", A11yLabel "Form"]
@@ -53,7 +54,15 @@ main = kayaMain $ \app -> do
           buttonOn
             "Rename"
             (buildTx app (writeSignal spoken "After") >> return ())
-            [A11yId "rename"]
+            [A11yId "rename"],
+          checkboxOn
+            "Favorite"
+            ( \on ->
+                buildTx app (writeSignal favorite (if on then "favorite on" else "favorite off"))
+                  >> return ()
+            )
+            [A11yId "favorite", Role Toggle, Symbol SymbolFavorite],
+          labelBound favorite [A11yId "favorite_state"]
         ]
     mount root
     return ()

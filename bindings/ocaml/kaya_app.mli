@@ -790,7 +790,7 @@ type size_class = Compact
 
 (* SEMANTIC EMPHASIS (docs/styling-plan.md D4): what a widget MEANS,
    never how it looks. *)
-type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer
+type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer | Toggle
 
 (* THE SEMANTIC ICON VOCABULARY (docs/styling-plan.md D6). *)
 type symbol =
@@ -1181,7 +1181,9 @@ val checkbox :
   ?help_bind:string signal ->
   ?a11y_hint:string ->
   ?text:string ->
-  ?checked:bool -> ?on_toggle:(bool -> unit) -> unit -> widget
+  ?checked:bool ->
+  ?role:role ->
+  ?symbol:symbol -> ?on_toggle:(bool -> unit) -> unit -> widget
 
 (* A date picker over civil dates — the compact field that opens the
    platform's calendar. UNCONTROLLED: the control owns its value and

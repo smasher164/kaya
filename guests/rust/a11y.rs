@@ -5,10 +5,11 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     #[derive(Clone, Copy)]
     enum Msg {
         Rename,
+        Favorite(bool),
     }
 
     let msgs = kaya::Messages::<Msg>::new();
-    let spoken = ctx.apply(|tx| {
+    let (spoken, favorite_state) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("a11y");
         let status = tx.signal("Ready");
         let cell_name = tx.signal("Name");
@@ -16,6 +17,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let feed_item = tx.signal("Item");
         let spoken_caption = tx.signal("Spoken");
         let spoken = tx.signal("Before");
+        let favorite_state = tx.signal("favorite off");
 
         let root = tx.column(|tx| {
             // Deliberately NOT labelled: the platform speaks the caption.
@@ -54,18 +56,30 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             tx.label(spoken_caption).a11y_id("spoken").a11y_label(spoken);
             let rename = tx.button("Rename").a11y_id("rename").id();
             msgs.on_click(rename, Msg::Rename);
+            // The toggle button (docs/media-player-plan.md M8).
+            let favorite = tx
+                .checkbox("Favorite")
+                .role(kaya::Role::Toggle)
+                .symbol(kaya::Symbol::Favorite)
+                .a11y_id("favorite")
+                .id();
+            msgs.on_toggle(favorite, Msg::Favorite);
+            tx.label(favorite_state).a11y_id("favorite_state");
         })
         .a11y_id("form")
         .a11y_label("Form")
         .id();
         tx.mount(root);
-        spoken
+        (spoken, favorite_state)
     });
 
     while let Some(msg) = msgs.next(&ctx) {
         match msg {
             Msg::Rename => ctx.apply(|tx| {
                 tx.write(spoken, "After");
+            }),
+            Msg::Favorite(on) => ctx.apply(|tx| {
+                tx.write(favorite_state, if on { "favorite on" } else { "favorite off" });
             }),
         }
     }

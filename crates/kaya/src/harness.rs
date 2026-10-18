@@ -4345,9 +4345,10 @@ fn check_ax(spec: &str) -> Result<(), String> {
     // (macOS's AXRadioGroup and AXScrollArea are both `group`), because a
     // name only one backend can produce is a name no shared scene can
     // assert.
-    const ROLES: [&str; 14] = [
+    const ROLES: [&str; 15] = [
         "button", "label", "field", "checkbox", "slider", "image", "progress",
         "combobox", "group", "heading", "datetime", "unknown", "switch", "link",
+        "toggle",
 ];
     let Some((role, _label)) = spec.split_once('/') else {
         return Err(format!("ax {spec:?} wants <role>/<label>"));

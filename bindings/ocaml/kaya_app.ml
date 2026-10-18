@@ -2117,7 +2117,7 @@ let set_axis (Widget id) a = emit (the_tx ()) (Kaya_wire.tx_set_axis id (axis_wi
    never how it looks. [Destructive] and [Prominent] are an ACTION's
    emphasis and belong to a button; [Heading] and [Caption] are text
    hierarchy facts and belong to a label. *)
-type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer
+type role = Destructive | Prominent | Heading | Caption | Plain | Switch | Link | Composer | Toggle
 
 let role_wire = function
   | Destructive -> Int64.of_int Kaya_wire.role_destructive
@@ -2128,6 +2128,7 @@ let role_wire = function
   | Switch -> Int64.of_int Kaya_wire.role_switch
   | Link -> Int64.of_int Kaya_wire.role_link
   | Composer -> Int64.of_int Kaya_wire.role_composer
+  | Toggle -> Int64.of_int Kaya_wire.role_toggle
 
 let set_role (Widget id) r = emit (the_tx ()) (Kaya_wire.tx_set_role id (role_wire r))
 
@@ -3002,9 +3003,12 @@ let segmented_symbols ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label
     ?help ?help_bind ?a11y_hint ?selected ?bind ?on_select
     (List.map (fun (name, symbol) -> (name, Some symbol)) segments)
 
-let checkbox ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?text ?checked ?on_toggle () =
+let checkbox ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?text ?checked
+    ?role ?symbol ?on_toggle () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_checkbox in
+  Option.iter (fun r -> set_role w r) role;
+  Option.iter (fun s -> set_symbol w s) symbol;
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;

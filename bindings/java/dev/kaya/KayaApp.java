@@ -212,7 +212,10 @@ public final class KayaApp {
         LINK(KayaWire.ROLE_LINK),
         /** A row drawn as ONE text field in the platform's own style
          * around its field and buttons (docs/composer-plan.md §4). */
-        COMPOSER(KayaWire.ROLE_COMPOSER);
+        COMPOSER(KayaWire.ROLE_COMPOSER),
+        /** A checkbox drawn as the platform's toggle button, its glyph
+         * its symbol (docs/media-player-plan.md M8). */
+        TOGGLE(KayaWire.ROLE_TOGGLE);
 
         final long wire;
 

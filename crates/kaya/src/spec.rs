@@ -4579,6 +4579,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("switch", 6),
                 ("link", 7),
                 ("composer", 8),
+                ("toggle", 9),
             ],
         },
         EnumSpec {
@@ -5630,6 +5631,7 @@ mod tests {
                     ("role", "switch") => wire::ROLE_SWITCH,
                     ("role", "link") => wire::ROLE_LINK,
                     ("role", "composer") => wire::ROLE_COMPOSER,
+                    ("role", "toggle") => wire::ROLE_TOGGLE,
                     ("tint", "accent") => wire::TINT_ACCENT,
                     ("tint", "success") => wire::TINT_SUCCESS,
                     ("tint", "warning") => wire::TINT_WARNING,

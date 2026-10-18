@@ -905,6 +905,10 @@ pub(crate) struct Scene {
     /// the transaction.
     skin_boxes: HashMap<WidgetId, SkinBox>,
     skin_dirty: Vec<WidgetId>,
+    /// Per live checkbox, (declared a symbol, declared the toggle role),
+    /// checked at the end of the transaction (docs/media-player-plan.md M8).
+    toggle_boxes: HashMap<WidgetId, (bool, bool)>,
+    toggle_dirty: Vec<WidgetId>,
     /// A child joined a tree this transaction, so Y3's bare-text walk runs.
     skin_text_dirty: bool,
     /// Menu items by id — their OWN id space (DESIGN.md, Menus).
@@ -1374,6 +1378,15 @@ impl SkinBox {
     }
 }
 
+/// A checkbox draws a glyph only as the platform's toggle button
+/// (docs/media-player-plan.md M8).
+fn toggle_refusal(who: &str) -> String {
+    format!(
+        "kaya: {who} declares a symbol and not the `toggle` role — a checkbox draws a glyph only \
+         as the platform's toggle button (docs/media-player-plan.md M8)"
+    )
+}
+
 /// The kinds that put text on screen (docs/styling-pass-plan.md Y3).
 fn is_text_kind(kind: WidgetKind) -> bool {
     matches!(
@@ -1595,7 +1608,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         // A button's glyph, and a segment's (a label held to a segmented
         // parent at the end of the transaction, docs/segmented-plan.md G3).
-        Prop::Symbol => matches!(kind, WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander),
+        Prop::Symbol => matches!(
+            kind,
+            WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander | WidgetKind::Checkbox
+        ),
         Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
@@ -2800,9 +2816,12 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             // composer: a row drawn as one text field with its buttons
             // (docs/composer-plan.md §4).
             8 => kind == WidgetKind::Row,
+            // toggle: a checkbox drawn as the platform's toggle button
+            // (docs/media-player-plan.md M8).
+            9 => kind == WidgetKind::Checkbox,
             other => panic!(
                 "kaya: {other} is not a role (destructive=1, prominent=2, \
-                 heading=3, caption=4, plain=5, switch=6, link=7, composer=8)"
+                 heading=3, caption=4, plain=5, switch=6, link=7, composer=8, toggle=9)"
             ),
         };
         let name = match *role {
@@ -2813,13 +2832,14 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             5 => "plain",
             6 => "switch",
             7 => "link",
-            _ => "composer",
+            8 => "composer",
+            _ => "toggle",
         };
         assert!(
             ok,
             "kaya: role {name} does not fit {kind:?} — destructive, \
              prominent and plain are button emphasis, heading, caption and \
-             link are labels, switch is a checkbox, composer is a row"
+             link are labels, switch and toggle are checkboxes, composer is a row"
         );
     }
     if let (Prop::Symbol, Value::I64(symbol)) = (prop, value) {
@@ -3426,14 +3446,29 @@ impl Scene {
         let mut boxes: HashMap<u64, SkinBox> = HashMap::new();
         let mut kinds: HashMap<u64, WidgetKind> = HashMap::new();
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
+        let mut toggles: HashMap<u64, (bool, bool)> = HashMap::new();
         for op in &body.ops {
             match op {
                 TplOp::Widget { node, kind } => {
                     kinds.insert(*node, *kind);
                 }
-                TplOp::SetProp { node, prop, value } => boxes.entry(*node).or_default().note(*prop, value),
+                TplOp::SetProp { node, prop, value } => {
+                    match (prop, value) {
+                        (Prop::Symbol, _) => toggles.entry(*node).or_default().0 = true,
+                        (Prop::Role, PropValue::Const(Value::I64(r))) => {
+                            toggles.entry(*node).or_default().1 = *r == i64::from(crate::wire::ROLE_TOGGLE);
+                        }
+                        _ => {}
+                    }
+                    boxes.entry(*node).or_default().note(*prop, value)
+                }
                 TplOp::AddChild { parent, child } => children.entry(*parent).or_default().push(*child),
                 _ => {}
+            }
+        }
+        for (node, declared) in &toggles {
+            if *declared == (true, false) && kinds.get(node) == Some(&WidgetKind::Checkbox) {
+                panic!("{}", toggle_refusal(&format!("template node {node} (Checkbox)")));
             }
         }
         for (node, b) in &boxes {
@@ -3930,6 +3965,19 @@ impl Scene {
                         self.skin_boxes.entry(widget).or_default().note(prop, &value);
                         if !self.skin_dirty.contains(&widget) {
                             self.skin_dirty.push(widget);
+                        }
+                    }
+                    if kind == WidgetKind::Checkbox && matches!(prop, Prop::Symbol | Prop::Role) {
+                        let b = self.toggle_boxes.entry(widget).or_default();
+                        match (prop, &value) {
+                            (Prop::Symbol, _) => b.0 = true,
+                            (Prop::Role, PropValue::Const(Value::I64(r))) => {
+                                b.1 = *r == i64::from(crate::wire::ROLE_TOGGLE);
+                            }
+                            _ => {}
+                        }
+                        if !self.toggle_dirty.contains(&widget) {
+                            self.toggle_dirty.push(widget);
                         }
                     }
                     if let (Prop::Accepts, PropValue::Const(Value::Str(list))) = (prop, &value) {
@@ -5754,6 +5802,11 @@ impl Scene {
         for id in std::mem::take(&mut self.image_box_dirty) {
             if let Some(why) = self.image_boxes.get(&id).and_then(|b| b.refusal(&format!("image {id:?}"))) {
                 panic!("{why}");
+            }
+        }
+        for id in std::mem::take(&mut self.toggle_dirty) {
+            if self.toggle_boxes.get(&id) == Some(&(true, false)) {
+                panic!("{}", toggle_refusal(&format!("checkbox {id:?}")));
             }
         }
         let skin_dirty = std::mem::take(&mut self.skin_dirty);
@@ -12628,6 +12681,55 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Symbol,
                 value: PropValue::Const(Value::I64(36)),
+            },
+        ]);
+    }
+
+    fn checkbox_with(props: &[(Prop, i64)]) -> Vec<TxOp> {
+        let mut ops = vec![TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Checkbox }];
+        for (prop, v) in props {
+            ops.push(TxOp::SetProperty { widget: WidgetId(1), prop: *prop, value: PropValue::Const(Value::I64(*v)) });
+        }
+        ops.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
+        ops
+    }
+
+    /// The toggle button (docs/media-player-plan.md M8): a checkbox takes a
+    /// symbol with the toggle role, in either order.
+    #[test]
+    fn a_toggle_checkbox_takes_a_symbol() {
+        let fav = i64::from(crate::wire::SYMBOL_FAVORITE);
+        let toggle = i64::from(crate::wire::ROLE_TOGGLE);
+        Scene::new().apply(checkbox_with(&[(Prop::Role, toggle), (Prop::Symbol, fav)]));
+        Scene::new().apply(checkbox_with(&[(Prop::Symbol, fav), (Prop::Role, toggle)]));
+        Scene::new().apply(checkbox_with(&[(Prop::Role, toggle)]));
+    }
+
+    #[test]
+    #[should_panic(expected = "declares a symbol and not the `toggle` role")]
+    fn a_checkbox_symbol_without_the_toggle_role_dies() {
+        Scene::new().apply(checkbox_with(&[(Prop::Symbol, i64::from(crate::wire::SYMBOL_FAVORITE))]));
+    }
+
+    #[test]
+    #[should_panic(expected = "declares a symbol and not the `toggle` role")]
+    fn a_switch_checkbox_with_a_symbol_dies() {
+        Scene::new().apply(checkbox_with(&[
+            (Prop::Role, i64::from(crate::wire::ROLE_SWITCH)),
+            (Prop::Symbol, i64::from(crate::wire::SYMBOL_FAVORITE)),
+        ]));
+    }
+
+    #[test]
+    #[should_panic(expected = "role toggle does not fit Button")]
+    fn the_toggle_role_is_a_checkboxs() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Role,
+                value: PropValue::Const(Value::I64(i64::from(crate::wire::ROLE_TOGGLE))),
             },
         ]);
     }

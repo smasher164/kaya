@@ -4825,6 +4825,7 @@ class Role(enum.IntEnum):
     SWITCH = wire.ROLE_SWITCH
     LINK = wire.ROLE_LINK
     COMPOSER = wire.ROLE_COMPOSER
+    TOGGLE = wire.ROLE_TOGGLE
 
     @classmethod
     def _missing_(cls, value: object) -> Any:

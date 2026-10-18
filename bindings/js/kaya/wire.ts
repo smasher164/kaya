@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x3c2971158b154feen;
+export const SPEC_HASH = 0xb281543d9811b0e5n;
 
 export const VALUE_BOOL = 1;
 export const VALUE_I64 = 2;
@@ -243,6 +243,7 @@ export const ROLE_PLAIN = 5;
 export const ROLE_SWITCH = 6;
 export const ROLE_LINK = 7;
 export const ROLE_COMPOSER = 8;
+export const ROLE_TOGGLE = 9;
 export const SYMBOL_ADD = 1;
 export const SYMBOL_REMOVE = 2;
 export const SYMBOL_DELETE = 3;

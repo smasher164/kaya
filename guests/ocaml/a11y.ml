@@ -12,6 +12,7 @@ let () =
      (* Safe: the blob table keeps its own reference. *)
      let mark = asset mark_name in
      let spoken = signal Scalar.Str ("Before") in
+     let favorite = signal Scalar.Str "favorite off" in
      let root =
        column ~a11y_id:"form" ~a11y_label:"Form"
          [
@@ -41,6 +42,9 @@ let () =
            label ~a11y_id:"spoken" ~a11y_label_bind:spoken ~text:"Spoken";
            button ~a11y_id:"rename" ~text:"Rename"
              ~on_click:(fun () -> write spoken ("After"));
+           checkbox ~a11y_id:"favorite" ~text:"Favorite" ~role:Toggle ~symbol:Favorite
+             ~on_toggle:(fun on -> write favorite (if on then "favorite on" else "favorite off"));
+           label ~a11y_id:"favorite_state" ~bind:favorite;
          ]
          ()
      in

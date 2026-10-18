@@ -67,6 +67,13 @@ KayaApp.run { app in
             tx.setA11yId(
                 tx.button("Rename", onClick: { inner in inner.write(spoken, .str("After")) }),
                 "rename")
+            let favorite = tx.signal(.str("favorite off"))
+            tx.setA11yId(
+                tx.checkbox("Favorite", role: .toggle, symbol: .favorite) { inner, on in
+                    inner.write(favorite, .str(on ? "favorite on" : "favorite off"))
+                },
+                "favorite")
+            tx.setA11yId(tx.label(bind: favorite), "favorite_state")
             return form
         }
         // Safe: the blob table already holds its own reference.

@@ -1550,6 +1550,8 @@ pub const KAYA_ROLE_SWITCH: u32 = 6;
 pub const KAYA_ROLE_LINK: u32 = 7;
 /// A row drawn as one text field with its buttons (docs/composer-plan.md §4).
 pub const KAYA_ROLE_COMPOSER: u32 = 8;
+/// A checkbox drawn as the platform's toggle button (docs/media-player-plan.md M8).
+pub const KAYA_ROLE_TOGGLE: u32 = 9;
 const _: () = assert!(
     KAYA_ROLE_DESTRUCTIVE == wire::ROLE_DESTRUCTIVE
         && KAYA_ROLE_PROMINENT == wire::ROLE_PROMINENT
@@ -1559,6 +1561,7 @@ const _: () = assert!(
         && KAYA_ROLE_SWITCH == wire::ROLE_SWITCH
         && KAYA_ROLE_LINK == wire::ROLE_LINK
         && KAYA_ROLE_COMPOSER == wire::ROLE_COMPOSER
+        && KAYA_ROLE_TOGGLE == wire::ROLE_TOGGLE
 );
 
 /// The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what

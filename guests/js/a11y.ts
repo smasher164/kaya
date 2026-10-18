@@ -40,6 +40,13 @@ app.window({ title: "a11y" }, () => {
     const spoken = kaya.signal("Before");
     kaya.label("Spoken").a11yId("spoken").a11yLabel(spoken);
     kaya.button("Rename", { onClick: () => spoken.set("After") }).a11yId("rename");
+    const favorite = kaya.signal("favorite off");
+    kaya
+      .checkbox("Favorite", { onToggle: (on: boolean) => favorite.set(on ? "favorite on" : "favorite off") })
+      .role(kaya.Role.TOGGLE)
+      .symbol(kaya.Symbol.FAVORITE)
+      .a11yId("favorite");
+    kaya.label({ bind: favorite }).a11yId("favorite_state");
   });
 });
 

@@ -46,6 +46,11 @@ public final class A11y {
                 tx.label("Spoken").a11yId("spoken").a11yLabel(spoken);
                 tx.button("Rename", inner -> inner.write(spoken, "After"))
                         .a11yId("rename");
+                KayaApp.Signal<String> favorite = tx.signal("favorite off");
+                tx.checkbox("Favorite",
+                                (inner, on) -> inner.write(favorite, on ? "favorite on" : "favorite off"))
+                        .role(KayaApp.Role.TOGGLE).symbol(KayaApp.Symbol.FAVORITE).a11yId("favorite");
+                tx.label(favorite).a11yId("favorite_state");
             }).a11yId("form").a11yLabel("Form"));
             return null;
         });

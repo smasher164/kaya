@@ -4289,9 +4289,10 @@ export const Role = Object.freeze({
   SWITCH: wire.ROLE_SWITCH,
   LINK: wire.ROLE_LINK,
   COMPOSER: wire.ROLE_COMPOSER,
+  TOGGLE: wire.ROLE_TOGGLE,
 });
 export type RoleValue = (typeof Role)[keyof typeof Role];
-export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain" | "switch" | "link" | "composer";
+export type RoleName = "destructive" | "prominent" | "heading" | "caption" | "plain" | "switch" | "link" | "composer" | "toggle";
 const ROLE_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Role).map(([k, v]) => [k.toLowerCase(), v]));
 
 function roleValue(role: unknown): number {

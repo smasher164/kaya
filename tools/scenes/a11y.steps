@@ -48,3 +48,13 @@ expect_ax button#3 "button/OK"
 expect_ax label@spoken "label/Before"
 click button@rename
 expect_ax label@spoken "label/After"
+
+# THE TOGGLE BUTTON (docs/media-player-plan.md M8): a checkbox with the
+# toggle role is drawn as the platform's toggle button around its symbol's
+# glyph, and keeps a checkbox's state. KEYED, so no ordinal above moves.
+expect_ax checkbox@favorite "toggle/Favorite"
+toggle checkbox@favorite on
+expect label@favorite_state "favorite on"
+expect_ax checkbox@favorite "toggle/Favorite"
+toggle checkbox@favorite off
+expect label@favorite_state "favorite off"

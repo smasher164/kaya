@@ -172,6 +172,30 @@ def check(texts):
     distinct(compose, re.findall(
         r"Triple\(\s*(SYMBOL_[A-Z0-9_]+),\s*\"[^\"]+\",\s*([\w.]+)\)", kt))
 
+    # --- The toggle button's filled forms (docs/media-player-plan.md M8):
+    # one set of concepts on the three platforms that draw one; GTK has none,
+    # since Adwaita's one heart is already filled. ---
+    def filled(site, text, block_re, row_re, name):
+        m = re.search(block_re, text, re.S)
+        if not m:
+            bad.append(f"{site}: no {name} to read the filled forms from")
+            return set()
+        return {camel_to_wire.get(c, c) for c in re.findall(row_re, m.group(0))}
+    camel_to_wire = {camel(c): c for c in root_by_cname}
+    sw_on = filled(swiftui, st, r"let kayaSymbolOnTable\b.*?\n\]",
+                   r"\(\s*(symbol\w+),\s*\"[^\"]+\"\s*\)", "kayaSymbolOnTable")
+    kt_on = filled(compose, kt, r"val SYMBOLS_ON\b.*?\n    \)",
+                   r"Pair\(\s*(SYMBOL_[A-Z0-9_]+),", "SYMBOLS_ON")
+    wi_on = filled(winui, wt2, r"fn toggle_glyph\(.*?\n\}",
+                   r"crate::wire::(SYMBOL_[A-Z0-9_]+)", "toggle_glyph")
+    if not sw_on:
+        bad.append(f"{swiftui}: kayaSymbolOnTable names no filled form")
+    for site, got in ((compose, kt_on), (winui, wi_on)):
+        if got != sw_on:
+            bad.append(f"{site}: the toggle button's filled forms are {sorted(got)}, "
+                       f"SwiftUI's {sorted(sw_on)} — one concept filled on one "
+                       f"platform and outlined on another")
+
     if bad:
         return "bad", bad
     return "ok", f"{len(root)} concepts level across six files"
@@ -230,6 +254,9 @@ selftest("N6", GTK, r'\(crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"\)
 selftest("N7", COMPOSE, r'Triple\(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile\)',
          'Triple(SYMBOL_ATTACH, "attach", Icons.Default.Add)',
          "draw the same glyph")
+# N9: a filled form withheld from one platform (docs/media-player-plan.md M8).
+selftest("N9", COMPOSE, r"        Pair\(SYMBOL_FAVORITE, Icons\.Default\.Favorite\),\n", "",
+         "the toggle button's filled forms are []")
 # N8: a transport row withheld (docs/media-player-plan.md M8).
 selftest("N8", SWIFTUI, r'\(symbolRepeatOne, "repeat_one", "repeat\.1", nil\),', "",
          "kayaSymbolTable has no row for SYMBOL_REPEAT_ONE")

@@ -3756,6 +3756,12 @@ enum NativeWidget {
     /// `toggled`, the `toggle` verb. GtkSwitch is no CheckButton subclass, so
     /// the role swaps the control (`swap_control`).
     Switch(gtk4::Switch),
+    /// The checkbox kind wearing `role toggle` (docs/media-player-plan.md
+    /// M8): a `GtkToggleButton` around the symbol's Adwaita icon, the title
+    /// its accessible name; a checkbox to the model, swapped in like the
+    /// switch. Adwaita has one heart, so its on state is the button's own
+    /// pressed look.
+    Toggle(gtk4::ToggleButton),
     Slider(GtkSlider),
     /// docs/number-field-plan.md §6: a `GtkSpinButton` whose text kaya
     /// writes and reads through the formatter door.
@@ -3807,6 +3813,7 @@ impl NativeWidget {
             NativeWidget::Row(w) => w.clone().upcast(),
             NativeWidget::Checkbox(w) => w.clone().upcast(),
             NativeWidget::Switch(w) => w.clone().upcast(),
+            NativeWidget::Toggle(w) => w.clone().upcast(),
             NativeWidget::Slider(w) => w.scale.clone().upcast(),
             NativeWidget::NumberField(f) => f.spin.clone().upcast(),
             NativeWidget::ColorPicker(f) => f.button.clone().upcast(),
@@ -4142,6 +4149,32 @@ fn label_text(widget: &gtk4::Widget) -> String {
     String::new()
 }
 
+/// The toggle button's glyph: the symbol's Adwaita icon, flat like the
+/// composer's symbol buttons (docs/media-player-plan.md M8).
+fn toggle_symbol(toggle: &gtk4::ToggleButton, symbol: i64) {
+    use gtk4::prelude::{ButtonExt, WidgetExt};
+    assert_symbol_icons_resolve(&toggle.display());
+    let icon = symbol_icon_name(symbol)
+        .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
+    toggle.set_icon_name(icon);
+    toggle.add_css_class("flat");
+    if let Some(title) = unsafe { gtk4::prelude::ObjectExt::data::<String>(toggle, "kaya-toggle-title") } {
+        let title = unsafe { title.as_ref() }.clone();
+        toggle_name(toggle, &title);
+    }
+}
+
+/// The toggle's spoken name. GTK names a button by its LABELLED_BY relation
+/// before its label property, and the icon child it points at has no name,
+/// so the bus read `toggle/` until the relation went (measured 2026-10-17,
+/// `KAYA_AX_TRACE: ToggleButton#1 on the bus has no name`).
+fn toggle_name(toggle: &gtk4::ToggleButton, title: &str) {
+    use gtk4::prelude::AccessibleExt;
+    unsafe { gtk4::prelude::ObjectExt::set_data(toggle, "kaya-toggle-title", title.to_owned()) };
+    toggle.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+    toggle.update_property(&[gtk4::accessible::Property::Label(title)]);
+}
+
 /// The checked bit a CHECKBOX registry slot holds, and the write that moves
 /// it — a `GtkSwitch` (the switch role, T1) is no `GtkCheckButton`, and both
 /// signal their change under `apply_quiet` the same way.
@@ -4151,6 +4184,8 @@ fn set_checked(widget: &gtk4::Widget, on: bool) {
         check.set_active(on);
     } else if let Some(switch) = widget.downcast_ref::<gtk4::Switch>() {
         switch.set_active(on);
+    } else if let Some(toggle) = widget.downcast_ref::<gtk4::ToggleButton>() {
+        gtk4::prelude::ToggleButtonExt::set_active(toggle, on);
     }
 }
 
@@ -16493,6 +16528,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // (docs/tasks-s2-plan.md §3) and the shape every guest that
                 // declares one already takes.
                 (NativeWidget::Switch(_), Prop::Text, Value::Str(_)) => {}
+                (NativeWidget::Toggle(toggle), Prop::Text, Value::Str(s)) => {
+                    use gtk4::prelude::ButtonExt;
+                    if toggle.icon_name().is_none() {
+                        toggle.set_label(&s);
+                    }
+                    toggle_name(toggle, &s);
+                }
+                // A symbol before the role: held on the box for the swap.
+                (NativeWidget::Checkbox(check), Prop::Symbol, Value::I64(symbol)) => unsafe {
+                    gtk4::prelude::ObjectExt::set_data(check, "kaya-toggle-symbol", symbol);
+                },
+                (NativeWidget::Toggle(toggle), Prop::Symbol, Value::I64(symbol)) => {
+                    toggle_symbol(toggle, symbol);
+                }
                 (NativeWidget::Checkbox(check), Prop::Checked, Value::Bool(b)) => {
                     core.apply_quiet.set(true);
                     check.set_active(b);
@@ -16501,6 +16550,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Switch(switch), Prop::Checked, Value::Bool(b)) => {
                     core.apply_quiet.set(true);
                     switch.set_active(b);
+                    core.apply_quiet.set(false);
+                }
+                (NativeWidget::Toggle(toggle), Prop::Checked, Value::Bool(b)) => {
+                    core.apply_quiet.set(true);
+                    gtk4::prelude::ToggleButtonExt::set_active(toggle, b);
                     core.apply_quiet.set(false);
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
@@ -16772,6 +16826,36 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Switch(_), Prop::Role, Value::I64(role))
                     if role == i64::from(crate::wire::ROLE_SWITCH) => {}
+                (NativeWidget::Checkbox(check), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_TOGGLE) =>
+                {
+                    use gtk4::prelude::{ButtonExt, CheckButtonExt, ObjectExt, ToggleButtonExt};
+                    let toggle = gtk4::ToggleButton::new();
+                    let title = check.label().map(|l| l.to_string()).unwrap_or_default();
+                    core.apply_quiet.set(true);
+                    toggle.set_active(check.is_active());
+                    core.apply_quiet.set(false);
+                    match unsafe { check.data::<i64>("kaya-toggle-symbol") } {
+                        Some(symbol) => toggle_symbol(&toggle, unsafe { *symbol.as_ref() }),
+                        None => toggle.set_label(&title),
+                    }
+                    toggle_name(&toggle, &title);
+                    let sink = core.occurrences.clone();
+                    let quiet = core.apply_quiet.clone();
+                    let tag = core
+                        .widget_tags
+                        .get(&id.0)
+                        .cloned()
+                        .expect("checkboxes carry a tag");
+                    toggle.connect_toggled(move |b| {
+                        if !quiet.get() {
+                            sink.send_toggle_tag(&tag, b.is_active());
+                        }
+                    });
+                    swap_control(core, id, NativeWidget::Toggle(toggle));
+                }
+                (NativeWidget::Toggle(_), Prop::Role, Value::I64(role))
+                    if role == i64::from(crate::wire::ROLE_TOGGLE) => {}
                 (NativeWidget::Label(label), Prop::Role, Value::I64(role))
                     if role == i64::from(crate::wire::ROLE_LINK) =>
                 {
@@ -20605,6 +20689,8 @@ impl crate::harness::Stage for GtkStage {
                 None => match want {
                     atspi::Role::Button => "button",
                     atspi::Role::CheckBox => "checkbox",
+                    // The toggle role's GtkToggleButton (docs/media-player-plan.md M8).
+                    atspi::Role::ToggleButton => "toggle",
                     // The platform's own word for a link, unlike the switch
                     // above it (docs/tasks-s2-plan.md T3).
                     atspi::Role::Link => "link",

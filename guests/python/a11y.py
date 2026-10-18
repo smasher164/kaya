@@ -37,6 +37,11 @@ with app.window(title="a11y"):
         spoken = kaya.signal("Before")
         kaya.label(text="Spoken").a11y_id("spoken").a11y_label(spoken)
         kaya.button("Rename", on_click=lambda: spoken.set("After")).a11y_id("rename")
+        favorite = kaya.signal("favorite off")
+        kaya.checkbox("Favorite",
+                      on_toggle=lambda on: favorite.set("favorite on" if on else "favorite off")) \
+            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE).a11y_id("favorite")
+        kaya.label(bind=favorite).a11y_id("favorite_state")
     form.a11y_id("form").a11y_label("Form")
 
 sys.exit(app.run())

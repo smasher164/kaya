@@ -1623,6 +1623,11 @@
 #define KAYA_ROLE_COMPOSER 8
 
 /**
+ * A checkbox drawn as the platform's toggle button (docs/media-player-plan.md M8).
+ */
+#define KAYA_ROLE_TOGGLE 9
+
+/**
  * The tint enum's values (spec enum "tint"; docs/tints-plan.md T1): what
  * a filled container's surface MEANS, each backend lowering it to the
  * platform's own fill and foreground pair.

@@ -146,6 +146,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -191,6 +192,7 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
@@ -2890,7 +2892,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x3c2971158b154feeuL
+    private const val SPEC_HASH: ULong = 0xb281543d9811b0e5uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3270,6 +3272,7 @@ object KayaCompose {
     const val ROLE_SWITCH = 6L
     const val ROLE_LINK = 7L
     const val ROLE_COMPOSER = 8L
+    const val ROLE_TOGGLE = 9L
     // THE SEMANTIC ICON VOCABULARY (spec enum "symbol";
     // docs/styling-plan.md D6). Long, like the role values: the prop
     // rides as an i64 and the model's field is what the render arms
@@ -3364,6 +3367,16 @@ object KayaCompose {
 
     /** The glyph for a wire symbol value. */
     fun symbolIcon(value: Long): ImageVector? = SYMBOLS.firstOrNull { it.first == value }?.third
+
+    /** A toggle button's glyph while checked, where the symbol has a filled
+     * form (docs/media-player-plan.md M8). */
+    val SYMBOLS_ON: List<Pair<Long, ImageVector>> = listOf(
+        Pair(SYMBOL_FAVORITE, Icons.Default.Favorite),
+    )
+
+    /** The glyph a toggle button draws: its symbol's, or the filled form while on. */
+    fun toggleIcon(value: Long, on: Boolean): ImageVector? =
+        (if (on) SYMBOLS_ON.firstOrNull { it.first == value }?.second else null) ?: symbolIcon(value)
 
     /** Is this string one of the twenty names — the question that tells
      * a symbol's description apart from any OTHER content description a
@@ -18129,9 +18142,28 @@ private fun KayaRenderCore(
             // Material's Switch and published as Role.Switch. A role with
             // no arm is REFUSED, the label arm's rule.
             val asSwitch = node.role == KayaCompose.ROLE_SWITCH
-            check(node.role == 0L || asSwitch) {
+            val asToggle = node.role == KayaCompose.ROLE_TOGGLE
+            check(node.role == 0L || asSwitch || asToggle) {
                 "kaya: checkbox role ${node.role} has no compose arm"
             }
+            // THE TOGGLE ROLE (docs/media-player-plan.md M8): Material's icon
+            // toggle button around the symbol's glyph, filled while on.
+            // compose-ui has no toggle-button Role (IconToggleButton publishes
+            // Role.Checkbox), so the word rides KayaAxKind, the link's shape.
+            if (asToggle) {
+                IconToggleButton(
+                    checked = node.checked,
+                    onCheckedChange = { newValue ->
+                        node.checked = newValue
+                        KayaPresent.emitToggled(node.tag, newValue)
+                    },
+                    modifier = boxFill.then(a11y).semantics { this[KayaAxKind] = "toggle" },
+                ) {
+                    val icon = KayaCompose.toggleIcon(node.symbol, node.checked)
+                    if (node.symbol != 0L && icon != null) Icon(icon, contentDescription = node.text)
+                    else Text(node.text)
+                }
+            } else {
             // Uncontrolled toward the app, the entry's shape. The TOGGLE
             // LIVES ON THE ROW and the box takes onCheckedChange = null:
             // a box with its own handler is independently focusable and
@@ -18158,6 +18190,7 @@ private fun KayaRenderCore(
                     Checkbox(checked = node.checked, onCheckedChange = null)
                 }
                 Text(node.text)
+            }
             }
         }
         KayaCompose.KIND_SLIDER -> KayaSliderSurface(node, boxFill, a11y)

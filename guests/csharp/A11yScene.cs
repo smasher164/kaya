@@ -73,6 +73,13 @@ static class A11yScene
                 tx.SetA11yId(
                     tx.Button("Rename", onClick: inner => inner.Write(spoken, "After")),
                     "rename");
+                var favorite = tx.Signal("favorite off");
+                var heart = tx.Checkbox("Favorite",
+                    onToggle: (inner, on) => inner.Write(favorite, on ? "favorite on" : "favorite off"));
+                tx.SetRole(heart, Role.Toggle);
+                tx.SetSymbol(heart, Symbol.Favorite);
+                tx.SetA11yId(heart, "favorite");
+                tx.SetA11yId(tx.Label(bind: favorite), "favorite_state");
                 return form;
             });
             tx.SetA11yId(form, "form");

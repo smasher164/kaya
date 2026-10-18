@@ -1514,6 +1514,7 @@ pub(crate) const ROLE_PLAIN: u32 = 5;
 pub(crate) const ROLE_SWITCH: u32 = 6;
 pub(crate) const ROLE_LINK: u32 = 7;
 pub(crate) const ROLE_COMPOSER: u32 = 8;
+pub(crate) const ROLE_TOGGLE: u32 = 9;
 
 pub(crate) const TINT_ACCENT: u32 = 1;
 pub(crate) const TINT_SUCCESS: u32 = 2;

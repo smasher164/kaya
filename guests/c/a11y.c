@@ -34,7 +34,10 @@
 #define W_OK 24
 #define W_SPOKEN 25
 #define W_RENAME 26
+#define W_FAVORITE 27
+#define W_FAVORITE_STATE 28
 #define SIG_SPOKEN 1
+#define SIG_FAVORITE 2
 
 /* A 2x2 RGB PNG (red/green over blue/white), embedded as source. */
 static const uint8_t TEST_PNG[75] = {
@@ -149,6 +152,15 @@ static void build_scene(void) {
     kaya_tx_create_widget(&tx, W_RENAME, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_RENAME, "Rename");
     kaya_tx_set_a11y_id(&tx, W_RENAME, "rename");
+    kaya_tx_create_widget(&tx, W_FAVORITE, KAYA_KIND_CHECKBOX);
+    kaya_tx_set_text(&tx, W_FAVORITE, "Favorite");
+    kaya_tx_set_role(&tx, W_FAVORITE, KAYA_ROLE_TOGGLE);
+    kaya_tx_set_symbol(&tx, W_FAVORITE, KAYA_SYMBOL_FAVORITE);
+    kaya_tx_set_a11y_id(&tx, W_FAVORITE, "favorite");
+    kaya_tx_create_signal(&tx, SIG_FAVORITE, kaya_str("favorite off"));
+    kaya_tx_create_widget(&tx, W_FAVORITE_STATE, KAYA_KIND_LABEL);
+    kaya_tx_bind_text(&tx, W_FAVORITE_STATE, SIG_FAVORITE);
+    kaya_tx_set_a11y_id(&tx, W_FAVORITE_STATE, "favorite_state");
 
     kaya_tx_add_child(&tx, W_FORM, W_SAVE);
     kaya_tx_add_child(&tx, W_FORM, W_DETAILS);
@@ -166,6 +178,8 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_FORM, W_ACTIONS);
     kaya_tx_add_child(&tx, W_FORM, W_SPOKEN);
     kaya_tx_add_child(&tx, W_FORM, W_RENAME);
+    kaya_tx_add_child(&tx, W_FORM, W_FAVORITE);
+    kaya_tx_add_child(&tx, W_FORM, W_FAVORITE_STATE);
     {
         size_t start = kaya_wire_begin(&tx, KAYA_TX_SET_WINDOW_PROP);
         kaya_wire_u64(&tx, 0);
@@ -190,9 +204,14 @@ static void *app(void *arg) {
         if (size == KAYA_OCCURRENCE_WOKEN)
             continue; /* no record; rec is NULL */
         uint64_t id;
-        KayaVal keys[2];
+        KayaVal keys[2], payload;
         uint32_t n_keys;
-        if (kaya_parse_click(rec, &id, keys, 2, &n_keys) && id == W_RENAME) {
+        if (kaya_parse_toggled(rec, &id, keys, 2, &n_keys, &payload) && id == W_FAVORITE) {
+            uint8_t buf[256];
+            KayaTx tx = {buf, 0, sizeof buf};
+            kaya_tx_write_signal(&tx, SIG_FAVORITE, kaya_str(payload.i ? "favorite on" : "favorite off"));
+            kaya_submit(tx.buf, tx.len);
+        } else if (kaya_parse_click(rec, &id, keys, 2, &n_keys) && id == W_RENAME) {
             uint8_t buf[256];
             KayaTx tx = {buf, 0, sizeof buf};
             kaya_tx_write_signal(&tx, SIG_SPOKEN, kaya_str("After"));

@@ -747,6 +747,9 @@ enum Role : long
     /// A row drawn as ONE text field in the platform's own style around its
     /// field and buttons (docs/composer-plan.md §4).
     Composer = KayaWire.RoleComposer,
+    /// A checkbox drawn as the platform's toggle button, its glyph its
+    /// Symbol (docs/media-player-plan.md M8).
+    Toggle = KayaWire.RoleToggle,
 }
 
 /// What an open dialog offers (docs/photo-attach-plan.md §1): Images opens

@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x3c2971158b154fee
+let kayaSpecHash: UInt64 = 0xb281543d9811b0e5
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -260,6 +260,7 @@ private let roleHeading: Int64 = 3
 private let roleCaption: Int64 = 4
 private let rolePlain: Int64 = 5
 private let roleComposer: Int64 = 8
+private let roleToggle: Int64 = 9
 private let roleSwitch: Int64 = 6
 private let roleLink: Int64 = 7
 /// THE SEMANTIC ICON VOCABULARY (spec enum "symbol"). APPEND-ONLY wire
@@ -491,6 +492,18 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
 /// the core disagree, which the spec hash exists to make impossible.
 func kayaSymbolName(_ value: Int64) -> String? {
     kayaSymbolTable.first { $0.value == value }?.name
+}
+
+/// A toggle button's glyph while checked, where the symbol has a filled form
+/// (docs/media-player-plan.md M8); tools/check-symbols.py holds `sf`.
+let kayaSymbolOnTable: [(value: Int64, sf: String)] = [
+    (symbolFavorite, "heart.fill"),
+]
+
+/// The glyph a toggle button draws: its symbol's, or the filled form while on.
+func kayaToggleSF(_ value: Int64, on: Bool) -> String? {
+    if on, let filled = kayaSymbolOnTable.first(where: { $0.value == value }) { return filled.sf }
+    return kayaSFSymbol(value)
 }
 
 /// The SF Symbols spelling for a wire symbol value.
@@ -7542,7 +7555,8 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         case kAXTextFieldRole, kAXTextAreaRole: return "field"
         // AppKit publishes the switch style as AXCheckBox with the AXSwitch
         // subrole (docs/tasks-s2-plan.md T1): the subrole is the word.
-        case kAXCheckBoxRole: return subrole == "AXSwitch" ? "switch" : "checkbox"
+        case kAXCheckBoxRole:
+            return subrole == "AXSwitch" ? "switch" : subrole == "AXToggle" ? "toggle" : "checkbox"
         case kAXSliderRole: return "slider"
         // NSDatePicker publishes ONE role for a date and a time picker alike
         // (measured 2026-09-04 on the pickers scene): the closed set's
@@ -7660,7 +7674,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
     /// is the count KAYA_AX_COUNT reports per identifier walk.
     private var kayaAxCopyCount = 0
 
-    private func kayaAxRead(_ identifier: String, declaredSwitch: Bool = false) -> String? {
+    private func kayaAxRead(_ identifier: String, declaredRole: Int64 = 0) -> String? {
         guard !identifier.isEmpty else { return nil }
         // WAIT FOR THE WINDOW, ON THE EVENT — never on a clock: kayaAwaitWindow
         // parks on the registration signal, because an AX call landing during
@@ -8080,15 +8094,15 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
     /// SPECIFIC signals are weighed before `.button`.
     /// UIKit has one control for both, so the word follows the declared role
     /// (docs/tasks-s2-plan.md T1).
-    private func kayaAxRole(_ element: NSObject, declaredSwitch: Bool = false) -> String {
+    private func kayaAxRole(_ element: NSObject, declaredRole: Int64 = 0) -> String {
         let traits = element.accessibilityTraits
         // A Toggle publishes button|toggleButton (traits
         // 9007199254740993 = 1 | 1<<53, measured 2026-07-25). The trait
         // is iOS 17; below that the switch is only its class.
         if #available(iOS 17.0, *), traits.contains(.toggleButton) {
-            return declaredSwitch ? "switch" : "checkbox"
+            return declaredRole == roleSwitch ? "switch" : declaredRole == roleToggle ? "toggle" : "checkbox"
         }
-        if element is UISwitch { return declaredSwitch ? "switch" : "checkbox" }
+        if element is UISwitch { return declaredRole == roleSwitch ? "switch" : "checkbox" }
         if traits.contains(.link) { return "link" }
         // A compact UIDatePicker is the accessibility element itself and
         // publishes NO traits at all (traits 0, elements 0, measured
@@ -8219,7 +8233,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         DispatchQueue.main.async { kayaExpanderRepublish() }
     }
 
-    private func kayaAxRead(_ identifier: String, declaredSwitch: Bool = false) -> String? {
+    private func kayaAxRead(_ identifier: String, declaredRole: Int64 = 0) -> String? {
         guard !identifier.isEmpty else { return nil }
         // The tree materializes asynchronously after the switch flips;
         // the step's bounded retry is what waits for it (no sleep here —
@@ -8250,7 +8264,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
                             .lazy
                             .compactMap { $0 }
                             .first { !$0.isEmpty } ?? ""
-                        return kayaAxRole(hit, declaredSwitch: declaredSwitch) + "/" + spoken
+                        return kayaAxRole(hit, declaredRole: declaredRole) + "/" + spoken
                     }
                 }
             }
@@ -13993,9 +14007,9 @@ private func kayaRunScript(_ script: String) {
                 // ITSELF runs on the harness thread ON PURPOSE: requests are
                 // serviced BY the main runloop, so querying from inside
                 // main.sync leaves SwiftUI's elements coming back empty.
-                let resolved = DispatchQueue.main.sync { () -> (String, Bool)? in
+                let resolved = DispatchQueue.main.sync { () -> (String, Int64)? in
                     guard let node = kayaAnyTarget(parts[1]) else { return nil }
-                    return (node.a11yId, node.role == roleSwitch)
+                    return (node.a11yId, node.role)
                 }
                 let identifier = resolved?.0
                 let gotAx: String
@@ -14003,8 +14017,8 @@ private func kayaRunScript(_ script: String) {
                 case .none: gotAx = "<no such target>"
                 case .some((let ident, _)) where ident.isEmpty:
                     gotAx = "<no a11y_id authored on this widget>"
-                case .some((let ident, let declaredSwitch)):
-                    gotAx = kayaAxRead(ident, declaredSwitch: declaredSwitch)
+                case .some((let ident, let declaredRole)):
+                    gotAx = kayaAxRead(ident, declaredRole: declaredRole)
                         ?? "<not in the accessibility tree>"
                 }
                 if gotAx == wantAx {
@@ -19533,6 +19547,34 @@ struct KayaSymbolButton: View {
     }
 }
 
+/// The toggle button (docs/media-player-plan.md M8): a checkbox drawn as the
+/// platform's toggle button around its symbol's glyph, filled while on where
+/// the symbol has a filled form; the title stays its accessible name.
+struct KayaToggleButton: View {
+    let node: KayaNode
+
+    var body: some View {
+        Toggle(
+            isOn: Binding(
+                get: { node.checked },
+                set: { on in
+                    kayaUserWrite { node.checked = on }
+                    KayaHost.emitToggled(node.tag, on)
+                })
+        ) {
+            if node.symbol != 0 {
+                Label(node.text, systemImage: kayaToggleSF(node.symbol, on: node.checked) ?? "questionmark")
+                    .labelStyle(.iconOnly)
+            } else {
+                Text(node.text)
+            }
+        }
+        .toggleStyle(.button)
+        .accessibilityLabel(node.text)
+        .fixedSize()
+    }
+}
+
 /// Set for the ONE button that is a run card's whole content: Settings'
 /// "Sign Out" row — centred across the card, the role's tint, no bezel
 /// (docs/adaptive-layout-plan.md D7.5, the run card's interior).
@@ -24259,6 +24301,9 @@ struct KayaRender: View {
                 return d[.firstTextBaseline]
             }
             .background(KayaLabelFrameReader(id: node.id))
+        case kindCheckbox where node.role == roleToggle:
+            KayaToggleButton(node: node)
+                .background(KayaLabelFrameReader(id: node.id))
         case kindCheckbox:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (SwiftUI needs the binding), and

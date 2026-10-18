@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x3c2971158b154fee
+	SpecHash uint64 = 0xb281543d9811b0e5
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -250,6 +250,7 @@ const (
 	RoleSwitch Role = 6
 	RoleLink Role = 7
 	RoleComposer Role = 8
+	RoleToggle Role = 9
 	SymbolAdd Symbol = 1
 	SymbolRemove Symbol = 2
 	SymbolDelete Symbol = 3
@@ -823,6 +824,8 @@ func (r Role) String() string {
 		return "link"
 	case RoleComposer:
 		return "composer"
+	case RoleToggle:
+		return "toggle"
 	}
 	return "Role(" + strconv.FormatInt(int64(r), 10) + ")"
 }

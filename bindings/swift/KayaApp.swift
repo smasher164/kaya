@@ -553,6 +553,9 @@ public enum KayaRole: Int64 {
     /// A row drawn as ONE text field in the platform's own style around its
     /// field and buttons (docs/composer-plan.md §4).
     case composer = 8
+    /// A checkbox drawn as the platform's toggle button, its glyph its
+    /// symbol (docs/media-player-plan.md M8).
+    case toggle = 9
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the `platform` spec
@@ -5270,13 +5273,15 @@ public final class KayaAppTx {
 
     @discardableResult
     public func checkbox(
-        _ text: String? = nil, checked: Bool? = nil,
+        _ text: String? = nil, checked: Bool? = nil, role: KayaRole? = nil, symbol: KayaSymbol? = nil,
         onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_CHECKBOX))
         if let text { setText(w, text) }
         if let checked { setChecked(w, checked) }
+        if let role { setRole(w, role) }
+        if let symbol { setSymbol(w, symbol) }
         if let onToggle { app.onToggle(w, onToggle) }
         if let grow { setGrow(w, grow) }
         return w

@@ -8024,6 +8024,10 @@ pub enum Role {
     /// style; a prominent symbol-only button in or beside it is its send,
     /// undrawn on macOS where Return sends (docs/composer-plan.md §4, §5).
     Composer = 8,
+    /// A checkbox drawn as the platform's toggle button, its glyph the
+    /// [`Symbol`] it declares, filled while checked where the platform has a
+    /// filled form (docs/media-player-plan.md M8).
+    Toggle = 9,
 }
 
 /// Which platform a per-platform brand value is for (spec enum "platform";

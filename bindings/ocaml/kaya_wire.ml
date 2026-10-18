@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x3c2971158b154feeL
+let spec_hash = 0xb281543d9811b0e5L
 
 let value_bool = 1
 let value_i64 = 2
@@ -266,6 +266,7 @@ let role_plain = 5
 let role_switch = 6
 let role_link = 7
 let role_composer = 8
+let role_toggle = 9
 let symbol_add = 1
 let symbol_remove = 2
 let symbol_delete = 3

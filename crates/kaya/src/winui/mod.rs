@@ -141,6 +141,9 @@ enum NativeWidget {
         check: CheckBox,
         caption: TextBlock,
         switch: Option<ToggleSwitch>,
+        /// `role toggle` (docs/media-player-plan.md M8): a ToggleButton that
+        /// replaces the CheckBox in the tree, the switch's shape.
+        toggle: Option<ToggleButton>,
     },
     Slider(Slider),
     Button { button: Button, caption: TextBlock },
@@ -223,9 +226,10 @@ impl NativeWidget {
             // THE OUTER CONTROL ONCE A ROLE SWAPPED IT (T1, T3): what the
             // parent lays out, what UIA describes and what the a11y props
             // land on. The registry keeps the inner one — see the variants.
-            NativeWidget::Checkbox { check, switch, .. } => match switch {
-                Some(switch) => switch.cast(),
-                None => check.cast(),
+            NativeWidget::Checkbox { check, switch, toggle, .. } => match (switch, toggle) {
+                (Some(switch), _) => switch.cast(),
+                (None, Some(toggle)) => toggle.cast(),
+                (None, None) => check.cast(),
             },
             NativeWidget::Slider(slider) => slider.cast(),
             NativeWidget::Button { button, .. } => button.cast(),
@@ -1227,6 +1231,29 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
         &HSTRING::from(name),
     )?;
     Ok(Some(element))
+}
+
+/// A toggle button's glyph (docs/media-player-plan.md M8): the symbol's, or
+/// its filled form while on where it has one; the value rides the button's
+/// Tag so the Checked and Unchecked handlers can redraw it.
+fn toggle_symbol(button: &ToggleButton, symbol: i64, on: bool) -> windows_core::Result<()> {
+    button.SetTag(&PropertyValue::CreateInt64(symbol)?)?;
+    toggle_glyph(button, on)
+}
+
+fn toggle_glyph(button: &ToggleButton, on: bool) -> windows_core::Result<()> {
+    let Ok(tag) = button.Tag() else { return Ok(()) };
+    let Ok(symbol) = tag.cast::<IReference<i64>>().and_then(|r| r.Value()) else { return Ok(()) };
+    let filled = on && symbol == i64::from(crate::wire::SYMBOL_FAVORITE);
+    let icon = if filled {
+        let icon = FontIcon::new()?;
+        icon.SetGlyph(&HSTRING::from("\u{EB52}"))?;
+        icon.cast::<IconElement>()?
+    } else {
+        button_icon(symbol, false)?
+            .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Fluent spelling in fluent_icon"))
+    };
+    button.SetContent(&icon)
 }
 
 /// The picture types WIC decodes out of the box, which an images request
@@ -14393,7 +14420,7 @@ fn apply_control_role(
     role: i64,
 ) -> windows_core::Result<bool> {
     if role == i64::from(crate::wire::ROLE_SWITCH) {
-        let Some(NativeWidget::Checkbox { check, caption, switch }) = core.widgets.get(&id) else {
+        let Some(NativeWidget::Checkbox { check, caption, switch, .. }) = core.widgets.get(&id) else {
             return Ok(false);
         };
         if switch.is_some() {
@@ -14451,6 +14478,49 @@ fn apply_control_role(
         write?;
         if let Some(NativeWidget::Checkbox { switch, .. }) = core.widgets.get_mut(&id) {
             *switch = Some(toggle);
+        }
+        return Ok(true);
+    }
+    if role == i64::from(crate::wire::ROLE_TOGGLE) {
+        let Some(NativeWidget::Checkbox { check, caption, toggle, .. }) = core.widgets.get(&id) else {
+            return Ok(false);
+        };
+        if toggle.is_some() {
+            return Ok(true);
+        }
+        let (check, caption) = (check.clone(), caption.clone());
+        let button = ToggleButton::new()?;
+        let on = check.IsChecked().and_then(|held| held.Value()).unwrap_or(false);
+        // The checkbox's own occurrence behind its echo guard, the glyph
+        // filled while on where the symbol has a filled form.
+        for (checked, sink, tag, quiet) in [true, false].map(|c| {
+            (c, core.occurrences.clone(), core.widget_tags.get(&id.0).cloned().unwrap_or_default(), core.apply_quiet.clone())
+        }) {
+            let handler = RoutedEventHandler::new(move |sender, _| {
+                if let Some(sender) = sender.as_ref() {
+                    toggle_glyph(&sender.cast::<ToggleButton>()?, checked)?;
+                }
+                if !quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                    sink.send_toggle_tag(&tag, checked);
+                }
+                Ok(())
+            });
+            if checked { button.Checked(&handler)? } else { button.Unchecked(&handler)? };
+        }
+        swap_element(core, id, &check.cast()?, &button.cast()?)?;
+        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(&button, &caption.Text()?)?;
+        if let Some(symbol) = core.symbol_values.get(&id).copied() {
+            toggle_symbol(&button, symbol, on)?;
+        } else {
+            check.SetContent(None::<&windows_core::IInspectable>)?;
+            button.SetContent(&caption)?;
+        }
+        core.apply_quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+        let write = button.SetIsChecked(&PropertyValue::CreateBoolean(on)?.cast::<IReference<bool>>()?);
+        core.apply_quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+        write?;
+        if let Some(NativeWidget::Checkbox { toggle, .. }) = core.widgets.get_mut(&id) {
+            *toggle = Some(button);
         }
         return Ok(true);
     }
@@ -15899,7 +15969,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     });
                     check.Unchecked(&unchecked)?;
                     core.checkboxes.push(check.clone());
-                    NativeWidget::Checkbox { check, caption, switch: None }
+                    NativeWidget::Checkbox { check, caption, switch: None, toggle: None }
                 }
                 WidgetKind::Slider => {
                     // WinUI raises ValueChanged for programmatic
@@ -17823,10 +17893,22 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (_, Prop::CanUndo | Prop::CanRedo, Value::Bool(_)) => {
                     refresh_role_enablement(core);
                 }
-                (NativeWidget::Checkbox { caption, switch, .. }, Prop::Text, Value::Str(s)) => {
+                (NativeWidget::Checkbox { caption, switch, toggle, .. }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
                     if let Some(toggle) = switch {
                         switch_caption(toggle, caption)?;
+                    }
+                    if let Some(button) = toggle {
+                        bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(button, &caption.Text()?)?;
+                    }
+                }
+                // A symbol on either side of `role toggle`: held for the role
+                // arm, drawn once the ToggleButton is there.
+                (NativeWidget::Checkbox { toggle, .. }, Prop::Symbol, Value::I64(symbol)) => {
+                    core.symbol_values.insert(id, symbol);
+                    if let Some(button) = toggle {
+                        let on = button.IsChecked().and_then(|held| held.Value()).unwrap_or(false);
+                        toggle_symbol(button, symbol, on)?;
                     }
                 }
                 // THE LINK'S DESTINATION (docs/tasks-s2-plan.md T3). Recorded
@@ -17877,16 +17959,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Secure(field), Prop::ContentType, Value::I64(word)) => {
                     field.SetInputScope(&input_scope(content_scope(true, word).0)?)?;
                 }
-                (NativeWidget::Checkbox { check, switch, .. }, Prop::Checked, Value::Bool(b)) => {
+                (NativeWidget::Checkbox { check, switch, toggle, .. }, Prop::Checked, Value::Bool(b)) => {
                     let boxed: IReference<bool> = PropertyValue::CreateBoolean(b)?.cast()?;
                     core.apply_quiet
                         .store(true, std::sync::atomic::Ordering::Relaxed);
                     // THE CONTROL THE USER SEES: a `role switch` checkbox is a
                     // ToggleSwitch and the detached CheckBox beside it moves
                     // nothing (docs/tasks-s2-plan.md T1).
-                    let write = match switch {
-                        Some(switch) => switch.SetIsOn(b),
-                        None => check.SetIsChecked(&boxed),
+                    let write = match (switch, toggle) {
+                        (Some(switch), _) => switch.SetIsOn(b),
+                        (None, Some(button)) => button.SetIsChecked(&boxed),
+                        (None, None) => check.SetIsChecked(&boxed),
                     };
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
@@ -24371,20 +24454,17 @@ impl crate::harness::Stage for WinUiStage {
             // ToggleSwitch, and driving the detached CheckBox beside it would
             // emit `toggled` with nothing on the screen moving — a green leg
             // over a switch that never flipped (docs/tasks-s2-plan.md T1).
-            let switch = core.widgets.values().find_map(|widget| match widget {
-                NativeWidget::Checkbox { check: held, switch: Some(switch), .. }
-                    if *held == check =>
-                {
-                    Some(switch.clone())
+            let face = core.widgets.values().find_map(|widget| match widget {
+                NativeWidget::Checkbox { check: held, switch, toggle, .. } if *held == check => {
+                    Some((switch.clone(), toggle.clone()))
                 }
                 _ => None,
             });
-            match switch {
-                Some(switch) => switch.SetIsOn(on)?,
-                None => {
-                    let boxed: IReference<bool> = PropertyValue::CreateBoolean(on)?.cast()?;
-                    check.SetIsChecked(&boxed)?;
-                }
+            let boxed: IReference<bool> = PropertyValue::CreateBoolean(on)?.cast()?;
+            match face {
+                Some((Some(switch), _)) => switch.SetIsOn(on)?,
+                Some((None, Some(button))) => button.SetIsChecked(&boxed)?,
+                _ => check.SetIsChecked(&boxed)?,
             }
             Ok(())
         });
@@ -28935,6 +29015,11 @@ fn ax_role(
         // guest 2026-09-28) while the shared verdict is `field`, the search
         // field's precedent (docs/number-field-plan.md §6).
         "field"
+    } else if kind == AutomationControlType::Button && toggles && class == "ToggleButton" {
+        // THE TOGGLE BUTTON (docs/media-player-plan.md M8): UIA publishes it
+        // as the switch does, `Button` with the toggle pattern, so the peer's
+        // class tells the two apart, the pickers' precedent above.
+        "toggle"
     } else if kind == AutomationControlType::Button && toggles {
         // THE SWITCH (docs/tasks-s2-plan.md T1), and its evidence is UIA's
         // own: a ToggleSwitch publishes `Button` with the TOGGLE PATTERN,
