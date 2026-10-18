@@ -710,7 +710,11 @@ bottom can be slightly lower": the coloured area runs down until the gap
 between its edge and the track table equals the table's side margin. The
 vivid pick needs the cover's main colours, which kaya does not report
 (image_dominant answers the most common one); whether to add an
-image_palette beside it is asked separately. The fade line at the header's
+image_palette beside it is asked separately. RULED 2026-10-18 (the
+maintainer: "definitely yes to image_palette"): kaya adds image_palette beside
+image_dominant, the picture's main colours with their shares, in the core and
+all nine bindings and the C floor; the header picks the most vivid colour with
+enough share. The fade line at the header's
 edge and the Mac's colour stopping under the title bar stay as they are.
 
 ## §6: Build order
