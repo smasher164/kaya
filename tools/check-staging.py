@@ -461,6 +461,55 @@ def check(root):
              "kaya_prepare_process() — kaya_run's environment writes then race "
              "CPython's read of environ (docs/traps.md, the iOS Python host's "
              "environment race)")
+    # --- THE ANDROID PYTHON HOST'S ENVIRONMENT IS WRITTEN BEFORE CPYTHON'S
+    # THREAD STARTS, the same race one host over (docs/traps.md, the iOS
+    # Python host's environment race): the intent's KAYA_* extras, TMPDIR
+    # and the attach, whose arm_state is kaya's own writes, all on the UI
+    # thread ahead of the Thread that runs KayaPy.run.
+    activity_rel = "android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt"
+    activity = (root / activity_rel).read_text(encoding="utf-8")
+
+    def body(text, start, end):
+        a = text.find(start)
+        b = text.find(end, a + 1) if a >= 0 else -1
+        return text[a:b] if a >= 0 and b > a else None
+
+    start_body = body(activity, "override fun start(context: Context)",
+                      "fun extractPython(")
+    create_body = body(activity, "override fun onCreate(",
+                       "override fun onNewIntent(")
+    if start_body is None or create_body is None:
+        fail(f"{activity_rel} has no GuestStart.start or onCreate this clause "
+             f"can find, so it reads a host it no longer describes")
+    else:
+        spawn = start_body.find("Thread {")
+        if spawn < 0:
+            fail(f"{activity_rel}'s GuestStart.start starts no Thread, so this "
+                 f"clause reads a host it no longer describes")
+        else:
+            for call, what in (('Os.setenv("TMPDIR"', "its TMPDIR write"),
+                               ("KayaRing.attach(", "KayaRing.attach, whose "
+                                "arm_state writes kaya's environment")):
+                at = start_body.find(call)
+                if at < 0 or at > spawn:
+                    fail(f"{activity_rel} starts CPython's thread before "
+                         f"{what} — the write then races CPython's read of "
+                         f"environ (docs/traps.md, the iOS Python host's "
+                         f"environment race)")
+        env_at = create_body.find("KayaEnv.fromIntent(intent)")
+        start_at = create_body.find("GuestStart.start(this)")
+        if start_at < 0:
+            fail(f"{activity_rel}'s onCreate never calls GuestStart.start(this)")
+        elif env_at < 0 or env_at > start_at:
+            fail(f"{activity_rel}'s onCreate starts the guest before "
+                 f"KayaEnv.fromIntent(intent) — the extras' setenv then races "
+                 f"CPython's read of environ")
+    android_rs = (root / "crates/kaya/src/android.rs").read_text(encoding="utf-8")
+    attach = body(android_rs, "fn Java_dev_kaya_KayaRing_attach(", "\n}\n")
+    if attach is None or "arm_state(" not in attach:
+        fail("crates/kaya/src/android.rs's KayaRing attach no longer calls "
+             "arm_state(, so the Android Python host's order above no longer "
+             "puts kaya's environment writes before CPython's thread")
 
     # ONCE, on the real tree: the shadows run this same clause and their
     # answer is the same module's.
@@ -477,7 +526,9 @@ def check(root):
 SHADOW_RELS = ["tools/deploy-win.py", "tools/lib/flightrec_lane.py",
                "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
-               "tools/scenes", "tools/guest", "guests/python", "tools/ios/pyhost.c"]
+               "tools/scenes", "tools/guest", "guests/python", "tools/ios/pyhost.c",
+               "android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt",
+               "crates/kaya/src/android.rs"]
 
 
 def shadow(name):
@@ -576,6 +627,37 @@ negative(
     r"^    kaya_prepare_process\(\);\n", "",
     "before it calls kaya_prepare_process()",
     "N5b (the iOS Python host booting CPython beside kaya's environment writes)")
+
+_ACTIVITY = "android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt"
+negative(
+    "N5c", "attached kaya after the Android Python thread", _ACTIVITY,
+    r"^(        KayaRing\.attach\(context, context\.filesDir\.absolutePath\)\n)"
+    r"((?:.*\n)*?        \}\.start\(\)\n)", r"\2\1",
+    "before KayaRing.attach",
+    "N5c (the Android Python host booting CPython beside the attach's "
+    "environment writes)")
+
+negative(
+    "N5d", "set TMPDIR after the Android Python thread", _ACTIVITY,
+    r'^(        Os\.setenv\("TMPDIR".*\n)((?:.*\n)*?        \}\.start\(\)\n)',
+    r"\2\1",
+    "before its TMPDIR write",
+    "N5d (the Android Python host setting TMPDIR beside CPython's init)")
+
+negative(
+    "N5e", "mapped the intent's extras after the guest started", _ACTIVITY,
+    r"^(        KayaEnv\.fromIntent\(intent\)\n)(\n        GuestStart\.start\(this\)\n)",
+    r"\2\1",
+    "starts the guest before KayaEnv.fromIntent(intent)",
+    "N5e (the Android Python host mapping KAYA_* extras beside CPython's init)")
+
+negative(
+    "N5f", "took arm_state out of the KayaRing attach", "crates/kaya/src/android.rs",
+    r"^(    crate::fmt::install_locale_knob\(\);\n)    arm_state\(&mut env, &state_root\);\n",
+    r"\1",
+    "no longer calls arm_state(",
+    "N5f (the attach the Android Python host's order relies on, without "
+    "kaya's environment writes)")
 
 # Both directions of the one-list census: a name dropped from the list,
 # and a file appearing on disk that the list does not know.

@@ -17712,11 +17712,26 @@ initializes, so the two raced: one music_headerdark-python leg died of
 SIGSEGV in `_platform_strchr` under `convertenviron`, with the main thread in
 `kaya::prefs::domain` under `act::arm` (crash report pyhost-2026-10-18-055416).
 kaya_prepare_process() is now a C export that does exactly what kaya_run does
-first, run once (a std::sync::Once), and the host calls it before
-pthread_create; kaya_run's own call is then a no-op.
+first, run once (an AtomicBool swap, so a second call returns at once),
+and the host calls it before pthread_create; kaya_run's own call is then a
+no-op.
+
+The Android Python host has the right order already (checked 2026-10-18):
+Android never runs kaya_run, and its door is KayaRing.attach, whose
+install_locale_knob and arm_state are all of kaya's environment writes on
+that platform. MainActivity.onCreate maps the intent's KAYA_* extras, then
+GuestStart.start sets TMPDIR and attaches on the UI thread, and only then
+starts the Thread that calls KayaPy.run. The writes left after that are
+onNewIntent's and a second onCreate's KayaEnv.fromIntent, which arrive
+while the guest is running, after Py_InitializeFromConfig has read environ.
+The desktop lanes run python itself, which is initialized before kaya is
+loaded.
 
 GUARD: check-staging refuses a pyhost.c whose pthread_create precedes its
-kaya_prepare_process() call, watched red as N5b.
+kaya_prepare_process() call, watched red as N5b; and an Android
+MainActivity.kt whose Thread starts before its TMPDIR write or
+KayaRing.attach, whose onCreate starts the guest before
+KayaEnv.fromIntent, or an attach without arm_state, watched red as N5c-N5f.
 
 ## The table measure's live row count (measured 2026-10-18)
 
