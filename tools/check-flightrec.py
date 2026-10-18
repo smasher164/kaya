@@ -1655,17 +1655,33 @@ def census_ios_hang_record(src):
             ('NSSelectorFromString("addAnimation:forKey:")', "the layer an animation is added to"),
             ("prevAdd(layer, addSel, anim, key)", "the replaced add still called"),
             ("KayaAnimationLedger.shared.added(layer, key as String?)", "the add recorded"),
-            ("let place = placed.removeValue(forKey: ObjectIdentifier(key))",
+            ("let place = objc_getAssociatedObject(key, KayaAnimationPlace.key) "
+             "as? KayaAnimationPlace",
              "the add's layer carried into its open start"),
+            ("objc_setAssociatedObject(anim, KayaAnimationPlace.key, entry, "
+             ".OBJC_ASSOCIATION_RETAIN_NONATOMIC)", "the add's layer kept on the animation itself"),
+            ("if place != nil {\n                startsPlaced += 1",
+             "how many starts carried their add's layer"),
+            ("Thread.callStackReturnAddresses", "the add's caller"),
             ('+ (gotNow[entry.id] ?? ""))', "the add's layer read beside each open start")):
         if want not in ledger:
             found.append(f"swift: KayaAnimationLedger lost {why} ({want.splitlines()[0]})")
+    if ledger.count("; added from \\(symbolicate(place.caller))") != 2:
+        found.append("swift: an open start whose add was seen no longer names the add's caller "
+                     "on both of its readings (layer alive, layer deallocated)")
+    if re.search(r"\[ObjectIdentifier: KayaAnimationPlace\]", ledger):
+        found.append("swift: KayaAnimationLedger keys an add's layer by the animation's address, "
+                     "which a later animation reuses once the first is freed, so a start reads "
+                     "another's layer or none (docs/traps.md, the animations-idle wait, "
+                     "2026-10-18)")
     for key in ("XCTest's animation tracking ", "XCTest IN PROGRESS", "XCTest not in progress",
                 "XCTest's notifier first seen at ", "for animations that started before it loaded",
                 "XCTest unread: ", "refused: ", "open since",
                 "main thread did not answer", "layers read at add: ",
                 "that layer has been deallocated", "is alive in no window",
-                "a window the scene does not list", "never seen added through"):
+                "a window the scene does not list", "never seen added through",
+                "starts carried the layer their add read", "; added from ",
+                " (the others: ", " WITH NO ADD SEEN"):
         if key not in ledger:
             found.append(f"swift: the reading no longer prints {key!r}, which "
                          f"flightrec_lane.ios_animation_reading keys on")
@@ -3102,7 +3118,17 @@ for label, rel, pattern, repl, want, check in (
          "the add recorded", census_ios_hang_record),
         ("NH20 an open start printed without its add's layer", SWIFTUI,
          r"\n +\+ \(gotNow\[entry\.id\] \?\? \"\"\)\)", ")",
-         "read beside each open start", census_ios_hang_record)):
+         "read beside each open start", census_ios_hang_record),
+        ("NH21 the add's layer back in an address-keyed table, as shipped", SWIFTUI,
+         r"(        private var startsPlaced = 0\n)",
+         r"\1        private var placed: [ObjectIdentifier: KayaAnimationPlace] = [:]\n",
+         "keys an add's layer by the animation's address", census_ios_hang_record),
+        ("NH22 the reading without how many starts carried their add", SWIFTUI,
+         r'starts carried the layer their add read"', 'starts"',
+         "starts carried the layer their add read", census_ios_hang_record),
+        ("NH23 an open start without its add's caller", SWIFTUI,
+         r'\n +\+ "; added from \\\(symbolicate\(place\.caller\)\)"', "",
+         "no longer names the add's caller", census_ios_hang_record)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 for label, name, want in (("NH13 iOS animations section unwritten", "animations",
@@ -3359,6 +3385,6 @@ for verb, _ in GTK_MEDIA_NOTES:
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(231 + (5 if DRIVES else 0))
+gate.negatives_ran(234 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

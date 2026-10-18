@@ -1054,7 +1054,7 @@ in docs/deferred.md.
    record names another bundle id, not held since the start, is an
    IDENTITY ADOPTED refusal (the fix is crates/kaya/src/ls_identity.rs,
    check-app-identity's C16 its static half); five cuts watched.
-   Two hundred and thirty-six watched negatives, counts printed),
+   Two hundred and thirty-nine watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

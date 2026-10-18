@@ -16158,8 +16158,8 @@ reads free space. The fix belongs on that path: restart the launcher
 after install, or refuse with the free space and the launcher's pinned
 count named, and it is held by android-leg-order's staging clause.
 
-## INVESTIGATE — XCTest waits 60 s for "animations idle" after a Return that commits a list row and removes the focused field (iOS, seen 2026-10-08 and 2026-10-12)
-KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, KayaAnimationPlace, addAnimation:forKey:, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
+## INVESTIGATE — XCTest waits 60 s for "animations idle" after a Return that commits a number field and hides the keyboard (iOS, seen 2026-10-08, 10-12, 10-16 and 10-18)
+KEY: animations idle, XCTAnimationsIdleNotifier, isAnimationInProgress, KayaAnimationLedger, KayaAnimationPlace, addAnimation:forKey:, startsPlaced, starts carried the layer their add read, added from, numberfield-swift, kayaDriverSlowReading, system_capture, ios_animation_reading, ios_system_log, ios_crash_reports, Lost connection to the application, timecode rowtime, xcuidrive type_b64
 
 docs/traps.md, "The iOS ceiling's stacks, and XCTest's 60 s animations-idle
 wait", has the mechanism and both sightings. Both were the same step:
@@ -16233,3 +16233,27 @@ layer is now deallocated, alive in no window (its topmost layer named), or in a
 window (hidden or not, listed by the scene or not), still carrying the animation
 or not. On the next sighting that line names the view; find what removed or
 paused it on the Return.
+
+The fourth sighting, 2026-10-18 (matrix 20261018T181343Z, `numberfield-swift`,
+the Return after `type "250"` on the LIVE field `number_field@amount`, whose
+commit clamps to 100): the same two `CASpringAnimation bounds.size duration
+0.3833` starts of the keyboard-hide state held XCTest's count (39 bounds.size
+starts on it, 37 stops; 540 started in the leg), the main thread answered in
+0 ms, and both read "never seen added through CALayer's addAnimation:forKey:".
+That sentence was not a measurement. The ledger kept each add's layer in a table
+keyed by the animation's address with a 400-entry FIFO, and a freed animation's
+address is reused, so past about 400 adds the trim deleted a newer animation's
+entry (or a start picked up a dead one's). The leg had made more than 400. So
+the sighting is also not limited to row fields: the field that keeps its place
+reproduces it. Since then the add's layer and its caller ride on the animation
+itself (an associated object), each reading says how many starts carried their
+add's layer and what the others were, each start event without one is marked
+`WITH NO ADD SEEN`, and an open start with its add names the call stack that
+added it (`added from ...`). A forced red with an endless animation started at
+the leg's third Return (478 starts in) read back with its layer, window and the
+stack through `+[UIView animateWithDuration:...]`; the reading said 452 of 479
+starts carried their layer and that the 27 others were all `no animation` (UIKit
+calling animationDidStart: with nil), so on this leg every real animation's add
+was seen (docs/traps.md, the animations-idle wait). On the next sighting a
+"never seen added" line is a real bypass of addAnimation:forKey:, and an
+"added from" line names the code that started the spring.

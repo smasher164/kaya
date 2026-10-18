@@ -9427,11 +9427,14 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
     /// the same way (class_replaceMethod, the replaced IMP called first-hand) and keeps
     /// the starts no stop has matched.
     final class KayaAnimationPlace {
+        static let key = UnsafeMutableRawPointer.allocate(byteCount: 1, alignment: 1)
         weak var layer: CALayer?
         let at: String
-        init(_ layer: CALayer, _ at: String) {
+        let caller: [UInt]
+        init(_ layer: CALayer, _ at: String, _ caller: [UInt]) {
             self.layer = layer
             self.at = at
+            self.caller = caller
         }
     }
 
@@ -9444,9 +9447,9 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
         private var started = 0
         private var stopped = 0
         private var unmatched = 0
+        private var startsPlaced = 0
+        private var unplaced: [String: Int] = [:]
         private var open: [(id: ObjectIdentifier, anim: AnyObject, at: String, step: String, what: String, xctest: Bool, placed: KayaAnimationPlace?)] = []
-        private var placed: [ObjectIdentifier: KayaAnimationPlace] = [:]
-        private var placedOrder: [ObjectIdentifier] = []
         private var events: [String] = []
         private var xctestSeen: String?
         private var xctestBlind: [String] = []
@@ -9502,10 +9505,16 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             seeXCTest(loaded)
             started += 1
             lastMove = Date()
-            let place = placed.removeValue(forKey: ObjectIdentifier(key))
+            let place = objc_getAssociatedObject(key, KayaAnimationPlace.key) as? KayaAnimationPlace
+            if place != nil {
+                startsPlaced += 1
+            } else {
+                let kind = (what.range(of: " of ").map { String(what[..<$0.lowerBound]) } ?? what) + " in step '\(step)'"
+                if unplaced[kind] != nil || unplaced.count < 40 { unplaced[kind, default: 0] += 1 }
+            }
             open.append((ObjectIdentifier(key), key, Self.clock(), step, what, loaded, place))
             lock.unlock()
-            note("start \(what)")
+            note("start \(what)\(place == nil ? " WITH NO ADD SEEN" : "")")
         }
 
         func ended(_ state: AnyObject, _ anim: AnyObject?, _ finished: Bool) {
@@ -9555,22 +9564,27 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             else { return }
             let site = Thread.isMainThread
                 ? Self.place(layer) : "\(type(of: layer)), added off the main thread"
-            let entry = KayaAnimationPlace(layer, "\(site) key \(key) at \(Self.clock())")
-            let id = ObjectIdentifier(anim)
-            lock.lock()
-            placed[id] = entry
-            placedOrder.append(id)
-            if placedOrder.count > 400 {
-                for gone in placedOrder.prefix(placedOrder.count - 400) { placed.removeValue(forKey: gone) }
-                placedOrder.removeFirst(placedOrder.count - 400)
+            let caller = Thread.callStackReturnAddresses.prefix(28).map { $0.uintValue }
+            let entry = KayaAnimationPlace(layer, "\(site) key \(key) at \(Self.clock())", caller)
+            objc_setAssociatedObject(anim, KayaAnimationPlace.key, entry, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        }
+
+        static func symbolicate(_ caller: [UInt]) -> String {
+            let names: [String] = caller.compactMap { pc in
+                var info = Dl_info()
+                guard dladdr(UnsafeRawPointer(bitPattern: pc), &info) != 0 else { return String(format: "0x%lx", pc) }
+                let image = info.dli_fname.map { (String(cString: $0) as NSString).lastPathComponent } ?? "?"
+                let symbol = info.dli_sname.map { String(cString: $0) } ?? String(format: "0x%lx", pc)
+                return "\(image) \(symbol)"
             }
-            lock.unlock()
+            let theirs = names.drop { $0.hasPrefix("libkaya_swiftui") || $0.contains("Thread") }
+            return theirs.prefix(14).joined(separator: " < ")
         }
 
         static func now(_ place: KayaAnimationPlace?, _ anim: AnyObject, _ listed: [UIWindow]) -> String {
             guard let place else { return "; never seen added through CALayer's addAnimation:forKey:" }
             guard let layer = place.layer else {
-                return "; added to \(place.at); that layer has been deallocated"
+                return "; added to \(place.at); that layer has been deallocated; added from \(symbolicate(place.caller))"
             }
             var root = layer
             while let up = root.superlayer { root = up }
@@ -9585,6 +9599,7 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
                     + (root === layer ? " (itself, with no superlayer)" : ""))
             return "; added to \(place.at); that layer now \(whereNow) and "
                 + (carried ? "still carries the animation" : "no longer carries it")
+                + "; added from \(symbolicate(place.caller))"
         }
 
         /// docs/traps.md, XCTest's notifier loaded over an open animation.
@@ -9705,7 +9720,10 @@ func kayaWedgeVerdict(_ step: String, _ waited: TimeInterval) -> String {
             lock.lock()
             let mine = open
             let head = "kaya's ledger \(installed); \(started) started, \(stopped) stopped, "
-                + "\(unmatched) stopped with no start, \(open.count) open, layers read at add: \(adds)"
+                + "\(unmatched) stopped with no start, \(open.count) open, layers read at add: \(adds), "
+                + "\(startsPlaced) of \(started) starts carried the layer their add read"
+                + (unplaced.isEmpty ? "" : " (the others: "
+                    + unplaced.sorted { $0.value > $1.value }.map { "\($0.value) x \($0.key)" }.joined(separator: ", ") + ")")
             let ring = events
             lock.unlock()
             let lock2 = NSLock()

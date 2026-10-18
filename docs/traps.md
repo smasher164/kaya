@@ -15525,6 +15525,25 @@ leaving the window. The ledger now records the layer at `addAnimation:forKey:`
 and says at the reading whether it is deallocated, alive in no window, or in a
 window, and whether it still carries the animation (check-flightrec NH19, NH20).
 
+THE ADD TABLE WAS KEYED BY ADDRESS (found 2026-10-18 from the fourth sighting's
+bundle). The 2026-10-16 ledger kept each add's layer in a dictionary keyed by
+ObjectIdentifier(animation), trimmed first in, first out at 400 entries. The
+entries do not keep the animation alive, a freed CAAnimation's address goes to a
+later one, and trimming an old position whose address had been reused deleted
+the newer animation's entry. So once a leg passed about 400 adds (numberfield
+makes about 540) an open start could read "never seen added through CALayer's
+addAnimation:forKey:" when it had been, or name another animation's layer. The
+2026-10-16 forced red matched only because its leg was young. The place now
+rides on the animation as an associated object with the add's return addresses,
+symbolicated by dladdr at the reading (`added from QuartzCore CA::Layer::setter
+< -[CALayer setOpacity:] < -[UIView _backing_setAlpha:] < ... +[UIView
+animateWithDuration:delay:options:animations:completion:]` in the forced read-
+back, 478 starts into the leg). Measured on the same leg: 452 of 479 starts
+carried their add's layer, and all 27 others were UIKit calling
+`animationDidStart:` with no animation, so the add hook saw every real animation
+there; each reading now prints that count and the kinds without one
+(check-flightrec NH21 to NH23).
+
 ## The app log selected by process name (measured 2026-10-12)
 
 run-sim.py's `app-log` section was `log show --last 2m --predicate 'process
