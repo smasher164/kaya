@@ -87,7 +87,13 @@ pub(super) struct WinPlayer {
     /// A seek issued while another has not completed waits for it
     /// (docs/deferred.md, the WinUI paused seek that leaves the old picture).
     seek_in_flight: bool,
-    seek_held: Option<i64>,
+    seek_held: Option<(i64, u64)>,
+    /// The app's seek in flight, in ms, and whether its lost seek was
+    /// already rebuilt once (`rebuild_lost_seek`).
+    seek_ms: u64,
+    seek_rebuilt: bool,
+    /// A rebuilt item reopening to put back what the lost one had.
+    resume: Option<Resume>,
     /// The app's last word was play: a frame step would pause it.
     play_asked: bool,
     /// The source this load opened, and whether its stalled adaptive open
@@ -95,6 +101,15 @@ pub(super) struct WinPlayer {
     url: String,
     rebuilt: bool,
     rebuilding: bool,
+}
+
+/// What a rebuilt item puts back before its seek: the tracks the app
+/// selected and its play.
+struct Resume {
+    seek_ms: u64,
+    audio: Option<i32>,
+    caption: Option<u32>,
+    play: bool,
 }
 
 /// WHAT AN OPENING ITEM DID, per load, printed only when the open stalls
@@ -589,9 +604,8 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
                 if live(core, id, at) {
                     if let Some(p) = core.media.players.get_mut(&id) {
                         p.seek_in_flight = false;
-                        if let Some(held) = p.seek_held.take() {
-                            p.seek_in_flight = true;
-                            if let Err(e) = p.player.PlaybackSession().and_then(|s| s.SetPosition(TimeSpan { Duration: held })) {
+                        if let Some((held, ms)) = p.seek_held.take() {
+                            if let Err(e) = issue_seek(core, id, held, ms) {
                                 eprintln!("KAYA_DIAG winui player {id}: the held seek failed: {}", e.message());
                             }
                             return;
@@ -648,6 +662,9 @@ pub(super) fn create_player(core: &mut CoreState, id: u64) -> windows_core::Resu
             opened: false,
             seek_in_flight: false,
             seek_held: None,
+            seek_ms: 0,
+            seek_rebuilt: false,
+            resume: None,
             play_asked: false,
             url: String::new(),
             rebuilt: false,
@@ -835,11 +852,18 @@ fn finish_open(core: &mut CoreState, id: u64, generation: u64) {
         Ok(read) => read,
         Err(e) => (0, (0, 0), true, format!("reading the opened item failed: {}", e.message())),
     };
-    if let Some(p) = core.media.players.get_mut(&id) {
+    let resume = core.media.players.get_mut(&id).and_then(|p| {
         p.size = size;
         p.duration_ms = duration_ms;
         p.loaded = true;
         p.awaiting_size = false;
+        p.resume.take()
+    });
+    if let Some(resume) = resume {
+        // The rebuilt item resolves the tracks it lists before reporting.
+        report_tracks_quietly(core, id);
+        resume_rebuilt(core, id, resume);
+        return;
     }
     report(core, id, Report::Loaded { duration_ms, size, undecodable, detail });
     report_tracks(core, id);
@@ -1236,6 +1260,7 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
                                 session.as_ref().map(|s| s.0),
                                 unix_ms()
                             );
+                            eprintln!("KAYA_DIAG winui player {id}: at that moment {}", seek_reading(p));
                             p.trail.print(generation);
                         }
                     });
@@ -1249,19 +1274,177 @@ pub(super) fn command(core: &mut CoreState, id: u64, command: PlayerCommand) -> 
             });
             let at = span_of(ms).Duration.saturating_add(p.shift.load(Ordering::SeqCst)).max(0);
             let held = p.seek_in_flight;
-            if !held {
-                p.player.PlaybackSession()?.SetPosition(TimeSpan { Duration: at })?;
-            }
             if let Some(p) = core.media.players.get_mut(&id) {
+                p.seek_rebuilt = false;
                 if held {
-                    p.seek_held = Some(at);
-                } else {
-                    p.seek_in_flight = true;
+                    p.seek_held = Some((at, ms));
                 }
+            }
+            if !held {
+                issue_seek(core, id, at, ms)?;
             }
         }
     }
     Ok(())
+}
+
+/// When an adaptive item's seek with no SeekCompleted is taken as lost.
+const SEEK_LOST_MS: u64 = 2000;
+
+/// One seek to the platform, the one in flight until its SeekCompleted.
+fn issue_seek(core: &mut CoreState, id: u64, at: i64, ms: u64) -> windows_core::Result<()> {
+    let Some(p) = core.media.players.get_mut(&id) else { return Ok(()) };
+    p.player.PlaybackSession()?.SetPosition(TimeSpan { Duration: at })?;
+    p.seek_in_flight = true;
+    p.seek_ms = ms;
+    let (seeks, before, generation) = (p.seeks.clone(), p.seeks.load(Ordering::SeqCst), p.generation.load(Ordering::SeqCst));
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(SEEK_LOST_MS));
+        if seeks.load(Ordering::SeqCst) == before {
+            post(move |core| rebuild_lost_seek(core, id, generation, before));
+        }
+    });
+    Ok(())
+}
+
+/// THE ADAPTIVE SEEK THAT MEDIA FOUNDATION LOST is rebuilt once per app seek;
+/// asking again in place was measured recovering nothing (docs/traps.md, the
+/// WinUI adaptive pipeline that goes idle, the seek face).
+fn rebuild_lost_seek(core: &mut CoreState, id: u64, generation: u64, before: u64) {
+    if !live(core, id, generation) {
+        return;
+    }
+    let Some(p) = core.media.players.get_mut(&id) else { return };
+    if !p.adaptive || p.seek_rebuilt || !p.seek_in_flight || p.seeks.load(Ordering::SeqCst) != before {
+        return;
+    }
+    let audio = p.item.as_ref().and_then(|i| i.AudioTracks().ok()).and_then(|a| a.SelectedIndex().ok()).filter(|&i| i >= 0);
+    let caption = p.caption_selected.and_then(|sel| p.caption_tracks.iter().position(|&i| i == sel)).map(|at| at as u32 + 1);
+    let seek_ms = p.seek_held.map_or(p.seek_ms, |(_, ms)| ms);
+    eprintln!(
+        "KAYA_DIAG winui player {id}: rebuilding the item once for a lost seek — no SeekCompleted after \
+         {SEEK_LOST_MS} ms; {}; reopening at {seek_ms} ms with audio {audio:?}, caption {caption:?}, play {}; unix ms {}",
+        seek_reading(p),
+        p.play_asked,
+        unix_ms()
+    );
+    let resume = Resume { seek_ms, audio, caption, play: p.play_asked };
+    let url = p.url.clone();
+    p.trail.note(generation, format!("rebuilding for the lost seek to {seek_ms} ms"));
+    if let Err(e) = load(core, id, &url) {
+        eprintln!("KAYA_DIAG winui player {id}: the lost seek's rebuild failed to load: {}", e.message());
+        return;
+    }
+    if let Some(p) = core.media.players.get_mut(&id) {
+        p.seek_rebuilt = true;
+        p.resume = Some(resume);
+    }
+}
+
+/// The rebuilt item opened: the app's tracks, then its seek, then its play.
+fn resume_rebuilt(core: &mut CoreState, id: u64, resume: Resume) {
+    let restored = (|| -> windows_core::Result<()> {
+        let p = &core.media.players[&id];
+        let Some(item) = p.item.clone() else { return Ok(()) };
+        if let Some(audio) = resume.audio {
+            item.AudioTracks()?.SetSelectedIndex(audio)?;
+        }
+        let timed = item.TimedMetadataTracks()?;
+        for (at, i) in p.caption_tracks.iter().enumerate() {
+            let mode = if resume.caption == Some(at as u32 + 1) {
+                TimedMetadataTrackPresentationMode::PlatformPresented
+            } else {
+                TimedMetadataTrackPresentationMode::Disabled
+            };
+            timed.SetPresentationMode(*i, mode)?;
+        }
+        Ok(())
+    })();
+    if let Err(e) = restored {
+        eprintln!("KAYA_DIAG winui player {id}: the rebuilt item's tracks were not put back: {}", e.message());
+    }
+    report_tracks(core, id);
+    let Some(p) = core.media.players.get(&id) else { return };
+    p.trail.note(p.generation.load(Ordering::SeqCst), format!("rebuilt item reopened; seek to {} ms", resume.seek_ms));
+    let at = span_of(resume.seek_ms).Duration.saturating_add(p.shift.load(Ordering::SeqCst)).max(0);
+    if let Err(e) = issue_seek(core, id, at, resume.seek_ms) {
+        eprintln!("KAYA_DIAG winui player {id}: the rebuilt item's seek failed: {}", e.message());
+    }
+    if resume.play {
+        if let Some(p) = core.media.players.get_mut(&id) {
+            p.play_asked = true;
+            if let Err(e) = p.player.PlaybackSession().and_then(|s| s.SetPlaybackRate(p.speed)).and_then(|()| p.player.Play()) {
+                eprintln!("KAYA_DIAG winui player {id}: the rebuilt item's play failed: {}", e.message());
+            }
+        }
+    }
+}
+
+/// What the platform reads while a seek has not completed: whether the clock
+/// moved, the session's own progress, and each caption track's mode and
+/// active cues, each read or the error it answered.
+fn seek_reading(p: &WinPlayer) -> String {
+    fn read<T: std::fmt::Debug>(r: windows_core::Result<T>) -> String {
+        r.map_or_else(|e| format!("<{}>", e.message()), |v| format!("{v:?}"))
+    }
+    let mut out = Vec::new();
+    match p.player.PlaybackSession() {
+        Ok(s) => {
+            out.push(format!("position (raw 100 ns, shown ms) {}", read(s.Position().map(|t| (t.Duration, shown_ms(t, &p.shift))))));
+            out.push(format!("duration {}", read(s.NaturalDuration().map(ms_of))));
+            out.push(format!("buffering {}", read(s.BufferingProgress())));
+            out.push(format!("download {}", read(s.DownloadProgress())));
+            out.push(format!("can seek {}", read(s.CanSeek())));
+            out.push(format!("rate {}", read(s.PlaybackRate())));
+        }
+        Err(e) => out.push(format!("session <{}>", e.message())),
+    }
+    out.push(format!(
+        "in flight {}, held {:?}, play asked {}, playing {}, platform cue {:?}",
+        p.seek_in_flight, p.seek_held, p.play_asked, p.playing, p.platform_cue
+    ));
+    if let Some(item) = &p.item {
+        out.push(format!("audio selected {}", read(item.AudioTracks().and_then(|a| a.SelectedIndex()))));
+        let tracks = (|| -> windows_core::Result<Vec<String>> {
+            let timed = item.TimedMetadataTracks()?;
+            let mut lines = Vec::new();
+            for &i in &p.caption_tracks {
+                let mode = timed.GetPresentationMode(i).map(|m| m.0);
+                let active = timed.GetAt(i).and_then(|t| t.ActiveCues()).and_then(|a| {
+                    let mut texts = Vec::new();
+                    for c in 0..a.Size()? {
+                        let cue = a.GetAt(c)?;
+                        let span = format!("{}+{}", ms_of(cue.StartTime()?), ms_of(cue.Duration()?));
+                        texts.push(match cue.cast::<TimedTextCue>() {
+                            Ok(t) => {
+                                let lines = t.Lines()?;
+                                let mut words = Vec::new();
+                                for l in 0..lines.Size()? {
+                                    words.push(lines.GetAt(l)?.Text()?.to_string());
+                                }
+                                format!("{span} {:?}", words.join("\n"))
+                            }
+                            Err(_) => format!("{span} <not text>"),
+                        });
+                    }
+                    Ok(texts)
+                });
+                lines.push(format!("caption track {i} mode {} active {}", read(mode), read(active)));
+            }
+            Ok(lines)
+        })();
+        match tracks {
+            Ok(lines) if lines.is_empty() => out.push("no caption tracks".to_owned()),
+            Ok(lines) => out.extend(lines),
+            Err(e) => out.push(format!("caption tracks <{}>", e.message())),
+        }
+    } else {
+        out.push("no item".to_owned());
+    }
+    if let Some((requested, completed, failed)) = p.trail.downloads(p.generation.load(Ordering::SeqCst)) {
+        out.push(format!("downloads {requested} asked, {completed} done, {failed} failed"));
+    }
+    out.join("; ")
 }
 
 pub(super) fn release(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
@@ -1308,6 +1491,18 @@ fn is_caption_kind(track: &TimedMetadataTrack) -> bool {
 }
 
 fn report_tracks(core: &mut CoreState, id: u64) {
+    if let Some(tracks) = read_tracks(core, id) {
+        report(core, id, tracks);
+    }
+}
+
+/// A rebuilt item's own track list while it reopens: the app selected its
+/// tracks on the lost item and hears them put back, never the defaults.
+fn report_tracks_quietly(core: &mut CoreState, id: u64) {
+    let _ = read_tracks(core, id);
+}
+
+fn read_tracks(core: &mut CoreState, id: u64) -> Option<Report> {
     let read = (|| -> windows_core::Result<Option<Report>> {
         let Some(p) = core.media.players.get_mut(&id) else { return Ok(None) };
         // NOTHING READS THE ITEM'S TRACKS BEFORE IT OPENS (docs/traps.md, the
@@ -1359,9 +1554,12 @@ fn report_tracks(core: &mut CoreState, id: u64) {
         Ok(Some(Report::Tracks { audio, captions, audio_selected, caption_selected }))
     })();
     match read {
-        Ok(Some(tracks)) => report(core, id, tracks),
-        Ok(None) => {}
-        Err(e) => eprintln!("KAYA_DIAG winui player {id}: reading the item's tracks failed: {}", e.message()),
+        Ok(Some(tracks)) if core.media.players.get(&id).is_some_and(|p| p.resume.is_none()) => Some(tracks),
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("KAYA_DIAG winui player {id}: reading the item's tracks failed: {}", e.message());
+            None
+        }
     }
 }
 

@@ -4177,9 +4177,9 @@ def winui_media_arms(media_src=None):
             or "undecodable" not in opened:
         bad.append("fn finish_open does not read every track's DecoderStatus into "
                    "Loaded's undecodable flag (docs/media-plan.md §7a)")
-    tracks = rust_fn(code, "report_tracks")
+    tracks = rust_fn(code, "read_tracks")
     if tracks is None or not (0 <= tracks.find("if !p.loaded") < tracks.find(".AudioTracks()")):
-        bad.append("report_tracks reads the item's tracks before it has opened — an HLS "
+        bad.append("read_tracks reads the item's tracks before it has opened — an HLS "
                    "item read while opening never raised MediaOpened (docs/traps.md)")
     if "CommandManager()?.SetIsEnabled(false)" not in code:
         bad.append("the players' command manager is left on — Windows would drive "
@@ -4252,7 +4252,7 @@ def winui_media_arms(media_src=None):
         bad.append("fn load does not read a progressive source's edit list (read_shift in "
                    "the non-adaptive branch)")
     if command is None or "let held = p.seek_in_flight;" not in command \
-            or not re.search(r"if held \{\s*p\.seek_held = Some\(at\)", command):
+            or not re.search(r"if held \{\s*p\.seek_held = Some\(\(at, ms\)\)", command):
         bad.append("fn command issues a seek while another is in flight — Media Foundation "
                    "then leaves the earlier picture drawn (docs/traps.md)")
     step = code.find("StepForwardOneFrame().and_then(|()| p.player.StepBackwardOneFrame())")
@@ -4263,6 +4263,37 @@ def winui_media_arms(media_src=None):
                    "(docs/traps.md, the WinUI paused seek)")
     if "seek_held.take()" not in code:
         bad.append("nothing issues a held seek when the one in flight completes")
+    # A LOST ADAPTIVE SEEK IS REBUILT (docs/traps.md, the WinUI adaptive
+    # pipeline that goes idle, the seek face): only a lane under load loses
+    # one, about 1 leg in 50, so no hand run of the scene holds it.
+    if command is None or "seek_reading(p)" not in command:
+        bad.append("fn command's stalled-seek line does not print seek_reading — the bundle "
+                   "cannot say whether the clock moved or the cue is active")
+    issue = rust_fn(code, "issue_seek") or ""
+    if "SetPosition(" not in issue or "SEEK_LOST_MS" not in issue \
+            or "rebuild_lost_seek(core, id, generation, before)" not in issue:
+        bad.append("fn issue_seek does not arm rebuild_lost_seek after SEEK_LOST_MS — a seek "
+                   "Media Foundation lost leaves the cue empty and every later seek held")
+    if len(re.findall(r"\.SetPosition\(", code)) != 1:
+        bad.append("winui/media.rs sets the session's Position outside fn issue_seek — a seek "
+                   "issued there is never rebuilt when it is lost")
+    lost = rust_fn(code, "rebuild_lost_seek") or ""
+    key = ("if !p.adaptive || p.seek_rebuilt || !p.seek_in_flight "
+           "|| p.seeks.load(Ordering::SeqCst) != before")
+    if key not in lost or "p.resume = Some(resume)" not in lost or "seek_reading(p)" not in lost:
+        bad.append("fn rebuild_lost_seek is not keyed on the measured shape alone (adaptive, "
+                   "once per app seek, still in flight, no SeekCompleted since) or does not "
+                   "carry the resume and its reading")
+    if command is None or "p.seek_rebuilt = false;" not in command:
+        bad.append("fn command does not give each app seek its own rebuild")
+    opened_body = rust_fn(code, "finish_open") or ""
+    hand = opened_body.find("resume_rebuilt(core, id, resume)")
+    loaded = opened_body.find("Report::Loaded")
+    if hand < 0 or loaded < 0 or hand > loaded:
+        bad.append("fn finish_open reports Loaded for a rebuilt item instead of resuming it")
+    tracks = rust_fn(code, "read_tracks") or ""
+    if "p.resume.is_none()" not in tracks:
+        bad.append("fn read_tracks reports a rebuilt item's default tracks while it reopens")
     if opened is None or "p.shift_pending" not in opened.split("return;", 1)[0]:
         bad.append("fn finish_open does not wait for an http(s) edit list still being read")
     shown = rust_fn(code, "shown_fraction")
@@ -4378,9 +4409,20 @@ for pattern, repl, label, want in (
     (r"(\n +)read_shift\(core, id, generation, url\);", "",
      "the edit list never read", 1),
     (r"(let held = )p\.seek_in_flight;", "false;", "a seek issued over one in flight", 1),
-    (r"(if let Some\(held\) = p\.)seek_held\.take\(\)", "seek_held.clone()",
+    (r"(if let Some\(\(held, ms\)\) = p\.)seek_held\.take\(\)", "seek_held.clone()",
      "the held seek never issued", 1),
     (r"(if !p\.playing )&& !p\.play_asked ", "", "a frame step over a play the app asked for", 1),
+    (r"(\n +)post\(move \|core\| rebuild_lost_seek\(core, id, generation, before\)\);", "",
+     "the lost seek never rebuilt", 1),
+    (r"(if !p\.adaptive \|\| )p\.seek_rebuilt \|\| ", "", "a lost seek rebuilt without end", 1),
+    (r"(\n +)p\.seek_rebuilt = false;", "", "one rebuild for every later seek", 1),
+    (r"(\n +)resume_rebuilt\(core, id, resume\);\n +return;", "",
+     "a rebuilt item reported Loaded instead of resumed", 1),
+    (r"(Ok\(Some\(tracks\)\)) if core\.media\.players\.get\(&id\)"
+     r"\.is_some_and\(\|p\| p\.resume\.is_none\(\)\)",
+     "", "a rebuilt item's default tracks reported", 1),
+    (r"(\n +)eprintln!\(\"KAYA_DIAG winui player \{id\}: at that moment \{\}\", "
+     r"seek_reading\(p\)\);", "", "the stalled seek's reading not printed", 1),
     (r"(if let Err\(e\) = p\.player\.)StepForwardOneFrame\(\)\.and_then\(\|\(\)\| "
      r"p\.player\.StepBackwardOneFrame\(\)\)", "Pause()", "the paused seek's frame step cut", 1),
     (r"(\|p\| p\.loaded) \|\| p\.shift_pending\)", ")",

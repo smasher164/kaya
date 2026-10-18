@@ -14278,6 +14278,28 @@ media_delivery and media_tracks leg alone, and a player whose open or seek
 passes the 30 s bound fails `timeout` on every platform, its item torn down,
 the retry the app's.
 
+THE SEEK FACE, MEASURED 2026-10-18 (matrix run 20261018T061732Z-026311's
+`media_tracks_go`, and the same shape in `media_tracks_csharp` of
+20261016T205623Z-042979): with media_tracks ALONE on the VM, the hls_fmp4 item's
+paused seek to 500 ms, asked 35-55 ms after the caption selection that followed the
+French audio switch, raised no SeekCompleted, and the seek after it was held behind
+it, so both cues read "". By hand: 0 of 18 legs idle, 1 of 36 beside 16 host CPU
+spinners, 1 of 72 beside 24. The stalled-seek line now prints what the platform
+reads (`seek_reading`): the session's Position HAD moved to the asked 500 ms, the
+session Paused, every download answered, the caption track PlatformPresented and
+its ActiveCues EMPTY, so re-reading the cues cannot recover it. Asking again in
+place recovers nothing either: the same position at 1 s, one 100 ns tick later at
+2 s and StepForwardOneFrame at 3 s each raised no SeekCompleted (1 of 72). What
+recovers it is a new item: an adaptive seek with no SeekCompleted after 2 s is
+rebuilt once per app seek (`rebuild_lost_seek`: the same URL loaded again, the
+app's audio and caption tracks put back while the app hears no Loaded and no
+default track list, then the latest asked seek and the app's play). 72 of 72
+beside 24 spinners passed with it, one of them a real lost seek whose cue arrived
+2.5 s after the ask and whose next seek completed normally; a forced drop of the
+first SeekCompleted went green through the rebuild on two languages.
+tools/check-verbs.py holds the reading, the one SetPosition site, the arm, the
+key, the resume and the quiet track read, six cuts watched.
+
 RECURRENCE 2026-10-05, with the Windows delivery route already serial:
 `media_delivery_go` failed in 43 s in recorder run
 `20261005T073206Z-035428`, bundle `windows-media_delivery_go`. The DASH

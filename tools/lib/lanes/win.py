@@ -388,8 +388,9 @@ ORDER = [
     # pipeline loses an event when media guests run beside each other on the
     # loaded VM, measured 1 in about 12 legs six wide, 1 in 48 two wide, 0 in
     # 48 one at a time (docs/traps.md, the WinUI adaptive pipeline that goes
-    # idle). The lost open is rebuilt once since 2026-10-05; the lost paused
-    # seek, media_tracks' face, has no such recovery.
+    # idle). The lost open is rebuilt once since 2026-10-05 and the lost
+    # adaptive seek since 2026-10-18; media_tracks pooled beside the rebuild is
+    # not measured, so it stays alone until it is.
     ["media_delivery_rust", "media_delivery_python"],
     ["media_delivery_js", "media_delivery_go"],
     ["media_delivery_csharp", "media_delivery_java"],

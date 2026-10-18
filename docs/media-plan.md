@@ -716,6 +716,9 @@ every other stall stays the app's to retry.
 AMENDED 2026-10-06 (the maintainer), (a) TESTS: the Windows lane runs the
 media_delivery legs two at a time, since an open lost under that pairing is
 rebuilt; media_tracks stays alone, its lost paused seek having no recovery.
+(Since 2026-10-18 a lost adaptive seek is rebuilt once too, `rebuild_lost_seek`
+in crates/kaya/src/winui/media.rs, docs/traps.md; media_tracks stays alone
+until it is measured pooled.)
 
 - THE REASON is a new entry, `timeout` (7), in the closed vocabulary. None of
   the six fits honestly: the depth's ceiling had called a stall `network` for
