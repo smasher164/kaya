@@ -298,6 +298,12 @@ pub enum Step {
     Click(Target),
     Toggle(Target, bool),
     SetValue(Target, f64),
+    /// `hold slider#0` / `hold slider#0 at 80`: the platform's pointer goes
+    /// down on the slider's thumb, walks to the value when one is named, and
+    /// stays down; `release slider#0` lets it up where it is
+    /// (docs/media-player-plan.md M10).
+    Hold(Target, Option<f64>),
+    Release(Target),
     /// Drive a date picker to `2026-09-04` THROUGH the platform control,
     /// so its own committed event fires (docs/datetime-plan.md D8).
     SetDate(Target, crate::Date),
@@ -1048,6 +1054,8 @@ impl Step {
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
+            | Step::Hold(t, _)
+            | Step::Release(t)
             | Step::SetDate(t, _)
             | Step::SetTime(t, _)
             | Step::ExpectPicker(t, _)
@@ -1222,6 +1230,8 @@ impl Step {
             Step::Click { .. } => false,
             Step::Toggle { .. } => false,
             Step::SetValue { .. } => false,
+            Step::Hold { .. } => false,
+            Step::Release { .. } => false,
             Step::SetDate { .. } => false,
             Step::SetTime { .. } => false,
             Step::ExpectPicker { .. } => true,
@@ -1558,6 +1568,12 @@ pub trait Stage: Send + 'static {
     fn click(&self, target: Target);
     fn toggle(&self, target: Target, on: bool);
     fn set_value(&self, target: Target, value: f64);
+    /// The platform's pointer down on the slider's thumb, walked to `to`
+    /// when given, and left down (docs/media-player-plan.md M10); Err names
+    /// what stopped it.
+    fn hold(&self, target: Target, to: Option<f64>) -> Result<(), String>;
+    /// The held pointer up where it is.
+    fn release(&self, target: Target) -> Result<(), String>;
     /// Drive a date picker THROUGH the platform control (its binding,
     /// state or selected-date property), so the control's own committed
     /// event fires and the app's handler runs as for a user
@@ -2500,6 +2516,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 } else {
                     Step::SetValue(target, number(value)?)
                 }
+            }
+            "hold" | "release" => {
+                let mut words = rest.split_whitespace();
+                let target = parse_target(words.next().unwrap_or_default())?;
+                if target.kind != TargetKind::Slider {
+                    return Err(format!("{op} holds a slider's thumb, not {target:?}: {line:?}"));
+                }
+                let to = match (op, words.next(), words.next(), words.next()) {
+                    (_, None, _, _) => None,
+                    ("hold", Some("at"), Some(v), None) => {
+                        Some(v.parse::<f64>().map_err(|_| format!("hold's `at` wants a number: {line:?}"))?)
+                    }
+                    _ => {
+                        let tail = if op == "hold" { " [at <value>]" } else { "" };
+                        return Err(format!("{op} wants `<slider>`{tail}: {line:?}"));
+                    }
+                };
+                if op == "hold" { Step::Hold(target, to) } else { Step::Release(target) }
             }
             "expect_thumb" => {
                 let (target, text) = rest
@@ -5084,6 +5118,28 @@ fn run_with_log(
                 stage.set_value(*t, *v);
                 await_answer(answered);
                 None
+            }
+            Step::Hold(t, to) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                match stage.hold(*t, *to) {
+                    Ok(()) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(format!("hold {}: {why}", target_spec(t)))),
+                }
+            }
+            Step::Release(t) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                match stage.release(*t) {
+                    Ok(()) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(format!("release {}: {why}", target_spec(t)))),
+                }
             }
             Step::SetDate(t, d) => {
                 await_quiet();
@@ -9359,6 +9415,12 @@ mod tests {
             }
         }
         fn set_value(&self, _: Target, _: f64) {}
+        fn hold(&self, _: Target, _: Option<f64>) -> Result<(), String> {
+            Ok(())
+        }
+        fn release(&self, _: Target) -> Result<(), String> {
+            Ok(())
+        }
         fn set_date(&self, t: Target, d: crate::Date) {
             self.seen.lock().unwrap().push(format!("set_date {t:?} {d}"));
         }
@@ -10581,6 +10643,12 @@ mod tests {
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
+            fn hold(&self, _: Target, _: Option<f64>) -> Result<(), String> {
+                Ok(())
+            }
+            fn release(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
             fn set_date(&self, _: Target, _: crate::Date) {}
             fn set_time(&self, _: Target, _: crate::Time) {}
             fn set_color(&self, _: Target, _: crate::Color) {}
@@ -11059,6 +11127,12 @@ mod tests {
             fn click(&self, _: Target) {}
             fn toggle(&self, _: Target, _: bool) {}
             fn set_value(&self, _: Target, _: f64) {}
+            fn hold(&self, _: Target, _: Option<f64>) -> Result<(), String> {
+                Ok(())
+            }
+            fn release(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
             fn set_date(&self, _: Target, _: crate::Date) {}
             fn set_time(&self, _: Target, _: crate::Time) {}
             fn set_color(&self, _: Target, _: crate::Color) {}

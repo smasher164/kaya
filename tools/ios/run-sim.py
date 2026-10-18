@@ -1482,6 +1482,8 @@ BRIDGE_VERBS = frozenset((
     "expect_badge",
     # The screenshot and the remote command are the host's (media_verb).
     "expect_video_ink", "expect_video_corner", "session_send",
+    # The held press is the driver's touch (docs/media-player-plan.md M10).
+    "hold", "release",
 ))
 
 

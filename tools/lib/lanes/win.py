@@ -91,7 +91,12 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # HOVER moves the VM's real pointer (docs/styling-pass-plan.md
              # §5): no in-process route reaches a ListViewItem's PointerOver
              # state, so a neighbour under the pointer would take it.
-             "cards_rust", "cards_python", "cards_js", "cards_go", "cards_csharp", "cards_java"}
+             "cards_rust", "cards_python", "cards_js", "cards_go", "cards_csharp", "cards_java",
+             # THE HELD SLIDER presses and holds the VM's real left button
+             # (docs/media-player-plan.md M10): in the pool four of six legs
+             # went red and every one is green alone (measured 2026-10-17).
+             "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp",
+             "sliders_java"}
 
 # The legs that run under the user's 24-hour clock: HKCU\Control Panel\
 # International's iTime and sShortTime, written by deploy-win before the leg

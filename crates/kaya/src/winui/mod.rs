@@ -16036,6 +16036,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                                     &released_sink,
                                     true,
                                 )?;
+                                winui_slider_show_pending(&slider, &released, &released_quiet)?;
                             }
                             Ok(())
                         },
@@ -17974,6 +17975,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.apply_quiet
                         .store(false, std::sync::atomic::Ordering::Relaxed);
                     write?;
+                }
+                (NativeWidget::Slider(slider), Prop::Value, Value::F64(v))
+                    if core.slider_cells.get(&id.0).is_some_and(|cell| winui_slider_held(core, slider, cell)) =>
+                {
+                    // THE HELD WRITE (docs/media-player-plan.md M10): the thumb
+                    // stays under the pointer; the capture's loss shows it.
+                    if let Some(cell) = core.slider_cells.get(&id.0) {
+                        *cell.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(v);
+                    }
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
                     // The mirrors move with the control: what the app was
@@ -24520,6 +24530,70 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui_read(move |core| Ok(winui_picker_reading(core, t)))
             .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    /// docs/media-player-plan.md M10: the VM's real cursor and left button,
+    /// `hover`'s mouse_event route, pressed at the thumb's place on the track
+    /// and walked to the value's.
+    fn hold(&self, t: crate::harness::Target, to: Option<f64>) -> Result<(), String> {
+        Self::foreground_guest("hold");
+        let aim = Self::on_ui_read(move |core| {
+            let i = crate::harness::try_resolve(t.index, core.sliders.len());
+            let Some(i) = i else { return Ok(None) };
+            let slider = core.sliders[i].clone();
+            let Some(&id) = core.slider_ids.get(i) else { return Ok(None) };
+            let Some((_, _, w, _)) = widget_screen_rect(core, id) else { return Ok(None) };
+            let Some(thumb) = named_descendant(&slider.cast()?, "HorizontalThumb")? else { return Ok(None) };
+            let Some((tx, ty, tw, th)) = element_screen_rect(core, &thumb.cast()?) else { return Ok(None) };
+            let (lo, hi) = (slider.Minimum()?, slider.Maximum()?);
+            let span = (hi - lo).max(f64::EPSILON);
+            let now = slider.Value()?;
+            let from = tx + tw / 2.0;
+            let to_x = from + (to.unwrap_or(now) - now) / span * (w - tw);
+            Ok(Some((from, to_x, ty + th / 2.0)))
+        });
+        let Ok(Some((x0, x1, cy))) = aim else { return Err(format!("no laid-out slider ({aim:?})")) };
+        const MOVE: u32 = 0x0001;
+        const LEFTDOWN: u32 = 0x0002;
+        const ABSOLUTE: u32 = 0x8000;
+        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+        // inject_drag's own shape: the cursor first, a bare LEFTDOWN, then
+        // moves each followed by SetCursorPos.
+        let put = |x: f64| unsafe {
+            let (sx, sy) = (x as i32, cy as i32);
+            mouse_event(
+                MOVE | ABSOLUTE,
+                ((i64::from(sx) * 65535) / width) as u32,
+                ((i64::from(sy) * 65535) / height) as u32,
+                0,
+                0,
+            );
+            SetCursorPos(sx, sy);
+        };
+        put(x0);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        for k in 1..=8 {
+            put(x0 + (x1 - x0) * f64::from(k) / 8.0);
+            std::thread::sleep(std::time::Duration::from_millis(15));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(120));
+        let now = Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.sliders.len()) else { return Ok(None) };
+            Ok(Some(core.sliders[i].Value()?))
+        });
+        eprintln!("kaya: winui hold {t:?} pressed at ({x0:.0},{cy:.0}) walked to ({x1:.0},{cy:.0}); the slider reads {now:?}");
+        Ok(())
+    }
+
+    fn release(&self, t: crate::harness::Target) -> Result<(), String> {
+        const LEFTUP: u32 = 0x0004;
+        unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+        eprintln!("kaya: winui release {t:?}");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Ok(())
+    }
+
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_ui(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());
@@ -29201,6 +29275,12 @@ struct SliderCell {
     /// on: the live emit and the committed one compare against these.
     held: std::sync::atomic::AtomicU64,
     committed: std::sync::atomic::AtomicU64,
+    /// The app's write that arrived while a pointer held the thumb, shown at
+    /// the release unless the gesture's commit superseded it
+    /// (docs/media-player-plan.md M10).
+    pending: std::sync::Mutex<Option<f64>>,
+    /// A drag's own movement has run since the press.
+    dragging: std::sync::atomic::AtomicBool,
 }
 
 impl SliderCell {
@@ -29213,6 +29293,8 @@ impl SliderCell {
             tick_spacing: std::sync::atomic::AtomicU64::new(0),
             held: std::sync::atomic::AtomicU64::new(0),
             committed: std::sync::atomic::AtomicU64::new(0),
+            pending: std::sync::Mutex::new(None),
+            dragging: std::sync::atomic::AtomicBool::new(false),
         };
         // The control's own defaults, so a slider that declares no range is
         // shaped like the one WinUI hands back.
@@ -29337,8 +29419,10 @@ fn winui_slider_committed(
     let moved = v != SliderCell::get(&cell.held);
     let settled = final_ && v != SliderCell::get(&cell.committed);
     SliderCell::set(&cell.held, v);
+    cell.dragging.store(!final_, std::sync::atomic::Ordering::Relaxed);
     if settled {
         SliderCell::set(&cell.committed, v);
+        *cell.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
     if v != raw {
         quiet.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -29353,6 +29437,49 @@ fn winui_slider_committed(
         sink.send_value_committed_tag(&cell.tag, v);
     }
     Ok(())
+}
+
+/// A pointer holds this slider's thumb (docs/media-player-plan.md M10): the
+/// left button is down and either a drag has moved it or the cursor is on
+/// it. The Slider marks its own press handled (measured 2026-09-04), so the
+/// press is read off the button and the cursor, the drag/key split's route.
+fn winui_slider_held(core: &CoreState, slider: &Slider, cell: &SliderCell) -> bool {
+    use bindings::Microsoft::UI::Xaml::UIElement;
+    if !pointer_button_down() {
+        return false;
+    }
+    if cell.dragging.load(std::sync::atomic::Ordering::Relaxed) {
+        return true;
+    }
+    let mut at = Point32 { x: 0, y: 0 };
+    // SAFETY: a stack POINT.
+    if unsafe { GetCursorPos(&mut at) } == 0 {
+        return false;
+    }
+    let Ok(element) = windows_core::Interface::cast::<UIElement>(slider) else { return false };
+    element_screen_rect(core, &element).is_some_and(|(x, y, w, h)| {
+        let (px, py) = (f64::from(at.x), f64::from(at.y));
+        px >= x && px <= x + w && py >= y && py <= y + h
+    })
+}
+
+/// The release of a gesture that committed nothing shows the app's write it
+/// held, quietly, as any app write.
+fn winui_slider_show_pending(
+    slider: &Slider,
+    cell: &SliderCell,
+    quiet: &std::sync::atomic::AtomicBool,
+) -> windows_core::Result<()> {
+    cell.dragging.store(false, std::sync::atomic::Ordering::Relaxed);
+    let Some(v) = cell.pending.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else {
+        return Ok(());
+    };
+    SliderCell::set(&cell.held, v);
+    SliderCell::set(&cell.committed, v);
+    quiet.store(true, std::sync::atomic::Ordering::Relaxed);
+    let write = slider.SetValue(v);
+    quiet.store(false, std::sync::atomic::Ordering::Relaxed);
+    write
 }
 
 /// One range's declared shape and its mirrors (docs/range-plan.md §2, §3),

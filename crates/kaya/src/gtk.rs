@@ -2777,6 +2777,10 @@ struct SliderState {
     /// 2026-09-04; docs/traps.md, "A GestureClick on a GtkScale never
     /// sees its release").
     dragging: bool,
+    /// The app's write that arrived while the pointer was down, shown at the
+    /// release unless the gesture's own commit superseded it
+    /// (docs/media-player-plan.md M10).
+    pending: Option<f64>,
 }
 
 #[derive(Clone)]
@@ -3143,9 +3147,23 @@ fn slider_committed(
     }
     if settled && value != state.committed {
         state.committed = value;
+        state.pending = None;
         slider.state.set(state);
         sink.send_value_committed_tag(tag, value);
     }
+}
+
+/// The release of a gesture that committed nothing shows the app's write it
+/// held (docs/media-player-plan.md M10).
+fn slider_show_pending(slider: &GtkSlider, quiet: &Rc<std::cell::Cell<bool>>) {
+    let mut state = slider.state.get();
+    let Some(v) = state.pending.take() else { return };
+    let was = quiet.replace(true);
+    slider.scale.set_value(v);
+    quiet.set(was);
+    state.held = slider.scale.value();
+    state.committed = state.held;
+    slider.state.set(state);
 }
 
 /// The ticks (S5): one at every multiple of the spacing from the minimum,
@@ -12371,6 +12389,11 @@ fn show_insertion(rows: &gtk4::Widget, x: f64, y: f64) {
 /// because a drag that silently does not happen reads as a refused drop.
 #[cfg(feature = "harness")]
 const DRAG_DRIVER_VAR: &str = "KAYA_DRAG_DRIVER";
+
+/// The wayland pointer a `hold` keeps down, and the file its release waits on.
+#[cfg(feature = "harness")]
+static HELD_SLIDER: std::sync::Mutex<Option<(std::process::Child, std::path::PathBuf)>> =
+    std::sync::Mutex::new(None);
 /// GTK began a drag since the harness last asked: the x11 release is held
 /// for it (docs/deferred.md, the dndwitness-in-x11 sightings), since a
 /// release reaching the server before GDK begins leaves no drag at all.
@@ -13677,6 +13700,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                                         committed.scale.value(),
                                         true,
                                     );
+                                    slider_show_pending(&committed, &quiet);
                                 }
                                 _ => {}
                             }
@@ -16556,6 +16580,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.apply_quiet.set(true);
                     gtk4::prelude::ToggleButtonExt::set_active(toggle, b);
                     core.apply_quiet.set(false);
+                }
+                (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) if slider.state.get().dragging => {
+                    // THE HELD WRITE (docs/media-player-plan.md M10): the thumb
+                    // stays under the pointer; the release shows it.
+                    let mut state = slider.state.get();
+                    state.pending = Some(v);
+                    slider.state.set(state);
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) => {
                     core.apply_quiet.set(true);
@@ -21906,6 +21937,175 @@ impl crate::harness::Stage for GtkStage {
             spelled_date(calendar_packed(&core.date_pickers[i].calendar))
         })
     }
+    /// docs/media-player-plan.md M10: the lane's real pointer, xdotool's
+    /// XTEST button on x11 (its state outlives the process) and a
+    /// wlpointer child kept alive on wayland, pressed on the thumb GtkRange
+    /// reports and walked to the value's point.
+    fn hold(&self, t: crate::harness::Target, to: Option<f64>) -> Result<(), String> {
+        let driver = std::env::var(DRAG_DRIVER_VAR)
+            .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer"))?;
+        Self::await_frames(2);
+        let aim = Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, RangeExt, WidgetExt};
+            let i = crate::harness::try_resolve(t.index, core.sliders.len())?;
+            let scale = core.sliders[i].scale.clone();
+            let window = scale.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
+            // The trough and the knob as GTK laid them out. The knob's centre
+            // travels the WHOLE trough under Adwaita (measured 2026-10-17: a
+            // 136 px trough, the knob centred at 81.0 for 60 of 0..100), so a
+            // walk computed on the trough less the knob landed one step short.
+            fn css_child(w: &gtk4::Widget, name: &str) -> Option<gtk4::Widget> {
+                let mut child = w.first_child();
+                while let Some(c) = child {
+                    if c.css_name() == name {
+                        return Some(c);
+                    }
+                    if let Some(hit) = css_child(&c, name) {
+                        return Some(hit);
+                    }
+                    child = c.next_sibling();
+                }
+                None
+            }
+            let trough = css_child(scale.upcast_ref(), "trough")?.compute_bounds(&scale)?;
+            let knob = css_child(scale.upcast_ref(), "slider")?.compute_bounds(&scale)?;
+            let len = f64::from(knob.width());
+            let mid_y = f64::from(knob.y()) + f64::from(knob.height()) / 2.0;
+            let from_x = f64::from(knob.x()) + len / 2.0;
+            // AND THE DRAG THRESHOLD IS LOST: GtkRange's drag starts counting
+            // once the pointer has crossed it (measured 2026-10-17: a 27 px
+            // walk moved 15 units where the trough's arithmetic says 20), so
+            // a walk that moves at all goes that much further.
+            let threshold = f64::from(gtk4::Settings::default().map_or(8, |s| s.gtk_dnd_drag_threshold()));
+            let to_x = to.map_or(from_x, |v| {
+                let adj = scale.adjustment();
+                let span = (adj.upper() - adj.lower()).max(f64::EPSILON);
+                let walk = (v - scale.value()) / span * f64::from(trough.width());
+                if walk == 0.0 { from_x } else { from_x + walk + threshold * walk.signum() }
+            });
+            let map = |x: f64| {
+                scale
+                    .compute_point(&window, &gtk4::graphene::Point::new(x as f32, mid_y as f32))
+                    .map(|p| (f64::from(p.x()), f64::from(p.y())))
+            };
+            let geometry = format!(
+                "trough x {} w {}, knob x {} w {}, scale w {}, value {}",
+                trough.x(), trough.width(), knob.x(), knob.width(), scale.width(), scale.value()
+            );
+            Some((map(from_x)?, map(to_x)?, gtk4::prelude::NativeExt::surface_transform(&window), geometry))
+        });
+        let Some((from, to, transform, geometry)) = aim else { return Err("no laid-out slider in a window".into()) };
+        let wayland = linux_wayland_session();
+        let locate = |at: (f64, f64)| -> Result<(String, String, String), String> {
+            let out = std::process::Command::new("python3")
+                .arg(&driver)
+                .args(["locate", if wayland { "wayland" } else { "x11" }])
+                .arg(std::process::id().to_string())
+                .args([transform.0, transform.1, at.0, at.1].iter().map(|v| (v.round() as i64).to_string()))
+                .output()
+                .map_err(|e| format!("{driver} could not be run: {e}"))?;
+            let said = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            let mut words = said.split_whitespace().map(str::to_owned);
+            match (out.status.success(), words.next(), words.next(), words.next()) {
+                (true, Some(x), Some(y), Some(injector)) => Ok((x, y, injector)),
+                _ => Err(format!("{driver} located nothing: {said} {}", String::from_utf8_lossy(&out.stderr).trim())),
+            }
+        };
+        let (x0, y0, injector) = locate(from)?;
+        let (x1, y1, _) = locate(to)?;
+        let (fx, fy, tx, ty) = (x0.parse::<i64>().unwrap_or(0), y0.parse::<i64>().unwrap_or(0),
+                                x1.parse::<i64>().unwrap_or(0), y1.parse::<i64>().unwrap_or(0));
+        let walk: Vec<(i64, i64)> = (1..=8).map(|k| (fx + (tx - fx) * k / 8, fy + (ty - fy) * k / 8)).collect();
+        let release_flag = std::env::temp_dir().join(format!("kaya-hold-{}", std::process::id()));
+        let _ = std::fs::remove_file(&release_flag);
+        let mut argv: Vec<String> = Vec::new();
+        if wayland {
+            argv.extend(["set".into(), x0.clone(), y0.clone(), "sleep".into(), "150".into(),
+                         "press".into(), "left".into()]);
+            for (x, y) in &walk {
+                argv.extend(["set".into(), x.to_string(), y.to_string(), "sleep".into(), "20".into()]);
+            }
+            argv.extend(["wait".into(), release_flag.display().to_string(), "120000".into(),
+                         "release".into(), "left".into(), "sleep".into(), "150".into()]);
+            let child = std::process::Command::new(&injector)
+                .args(&argv)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+                .map_err(|e| format!("{injector} could not be run: {e}"))?;
+            *HELD_SLIDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((child, release_flag));
+        } else {
+            // NO PAUSE AFTER THE PRESS: a still press is GtkRange's long press,
+            // which zooms the drag to half speed (a walk to 80 landed on 70).
+            argv.extend(["mousemove".into(), x0, y0, "sleep".into(), "0.15".into(), "mousedown".into(), "1".into()]);
+            for (x, y) in &walk {
+                argv.extend(["mousemove".into(), x.to_string(), y.to_string(), "sleep".into(), "0.02".into()]);
+            }
+            let out = std::process::Command::new(&injector)
+                .args(&argv)
+                .output()
+                .map_err(|e| format!("{injector} could not be run: {e}"))?;
+            if !out.status.success() {
+                return Err(format!("{injector} exited {}: {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+            }
+        }
+        crate::vtrace::note(
+            "hold",
+            format_args!("{} pressed at {fx},{fy} walked to {tx},{ty} ({geometry})", crate::harness::target_spec(&t)),
+        );
+        for _ in 0..200 {
+            let held = Self::on_main(move |core| {
+                crate::harness::try_resolve(t.index, core.sliders.len())
+                    .filter(|i| core.sliders[*i].state.get().dragging)
+                    .map(|i| core.sliders[i].scale.value())
+            });
+            if let Some(now) = held {
+                // The wayland walk runs in the injector child after the press.
+                if wayland && fx != tx {
+                    std::thread::sleep(std::time::Duration::from_millis(400));
+                }
+                Self::await_frames(2);
+                crate::vtrace::note("hold", format_args!("{} held, the scale reads {now}", crate::harness::target_spec(&t)));
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        Err("the scale never saw the pointer go down".into())
+    }
+
+    fn release(&self, t: crate::harness::Target) -> Result<(), String> {
+        if linux_wayland_session() {
+            let held = HELD_SLIDER.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+            let Some((mut child, flag)) = held else { return Err("no slider is held".into()) };
+            std::fs::write(&flag, b"").map_err(|e| format!("the release flag {}: {e}", flag.display()))?;
+            let status = child.wait().map_err(|e| format!("the held pointer: {e}"))?;
+            let _ = std::fs::remove_file(&flag);
+            if !status.success() {
+                return Err(format!("the held pointer exited {status}"));
+            }
+        } else {
+            let out = std::process::Command::new("xdotool")
+                .args(["mouseup", "1"])
+                .output()
+                .map_err(|e| format!("xdotool could not be run: {e}"))?;
+            if !out.status.success() {
+                return Err(format!("xdotool mouseup exited {}", out.status));
+            }
+        }
+        for _ in 0..200 {
+            let held = Self::on_main(move |core| {
+                crate::harness::try_resolve(t.index, core.sliders.len()).is_some_and(|i| core.sliders[i].state.get().dragging)
+            });
+            if !held {
+                Self::await_frames(2);
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        Err("the scale never saw the pointer come up".into())
+    }
+
     fn set_value(&self, t: crate::harness::Target, value: f64) {
         Self::on_main(move |core| {
             let i = crate::harness::resolve(t.index, core.sliders.len());

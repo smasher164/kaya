@@ -643,6 +643,14 @@ final class KayaDrive: XCTestCase {
             guard let p = coordinate(a, words, 1), words.count > 3, let ms = Double(words[3]) else { return (false, "press_at X Y MS") }
             p.press(forDuration: ms / 1000)
             return (true, "pressed")
+        case "press_hold":
+            // docs/media-player-plan.md M10: down, walk, and the finger kept
+            // down while the app's harness goes on.
+            guard let p1 = coordinate(a, words, 1), let p2 = coordinate(a, words, 3), words.count > 5,
+                let ms = Double(words[5])
+            else { return (false, "press_hold X1 Y1 X2 Y2 MS") }
+            p1.press(forDuration: 0.3, thenDragTo: p2, withVelocity: .slow, thenHoldForDuration: ms / 1000)
+            return (true, "held")
         case "drag", "swipe_points":
             guard let p1 = coordinate(a, words, 1), let p2 = coordinate(a, words, 3) else { return (false, "drag X1 Y1 X2 Y2 [HOLD_MS]") }
             let hold = words.count > 5 ? (Double(words[5]) ?? 100) / 1000 : 0.1

@@ -17425,3 +17425,23 @@ source. tools/scenes/media_session.steps' `expect_now_playing_art` is the
 read that would see it again. Beside it, Android: the platform
 MediaController's bitmap for a 600x600 cover is 300x300, so the read compares
 a colour, never a size.
+
+## The slider held under a pointer (measured 2026-10-17)
+
+Five things the `hold` verb (docs/media-player-plan.md M10) met, one per
+platform:
+- macOS: an NSEvent mouse-down handed to an NSSlider ends AppKit's tracking
+  loop in 1 ms when the hardware button is not down, so an in-process press
+  cannot hold it; the mac `hold` drives the arm's own gesture doors instead.
+- iOS: under a held XCUITest touch a UISlider holds the touch's own Float
+  (60.000004 for a thumb pressed at 60), and a walk aimed at a bound's thumb
+  stops a step short (95 for 100), since the finger keeps its grab offset.
+- GTK (Adwaita): the knob's centre travels the WHOLE trough (a 136 px trough
+  centres the knob at 81 for 60 of 0..100), and the first pixels of a drag
+  past the drag threshold are not counted, so a computed walk lands within a
+  step or two; the scene walks to the bound.
+- Android: Material's Slider emits no press interaction for a touch that has
+  not moved, so the gesture is read off the raw pointer stream.
+- Windows: the hold presses the VM's one real left button, so pooled sliders
+  legs collided (four of six red in the pool, all green alone); they are in
+  tools/lib/lanes/win.py's EXCLUSIVE set.

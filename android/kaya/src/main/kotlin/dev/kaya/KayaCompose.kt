@@ -288,6 +288,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -638,6 +639,13 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var numberFormat by mutableStateOf("number")
     var tickSpacing by mutableStateOf(0.0)
     var committed by mutableStateOf(0.0)
+
+    /** A pointer gesture owns a slider's thumb (docs/media-player-plan.md
+     * M10): what it shows while it lasts, and where it began; the app's
+     * writes wait in `value`. */
+    var gestureLive by mutableStateOf(false)
+    var gestureValue by mutableStateOf(0.0)
+    var gestureStart = 0.0
 
     /** THE RANGE'S thumbs, the pair its last gesture settled on, its gap and
      * its thumbs' words (docs/range-plan.md §2). */
@@ -5554,6 +5562,8 @@ object KayaCompose {
         get() = mountedActivity
             ?: error("kaya: the harness has no mounted activity")
 
+    internal fun <T> onUiOf(activity: ComponentActivity, f: () -> T): T = onUi(activity, f)
+
     private fun <T> onUi(activity: ComponentActivity, f: () -> T): T {
         var out: T? = null
         val done = java.util.concurrent.CountDownLatch(1)
@@ -6184,6 +6194,8 @@ object KayaCompose {
         if (atEnd && top >= -2f && top + rowHeight <= boxHeight + 2f) return null
         return "row top ${top.toInt()}px from the box's top; offset ${state.value} of ${state.maxValue}"
     }
+
+    internal fun targetOf(spec: String, kind: String, registry: List<KayaNode>): KayaNode? = target(spec, kind, registry)
 
     private fun target(spec: String, kind: String, registry: List<KayaNode>): KayaNode? {
         // harness.rs's Target spelling; sortTag is the stamped table identity.
@@ -10617,6 +10629,16 @@ object KayaCompose {
                             else kayaAwaitAnswer(answered)
                         }
                     }
+                    "hold", "release" -> {
+                        // docs/media-player-plan.md M10: a real touch held on
+                        // the thumb, dispatched to the activity's own view.
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val to = if (parts.size == 4 && parts[2] == "at") parts[3].toDoubleOrNull() else null
+                        val why = kayaSliderHold(activity, parts[1], parts[0] == "hold", to)
+                        if (why != null) failures.add("${parts[0]} ${parts[1]}: $why")
+                        else kayaAwaitAnswer(answered)
+                    }
                     "set_color" -> {
                         // A user's settled choice through the sheet's own
                         // door, the sheet never shown
@@ -10716,7 +10738,7 @@ object KayaCompose {
                                 }
                             } else {
                                 target(parts[1], "slider", KayaSceneModel.sliders)?.let {
-                                    kayaSpelledSlider(it.value)
+                                    kayaSpelledSlider(kayaSliderShown(it))
                                 }
                             }
                         }
@@ -20993,6 +21015,80 @@ fun kayaTouchTap(activity: android.app.Activity, x: Float, y: Float) {
     }
 }
 
+/** The held touch (docs/media-player-plan.md M10): where it is, and when it
+ * went down. Harness thread only. */
+private var kayaHeldTouch: Triple<Long, Float, Float>? = null
+
+private fun kayaTouchSend(activity: android.app.Activity, down: Long, action: Int, x: Float, y: Float) {
+    val latch = java.util.concurrent.CountDownLatch(1)
+    activity.runOnUiThread {
+        val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
+        event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+        activity.window.decorView.dispatchTouchEvent(event)
+        event.recycle()
+        latch.countDown()
+    }
+    latch.await(2, java.util.concurrent.TimeUnit.SECONDS)
+}
+
+/** `hold` down on the thumb (walked to `to` when given) and left down;
+ * `release` up where it is. null when it happened. Off the main thread. */
+fun kayaSliderHold(activity: ComponentActivity, spec: String, down: Boolean, to: Double?): String? {
+    val aim = KayaCompose.onUiOf(activity) {
+        val node = KayaCompose.targetOf(spec, "slider", KayaSceneModel.sliders) ?: return@onUiOf null
+        val thumb = kayaThumbCoords[node.id to 0] ?: return@onUiOf null
+        val track = kayaTravelCoords[node.id] ?: return@onUiOf null
+        val at = thumb.positionInWindow()
+        val cx = at.x + thumb.size.width / 2f
+        val cy = at.y + thumb.size.height / 2f
+        val goal = to?.let {
+            val span = (node.maxValue - node.minValue).takeIf { s -> s > 0 } ?: 1.0
+            val left = track.positionInWindow().x + thumb.size.width / 2f
+            left + ((it - node.minValue) / span).toFloat() * (track.size.width - thumb.size.width)
+        }
+        Triple(node, Pair(cx, cy), goal)
+    } ?: return "no such slider on screen"
+    val (node, from, goal) = aim
+    if (!down) {
+        val held = kayaHeldTouch ?: return "no slider is held"
+        kayaTouchSend(activity, held.first, android.view.MotionEvent.ACTION_UP, held.second, held.third)
+        kayaHeldTouch = null
+        repeat(80) {
+            if (KayaCompose.onUiOf(activity) { !node.gestureLive } == true) return null
+            Thread.sleep(25)
+        }
+        return "the slider still holds a gesture after the touch lifted"
+    }
+    if (kayaHeldTouch != null) return "a slider is already held"
+    val start = KayaCompose.onUiOf(activity) { node.value }
+    val t0 = android.os.SystemClock.uptimeMillis()
+    kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_DOWN, from.first, from.second)
+    var x = from.first
+    if (goal != null && to != null) {
+        for (i in 1..12) {
+            Thread.sleep(16)
+            x = from.first + (goal - from.first) * i / 12
+            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second)
+        }
+        // The walk's last pixels by what the slider says: the thumb's travel
+        // is Material's arithmetic, not this one's.
+        val perUnit = (goal - from.first) / (to - start).toFloat().let { if (it == 0f) 1f else it }
+        repeat(6) {
+            Thread.sleep(32)
+            val miss = to - (KayaCompose.onUiOf(activity) { node.gestureValue } ?: to)
+            if (kotlin.math.abs(miss) < 1e-9) return@repeat
+            x += (miss * perUnit).toFloat()
+            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second)
+        }
+    }
+    kayaHeldTouch = Triple(t0, x, from.second)
+    repeat(80) {
+        if (KayaCompose.onUiOf(activity) { node.gestureLive } == true) return null
+        Thread.sleep(25)
+    }
+    return "the slider never took the touch as a gesture"
+}
+
 fun kayaTouchSwipe(activity: android.app.Activity, startX: Float, endX: Float, y: Float) {
     val down = android.os.SystemClock.uptimeMillis()
     val steps = 12
@@ -22054,6 +22150,20 @@ internal fun kayaSliderCommitted(node: KayaNode, raw: Double, final: Boolean) {
     }
 }
 
+/** What a slider draws: the gesture's value while one owns the thumb, the
+ * node's otherwise (docs/media-player-plan.md M10). */
+internal fun kayaSliderShown(node: KayaNode): Double = if (node.gestureLive) node.gestureValue else node.value
+
+/** The gesture's end (Material's onValueChangeFinished, also called after an
+ * assistive setProgress): a gesture that moved nothing commits nothing and
+ * shows the app's last write; one that moved commits its own value over it. */
+internal fun kayaSliderGestureEnded(node: KayaNode) {
+    val held = node.gestureLive
+    node.gestureLive = false
+    if (held && node.gestureValue == node.gestureStart) return
+    kayaSliderCommitted(node, if (held) node.gestureValue else node.value, final = true)
+}
+
 /** A vertical slider (docs/range-plan.md §3 rule 6): its axis is 1. */
 internal fun kayaSliderVertical(node: KayaNode): Boolean =
     node.kind == KayaCompose.KIND_SLIDER && node.axis == 1L
@@ -22212,12 +22322,30 @@ private fun KayaSliderSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier)
     val source = remember { MutableInteractionSource() }
     val slider = @Composable { modifier: Modifier ->
         Slider(
-            modifier = modifier.onGloballyPositioned { kayaTravelCoords[node.id] = it },
-            value = node.value.toFloat(),
-            onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = false) },
-            // The end of the gesture carries no value: the last move already
-            // mirrored the settled one.
-            onValueChangeFinished = { kayaSliderCommitted(node, node.value, final = true) },
+            // THE HELD WRITE (docs/media-player-plan.md M10): a pointer down on
+            // the slider is the gesture, read off the raw stream before
+            // Material's own handlers, since Material emits no press for a
+            // touch that has not moved (measured 2026-10-17: a held touch
+            // never read pressed); the thumb shows the user's value.
+            modifier = modifier.onGloballyPositioned { kayaTravelCoords[node.id] = it }
+                .pointerInput(node.id) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        node.gestureStart = node.value
+                        node.gestureValue = node.value
+                        node.gestureLive = true
+                        do {
+                            val event = awaitPointerEvent(PointerEventPass.Final)
+                        } while (event.changes.any { it.pressed })
+                        if (node.gestureLive) kayaSliderGestureEnded(node)
+                    }
+                },
+            value = kayaSliderShown(node).toFloat(),
+            onValueChange = {
+                node.gestureValue = kayaSnappedSlider(it.toDouble(), node.minValue, node.maxValue, node.step)
+                kayaSliderCommitted(node, it.toDouble(), final = false)
+            },
+            onValueChangeFinished = { kayaSliderGestureEnded(node) },
             steps = kayaSliderSteps(node.minValue, node.maxValue, node.step),
             valueRange = node.minValue.toFloat()..node.maxValue.toFloat(),
             colors = colors,

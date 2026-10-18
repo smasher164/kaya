@@ -10140,6 +10140,17 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("no such target \(parts[1])")
                 }
+            case "hold", "release":
+                // docs/media-player-plan.md M10: the platform's own pointer
+                // gesture on the thumb, left down between the two verbs.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let to = parts.count == 4 && parts[2] == "at" ? Double(parts[3]) : nil
+                if let why = kayaSliderHold(String(parts[1]), down: parts[0] == "hold", to: to) {
+                    failures.append("\(parts[0]) \(parts[1]): \(why)")
+                } else {
+                    kayaAwaitAnswer(answered)
+                }
             case "set_value":
                 // THROUGH the control (docs/slider-plan.md S8): its value moves
                 // and the arm's own commit path runs — the step's snap, the
@@ -10189,6 +10200,15 @@ private func kayaRunScript(_ script: String) {
                     guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders),
                         let control = kayaSliderControls[node.id]
                     else { return nil }
+                    #if os(iOS)
+                        // UISlider does not snap, and under a held finger it
+                        // holds the touch's own Float (60.000004 for a thumb
+                        // pressed at 60, measured 2026-10-17): a stepped
+                        // slider's reading is its lattice point.
+                        if node.step > 0, control.slider.isTracking {
+                            return kayaSpelledSlider(kayaSnappedSlider(node, kayaControlSliderValue(control)))
+                        }
+                    #endif
                     return kayaSpelledSlider(kayaControlSliderValue(control))
                 }
                 if let got, got == want {
@@ -15177,11 +15197,63 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
         kayaSliderCommitted(node, control.doubleValue, final: true) { control.doubleValue = $0 }
     }
 
+    /// `hold` and `release` (docs/media-player-plan.md M10) through the
+    /// arm's own gesture doors, the ones a real press reaches from
+    /// `mouseDown`: AppKit's tracking loop ends at once without the hardware
+    /// button down (measured 2026-10-17: 1 ms for a posted press), and a real
+    /// press would take the host's cursor. The walk moves the control and runs
+    /// the coordinator's live path, as a drag's movements do; nil when it
+    /// happened.
+    func kayaSliderHold(_ spec: String, down: Bool, to value: Double?) -> String? {
+        DispatchQueue.main.sync { () -> String? in
+            guard let node = kayaTarget(Substring(spec), "slider", kayaScene.sliders),
+                let control = kayaSliderControls[node.id]
+            else { return "no such slider on screen" }
+            if down {
+                guard !control.tracking else { return "the slider is already held" }
+                control.beginGesture()
+                if let value {
+                    control.doubleValue = value
+                    kayaSliderCommitted(node, control.doubleValue, final: false) { control.doubleValue = $0 }
+                }
+                return nil
+            }
+            guard control.tracking else { return "the slider is not held" }
+            if control.doubleValue != control.startValue {
+                kayaSliderCommitted(node, control.doubleValue, final: true) { control.doubleValue = $0 }
+            }
+            control.endGesture()
+            return nil
+        }
+    }
+
     /// NSSlider whose arrow keys move by kaya's nudge and commit at once, and
     /// whose action tells a drag's movement from its release by the event that
     /// carried it.
     final class KayaNSSlider: NSSlider {
         var node: KayaNode?
+        /// A pointer gesture owns the thumb (docs/media-player-plan.md M10):
+        /// the app's writes wait in the node while it lasts.
+        var tracking = false
+        var startValue = 0.0
+
+        override func mouseDown(with event: NSEvent) {
+            beginGesture()
+            super.mouseDown(with: event)
+            endGesture()
+        }
+
+        func beginGesture() {
+            tracking = true
+            startValue = doubleValue
+        }
+
+        /// A gesture that moved nothing commits nothing, and the app's last
+        /// write, held in the node, is what the thumb shows.
+        func endGesture() {
+            tracking = false
+            if doubleValue == startValue, let node { doubleValue = node.value }
+        }
 
         private func nudge(by direction: Double) {
             guard let node else { return }
@@ -15203,6 +15275,7 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
             // and once more on the release; the event type tells them apart.
             let type = NSApp.currentEvent?.type
             let final = type != .leftMouseDown && type != .leftMouseDragged
+            if final && sender.tracking && sender.doubleValue == sender.startValue { return }
             kayaSliderCommitted(node, sender.doubleValue, final: final) { sender.doubleValue = $0 }
         }
     }
@@ -15249,11 +15322,71 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
                 node.tickSpacing > 0 && span > 0 ? Int((span / node.tickSpacing).rounded()) + 1 : 0
             slider.tickMarkPosition = .below
             slider.allowsTickMarkValuesOnly = node.step > 0 && node.tickSpacing == node.step
-            slider.doubleValue = node.value
+            // THE HELD WRITE (docs/media-player-plan.md M10): the thumb stays
+            // under the pointer; endGesture shows the write if nothing moved.
+            if !slider.tracking { slider.doubleValue = node.value }
         }
     }
 #else
     nonisolated(unsafe) var kayaSliderControls: [UInt64: KayaTickedSlider] = [:]
+
+    /// The held press's answer from the resident XCUITest driver, set off
+    /// the harness thread (docs/media-player-plan.md M10).
+    nonisolated(unsafe) var kayaHeldPress: (done: Bool, refusal: String?) = (true, nil)
+
+    /// How long the driver keeps the finger down after its walk: the steps a
+    /// scene puts between `hold` and `release` run inside it.
+    let kayaHoldMs = 2500
+
+    /// `hold` and `release` through the simulator's own touch: the resident
+    /// driver presses the thumb, walks to the value and keeps the finger
+    /// down for kayaHoldMs while the harness goes on; `release` waits for
+    /// that finger to lift. nil when it happened.
+    func kayaSliderHold(_ spec: String, down: Bool, to value: Double?) -> String? {
+        if !down {
+            for _ in 0..<1200 where !kayaHeldPress.done { Thread.sleep(forTimeInterval: 0.025) }
+            guard kayaHeldPress.done else { return "the driver's press never lifted" }
+            return kayaHeldPress.refusal
+        }
+        let aim = DispatchQueue.main.sync { () -> (KayaTickedSlider, CGPoint, CGPoint)? in
+            guard let node = kayaTarget(Substring(spec), "slider", kayaScene.sliders),
+                let view = kayaSliderControls[node.id]
+            else { return nil }
+            let s = view.slider
+            let track = s.trackRect(forBounds: s.bounds)
+            let at = s.thumbRect(forBounds: s.bounds, trackRect: track, value: s.value)
+            let from = s.convert(CGPoint(x: at.midX, y: at.midY), to: nil)
+            var to = from
+            if let value {
+                let goal = s.thumbRect(forBounds: s.bounds, trackRect: track, value: Float(value))
+                // A finger keeps where it grabbed the thumb, so a walk aimed at
+                // a bound's thumb stopped a step short (95 for 100, measured
+                // 2026-10-17): a bound is walked past, which UISlider clamps.
+                let past = Double(value) >= Double(s.maximumValue) ? goal.width
+                    : Double(value) <= Double(s.minimumValue) ? -goal.width : 0
+                to = s.convert(CGPoint(x: goal.midX + past, y: goal.midY), to: nil)
+            }
+            return (view, from, to)
+        }
+        guard let (view, from, to) = aim else { return "no such slider on screen" }
+        guard kayaHeldPress.done else { return "a slider is already held" }
+        kayaHeldPress = (false, nil)
+        let ask = String(format: "press_hold %.1f %.1f %.1f %.1f %d", from.x, from.y, to.x, to.y, kayaHoldMs)
+        Thread.detachNewThread {
+            let (ok, lines) = KayaSimdrive.ask(ask, timeout: 30)
+            kayaHeldPress = (true, ok ? nil : (lines.first ?? "the driver refused the press without saying why"))
+        }
+        let goal = value.map(Float.init)
+        for _ in 0..<200 {
+            let held = DispatchQueue.main.sync { () -> Bool in
+                view.slider.isTracking && (goal == nil || abs(view.slider.value - goal!) <= abs(goal!) * 0.03 + 0.5)
+            }
+            if held { return nil }
+            if kayaHeldPress.done { return kayaHeldPress.refusal ?? "the press lifted before the slider tracked it" }
+            Thread.sleep(forTimeInterval: 0.025)
+        }
+        return "the slider never tracked the driver's press"
+    }
 
     func kayaControlSliderValue(_ control: KayaTickedSlider) -> Double { Double(control.slider.value) }
 
@@ -15372,7 +15505,20 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
                 sender.setValue(Float($0), animated: false)
             }
         }
+        /// Where the gesture began (docs/media-player-plan.md M10).
+        var startValue: Float = 0
+        @objc func began(_ sender: UISlider) {
+            startValue = sender.value
+            kayaDiag("slider hold: touch down at \(sender.value), tracking \(sender.isTracking)")
+        }
         @objc func released(_ sender: UISlider) {
+            // A gesture that moved nothing commits nothing, and the app's
+            // last write, held in the node, is what the thumb shows.
+            kayaDiag("slider hold: touch up at \(sender.value) from \(startValue), app's \(node.value)")
+            if kayaSnappedSlider(node, Double(sender.value)) == kayaSnappedSlider(node, Double(startValue)) {
+                sender.setValue(Float(node.value), animated: false)
+                return
+            }
             kayaSliderCommitted(node, Double(sender.value), final: true) {
                 sender.setValue(Float($0), animated: false)
             }
@@ -15389,6 +15535,8 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
             view.slider.addTarget(
                 context.coordinator, action: #selector(KayaSliderCoordinator.moved(_:)),
                 for: .valueChanged)
+            view.slider.addTarget(
+                context.coordinator, action: #selector(KayaSliderCoordinator.began(_:)), for: .touchDown)
             view.slider.addTarget(
                 context.coordinator, action: #selector(KayaSliderCoordinator.released(_:)),
                 for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -15424,7 +15572,9 @@ func kayaSliderNudge(_ node: KayaNode) -> Double {
             view.vertical = node.axis == 1
             view.slider.minimumValue = Float(node.minValue)
             view.slider.maximumValue = Float(node.maxValue)
-            view.slider.setValue(Float(node.value), animated: false)
+            // THE HELD WRITE (docs/media-player-plan.md M10): the thumb stays
+            // under the finger; `released` shows the write if nothing moved.
+            if !view.slider.isTracking { view.slider.setValue(Float(node.value), animated: false) }
             let span = node.maxValue - node.minValue
             if node.tickSpacing > 0 && span > 0 {
                 let count = Int((span / node.tickSpacing).rounded())

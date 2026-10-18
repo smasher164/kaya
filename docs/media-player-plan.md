@@ -537,6 +537,25 @@ backend, the thumb under a held pointer while the app writes (the jump is
 expected on SwiftUI's `updateNSView` and Compose's controlled slider; GTK and
 WinUI may already ignore a programmatic set during a drag).
 
+BUILT 2026-10-17, MEASURED with each arm's hold cut out: every backend moved
+the thumb to the app's write under a held pointer, tools/scenes/sliders.steps
+reading `slider#0 holds "25", wanted "60"` on the mac, on GTK under x11 and
+wayland and on WinUI, and the same on iOS and Android before their gesture
+reads were right; GTK and WinUI ignore no programmatic set during a drag. The gesture is each platform's own: AppKit's tracking
+loop (the mac's `hold` drives the arm's gesture doors in process, since a
+posted press ends AppKit's loop at once and a real one would take the host's
+cursor), UISlider's `isTracking` under the XCUITest driver's held touch,
+GtkRange under the lane's real pointer (xdotool, wlpointer), the WinUI
+Slider under the VM's real cursor, and a raw pointer-down on Compose's
+Slider. A write that arrives meanwhile is held; a gesture that moved nothing
+ends with it shown and commits nothing, and one that moved commits its own
+value over it. `hold slider#0 [at <value>]` and `release slider#0` are the
+scene verbs in all three harnesses; the Windows sliders legs joined the
+lane's EXCLUSIVE set, since its real button collides across the pool
+(docs/traps.md, the slider held under a pointer). check-slider-commit holds
+the rule's fifteen points across the five arms, and a cut applying the write
+at once in each arm is watched red.
+
 ### M11: The queue is the app's; no gapless, no preload (RULED 2026-10-17)
 
 RECOMMEND that the app keep the queue, shuffle and repeat, and move one

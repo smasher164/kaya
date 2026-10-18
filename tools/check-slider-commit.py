@@ -35,6 +35,8 @@ dev_shell_or_die()
 
 import re
 
+import slider_hold
+
 WINUI = "crates/kaya/src/winui/mod.rs"
 GTK = "crates/kaya/src/gtk.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
@@ -203,17 +205,23 @@ def compose_findings(source):
         out.append(f"{COMPOSE}: no KayaSliderSurface — the arm this gate "
                    f"reads is gone or renamed")
         return out
-    moved = re.search(r"onValueChange = \{ kayaSliderCommitted\((.*?)\) \}", surface, re.S)
+    moved = re.search(r"onValueChange = \{.*?kayaSliderCommitted\((.*?)\)\s*\}", surface, re.S)
     if moved is None or not moved.group(1).rstrip().endswith("final = false"):
         got = moved.group(1).strip() if moved else "no call at all"
         out.append(
             f"{COMPOSE}: onValueChange commits with `{got}` — a per-movement "
             f"event is final ONLY when the gesture is over (final = false "
             f"here), or a real drag publishes one value_committed per pixel")
-    finished = re.search(
-        r"onValueChangeFinished = \{ kayaSliderCommitted\((.*?)\) \}", surface, re.S)
-    if finished is None or not finished.group(1).rstrip().endswith("final = true"):
-        got = finished.group(1).strip() if finished else "no onValueChangeFinished at all"
+    # The end goes through kayaSliderGestureEnded since the held write
+    # (docs/media-player-plan.md M10), whose one commit is final.
+    finished = "onValueChangeFinished = { kayaSliderGestureEnded(node) }" in surface
+    ended = block_after(source, "internal fun kayaSliderGestureEnded(")
+    commit = re.search(r"kayaSliderCommitted\((.*?)\)\n", ended, re.S)
+    if not finished:
+        out.append(f"{COMPOSE}: the gesture's end is no onValueChangeFinished at all — "
+                   f"Material's onValueChangeFinished IS the commit")
+    elif commit is None or not commit.group(1).rstrip().endswith("final = true"):
+        got = commit.group(1).strip() if commit else "no call at all"
         out.append(f"{COMPOSE}: the gesture's end is `{got}` — Material's "
                    f"onValueChangeFinished IS the commit (final = true)")
     return out
@@ -376,16 +384,16 @@ watched("a GTK scale whose controller never sees the release",
 # 9. COMPOSE: THE MOVEMENT COMMITS.
 compose_always = gate.doctor(
     "the compose per-movement commit", REAL[COMPOSE],
-    r"onValueChange = \{ kayaSliderCommitted\(node, it\.toDouble\(\), final = false\) \}",
-    "onValueChange = { kayaSliderCommitted(node, it.toDouble(), final = true) }")
+    r"kayaSliderCommitted\(node, it\.toDouble\(\), final = false\)",
+    "kayaSliderCommitted(node, it.toDouble(), final = true)")
 watched("a Compose arm committing on every drag movement",
         {**REAL, COMPOSE: compose_always}, "final ONLY when the gesture is over")
 
 # 10. COMPOSE: THE GESTURE HAS NO END.
 compose_no_end = gate.doctor(
     "the compose finished-callback removal", REAL[COMPOSE],
-    r"onValueChangeFinished = \{ kayaSliderCommitted\(",
-    "onValueChangeStarted = { kayaSliderCommitted(")
+    r"onValueChangeFinished = \{ kayaSliderGestureEnded\(",
+    "onValueChangeStarted = { kayaSliderGestureEnded(")
 watched("a Compose slider with no onValueChangeFinished",
         {**REAL, COMPOSE: compose_no_end}, "no onValueChangeFinished at all")
 
@@ -1882,6 +1890,7 @@ for line in compose_color_findings(REAL[COMPOSE]):
     gate.finding(line)
 for line in compose_range_findings(REAL[COMPOSE]):
     gate.finding(line)
+slider_hold.run(gate, gate.read)
 
 gate.verdict("the commit rule holds on every landed slider arm, every colour picker arm, "
              "every range arm and the core's record of the user's pair; every range arm "

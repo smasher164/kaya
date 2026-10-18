@@ -47,3 +47,25 @@ set_value slider#2 0.75
 expect_value slider#2 "0.75"
 expect_thumb slider#2 "0.75"
 expect_ax slider#2 "slider/Fader"
+
+# THE HELD WRITE (docs/media-player-plan.md M10): while a pointer holds the
+# thumb, an app's write to the slider waits. A gesture that moves nothing
+# ends with the app's last write shown; one that moves commits over it. The
+# walk goes to the bound, where every platform's own drag arithmetic agrees.
+set_value slider#0 60
+expect label#1 "commits: 3"
+hold slider#0
+click button#0
+expect_value slider#0 "60"
+release slider#0
+expect_value slider#0 "25"
+expect label#1 "commits: 3"
+set_value slider#0 60
+expect label#1 "commits: 4"
+hold slider#0 at 100
+click button#0
+expect_value slider#0 "100"
+release slider#0
+expect_value slider#0 "100"
+expect label#0 "value: 100"
+expect label#1 "commits: 5"
