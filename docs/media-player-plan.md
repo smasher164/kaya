@@ -694,7 +694,7 @@ want a volume slider"). PREVIOUS restarts the playing track when it has played
 more than about three seconds and goes to the previous track otherwise ("we
 should probably restart the track after three seconds").
 
-### M15: The album header's gradient (OPEN, the maintainer's visual ruling)
+### M15: The album header's gradient (RULED 2026-10-18: B)
 
 The maintainer, 2026-10-18: the inset gradient "looks a bit tacky", maybe the
 wrong colours, maybe darker and subtler, maybe full bleed (the inset leaves a
@@ -702,6 +702,16 @@ border around it), maybe a solid colour. To be ruled from a comparison page
 showing, on several real covers in light and dark: (A) the current inset
 gradient; (B) full bleed, the cover's most vivid colour darkened and muted, a
 long soft fade into the page; (C) full bleed, a solid muted colour.
+
+RULED 2026-10-18 from the comparison page (the maintainer: "I think B looks
+best"): B, full bleed, the cover's most vivid colour darkened to a deep wash
+in dark and lifted to a pale tint in light, fading into the page; and "B's
+bottom can be slightly lower": the coloured area runs down until the gap
+between its edge and the track table equals the table's side margin. The
+vivid pick needs the cover's main colours, which kaya does not report
+(image_dominant answers the most common one); whether to add an
+image_palette beside it is asked separately. The fade line at the header's
+edge and the Mac's colour stopping under the title bar stay as they are.
 
 ## §6: Build order
 
