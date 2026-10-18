@@ -3986,6 +3986,8 @@ data SessionAttr
   | SessionAlbum Text
   | -- | An asset name.
     SessionArtwork Text
+  | -- | The picture's bytes (docs\/media-player-plan.md M7).
+    SessionArtworkBytes BS.ByteString
   | -- | The actions the app answers itself through 'onSession'; play,
     -- pause and seek_to it leaves out apply to the attached player.
     SessionHandles [SessionActionKind]
@@ -3996,7 +3998,7 @@ data SessionAttr
 -- (docs\/media-plan.md §5).
 declareSession :: [SessionAttr] -> Build ()
 declareSession attrs =
-  emitB
+  emitBIO
     ( W.txSetSession
         (last (0 : [p | SessionPlayer (Player p) <- attrs]))
         (foldr (\k m -> m + 2 ^ sessionActionKindWire k) 0 (concat [ks | SessionHandles ks <- attrs]))
@@ -4004,10 +4006,16 @@ declareSession attrs =
         (str [x | SessionTitle x <- attrs])
         (str [x | SessionArtist x <- attrs])
         (str [x | SessionAlbum x <- attrs])
-        (str [x | SessionArtwork x <- attrs])
+        <$> artwork (last (Nothing : [Just a | a <- attrs, isArtwork a]))
     )
   where
     str xs = W.VStr (T.unpack (last ("" : xs)))
+    isArtwork (SessionArtwork _) = True
+    isArtwork (SessionArtworkBytes _) = True
+    isArtwork _ = False
+    artwork (Just (SessionArtworkBytes b)) = W.VBlob <$> registerBlob b
+    artwork (Just (SessionArtwork x)) = pure (W.VStr (T.unpack x))
+    artwork _ = pure (W.VStr "")
 
 -- THE MEDIA READER AND THE CORE-HELD IMAGES (docs\/media-plan.md §8
 -- rulings 3, 4): frames and peaks without a player.

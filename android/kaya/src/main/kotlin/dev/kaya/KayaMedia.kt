@@ -716,6 +716,9 @@ private fun kayaWatchCaptionStyle(context: Context) {
 /** expect_video_ink's tolerance on this lane (docs/traps.md, the BT.601 entry). */
 internal const val KAYA_VIDEO_INK_TOLERANCE = 14
 
+/** harness.rs's NOW_PLAYING_ART_TOLERANCE. */
+internal const val KAYA_NOW_PLAYING_ART_TOLERANCE = 16
+
 internal fun kayaVideoInkWithin(got: String, want: String): Boolean {
     fun rgb(s: String): List<Int>? {
         if (s.length != 6) return null
@@ -891,6 +894,7 @@ internal object KayaMediaSession {
     var artist = ""
     var album = ""
     var artwork = ""
+    var artworkData: ByteArray? = null
     var session: MediaSession? = null
     private var statePlayer: KayaSessionPlayer? = null
 
@@ -898,13 +902,17 @@ internal object KayaMediaSession {
      * the system delivered (the harness thread reads it). */
     @Volatile var arrivals = 0
 
-    fun apply(context: Context, attached: Long, actions: Int, t: String, a: String, al: String, art: String) {
+    fun apply(
+        context: Context, attached: Long, actions: Int, t: String, a: String, al: String, art: String,
+        artData: ByteArray?,
+    ) {
         player = attached
         offered = actions
         title = t
         artist = a
         album = al
         artwork = art
+        artworkData = artData
         if (session == null && (player != 0L || offered != 0)) {
             val sp = KayaSessionPlayer()
             statePlayer = sp
@@ -951,6 +959,20 @@ internal object KayaMediaSession {
         }
         return "${kayaDebugQuoted(t)} $state"
     }
+
+    /** expect_now_playing_art's read: the picture the SYSTEM holds for this
+     * session through the same controller, harness.rs's art_reading
+     * (`RRGGBB WxH`) or `none`. */
+    fun nowPlayingArt(context: Context): String {
+        val token = session?.platformToken ?: return "none"
+        val meta = android.media.session.MediaController(context, token).metadata ?: return "none"
+        val art = meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_ALBUM_ART)
+            ?: meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_ART)
+            ?: meta.getBitmap(android.media.MediaMetadata.METADATA_KEY_DISPLAY_ICON)
+            ?: return "none"
+        val p = art.getPixel(art.width / 2, art.height / 10)
+        return "%02X%02X%02X %dx%d".format(p shr 16 and 0xFF, p shr 8 and 0xFF, p and 0xFF, art.width, art.height)
+    }
 }
 
 /** The player the session speaks for: its state is kaya's, read fresh each
@@ -980,7 +1002,12 @@ internal class KayaSessionPlayer : SimpleBasePlayer(Looper.getMainLooper()) {
         val code = KayaPresent.sessionState()
         val p = kayaPlayers[s.player]
         val meta = MediaMetadata.Builder().setTitle(s.title).setArtist(s.artist).setAlbumTitle(s.album)
-        if (s.artwork.isNotEmpty()) meta.setArtworkUri(Uri.parse(s.artwork))
+        val data = s.artworkData
+        if (data != null) {
+            meta.setArtworkData(data, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+        } else if (s.artwork.isNotEmpty()) {
+            meta.setArtworkUri(Uri.parse(s.artwork))
+        }
         val durationMs = p?.exo?.duration?.takeIf { it != C.TIME_UNSET && it > 0 }
         val item = MediaItemData.Builder("kaya-session")
             .setMediaMetadata(meta.build())

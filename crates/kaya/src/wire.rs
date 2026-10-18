@@ -2305,7 +2305,12 @@ pub fn decode_transaction_with_blobs(
                     title: media_str(r.value(), "set_session's title"),
                     artist: media_str(r.value(), "set_session's artist"),
                     album: media_str(r.value(), "set_session's album"),
-                    artwork: media_str(r.value(), "set_session's artwork"),
+                    artwork: match r.value() {
+                        Value::Str(name) if name.is_empty() => crate::protocol::Artwork::None,
+                        Value::Str(name) => crate::protocol::Artwork::Asset(name),
+                        Value::Blob(bytes) => crate::protocol::Artwork::Bytes(bytes),
+                        other => panic!("kaya: set_session's artwork must be an asset name (Str) or bytes (Blob), got {other:?}"),
+                    },
                 })
             }
             TX_OPEN_READER => TxOp::OpenReader {
@@ -4593,9 +4598,10 @@ impl Writer {
                     b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
                     b.extend_from_slice(&offered.to_le_bytes());
                     b.extend_from_slice(&playback_state_raw(*playback_state).to_le_bytes());
-                    for s in [title, artist, album, artwork] {
+                    for s in [title, artist, album] {
                         write_value(b, &Value::Str(s.clone()), blobs);
                     }
+                    write_value(b, artwork, blobs);
                 })
             }
             ApplyOp::ScrollToRow { id, copy, index } => self.record(APPLY_SCROLL_TO_ROW, |b, _| {
@@ -5228,9 +5234,15 @@ impl Writer {
                 b.extend_from_slice(&spec.player.map_or(0, |p| p.0).to_le_bytes());
                 b.extend_from_slice(&spec.actions.to_le_bytes());
                 b.extend_from_slice(&playback_state_raw(spec.playback_state).to_le_bytes());
-                for s in [&spec.title, &spec.artist, &spec.album, &spec.artwork] {
+                for s in [&spec.title, &spec.artist, &spec.album] {
                     write_value(b, &Value::Str(s.clone()), blobs);
                 }
+                let artwork = match &spec.artwork {
+                    crate::protocol::Artwork::None => Value::Str(String::new()),
+                    crate::protocol::Artwork::Asset(name) => Value::Str(name.clone()),
+                    crate::protocol::Artwork::Bytes(bytes) => Value::Blob(bytes.clone()),
+                };
+                write_value(b, &artwork, blobs);
             }),
             TxOp::OpenReader { reader, source } => self.record(TX_OPEN_READER, |b, blobs| {
                 b.extend_from_slice(&reader.0.to_le_bytes());

@@ -972,7 +972,7 @@ def tx_select_track(player: int, kind: int, index: int) -> bytes:
     return record(TX_SELECT_TRACK, struct.pack("<Q", player) + struct.pack("<I", kind) + struct.pack("<I", index))
 
 def tx_set_session(player: int, actions: int, playback_state: int, title: Value, artist: Value, album: Value, artwork: Value) -> bytes:
-    """Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player."""
+    """Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player."""
     return record(TX_SET_SESSION, struct.pack("<Q", player) + struct.pack("<I", actions) + struct.pack("<I", playback_state) + _enc.value(title) + _enc.value(artist) + _enc.value(album) + _enc.value(artwork))
 
 def tx_open_reader(reader: int, source: Value) -> bytes:

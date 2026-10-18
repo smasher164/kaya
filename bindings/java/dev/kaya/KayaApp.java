@@ -2081,7 +2081,7 @@ public final class KayaApp {
         private String title = "";
         private String artist = "";
         private String album = "";
-        private String artwork = "";
+        private Object artwork = "";
         private int actions;
         private PlaybackState playbackState = PlaybackState.NONE;
 
@@ -2114,6 +2114,17 @@ public final class KayaApp {
         /** An asset name. */
         public Session artwork(String asset) {
             this.artwork = asset;
+            return this;
+        }
+
+        /** The picture's bytes (docs/media-player-plan.md M7). */
+        public Session artwork(byte[] bytes) {
+            this.artwork = new KayaWire.BlobHandle(KayaRing.blobRegister(bytes));
+            return this;
+        }
+
+        public Session artwork(Asset asset) {
+            this.artwork = new KayaWire.BlobHandle(asset.blob());
             return this;
         }
 

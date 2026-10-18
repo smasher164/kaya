@@ -1330,7 +1330,7 @@ public final class KayaWire {
         return finish(b);
     }
 
-    /** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+    /** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player. */
     public static byte[] txSetSession(long player, int actions, int playbackState, Object title, Object artist, Object album, Object artwork) {
         Enc b = begin(TX_KIND_SET_SESSION);
         b.putLong(player);

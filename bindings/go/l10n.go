@@ -66,6 +66,7 @@ func FormatTimecode(frames int64, rate TimecodeRate) string {
 		return C.kaya_fmt_timecode(C.int64_t(frames), C.int64_t(rate.Numerator), C.int64_t(rate.Denominator), rate.dropCode(), out, cap)
 	})
 }
+
 // FormatDuration is elapsed time, positional ("3:45", "1:02:03") in the
 // locale's digits.
 func FormatDuration(ms int64) string {

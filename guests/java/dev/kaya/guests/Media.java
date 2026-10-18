@@ -145,6 +145,7 @@ public final class Media {
                         .player(player)
                         .title("kaya media")
                         .artist("kaya")
+                        .artwork("covers/cover-600.jpg")
                         .handles(SessionActionKind.NEXT)
                         .declare();
             }
@@ -169,6 +170,13 @@ public final class Media {
                 if (action.kind() == SessionActionKind.NEXT) {
                     w.nexts++;
                     t.write(name, "next " + w.nexts);
+                    t.session()
+                            .player(player)
+                            .title("kaya media")
+                            .artist("kaya")
+                            .artwork(KayaApp.asset("covers/cover-320.jpg"))
+                            .handles(SessionActionKind.NEXT)
+                            .declare();
                 }
             });
             return null;

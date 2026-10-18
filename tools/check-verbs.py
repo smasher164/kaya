@@ -3797,6 +3797,50 @@ for pattern, repl, label, which in (
     if not found:
         fail(f"check-verbs SELF-TEST: the Android video read passed with {label}")
 
+# --- THE NOW PLAYING ART TOLERANCE (docs/media-player-plan.md M7) ------
+# expect_now_playing_art compares a colour the SYSTEM holds, rescaled and
+# re-encoded, so three harnesses hand-write the same number; copies drifting
+# together would quietly pass the wrong cover, which the scene cannot see.
+NOW_PLAYING_ART_RULED = 16
+
+
+def art_tolerance(harness_src=None, swift_src=None, media_src=None):
+    bad = []
+    for label, src, pattern in (
+            ("harness.rs NOW_PLAYING_ART_TOLERANCE", harness_src or real(HARNESS),
+             r"pub const NOW_PLAYING_ART_TOLERANCE: u8 = (\d+);"),
+            ("KayaSwiftUI.swift kayaNowPlayingArtTolerance", swift_src or real(SWIFT),
+             r"let kayaNowPlayingArtTolerance = (\d+)"),
+            ("KayaMedia.kt KAYA_NOW_PLAYING_ART_TOLERANCE", media_src or real(KOTLIN_MEDIA),
+             r"internal const val KAYA_NOW_PLAYING_ART_TOLERANCE = (\d+)")):
+        m = re.search(pattern, src)
+        if not m:
+            bad.append(f"{label} is not there to read")
+        elif int(m.group(1)) != NOW_PLAYING_ART_RULED:
+            bad.append(f"{label} is {m.group(1)}, not the ruled {NOW_PLAYING_ART_RULED}")
+    return bad
+
+
+art_out = art_tolerance()
+if art_out:
+    media_status = 1
+    print("check-verbs: the Now Playing art tolerance moved:", file=sys.stderr)
+    print("\n".join(art_out), file=sys.stderr)
+print(f"check-verbs: Now Playing art tolerance {NOW_PLAYING_ART_RULED} in three harnesses")
+for pattern, repl, label, which in (
+    (r"(pub const NOW_PLAYING_ART_TOLERANCE: u8 = )16", "40", "harness.rs widened", "harness"),
+    (r"(let kayaNowPlayingArtTolerance = )16", "40", "the Swift copy widened", "swift"),
+    (r"(internal const val KAYA_NOW_PLAYING_ART_TOLERANCE = )16", "40", "the Kotlin copy widened",
+     "media"),
+):
+    src = {"harness": HARNESS, "swift": SWIFT, "media": KOTLIN_MEDIA}[which]
+    cut = g.doctor(f"now playing art tolerance: {label}", real(src), pattern,
+                   lambda m, repl=repl: m.group(1) + repl)
+    found = art_tolerance(**{f"{which}_src": cut})
+    print(f"check-verbs: art-tolerance negative ({label}): {len(found)} finding(s)")
+    if not found:
+        fail(f"check-verbs SELF-TEST: the art tolerance passed with {label}")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its

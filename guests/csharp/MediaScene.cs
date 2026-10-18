@@ -123,7 +123,7 @@ static class MediaScene
             }));
             if (session)
                 tx.Session(player: player, title: "kaya media", artist: "kaya",
-                    handles: new[] { SessionActionKind.Next });
+                    artwork: "covers/cover-600.jpg", handles: new[] { SessionActionKind.Next });
             return (summary, name, player);
         });
 
@@ -157,6 +157,9 @@ static class MediaScene
             {
                 nexts++;
                 t.Write(name, $"next {nexts}");
+                using var art = t.Asset("covers/cover-320.jpg");
+                t.Session(player: player, title: "kaya media", artist: "kaya",
+                    handles: new[] { SessionActionKind.Next }, artworkBytes: art.Bytes());
             }
         });
         Environment.Exit(app.Run());

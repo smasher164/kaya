@@ -534,14 +534,17 @@ extension KayaAppTx {
     /// and what the system shows while no player is attached.
     public func session(
         player: KayaPlayer? = nil, title: String = "", artist: String = "", album: String = "",
-        artwork: String = "", handles: [KayaSessionActionKind] = [],
+        artwork: String = "", artworkData: Data? = nil, handles: [KayaSessionActionKind] = [],
         playbackState: KayaPlaybackState = .none,
         onAction: ((KayaAppTx, KayaSessionAction) throws -> Void)? = nil
     ) {
+        precondition(artworkData == nil || artwork.isEmpty,
+                     "kaya: a session's artwork is an asset name or bytes, not both")
         let mask = handles.reduce(UInt32(0)) { $0 | (1 << $1.rawValue) }
         tx.setSession(
             player?.id ?? 0, mask, playbackState.rawValue,
-            .str(title), .str(artist), .str(album), .str(artwork))
+            .str(title), .str(artist), .str(album),
+            artworkData.map { .blob(kayaRegisterBlob($0)) } ?? .str(artwork))
         if let onAction { app.onSessionAction(onAction) }
     }
 }

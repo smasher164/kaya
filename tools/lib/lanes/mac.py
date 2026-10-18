@@ -542,6 +542,7 @@ HOST_VERBS = {
     "file_dialog_name": ("panel", "types into the file panel's name field"),
     "session_send": ("session", "takes the host's Now Playing"),
     "expect_now_playing": ("session", "takes the host's Now Playing"),
+    "expect_now_playing_art": ("session", "takes the host's Now Playing"),
     "pick_emoji": ("takeover", "activates the guest under the emoji palette, "
                                "taking the host's keyboard"),
     "open_link": ("takeover", "activates the guest through LaunchServices, "

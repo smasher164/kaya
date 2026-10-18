@@ -10,6 +10,7 @@ click button#0
 expect label#0 "playing"
 expect_video_ink video#0 "C83C1E"
 expect_now_playing "kaya media" playing
+expect_now_playing_art C0432B
 expect_display_awake yes
 session_send pause
 expect label#0 "paused"
@@ -20,6 +21,8 @@ expect label#0 "playing"
 expect_now_playing "kaya media" playing
 session_send next
 expect label#1 "next 1"
+# The next track's art came as the app's bytes (docs/media-player-plan.md M7).
+expect_now_playing_art 2B69BE
 expect label#0 "playing"
 ax_action video#0 "Pause"
 expect label#0 "paused"

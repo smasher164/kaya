@@ -3200,7 +3200,7 @@ let video ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
    itself through [on_session]; play, pause and seek_to it leaves out
    apply to the attached [~player]. *)
 let declare_session ?player ?(title = "") ?(artist = "") ?(album = "") ?(artwork = "")
-    ?(handles = []) ?(playback_state = Playback_state.None) () =
+    ?artwork_bytes ?(handles = []) ?(playback_state = Playback_state.None) () =
   let mask =
     List.fold_left (fun m k -> m lor (1 lsl Session_action.Kind.wire k)) 0 handles
   in
@@ -3208,7 +3208,12 @@ let declare_session ?player ?(title = "") ?(artist = "") ?(album = "") ?(artwork
     (Kaya_wire.tx_set_session
        (match player with Some (Player id) -> id | None -> 0L)
        mask (Playback_state.wire playback_state) (Kaya_wire.Str title) (Kaya_wire.Str artist)
-       (Kaya_wire.Str album) (Kaya_wire.Str artwork))
+       (Kaya_wire.Str album)
+       (match artwork_bytes with
+        | None -> Kaya_wire.Str artwork
+        | Some _ when artwork <> "" ->
+            invalid_arg "kaya: a session's artwork is an asset name or bytes, not both"
+        | Some b -> Kaya_wire.Blob (Kaya_runtime.register_blob b)))
 
 (* Whether this platform plays [mime] with [codecs] (an RFC 6381 list, ""
    for none): true exactly when loading it would not fail as

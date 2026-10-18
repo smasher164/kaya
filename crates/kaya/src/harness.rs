@@ -660,6 +660,12 @@ pub enum Step {
     /// `expect_now_playing "title" playing`: what this app published to the
     /// system's Now Playing, and the playback state it states.
     ExpectNowPlaying(String, String),
+    /// `expect_now_playing_art C0432B`: the picture the system holds for
+    /// this app's Now Playing, read at half its width and a tenth of its
+    /// height within NOW_PLAYING_ART_TOLERANCE per channel, or `none`
+    /// (docs/media-player-plan.md M7). A colour, not a size: Android's
+    /// system copy of a 600 px cover is 300 px (measured 2026-10-17).
+    ExpectNowPlayingArt(String),
     /// `expect_display_awake yes`: whether this process holds the
     /// platform's keep-the-display-awake assertion (§2 rule 5).
     ExpectDisplayAwake(bool),
@@ -1159,6 +1165,7 @@ impl Step {
             | Step::ExpectBadge(..)
             | Step::SessionSend(..)
             | Step::ExpectNowPlaying(..)
+            | Step::ExpectNowPlayingArt(..)
             | Step::ExpectDisplayAwake(..)
             | Step::ExpectPlayerOpen(..)
             | Step::PickEmoji(..)
@@ -1324,6 +1331,7 @@ impl Step {
             Step::AxAction(..) => false,
             Step::SessionSend(..) => false,
             Step::ExpectNowPlaying(..) => true,
+            Step::ExpectNowPlayingArt(..) => true,
             Step::ExpectDisplayAwake(..) => true,
             Step::ExpectPlayerOpen(..) => true,
             Step::PickEmoji { .. } => false,
@@ -1481,6 +1489,22 @@ fn video_box_read(got: &str) -> Option<(f64, f64)> {
     match (parts.next(), parts.next(), parts.next()) {
         (Some(Ok(w)), Some(Ok(h)), None) if w > 0.0 && h > 0.0 => Some((w, h)),
         _ => None,
+    }
+}
+
+/// expect_now_playing_art's tolerance per channel: the system's own copy is
+/// rescaled and re-encoded (Android's is 300 px for a 600 px cover), and
+/// the scene's two covers differ by more than 100 in every channel.
+pub const NOW_PLAYING_ART_TOLERANCE: u8 = 16;
+
+/// expect_now_playing_art's reading of straight RGBA8: the colour at half
+/// the width and a tenth of the height, then the size.
+pub fn art_reading(width: u32, height: u32, rgba: &[u8]) -> String {
+    let (x, y) = (width / 2, height / 10);
+    let at = ((y * width + x) * 4) as usize;
+    match rgba.get(at..at + 3) {
+        Some(p) => format!("{:02X}{:02X}{:02X} {width}x{height}", p[0], p[1], p[2]),
+        None => format!("<a {width}x{height} picture with {} bytes of pixels>", rgba.len()),
     }
 }
 
@@ -1958,6 +1982,10 @@ pub trait Stage: Send + 'static {
     fn session_send(&self, action: &str) -> Result<(), String>;
     /// `"<title>" <state>` as this process published them to the system.
     fn now_playing(&self) -> String;
+    /// The picture the system holds for this process's Now Playing,
+    /// [`art_reading`]'s `RRGGBB WxH` or `none`; anything else says why it
+    /// could not be read.
+    fn now_playing_art(&self) -> String;
     /// Whether this process holds the display-awake assertion.
     fn display_awake(&self) -> bool;
     /// Whether the platform's player `n`-th by id holds an item, or why
@@ -3256,6 +3284,14 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_now_playing's state is playing, paused or stopped, not {state:?}"));
                 }
                 Step::ExpectNowPlaying(parse_string(title)?, state.to_owned())
+            }
+            "expect_now_playing_art" => {
+                let want = rest.trim();
+                let hex = want.len() == 6 && want.chars().all(|c| c.is_ascii_hexdigit());
+                if want != "none" && !hex {
+                    return Err(format!("expect_now_playing_art wants an RRGGBB colour or none: {line:?}"));
+                }
+                Step::ExpectNowPlayingArt(want.to_owned())
             }
             "expect_display_awake" => {
                 let word = rest.trim();
@@ -5760,6 +5796,17 @@ fn run_with_log(
                     Ok(format!("now playing {want}"))
                 } else {
                     Err(format!("now playing {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectNowPlayingArt(want) => Some(poll(|| {
+                let got = stage.now_playing_art();
+                let read = got.split_whitespace().next().unwrap_or_default();
+                if (want == "none" && got == "none")
+                    || (want != "none" && video_ink_within(read, want, NOW_PLAYING_ART_TOLERANCE))
+                {
+                    Ok(format!("now playing art {want}"))
+                } else {
+                    Err(format!("now playing art {got}, wanted {want}"))
                 }
             })),
             Step::ExpectDisplayAwake(want) => Some(poll(|| {
@@ -8745,6 +8792,20 @@ mod tests {
         ));
         assert!(parse("expect_now_playing \"Tone\" asleep").is_err());
         assert!(matches!(
+            parse("expect_now_playing_art C0432B").unwrap().as_slice(),
+            [Step::ExpectNowPlayingArt(w)] if w == "C0432B"
+        ));
+        assert_eq!(art_reading(2, 10, &[[0u8, 0, 0, 255]; 20].concat()), "000000 2x10");
+        let mut rgba = vec![0u8; 4 * 10 * 20];
+        rgba[(2 * 10 + 5) * 4..(2 * 10 + 5) * 4 + 3].copy_from_slice(&[0xC0, 0x43, 0x2B]);
+        assert_eq!(art_reading(10, 20, &rgba), "C0432B 10x20");
+        assert!(matches!(
+            parse("expect_now_playing_art none").unwrap().as_slice(),
+            [Step::ExpectNowPlayingArt(w)] if w == "none"
+        ));
+        assert!(parse("expect_now_playing_art big").is_err());
+        assert!(parse("expect_now_playing_art 600x600").is_err());
+        assert!(matches!(
             parse("expect_display_awake yes").unwrap().as_slice(),
             [Step::ExpectDisplayAwake(true)]
         ));
@@ -9538,6 +9599,9 @@ mod tests {
         }
         fn now_playing(&self) -> String {
             String::new()
+        }
+        fn now_playing_art(&self) -> String {
+            "none".into()
         }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())
@@ -10800,6 +10864,9 @@ mod tests {
         fn now_playing(&self) -> String {
             String::new()
         }
+        fn now_playing_art(&self) -> String {
+            "none".into()
+        }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())
         }
@@ -11274,6 +11341,9 @@ mod tests {
         }
         fn now_playing(&self) -> String {
             String::new()
+        }
+        fn now_playing_art(&self) -> String {
+            "none".into()
         }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())

@@ -7246,7 +7246,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 kayaFollowKeepAwake()
             case applySetSession:
                 // { u64 player; u32 offered; u32 playback_state; Str title,
-                //   artist, album, artwork (a file URL or empty) }.
+                //   artist, album; artwork a Str file URL (empty for none)
+                //   or the app's bytes as a Blob }, decoded once here.
                 var sat = body + 16
                 var session = KayaSession()
                 session.player = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -7255,7 +7256,15 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 session.title = kayaReadStrValue(raw, &sat)
                 session.artist = kayaReadStrValue(raw, &sat)
                 session.album = kayaReadStrValue(raw, &sat)
-                session.artwork = kayaReadStrValue(raw, &sat)
+                if raw.loadUnaligned(fromByteOffset: sat, as: UInt32.self) == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: sat + 8, as: UInt64.self)
+                    session.artwork = blobs[handle].flatMap { KayaPlatformImage(data: $0) }
+                } else {
+                    let url = kayaReadStrValue(raw, &sat)
+                    if !url.isEmpty, let file = URL(string: url) {
+                        session.artwork = KayaPlatformImage(contentsOfFile: file.path)
+                    }
+                }
                 kayaApplySession(session)
             case applySelectTrack:
                 // { u64 player; u32 track_kind; u32 index }, from 1 in the
@@ -12574,6 +12583,15 @@ private func kayaRunScript(_ script: String) {
                     observed.append("now playing \(want)")
                 } else {
                     failures.append("now playing \(got), wanted \(want)")
+                }
+            case "expect_now_playing_art":
+                let want = String(parts[1])
+                let got = kayaNowPlayingArt()
+                let read = String(got.split(separator: " ").first ?? "")
+                if (want == "none" && got == "none") || (want != "none" && kayaArtMatches(read, want)) {
+                    observed.append("now playing art \(want)")
+                } else {
+                    failures.append("now playing art \(got), wanted \(want)")
                 }
             case "expect_display_awake":
                 let want = parts[1] == "yes"
@@ -33547,7 +33565,7 @@ struct KayaSession {
     var title = ""
     var artist = ""
     var album = ""
-    var artwork = ""
+    var artwork: KayaPlatformImage?
 }
 
 nonisolated(unsafe) var kayaSession = KayaSession()
@@ -33662,7 +33680,7 @@ func kayaPublishNowPlaying() {
         info[MPNowPlayingInfoPropertyMediaType] =
             (p.mediaSize == .zero ? MPNowPlayingInfoMediaType.audio : .video).rawValue
     }
-    if !s.artwork.isEmpty, let url = URL(string: s.artwork), let image = KayaPlatformImage(contentsOfFile: url.path) {
+    if let image = s.artwork {
         info[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
     center.nowPlayingInfo = info
@@ -34957,6 +34975,39 @@ func kayaMediaRefusal(_ item: String) -> String? {
     }
 #endif
 
+/// harness.rs's NOW_PLAYING_ART_TOLERANCE.
+let kayaNowPlayingArtTolerance = 16
+
+/// expect_now_playing_art's read: the picture this process published to Now
+/// Playing, harness.rs's art_reading (`RRGGBB WxH`, the colour at half the
+/// width and a tenth of the height), or `none`.
+func kayaNowPlayingArt() -> String {
+    DispatchQueue.main.sync {
+        guard let art = MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyArtwork]
+                as? MPMediaItemArtwork
+        else { return "none" }
+        guard let image = art.image(at: art.bounds.size) else {
+            return "<an artwork of \(art.bounds.size) whose handler answered no image>"
+        }
+        #if os(macOS)
+            guard let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                return "<an artwork with no CGImage>"
+            }
+        #else
+            guard let cg = image.cgImage else { return "<an artwork with no CGImage>" }
+        #endif
+        let (w, h) = (cg.width, cg.height)
+        var px = [UInt8](repeating: 0, count: 4)
+        guard let ctx = CGContext(
+            data: &px, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return "<no 1x1 context to read the artwork>" }
+        ctx.draw(cg, in: CGRect(x: -CGFloat(w / 2), y: -CGFloat(h - 1 - h / 10), width: CGFloat(w), height: CGFloat(h)))
+        return String(format: "%02X%02X%02X %dx%d", px[0], px[1], px[2], w, h)
+    }
+}
+
 /// `"<title>" <state>` as this process published them.
 func kayaNowPlaying() -> String {
     DispatchQueue.main.sync {
@@ -35006,6 +35057,15 @@ func kayaVideoBoxSized(_ got: String, _ w: Int, _ h: Int) -> Bool {
     let parts = got.split(separator: " ").compactMap { Double($0) }
     guard parts.count == 2, got.split(separator: " ").count == 2, parts[0] > 0, parts[1] > 0 else { return false }
     return abs(parts[0] - Double(w)) <= 1 && abs(parts[1] - Double(h)) <= 1
+}
+
+func kayaArtMatches(_ got: String, _ want: String) -> Bool {
+    func rgb(_ s: String) -> [Int]? {
+        guard s.count == 6, let n = Int(s, radix: 16) else { return nil }
+        return [(n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF]
+    }
+    guard let g = rgb(got), let w = rgb(want) else { return false }
+    return zip(g, w).allSatisfy { abs($0 - $1) <= kayaNowPlayingArtTolerance }
 }
 
 func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {

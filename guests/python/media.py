@@ -134,6 +134,9 @@ def suite_app(scene):
         if action == kaya.SessionAction.NEXT:
             state["nexts"] += 1
             name.set(f"next {state['nexts']}")
+            kaya.session(player=player, title="kaya media", artist="kaya",
+                         artwork=kaya.asset("covers/cover-320.jpg"),
+                         handles=[kaya.SessionAction.NEXT], on_action=on_action)
 
     with app.window("media"):
         summary = kaya.signal("idle")
@@ -148,6 +151,7 @@ def suite_app(scene):
                         on_click=on_toggle if session else on_next)
         if session:
             kaya.session(player=player, title="kaya media", artist="kaya",
+                         artwork="covers/cover-600.jpg",
                          handles=[kaya.SessionAction.NEXT],
                          on_action=on_action)
 

@@ -408,6 +408,28 @@ would fetch itself: refused by N1 (no HTTP in kaya) and it would fetch every
 cover twice; (c) no artwork for network art: the demo's Now Playing would
 show a blank square on every platform.
 
+BUILT 2026-10-17: `set_session`'s `artwork` is a Str asset name (empty for
+none) or a Blob of the picture's bytes, on the TX record and on the apply
+record (the spec hash did not move: both fields were already values); the
+core resolves the name to a file URL and sends bytes on as the blob. The
+binding spellings: Rust `artwork_bytes(&bytes or &asset)`, Python and JS
+`artwork=` taking a str, bytes or Asset, Go `ArtworkBytes([]byte)`, C#
+`artworkBytes:`, Java `artwork(byte[])` and `artwork(Asset)`, Swift
+`artworkData:`, OCaml `?artwork_bytes`, Haskell `SessionArtworkBytes`; the C
+floor needs nothing, since `kaya_tx_set_session` takes a `kaya_blob(...)`.
+`expect_now_playing_art RRGGBB|none` reads the picture the SYSTEM holds at
+half its width and a tenth of its height within 16 per channel (MPNowPlaying
+InfoCenter's artwork on Apple, MPRIS `mpris:artUrl`'s file on GTK, the
+session manager's thumbnail on Windows, the platform MediaController's
+bitmap on Android); tools/scenes/media_session.steps declares
+covers/cover-600.jpg by name and, on `next`, covers/cover-320.jpg's bytes.
+MEASURED 2026-10-17: Android's system copy of the 600 px cover is 300x300
+(so the read is a colour, never a size); WinUI's thumbnail made with
+`RandomAccessStreamReference::CreateFromUri` on the asset's file:// URL
+reached the session manager as no thumbnail at all, so both routes now
+write the bytes into an in-memory stream (docs/traps.md, the thumbnail a
+file URL never gave).
+
 ### M8: The transport symbols join the symbol vocabulary (a GAP) (RULED 2026-10-17)
 
 RECOMMEND ten symbols in crates/kaya/src/wire.rs's SYMBOLS, each the

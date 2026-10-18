@@ -4,7 +4,7 @@
 
 use super::{Messages, Tx, Widget};
 use crate::protocol::{
-    Fit, MediaFailure, Occurrence, Path, PlaybackState, PlayerCommand, PlayerId, PlayerProp, PlayerState,
+    Artwork, Fit, MediaFailure, Occurrence, Path, PlaybackState, PlayerCommand, PlayerId, PlayerProp, PlayerState,
     PlayerTracks, SessionAction, SessionActionKind, SessionSpec, TemplateNodeId, TrackKind, TxOp, Value,
     WidgetId,
 };
@@ -342,7 +342,15 @@ impl SessionRef<'_, '_> {
 
     /// An asset name.
     pub fn artwork(mut self, asset: impl Into<String>) -> Self {
-        self.spec.artwork = asset.into();
+        let name = asset.into();
+        self.spec.artwork = if name.is_empty() { Artwork::None } else { Artwork::Asset(name) };
+        self
+    }
+
+    /// The picture's bytes, the ones an image of the same art draws
+    /// (docs/media-player-plan.md M7).
+    pub fn artwork_bytes(mut self, bytes: &(impl super::BlobSource + ?Sized)) -> Self {
+        self.spec.artwork = Artwork::Bytes(crate::protocol::Blob(bytes.blob_bytes()));
         self
     }
 

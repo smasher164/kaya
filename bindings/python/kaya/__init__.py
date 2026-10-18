@@ -7098,7 +7098,8 @@ def video(player: Player | Source | None = None, *,
 
 
 def session(*, player: Player | None = None, title: str = "",
-            artist: str = "", album: str = "", artwork: str = "",
+            artist: str = "", album: str = "",
+            artwork: str | bytes | bytearray | memoryview | Asset = "",
             handles: Sequence[SessionAction] = (),
             playback_state: PlaybackState | str | int = PlaybackState.NONE,
             on_action: Callable[[SessionAction, int], object] | None = None
@@ -7108,7 +7109,7 @@ def session(*, player: Player | None = None, title: str = "",
     speak to; `handles` the actions the app answers itself through
     `on_action(action, at_ms)` (`at_ms` for SEEK_TO, else 0) — play,
     pause and seek_to it leaves out apply to the attached player.
-    `artwork` is an asset name."""
+    `artwork` is an asset name, or the picture's bytes or `Asset`."""
     mask = 0
     for action in handles:
         mask |= 1 << int(SessionAction(action))
@@ -7118,7 +7119,8 @@ def session(*, player: Player | None = None, title: str = "",
         _text_value("a session title", title),
         _text_value("a session artist", artist),
         _text_value("a session album", album),
-        _text_value("a session artwork", artwork)))
+        _text_value("a session artwork", artwork) if isinstance(artwork, str)
+        else wire.BlobHandle(_blob_of(artwork))))
     _app._session_action = on_action
 
 

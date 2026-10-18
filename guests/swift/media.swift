@@ -141,11 +141,15 @@ func yesNo(_ b: Bool) -> String { b ? "yes" : "no" }
         tx.mount(root)
         if session {
             tx.session(
-                player: player, title: "kaya media", artist: "kaya", handles: [.next],
+                player: player, title: "kaya media", artist: "kaya", artwork: "covers/cover-600.jpg",
+                handles: [.next],
                 onAction: { tx, action in
                     if action == .next {
                         nexts += 1
                         tx.write(name, .str("next \(nexts)"))
+                        tx.session(
+                            player: player, title: "kaya media", artist: "kaya",
+                            artworkData: try KayaAsset("covers/cover-320.jpg").bytes, handles: [.next])
                     }
                 })
         }

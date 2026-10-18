@@ -743,7 +743,7 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
-    /// Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+    /// Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player.
     mutating func setSession(_ player: UInt64, _ actions: UInt32, _ playbackState: UInt32, _ title: KayaValue, _ artist: KayaValue, _ album: KayaValue, _ artwork: KayaValue) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_SESSION))
         self.u64(player)

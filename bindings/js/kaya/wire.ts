@@ -1350,7 +1350,7 @@ export function tx_select_track(player: number, kind: number, index: number): Ui
   return enc.end(TX_SELECT_TRACK);
 }
 
-/** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+/** Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player. */
 export function tx_set_session(player: number, actions: number, playback_state: number, title: WireValue, artist: WireValue, album: WireValue, artwork: WireValue): Uint8Array {
   enc.begin();
   enc.u64(player);

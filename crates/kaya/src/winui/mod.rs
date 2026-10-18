@@ -26940,6 +26940,10 @@ impl crate::harness::Stage for WinUiStage {
         media::stage::now_playing(declared_app_id().unwrap_or_default())
     }
 
+    fn now_playing_art(&self) -> String {
+        media::stage::now_playing_art(declared_app_id().unwrap_or_default())
+    }
+
     fn display_awake(&self) -> bool {
         media::stage::display_awake()
     }

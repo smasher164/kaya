@@ -117,7 +117,12 @@ formatsApp app scene = do
     mount root
     when session $
       declareSession
-        [SessionPlayer p, SessionTitle "kaya media", SessionArtist "kaya", SessionHandles [ActionNext]]
+        [ SessionPlayer p,
+          SessionTitle "kaya media",
+          SessionArtist "kaya",
+          SessionArtwork "covers/cover-600.jpg",
+          SessionHandles [ActionNext]
+        ]
     return (summary, name, p)
 
   onPlayerState app p $ \s ->
@@ -145,7 +150,16 @@ formatsApp app scene = do
     SessionNext -> do
       modifyIORef' nextsRef (+ 1)
       n <- readIORef nextsRef
-      submitTx app $ writeSignal name ("next " <> tshow n)
+      art <- asset "covers/cover-320.jpg" >>= assetBytes
+      submitTx app $ do
+        writeSignal name ("next " <> tshow n)
+        declareSession
+          [ SessionPlayer p,
+            SessionTitle "kaya media",
+            SessionArtist "kaya",
+            SessionArtworkBytes art,
+            SessionHandles [ActionNext]
+          ]
     _ -> return ()
 
 -- | One track list as a line: @audio en, fr [2]@, the selection counting

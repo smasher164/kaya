@@ -180,12 +180,15 @@ func playerApp(session bool, items []item) *kaya.App {
 		}))
 		if session {
 			tx.Session().Player(player).Title("kaya media").Artist("kaya").
-				Handles(kaya.SessionActionNext).Declare()
+				Artwork("covers/cover-600.jpg").Handles(kaya.SessionActionNext).Declare()
 		}
 		app.OnSession(func(tx *kaya.Tx, action kaya.SessionAction) {
 			if action.Kind == kaya.SessionActionNext {
 				nexts++
 				tx.Write(name, fmt.Sprintf("next %d", nexts))
+				tx.Session().Player(player).Title("kaya media").Artist("kaya").
+					ArtworkBytes(tx.Asset("covers/cover-320.jpg").Bytes()).
+					Handles(kaya.SessionActionNext).Declare()
 			}
 		})
 	})

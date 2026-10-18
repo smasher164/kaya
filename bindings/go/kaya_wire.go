@@ -1716,7 +1716,7 @@ func TxSelectTrack(player uint64, kind uint32, index uint32) []byte {
 	return endRecord(b)
 }
 
-// TxSetSession: Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+// TxSetSession: Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player.
 func TxSetSession(player uint64, actions uint32, playbackState uint32, title any, artist any, album any, artwork any) []byte {
 	b := beginRecord(txSetSession)
 	b = binary.LittleEndian.AppendUint64(b, player)

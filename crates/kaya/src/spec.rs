@@ -1908,7 +1908,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   actions the app handles itself, `playback_state` the \
                   PLAYBACK_STATE the app states while no player is attached, \
                   and the metadata as Str values, `artwork` an asset name \
-                  or empty. With a player attached, play, pause and seek_to \
+                  (Str, empty for none) or the picture's bytes (Blob, \
+                  docs/media-player-plan.md M7). With a player attached, play, pause and seek_to \
                   the app does not handle apply to that player.",
         },
         Record {
@@ -2975,7 +2976,8 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "The session as the system sees it: `offered` is the mask of \
                   actions the CORE decided the system may send (the app's own \
                   handlers plus the attached player's defaults), `artwork` \
-                  resolved to a file:// URL or empty. The backend publishes \
+                  resolved to a file:// URL or empty, or the app's bytes as \
+                  a Blob. The backend publishes \
                   it and follows the attached player's state \
                   (docs/media-plan.md §5).",
         },
@@ -5773,7 +5775,7 @@ mod tests {
     /// the spec is what the core reads, and the core's own encoder agrees.
     #[test]
     fn media_records_round_trip_through_wire() {
-        use crate::protocol::{PlaybackState, PlayerCommand, PlayerId, PlayerProp, SessionSpec, TrackKind};
+        use crate::protocol::{Artwork, PlaybackState, PlayerCommand, PlayerId, PlayerProp, SessionSpec, TrackKind};
         let mut w = GenericWriter { buf: Vec::new(), blobs: Vec::new() };
         let s = |t: &str| Arg::Value(Value::from(t));
         w.record(tx_record("create_player"), &[Arg::U64(4)]);
@@ -5788,6 +5790,10 @@ mod tests {
         w.record(
             tx_record("set_session"),
             &[Arg::U64(4), Arg::U32(1 << 7), Arg::U32(2), s("T"), s("A"), s("B"), s("")],
+        );
+        w.record(
+            tx_record("set_session"),
+            &[Arg::U64(4), Arg::U32(0), Arg::U32(0), s(""), s(""), s(""), s("covers/cover-600.jpg")],
         );
         w.record(tx_record("release_player"), &[Arg::U64(4)]);
         let want = vec![
@@ -5808,7 +5814,12 @@ mod tests {
                 title: "T".into(),
                 artist: "A".into(),
                 album: "B".into(),
-                artwork: String::new(),
+                artwork: Artwork::None,
+            }),
+            TxOp::SetSession(SessionSpec {
+                player: Some(PlayerId(4)),
+                artwork: Artwork::Asset("covers/cover-600.jpg".into()),
+                ..SessionSpec::default()
             }),
             TxOp::ReleasePlayer { player: PlayerId(4) },
         ];

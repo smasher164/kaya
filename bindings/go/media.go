@@ -390,11 +390,12 @@ func (c RecordCollection[K, T]) Video[S interface {
 // SessionRef is the app's one media session being declared
 // (docs/media-plan.md §5); Declare sends it, replacing the last.
 type SessionRef struct {
-	tx                        *Tx
-	player                    Player
-	actions                   uint32
-	state                     PlaybackState
-	title, artist, album, art string
+	tx                   *Tx
+	player               Player
+	actions              uint32
+	state                PlaybackState
+	title, artist, album string
+	art                  any
 }
 
 // Session starts the declaration of the app's one media session.
@@ -411,6 +412,13 @@ func (s SessionRef) Album(album string) SessionRef   { s.album = album; return s
 // Artwork is an asset name.
 func (s SessionRef) Artwork(asset string) SessionRef { s.art = asset; return s }
 
+// ArtworkBytes is the picture's bytes, the ones an image of the same art
+// draws (docs/media-player-plan.md M7).
+func (s SessionRef) ArtworkBytes(b []byte) SessionRef {
+	s.art = BlobHandle(RegisterBlob(b))
+	return s
+}
+
 // Handles names the actions the app answers itself through App.OnSession;
 // play, pause and seek_to it leaves out apply to the attached player.
 func (s SessionRef) Handles(actions ...SessionActionKind) SessionRef {
@@ -424,7 +432,11 @@ func (s SessionRef) Handles(actions ...SessionActionKind) SessionRef {
 func (s SessionRef) PlaybackState(state PlaybackState) SessionRef { s.state = state; return s }
 
 func (s SessionRef) Declare() {
-	s.tx.emit(TxSetSession(s.player.id, s.actions, uint32(s.state), s.title, s.artist, s.album, s.art))
+	art := s.art
+	if art == nil {
+		art = ""
+	}
+	s.tx.emit(TxSetSession(s.player.id, s.actions, uint32(s.state), s.title, s.artist, s.album, art))
 }
 
 func mediaOccurrence(kind uint16) bool {

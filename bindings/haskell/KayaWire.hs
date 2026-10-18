@@ -1532,7 +1532,7 @@ txReleasePlayer player = wireRecord txKindReleasePlayer (word64LE player)
 txSelectTrack :: Word64 -> Word32 -> Word32 -> Builder
 txSelectTrack player kind index = wireRecord txKindSelectTrack (word64LE player <> word32LE kind <> word32LE index)
 
--- Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player.
+-- Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player.
 txSetSession :: Word64 -> Word32 -> Word32 -> Value -> Value -> Value -> Value -> Builder
 txSetSession player actions playbackState title artist album artwork = wireRecord txKindSetSession (word64LE player <> word32LE actions <> word32LE playbackState <> encodeValue title <> encodeValue artist <> encodeValue album <> encodeValue artwork)
 

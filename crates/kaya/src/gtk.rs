@@ -16038,7 +16038,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,
-                gtk_media::SessionSpecGtk { player: player.map(|p| p.0), offered, title, artist, album, artwork },
+                gtk_media::SessionSpecGtk {
+                    player: player.map(|p| p.0),
+                    offered,
+                    title,
+                    artist,
+                    album,
+                    artwork: gtk_media::artwork_url(&artwork),
+                },
             );
         }
         ApplyOp::PresentAlert(spec) => {
@@ -19674,6 +19681,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         }
         core.take();
     });
+    gtk_media::remove_art_dir();
     EXIT_CODE.load(Ordering::Relaxed)
 }
 
@@ -24565,6 +24573,10 @@ impl crate::harness::Stage for GtkStage {
         gtk_media::now_playing()
     }
 
+    fn now_playing_art(&self) -> String {
+        gtk_media::now_playing_art()
+    }
+
     fn player_open(&self, n: usize) -> Result<bool, String> {
         Self::on_main(move |_| gtk_media::player_open(n))
     }
@@ -29338,6 +29350,49 @@ mod gtk_media {
         1 << crate::wire::session_action_raw(action).0
     }
 
+    /// mpris:artUrl takes only a URL (docs/media-player-plan.md M7): the
+    /// app's bytes are written once per content id into this process's own
+    /// directory, removed at exit, and named file://.
+    pub(super) fn artwork_url(artwork: &crate::protocol::Value) -> String {
+        use crate::protocol::Value;
+        match artwork {
+            Value::Str(url) => url.clone(),
+            Value::Blob(bytes) => {
+                let dir = art_dir();
+                let path = dir.join(format!("{:016x}", crate::content_id::of(&bytes.0)));
+                if !path.exists() {
+                    prune_art_dirs();
+                    if let Err(why) = std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&path, &bytes.0)) {
+                        eprintln!("kaya: the session's artwork could not be written to {}: {why}", path.display());
+                        return String::new();
+                    }
+                }
+                crate::assets::file_url(&path)
+            }
+            other => panic!("kaya: set_session's artwork reached GTK as {other:?}, not a URL or bytes"),
+        }
+    }
+
+    fn art_dir() -> std::path::PathBuf {
+        glib::user_runtime_dir().join(format!("kaya-art-{}", std::process::id()))
+    }
+
+    /// A process that left through `_exit` never removed its directory.
+    fn prune_art_dirs() {
+        let Ok(entries) = std::fs::read_dir(glib::user_runtime_dir()) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(pid) = name.to_str().and_then(|n| n.strip_prefix("kaya-art-")) else { continue };
+            if !std::path::Path::new("/proc").join(pid).exists() {
+                let _ = std::fs::remove_dir_all(entry.path());
+            }
+        }
+    }
+
+    pub(super) fn remove_art_dir() {
+        let _ = std::fs::remove_dir_all(art_dir());
+    }
+
     pub(super) fn set_session(core: &CoreState, spec: SessionSpecGtk) {
         SESSION.with_borrow_mut(|s| s.spec = Some(spec));
         let build = SESSION.with_borrow_mut(|s| {
@@ -29734,6 +29789,44 @@ mod gtk_media {
             &format!("org.mpris.MediaPlayer2.Player.{method}"),
         ])
         .map(|_| ())
+    }
+
+    /// The picture behind `mpris:artUrl` read back over the bus, as a
+    /// shell's card reads it: crate::harness::art_reading, or `none`.
+    #[cfg(feature = "harness")]
+    pub(super) fn now_playing_art() -> String {
+        let Ok(name) = own_mpris_name() else {
+            return "none".to_owned();
+        };
+        let metadata = match dbus_send(&[
+            &format!("--dest={name}"),
+            "/org/mpris/MediaPlayer2",
+            "org.freedesktop.DBus.Properties.Get",
+            "string:org.mpris.MediaPlayer2.Player",
+            "string:Metadata",
+        ]) {
+            Ok(m) => m,
+            Err(why) => return format!("<Metadata unreadable: {why}>"),
+        };
+        let lines: Vec<&str> = metadata.lines().collect();
+        let Some(url) = lines
+            .iter()
+            .position(|l| l.contains("\"mpris:artUrl\""))
+            .and_then(|i| lines.get(i + 1))
+            .and_then(|l| l.split_once('"').and_then(|(_, rest)| rest.rsplit_once('"')).map(|(s, _)| s.to_owned()))
+        else {
+            return "none".to_owned();
+        };
+        let Some(path) = gio::File::for_uri(&url).path() else {
+            return format!("<mpris:artUrl {url} names no local file>");
+        };
+        match std::fs::read(&path) {
+            Ok(bytes) => match crate::reader::decode_straight(&bytes) {
+                Some((w, h, rgba)) => crate::harness::art_reading(w, h, &rgba),
+                None => format!("<mpris:artUrl {url}: {} bytes that are not a PNG or JPEG>", bytes.len()),
+            },
+            Err(why) => format!("<mpris:artUrl {url} is unreadable: {why}>"),
+        }
     }
 
     /// `"<title>" <state>` read back over the bus, as a shell's card reads it.

@@ -343727,6 +343727,324 @@ pub mod Windows {
         pub mod Streams {
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct DataReader(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                DataReader,
+                windows_core::IUnknown,
+                windows_core::IInspectable,
+                IDataReader
+            );
+            windows_core::imp::required_hierarchy!(DataReader, super::super::Foundation::IClosable);
+            impl DataReader {
+                pub fn Close(&self) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<super::super::Foundation::IClosable>(
+                        self,
+                    )?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).Close)(
+                            windows_core::Interface::as_raw(this),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn UnconsumedBufferLength(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UnconsumedBufferLength)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadByte(&self) -> windows_core::Result<u8> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadByte)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadBytes(&self, value: &mut [u8]) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ReadBytes)(
+                            windows_core::Interface::as_raw(this),
+                            value.len().try_into().unwrap(),
+                            value.as_mut_ptr(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ReadBuffer(&self, length: u32) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            length,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn ReadBoolean(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadBoolean)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadGuid(&self) -> windows_core::Result<windows_core::GUID> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadGuid)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt16(&self) -> windows_core::Result<i16> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt16)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt32(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt32)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt64(&self) -> windows_core::Result<i64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt64)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt16(&self) -> windows_core::Result<u16> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt16)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt32(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt32)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt64(&self) -> windows_core::Result<u64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt64)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadSingle(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadSingle)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadDouble(&self) -> windows_core::Result<f64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadDouble)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadString(
+                    &self,
+                    codeunitcount: u32,
+                ) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadString)(
+                            windows_core::Interface::as_raw(this),
+                            codeunitcount,
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn ReadDateTime(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::DateTime> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadDateTime)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadTimeSpan(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::TimeSpan> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadTimeSpan)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn LoadAsync(
+                    &self,
+                    count: u32,
+                ) -> windows_core::Result<DataReaderLoadOperation> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).LoadAsync)(
+                            windows_core::Interface::as_raw(this),
+                            count,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DetachBuffer(&self) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DetachStream(&self) -> windows_core::Result<IInputStream> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachStream)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn CreateDataReader<P0>(inputstream: P0) -> windows_core::Result<DataReader>
+                where
+                    P0: windows_core::Param<IInputStream>,
+                {
+                    Self::IDataReaderFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateDataReader)(
+                            windows_core::Interface::as_raw(this),
+                            inputstream.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn FromBuffer<P0>(buffer: P0) -> windows_core::Result<DataReader>
+                where
+                    P0: windows_core::Param<IBuffer>,
+                {
+                    Self::IDataReaderStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FromBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            buffer.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                fn IDataReaderFactory<
+                    R,
+                    F: FnOnce(&IDataReaderFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<DataReader, IDataReaderFactory> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IDataReaderStatics<
+                    R,
+                    F: FnOnce(&IDataReaderStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<DataReader, IDataReaderStatics> =
+                        windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for DataReader {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IDataReader>();
+            }
+            unsafe impl windows_core::Interface for DataReader {
+                type Vtable = <IDataReader as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IDataReader as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for DataReader {
+                const NAME: &'static str = "Windows.Storage.Streams.DataReader";
+            }
+            unsafe impl Send for DataReader {}
+            unsafe impl Sync for DataReader {}
+            pub type DataReaderLoadOperation = windows_future::IAsyncOperation<u32>;
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct DataWriter(windows_core::IUnknown);
             windows_core::imp::interface_hierarchy!(
                 DataWriter,
@@ -344281,6 +344599,850 @@ pub mod Windows {
                     *mut *mut core::ffi::c_void,
                 )
                     -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDataReader,
+                IDataReader_Vtbl,
+                0xe2b50029_b4c1_4314_a4b8_fb813a2f275e
+            );
+            impl windows_core::RuntimeType for IDataReader {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            windows_core::imp::interface_hierarchy!(
+                IDataReader,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            impl IDataReader {
+                pub fn UnconsumedBufferLength(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UnconsumedBufferLength)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadByte(&self) -> windows_core::Result<u8> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadByte)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadBytes(&self, value: &mut [u8]) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).ReadBytes)(
+                            windows_core::Interface::as_raw(this),
+                            value.len().try_into().unwrap(),
+                            value.as_mut_ptr(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn ReadBuffer(&self, length: u32) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            length,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn ReadBoolean(&self) -> windows_core::Result<bool> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadBoolean)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadGuid(&self) -> windows_core::Result<windows_core::GUID> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadGuid)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt16(&self) -> windows_core::Result<i16> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt16)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt32(&self) -> windows_core::Result<i32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt32)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadInt64(&self) -> windows_core::Result<i64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadInt64)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt16(&self) -> windows_core::Result<u16> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt16)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt32(&self) -> windows_core::Result<u32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt32)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadUInt64(&self) -> windows_core::Result<u64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadUInt64)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadSingle(&self) -> windows_core::Result<f32> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadSingle)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadDouble(&self) -> windows_core::Result<f64> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadDouble)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadString(
+                    &self,
+                    codeunitcount: u32,
+                ) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadString)(
+                            windows_core::Interface::as_raw(this),
+                            codeunitcount,
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn ReadDateTime(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::DateTime> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadDateTime)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn ReadTimeSpan(
+                    &self,
+                ) -> windows_core::Result<super::super::Foundation::TimeSpan> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).ReadTimeSpan)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn LoadAsync(
+                    &self,
+                    count: u32,
+                ) -> windows_core::Result<DataReaderLoadOperation> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).LoadAsync)(
+                            windows_core::Interface::as_raw(this),
+                            count,
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DetachBuffer(&self) -> windows_core::Result<IBuffer> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachBuffer)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn DetachStream(&self) -> windows_core::Result<IInputStream> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DetachStream)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+            }
+            impl windows_core::RuntimeName for IDataReader {
+                const NAME: &'static str = "Windows.Storage.Streams.IDataReader";
+            }
+            pub trait IDataReader_Impl: windows_core::IUnknownImpl {
+                fn UnconsumedBufferLength(&self) -> windows_core::Result<u32>;
+                fn ReadByte(&self) -> windows_core::Result<u8>;
+                fn ReadBytes(&self, value: &mut [u8]) -> windows_core::Result<()>;
+                fn ReadBuffer(&self, length: u32) -> windows_core::Result<IBuffer>;
+                fn ReadBoolean(&self) -> windows_core::Result<bool>;
+                fn ReadGuid(&self) -> windows_core::Result<windows_core::GUID>;
+                fn ReadInt16(&self) -> windows_core::Result<i16>;
+                fn ReadInt32(&self) -> windows_core::Result<i32>;
+                fn ReadInt64(&self) -> windows_core::Result<i64>;
+                fn ReadUInt16(&self) -> windows_core::Result<u16>;
+                fn ReadUInt32(&self) -> windows_core::Result<u32>;
+                fn ReadUInt64(&self) -> windows_core::Result<u64>;
+                fn ReadSingle(&self) -> windows_core::Result<f32>;
+                fn ReadDouble(&self) -> windows_core::Result<f64>;
+                fn ReadString(
+                    &self,
+                    codeUnitCount: u32,
+                ) -> windows_core::Result<windows_core::HSTRING>;
+                fn ReadDateTime(&self) -> windows_core::Result<super::super::Foundation::DateTime>;
+                fn ReadTimeSpan(&self) -> windows_core::Result<super::super::Foundation::TimeSpan>;
+                fn LoadAsync(&self, count: u32) -> windows_core::Result<DataReaderLoadOperation>;
+                fn DetachBuffer(&self) -> windows_core::Result<IBuffer>;
+                fn DetachStream(&self) -> windows_core::Result<IInputStream>;
+            }
+            impl IDataReader_Vtbl {
+                pub const fn new<Identity: IDataReader_Impl, const OFFSET: isize>() -> Self {
+                    unsafe extern "system" fn UnconsumedBufferLength<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::UnconsumedBufferLength(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadByte<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u8,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadByte(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadBytes<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value_array_size: u32,
+                        value: *mut u8,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            IDataReader_Impl::ReadBytes(
+                                this,
+                                core::slice::from_raw_parts_mut(
+                                    core::mem::transmute_copy(&value),
+                                    value_array_size as usize,
+                                ),
+                            )
+                            .into()
+                        }
+                    }
+                    unsafe extern "system" fn ReadBuffer<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        length: u32,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadBuffer(this, length) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadBoolean<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut bool,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadBoolean(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadGuid<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut windows_core::GUID,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadGuid(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadInt16<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i16,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadInt16(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadInt32<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadInt32(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadInt64<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut i64,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadInt64(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadUInt16<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u16,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadUInt16(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadUInt32<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadUInt32(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadUInt64<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut u64,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadUInt64(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadSingle<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f32,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadSingle(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadDouble<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut f64,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadDouble(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadString<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        codeunitcount: u32,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadString(this, codeunitcount) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadDateTime<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut super::super::Foundation::DateTime,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadDateTime(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn ReadTimeSpan<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut super::super::Foundation::TimeSpan,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::ReadTimeSpan(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn LoadAsync<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        count: u32,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::LoadAsync(this, count) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn DetachBuffer<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::DetachBuffer(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn DetachStream<
+                        Identity: IDataReader_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut *mut core::ffi::c_void,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match IDataReader_Impl::DetachStream(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    core::mem::forget(ok__);
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    Self {
+                        base__: windows_core::IInspectable_Vtbl::new::<Identity, IDataReader, OFFSET>(
+                        ),
+                        UnconsumedBufferLength: UnconsumedBufferLength::<Identity, OFFSET>,
+                        UnicodeEncoding: 0,
+                        SetUnicodeEncoding: 0,
+                        ByteOrder: 0,
+                        SetByteOrder: 0,
+                        InputStreamOptions: 0,
+                        SetInputStreamOptions: 0,
+                        ReadByte: ReadByte::<Identity, OFFSET>,
+                        ReadBytes: ReadBytes::<Identity, OFFSET>,
+                        ReadBuffer: ReadBuffer::<Identity, OFFSET>,
+                        ReadBoolean: ReadBoolean::<Identity, OFFSET>,
+                        ReadGuid: ReadGuid::<Identity, OFFSET>,
+                        ReadInt16: ReadInt16::<Identity, OFFSET>,
+                        ReadInt32: ReadInt32::<Identity, OFFSET>,
+                        ReadInt64: ReadInt64::<Identity, OFFSET>,
+                        ReadUInt16: ReadUInt16::<Identity, OFFSET>,
+                        ReadUInt32: ReadUInt32::<Identity, OFFSET>,
+                        ReadUInt64: ReadUInt64::<Identity, OFFSET>,
+                        ReadSingle: ReadSingle::<Identity, OFFSET>,
+                        ReadDouble: ReadDouble::<Identity, OFFSET>,
+                        ReadString: ReadString::<Identity, OFFSET>,
+                        ReadDateTime: ReadDateTime::<Identity, OFFSET>,
+                        ReadTimeSpan: ReadTimeSpan::<Identity, OFFSET>,
+                        LoadAsync: LoadAsync::<Identity, OFFSET>,
+                        DetachBuffer: DetachBuffer::<Identity, OFFSET>,
+                        DetachStream: DetachStream::<Identity, OFFSET>,
+                    }
+                }
+                pub fn matches(iid: &windows_core::GUID) -> bool {
+                    iid == &<IDataReader as windows_core::Interface>::IID
+                }
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDataReader_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub UnconsumedBufferLength: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u32,
+                )
+                    -> windows_core::HRESULT,
+                UnicodeEncoding: usize,
+                SetUnicodeEncoding: usize,
+                ByteOrder: usize,
+                SetByteOrder: usize,
+                InputStreamOptions: usize,
+                SetInputStreamOptions: usize,
+                pub ReadByte: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u8,
+                ) -> windows_core::HRESULT,
+                pub ReadBytes: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u32,
+                    *mut u8,
+                ) -> windows_core::HRESULT,
+                pub ReadBuffer: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u32,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub ReadBoolean: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
+                pub ReadGuid: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut windows_core::GUID,
+                ) -> windows_core::HRESULT,
+                pub ReadInt16: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i16,
+                ) -> windows_core::HRESULT,
+                pub ReadInt32: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i32,
+                ) -> windows_core::HRESULT,
+                pub ReadInt64: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut i64,
+                ) -> windows_core::HRESULT,
+                pub ReadUInt16: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u16,
+                ) -> windows_core::HRESULT,
+                pub ReadUInt32: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u32,
+                ) -> windows_core::HRESULT,
+                pub ReadUInt64: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut u64,
+                ) -> windows_core::HRESULT,
+                pub ReadSingle: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f32,
+                ) -> windows_core::HRESULT,
+                pub ReadDouble: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut f64,
+                ) -> windows_core::HRESULT,
+                pub ReadString: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u32,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub ReadDateTime: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::Foundation::DateTime,
+                )
+                    -> windows_core::HRESULT,
+                pub ReadTimeSpan: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::Foundation::TimeSpan,
+                )
+                    -> windows_core::HRESULT,
+                pub LoadAsync: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    u32,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub DetachBuffer: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub DetachStream: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDataReaderFactory,
+                IDataReaderFactory_Vtbl,
+                0xd7527847_57da_4e15_914c_06806699a098
+            );
+            impl windows_core::RuntimeType for IDataReaderFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDataReaderFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateDataReader: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IDataReaderStatics,
+                IDataReaderStatics_Vtbl,
+                0x11fcbfc8_f93a_471b_b121_f379e349313c
+            );
+            impl windows_core::RuntimeType for IDataReaderStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IDataReaderStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub FromBuffer: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IDataWriter,

@@ -1319,6 +1319,7 @@ val declare_session :
   ?artist:string ->
   ?album:string ->
   ?artwork:string ->
+  ?artwork_bytes:bytes ->
   ?handles:Session_action.Kind.t list -> ?playback_state:Playback_state.t -> unit -> unit
 
 (* Whether this platform plays [mime] with [codecs] (an RFC 6381 list, ""

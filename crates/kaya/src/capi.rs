@@ -304,7 +304,8 @@ pub const KAYA_TX_SET_BADGE: u16 = 62;
 /// (written once, never bound); PLAYER_COMMAND u64 player, u32
 /// player_command, u32 reserved, u64 at_ms; SELECT_TRACK u64 player, u32
 /// track_kind, u32 index (from 1, 0 none); SET_SESSION u64 player, u32 actions mask, u32
-/// playback_state, then title, artist, album and artwork as Str values.
+/// playback_state, then title, artist and album as Str values and artwork
+/// an asset name (Str, empty for none) or the picture's bytes (Blob).
 pub const KAYA_TX_CREATE_PLAYER: u16 = 63;
 pub const KAYA_TX_SET_PLAYER_PROP: u16 = 64;
 pub const KAYA_TX_PLAYER_COMMAND: u16 = 65;
@@ -740,7 +741,8 @@ pub const KAYA_APPLY_SCROLL_TO_ROW: u16 = 49;
 pub const KAYA_APPLY_SET_BADGE: u16 = 50;
 /// The media applies, the tx layouts with SET_PLAYER_PROP's source
 /// RESOLVED to a URL string and SET_SESSION carrying the offered mask the
-/// core decided and the artwork as a file:// URL (docs/media-plan.md §5).
+/// core decided and the artwork as a file:// URL (Str, empty for none) or
+/// the app's bytes (Blob) (docs/media-plan.md §5).
 pub const KAYA_APPLY_CREATE_PLAYER: u16 = 51;
 pub const KAYA_APPLY_SET_PLAYER_PROP: u16 = 52;
 pub const KAYA_APPLY_PLAYER_COMMAND: u16 = 53;

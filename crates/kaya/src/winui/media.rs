@@ -355,7 +355,7 @@ struct SessionView {
     title: String,
     artist: String,
     album: String,
-    artwork: String,
+    artwork: Option<super::bindings::Windows::Storage::Streams::RandomAccessStreamReference>,
 }
 
 #[derive(Default)]
@@ -1982,13 +1982,50 @@ pub(super) struct SessionSpec {
     pub(super) title: String,
     pub(super) artist: String,
     pub(super) album: String,
-    pub(super) artwork: String,
+    pub(super) artwork: Value,
 }
 
 pub(super) fn set_session(core: &mut CoreState, spec: SessionSpec) -> windows_core::Result<()> {
     let SessionSpec { player, offered, stated, title, artist, album, artwork } = spec;
+    let artwork = session_thumbnail(&artwork)?;
     core.media.session = SessionView { player, offered, stated, title, artist, album, artwork };
     session_publish(core)
+}
+
+/// The SMTC's thumbnail, made once per declaration from the picture's bytes
+/// in an in-memory stream, the asset's read from its file
+/// (docs/media-player-plan.md M7).
+fn session_thumbnail(
+    artwork: &Value,
+) -> windows_core::Result<Option<super::bindings::Windows::Storage::Streams::RandomAccessStreamReference>> {
+    use super::bindings::Windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference};
+    let (bytes, from) = match artwork {
+        Value::Str(url) if url.is_empty() => return Ok(None),
+        Value::Str(url) => {
+            let read = crate::edit_list::file_url_path(url).map(std::fs::read);
+            match read {
+                Some(Ok(bytes)) => (std::sync::Arc::from(bytes), url.as_str()),
+                Some(Err(why)) => {
+                    eprintln!("KAYA_DIAG winui session thumbnail: {url} is unreadable: {why}");
+                    return Ok(None);
+                }
+                None => {
+                    eprintln!("KAYA_DIAG winui session thumbnail: {url} is not a file URL");
+                    return Ok(None);
+                }
+            }
+        }
+        Value::Blob(bytes) => (bytes.0.clone(), "the app's bytes"),
+        other => panic!("kaya: set_session's artwork reached WinUI as {other:?}, not a URL or bytes"),
+    };
+    let stream = InMemoryRandomAccessStream::new()?;
+    let writer = DataWriter::CreateDataWriter(&stream)?;
+    writer.WriteBytes(&bytes)?;
+    writer.StoreAsync()?.join()?;
+    writer.DetachStream()?;
+    stream.Seek(0)?;
+    eprintln!("KAYA_DIAG winui session thumbnail: {} bytes from {from}, stream size {}", bytes.len(), stream.Size()?);
+    Ok(Some(RandomAccessStreamReference::CreateFromStream(&stream)?))
 }
 
 /// The SMTC the session speaks through: the attached player's own, or with
@@ -2059,11 +2096,8 @@ fn session_publish(core: &mut CoreState) -> windows_core::Result<()> {
             props.SetArtist(&HSTRING::from(s.artist.as_str()))?;
             props.SetAlbumTitle(&HSTRING::from(s.album.as_str()))?;
         }
-        if !s.artwork.is_empty() {
-            let uri = Uri::CreateUri(&HSTRING::from(s.artwork.as_str()))?;
-            display.SetThumbnail(
-                &super::bindings::Windows::Storage::Streams::RandomAccessStreamReference::CreateFromUri(&uri)?,
-            )?;
+        if let Some(thumbnail) = &s.artwork {
+            display.SetThumbnail(thumbnail)?;
         }
         display.Update()?;
     }
@@ -2298,6 +2332,34 @@ pub(super) mod stage {
             names.push(source);
         }
         Ok(Err(format!("the system's session manager holds {names:?}, none of them this process ({aumid:?})")))
+    }
+
+    /// The thumbnail the system's session manager holds for this process:
+    /// crate::harness::art_reading over its bytes, or `none`.
+    pub(crate) fn now_playing_art(aumid: String) -> String {
+        in_mta(move || {
+            use super::super::bindings::Windows::Storage::Streams::DataReader;
+            let session = match system_session(aumid)? {
+                Ok(session) => session,
+                Err(why) => return Ok(format!("<{why}>")),
+            };
+            let thumbnail = match session.TryGetMediaPropertiesAsync()?.join()?.Thumbnail() {
+                Ok(t) => t,
+                Err(e) if e.code().is_ok() => return Ok("none".to_owned()),
+                Err(e) => return Err(e),
+            };
+            let stream = thumbnail.OpenReadAsync()?.join()?;
+            let size = stream.Size()? as u32;
+            let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0)?)?;
+            let loaded = reader.LoadAsync(size)?.join()?;
+            let mut bytes = vec![0u8; loaded as usize];
+            reader.ReadBytes(&mut bytes)?;
+            Ok(match crate::reader::decode_straight(&bytes) {
+                Some((w, h, rgba)) => crate::harness::art_reading(w, h, &rgba),
+                None => format!("<a thumbnail of {loaded} bytes that are not a PNG or JPEG>"),
+            })
+        })
+        .unwrap_or_else(|e| format!("<the session manager: {}>", e.message()))
     }
 
     /// `"<title>" <state>` as the system's session manager reads this

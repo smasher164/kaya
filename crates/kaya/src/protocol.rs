@@ -578,8 +578,17 @@ pub struct SessionSpec {
     pub title: String,
     pub artist: String,
     pub album: String,
-    /// An asset name, or empty.
-    pub artwork: String,
+    pub artwork: Artwork,
+}
+
+/// The session's picture (docs/media-player-plan.md M7): what an image's
+/// source takes, an asset name or bytes the app holds.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Artwork {
+    #[default]
+    None,
+    Asset(String),
+    Bytes(Blob),
 }
 
 /// A live file dialog, guest-chosen like an alert id, retiring when its
@@ -3066,7 +3075,8 @@ pub enum ApplyOp {
     /// The kaya-drawn cues' boundaries in ms, ascending; empty for none.
     CaptionTimes { player: PlayerId, times: Vec<u64> },
     /// The session as the system sees it (docs/media-plan.md §5): the core
-    /// decided `offered`, and `artwork` is a file:// URL or empty.
+    /// decided `offered`, and `artwork` is a file:// URL, empty, or the
+    /// app's bytes as a Blob.
     SetSession {
         player: Option<PlayerId>,
         offered: u32,
@@ -3074,7 +3084,7 @@ pub enum ApplyOp {
         title: String,
         artist: String,
         album: String,
-        artwork: String,
+        artwork: Value,
     },
     /// Present the platform's real file picker (already validated).
     PresentFileDialog(FileDialogSpec),

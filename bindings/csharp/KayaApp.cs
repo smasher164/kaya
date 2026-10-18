@@ -5224,20 +5224,24 @@ sealed class Tx : IDisposable
 
     /// Declare the app's one media session, replacing the last
     /// (docs/media-plan.md §5): the attached player the system's controls
-    /// speak to, the metadata (artwork an asset name), the actions the app
+    /// speak to, the metadata (artwork an asset name, or artworkBytes the
+    /// picture's bytes), the actions the app
     /// answers itself through `onAction` (play, pause and seek_to left out
     /// apply to the attached player), and what the system shows while no
     /// player is attached.
     public void Session(Player? player = null, string title = "", string artist = "",
         string album = "", string artwork = "", SessionActionKind[]? handles = null,
         PlaybackState playbackState = PlaybackState.None,
-        Action<Tx, SessionAction>? onAction = null)
+        Action<Tx, SessionAction>? onAction = null, byte[]? artworkBytes = null)
     {
+        if (artworkBytes != null && artwork.Length > 0)
+            throw new ArgumentException("kaya: a session's artwork is an asset name or bytes, not both");
         uint mask = 0;
         foreach (var kind in handles ?? Array.Empty<SessionActionKind>())
             mask |= 1u << (int)kind;
         Records.Add(KayaWire.TxSetSession(player?.Id ?? 0, mask, (uint)playbackState,
-            title, artist, album, artwork));
+            title, artist, album,
+            artworkBytes != null ? new KayaWire.BlobHandle(Kaya.RegisterBlob(artworkBytes)) : (object)artwork));
         if (onAction != null) App.OnSession(onAction);
     }
 

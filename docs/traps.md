@@ -17407,3 +17407,21 @@ refused it (`STALE — carries 1d8a265375d5d787, but core in this tree is
 the next build recompiles. build-id's `--verify` is the wall that caught it:
 any lane or gate run after a negative refuses the artifact rather than
 running it.
+
+## The thumbnail a file URL never gave (measured 2026-10-17)
+
+The WinUI session set the SMTC's thumbnail with
+`RandomAccessStreamReference::CreateFromUri` on the asset's `file:///C:/…`
+URL, and the system's session manager
+(`GlobalSystemMediaTransportControlsSessionManager`) answered
+`TryGetMediaPropertiesAsync().Thumbnail()` with nothing, for every language,
+while the title and state read back right: no scene had ever read the
+artwork, so the asset route had never worked on Windows. The same picture's
+bytes written into an `InMemoryRandomAccessStream` and handed over by
+`CreateFromStream` reach the session manager, so both the asset and the app's
+bytes take that route (crates/kaya/src/winui/media.rs, `session_thumbnail`),
+with a `KAYA_DIAG winui session thumbnail` line naming the bytes and their
+source. tools/scenes/media_session.steps' `expect_now_playing_art` is the
+read that would see it again. Beside it, Android: the platform
+MediaController's bitmap for a 600x600 cover is 300x300, so the read compares
+a colour, never a size.

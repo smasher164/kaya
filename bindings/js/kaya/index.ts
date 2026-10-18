@@ -6044,8 +6044,8 @@ export type SessionOptions = {
   title?: string;
   artist?: string;
   album?: string;
-  /** An asset name. */
-  artwork?: string;
+  /** An asset name, or the picture's bytes or Asset. */
+  artwork?: string | Uint8Array | Asset;
   /** The actions the app answers itself through onAction; play, pause and
    * seek_to it leaves out apply to the attached player. */
   handles?: readonly SessionAction[];
@@ -6073,7 +6073,9 @@ export function session(opts: SessionOptions = {}): void {
       textValue("a session title", opts.title ?? ""),
       textValue("a session artist", opts.artist ?? ""),
       textValue("a session album", opts.album ?? ""),
-      textValue("a session artwork", opts.artwork ?? ""),
+      typeof (opts.artwork ?? "") === "string"
+        ? textValue("a session artwork", opts.artwork ?? "")
+        : new BlobHandle(blobOf(opts.artwork as Asset | Uint8Array)),
     ),
   );
   app()._sessionAction = opts.onAction;

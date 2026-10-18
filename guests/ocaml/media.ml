@@ -115,7 +115,7 @@ let formats_app app scene =
         in
         mount root;
         if session then
-          declare_session ~player:p ~title:"kaya media" ~artist:"kaya"
+          declare_session ~player:p ~title:"kaya media" ~artist:"kaya" ~artwork:"covers/cover-600.jpg"
             ~handles:[ Session_action.Kind.Next ] ();
         (summary, name, p))
   in
@@ -143,7 +143,10 @@ let formats_app app scene =
   on_session app (function
     | Session_action.Next ->
         incr nexts;
-        write name (Printf.sprintf "next %d" !nexts)
+        write name (Printf.sprintf "next %d" !nexts);
+        declare_session ~player:p ~title:"kaya media" ~artist:"kaya"
+          ~artwork_bytes:(asset_bytes (asset "covers/cover-320.jpg"))
+          ~handles:[ Session_action.Kind.Next ] ()
     | _ -> ());
   exit (run app)
 

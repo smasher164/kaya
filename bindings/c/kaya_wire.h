@@ -811,7 +811,7 @@ static inline void kaya_tx_select_track(KayaTx *tx, uint64_t player, uint32_t ki
     kaya_wire_end(tx, kaya_at);
 }
 
-/* Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name or empty. With a player attached, play, pause and seek_to the app does not handle apply to that player. */
+/* Declare the app's ONE media session (docs/media-plan.md §5), replacing the last declaration: the attached `player` (0 attaches none and withdraws the app from the system's controls), `actions` a mask of 1 << SESSION_ACTION for the actions the app handles itself, `playback_state` the PLAYBACK_STATE the app states while no player is attached, and the metadata as Str values, `artwork` an asset name (Str, empty for none) or the picture's bytes (Blob, docs/media-player-plan.md M7). With a player attached, play, pause and seek_to the app does not handle apply to that player. */
 static inline void kaya_tx_set_session(KayaTx *tx, uint64_t player, uint32_t actions, uint32_t playback_state, KayaVal title, KayaVal artist, KayaVal album, KayaVal artwork) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_SESSION);
     kaya_wire_u64(tx, player);

@@ -512,13 +512,13 @@ impl Media {
     }
 
     fn session_op(&self) -> ApplyOp {
-        let artwork = if self.session.artwork.is_empty() {
-            String::new()
-        } else {
-            match crate::assets::media_locator(&self.session.artwork) {
-                Ok(url) => url,
+        let artwork = match &self.session.artwork {
+            crate::protocol::Artwork::None => Value::Str(String::new()),
+            crate::protocol::Artwork::Asset(name) => match crate::assets::media_locator(name) {
+                Ok(url) => Value::Str(url),
                 Err(why) => panic!("kaya: set_session's artwork: {why}"),
-            }
+            },
+            crate::protocol::Artwork::Bytes(bytes) => Value::Blob(bytes.clone()),
         };
         ApplyOp::SetSession {
             player: self.session.player,
@@ -1633,6 +1633,27 @@ mod tests {
         assert_eq!(m.route(SessionAction::Pause), Route::App);
         assert_eq!(m.route(SessionAction::Next), Route::App);
         assert_eq!(m.route(SessionAction::Play), Route::Player(other, PlayerCommand::Play));
+    }
+
+    #[test]
+    fn the_session_artwork_is_an_asset_url_or_the_apps_bytes() {
+        let mut m = Media::default();
+        m.create(P);
+        let art = |m: &mut Media, artwork| {
+            let mut out = Vec::new();
+            m.set_session(SessionSpec { player: Some(P), artwork, ..SessionSpec::default() }, &mut out);
+            match out.pop() {
+                Some(ApplyOp::SetSession { artwork, .. }) => artwork,
+                other => panic!("no set_session apply: {other:?}"),
+            }
+        };
+        assert_eq!(art(&mut m, crate::protocol::Artwork::None), Value::Str(String::new()));
+        let bytes = crate::protocol::Blob(std::sync::Arc::from(&b"\x89PNG"[..]));
+        assert_eq!(art(&mut m, crate::protocol::Artwork::Bytes(bytes.clone())), Value::Blob(bytes));
+        match art(&mut m, crate::protocol::Artwork::Asset("covers/cover-600.jpg".into())) {
+            Value::Str(url) => assert!(url.ends_with("covers/cover-600.jpg"), "{url}"),
+            other => panic!("an asset's artwork reached the backend as {other:?}"),
+        }
     }
 
     #[test]

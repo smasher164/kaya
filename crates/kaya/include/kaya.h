@@ -20,6 +20,13 @@
 #define VIDEO_INK_TOLERANCE 2
 
 /**
+ * expect_now_playing_art's tolerance per channel: the system's own copy is
+ * rescaled and re-encoded (Android's is 300 px for a 600 px cover), and
+ * the scene's two covers differ by more than 100 in every channel.
+ */
+#define NOW_PLAYING_ART_TOLERANCE 16
+
+/**
  * The largest part the root takes. A packer saturates a part outside
  * i32 into it, so an overflow lands above this and is refused.
  */
@@ -382,7 +389,8 @@
  * (written once, never bound); PLAYER_COMMAND u64 player, u32
  * player_command, u32 reserved, u64 at_ms; SELECT_TRACK u64 player, u32
  * track_kind, u32 index (from 1, 0 none); SET_SESSION u64 player, u32 actions mask, u32
- * playback_state, then title, artist, album and artwork as Str values.
+ * playback_state, then title, artist and album as Str values and artwork
+ * an asset name (Str, empty for none) or the picture's bytes (Blob).
  */
 #define KAYA_TX_CREATE_PLAYER 63
 
@@ -798,7 +806,8 @@
 /**
  * The media applies, the tx layouts with SET_PLAYER_PROP's source
  * RESOLVED to a URL string and SET_SESSION carrying the offered mask the
- * core decided and the artwork as a file:// URL (docs/media-plan.md §5).
+ * core decided and the artwork as a file:// URL (Str, empty for none) or
+ * the app's bytes (Blob) (docs/media-plan.md §5).
  */
 #define KAYA_APPLY_CREATE_PLAYER 51
 

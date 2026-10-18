@@ -143,6 +143,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 .player(player)
                 .title("kaya media")
                 .artist("kaya")
+                .artwork("covers/cover-600.jpg")
                 .handles(&[SessionActionKind::Next])
                 .declare();
         }
@@ -212,7 +213,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Position(ms) => furthest = furthest.max(ms),
             Msg::Session(SessionAction::Next) => {
                 nexts += 1;
-                ctx.apply(|tx| tx.write(name, format!("next {nexts}")));
+                ctx.apply(|tx| {
+                    tx.write(name, format!("next {nexts}"));
+                    // The next track's art arrives as bytes, the way a
+                    // catalogue's would (docs/media-player-plan.md M7).
+                    let art = tx.asset("covers/cover-320.jpg");
+                    tx.session()
+                        .player(player)
+                        .title("kaya media")
+                        .artist("kaya")
+                        .artwork_bytes(&art)
+                        .handles(&[SessionActionKind::Next])
+                        .declare();
+                });
             }
             Msg::Session(_) => {}
         }

@@ -385,6 +385,10 @@ fn main() {
         "Windows.Storage.Streams.DataWriter".to_string(),
         // StoreAsync's return type; without it the method is skipped.
         "Windows.Storage.Streams.DataWriterStoreOperation".to_string(),
+        // The session artwork's read back (docs/media-player-plan.md M7):
+        // the system's thumbnail stream drained to bytes.
+        "Windows.Storage.Streams.DataReader".to_string(),
+        "Windows.Storage.Streams.DataReaderLoadOperation".to_string(),
         "Windows.Storage.Streams.IRandomAccessStream".to_string(),
         "Windows.Foundation.IReference".to_string(),
         "Windows.Foundation.PropertyValue".to_string(),

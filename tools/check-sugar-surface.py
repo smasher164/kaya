@@ -3209,6 +3209,27 @@ MEDIA_SURFACES = [
      r"^{0} :: Text -> Text -> IO Bool"),
     ("haskell", "bindings/haskell/Kaya/Core.hs", "picked source", "mediaPicked",
      r"^{0} :: PickedFile -> MediaSource\n{0} f = MediaPicked f\.handle$"),
+    # THE SESSION'S ARTWORK FROM THE APP'S BYTES (docs/media-player-plan.md
+    # M7): the asset-name form alone draws every catalogue app's lock screen
+    # blank, and no scene runs a language that cannot spell the bytes.
+    ("rust", "crates/kaya/src/app/media.rs", "session artwork bytes", "artwork_bytes",
+     r"pub fn {0}\(mut self, bytes: &\(impl super::BlobSource \+ \?Sized\)\) -> Self"),
+    ("python", "bindings/python/kaya/__init__.py", "session artwork bytes", "artwork",
+     r"^\s+{0}: str \| bytes \| bytearray \| memoryview \| Asset = \"\",$"),
+    ("go", "bindings/go/media.go", "session artwork bytes", "ArtworkBytes",
+     r"func \(s SessionRef\) {0}\(b \[\]byte\) SessionRef"),
+    ("csharp", "bindings/csharp/KayaApp.cs", "session artwork bytes", "artworkBytes",
+     r"Action<Tx, SessionAction>\? onAction = null, byte\[\]\? {0} = null\)"),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", "session artwork bytes", "artwork",
+     r"public Session {0}\(byte\[\] bytes\)"),
+    ("swift", "bindings/swift/KayaMedia.swift", "session artwork bytes", "artworkData",
+     r"artwork: String = \"\", {0}: Data\? = nil,"),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", "session artwork bytes", "artwork_bytes",
+     r"\?{0} \?\(handles = \[\]\)"),
+    ("haskell", "bindings/haskell/KayaApp.hs", "session artwork bytes", "SessionArtworkBytes",
+     r"^    {0} BS\.ByteString$"),
+    ("js", "bindings/js/kaya/index.ts", "session artwork bytes", "artwork",
+     r"^  {0}\?: string \| Uint8Array \| Asset;$"),
 ]
 
 
@@ -3458,7 +3479,7 @@ MEDIA_LANGS = ("rust", "python", "go", "csharp", "java", "swift", "ocaml", "hask
 MEDIA_PARTS = ("player object", "player field", "visibility", "audio selection",
                "caption selection", "sidecar captions", "track reading", "cue reading",
                "track handler", "cue handler", "failed handler", "session",
-               "session handler", "capability", "picked source")
+               "session handler", "capability", "picked source", "session artwork bytes")
 
 
 def media_parts_missing(table):

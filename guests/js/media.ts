@@ -126,6 +126,7 @@ function suiteApp(scene: string): void {
     if (action === "next") {
       nexts += 1;
       name.set(`next ${nexts}`);
+      kaya.session({ player, title: "kaya media", artist: "kaya", artwork: kaya.asset("covers/cover-320.jpg"), handles: ["next"], onAction });
     }
   }
 
@@ -139,7 +140,7 @@ function suiteApp(scene: string): void {
       kaya.video(player).a11yId("clip").a11yLabel("Clip"); // video#0
       kaya.button(session ? "play" : "next", { onClick: session ? onToggle : onNext }); // button#0
     });
-    if (session) kaya.session({ player, title: "kaya media", artist: "kaya", handles: ["next"], onAction });
+    if (session) kaya.session({ player, title: "kaya media", artist: "kaya", artwork: "covers/cover-600.jpg", handles: ["next"], onAction });
     return { summary, name, player };
   });
 }

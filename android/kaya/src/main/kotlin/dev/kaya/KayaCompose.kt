@@ -4701,16 +4701,19 @@ object KayaCompose {
                 }
                 APPLY_SET_SESSION -> {
                     // { u64 player; u32 offered; u32 playback_state; Str title,
-                    //   artist, album, artwork (a file URL or empty) }.
+                    //   artist, album; artwork a Str file URL (empty for none)
+                    //   or the app's bytes as a Blob }.
                     val attached = b.long
                     val offered = b.int
                     b.int
                     val title = readString(b)
                     val artist = readString(b)
                     val album = readString(b)
-                    val artwork = readString(b)
+                    val bytes = b.getInt(b.position()) == VALUE_BLOB
+                    val artData = if (bytes) blobs[readBlobHandle(b)] else null
+                    val artwork = if (bytes) "" else readString(b)
                     val context = kayaAppContext ?: error("kaya: set_session before the Compose backend attached")
-                    KayaMediaSession.apply(context, attached, offered, title, artist, album, artwork)
+                    KayaMediaSession.apply(context, attached, offered, title, artist, album, artwork, artData)
                 }
                 APPLY_SELECT_TRACK -> {
                     // { u64 player; u32 track_kind; u32 index }, from 1, 0 off.
@@ -11083,6 +11086,19 @@ object KayaCompose {
                         val got = onUi(activity) { KayaMediaSession.nowPlaying(activity) }
                         if (got == want) observed.add("now playing $want")
                         else failures.add("now playing $got, wanted $want")
+                    }
+                    "expect_now_playing_art" -> {
+                        val want = parts[1]
+                        val got = onUi(activity) { KayaMediaSession.nowPlayingArt(activity) }
+                        val read = got.substringBefore(' ')
+                        fun rgb(s: String) = s.takeIf { it.length == 6 }?.toIntOrNull(16)
+                            ?.let { listOf(it shr 16 and 0xFF, it shr 8 and 0xFF, it and 0xFF) }
+                        val g = rgb(read)
+                        val w = rgb(want)
+                        val close = g != null && w != null &&
+                            g.zip(w).all { (a, b) -> kotlin.math.abs(a - b) <= KAYA_NOW_PLAYING_ART_TOLERANCE }
+                        if ((want == "none" && got == "none") || (want != "none" && close)) observed.add("now playing art $want")
+                        else failures.add("now playing art $got, wanted $want")
                     }
                     "expect_player_open" -> {
                         // docs/media-plan.md §7d: the n-th player by id holds
