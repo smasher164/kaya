@@ -19,12 +19,14 @@ expect_selected row@track[1860160] off
 double_click row@track[1860160]
 expect_selected row@track[1860160] on
 expect_selected row@track[1860165] off
-expect label@now "Playing · Seven Chimes"
+expect label@dock_title "Seven Chimes"
+expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860160] accent
 expect_tint label@track_name[1860165] none
 # The clips are 20 s: past the first one's end the queue plays the next.
 settle 12000
-expect label@now "Playing · Athens"
+expect label@dock_title "Athens"
+expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860165] accent
 expect_tint label@track_name[1860160] none
 # The desktops: the entry's title, the album column, and Home and the

@@ -101,7 +101,8 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media",
               "media_reader": "media", "capture_denied": "capture",
-              "music_home": "music", "music_playlist": "music", "music_header": "music"}
+              "music_home": "music", "music_playlist": "music", "music_header": "music",
+              "music_dock": "music"}
 
 # THE LOCALE A SCENE RUNS UNDER (docs/compliance-plan.md §4): the knob the
 # leg carries, so the same guest is read under German and Arabic; the
@@ -187,7 +188,7 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # The media player demo, one Python app under a script per
                # screen (docs/media-player-plan.md M3, §5).
                "music_home": "python", "music_playlist": "python",
-               "music_header": "python"}
+               "music_header": "python", "music_dock": "python"}
 
 # The queue, in run order. Entries:
 #   (scene, (lang, ...))    a group: script export + one leg per lang
@@ -344,6 +345,7 @@ ORDER = [
     ("music_home", ("python",)),
     ("music_playlist", ("python",)),
     ("music_header", ("python",)),
+    ("music_dock", ("python",)),
     ("richtext", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("ownundo", ("rust", "python", "js", "go", "csharp", "java", "swift",

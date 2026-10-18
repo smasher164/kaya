@@ -1,0 +1,87 @@
+# The media player demo's fourth screen (docs/media-player-plan.md §6 step 5,
+# M6-M11; docs/styling-pass-plan.md Y8; docs/media-plan.md §5): the dock is
+# attached when something first plays and holds the playing track's rounded
+# art and two lines, the transport, the scrubber with elapsed and remaining
+# time, shuffle, repeat and the heart. The track is the app's media session,
+# so the system's Now Playing shows it with its art, and the system's
+# commands reach the app: play and pause the player, next and previous the
+# app's queue (M11). The phones' dock holds the art, the lines, play and next;
+# a tap opens the full player as a sheet, which holds the rest
+# (tools/lib/lanes/ios.py, android.py).
+expect_image_phase image@art_116452 shown
+expect_dock hidden
+click column@card_116452
+expect_image_phase image@album_art shown
+click button@play_album
+expect_dock shown
+expect label@dock_title "In Tune"
+expect label@dock_artist "Kellee Maize"
+expect_image_phase image@dock_art shown
+expect_shape image@dock_art rounded
+expect_ax button@play_pause "button/Pause"
+expect_ax button@next "button/Next"
+expect_now_playing "In Tune" playing
+expect_now_playing_art 4CC0BF
+session_send pause
+expect_ax button@play_pause "button/Play"
+expect_now_playing "In Tune" paused
+session_send play
+expect_ax button@play_pause "button/Pause"
+session_send next
+expect label@dock_title "Owl Time"
+expect_tint label@track_name[989873] accent
+expect_tint label@track_name[989871] none
+expect_now_playing "Owl Time" playing
+session_send previous
+expect label@dock_title "In Tune"
+expect_tint label@track_name[989871] accent
+expect_now_playing "In Tune" playing
+expect_no_clipping
+# The scrubber: a commit seeks, and while a pointer holds the thumb the
+# player's position waits (M10); the slider runs 0 to 1 over the track.
+click button@play_pause
+expect_title "Owl Time (2013)"
+expect_ax button@play_pause "button/Play"
+set_value slider@progress 0.5
+expect_value slider@progress "0.5"
+expect label@elapsed "0:10"
+expect label@remaining "-0:10"
+click button@play_pause
+expect_ax button@play_pause "button/Pause"
+hold slider@progress at 0
+settle 1000
+expect_value slider@progress "0"
+click button@play_pause
+expect_ax button@play_pause "button/Play"
+release slider@progress
+expect_value slider@progress "0"
+expect label@elapsed "0:00"
+expect label@remaining "-0:20"
+# Shuffle is a toggle; repeat a button whose symbol the app swaps (M8).
+expect_ax checkbox@shuffle "toggle/Shuffle"
+expect_checked checkbox@shuffle off
+toggle checkbox@shuffle on
+expect_checked checkbox@shuffle on
+toggle checkbox@shuffle off
+expect_checked checkbox@shuffle off
+expect_ax button@repeat "button/Repeat off"
+expect_symbol button@repeat "repeat"
+click button@repeat
+expect_ax button@repeat "button/Repeat all"
+expect_symbol button@repeat "repeat"
+click button@repeat
+expect_ax button@repeat "button/Repeat one"
+expect_symbol button@repeat "repeat_one"
+click button@repeat
+expect_ax button@repeat "button/Repeat off"
+expect_symbol button@repeat "repeat"
+# The heart is the playing track's.
+expect_ax checkbox@like "toggle/Like"
+toggle checkbox@like on
+expect_checked checkbox@like on
+click button@next
+expect label@dock_title "Owl Time"
+expect_checked checkbox@like off
+click button@previous
+expect label@dock_title "In Tune"
+expect_checked checkbox@like on

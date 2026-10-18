@@ -8261,12 +8261,41 @@ object KayaCompose {
 
     /** expect_checked: a checkbox's state off its semantics node's
      * ToggleableState, whatever role it is drawn as (docs/media-player-plan.md M8). */
+    /** expect_symbol (docs/media-player-plan.md M8): the glyph the button's
+     * Icon drew, off the unmerged tree, by symbol name. */
+    private fun kayaButtonSymbolRead(activity: ComponentActivity, spec: String): String = onUi(activity) {
+        val node = target(spec, "button", KayaSceneModel.buttons) ?: return@onUi "<no such target>"
+        if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
+        val roots = kayaComposeRoots(activity).map { it as RootForTest }
+        if (roots.isEmpty()) return@onUi "<no Compose root>"
+        roots.forEach { it.measureAndLayoutForTest() }
+        val glyphs = mutableListOf<ImageVector>()
+        var tagged = 0
+        fun under(n: SemanticsNode, depth: Int) {
+            if (depth > 16) return
+            n.config.getOrNull(KayaGlyph)?.let { glyphs.add(it) }
+            n.children.forEach { under(it, depth + 1) }
+        }
+        fun walk(n: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (n.config.getOrNull(SemanticsProperties.TestTag) == node.a11yId) {
+                tagged++
+                under(n, 0)
+                return
+            }
+            n.children.forEach { walk(it, depth + 1) }
+        }
+        roots.forEach { walk(it.semanticsOwner.unmergedRootSemanticsNode, 0) }
+        if (glyphs.size != 1) return@onUi "<$tagged nodes carry tag '${node.a11yId}', ${glyphs.size} glyphs under them>"
+        SYMBOLS.firstOrNull { it.third == glyphs[0] }?.second ?: "<the button draws a glyph outside the symbol table>"
+    }
+
     private fun kayaCheckedRead(activity: ComponentActivity, spec: String): String? = onUi(activity) {
         val node = target(spec, "checkbox", KayaSceneModel.checkboxes) ?: return@onUi null
         if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
-        val view = kayaComposeRoot(activity.window.decorView) ?: return@onUi "<no Compose root>"
-        val root = view as RootForTest
-        root.measureAndLayoutForTest()
+        val roots = kayaComposeRoots(activity).map { it as RootForTest }
+        if (roots.isEmpty()) return@onUi "<no Compose root>"
+        roots.forEach { it.measureAndLayoutForTest() }
         val states = mutableListOf<androidx.compose.ui.state.ToggleableState>()
         var tagged = 0
         fun walk(n: SemanticsNode, depth: Int) {
@@ -8277,7 +8306,7 @@ object KayaCompose {
             }
             n.children.forEach { walk(it, depth + 1) }
         }
-        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        roots.forEach { walk(it.semanticsOwner.rootSemanticsNode, 0) }
         when {
             states.size != 1 -> "<$tagged nodes carry tag '${node.a11yId}', ${states.size} publish a ToggleableState>"
             states[0] == androidx.compose.ui.state.ToggleableState.On -> "on (ToggleableState.On)"
@@ -9006,11 +9035,20 @@ object KayaCompose {
      * a hard crash rather than a wrong answer.
      */
     private fun kayaAx(activity: ComponentActivity, tag: String): KayaAxRead? {
-        val view = kayaComposeRoot(activity.window.decorView) ?: return null
-        val owner = (view as RootForTest).semanticsOwner
-        val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: return null
-        return kayaAxOf(view, node)
+        for (view in kayaComposeRoots(activity)) {
+            val owner = (view as RootForTest).semanticsOwner
+            val node = kayaAxFind(owner.rootSemanticsNode, tag) ?: continue
+            return kayaAxOf(view, node)
+        }
+        return null
     }
+
+    /** Every Compose root the app shows: each live sheet's own window (a
+     * ModalBottomSheet is a dialog window), topmost first, then the
+     * activity's. */
+    private fun kayaComposeRoots(activity: ComponentActivity): List<android.view.View> =
+        (KayaSceneModel.sheets.reversed().mapNotNull { it.window?.decorView } + activity.window.decorView)
+            .mapNotNull { kayaComposeRoot(it) }
 
     /** [kayaAx]'s read of one semantics node, however it was found. */
     private fun kayaAxOf(view: android.view.View, node: SemanticsNode): KayaAxRead {
@@ -13692,6 +13730,17 @@ object KayaCompose {
                         kayaSkinExpect(parts, failures) { kayaLabelTintRead(activity, parts[1]) }?.let { observed.add(it) }
                     "expect_selected" ->
                         kayaSkinExpect(parts, failures) { kayaSelectedRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_symbol" -> {
+                        val want = parts.drop(2).joinToString(" ").removeSurrounding("\"")
+                        var got = kayaButtonSymbolRead(activity, parts[1])
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (got != want && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            got = kayaButtonSymbolRead(activity, parts[1])
+                        }
+                        if (got == want) observed.add("symbol \"$want\"")
+                        else failures.add("symbol \"$got\", wanted \"$want\"")
+                    }
                     "expect_checked" ->
                         kayaSkinExpect(parts, failures) { kayaCheckedRead(activity, parts[1]) }?.let { observed.add(it) }
                     "expect_dock" -> {
@@ -18121,14 +18170,24 @@ private fun KayaRenderCore(
                         onClick = { KayaPresent.emitClicked(node.tag) },
                         modifier = lifted.then(boxFill).then(a11y).then(buttonRect),
                     ) {
-                        Icon(glyph, contentDescription = node.text)
+                        Icon(
+                            glyph,
+                            // The a11y modifier carries an a11y_label; the icon's own would be spoken after it.
+                            contentDescription = if (node.a11yLabel.isEmpty()) node.text else null,
+                            modifier = Modifier.semantics { this[KayaGlyph] = glyph }
+                        )
                     }
                 } else {
                     IconButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
                         modifier = lifted.then(boxFill).then(a11y).then(buttonRect),
                     ) {
-                        Icon(glyph, contentDescription = node.text)
+                        Icon(
+                            glyph,
+                            // The a11y modifier carries an a11y_label; the icon's own would be spoken after it.
+                            contentDescription = if (node.a11yLabel.isEmpty()) node.text else null,
+                            modifier = Modifier.semantics { this[KayaGlyph] = glyph }
+                        )
                     }
                 }
             } else when (node.role) {
@@ -21146,13 +21205,18 @@ fun kayaTouchTap(activity: android.app.Activity, x: Float, y: Float) {
 /** The held touch (docs/media-player-plan.md M10): where it is, and when it
  * went down. Harness thread only. */
 private var kayaHeldTouch: Triple<Long, Float, Float>? = null
+/** The window the held touch went to: a sheet's own, or the activity's. */
+private var kayaHeldWindow: android.view.Window? = null
 
-private fun kayaTouchSend(activity: android.app.Activity, down: Long, action: Int, x: Float, y: Float) {
+private fun kayaTouchSend(
+    activity: android.app.Activity, down: Long, action: Int, x: Float, y: Float,
+    window: android.view.Window = activity.window,
+) {
     val latch = java.util.concurrent.CountDownLatch(1)
     activity.runOnUiThread {
         val event = android.view.MotionEvent.obtain(down, android.os.SystemClock.uptimeMillis(), action, x, y, 0)
         event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
-        activity.window.decorView.dispatchTouchEvent(event)
+        window.decorView.dispatchTouchEvent(event)
         event.recycle()
         latch.countDown()
     }
@@ -21174,13 +21238,19 @@ fun kayaSliderHold(activity: ComponentActivity, spec: String, down: Boolean, to:
             val left = track.positionInWindow().x + thumb.size.width / 2f
             left + ((it - node.minValue) / span).toFloat() * (track.size.width - thumb.size.width)
         }
-        Triple(node, Pair(cx, cy), goal)
+        // A slider in a sheet is in the sheet's own window, whose coordinates these are.
+        val root = kayaRootIdOf(node.id)
+        val window = KayaSceneModel.sheets.firstOrNull { it.root?.id == root }?.window ?: activity.window
+        Triple(node, Triple(cx, cy, window), goal)
     } ?: return "no such slider on screen"
-    val (node, from, goal) = aim
+    val (node, aimed, goal) = aim
+    val from = Pair(aimed.first, aimed.second)
     if (!down) {
         val held = kayaHeldTouch ?: return "no slider is held"
-        kayaTouchSend(activity, held.first, android.view.MotionEvent.ACTION_UP, held.second, held.third)
+        kayaTouchSend(activity, held.first, android.view.MotionEvent.ACTION_UP, held.second, held.third,
+            kayaHeldWindow ?: activity.window)
         kayaHeldTouch = null
+        kayaHeldWindow = null
         repeat(80) {
             if (KayaCompose.onUiOf(activity) { !node.gestureLive } == true) return null
             Thread.sleep(25)
@@ -21190,13 +21260,14 @@ fun kayaSliderHold(activity: ComponentActivity, spec: String, down: Boolean, to:
     if (kayaHeldTouch != null) return "a slider is already held"
     val start = KayaCompose.onUiOf(activity) { node.value }
     val t0 = android.os.SystemClock.uptimeMillis()
-    kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_DOWN, from.first, from.second)
+    kayaHeldWindow = aimed.third
+    kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_DOWN, from.first, from.second, aimed.third)
     var x = from.first
     if (goal != null && to != null) {
         for (i in 1..12) {
             Thread.sleep(16)
             x = from.first + (goal - from.first) * i / 12
-            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second)
+            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second, aimed.third)
         }
         // The walk's last pixels by what the slider says: the thumb's travel
         // is Material's arithmetic, not this one's.
@@ -21206,7 +21277,7 @@ fun kayaSliderHold(activity: ComponentActivity, spec: String, down: Boolean, to:
             val miss = to - (KayaCompose.onUiOf(activity) { node.gestureValue } ?: to)
             if (kotlin.math.abs(miss) < 1e-9) return@repeat
             x += (miss * perUnit).toFloat()
-            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second)
+            kayaTouchSend(activity, t0, android.view.MotionEvent.ACTION_MOVE, x, from.second, aimed.third)
         }
     }
     kayaHeldTouch = Triple(t0, x, from.second)

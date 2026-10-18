@@ -7766,6 +7766,24 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         return role + "/" + label
     }
 
+    /// expect_symbol: the AXButton carrying the id, and the glyph its render
+    /// arm drew (kayaButtonGlyphs), by symbol name.
+    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            var matches: [AXUIElement] = []
+            kayaAxFindAll(app, identifier, 0, &matches)
+            let buttons = matches.filter { kayaAxCopy($0, kAXRoleAttribute) as? String == kAXButtonRole }
+            guard buttons.count == 1 else {
+                return "<\(matches.count) elements carry id '\(identifier)', \(buttons.count) of them AXButton>"
+            }
+            return kayaButtonGlyphName(node)
+        }
+    }
+
     /// expect_checked: a checkbox's state off its AXValue, whatever role it is
     /// drawn as (docs/media-player-plan.md M8).
     func kayaAxCheckedRead(_ identifier: String) -> String {
@@ -8119,7 +8137,16 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
     /// platform published a role the closed set has no name for, and the next
     /// question is always which one.
     private func kayaAxWhy(_ identifier: String) -> String {
+        // On the main thread for kayaAxRead's reason: an own-process AX walk off it makes
+        // AppKit lay out a table's rows from this thread and throw (docs/traps.md, the
+        // why-not that walked the tree off the main thread).
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { kayaAxWhyOnMain(identifier) }
+    }
+
+    private func kayaAxWhyOnMain(_ identifier: String) -> String {
         let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
         guard let hit = kayaAxFind(app, identifier) else { return "" }
         let role = kayaAxCopy(hit, kAXRoleAttribute as String) as? String ?? "nil"
         let subrole = kayaAxCopy(hit, kAXSubroleAttribute as String) as? String ?? "nil"
@@ -8316,6 +8343,32 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
                 }
             }
             return nil
+        }
+    }
+
+    /// expect_symbol: the element UIKit publishes for the id, and the glyph
+    /// the button's render arm drew (kayaButtonGlyphs), by symbol name.
+    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64) -> String {
+        guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
+        kayaAxEnableAutomation()
+        return DispatchQueue.main.sync { () -> String in
+            var hits = 0
+            func walk(_ element: NSObject, _ depth: Int) {
+                if depth > 64 { return }
+                if kayaAxIdentifier(element) == identifier { hits += 1 }
+                let count = element.accessibilityElementCount()
+                if count != NSNotFound && count > 0 {
+                    for i in 0..<count {
+                        if let child = element.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+                    }
+                }
+                if let view = element as? UIView { view.subviews.forEach { walk($0, depth + 1) } }
+            }
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { walk(window, 0) }
+            }
+            guard hits > 0 else { return "<no element UIKit publishes carries id '\(identifier)'>" }
+            return kayaButtonGlyphName(node)
         }
     }
 
@@ -12457,6 +12510,28 @@ private func kayaRunScript(_ script: String) {
             case "expect_selected":
                 let (ok, fail) = kayaSkinReading(parts)
                 if let ok { observed.append(ok) } else { failures.append(fail) }
+            case "expect_symbol":
+                guard parts.count >= 3 else {
+                    failures.append("expect_symbol wants a button and a quoted symbol name: \(line)")
+                    break
+                }
+                let wantSymbol = kayaQuoted(Array(parts.dropFirst(2)))
+                func readSymbol() -> String {
+                    guard let node = DispatchQueue.main.sync(execute: { kayaTarget(parts[1], "button", kayaScene.buttons) })
+                    else { return "<no such target>" }
+                    return kayaAxButtonSymbolRead(node.a11yId, node.id)
+                }
+                var gotSymbol = readSymbol()
+                let symbolDeadline = Date().addingTimeInterval(5)
+                while !kayaBytesEqual(gotSymbol, wantSymbol) && Date() < symbolDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotSymbol = readSymbol()
+                }
+                if kayaBytesEqual(gotSymbol, wantSymbol) {
+                    observed.append("symbol \"\(wantSymbol)\"")
+                } else {
+                    failures.append("symbol \"\(gotSymbol)\", wanted \"\(wantSymbol)\"")
+                }
             case "expect_checked":
                 let want = parts.count > 2 ? String(parts[2]) : ""
                 func read() -> String? {
@@ -19949,6 +20024,9 @@ struct KayaSymbolButton: View {
         .buttonStyle(.plain)
         .accessibilityLabel(node.text)
         .padding(.bottom, kayaComposerNeighbourLift(node))
+        .onAppear { kayaButtonGlyphs[node.id] = sf }
+        .onChange(of: sf) { _, drawn in kayaButtonGlyphs[node.id] = drawn }
+        .onDisappear { kayaButtonGlyphs[node.id] = nil }
     }
 }
 
@@ -21515,26 +21593,37 @@ struct KayaDockHost: ViewModifier {
     @State private var scene = kayaScene
 
     // One structure whether or not the dock shows (docs/traps.md, the dock host that rebuilt the window's content).
+    // macOS stacks the dock under the content: a NavigationSplitView's columns ignore a bottom safe-area inset
+    // (docs/traps.md, the panes the dock covered).
     func body(content: Content) -> some View {
-        content.safeAreaInset(edge: .bottom, spacing: 0) {
-            if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {
-                // A root fills what it is offered and an inset is offered the
-                // window, so the bar takes its ideal height (expect_dock's
-                // content half reads the fill as misplaced).
-                KayaRender(node: dock, isRoot: true)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, scene.windows[windowId]?.inset ?? 16)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.bar, ignoresSafeAreaEdges: .bottom)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear
-                                .onAppear { kayaDockFrame = geo.frame(in: .global) }
-                                .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
-                                .onDisappear { kayaDockFrame = nil }
-                        })
+        #if os(macOS)
+            VStack(spacing: 0) {
+                content.frame(maxWidth: .infinity, maxHeight: .infinity)
+                bar
             }
+        #else
+            content.safeAreaInset(edge: .bottom, spacing: 0) { bar }
+        #endif
+    }
+
+    @ViewBuilder private var bar: some View {
+        if let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock), !kayaDockIsAccessory(windowId) {
+            // A root fills what it is offered and an inset is offered the
+            // window, so the bar takes its ideal height (expect_dock's
+            // content half reads the fill as misplaced).
+            KayaRender(node: dock, isRoot: true)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, scene.windows[windowId]?.inset ?? 16)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.bar, ignoresSafeAreaEdges: .bottom)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear { kayaDockFrame = geo.frame(in: .global) }
+                            .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
+                            .onDisappear { kayaDockFrame = nil }
+                    })
         }
     }
 }
@@ -21584,12 +21673,15 @@ struct KayaDockHost: ViewModifier {
 /// widget of the window's own root laid out, on screen and wholly above the
 /// dock, so a dock drawn over the content or in its place reads misplaced.
 @MainActor func kayaDockContentFault(_ dock: CGRect) -> String? {
-    guard let root = kayaScene.windows[0]?.root else { return "the window has no root mounted" }
+    guard let window = kayaScene.windows[0], let root = window.root else { return "the window has no root mounted" }
     var leaves: [KayaNode] = []
     func walk(_ n: KayaNode) {
-        if n.kind == kindRow || n.kind == kindColumn { n.children.forEach(walk) } else { leaves.append(n) }
+        // A collection's container is read whole: its children are the template, not widgets.
+        let collection = n.children.contains { $0.id >= 1 << 63 }
+        if (n.kind == kindRow || n.kind == kindColumn) && !collection { n.children.forEach(walk) } else { leaves.append(n) }
     }
     walk(root)
+    if let shown = window.entries.last?.root { walk(shown) }
     for n in leaves {
         let name = n.a11yId.isEmpty ? "content widget \(n.id) (kind \(n.kind) \"\(n.text)\")" : n.a11yId
         guard let f = kayaPlatformFrame(n) else { return "\(name) of the window's content was never laid out" }
@@ -32785,6 +32877,16 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 /// body below. WHAT IT IS WORTH DIFFERS BY HOST: the symbol ANSWER on macOS,
 /// where SwiftUI exposes no image object (measured), a DIAGNOSTIC on iOS.
 let kayaSectionSymbolIdent = "kaya-section-symbol:"
+/// The SF name each symbol button's body last drew, by node, stamped by the
+/// render arm for expect_symbol (no AX attribute names a SwiftUI button's
+/// glyph; docs/traps.md, the button glyph no accessibility attribute names).
+@MainActor var kayaButtonGlyphs: [UInt64: String] = [:]
+
+@MainActor func kayaButtonGlyphName(_ node: UInt64) -> String {
+    guard let sf = kayaButtonGlyphs[node] else { return "<the button's body drew no symbol>" }
+    return kayaSymbolTable.first { $0.sf == sf || $0.rendered == sf }?.name
+        ?? "<the button drew \(sf), which is not in this interpreter's table>"
+}
 
 #if os(macOS)
     extension View {

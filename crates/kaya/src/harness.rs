@@ -873,6 +873,10 @@ pub enum Step {
     /// The SEMANTIC ICON NAME the segment at the 0-based index draws, read
     /// off the platform's own segment (docs/segmented-plan.md G5).
     ExpectSegmentSymbol(Target, usize, String),
+    /// `expect_symbol <button> "<name>"`: the SEMANTIC ICON NAME a button
+    /// draws, read off the platform's own control (docs/media-player-plan.md
+    /// M8, the repeat button whose symbol the app swaps).
+    ExpectSymbol(Target, String),
     /// `expect_expanded <expander> on|off`: the header's published expanded
     /// state AND the body's presence on screen, read off the platform and
     /// required to agree (docs/expander-plan.md K8).
@@ -1094,6 +1098,7 @@ impl Step {
             | Step::Choose(t, _)
             | Step::ExpectSegments(t, _)
             | Step::ExpectSegmentSymbol(t, _, _)
+            | Step::ExpectSymbol(t, _)
             | Step::ExpectExpanded(t, _)
             | Step::ExpectOutOfReach(t)
             | Step::ExpectSafe(t, _)
@@ -1388,6 +1393,7 @@ impl Step {
             Step::Choose { .. } => false,
             Step::ExpectSegments { .. } => true,
             Step::ExpectSegmentSymbol { .. } => true,
+            Step::ExpectSymbol { .. } => true,
             Step::ExpectExpanded { .. } => true,
             Step::ExpectOutOfReach { .. } => true,
             Step::ExpectKeyboard(..) => true,
@@ -2164,6 +2170,9 @@ pub trait Stage: Send + 'static {
     /// The SEMANTIC ICON NAME the segment at `index` draws, read off the
     /// platform's own segment, or a sentence saying what was measured.
     fn segment_symbol(&self, target: Target, index: usize) -> String;
+    /// The SEMANTIC ICON NAME a button draws, read off the platform's own
+    /// control, or a sentence saying what was measured.
+    fn button_symbol(&self, target: Target) -> String;
     /// An expander's two platform readings, (the header publishes expanded,
     /// the body's first child is on screen), or a sentence saying what was
     /// measured instead; never the scene model (docs/expander-plan.md K8).
@@ -3666,6 +3675,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse::<usize>()
                     .map_err(|_| format!("expect_segment_symbol wants a 0-based index: {line:?}"))?;
                 Step::ExpectSegmentSymbol(target, index, parse_string(want)?)
+            }
+            "expect_symbol" => {
+                let Some((target, want)) = rest.trim().split_once(char::is_whitespace) else {
+                    return Err(format!("expect_symbol wants a button and a quoted symbol name: {line:?}"));
+                };
+                let target = parse_target(target)?;
+                if target.kind != TargetKind::Button {
+                    return Err(format!("expect_symbol reads a button, not {target:?}"));
+                }
+                Step::ExpectSymbol(target, parse_string(want.trim())?)
             }
             "expect_expanded" => {
                 let (target, state) = rest
@@ -6090,6 +6109,14 @@ fn run_with_log(
             Step::ExpectOutOfReach(t) => Some(poll(|| match stage.collapsed_ancestor(*t) {
                 Some(i) => Ok(format!("out of reach inside expander#{i}")),
                 None => Err(WITHIN_REACH.to_owned()),
+            })),
+            Step::ExpectSymbol(t, want) => Some(poll(|| {
+                let got = stage.button_symbol(*t);
+                if got == *want {
+                    Ok(format!("symbol {want:?}"))
+                } else {
+                    Err(format!("symbol {got:?}, wanted {want:?}"))
+                }
             })),
             Step::ExpectSegmentSymbol(t, index, want) => Some(poll(|| {
                 let got = stage.segment_symbol(*t, *index);
@@ -9439,6 +9466,20 @@ mod tests {
         assert!(parse("choose segmented#0 1").is_ok());
     }
 
+    /// docs/media-player-plan.md M8: a button's symbol read in one spelling,
+    /// and a target that is not a button refused at parse.
+    #[test]
+    fn expect_symbol_reads_a_button_only() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        run(parse("expect_symbol button@repeat \"repeat\"").unwrap(), MockStage { seen: &SEEN, verdict: tx });
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("symbol \"repeat_one\", wanted \"repeat\""), "{verdict}");
+        assert!(parse("expect_symbol button@repeat \"repeat_one\"").is_ok());
+        assert!(parse("expect_symbol checkbox@shuffle \"shuffle\"").is_err());
+        assert!(parse("expect_symbol button@repeat").is_err());
+    }
+
     #[test]
     fn mask_count_reads_one_glyph_and_refuses_typed_characters() {
         assert_eq!(mask_count(""), Ok(0));
@@ -9675,6 +9716,9 @@ mod tests {
         }
         fn segment_symbol(&self, _: Target, index: usize) -> String {
             ["info", "edit"].get(index).map_or_else(|| format!("no segment {index}"), |s| (*s).to_owned())
+        }
+        fn button_symbol(&self, _: Target) -> String {
+            "repeat_one".to_owned()
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
@@ -10869,6 +10913,9 @@ mod tests {
         fn segment_symbol(&self, _: Target, _: usize) -> String {
             String::new()
         }
+        fn button_symbol(&self, _: Target) -> String {
+            String::new()
+        }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
         }
@@ -11354,6 +11401,9 @@ mod tests {
             String::new()
         }
         fn segment_symbol(&self, _: Target, _: usize) -> String {
+            String::new()
+        }
+        fn button_symbol(&self, _: Target) -> String {
             String::new()
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {

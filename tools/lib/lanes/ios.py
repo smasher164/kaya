@@ -80,16 +80,20 @@ GO_SCENES = [
 
 # CPython embedded in ONE bundle carrying every python scene
 # (docs/python-mobile-plan.md).
-PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist", "music_header"]
+PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist", "music_header",
+                 "music_dock"]
 # A scene whose guest file is another's: staged under the scene's name, the
 # one the host's main.py runs (tools/pyhost-main.py).
-PYTHON_GUEST = {"music_home": "music", "music_playlist": "music", "music_header": "music"}
+PYTHON_GUEST = {"music_home": "music", "music_playlist": "music", "music_header": "music",
+                "music_dock": "music"}
 # Python scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-python`
 # (docs/media-player-plan.md M5).
 PYTHON_DARK = ("music_header",)
 # The media player demo on a phone (docs/media-player-plan.md M6): no pointer,
 # and the library is the Library section rather than the sidebar.
 MUSIC_PLAYLIST_PHONE_TAIL = ('expect_columns column@tracks "#|Title|Time"; expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,0:20|7,Athens/Pierce Murphy,0:20"; back; expect_selected column@card_201715 on; click column@card_581719; expect_rows column@tracks "1,A Serpent I Did Hear/Pierce Murphy,0:20|2,Persimmon/Pierce Murphy,0:20"; back; select_section 1; click row@saved[201715]; expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,0:20|7,Athens/Pierce Murphy,0:20"; back; expect_selected row@saved[201715] on')
+# The dock's phone half: a tap opens the full player, which holds the rest.
+MUSIC_DOCK_PHONE_TAIL = ('click row@dock_open; expect_sheets 1; expect_sheet "Now Playing"; expect_image_phase image@full_art shown; expect label@full_title "In Tune"; click button@full_play_pause; expect_ax button@full_play_pause "button/Play"; set_value slider@progress 0.5; expect_value slider@progress "0.5"; expect label@elapsed "0:10"; expect label@remaining "-0:10"; click button@full_play_pause; expect_ax button@full_play_pause "button/Pause"; hold slider@progress at 0; settle 1000; expect_value slider@progress "0"; click button@full_play_pause; expect_ax button@full_play_pause "button/Play"; release slider@progress; expect_value slider@progress "0"; expect label@elapsed "0:00"; expect label@remaining "-0:20"; expect_ax checkbox@shuffle "toggle/Shuffle"; expect_checked checkbox@shuffle off; toggle checkbox@shuffle on; expect_checked checkbox@shuffle on; toggle checkbox@shuffle off; expect_checked checkbox@shuffle off; expect_ax button@repeat "button/Repeat off"; expect_symbol button@repeat "repeat"; click button@repeat; expect_ax button@repeat "button/Repeat all"; expect_symbol button@repeat "repeat"; click button@repeat; expect_ax button@repeat "button/Repeat one"; expect_symbol button@repeat "repeat_one"; click button@repeat; expect_ax button@repeat "button/Repeat off"; expect_symbol button@repeat "repeat"; expect_ax checkbox@like "toggle/Like"; toggle checkbox@like on; expect_checked checkbox@like on; click button@full_next; expect label@full_title "Owl Time"; expect_checked checkbox@like off; click button@previous; expect label@full_title "In Tune"; expect_checked checkbox@like on; dismiss_sheet; expect_sheets 0; expect label@dock_title "In Tune"')
 MUSIC_HEADER_PHONE_TAIL = ('back; expect_title "Music"; click column@card_581719; expect_checked checkbox@favorite off; back; click column@card_201715; expect_checked checkbox@favorite on; toggle checkbox@favorite off; expect_checked checkbox@favorite off')
 MUSIC_PHONE_TAIL = ('expect_title "Music"; click column@card_201715; back; expect_selected column@card_201715 on; expect_selected column@card_581719 off; expect_fill column@card_201715 selected; click column@card_139585; back; expect_selected column@card_139585 on; expect_selected column@card_201715 off; select_section 1; expect_selected row@saved[139585] on; expect_selected row@saved[201715] off; expect_image_phase image@saved_art[139585] shown; expect_shape image@saved_art[139585] rounded; click row@saved[201715]; back; expect_selected row@saved[201715] on; select_section 0; expect_selected column@card_201715 on; expect_selected column@card_139585 off')
 
@@ -338,6 +342,9 @@ MODS = {
     # The header's sidebar tail is the desktops'; a phone goes back to Home.
     ("python", "music_header"): {"cut": "click row@go_home", "keep": "expect_ground expect_shape",
                                  "extra": MUSIC_HEADER_PHONE_TAIL},
+    ("python", "music_dock"): {"cut": "click button@play_pause",
+                               "keep": "session_send expect_now_playing expect_dock",
+                               "extra": MUSIC_DOCK_PHONE_TAIL},
     ("python", "portfolio"): {
         "extra": "expect_folded column@summary column@ledger",
         "cut": "resize_window",
@@ -447,7 +454,7 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
 # app for the five scenes, so all five bundles carry it.
 SESSION_SCENES = ("media_formats", "media_delivery", "media_session",
                   "media_tracks", "media_feed", "media_picked", "media_timeout",
-                  "media_reader")
+                  "media_reader", "music_dock")
 
 # The locale a scene runs under, the knob the leg carries
 # (docs/compliance-plan.md §4); the reads ask the platform, never this.

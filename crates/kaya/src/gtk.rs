@@ -25839,6 +25839,20 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn button_symbol(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{ButtonExt, Cast};
+            let Some(widget) = target_widget(core, t) else { return "<no such target>".to_string() };
+            let Ok(button) = widget.downcast::<gtk4::Button>() else {
+                return "<the target is not a GtkButton>".to_string();
+            };
+            let Some(icon) = button.icon_name() else { return "<the button draws no icon>".to_string() };
+            symbol_name_of_icon(&icon)
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("<the button draws {icon}, which is not in SYMBOL_ICONS>"))
+        })
+    }
+
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.segmenteds.len()) else {

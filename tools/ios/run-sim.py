@@ -3664,7 +3664,8 @@ if SUITE in ("python", "all"):
             sys.exit(1)
     run(["chmod", "-R", "u+w", str(pyhome)])
     app = with_dylib(make_bundle("pyhost", "dev.kaya.pyhost",
-                                 BUNDLES / "pyhost-bin"))
+                                 BUNDLES / "pyhost-bin",
+                                 session=any(s in lane.SESSION_SCENES for s in lane.PYTHON_SCENES)))
     (app / "Frameworks").mkdir(exist_ok=True)
     (app / "app").mkdir(exist_ok=True)
     shutil.copytree(pyfw / "Python.framework",

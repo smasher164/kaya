@@ -77,9 +77,13 @@ DOORS = [
     ("the standalone colours", "func kayaStandalone(_ tint: Int64) -> Color? {",
      ["dark ? brand[8] : brand[3]", "Color.accentColor", "case tintSuccess: return .green"], ["Color(red:"]),
     ("the dock", "struct KayaDockHost: ViewModifier {",
-     [".safeAreaInset(edge: .bottom, spacing: 0)", ".background(.bar, ignoresSafeAreaEdges: .bottom)",
+     # macOS stacks the bar under the content, since a NavigationSplitView's
+     # columns ignore a bottom inset (docs/traps.md, the panes the dock covered).
+     ["VStack(spacing: 0) {\ncontent.frame(maxWidth: .infinity, maxHeight: .infinity)\nbar",
+      "content.safeAreaInset(edge: .bottom, spacing: 0) { bar }",
+      ".background(.bar, ignoresSafeAreaEdges: .bottom)",
       "kayaHoldsWidget(dock)", "KayaRender(node: dock, isRoot: true)\n.fixedSize(horizontal: false, vertical: true)",
-      "content.safeAreaInset(edge: .bottom, spacing: 0) {\nif let dock = scene.windows[windowId]?.dock"], []),
+      "@ViewBuilder private var bar: some View {\nif let dock = scene.windows[windowId]?.dock"], []),
 ]
 # Y4 on the macOS native tier (AMENDED 2026-10-17): a user's click and arrows
 # move the NSTableView's own selection and the app is told by selection_changed;
@@ -169,7 +173,9 @@ READS = [
     ("expect_dock's reader", "func kayaDockRead() -> String {",
      ["kayaDockFrame", "kayaFindSplitView(content)", "if let fault = kayaDockContentFault(frame)"]),
     ("expect_dock's content half", "func kayaDockContentFault(_ dock: CGRect) -> String? {",
-     ["kayaScene.windows[0]?.root", "kayaPlatformFrame(n)", "kayaVisibleFrame(n, f).shown", "f.maxY > dock.minY + 1"]),
+     ["kayaScene.windows[0], let root = window.root", "if let shown = window.entries.last?.root { walk(shown) }",
+      "let collection = n.children.contains { $0.id >= 1 << 63 }",
+      "kayaPlatformFrame(n)", "kayaVisibleFrame(n, f).shown", "f.maxY > dock.minY + 1"]),
     ("hover's route", "func kayaHoverTarget(_ spec: Substring) -> String? {",
      ["window.sendEvent(event)", "owner.mouseEntered(with: enter)", "owner.mouseMoved(with: event)",
       "trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque())", "kayaHovered.contains(node.id)"]),
@@ -429,9 +435,12 @@ def run(g):
         ("an activatable container flush against its surface", SWIFT,
          r"\(node\.filled != 0 \|\| node\.activatable && !kayaInDeclaredTable\(node\)\) && !node\.insetSet", "node.filled != 0 && !node.insetSet",
          "an activatable container takes the filled inset"),
-        ("the dock host branching around the content", SWIFT,
-         r"content\.safeAreaInset\(edge: \.bottom, spacing: 0\) \{\n(\s+)if let dock = scene\.windows\[windowId\]\?\.dock",
-         r"if true {\n\1if let dock = scene.windows[windowId]?.dock", "the dock lacks content.safeAreaInset"),
+        ("the mac dock as the inset the panes ignore, as first built", SWIFT,
+         r"VStack\(spacing: 0\) \{\n(\s+)content\.frame\(maxWidth: \.infinity, maxHeight: \.infinity\)\n\s+bar\n",
+         r"content.safeAreaInset(edge: .bottom, spacing: 0) {\n\1bar\n", "the dock lacks VStack(spacing: 0)"),
+        ("expect_dock's content half blind to the shown entry", SWIFT,
+         r"\n\s+if let shown = window\.entries\.last\?\.root \{ walk\(shown\) \}", "",
+         "expect_dock's content half lacks if let shown"),
         ("the dock's root filling the window", SWIFT,
          r"(KayaRender\(node: dock, isRoot: true\))\n\s+\.fixedSize\(horizontal: false, vertical: true\)", r"\1",
          "the dock lacks KayaRender(node: dock, isRoot: true)"),

@@ -723,6 +723,18 @@ Gates that grow (each with watched negatives, counts printed):
    album's first track, and the favourite heart (the toggle role) kept by
    the app in memory; `expect_checked` reads the heart off each platform's
    accessibility tree.
+   The dock with the session and media keys (2026-10-18,
+   music_dock.steps): attached by the first play, the rounded art and two
+   lines, shuffle (the toggle role), previous, play or pause (its symbol and
+   name following the player's state), next, repeat (a button cycling off,
+   all and one, its symbol swapped by the app), the scrubber with elapsed and
+   remaining time held under a gesture (M10), and the playing track's heart;
+   on the phones the dock holds the art, the lines, play and next, and its
+   art-and-lines row opens the full player as a sheet at the large detent.
+   The app's queue (M11) answers next and previous from the dock and through
+   the session, declared with the album cover's bytes (M7); `expect_symbol`
+   reads a button's glyph on each platform. The desktops' third pane is not
+   built yet.
 6. The matrix once, then the review page: every lane's capture of every
    screen in light and dark, a card hovered on the desktops and selected,
    the playing row's tinted title, the dock on the desktops and above the tab

@@ -1,11 +1,13 @@
 """The media player demo (docs/media-player-plan.md): the library sidebar
 and Home (tools/scenes/music_home.steps), an album's track table that plays
 through kaya's player (tools/scenes/music_playlist.steps), and the album's
-gradient header (tools/scenes/music_header.steps)."""
+gradient header (tools/scenes/music_header.steps), and the dock with the
+media session and the phones' full player (tools/scenes/music_dock.steps)."""
 
 import html
 import json
 import os
+import random
 import sys
 import threading
 import urllib.parse
@@ -17,6 +19,8 @@ import kaya
 
 HOME = 7
 CONNECT = 20
+DOCK = 21
+PLAYER_SHEET = 22
 SECTION_HOME = 30
 SECTION_LIBRARY = 31
 FIRST_ALBUM_ENTRY = 100
@@ -26,11 +30,16 @@ SHELF_CARDS = 12
 CARD_ART = 120
 ROW_ART = 40
 HEADER_ART = 200 if kaya.capabilities().aux_windows else 180
+DOCK_ART = 48
+FULL_ART = 300
 # The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
 UNKNOWN_COLOUR = kaya.Color(0x8E, 0x8E, 0x93)
 CLIENT_ID_PREF = "jamendo.client_id"
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
+# A lane's leg takes the host's Now Playing only in the scene that reads it
+# (tools/lib/lanes/mac.py HOST_VERBS derives the session legs from the verbs).
+SESSION = os.environ.get("KAYA_SELFTEST", "") in ("", "music_dock")
 
 
 @dataclass
@@ -176,8 +185,13 @@ library_keys = []
 known = {}
 pages = {}
 songs = {}
-playback = {"key": None, "queue": [], "start": False}
+playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
+            "shuffle": False, "repeat": "off", "seconds": 0}
 favorites = set()
+liked = set()
+covers = {}
+dock_ready = {"built": False}
+live = {"play": [], "repeat": [], "sheet": False}
 entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
 
 
@@ -297,7 +311,6 @@ def album_header(album, page):
                                   on_toggle=lambda on: set_favorite(album["id"], on)) \
                         .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
                         .a11y_id("favorite")
-                kaya.caption(bind=now_line).a11y_id("now")
 
 
 def set_favorite(album_id, on):
@@ -342,6 +355,11 @@ def cover_arrived(surface, entry, cover, colour):
         return
     page["cover"].set(cover)
     page["cover_phase"].set(kaya.ImagePhase.SHOWN)
+    covers[page["album"]] = cover
+    key = playback["key"]
+    if key is not None and songs[key]["album"] == page["album"]:
+        show_art()
+        declare_session()
     if colour is not None:
         page["colour"].set(colour)
 
@@ -365,7 +383,9 @@ def album_arrived(album, surface, entry, answer):
     page["about"].set(" · ".join(p for p in (artist, year, total) if p))
     for t in listed:
         key = t["id"]
-        songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"]}
+        songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],
+                      "artist": artist, "album": album["id"], "album_name": album["name"],
+                      "seconds": int(t["duration"])}
         page["keys"].append(key)
         page["tracks"].insert(key, Track(
             number=str(t["position"]), title=songs[key]["title"], artist=artist,
@@ -391,57 +411,318 @@ def on_pick(row):
 
 def on_play(row):
     select_track(row.key)
-    keys = pages_holding(row.key)[0]["keys"]
-    # The queue is the app's: the album from this track on (M11).
-    playback["queue"] = keys[keys.index(row.key):]
-    play_next()
+    start_queue(pages_holding(row.key)[0]["keys"], row.key)
 
 
 def play_album(page):
     if not page["keys"]:
         return
     select_track(page["keys"][0])
-    playback["queue"] = list(page["keys"])
-    play_next()
+    start_queue(page["keys"], page["keys"][0])
 
 
-def play_next():
+def start_queue(keys, first):
+    """The queue is the app's (M11): the album in its order, or the playing
+    track and the rest of the album shuffled."""
+    playback["album"] = list(keys)
+    playback["order"] = shuffled(first) if playback["shuffle"] else list(keys)
+    playback["at"] = playback["order"].index(first)
+    play_track(first, start=True)
+
+
+def shuffled(first):
+    rest = [k for k in playback["album"] if k != first]
+    random.shuffle(rest)
+    return [first, *rest]
+
+
+def play_track(key, start):
     previous = playback["key"]
-    playback["key"] = playback["queue"].pop(0) if playback["queue"] else None
-    for key in (previous, playback["key"]):
-        for page in pages_holding(key) if key else ():
-            page["tracks"].patch(key, tint=kaya.Tint.ACCENT if key == playback["key"]
-                                 else kaya.Tint.NONE)
-    if playback["key"] is None:
-        player.unload()
-        now_line.set("")
+    playback["key"] = key
+    for k in (previous, key):
+        for page in pages_holding(k) if k else ():
+            page["tracks"].patch(k, tint=kaya.Tint.ACCENT if k == key else kaya.Tint.NONE)
+    song = songs[key]
+    playback["start"] = start
+    playback["seconds"] = song["seconds"]
+    player.set_source(catalogue.source(song["audio"]))
+    show_position(0)
+    if not dock_ready["built"]:
+        build_dock()
+    dock_title.set(song["title"])
+    dock_artist.set(song["artist"])
+    liked_now.set(key in liked)
+    show_art()
+    show_play_state(False)
+    declare_session()
+
+
+def show_art():
+    cover = covers.get(songs[playback["key"]]["album"])
+    if cover is None:
+        dock_phase.set(kaya.ImagePhase.LOADING)
         return
-    playback["start"] = True
-    player.set_source(catalogue.source(songs[playback["key"]]["audio"]))
-    now_line.set(f"Loading · {songs[playback['key']]['title']}")
+    dock_art.set(cover)
+    dock_phase.set(kaya.ImagePhase.SHOWN)
+
+
+def declare_session():
+    if not SESSION:
+        return
+    song = songs[playback["key"]]
+    kaya.session(player=player, title=song["title"], artist=song["artist"],
+                 album=song["album_name"], artwork=covers.get(song["album"], ""),
+                 handles=[kaya.SessionAction.NEXT, kaya.SessionAction.PREVIOUS],
+                 on_action=on_session_action)
+
+
+def on_session_action(action, _at_ms):
+    if action == kaya.SessionAction.NEXT:
+        skip_next()
+    elif action == kaya.SessionAction.PREVIOUS:
+        skip_previous()
+
+
+def skip_next():
+    if playback["key"] is None:
+        return
+    advance(by_user=True)
+
+
+def advance(by_user):
+    at = playback["at"] + 1
+    if at < len(playback["order"]):
+        playback["at"] = at
+        play_track(playback["order"][at], start=True)
+        return
+    if playback["repeat"] == "all":
+        if playback["shuffle"]:
+            playback["order"] = shuffled(playback["album"][0])
+        playback["at"] = 0
+        play_track(playback["order"][0], start=True)
+        return
+    if by_user:
+        playback["at"] = 0
+        play_track(playback["order"][0], start=False)
+
+
+def skip_previous():
+    if playback["key"] is None:
+        return
+    if playback["at"] == 0:
+        seek_to(0)
+        return
+    playback["at"] -= 1
+    play_track(playback["order"][playback["at"]], start=True)
+
+
+def toggle_play():
+    if playback["key"] is None:
+        return
+    if player.state == kaya.PlayerState.PLAYING:
+        player.pause()
+    elif player.state == kaya.PlayerState.ENDED:
+        player.seek(0)
+        player.play()
+    elif player.state in (kaya.PlayerState.READY, kaya.PlayerState.PAUSED):
+        player.play()
+    else:
+        playback["start"] = True
+
+
+def set_shuffle(on):
+    playback["shuffle"] = on
+    shuffle_on.set(on)
+    if playback["key"] is None:
+        return
+    playback["order"] = shuffled(playback["key"]) if on else list(playback["album"])
+    playback["at"] = playback["order"].index(playback["key"])
+
+
+REPEAT_NEXT = {"off": "all", "all": "one", "one": "off"}
+REPEAT_NAME = {"off": "Repeat off", "all": "Repeat all", "one": "Repeat one"}
+
+
+def repeat_symbol():
+    return kaya.Symbol.REPEAT_ONE if playback["repeat"] == "one" else kaya.Symbol.REPEAT
+
+
+def cycle_repeat():
+    playback["repeat"] = REPEAT_NEXT[playback["repeat"]]
+    repeat_name.set(REPEAT_NAME[playback["repeat"]])
+    for button in live["repeat"]:
+        button.symbol(repeat_symbol())
+
+
+def set_liked(on):
+    key = playback["key"]
+    if key is None:
+        return
+    if on:
+        liked.add(key)
+    else:
+        liked.discard(key)
+    liked_now.set(on)
+
+
+def show_play_state(playing):
+    play_name.set("Pause" if playing else "Play")
+    for button in live["play"]:
+        button.symbol(kaya.Symbol.PAUSE if playing else kaya.Symbol.PLAY)
+
+
+def show_position(ms):
+    seconds = playback["seconds"]
+    at = min(ms / 1000, seconds) if seconds else 0
+    position.set(at / seconds if seconds else 0.0)
+    elapsed.set(kaya.fmt.duration(int(at) * 1000))
+    remaining.set("-" + kaya.fmt.duration(max(0, seconds - int(at)) * 1000))
+
+
+def seek_to(fraction):
+    ms = int(fraction * playback["seconds"] * 1000)
+    player.seek(ms)
+    show_position(ms)
+
+
+def on_scrub(value):
+    if playback["key"] is not None:
+        seek_to(value)
+
+
+def on_position(ms):
+    if player.state == kaya.PlayerState.PLAYING:
+        show_position(ms)
 
 
 def on_player_state(state):
     key = playback["key"]
     if key is None:
         return
-    title = songs[key]["title"]
     if state == kaya.PlayerState.READY and playback["start"]:
         playback["start"] = False
         player.play()
     elif state == kaya.PlayerState.PLAYING:
-        now_line.set(f"Playing · {title}")
-    elif state == kaya.PlayerState.PAUSED:
-        now_line.set(f"Paused · {title}")
+        show_play_state(True)
+    elif state in (kaya.PlayerState.PAUSED, kaya.PlayerState.READY):
+        show_play_state(False)
     elif state == kaya.PlayerState.ENDED:
-        play_next()
+        if playback["repeat"] == "one":
+            player.seek(0)
+            player.play()
+            return
+        show_play_state(False)
+        advance(by_user=False)
 
 
 def on_player_failed(why, detail):
     key = playback["key"]
     print(f"music: track {key} failed: {why} {detail}", file=sys.stderr)
     if key is not None:
-        now_line.set(f"Couldn't play {songs[key]['title']}.")
+        dock_artist.set(f"Couldn't play {songs[key]['title']}.")
+        show_play_state(False)
+
+
+def transport(full):
+    """Shuffle, previous, play or pause, next and repeat: the dock's on the
+    desktops, the full player's on the phones."""
+    with kaya.row(spacing=8, align="center"):
+        kaya.checkbox("Shuffle", checked=shuffle_on, on_toggle=set_shuffle) \
+            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.SHUFFLE).a11y_id("shuffle")
+        kaya.button("Previous", on_click=skip_previous, symbol=kaya.Symbol.PREVIOUS) \
+            .a11y_id("previous")
+        play_button(full)
+        kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
+            .a11y_id("full_next" if full else "next")
+        live["repeat"].append(
+            kaya.button("Repeat", on_click=cycle_repeat, symbol=repeat_symbol())
+            .a11y_label(repeat_name).a11y_id("repeat"))
+
+
+def play_button(full):
+    button = kaya.button("Play", on_click=toggle_play, symbol=kaya.Symbol.PLAY) \
+        .role(kaya.Role.PROMINENT).a11y_label(play_name) \
+        .a11y_id("full_play_pause" if full else "play_pause")
+    live["play"].append(button)
+    playing = player.state == kaya.PlayerState.PLAYING
+    button.symbol(kaya.Symbol.PAUSE if playing else kaya.Symbol.PLAY)
+
+
+def scrubber():
+    with kaya.row(spacing=8, align="center"):
+        kaya.caption(bind=elapsed).a11y_id("elapsed")
+        kaya.slider(position, min=0.0, max=1.0, on_commit=on_scrub, grow=1) \
+            .a11y_label("Position").a11y_id("progress")
+        kaya.caption(bind=remaining).a11y_id("remaining")
+
+
+def like_box():
+    kaya.checkbox("Like", checked=liked_now, on_toggle=set_liked) \
+        .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE).a11y_id("like")
+
+
+def build_dock():
+    """The dock (docs/styling-pass-plan.md Y8), attached once something has
+    played (M6): the bar at the window's foot on the desktops, above the tab
+    bar on the phones, where a tap opens the full player."""
+    dock_ready["built"] = True
+    with app.dock(DOCK):
+        if desktop:
+            with kaya.row(spacing=16, align="center") as bar:
+                bar.a11y_id("dock_bar")
+                now_playing(grow=1)
+                with kaya.column(spacing=4, align="center", grow=2):
+                    transport(full=False)
+                    scrubber()
+                with kaya.row(grow=1, align="center"):
+                    like_box()
+        else:
+            with kaya.row(spacing=12, align="center") as bar:
+                bar.a11y_id("dock_bar")
+                # Only the art and lines open the full player: an activatable
+                # container is one element to an assistive reader, buttons and all.
+                with kaya.row(on_activate=open_full_player, grow=1) as opener:
+                    opener.a11y_id("dock_open")
+                    now_playing(grow=1)
+                play_button(full=False)
+                kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
+                    .a11y_id("next")
+
+
+def now_playing(grow):
+    with kaya.row(spacing=12, align="center", grow=grow):
+        kaya.image(dock_art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=dock_phase) \
+            .max_width(DOCK_ART).max_height(DOCK_ART).a11y_id("dock_art")
+        with kaya.column(spacing=0):
+            kaya.label(bind=dock_title).a11y_id("dock_title")
+            kaya.caption(bind=dock_artist).a11y_id("dock_artist")
+
+
+def open_full_player():
+    if live["sheet"]:
+        return
+    live["sheet"] = True
+    with app.sheet(PLAYER_SHEET, title="Now Playing", detent="large",
+                   on_dismissed=full_player_closed):
+        with kaya.column(spacing=16, align="stretch") as full:
+            full.a11y_id("full_player")
+            with kaya.column(align="center"):
+                kaya.image(dock_art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=dock_phase) \
+                    .max_width(FULL_ART).max_height(FULL_ART).a11y_id("full_art")
+            with kaya.row(align="center"):
+                with kaya.column(spacing=0, grow=1):
+                    kaya.heading(bind=dock_title).a11y_id("full_title")
+                    kaya.caption(bind=dock_artist)
+                like_box()
+            scrubber()
+            with kaya.column(align="center"):
+                transport(full=True)
+
+
+def full_player_closed():
+    live["sheet"] = False
+    live["play"] = live["play"][:1]
+    live["repeat"] = []
 
 
 def card_art_landed(album_id, data):
@@ -588,11 +869,22 @@ with app.window(title="Music", width=1100, height=720,
     library = kaya.collection(Saved)
     library_art = kaya.RowImages(app, library, url="art_url", art="art", phase="phase",
                                  fetch=catalogue.fetch)
-    now_line = kaya.signal("")
     home_shown = kaya.signal(False)
+    dock_title = kaya.signal("")
+    dock_artist = kaya.signal("")
+    dock_art = kaya.signal(b"")
+    dock_phase = kaya.signal(kaya.ImagePhase.LOADING)
+    liked_now = kaya.signal(False)
+    shuffle_on = kaya.signal(False)
+    play_name = kaya.signal("Play")
+    repeat_name = kaya.signal(REPEAT_NAME["off"])
+    position = kaya.signal(0.0)
+    elapsed = kaya.signal(kaya.fmt.duration(0))
+    remaining = kaya.signal("-" + kaya.fmt.duration(0))
     # A lane's legs play on the maintainer's desk, so they play silently.
     player = kaya.player(muted=bool(os.environ.get("KAYA_SELFTEST")),
-                         on_state=on_player_state, on_failed=on_player_failed)
+                         on_state=on_player_state, on_failed=on_player_failed,
+                         on_position=on_position)
     if desktop:
         library_body()
 

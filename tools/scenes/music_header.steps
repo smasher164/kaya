@@ -20,7 +20,8 @@ toggle checkbox@favorite on
 expect_checked checkbox@favorite on
 click button@play_album
 expect_selected row@track[1860160] on
-expect label@now "Playing · Seven Chimes"
+expect label@dock_title "Seven Chimes"
+expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860160] accent
 expect_no_clipping
 # The desktops go Home through the sidebar (docs/media-player-plan.md §1); a

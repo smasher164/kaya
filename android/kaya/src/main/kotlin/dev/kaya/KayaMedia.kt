@@ -914,6 +914,18 @@ internal object KayaMediaSession {
         artwork = art
         artworkData = artData
         if (session == null && (player != 0L || offered != 0)) {
+            // media3 starts this service in the foreground; without the app's grant the process dies
+            // ten seconds later of ForegroundServiceDidNotStartInTimeException (docs/traps.md, the
+            // Python host's media session).
+            val needed = listOfNotNull(
+                android.Manifest.permission.FOREGROUND_SERVICE,
+                if (android.os.Build.VERSION.SDK_INT >= 34) android.Manifest.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK else null,
+            )
+            val missing = needed.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+            check(missing.isEmpty()) {
+                "kaya: ${context.packageName} declares a media session without ${missing.joinToString(" and ")} " +
+                    "in its AndroidManifest.xml; add the uses-permission lines android/gohost's manifest carries"
+            }
             val sp = KayaSessionPlayer()
             statePlayer = sp
             session = MediaSession.Builder(context, sp).setId("kaya").build()

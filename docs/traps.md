@@ -17747,3 +17747,91 @@ and the measure count the same list.
 
 GUARD: check-table-card holds the snapshot and watches the live read refused.
 
+
+## The panes the dock covered (measured 2026-10-18)
+
+On macOS the dock was a `.safeAreaInset(edge: .bottom)` on the window's
+content, and a NavigationSplitView's columns ignore a bottom safe-area inset:
+with the music demo's two panes, the NSSplitView's arranged subviews spanned
+the window's full 720 pt with `safeAreaInsets.bottom` 0 beside a 70 pt dock at
+y 650, and the native track table's NSScrollView ran to y 704 with no content
+inset, so the dock covered the bottom of both panes and a long table's last
+rows sat under it, unreachable. The dock scene's window has no panes, which is
+why it stayed green. The mac dock host stacks the bar under the content in a
+VStack; iOS keeps the inset, which its tab content honours.
+
+GUARD: music_dock's `expect_dock shown` on the mac (the pane clause read
+`misplaced` first); the content half also reads the shown entry's root, a
+collection's container whole, watched red with the inset put back; check-verbs'
+skin tables hold the VStack and the entry walk, each cut watched refused.
+
+## The button glyph no accessibility attribute names (measured 2026-10-18)
+
+A SwiftUI symbol button publishes an AXButton whose only text is its label
+(AXDescription "Repeat off"); an accessibilityIdentifier on the Image inside
+the label is merged away, and no AXImage child is published. So
+`expect_symbol` on Apple reads what the button's body last drew (the
+render arm's stamp, `kayaButtonGlyphs`, set on appear and on change of its SF
+name) after finding the platform's element by id: the section symbol's limit,
+what the arm said it rendered. GTK reads the GtkButton's icon-name, WinUI the
+FontIcon's glyph, Compose the Icon's KayaGlyph semantics.
+
+GUARD: music_dock's expect_symbol on every lane, the app's symbol swap cut
+and watched red on the mac.
+
+## The Python host's media session (measured 2026-10-18)
+
+android/pyhost declared neither FOREGROUND_SERVICE nor
+FOREGROUND_SERVICE_MEDIA_PLAYBACK, so the first `kaya.session` started
+KayaMediaService, media3's `startForeground` was refused
+(`SecurityException: Permission Denial: startForeground ... requires
+android.permission.FOREGROUND_SERVICE`) and ten seconds later the process
+died of `ForegroundServiceDidNotStartInTimeException`. The music_dock leg
+ends in about seven seconds, so it passed; a capture holding the scene for
+twenty died. The other three hosts declare both.
+
+GUARD: KayaMedia's session apply refuses a session whose app lacks either
+grant, naming the package and the permissions (watched red on the pyhost
+leg before its manifest gained them).
+
+## The readers that did not look in the sheet's window (measured 2026-10-18)
+
+On Compose a ModalBottomSheet is its own dialog window. `expect_ax`,
+`expect_checked` and `expect_symbol` walked the activity window's semantics
+alone (`nothing carries test tag "full_play_pause"`), and `hold` dispatched
+its touch to the activity's window with the sheet window's coordinates (`the
+slider never took the touch as a gesture`). The readers walk every live
+sheet's window, topmost first, then the activity's; the touch goes to the
+window of the slider's own root. A Compose symbol button with an a11y_label
+also read `button/Pause Play`, the label and its Icon's contentDescription
+merged; the Icon describes itself only when no label is set.
+
+GUARD: music_dock's phone tail on the Android lane (each watched red there
+first).
+
+## The hold one pixel short (measured 2026-10-18)
+
+WinUI's `hold slider at <value>` walks the VM's real cursor to the value's
+pixel, computed from the thumb's centre and truncated to a whole pixel. On
+the music dock's continuous 0..1 scrubber `hold slider@progress at 0` landed
+at x 344 and the Slider read 0.001, one of three runs (with the linux lane
+loading the host); the stepped sliders scene never sees it, since its step
+snaps the pixel away. A walk to a bound now goes a thumb's width past the
+track's end, where the Slider clamps.
+
+GUARD: music_dock's hold at 0 on the windows lane, run three times after.
+
+## The why-not that walked the tree off the main thread (measured 2026-10-18)
+
+The mac's `expect_ax` reads its own accessibility tree on the main thread
+(kayaAxRead), but its failure sentence's helper, kayaAxWhy, walked the same
+tree from the harness thread. Beside a native table the walk asks the table's
+cell mock elements for their frames, AppKit lays out a row view from that
+thread ("modifying the autolayout engine from a background thread") and
+throws, and the guest dies of an uncaught NSException at the first missed
+`expect_ax` read. The music dock's `button/Pause` read misses once while the
+player is still loading, which is how it was found; the iOS twin already
+hopped to the main thread.
+
+GUARD: check-verbs holds the mac kayaAxWhy's main-thread hop, the hop cut and
+watched refused.

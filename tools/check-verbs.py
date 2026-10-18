@@ -3295,6 +3295,30 @@ for rel, label, pattern in (
     if not found:
         fail(f"check-verbs SELF-TEST: the range arm census passed with {label} cut")
 
+# The mac's ax why-not walks its own tree on the main thread (docs/traps.md,
+# the why-not that walked the tree off the main thread): no scene reaches it
+# except through a first read that misses beside a native table.
+AX_WHY_HOP = "return DispatchQueue.main.sync { kayaAxWhyOnMain(identifier) }"
+
+
+def ax_why_findings(text):
+    head = "    private func kayaAxWhy(_ identifier: String) -> String {\n"
+    at = text.find(head)
+    if at < 0:
+        return ["the mac kayaAxWhy was not found"]
+    body = text[at:text.find("\n    }\n", at)]
+    return [] if AX_WHY_HOP in body else ["the mac kayaAxWhy walks the tree off the main thread"]
+
+
+for finding in ax_why_findings(real(SWIFT)):
+    fail(f"check-verbs: {finding}")
+_cut = g.doctor("ax why-not: the main-thread hop cut", real(SWIFT), re.escape(AX_WHY_HOP),
+                "return kayaAxWhyOnMain(identifier)")
+if not ax_why_findings(_cut):
+    fail("check-verbs SELF-TEST: the ax why-not census passed with its main-thread hop cut")
+print("check-verbs: the mac ax why-not hops to the main thread, one watched negative refused",
+      file=sys.stderr)
+
 # --- THE MEDIA ARMS (docs/media-plan.md §3, §5) ------------------------
 # Three rules no scene can see. THE VIDEO VIEW IS A BARE LAYER: AVPlayerView
 # keeps Space, the arrows and J/K/L at every controls style,

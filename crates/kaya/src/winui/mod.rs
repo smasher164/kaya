@@ -24630,7 +24630,14 @@ impl crate::harness::Stage for WinUiStage {
             let span = (hi - lo).max(f64::EPSILON);
             let now = slider.Value()?;
             let from = tx + tw / 2.0;
-            let to_x = from + (to.unwrap_or(now) - now) / span * (w - tw);
+            let mut to_x = from + (to.unwrap_or(now) - now) / span * (w - tw);
+            // A walk to a bound goes past the track's end, where the Slider clamps: the
+            // cursor's whole pixels landed one short of 0 (docs/traps.md, the hold one pixel short).
+            if to == Some(lo) {
+                to_x -= tw;
+            } else if to == Some(hi) {
+                to_x += tw;
+            }
             Ok(Some((from, to_x, ty + th / 2.0)))
         });
         let Ok(Some((x0, x1, cy))) = aim else { return Err(format!("no laid-out slider ({aim:?})")) };
@@ -28003,6 +28010,30 @@ impl crate::harness::Stage for WinUiStage {
         })
         .ok()
         .flatten()
+    }
+
+    fn button_symbol(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else { return Ok("<no such target>".to_owned()) };
+            let Ok(button) = element.cast::<Button>() else { return Ok("<the target is not a Button>".to_owned()) };
+            let Ok(icon) = button.Content().and_then(|c| c.cast::<FontIcon>()) else {
+                return Ok("<the button's content is no FontIcon>".to_owned());
+            };
+            let glyph = icon.Glyph()?.to_string();
+            Ok(SYMBOL_ORDER
+                .into_iter()
+                .find(|s| {
+                    let drawn = match fluent_icon(*s) {
+                        FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
+                        FluentIcon::Glyph(g) => g.to_owned(),
+                    };
+                    drawn == glyph
+                })
+                .and_then(|s| crate::wire::symbol_name(i64::from(symbol_wire(s))))
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("<the button draws glyph {:?}, which is not in fluent_icon>", glyph)))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
     fn segment_symbol(&self, t: crate::harness::Target, index: usize) -> String {
