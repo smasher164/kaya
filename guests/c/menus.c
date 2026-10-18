@@ -31,6 +31,7 @@
 #define M_PUBLISH 12
 #define M_TOOLS 13
 #define M_INSPECT 14
+#define M_TRANSPORT 15 /* the ten transport items, 15..24 */
 
 #define W_COLUMN 1
 #define W_STATUS 2 /* label#0 */
@@ -89,6 +90,24 @@ static void build_scene(void) {
     kaya_tx_set_menu_symbol(&tx, M_DETAILS, KAYA_SYMBOL_INFO);
     kaya_tx_bind_menu_checked(&tx, M_DETAILS, SIG_DETAILS);
     kaya_tx_menu_item_append(&tx, M_VIEW, M_DETAILS);
+    static const struct { const char *label; uint32_t symbol; } transport[] = {
+        {"Play", KAYA_SYMBOL_PLAY},
+        {"Pause", KAYA_SYMBOL_PAUSE},
+        {"Next", KAYA_SYMBOL_NEXT},
+        {"Previous", KAYA_SYMBOL_PREVIOUS},
+        {"Shuffle", KAYA_SYMBOL_SHUFFLE},
+        {"Repeat", KAYA_SYMBOL_REPEAT},
+        {"Repeat One", KAYA_SYMBOL_REPEAT_ONE},
+        {"Volume", KAYA_SYMBOL_VOLUME},
+        {"Queue", KAYA_SYMBOL_QUEUE},
+        {"Favorite", KAYA_SYMBOL_FAVORITE},
+    };
+    for (uint32_t i = 0; i < sizeof transport / sizeof transport[0]; i++) {
+        kaya_tx_menu_item_create(&tx, M_TRANSPORT + i, KAYA_MENU_KIND_ACTION);
+        kaya_tx_set_menu_label(&tx, M_TRANSPORT + i, transport[i].label);
+        kaya_tx_set_menu_symbol(&tx, M_TRANSPORT + i, transport[i].symbol);
+        kaya_tx_menu_item_append(&tx, M_VIEW, M_TRANSPORT + i);
+    }
     kaya_tx_menubar_append(&tx, 0, M_VIEW);
 
     /* Option order IS the index; value binds AFTER the options exist. */

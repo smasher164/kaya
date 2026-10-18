@@ -90,6 +90,17 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"),
     (crate::wire::SYMBOL_MIC, "audio-input-microphone-symbolic"),
     (crate::wire::SYMBOL_IMAGE_MISSING, "image-missing-symbolic"),
+    (crate::wire::SYMBOL_PLAY, "media-playback-start-symbolic"),
+    (crate::wire::SYMBOL_PAUSE, "media-playback-pause-symbolic"),
+    (crate::wire::SYMBOL_NEXT, "media-skip-forward-symbolic"),
+    (crate::wire::SYMBOL_PREVIOUS, "media-skip-backward-symbolic"),
+    (crate::wire::SYMBOL_SHUFFLE, "media-playlist-shuffle-symbolic"),
+    (crate::wire::SYMBOL_REPEAT, "media-playlist-repeat-symbolic"),
+    (crate::wire::SYMBOL_REPEAT_ONE, "media-playlist-repeat-song-symbolic"),
+    (crate::wire::SYMBOL_VOLUME, "audio-volume-high-symbolic"),
+    (crate::wire::SYMBOL_QUEUE, "view-list-symbolic"),
+    // Adwaita has no outline heart; its one heart is the love emote.
+    (crate::wire::SYMBOL_FAVORITE, "emote-love-symbolic"),
 ];
 
 const _: () = assert!(

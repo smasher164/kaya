@@ -426,13 +426,23 @@ tools/check-symbol-parity.py:
 | `repeat_one` | repeat.1 | repeat_one | media-playlist-repeat-song-symbolic | RepeatOne (E8ED) |
 | `volume` | speaker.wave.2.fill | volume_up | audio-volume-high-symbolic | Volume (E767) |
 | `queue` | list.bullet | queue_music | view-list-symbolic | List (EA37) |
-| `favorite` | heart, heart.fill when on | favorite_border, favorite | heart symbolic names to be read from the lane image's Adwaita theme | Heart (EB51), HeartFill (EB52) |
+| `favorite` | heart | FavoriteBorder | emote-love-symbolic | Heart (EB51) |
 
-The glyph names and code points are the vendors' published names as this
-pass recalls them, NOT yet checked against the installed sets; each is
-confirmed at the depth (§7), and
-`favorite`'s filled state rides the button's `checked` where the platform
-has a toggle button. The existing `star` stays the generic favourite.
+BUILT 2026-10-17 (wire values 26-35). MEASURED 2026-10-17 against the
+installed sets: every SF name is in this mac's name_availability.plist at
+macOS 10.15 / iOS 13 (speaker.wave.2.fill at 11 / 14), under kaya's floor;
+the Material names are classes in material-icons-core and -extended 1.7.8
+(`VolumeUp` and `QueueMusic` through `Icons.AutoMirrored.Filled`, the plain
+ones deprecated); the Adwaita names are files in the linux image's
+adwaita-icon-theme 51.0 (Adwaita has no heart but the filled
+`emote-love-symbolic`); the Fluent members are the `Symbol` enum's (Play
+E102, Pause E103, Next E101, Previous E100, Shuffle E14B, RepeatAll E1CD,
+RepeatOne E1CC, Volume E15D, List E14C) and Heart is the glyph EB51, every
+code point present in the VM's SegoeIcons.ttf and segmdl2.ttf. Read back on
+every lane by tools/scenes/menus.steps' View menu. NOT BUILT: `favorite`'s
+filled state. A button has no `checked` (scene.rs holds `checked` to the
+checkbox), so "heart.fill when on" needs a ruling (docs/deferred.md, the
+filled favourite). The existing `star` stays the generic favourite.
 
 Why: a player bar of text buttons ("Play", "Next") is not the reference and
 not any platform's music app; the chat composer's icon-only buttons are the

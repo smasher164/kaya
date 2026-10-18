@@ -70,6 +70,16 @@ const { status, canExport, details, sort, file, share, items, groups } = app.win
 
   app.menu("View", () => {
     kaya.toggle("Details", { checked: details, symbol: kaya.Symbol.INFO, onToggle: onDetails });
+    kaya.item("Play", { symbol: kaya.Symbol.PLAY });
+    kaya.item("Pause", { symbol: kaya.Symbol.PAUSE });
+    kaya.item("Next", { symbol: kaya.Symbol.NEXT });
+    kaya.item("Previous", { symbol: kaya.Symbol.PREVIOUS });
+    kaya.item("Shuffle", { symbol: kaya.Symbol.SHUFFLE });
+    kaya.item("Repeat", { symbol: kaya.Symbol.REPEAT });
+    kaya.item("Repeat One", { symbol: kaya.Symbol.REPEAT_ONE });
+    kaya.item("Volume", { symbol: kaya.Symbol.VOLUME });
+    kaya.item("Queue", { symbol: kaya.Symbol.QUEUE });
+    kaya.item("Favorite", { symbol: kaya.Symbol.FAVORITE });
   });
 
   // Option order IS the index.

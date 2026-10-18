@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x9e1c92057e3f0dc2
+let kayaSpecHash: UInt64 = 0x3c2971158b154fee
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -289,6 +289,16 @@ private let symbolSend: Int64 = 22
 private let symbolAttach: Int64 = 23
 private let symbolMic: Int64 = 24
 private let symbolImageMissing: Int64 = 25
+private let symbolPlay: Int64 = 26
+private let symbolPause: Int64 = 27
+private let symbolNext: Int64 = 28
+private let symbolPrevious: Int64 = 29
+private let symbolShuffle: Int64 = 30
+private let symbolRepeat: Int64 = 31
+private let symbolRepeatOne: Int64 = 32
+private let symbolVolume: Int64 = 33
+private let symbolQueue: Int64 = 34
+private let symbolFavorite: Int64 = 35
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -465,6 +475,16 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolAttach, "attach", "paperclip", nil),
     (symbolMic, "mic", "mic", nil),
     (symbolImageMissing, "image_missing", "photo", nil),
+    (symbolPlay, "play", "play.fill", nil),
+    (symbolPause, "pause", "pause.fill", nil),
+    (symbolNext, "next", "forward.end.fill", nil),
+    (symbolPrevious, "previous", "backward.end.fill", nil),
+    (symbolShuffle, "shuffle", "shuffle", nil),
+    (symbolRepeat, "repeat", "repeat", nil),
+    (symbolRepeatOne, "repeat_one", "repeat.1", nil),
+    (symbolVolume, "volume", "speaker.wave.2.fill", nil),
+    (symbolQueue, "queue", "list.bullet", nil),
+    (symbolFavorite, "favorite", "heart", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and

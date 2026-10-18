@@ -98,6 +98,24 @@ is held by the core's unit tests in both zones rather than by a guest forced to
 die once per run. Reduce Transparency and Windows High Contrast stay hand
 captures (§7). Trigger: the breadth, or the demo's sectioned phone window.
 
+## RULING — the filled favourite: how a symbol button shows its on state (docs/media-player-plan.md M8; 2026-10-17)
+KEY: favorite, SYMBOL_FAVORITE, heart.fill, FavoriteBorder, HeartFill, emote-love-symbolic, checked on a button, toggle button, filled favourite
+
+M8 built `favorite` as the platform's heart (SF `heart`, Material
+`FavoriteBorder`, Adwaita `emote-love-symbolic`, Fluent Heart EB51). Its
+ruled "heart.fill when on" rides "the button's `checked` where the platform
+has a toggle button", and a button has no `checked` (scene.rs holds `checked`
+to the checkbox), so nothing can say "on". The shuffle and repeat buttons of
+a player bar want the same state. Options for the maintainer: (a) `checked`
+on a button with a symbol, drawn as the platform's toggle button (SwiftUI
+`Toggle(.button)`, GTK `GtkToggleButton`, WinUI `ToggleButton`, Compose
+`IconToggleButton`) and its filled glyph where the platform has one (SF
+`heart.fill`, Material `Favorite`, Fluent HeartFill EB52; Adwaita has only
+the filled heart, so GTK shows the on state by the toggle's own pressed
+look), with a `toggled` occurrence; (b) a second concept `favorite_on` the
+app swaps in, no new state; (c) nothing, the app tints the label. Trigger:
+the media player's dock (docs/media-player-plan.md §6 step 5).
+
 ## BUILD — images from the network (docs/network-images-plan.md), depth on the mac and iOS (2026-10-13) and breadth on GTK, WinUI, Compose and all nine bindings with the C floor (2026-10-13); the media player's art (N17) and the review page are open
 KEY: network images, netimage, netimage_http, phase, PROP_PHASE, image_phase, IMAGE_PHASE_SHOWN, IMAGE_PHASE_LOADING, IMAGE_PHASE_FAILED, ImagePhase, collection_patch_if, CollectionPatchIf, patch_if, image_needed, image_released, ImageNeeded, ImageReleased, on_needed_node, on_released_node, RowImages, kaya_blob_content_id, blob_content_id, content_id, KayaPictureCache, kayaRequestPicture, kayaServePicture, kayaDecodePicture, KayaImageBox, kayaImagePhaseRead, expect_image_phase, image_box, check_image_template, settle_image_needs, need_images_on, netimage_routes, netimage_server_routes, covers, gen-covers, image_missing, DEPTH STUB netimage, netimage_gtk, netimage_winui, netimage_compose, netimage_surface, KayaRowImages, RowImages, PatchIf, patchIf, OnNeeded, onNeeded, FetchHTTP, HttpFetch, kayaURLSessionFetch, Row_images, rowImages, blobContentId, drain_when_free, winbuild/clang, SYMBOL_IMAGE_MISSING
 

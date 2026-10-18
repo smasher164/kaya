@@ -55,7 +55,22 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let details_item = tx
             .window(kaya::DEFAULT_WINDOW)
             .menu("View", |m| {
-                m.toggle("Details").checked(details).symbol(kaya::Symbol::Info).id()
+                let details = m.toggle("Details").checked(details).symbol(kaya::Symbol::Info).id();
+                for (title, symbol) in [
+                    ("Play", kaya::Symbol::Play),
+                    ("Pause", kaya::Symbol::Pause),
+                    ("Next", kaya::Symbol::Next),
+                    ("Previous", kaya::Symbol::Previous),
+                    ("Shuffle", kaya::Symbol::Shuffle),
+                    ("Repeat", kaya::Symbol::Repeat),
+                    ("Repeat One", kaya::Symbol::RepeatOne),
+                    ("Volume", kaya::Symbol::Volume),
+                    ("Queue", kaya::Symbol::Queue),
+                    ("Favorite", kaya::Symbol::Favorite),
+                ] {
+                    m.item(title).symbol(symbol);
+                }
+                details
             })
             .value();
         msgs.on_menu_toggle(details_item, Msg::Details);

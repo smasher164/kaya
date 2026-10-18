@@ -132,7 +132,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.BrokenImage
@@ -144,18 +146,26 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Done
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Mood
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -2880,7 +2890,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x9e1c92057e3f0dc2uL
+    private const val SPEC_HASH: ULong = 0x3c2971158b154feeuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3289,6 +3299,16 @@ object KayaCompose {
     const val SYMBOL_ATTACH = 23L
     const val SYMBOL_MIC = 24L
     const val SYMBOL_IMAGE_MISSING = 25L
+    const val SYMBOL_PLAY = 26L
+    const val SYMBOL_PAUSE = 27L
+    const val SYMBOL_NEXT = 28L
+    const val SYMBOL_PREVIOUS = 29L
+    const val SYMBOL_SHUFFLE = 30L
+    const val SYMBOL_REPEAT = 31L
+    const val SYMBOL_REPEAT_ONE = 32L
+    const val SYMBOL_VOLUME = 33L
+    const val SYMBOL_QUEUE = 34L
+    const val SYMBOL_FAVORITE = 35L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -3323,6 +3343,16 @@ object KayaCompose {
         Triple(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile),
         Triple(SYMBOL_MIC, "mic", Icons.Default.Mic),
         Triple(SYMBOL_IMAGE_MISSING, "image_missing", Icons.Default.BrokenImage),
+        Triple(SYMBOL_PLAY, "play", Icons.Default.PlayArrow),
+        Triple(SYMBOL_PAUSE, "pause", Icons.Default.Pause),
+        Triple(SYMBOL_NEXT, "next", Icons.Default.SkipNext),
+        Triple(SYMBOL_PREVIOUS, "previous", Icons.Default.SkipPrevious),
+        Triple(SYMBOL_SHUFFLE, "shuffle", Icons.Default.Shuffle),
+        Triple(SYMBOL_REPEAT, "repeat", Icons.Default.Repeat),
+        Triple(SYMBOL_REPEAT_ONE, "repeat_one", Icons.Default.RepeatOne),
+        Triple(SYMBOL_VOLUME, "volume", Icons.AutoMirrored.Filled.VolumeUp),
+        Triple(SYMBOL_QUEUE, "queue", Icons.AutoMirrored.Filled.QueueMusic),
+        Triple(SYMBOL_FAVORITE, "favorite", Icons.Default.FavoriteBorder),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value

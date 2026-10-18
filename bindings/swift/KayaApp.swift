@@ -608,6 +608,16 @@ public enum KayaSymbol: Int64 {
     case attach = 23
     case mic = 24
     case image_missing = 25
+    case play = 26
+    case pause = 27
+    case next = 28
+    case previous = 29
+    case shuffle = 30
+    case `repeat` = 31
+    case repeat_one = 32
+    case volume = 33
+    case queue = 34
+    case favorite = 35
 }
 
 public struct KayaWidget {

@@ -818,6 +818,16 @@ type symbol =
   | Attach
   | Mic
   | ImageMissing
+  | Play
+  | Pause
+  | Next
+  | Previous
+  | Shuffle
+  | Repeat
+  | RepeatOne
+  | Volume
+  | Queue
+  | Favorite
 
 (* An icon-only button (docs/composer-plan.md §2). *)
 val set_symbol : widget -> symbol -> unit

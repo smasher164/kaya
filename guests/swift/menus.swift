@@ -30,7 +30,17 @@ KayaApp.run { app in
             items: [
                 tx.toggle("Details", checked: details, symbol: .info) { t, on in
                     t.write(status, .str(on ? "details on" : "details off"))
-                }
+                },
+                tx.item("Play", symbol: .play),
+                tx.item("Pause", symbol: .pause),
+                tx.item("Next", symbol: .next),
+                tx.item("Previous", symbol: .previous),
+                tx.item("Shuffle", symbol: .shuffle),
+                tx.item("Repeat", symbol: .repeat),
+                tx.item("Repeat One", symbol: .repeat_one),
+                tx.item("Volume", symbol: .volume),
+                tx.item("Queue", symbol: .queue),
+                tx.item("Favorite", symbol: .favorite),
             ])
         // Option order IS the index vocabulary: Name = 0, Date = 1.
         let sortGroup = tx.radioGroup(

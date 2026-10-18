@@ -4770,7 +4770,7 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
-// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolImageMissing),
+// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolFavorite),
 // shared by SectionRef.Symbol, MenuItem.Symbol and Widget.Symbol.
 type Symbol int64
 

@@ -77,6 +77,16 @@ with app.window(title="menus"):
     with app.menu("View"):
         kaya.toggle("Details", checked=details, symbol=kaya.Symbol.INFO,
                     on_toggle=on_details)
+        kaya.item("Play", symbol=kaya.Symbol.PLAY)
+        kaya.item("Pause", symbol=kaya.Symbol.PAUSE)
+        kaya.item("Next", symbol=kaya.Symbol.NEXT)
+        kaya.item("Previous", symbol=kaya.Symbol.PREVIOUS)
+        kaya.item("Shuffle", symbol=kaya.Symbol.SHUFFLE)
+        kaya.item("Repeat", symbol=kaya.Symbol.REPEAT)
+        kaya.item("Repeat One", symbol=kaya.Symbol.REPEAT_ONE)
+        kaya.item("Volume", symbol=kaya.Symbol.VOLUME)
+        kaya.item("Queue", symbol=kaya.Symbol.QUEUE)
+        kaya.item("Favorite", symbol=kaya.Symbol.FAVORITE)
 
     # Option order IS the index.
     with app.radio_group("Sort", value=sort, on_select=on_sorted):

@@ -33,10 +33,21 @@ public final class Menus {
             file.item("Export").enabled(canExport).symbol(KayaApp.Symbol.FORWARD);
             KayaApp.MenuItem share = file.item("Share").primary(true).onActivate(onShare);
 
-            win.menu("View").toggle("Details").checked(details)
+            KayaApp.MenuItem view = win.menu("View");
+            view.toggle("Details").checked(details)
                     .symbol(KayaApp.Symbol.INFO)
                     .onToggle((t, on) ->
                             t.write(status, on ? "details on" : "details off"));
+            view.item("Play").symbol(KayaApp.Symbol.PLAY);
+            view.item("Pause").symbol(KayaApp.Symbol.PAUSE);
+            view.item("Next").symbol(KayaApp.Symbol.NEXT);
+            view.item("Previous").symbol(KayaApp.Symbol.PREVIOUS);
+            view.item("Shuffle").symbol(KayaApp.Symbol.SHUFFLE);
+            view.item("Repeat").symbol(KayaApp.Symbol.REPEAT);
+            view.item("Repeat One").symbol(KayaApp.Symbol.REPEAT_ONE);
+            view.item("Volume").symbol(KayaApp.Symbol.VOLUME);
+            view.item("Queue").symbol(KayaApp.Symbol.QUEUE);
+            view.item("Favorite").symbol(KayaApp.Symbol.FAVORITE);
 
             // Option order IS the index vocabulary: Name = 0, Date = 1.
             KayaApp.MenuItem sortGroup = win.radioGroup("Sort");

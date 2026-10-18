@@ -1695,6 +1695,26 @@
 
 #define KAYA_SYMBOL_IMAGE_MISSING 25
 
+#define KAYA_SYMBOL_PLAY 26
+
+#define KAYA_SYMBOL_PAUSE 27
+
+#define KAYA_SYMBOL_NEXT 28
+
+#define KAYA_SYMBOL_PREVIOUS 29
+
+#define KAYA_SYMBOL_SHUFFLE 30
+
+#define KAYA_SYMBOL_REPEAT 31
+
+#define KAYA_SYMBOL_REPEAT_ONE 32
+
+#define KAYA_SYMBOL_VOLUME 33
+
+#define KAYA_SYMBOL_QUEUE 34
+
+#define KAYA_SYMBOL_FAVORITE 35
+
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",
  * "edit_source"; docs/rich-text-plan.md R3/R4). A name rides as a string.

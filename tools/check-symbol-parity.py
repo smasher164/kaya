@@ -230,6 +230,9 @@ selftest("N6", GTK, r'\(crate::wire::SYMBOL_ATTACH, "mail-attachment-symbolic"\)
 selftest("N7", COMPOSE, r'Triple\(SYMBOL_ATTACH, "attach", Icons.Default.AttachFile\)',
          'Triple(SYMBOL_ATTACH, "attach", Icons.Default.Add)',
          "draw the same glyph")
+# N8: a transport row withheld (docs/media-player-plan.md M8).
+selftest("N8", SWIFTUI, r'\(symbolRepeatOne, "repeat_one", "repeat\.1", nil\),', "",
+         "kayaSymbolTable has no row for SYMBOL_REPEAT_ONE")
 
 if status == 0:
     print(f"check-symbol-parity: OK ({payload})")

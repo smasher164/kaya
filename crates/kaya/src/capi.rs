@@ -1611,6 +1611,16 @@ pub const KAYA_SYMBOL_SEND: u32 = 22;
 pub const KAYA_SYMBOL_ATTACH: u32 = 23;
 pub const KAYA_SYMBOL_MIC: u32 = 24;
 pub const KAYA_SYMBOL_IMAGE_MISSING: u32 = 25;
+pub const KAYA_SYMBOL_PLAY: u32 = 26;
+pub const KAYA_SYMBOL_PAUSE: u32 = 27;
+pub const KAYA_SYMBOL_NEXT: u32 = 28;
+pub const KAYA_SYMBOL_PREVIOUS: u32 = 29;
+pub const KAYA_SYMBOL_SHUFFLE: u32 = 30;
+pub const KAYA_SYMBOL_REPEAT: u32 = 31;
+pub const KAYA_SYMBOL_REPEAT_ONE: u32 = 32;
+pub const KAYA_SYMBOL_VOLUME: u32 = 33;
+pub const KAYA_SYMBOL_QUEUE: u32 = 34;
+pub const KAYA_SYMBOL_FAVORITE: u32 = 35;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1637,6 +1647,16 @@ const _: () = assert!(
         && KAYA_SYMBOL_ATTACH == wire::SYMBOL_ATTACH
         && KAYA_SYMBOL_MIC == wire::SYMBOL_MIC
         && KAYA_SYMBOL_IMAGE_MISSING == wire::SYMBOL_IMAGE_MISSING
+        && KAYA_SYMBOL_PLAY == wire::SYMBOL_PLAY
+        && KAYA_SYMBOL_PAUSE == wire::SYMBOL_PAUSE
+        && KAYA_SYMBOL_NEXT == wire::SYMBOL_NEXT
+        && KAYA_SYMBOL_PREVIOUS == wire::SYMBOL_PREVIOUS
+        && KAYA_SYMBOL_SHUFFLE == wire::SYMBOL_SHUFFLE
+        && KAYA_SYMBOL_REPEAT == wire::SYMBOL_REPEAT
+        && KAYA_SYMBOL_REPEAT_ONE == wire::SYMBOL_REPEAT_ONE
+        && KAYA_SYMBOL_VOLUME == wire::SYMBOL_VOLUME
+        && KAYA_SYMBOL_QUEUE == wire::SYMBOL_QUEUE
+        && KAYA_SYMBOL_FAVORITE == wire::SYMBOL_FAVORITE
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1654,7 +1674,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 25,
+        variants == 35,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );

@@ -37,6 +37,16 @@ static class MenusScene
             {
                 tx.Toggle("Details", isChecked: details, symbol: Symbol.Info,
                     onToggle: (t, on) => t.Write(status, on ? "details on" : "details off")),
+                tx.Item("Play", symbol: Symbol.Play),
+                tx.Item("Pause", symbol: Symbol.Pause),
+                tx.Item("Next", symbol: Symbol.Next),
+                tx.Item("Previous", symbol: Symbol.Previous),
+                tx.Item("Shuffle", symbol: Symbol.Shuffle),
+                tx.Item("Repeat", symbol: Symbol.Repeat),
+                tx.Item("Repeat One", symbol: Symbol.RepeatOne),
+                tx.Item("Volume", symbol: Symbol.Volume),
+                tx.Item("Queue", symbol: Symbol.Queue),
+                tx.Item("Favorite", symbol: Symbol.Favorite),
             });
             // Option order IS the index vocabulary: Name = 0, Date = 1.
             var sortGroup = tx.RadioGroup("Sort",

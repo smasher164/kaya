@@ -4586,7 +4586,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // THE IDS ARE APPEND-ONLY, FOREVER: wire values in eight
             // generated bindings and four backends' lowering tables, so
             // a renumber would silently redraw every shipped app's menus.
-            // A new concept takes 21.
+            // A new concept takes 36.
             name: "symbol",
             variants: &[
                 ("add", 1),
@@ -4614,6 +4614,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("attach", 23),
                 ("mic", 24),
                 ("image_missing", 25),
+                ("play", 26),
+                ("pause", 27),
+                ("next", 28),
+                ("previous", 29),
+                ("shuffle", 30),
+                ("repeat", 31),
+                ("repeat_one", 32),
+                ("volume", 33),
+                ("queue", 34),
+                ("favorite", 35),
             ],
         },
         EnumSpec {
@@ -5650,6 +5660,16 @@ mod tests {
                     ("symbol", "attach") => wire::SYMBOL_ATTACH,
                     ("symbol", "mic") => wire::SYMBOL_MIC,
                     ("symbol", "image_missing") => wire::SYMBOL_IMAGE_MISSING,
+                    ("symbol", "play") => wire::SYMBOL_PLAY,
+                    ("symbol", "pause") => wire::SYMBOL_PAUSE,
+                    ("symbol", "next") => wire::SYMBOL_NEXT,
+                    ("symbol", "previous") => wire::SYMBOL_PREVIOUS,
+                    ("symbol", "shuffle") => wire::SYMBOL_SHUFFLE,
+                    ("symbol", "repeat") => wire::SYMBOL_REPEAT,
+                    ("symbol", "repeat_one") => wire::SYMBOL_REPEAT_ONE,
+                    ("symbol", "volume") => wire::SYMBOL_VOLUME,
+                    ("symbol", "queue") => wire::SYMBOL_QUEUE,
+                    ("symbol", "favorite") => wire::SYMBOL_FAVORITE,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -5985,7 +6005,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(26), None);
+        assert_eq!(wire::symbol_name(36), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

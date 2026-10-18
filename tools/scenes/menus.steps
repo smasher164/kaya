@@ -11,6 +11,17 @@ expect_menu "File>Export" disabled
 expect_menu_symbol "File>Save" "done"
 expect_menu_symbol "File>Export" "forward"
 expect_menu_symbol "View>Details" "info"
+# The transport symbols (docs/media-player-plan.md M8).
+expect_menu_symbol "View>Play" "play"
+expect_menu_symbol "View>Pause" "pause"
+expect_menu_symbol "View>Next" "next"
+expect_menu_symbol "View>Previous" "previous"
+expect_menu_symbol "View>Shuffle" "shuffle"
+expect_menu_symbol "View>Repeat" "repeat"
+expect_menu_symbol "View>Repeat One" "repeat_one"
+expect_menu_symbol "View>Volume" "volume"
+expect_menu_symbol "View>Queue" "queue"
+expect_menu_symbol "View>Favorite" "favorite"
 expect_menu "View>Details" unchecked
 expect_menu "Sort" value 0
 

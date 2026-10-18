@@ -1563,6 +1563,16 @@ pub(crate) const SYMBOL_SEND: u32 = 22;
 pub(crate) const SYMBOL_ATTACH: u32 = 23;
 pub(crate) const SYMBOL_MIC: u32 = 24;
 pub(crate) const SYMBOL_IMAGE_MISSING: u32 = 25;
+pub(crate) const SYMBOL_PLAY: u32 = 26;
+pub(crate) const SYMBOL_PAUSE: u32 = 27;
+pub(crate) const SYMBOL_NEXT: u32 = 28;
+pub(crate) const SYMBOL_PREVIOUS: u32 = 29;
+pub(crate) const SYMBOL_SHUFFLE: u32 = 30;
+pub(crate) const SYMBOL_REPEAT: u32 = 31;
+pub(crate) const SYMBOL_REPEAT_ONE: u32 = 32;
+pub(crate) const SYMBOL_VOLUME: u32 = 33;
+pub(crate) const SYMBOL_QUEUE: u32 = 34;
+pub(crate) const SYMBOL_FAVORITE: u32 = 35;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1593,6 +1603,16 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_ATTACH, "attach"),
     (SYMBOL_MIC, "mic"),
     (SYMBOL_IMAGE_MISSING, "image_missing"),
+    (SYMBOL_PLAY, "play"),
+    (SYMBOL_PAUSE, "pause"),
+    (SYMBOL_NEXT, "next"),
+    (SYMBOL_PREVIOUS, "previous"),
+    (SYMBOL_SHUFFLE, "shuffle"),
+    (SYMBOL_REPEAT, "repeat"),
+    (SYMBOL_REPEAT_ONE, "repeat_one"),
+    (SYMBOL_VOLUME, "volume"),
+    (SYMBOL_QUEUE, "queue"),
+    (SYMBOL_FAVORITE, "favorite"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside

@@ -57,7 +57,17 @@ main = kayaMain $ \app -> do
                             writeSignal status
                               (if on then "details on" else "details off")
                       )
-                  ]
+                  ],
+                item "Play" [ISymbol SymbolPlay],
+                item "Pause" [ISymbol SymbolPause],
+                item "Next" [ISymbol SymbolNext],
+                item "Previous" [ISymbol SymbolPrevious],
+                item "Shuffle" [ISymbol SymbolShuffle],
+                item "Repeat" [ISymbol SymbolRepeat],
+                item "Repeat One" [ISymbol SymbolRepeatOne],
+                item "Volume" [ISymbol SymbolVolume],
+                item "Queue" [ISymbol SymbolQueue],
+                item "Favorite" [ISymbol SymbolFavorite]
               ],
             -- Option order IS the index vocabulary: Name = 0, Date = 1.
             radioGroup

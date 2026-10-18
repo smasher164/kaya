@@ -38,6 +38,16 @@ let () =
                    ~on_toggle:(fun on ->
                      write status
                        (if on then "details on" else "details off"));
+                 item ~label:"Play" ~symbol:Play;
+                 item ~label:"Pause" ~symbol:Pause;
+                 item ~label:"Next" ~symbol:Next;
+                 item ~label:"Previous" ~symbol:Previous;
+                 item ~label:"Shuffle" ~symbol:Shuffle;
+                 item ~label:"Repeat" ~symbol:Repeat;
+                 item ~label:"Repeat One" ~symbol:RepeatOne;
+                 item ~label:"Volume" ~symbol:Volume;
+                 item ~label:"Queue" ~symbol:Queue;
+                 item ~label:"Favorite" ~symbol:Favorite;
                ];
              (* Option order IS the index vocabulary: Name = 0, Date = 1. *)
              radio_group ~label:"Sort" ~bind_value:sort

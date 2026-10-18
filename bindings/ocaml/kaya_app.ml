@@ -2167,6 +2167,16 @@ type symbol =
   | Attach
   | Mic
   | ImageMissing
+  | Play
+  | Pause
+  | Next
+  | Previous
+  | Shuffle
+  | Repeat
+  | RepeatOne
+  | Volume
+  | Queue
+  | Favorite
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2194,6 +2204,16 @@ let symbol_wire = function
   | Attach -> Int64.of_int Kaya_wire.symbol_attach
   | Mic -> Int64.of_int Kaya_wire.symbol_mic
   | ImageMissing -> Int64.of_int Kaya_wire.symbol_image_missing
+  | Play -> Int64.of_int Kaya_wire.symbol_play
+  | Pause -> Int64.of_int Kaya_wire.symbol_pause
+  | Next -> Int64.of_int Kaya_wire.symbol_next
+  | Previous -> Int64.of_int Kaya_wire.symbol_previous
+  | Shuffle -> Int64.of_int Kaya_wire.symbol_shuffle
+  | Repeat -> Int64.of_int Kaya_wire.symbol_repeat
+  | RepeatOne -> Int64.of_int Kaya_wire.symbol_repeat_one
+  | Volume -> Int64.of_int Kaya_wire.symbol_volume
+  | Queue -> Int64.of_int Kaya_wire.symbol_queue
+  | Favorite -> Int64.of_int Kaya_wire.symbol_favorite
 
 (* An icon-only button (docs/composer-plan.md §2): the glyph in place of
    the title, which stays its accessible name. *)

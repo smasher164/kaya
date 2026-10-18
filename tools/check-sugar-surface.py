@@ -2157,7 +2157,7 @@ def check_symbol_name(snake, pascal, upper, findings=None):
          f"^    {pascal} = KayaWire.Symbol{pascal},$")
     want("java", "bindings/java/dev/kaya/KayaApp.java",
          f"^        {upper}\\(KayaWire.SYMBOL_{upper}\\)[,;]$")
-    want("swift", "bindings/swift/KayaApp.swift", f"^    case {snake} = \\d+$")
+    want("swift", "bindings/swift/KayaApp.swift", f"^    case `?{snake}`? = \\d+$")
     want("haskell", "bindings/haskell/KayaApp.hs",
          f"^  Symbol{pascal} -> W.symbol{pascal}$")
     want("ocaml", "bindings/ocaml/kaya_app.ml",

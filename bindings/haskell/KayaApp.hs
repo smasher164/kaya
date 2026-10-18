@@ -1427,6 +1427,16 @@ data Symbol
   | SymbolAttach
   | SymbolMic
   | SymbolImageMissing
+  | SymbolPlay
+  | SymbolPause
+  | SymbolNext
+  | SymbolPrevious
+  | SymbolShuffle
+  | SymbolRepeat
+  | SymbolRepeatOne
+  | SymbolVolume
+  | SymbolQueue
+  | SymbolFavorite
   deriving (Eq, Show)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1458,6 +1468,16 @@ symbolWire s = fromIntegral $ case s of
   SymbolAttach -> W.symbolAttach
   SymbolMic -> W.symbolMic
   SymbolImageMissing -> W.symbolImageMissing
+  SymbolPlay -> W.symbolPlay
+  SymbolPause -> W.symbolPause
+  SymbolNext -> W.symbolNext
+  SymbolPrevious -> W.symbolPrevious
+  SymbolShuffle -> W.symbolShuffle
+  SymbolRepeat -> W.symbolRepeat
+  SymbolRepeatOne -> W.symbolRepeatOne
+  SymbolVolume -> W.symbolVolume
+  SymbolQueue -> W.symbolQueue
+  SymbolFavorite -> W.symbolFavorite
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 

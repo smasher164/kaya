@@ -812,6 +812,16 @@ enum Symbol : long
     Attach = KayaWire.SymbolAttach,
     Mic = KayaWire.SymbolMic,
     ImageMissing = KayaWire.SymbolImageMissing,
+    Play = KayaWire.SymbolPlay,
+    Pause = KayaWire.SymbolPause,
+    Next = KayaWire.SymbolNext,
+    Previous = KayaWire.SymbolPrevious,
+    Shuffle = KayaWire.SymbolShuffle,
+    Repeat = KayaWire.SymbolRepeat,
+    RepeatOne = KayaWire.SymbolRepeatOne,
+    Volume = KayaWire.SymbolVolume,
+    Queue = KayaWire.SymbolQueue,
+    Favorite = KayaWire.SymbolFavorite,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's

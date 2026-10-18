@@ -4322,6 +4322,16 @@ export const Symbol_ = Object.freeze({
   ATTACH: wire.SYMBOL_ATTACH,
   MIC: wire.SYMBOL_MIC,
   IMAGE_MISSING: wire.SYMBOL_IMAGE_MISSING,
+  PLAY: wire.SYMBOL_PLAY,
+  PAUSE: wire.SYMBOL_PAUSE,
+  NEXT: wire.SYMBOL_NEXT,
+  PREVIOUS: wire.SYMBOL_PREVIOUS,
+  SHUFFLE: wire.SYMBOL_SHUFFLE,
+  REPEAT: wire.SYMBOL_REPEAT,
+  REPEAT_ONE: wire.SYMBOL_REPEAT_ONE,
+  VOLUME: wire.SYMBOL_VOLUME,
+  QUEUE: wire.SYMBOL_QUEUE,
+  FAVORITE: wire.SYMBOL_FAVORITE,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.

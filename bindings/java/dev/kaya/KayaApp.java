@@ -268,7 +268,17 @@ public final class KayaApp {
         SEND(KayaWire.SYMBOL_SEND),
         ATTACH(KayaWire.SYMBOL_ATTACH),
         MIC(KayaWire.SYMBOL_MIC),
-        IMAGE_MISSING(KayaWire.SYMBOL_IMAGE_MISSING);
+        IMAGE_MISSING(KayaWire.SYMBOL_IMAGE_MISSING),
+        PLAY(KayaWire.SYMBOL_PLAY),
+        PAUSE(KayaWire.SYMBOL_PAUSE),
+        NEXT(KayaWire.SYMBOL_NEXT),
+        PREVIOUS(KayaWire.SYMBOL_PREVIOUS),
+        SHUFFLE(KayaWire.SYMBOL_SHUFFLE),
+        REPEAT(KayaWire.SYMBOL_REPEAT),
+        REPEAT_ONE(KayaWire.SYMBOL_REPEAT_ONE),
+        VOLUME(KayaWire.SYMBOL_VOLUME),
+        QUEUE(KayaWire.SYMBOL_QUEUE),
+        FAVORITE(KayaWire.SYMBOL_FAVORITE);
 
         final long wire;
 

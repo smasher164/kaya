@@ -1098,6 +1098,16 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Attach => FluentIcon::Member(Fluent::Attach),
         S::Mic => FluentIcon::Member(Fluent::Microphone),
         S::ImageMissing => FluentIcon::Glyph("\u{E91B}"),
+        S::Play => FluentIcon::Member(Fluent::Play),
+        S::Pause => FluentIcon::Member(Fluent::Pause),
+        S::Next => FluentIcon::Member(Fluent::Next),
+        S::Previous => FluentIcon::Member(Fluent::Previous),
+        S::Shuffle => FluentIcon::Member(Fluent::Shuffle),
+        S::Repeat => FluentIcon::Member(Fluent::RepeatAll),
+        S::RepeatOne => FluentIcon::Member(Fluent::RepeatOne),
+        S::Volume => FluentIcon::Member(Fluent::Volume),
+        S::Queue => FluentIcon::Member(Fluent::List),
+        S::Favorite => FluentIcon::Glyph("\u{EB51}"),
     }
 }
 
@@ -1131,17 +1141,28 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Attach => crate::wire::SYMBOL_ATTACH,
         S::Mic => crate::wire::SYMBOL_MIC,
         S::ImageMissing => crate::wire::SYMBOL_IMAGE_MISSING,
+        S::Play => crate::wire::SYMBOL_PLAY,
+        S::Pause => crate::wire::SYMBOL_PAUSE,
+        S::Next => crate::wire::SYMBOL_NEXT,
+        S::Previous => crate::wire::SYMBOL_PREVIOUS,
+        S::Shuffle => crate::wire::SYMBOL_SHUFFLE,
+        S::Repeat => crate::wire::SYMBOL_REPEAT,
+        S::RepeatOne => crate::wire::SYMBOL_REPEAT_ONE,
+        S::Volume => crate::wire::SYMBOL_VOLUME,
+        S::Queue => crate::wire::SYMBOL_QUEUE,
+        S::Favorite => crate::wire::SYMBOL_FAVORITE,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 25] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 35] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
         S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
-        S::ImageMissing,
+        S::ImageMissing, S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat,
+        S::RepeatOne, S::Volume, S::Queue, S::Favorite,
     ]
 };
 

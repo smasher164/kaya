@@ -34,7 +34,8 @@ func App() *kaya.App {
 		file.Item("Export").BindEnabled(canExport).Symbol(kaya.SymbolForward)
 		share := file.Item("Share").Primary(true).OnActivate(onShare)
 
-		win.Menu("View").Toggle("Details").BindChecked(details).
+		view := win.Menu("View")
+		view.Toggle("Details").BindChecked(details).
 			Symbol(kaya.SymbolInfo).
 			OnToggle(func(tx *kaya.Tx, on bool) {
 				if on {
@@ -43,6 +44,16 @@ func App() *kaya.App {
 					tx.Write(status, "details off")
 				}
 			})
+		view.Item("Play").Symbol(kaya.SymbolPlay)
+		view.Item("Pause").Symbol(kaya.SymbolPause)
+		view.Item("Next").Symbol(kaya.SymbolNext)
+		view.Item("Previous").Symbol(kaya.SymbolPrevious)
+		view.Item("Shuffle").Symbol(kaya.SymbolShuffle)
+		view.Item("Repeat").Symbol(kaya.SymbolRepeat)
+		view.Item("Repeat One").Symbol(kaya.SymbolRepeatOne)
+		view.Item("Volume").Symbol(kaya.SymbolVolume)
+		view.Item("Queue").Symbol(kaya.SymbolQueue)
+		view.Item("Favorite").Symbol(kaya.SymbolFavorite)
 
 		// Option order IS the index.
 		sortGroup := win.RadioGroup("Sort")

@@ -8041,7 +8041,7 @@ pub enum Platform {
 /// The semantic icon vocabulary (spec enum "symbol"; docs/styling-plan.md
 /// D6): an app names a concept and each backend draws its own platform's
 /// glyph. The discriminants are wire values and append-only — a new
-/// concept takes 21.
+/// concept takes 36.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Symbol {
     Add = 1,
@@ -8084,6 +8084,18 @@ pub enum Symbol {
     Mic = 24,
     /// A picture that is not there: a failed image (docs/network-images-plan.md N4).
     ImageMissing = 25,
+    /// Start playback (docs/media-player-plan.md M8).
+    Play = 26,
+    Pause = 27,
+    Next = 28,
+    Previous = 29,
+    Shuffle = 30,
+    Repeat = 31,
+    RepeatOne = 32,
+    Volume = 33,
+    Queue = 34,
+    /// A liked item, the heart idiom; `Star` stays the generic favourite.
+    Favorite = 35,
 }
 
 /// One entry of an accept list: a closed kind, or a custom format id.
