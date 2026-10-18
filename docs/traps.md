@@ -7875,6 +7875,32 @@ relayout signal after the pass that measured the first row, which
 under load did not come for 15s; the measuring pass now derives from
 what it measured (gtk.rs window_report).
 
+## A size the app asked of a mapped wayland window, replaced by the configure that answered its previous size (measured 2026-10-18)
+
+`format-java-wayland` failed its first step on matrix 20261018T113159Z:
+`root hugs (540x482px at (0,46) inside 540x490px)` with the guest declaring
+540x560. kaya presents the primary at activate at 540x330, and a JVM guest's
+first transaction can land after GTK committed that size and before sway's
+`xdg_toplevel.configure(540, 330)` answering it is dispatched
+(`WAYLAND_DEBUG=client`: commit 540x330, `set_title("format")`, then the
+configure). GTK takes the configured size, clamps it to its minimum at that
+width (490, from `gtk_window_compute_min_size`) and, since the window is
+floating, WRITES IT INTO `default_size`: the 560 never reached the
+compositor. At 490 libadwaita's AdwBreakpointBin allocates its child at the
+child's `for_size = -1` minimum (528), so the content overruns the window
+(the `exceeds AdwApplicationWindow height` warning). The
+`measure ... for height of 490, but it needs at least 528` warning is in
+EVERY java format leg, green or red; it is GTK's min-size search, not the
+cause. Reproduced in the lane image with a java guest copy sleeping 0-300 ms
+before its build: 10 of 80 red on the shipped code, every one this sentence;
+80 of 80 green with the fix, 17 of them re-requested. The verb half of this
+class is the wayland resize entry above; the app's own size write had no
+re-request. gtk.rs `hold_size_request` keeps a write made on a mapped
+window until the surface holds it (or GTK's minimum-clamped grant), asking
+again up to three times, and prints `KAYA_DIAG size request ...` lines naming
+the request, what replaced it and what the window held; the decision is
+`size_hold_step`, held by gtk::frame_tests and tools/check-gtk.py.
+
 ## An iOS window's FIRST metrics report can precede the pump's first call, and a report with no scene to take it was dropped (measured 2026-09-01)
 
 `adaptive-swiftui` read `row@narrow axis "horizontal", wanted

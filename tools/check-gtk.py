@@ -293,6 +293,26 @@ ENTRIES = (
     ("the primary's frame notifies wired to window 0",
      "watch_frame(window.upcast_ref::<gtk4::Window>(), 0);",
      "watch_frame(window.upcast_ref::<gtk4::Window>(), 1);"),
+    # docs/traps.md, the size a stale configure replaced: the decision is
+    # gtk::frame_tests::gtk_size_hold_outlasts_a_stale_configure, and these
+    # are the three links it cannot see.
+    ("the app's width write held until the surface takes it",
+     "target.set_default_size(*w as i32, h);\n"
+     "                        hold_size_request(&target, window.0);",
+     "target.set_default_size(*w as i32, h);"),
+    ("the app's height write held until the surface takes it",
+     "target.set_default_size(w, *h as i32);\n"
+     "                        hold_size_request(&target, window.0);",
+     "target.set_default_size(w, *h as i32);"),
+    ("the replaced request asked again",
+     "                w.set_default_size(want.0, want.1);\n",
+     ""),
+    ("the resize verb's size never fought by an earlier app request",
+     "                    release_size_hold(window);\n"
+     "                    target.set_default_size(width as i32, height as i32);\n"
+     "                    None",
+     "                    target.set_default_size(width as i32, height as i32);\n"
+     "                    None"),
     # THE SAVE IS COALESCED ON IDLE AND NOT ON A TIMER, and the
     # perturbation is the shape that was built first and MEASURED losing
     # (2026-09-09, in this image): the declaration's own notify arms the
@@ -454,6 +474,8 @@ PY
             gtk::frame_tests::gtk_frame_memory_beats_the_declaration_and_yields_to_a_resize \\
         && run_exact_test \\
             gtk::frame_tests::gtk_frame_memory_skips_a_fullscreen_frame \\
+        && run_exact_test \\
+            gtk::frame_tests::gtk_size_hold_outlasts_a_stale_configure \\
         && run_exact_test gtk::color_tests::gtk_color_round_trips_every_byte \\
         && run_exact_test gtk::range_tests::gtk_range_press_split_and_travel \\
         && run_exact_test gtk::media_tests::gtk_media_can_play_follows_the_registry \\

@@ -6521,6 +6521,123 @@ fn runtime_frame_write(
     }
 }
 
+/// docs/traps.md, "A size the app asked of a mapped wayland window, replaced
+/// by the configure that answered its previous size".
+#[derive(Debug, PartialEq, Eq)]
+enum SizeHold {
+    Held,
+    Wait,
+    Reissue,
+    GiveUp,
+}
+
+const SIZE_REISSUES: u32 = 3;
+const SIZE_HOLD_FRAMES: u32 = 240;
+
+fn size_hold_step(
+    want: (i32, i32),
+    min: (i32, i32),
+    default: (i32, i32),
+    allocated: (i32, i32),
+    reissued: u32,
+    frames: u32,
+) -> SizeHold {
+    let granted = (want.0.max(min.0), want.1.max(min.1));
+    if allocated == want || allocated == granted {
+        SizeHold::Held
+    } else if default == want || default == granted {
+        if frames >= SIZE_HOLD_FRAMES { SizeHold::GiveUp } else { SizeHold::Wait }
+    } else if reissued < SIZE_REISSUES {
+        SizeHold::Reissue
+    } else {
+        SizeHold::GiveUp
+    }
+}
+
+thread_local! {
+    static SIZE_HOLDS: RefCell<HashMap<u64, u64>> = RefCell::new(HashMap::new());
+}
+
+#[cfg(feature = "harness")]
+fn release_size_hold(id: u64) {
+    SIZE_HOLDS.with_borrow_mut(|holds| {
+        if let Some(generation) = holds.get_mut(&id) {
+            *generation += 1;
+        }
+    });
+}
+
+fn hold_size_request(window: &gtk4::Window, id: u64) {
+    use gtk4::prelude::{Cast, GtkWindowExt, NativeExt, WidgetExt};
+    if !window.is_mapped() {
+        return;
+    }
+    let want = window.default_size();
+    let generation = SIZE_HOLDS.with_borrow_mut(|holds| {
+        let generation = holds.entry(id).or_insert(0);
+        *generation += 1;
+        *generation
+    });
+    eprintln!(
+        "KAYA_DIAG size request {}x{} on window#{id} while mapped at {}x{}",
+        want.0,
+        want.1,
+        window.width(),
+        window.height()
+    );
+    let (reissued, frames) = (std::cell::Cell::new(0), std::cell::Cell::new(0));
+    window.add_tick_callback(move |w, _| {
+        if SIZE_HOLDS.with_borrow(|holds| holds.get(&id) != Some(&generation)) {
+            return glib::ControlFlow::Break;
+        }
+        let tiled = gdk::ToplevelState::TILED
+            | gdk::ToplevelState::TOP_TILED
+            | gdk::ToplevelState::RIGHT_TILED
+            | gdk::ToplevelState::BOTTOM_TILED
+            | gdk::ToplevelState::LEFT_TILED;
+        let decided = w.is_maximized()
+            || w.is_fullscreen()
+            || w.surface()
+                .and_then(|s| s.dynamic_cast::<gdk::Toplevel>().ok())
+                .is_some_and(|t| t.state().intersects(tiled));
+        if decided {
+            return glib::ControlFlow::Break;
+        }
+        frames.set(frames.get() + 1);
+        let (n, f) = (reissued.get(), frames.get());
+        let default = w.default_size();
+        let allocated = (w.width(), w.height());
+        let min = (
+            w.measure(gtk4::Orientation::Horizontal, -1).0,
+            w.measure(gtk4::Orientation::Vertical, default.0.max(0)).0,
+        );
+        match size_hold_step(want, min, default, allocated, n, f) {
+            SizeHold::Held => glib::ControlFlow::Break,
+            SizeHold::Wait => glib::ControlFlow::Continue,
+            SizeHold::Reissue => {
+                reissued.set(n + 1);
+                eprintln!(
+                    "KAYA_DIAG size request {}x{} on window#{id} replaced by {}x{} before \
+                     the surface held it (allocated {}x{}, minimum {}x{}): re-requested \
+                     {}/{SIZE_REISSUES}",
+                    want.0, want.1, default.0, default.1, allocated.0, allocated.1, min.0, min.1, n + 1
+                );
+                w.set_default_size(want.0, want.1);
+                glib::ControlFlow::Continue
+            }
+            SizeHold::GiveUp => {
+                eprintln!(
+                    "KAYA_DIAG size request {}x{} on window#{id} not held after {n} \
+                     re-requests and {f} frames: default {}x{}, allocated {}x{}, \
+                     minimum {}x{}",
+                    want.0, want.1, default.0, default.1, allocated.0, allocated.1, min.0, min.1
+                );
+                glib::ControlFlow::Break
+            }
+        }
+    });
+}
+
 /// The opt-out (docs/tasks-s4-plan.md P4): remembered unless the app said
 /// no. Absent means yes — a window nobody wrote the prop for is remembered.
 fn frame_remembered(remember: &HashMap<u64, bool>, window: u64) -> bool {
@@ -14894,12 +15011,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     if runtime_frame_write(&mut core.frame_memory, window.0, |m| &mut m.width, *w) {
                         let (_, h) = target.default_size();
                         target.set_default_size(*w as i32, h);
+                        hold_size_request(&target, window.0);
                     }
                 }
                 (WindowProp::Height, Value::F64(h)) => {
                     if runtime_frame_write(&mut core.frame_memory, window.0, |m| &mut m.height, *h) {
                         let (w, _) = target.default_size();
                         target.set_default_size(w, *h as i32);
+                        hold_size_request(&target, window.0);
                     }
                 }
                 (WindowProp::VetoClose, Value::Bool(on)) => {
@@ -19045,8 +19164,8 @@ mod chrome_tests {
 #[cfg(test)]
 mod frame_tests {
     use super::{
-        FrameMemory, clamp_frame, frame_line, frame_remembered, frame_savable, parse_frame,
-        runtime_frame_write,
+        FrameMemory, SIZE_HOLD_FRAMES, SIZE_REISSUES, SizeHold, clamp_frame, frame_line,
+        frame_remembered, frame_savable, parse_frame, runtime_frame_write, size_hold_step,
     };
     use std::collections::HashMap;
 
@@ -19111,6 +19230,29 @@ mod frame_tests {
         assert!(!frame_savable(Some(&door), true));
         door.settled(false);
         assert!(frame_savable(Some(&door), false));
+    }
+
+    /// The format-java-wayland red of 2026-10-18 (docs/traps.md, the size a
+    /// stale configure replaced): no scene can order a request between a
+    /// commit and the compositor's answer to it.
+    #[test]
+    fn gtk_size_hold_outlasts_a_stale_configure() {
+        let want = (540, 560);
+        let min = (360, 490);
+        assert_eq!(size_hold_step(want, min, want, (540, 330), 0, 1), SizeHold::Wait);
+        assert_eq!(size_hold_step(want, min, (540, 490), (540, 490), 0, 2), SizeHold::Reissue);
+        assert_eq!(size_hold_step(want, min, want, want, 1, 3), SizeHold::Held);
+        assert_eq!(
+            size_hold_step(want, min, (540, 490), (540, 490), SIZE_REISSUES, 9),
+            SizeHold::GiveUp
+        );
+        assert_eq!(
+            size_hold_step(want, min, want, (540, 330), 0, SIZE_HOLD_FRAMES),
+            SizeHold::GiveUp
+        );
+        // Below the content's minimum GTK grants the minimum, which is held.
+        assert_eq!(size_hold_step((540, 100), min, (540, 490), (540, 490), 0, 1), SizeHold::Held);
+        assert_eq!(size_hold_step((540, 100), min, (540, 100), (540, 330), 0, 1), SizeHold::Wait);
     }
 
     /// THE BY-VALUE RULE (docs/tasks-s4-plan.md P4), which no scene can
@@ -21316,6 +21458,7 @@ impl crate::harness::Stage for GtkStage {
             use gtk4::prelude::GtkWindowExt;
             match gtk_window_read(core, window) {
                 Some(target) => {
+                    release_size_hold(window);
                     target.set_default_size(width as i32, height as i32);
                     None
                 }
@@ -21360,6 +21503,7 @@ impl crate::harness::Stage for GtkStage {
                 Self::on_main_mut(move |core| {
                     use gtk4::prelude::GtkWindowExt;
                     if let Some(target) = gtk_window_read(core, window) {
+                        release_size_hold(window);
                         target.set_default_size(width as i32, height as i32);
                     }
                 });
