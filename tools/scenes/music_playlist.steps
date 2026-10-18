@@ -1,0 +1,47 @@
+# The media player demo's second screen (docs/media-player-plan.md §6 step 5,
+# M9, M11, M13): an album opened from its card is a track table whose title
+# cell is rounded art beside two lines, with the catalogue's durations through
+# the duration formatter. A pick selects a row; an activation plays it through
+# kaya's player against the lane's mirror (tools/lib/catalogue.py), the
+# playing row's name tinted, and the app's queue moves to the album's next
+# track on `ended`. A click on the macOS native table only picks; every other
+# tier's press picks and plays (docs/styling-pass-plan.md Y4, AMENDED).
+expect_image_phase image@art_201715 shown
+click column@card_201715
+expect_header_shown column@tracks
+expect_image_phase image@track_art[1860160] shown
+expect_shape image@track_art[1860160] rounded
+expect_image_size image@track_art[1860160] "40x40"
+expect_tint label@track_name[1860160] none
+click row@track[1860165]
+expect_selected row@track[1860165] on
+expect_selected row@track[1860160] off
+double_click row@track[1860160]
+expect_selected row@track[1860160] on
+expect_selected row@track[1860165] off
+expect label@now "Playing · Seven Chimes"
+expect_tint label@track_name[1860160] accent
+expect_tint label@track_name[1860165] none
+# The clips are 20 s: past the first one's end the queue plays the next.
+settle 12000
+expect label@now "Playing · Athens"
+expect_tint label@track_name[1860165] accent
+expect_tint label@track_name[1860160] none
+# The desktops: the entry's title, the album column, and Home and the
+# library's albums as the sidebar's destinations (docs/media-player-plan.md
+# §1), each opened in the content pane. A phone reads its window's title,
+# has no album column and goes back instead (tools/lib/lanes/ios.py).
+expect_title "Through The Olive Branches"
+expect_columns column@tracks "#|Title|Album|Time"
+expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,Through The Olive Branches,0:20|7,Athens/Pierce Murphy,Through The Olive Branches,0:20"
+expect_selected row@go_home off
+click row@go_home
+expect_selected row@go_home on
+expect_title "Home"
+click column@card_581719
+expect_title "Fellow Traveler"
+expect_rows column@tracks "1,A Serpent I Did Hear/Pierce Murphy,Fellow Traveler,0:20|2,Persimmon/Pierce Murphy,Fellow Traveler,0:20"
+click row@saved[201715]
+expect_selected row@saved[201715] on
+expect_title "Through The Olive Branches"
+expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,Through The Olive Branches,0:20|7,Athens/Pierce Murphy,Through The Olive Branches,0:20"

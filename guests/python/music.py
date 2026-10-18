@@ -1,5 +1,6 @@
-"""The media player demo (docs/media-player-plan.md), screen 1: the library
-sidebar and Home (tools/scenes/music_home.steps)."""
+"""The media player demo (docs/media-player-plan.md): the library sidebar
+and Home (tools/scenes/music_home.steps), and an album's track table that
+plays through kaya's player (tools/scenes/music_playlist.steps)."""
 
 import html
 import json
@@ -17,6 +18,7 @@ HOME = 7
 CONNECT = 20
 SECTION_HOME = 30
 SECTION_LIBRARY = 31
+FIRST_ALBUM_ENTRY = 100
 
 SHELVES = [("jazz", "Jazz"), ("electronic", "Electronic"), ("rock", "Rock")]
 SHELF_CARDS = 12
@@ -34,6 +36,20 @@ class Saved:
     art_url: str
     art: bytes
     phase: kaya.ImagePhase
+    selected: bool
+
+
+@dataclass
+class Track:
+    number: str
+    title: str
+    artist: str
+    album: str
+    duration: str
+    art_url: str
+    art: bytes
+    phase: kaya.ImagePhase
+    tint: kaya.Tint
     selected: bool
 
 
@@ -107,6 +123,12 @@ class Catalogue:
             return SAMPLER + url
         return urllib.parse.urljoin(self.base, url)
 
+    def source(self, audio):
+        if self.sampler:
+            query = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(audio).query))
+            return kaya.MediaSource.asset(f"catalogue/t{query['trackid']}.mp3")
+        return kaya.MediaSource.url(self.address(audio))
+
     def get(self, endpoint, **query):
         pairs = {**query, **self.params}
         url = f"{self.api}{endpoint}/?" + urllib.parse.urlencode(pairs)
@@ -136,6 +158,9 @@ class Catalogue:
                                "image": self.address(track["album_image"])})
         return albums
 
+    def album(self, album_id):
+        return self.get("albums/tracks", id=album_id, imagesize=600)[0]
+
 
 app = kaya.App()
 catalogue = Catalogue()
@@ -144,22 +169,34 @@ art_pool = ThreadPoolExecutor(max_workers=6)
 cards = {}
 viewing = {"album": None}
 library_keys = []
+known = {}
+pages = {}
+songs = {}
+playback = {"key": None, "queue": [], "start": False}
+entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
 
 
 def library_caption():
-    return f"{len(library_keys)} albums" if library_keys else "Albums you open appear here."
+    if not library_keys:
+        return "Albums you open appear here."
+    return "1 album" if len(library_keys) == 1 else f"{len(library_keys)} albums"
 
 
 def show_selection(album_id):
     viewing["album"] = album_id
     for key, card in cards.items():
         card["selected"].set(key == album_id)
+    show_library_selection(album_id)
+
+
+def show_library_selection(album_id):
     for key in library_keys:
         library.patch(key, selected=key == album_id)
 
 
 def open_album(album):
     key = album["id"]
+    show_album(album, 0 if desktop else SECTION_HOME)
     if key not in library_keys:
         library.insert(key, Saved(title=album["name"], caption=f"Album · {album['artist']}",
                                   art_url=album["image"], art=b"",
@@ -175,6 +212,164 @@ def open_album(album):
 
 def on_saved(row):
     show_selection(row.key)
+    show_album(known[row.key], 0 if desktop else SECTION_LIBRARY)
+
+
+def go_home():
+    if 0 in pages:
+        kaya.pop_entry()
+        del pages[0]
+    # The album last opened stays the selected card under Home.
+    show_library_selection(None)
+    home_shown.set(True)
+
+
+def show_album(album, surface):
+    if desktop:
+        home_shown.set(False)
+    page = pages.get(surface)
+    if page is not None and page["album"] == album["id"]:
+        return
+    if page is not None:
+        kaya.pop_entry(surface)
+    entry = next(entries)
+    page = {"album": album["id"], "entry": entry, "keys": []}
+    pages[surface] = page
+    with app.push_entry(entry, title=album["name"], window=surface,
+                        on_popped=lambda: page_closed(surface, entry)):
+        page["about"] = kaya.signal(f"Album · {album['artist']}")
+        page["tracks"] = kaya.collection(Track)
+        page["art"] = kaya.RowImages(app, page["tracks"], url="art_url", art="art",
+                                     phase="phase", fetch=catalogue.fetch)
+        album_body(album, page)
+    threading.Thread(target=load_album, args=(album, surface, entry), daemon=True).start()
+
+
+def album_body(album, page):
+    with kaya.column(spacing=12, align="stretch") as body:
+        body.a11y_id("album")
+        # The gradient header replaces this column (docs/media-player-plan.md §6
+        # step 5, the third screen).
+        with kaya.column(spacing=2) as header:
+            header.a11y_id("album_header")
+            kaya.heading(album["name"])
+            kaya.caption(bind=page["about"])
+            kaya.caption(bind=now_line).a11y_id("now")
+        # A phone's width holds no album column (the album is the page).
+        names = ("#", "Title", "Album", "Time") if desktop else ("#", "Title", "Time")
+        for track in page["tracks"].columns(*names, a11y_id="tracks", grow=1):
+            with kaya.row(selected=track.selected, on_select=on_pick,
+                          on_activate=on_play) as line:
+                line.a11y_id("track")
+                kaya.label(bind=track.number)
+                with kaya.row(spacing=8):
+                    kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                               phase=track.phase, on_needed=page["art"].needed,
+                               on_released=page["art"].released) \
+                        .max_width(ROW_ART).max_height(ROW_ART).a11y_id("track_art")
+                    with kaya.column(spacing=0):
+                        kaya.label(bind=track.title, tint=track.tint).a11y_id("track_name")
+                        kaya.caption(bind=track.artist)
+                if desktop:
+                    kaya.label(bind=track.album)
+                kaya.label(bind=track.duration).a11y_id("track_time")
+
+
+def page_closed(surface, entry):
+    if pages.get(surface, {}).get("entry") == entry:
+        del pages[surface]
+
+
+def load_album(album, surface, entry):
+    try:
+        answer = catalogue.album(album["id"])
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        print(f"music: album {album['id']} did not load: {e!r}", file=sys.stderr)
+        answer = None
+    app.post(album_arrived, album, surface, entry, answer)
+
+
+def album_arrived(album, surface, entry, answer):
+    page = pages.get(surface)
+    if page is None or page["entry"] != entry:
+        return
+    if answer is None:
+        page["about"].set("Couldn't reach the catalogue.")
+        return
+    artist = html.unescape(answer["artist_name"])
+    year = answer.get("releasedate", "")[:4]
+    page["about"].set(" · ".join(p for p in ("Album", artist, year) if p))
+    for t in sorted(answer["tracks"], key=lambda t: int(t["position"])):
+        key = t["id"]
+        songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"]}
+        page["keys"].append(key)
+        page["tracks"].insert(key, Track(
+            number=str(t["position"]), title=songs[key]["title"], artist=artist,
+            album=album["name"], duration=kaya.fmt.duration(int(t["duration"]) * 1000),
+            art_url=album["image"], art=b"", phase=kaya.ImagePhase.LOADING,
+            tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
+            selected=False))
+
+
+def pages_holding(key):
+    return [page for page in pages.values() if key in page["keys"]]
+
+
+def select_track(key):
+    for page in pages_holding(key):
+        for other in page["keys"]:
+            page["tracks"].patch(other, selected=other == key)
+
+
+def on_pick(row):
+    select_track(row.key)
+
+
+def on_play(row):
+    select_track(row.key)
+    keys = pages_holding(row.key)[0]["keys"]
+    # The queue is the app's: the album from this track on (M11).
+    playback["queue"] = keys[keys.index(row.key):]
+    play_next()
+
+
+def play_next():
+    previous = playback["key"]
+    playback["key"] = playback["queue"].pop(0) if playback["queue"] else None
+    for key in (previous, playback["key"]):
+        for page in pages_holding(key) if key else ():
+            page["tracks"].patch(key, tint=kaya.Tint.ACCENT if key == playback["key"]
+                                 else kaya.Tint.NONE)
+    if playback["key"] is None:
+        player.unload()
+        now_line.set("")
+        return
+    playback["start"] = True
+    player.set_source(catalogue.source(songs[playback["key"]]["audio"]))
+    now_line.set(f"Loading · {songs[playback['key']]['title']}")
+
+
+def on_player_state(state):
+    key = playback["key"]
+    if key is None:
+        return
+    title = songs[key]["title"]
+    if state == kaya.PlayerState.READY and playback["start"]:
+        playback["start"] = False
+        player.play()
+    elif state == kaya.PlayerState.PLAYING:
+        now_line.set(f"Playing · {title}")
+    elif state == kaya.PlayerState.PAUSED:
+        now_line.set(f"Paused · {title}")
+    elif state == kaya.PlayerState.ENDED:
+        play_next()
+
+
+def on_player_failed(why, detail):
+    key = playback["key"]
+    print(f"music: track {key} failed: {why} {detail}", file=sys.stderr)
+    if key is not None:
+        now_line.set(f"Couldn't play {songs[key]['title']}.")
 
 
 def card_art_landed(album_id, data):
@@ -195,6 +390,7 @@ def fetch_card_art(album_id, url):
 
 
 def card(album):
+    known[album["id"]] = album
     art = kaya.signal(b"")
     phase = kaya.signal(kaya.ImagePhase.LOADING)
     selected = kaya.signal(False)
@@ -263,6 +459,11 @@ def home_body(shelves):
 def library_body():
     with kaya.column(spacing=4) as side:
         side.a11y_id("library")
+        if desktop:
+            # Home is a sidebar destination (docs/media-player-plan.md §1).
+            with kaya.row(selected=home_shown, on_activate=go_home) as destination:
+                destination.a11y_id("go_home")
+                kaya.label("Home")
         kaya.heading("Your Library")
         kaya.caption(bind=library_hint)
         for item in library:
@@ -281,6 +482,7 @@ def home_arrived(shelves):
     if desktop:
         with app.push_entry(HOME, title="Home"):
             home_body(shelves)
+        home_shown.set(True)
     else:
         with app.add_section(SECTION_HOME, title="Home", symbol=kaya.Symbol.HOME):
             home_body(shelves)
@@ -314,6 +516,11 @@ with app.window(title="Music", width=1100, height=720,
     library = kaya.collection(Saved)
     library_art = kaya.RowImages(app, library, url="art_url", art="art", phase="phase",
                                  fetch=catalogue.fetch)
+    now_line = kaya.signal("")
+    home_shown = kaya.signal(False)
+    # A lane's legs play on the maintainer's desk, so they play silently.
+    player = kaya.player(muted=bool(os.environ.get("KAYA_SELFTEST")),
+                         on_state=on_player_state, on_failed=on_player_failed)
     if desktop:
         library_body()
 

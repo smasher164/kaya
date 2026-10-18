@@ -5633,7 +5633,7 @@ function runScope<T>(
   return result;
 }
 
-export type EntryOptions = { title?: string; interceptBack?: boolean; onPopped?: () => void; onBack?: () => void };
+export type EntryOptions = { title?: string; interceptBack?: boolean; onPopped?: () => void; onBack?: () => void; window?: number };
 export type SheetOptions = {
   title?: string;
   interceptDismiss?: boolean;
@@ -6953,10 +6953,11 @@ export class App {
 
   /** A navigation entry's scene scope (DESIGN.md, Navigation): push_entry
    * plus the entry's props, and the single top-level container mounts
-   * INTO IT on exit. Nests inside a handler's transaction. */
+   * INTO IT on exit. Nests inside a handler's transaction. `window` is the
+   * surface whose stack it joins, a section's id inside that section. */
   pushEntry<T>(entryId: number, opts: EntryOptions, body: () => T): T {
     return runScope<T>("push", body, entryId, () => {
-      records().push(wire.tx_push_entry(0, entryId));
+      records().push(wire.tx_push_entry(opts.window ?? 0, entryId));
       if (opts.title !== undefined) records().push(wire.tx_set_entry_title(entryId, String(opts.title)));
       if (opts.interceptBack !== undefined) records().push(wire.tx_set_entry_intercept_back(entryId, Boolean(opts.interceptBack)));
       if (opts.onPopped !== undefined) this._entryPopped.set(entryId, opts.onPopped);

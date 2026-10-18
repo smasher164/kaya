@@ -6364,7 +6364,7 @@ class _TxScope:
             self._outer = (_recording, _pending_root)
             _recording = True
             _pending_root = None
-            _records().append(wire.tx_push_entry(0, self._window))
+            _records().append(wire.tx_push_entry(self._parent, self._window))
             if self._title is not None:
                 _records().append(
                     wire.tx_set_entry_title(self._window, str(self._title)))
@@ -8114,10 +8114,13 @@ class App:
     def push_entry(self, entry_id: int, *, title: str | None = None,
                    intercept_back: bool | None = None,
                    on_popped: Callable[[], object] | None = None,
-                   on_back: Callable[[], object] | None = None) -> _TxScope:
+                   on_back: Callable[[], object] | None = None,
+                   window: int = 0) -> _TxScope:
         """A navigation entry's scene scope (DESIGN.md, Navigation): the
         single top-level container mounts INTO IT on exit. Entry ids are
-        guest-allocated in the shared surface namespace.
+        guest-allocated in the shared surface namespace. `window` is the
+        surface whose stack it joins: 0 the primary, a section's id to push
+        inside that section (DESIGN.md, Sections).
 
         on_popped() fires when the user's back affordance pops THIS entry
         natively (a programmatic kaya.pop_entry does not fire it) and
@@ -8125,7 +8128,7 @@ class App:
         intercept_back is armed, and NOTHING HAS POPPED — answer with
         kaya.pop_entry to agree."""
         return _TxScope(
-            self, mount_on_exit=True, window=entry_id, push=True,
+            self, mount_on_exit=True, window=entry_id, push=True, parent=window,
             title=title, intercept_back=intercept_back,
             on_popped=on_popped, on_back=on_back)
 

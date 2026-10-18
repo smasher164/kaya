@@ -25,7 +25,11 @@
     <!-- The declared identity, read out of guests/assets/identity.toml
          by android/build.gradle.kts (rusthost's manifest carries the
          reasoning). -->
+    <!-- The lane's media server is plain HTTP at 10.0.2.2 (the library's
+         kaya_harness_network); without it media3 refuses the playlist's
+         audio, ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED. -->
     <application
+        android:networkSecurityConfig="@xml/kaya_harness_network"
         android:icon="@mipmap/kaya_mark"
         android:label="${kayaAppLabel}"
         android:theme="@style/Theme.Kaya.Launch">

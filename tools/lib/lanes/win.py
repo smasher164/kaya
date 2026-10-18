@@ -361,6 +361,9 @@ ORDER = [
      "shapes_rust", "shapes_python", "shapes_js", "shapes_go", "shapes_csharp", "shapes_java",
      "tracks_rust", "tracks_python", "tracks_js", "tracks_go", "tracks_csharp", "tracks_java",
      "dock_rust", "dock_python", "dock_js", "dock_go", "dock_csharp", "dock_java",
+     # The media player demo's playlist (docs/media-player-plan.md §6 step 5):
+     # no hover, its player muted under the harness.
+     "music_playlist_python",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -923,7 +926,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
-              "music_home": "music"}
+              "music_home": "music", "music_playlist": "music"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

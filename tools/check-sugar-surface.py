@@ -11732,6 +11732,11 @@ from skin_surface import run as check_skin_surface
 if check_skin_surface():
     status = 1
 
+from nav_surface import run as check_nav_surface
+
+if check_nav_surface():
+    status = 1
+
 check_scene_sugar()
 
 if status != 0:

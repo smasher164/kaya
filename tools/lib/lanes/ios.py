@@ -80,13 +80,14 @@ GO_SCENES = [
 
 # CPython embedded in ONE bundle carrying every python scene
 # (docs/python-mobile-plan.md).
-PYTHON_SCENES = ["portfolio", "varied", "music_home"]
+PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist"]
 # A scene whose guest file is another's: staged under the scene's name, the
 # one the host's main.py runs (tools/pyhost-main.py).
-PYTHON_GUEST = {"music_home": "music"}
+PYTHON_GUEST = {"music_home": "music", "music_playlist": "music"}
 # The media player demo on a phone (docs/media-player-plan.md M6): no pointer,
 # and the library is the Library section rather than the sidebar.
-MUSIC_PHONE_TAIL = ('expect_title "Music"; select_section 1; expect_selected row@saved[139585] on; expect_selected row@saved[201715] off; expect_image_phase image@saved_art[139585] shown; expect_shape image@saved_art[139585] rounded; click row@saved[201715]; expect_selected row@saved[201715] on; select_section 0; expect_selected column@card_201715 on; expect_selected column@card_139585 off')
+MUSIC_PLAYLIST_PHONE_TAIL = ('expect_columns column@tracks "#|Title|Time"; expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,0:20|7,Athens/Pierce Murphy,0:20"; back; expect_selected column@card_201715 on; click column@card_581719; expect_rows column@tracks "1,A Serpent I Did Hear/Pierce Murphy,0:20|2,Persimmon/Pierce Murphy,0:20"; back; select_section 1; click row@saved[201715]; expect_rows column@tracks "4,Seven Chimes/Pierce Murphy,0:20|7,Athens/Pierce Murphy,0:20"; back; expect_selected row@saved[201715] on')
+MUSIC_PHONE_TAIL = ('expect_title "Music"; click column@card_201715; back; expect_selected column@card_201715 on; expect_selected column@card_581719 off; expect_fill column@card_201715 selected; click column@card_139585; back; expect_selected column@card_139585 on; expect_selected column@card_201715 off; select_section 1; expect_selected row@saved[139585] on; expect_selected row@saved[201715] off; expect_image_phase image@saved_art[139585] shown; expect_shape image@saved_art[139585] rounded; click row@saved[201715]; back; expect_selected row@saved[201715] on; select_section 0; expect_selected column@card_201715 on; expect_selected column@card_139585 off')
 
 # The rust-swiftui suite: one cargo example per scene, milestone2 first
 # (its leg is the bare `rust-swiftui`). The EXAMPLE a scene builds is
@@ -326,6 +327,10 @@ MODS = {
     # asserts the always-stacked truth this host CAN express.
     ("python", "music_home"): {"cut": "hover", "keep": "expect_ax expect_grid_columns",
                                "extra": MUSIC_PHONE_TAIL},
+    # The playlist's sidebar tail is the desktops'; a phone comes back with
+    # `back` and opens a library album in the Library section.
+    ("python", "music_playlist"): {"cut": "expect_title", "keep": "expect_tint",
+                                   "extra": MUSIC_PLAYLIST_PHONE_TAIL},
     ("python", "portfolio"): {
         "extra": "expect_folded column@summary column@ledger",
         "cut": "resize_window",

@@ -68,7 +68,7 @@ def run():
     texts = {rel: (ROOT / rel).read_text(encoding="utf-8") for _, rel, _, _ in ROWS}
     baseline = findings(texts)
     for problem in baseline:
-        gate.fail(problem)
+        gate.finding(problem)
     if baseline:
         print("check-timecode-surface: FINDINGS ABOVE")
         return gate.status

@@ -99,6 +99,7 @@ module KayaApp
     primary,
     createWindow,
     pushEntry,
+    pushEntryIn,
     addSection,
     addSectionIn,
     selectSection,
@@ -108,6 +109,7 @@ module KayaApp
     SectionsPresentation (..),
     Appearance (..),
     popEntry,
+    popEntryIn,
     EntryAttr (..),
     presentSheet,
     presentSheetOver,
@@ -1283,8 +1285,14 @@ data SectionAttr
 -- are guest-allocated in the shared surface namespace); materializes
 -- covered, 'mountIn' presents it.
 pushEntry :: Word64 -> [EntryAttr] -> Build ()
-pushEntry n attrs = do
-  emitB (W.txPushEntry 0 n)
+pushEntry = pushEntryIn 0
+
+-- | 'pushEntry' onto another surface's stack said out loud: a section's id
+-- pushes inside that section (DESIGN.md, Sections), an aux window's onto
+-- its own.
+pushEntryIn :: Word64 -> Word64 -> [EntryAttr] -> Build ()
+pushEntryIn w n attrs = do
+  emitB (W.txPushEntry w n)
   mapM_ apply attrs
   where
     apply (ETitle t) = emitB (W.txSetEntryTitle n (T.unpack t))
@@ -1295,7 +1303,10 @@ pushEntry n attrs = do
 -- | Pop the primary stack's top navigation entry and forget its tree — also
 -- the back-veto grammar's confirmation after 'onBackRequested'.
 popEntry :: Build ()
-popEntry = emitB (W.txPopEntry 0)
+popEntry = popEntryIn 0
+
+popEntryIn :: Word64 -> Build ()
+popEntryIn w = emitB (W.txPopEntry w)
 
 -- | The height the phones open a sheet at (docs\/sheet-plan.md §1.4); the
 -- desktops have nothing to say and ignore it.
