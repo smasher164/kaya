@@ -714,7 +714,17 @@ image_palette beside it is asked separately. RULED 2026-10-18 (the
 maintainer: "definitely yes to image_palette"): kaya adds image_palette beside
 image_dominant, the picture's main colours with their shares, in the core and
 all nine bindings and the C floor; the header picks the most vivid colour with
-enough share. The fade line at the header's
+enough share.
+
+RULED 2026-10-18 from the vivid-header review page (the maintainer: "for the
+questions, i agree with everything"): (1) the core's light-mode clamp lifts a
+data colour's lightness while KEEPING its chroma (a pale rose, not a grey), as
+Y2's text already says it does, for every app; (2) the album header's line
+under the title no longer repeats the artist, whose name is the link to the
+artist page; (3) the vivid pick's share threshold is lowered so a small vivid
+figure (The Banquet's yellow, 1.6% of its cover) counts; (4) a picture ground at
+the top of a phone screen, outside a scroll, runs under the status bar as a
+gradient ground does (safe-area A3), on both phones. The fade line at the header's
 edge and the Mac's colour stopping under the title bar stay as they are.
 BUILT 2026-10-18: `image_palette(bytes, n)` in crates/kaya/src/dominant.rs
 (at most n and at most 16 colours, each with its share, largest first; a
