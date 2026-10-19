@@ -566,8 +566,13 @@ gradient ground (docs/styling-pass-plan.md Y2) runs under the system bars on the
 sides where it touches the safe area's edge, as SwiftUI's ShapeStyle background
 does on iOS: through plain rows and columns to the mounted root (the bleed's
 touching walk), with the window giving no inset, never inside a scroll; its
-content keeps the inset. An image ground (Y3) does not, on either phone (iOS
-draws it with the ViewBuilder background). Each bar's icons take the shade with
+content keeps the inset. An image ground (Y3) does the same since 2026-10-18
+(docs/media-player-plan.md M15's fourth ruling), on both phones: the picture is
+cropped over the grown area and the readers place it there; its claim on a bar
+is the mean of the picture under that bar's outer thirds, where the icons sit.
+iOS's App lifecycle has no per-view status bar style (`toolbarColorScheme` acts
+only while the bar's background is visible), so the root controller's
+`preferredStatusBarStyle` answers the claim (`kayaGroundUnder`). Each bar's icons take the shade with
 the higher contrast against what is drawn behind it: a reaching ground while it
 is composed, the ground composed there otherwise, so a popped screen gives the
 default back. Read by `expect_ground_reach` and `expect_system_bars` (the

@@ -127,16 +127,87 @@ pub fn gradient_tops(rgb: u32) -> (u32, u32) {
     };
     let light = if lstar < GRADIENT_LIGHT_MIN_LSTAR {
         let mut target = GRADIENT_LIGHT_MIN_LSTAR + 0.5;
-        let mut top = set_lstar(rgb, target);
+        let mut top = lift_keeping_chroma(rgb, target);
         while cie_lstar(top) < GRADIENT_LIGHT_MIN_LSTAR && target < 100.0 {
             target += 0.5;
-            top = set_lstar(rgb, target);
+            top = lift_keeping_chroma(rgb, target);
         }
         top
     } else {
         rgb
     };
     (light, dark)
+}
+
+/// Y2's light top: L* lifted to `target` at the seed's Oklab hue and chroma,
+/// the chroma given up only where the sRGB gamut ends.
+fn lift_keeping_chroma(rgb: u32, target: f64) -> u32 {
+    let (l0, a, b) = oklab(rgb);
+    let at = |l: f64| {
+        let full = oklab_linear(l, a, b);
+        if in_gamut(full) {
+            return full;
+        }
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..40 {
+            let mid = (lo + hi) / 2.0;
+            if in_gamut(oklab_linear(l, a * mid, b * mid)) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        oklab_linear(l, a * lo, b * lo)
+    };
+    let lstar_of = |(r, g, b): (f64, f64, f64)| {
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        if y <= 216.0 / 24389.0 {
+            y * 24389.0 / 27.0
+        } else {
+            116.0 * y.cbrt() - 16.0
+        }
+    };
+    let (mut lo, mut hi) = (l0, 1.0f64);
+    for _ in 0..40 {
+        let mid = (lo + hi) / 2.0;
+        if lstar_of(at(mid)) < target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    let (r, g, b) = at(hi);
+    pack(delinearize(r.max(0.0)), delinearize(g.max(0.0)), delinearize(b.max(0.0)))
+}
+
+fn in_gamut((r, g, b): (f64, f64, f64)) -> bool {
+    [r, g, b].iter().all(|c| (-1e-9..=1.0 + 1e-9).contains(c))
+}
+
+/// Oklab (Björn Ottosson's matrices) of a packed sRGB colour: (L, a, b).
+fn oklab(rgb: u32) -> (f64, f64, f64) {
+    let (r, g, b) = srgb_channels(rgb);
+    let (lr, lg, lb) = (linearize(r), linearize(g), linearize(b));
+    let l = (0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb).cbrt();
+    let m = (0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb).cbrt();
+    let s = (0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb).cbrt();
+    (
+        0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+        1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+        0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    )
+}
+
+/// Linear sRGB of an Oklab colour, unclamped, so a caller can see the gamut.
+fn oklab_linear(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
+    let l_ = (l + 0.3963377774 * a + 0.2158037573 * b).powi(3);
+    let m_ = (l - 0.1055613458 * a - 0.0638541728 * b).powi(3);
+    let s_ = (l - 0.0894841775 * a - 1.2914855480 * b).powi(3);
+    (
+        4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+        -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+        -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+    )
 }
 
 /// WCAG's contrast ratio of two packed sRGB colours.
@@ -410,6 +481,46 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// docs/styling-pass-plan.md Y2 and docs/media-player-plan.md M15's first
+    /// 2026-10-18 ruling: the light top is the seed lifted to the floor, not
+    /// past it, at the seed's Oklab hue and chroma, giving chroma up only
+    /// where the sRGB gamut ends, so a rose stays a pale rose.
+    #[test]
+    fn the_light_top_keeps_the_seeds_hue_and_chroma() {
+        let polar = |c: u32| {
+            let (_, a, b) = oklab(c);
+            (a.hypot(b), b.atan2(a).to_degrees())
+        };
+        let on_gamut_edge = |c: u32| {
+            let ch = [(c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF];
+            ch.iter().any(|&v| v <= 1 || v >= 254)
+        };
+        let mut checked = 0;
+        for rgb in sweep() {
+            if cie_lstar(rgb) >= GRADIENT_LIGHT_MIN_LSTAR {
+                continue;
+            }
+            let (light, _) = gradient_tops(rgb);
+            let l = cie_lstar(light);
+            assert!(l < GRADIENT_LIGHT_MIN_LSTAR + 1.5, "{rgb:06x}: light top {light:06x} at L* {l:.2}, lifted past the floor");
+            let ((c0, h0), (c1, h1)) = (polar(rgb), polar(light));
+            assert!(
+                c1 >= c0 - 0.006 || on_gamut_edge(light),
+                "{rgb:06x}: light top {light:06x} gave up chroma {c0:.3} -> {c1:.3} inside the gamut"
+            );
+            if c0 > 0.03 && c1 > 0.03 {
+                let dh = ((h1 - h0 + 540.0) % 360.0 - 180.0).abs();
+                assert!(dh < 4.0, "{rgb:06x}: light top {light:06x} moved its hue {h0:.1} -> {h1:.1}");
+                checked += 1;
+            }
+        }
+        assert!(checked > 300, "the hue clause read {checked} seeds");
+        let rose = 0x673946;
+        let (light, _) = gradient_tops(rose);
+        let ((c0, _), (c1, _)) = (polar(rose), polar(light));
+        assert!(c1 >= c0 - 0.006 && c1 > 0.05, "{rose:06x} -> {light:06x}: chroma {c0:.3} -> {c1:.3}, a grey");
     }
 
     /// The mid-stops hold the ratio too: an sRGB mix toward the mac's dark

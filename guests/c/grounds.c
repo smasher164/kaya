@@ -58,6 +58,7 @@ static void build_scene(void) {
     window_prop(&tx, KAYA_WPROP_TITLE, kaya_str("grounds"));
     window_prop(&tx, KAYA_WPROP_WIDTH, kaya_f64(480.0));
     window_prop(&tx, KAYA_WPROP_HEIGHT, kaya_f64(560.0));
+    window_prop(&tx, KAYA_WPROP_INSET, kaya_f64(0.0));
 
     kaya_tx_create_widget(&tx, W_ROOT, KAYA_KIND_COLUMN);
     kaya_tx_set_spacing(&tx, W_ROOT, 12.0);
@@ -77,7 +78,6 @@ static void build_scene(void) {
     kaya_tx_set_ground(&tx, W_HEADER, KAYA_GROUND_GRADIENT);
     kaya_tx_set_color(&tx, W_HEADER, (uint8_t)(rgb >> 16), (uint8_t)(rgb >> 8), (uint8_t)rgb, 0xFF);
     kaya_tx_set_a11y_id(&tx, W_HEADER, "header");
-    kaya_tx_add_child(&tx, W_ROOT, W_HEADER);
 
     /* The hero: the picture as the ground, the name on the overlay panel. */
     kaya_tx_create_widget(&tx, W_HERO, KAYA_KIND_COLUMN);
@@ -92,7 +92,10 @@ static void build_scene(void) {
     kaya_tx_set_ground(&tx, W_HERO, KAYA_GROUND_IMAGE);
     kaya_tx_set_source(&tx, W_HERO, kaya_blob_register(art, len));
     kaya_tx_set_a11y_id(&tx, W_HERO, "hero");
+    /* The hero first, at the top of a window giving no inset: on a phone it
+     * runs under the status bar (docs/media-player-plan.md M15). */
     kaya_tx_add_child(&tx, W_ROOT, W_HERO);
+    kaya_tx_add_child(&tx, W_ROOT, W_HEADER);
 
     kaya_tx_create_widget(&tx, W_PLAIN, KAYA_KIND_COLUMN);
     kaya_tx_create_widget(&tx, W_PLAIN_TEXT, KAYA_KIND_LABEL);

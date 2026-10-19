@@ -20832,21 +20832,200 @@ struct KayaGroundSurface: ViewModifier {
                     colors: [kayaPackedRGB(top), kayaWindowGround(grouped: grouped)],
                     startPoint: .top, endPoint: .bottom))
         case groundImage:
-            content
-                .background {
-                    if let image = node.image {
-                        #if os(macOS)
-                            Image(nsImage: image).resizable().scaledToFill()
-                        #else
-                            Image(uiImage: image).resizable().scaledToFill()
-                        #endif
+            let reach = kayaGroundEdges(node)
+            if reach.isEmpty {
+                content
+                    .background {
+                        if let image = node.image {
+                            #if os(macOS)
+                                Image(nsImage: image).resizable().scaledToFill()
+                            #else
+                                Image(uiImage: image).resizable().scaledToFill()
+                            #endif
+                        }
                     }
-                }
-                .clipped()
+                    .clipped()
+                    .onAppear { kayaGroundUnder(node.id, nil) }
+            } else {
+                #if os(iOS)
+                    content
+                        .background {
+                            Color.clear
+                                .overlay {
+                                    if let image = node.image { Image(uiImage: image).resizable().scaledToFill() }
+                                }
+                                .clipped()
+                                .background(
+                                    GeometryReader { geo in
+                                        Color.clear
+                                            .onAppear { kayaGroundDrawn(node, inner: geo.frame(in: .global)) }
+                                            .onChange(of: geo.frame(in: .global)) { _, f in kayaGroundDrawn(node, inner: f) }
+                                            .onChange(of: node.image) { _, _ in kayaGroundDrawn(node, inner: geo.frame(in: .global)) }
+                                    }
+                                )
+                                .ignoresSafeArea(.container, edges: reach)
+                        }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear
+                                    .onAppear { kayaGroundDrawn(node, outer: geo.frame(in: .global)) }
+                                    .onChange(of: geo.frame(in: .global)) { _, f in kayaGroundDrawn(node, outer: f) }
+                            }
+                        )
+                        .onDisappear { kayaGroundUnder(node.id, nil) }
+                #else
+                    content
+                #endif
+            }
         default:
             content
         }
     }
+}
+
+/// The sides an image ground runs under the system bars on (docs/safe-area-plan.md
+/// A2, A3; docs/media-player-plan.md M15): a phone screen's edges it touches with
+/// the window giving no inset, never inside a scroll; Compose's kayaGroundReach.
+@MainActor func kayaGroundEdges(_ node: KayaNode) -> Edge.Set {
+    #if os(iOS)
+        guard (kayaScene.windows[0]?.inset ?? 16) == 0 else { return [] }
+        return kayaBleedEdges(node)
+    #else
+        return []
+    #endif
+}
+
+/// Each image ground's container frame and drawn frame, global points: the
+/// readers place the picture where it is drawn.
+@MainActor var kayaGroundFrames: [UInt64: (outer: CGRect?, inner: CGRect?)] = [:]
+
+/// How far an image ground draws past its container, (left, top, right, bottom).
+@MainActor func kayaGroundGrowth(_ id: UInt64) -> (CGFloat, CGFloat, CGFloat, CGFloat) {
+    guard let pair = kayaGroundFrames[id], let o = pair.outer, let i = pair.inner else { return (0, 0, 0, 0) }
+    return (max(0, o.minX - i.minX), max(0, o.minY - i.minY), max(0, i.maxX - o.maxX), max(0, i.maxY - o.maxY))
+}
+
+@MainActor func kayaGroundDrawn(_ node: KayaNode, outer: CGRect? = nil, inner: CGRect? = nil) {
+    var pair = kayaGroundFrames[node.id] ?? (nil, nil)
+    if let outer { pair.outer = outer }
+    if let inner { pair.inner = inner }
+    kayaGroundFrames[node.id] = pair
+    #if os(iOS)
+        // The growth also covers the navigation bar; the icons sit in the
+        // window's own top inset, the status bar.
+        let (_, grown, _, _) = kayaGroundGrowth(node.id)
+        let up = min(grown, kayaHarnessWindow()?.safeAreaInsets.top ?? 0)
+        guard up > 0, let drawn = pair.inner, let image = node.image, let window = kayaHarnessWindow() else {
+            kayaGroundUnder(node.id, nil)
+            return
+        }
+        // Each end third of the bar, where its icons sit: the picture where it
+        // is drawn there, the page's ground over the rest.
+        var page: [Double] = [1, 1, 1]
+        var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (1, 1, 1, 1)
+        if UIColor.systemBackground.resolvedColor(with: window.traitCollection).getRed(&r, green: &g, blue: &b, alpha: &a) {
+            page = [Double(r), Double(g), Double(b)]
+        }
+        let width = window.bounds.width
+        var ends: [[Double]] = []
+        for third in [CGRect(x: 0, y: 0, width: width / 3, height: up), CGRect(x: width * 2 / 3, y: 0, width: width / 3, height: up)] {
+            let over = third.intersection(CGRect(x: drawn.minX, y: 0, width: drawn.width, height: up))
+            let share = over.isNull ? 0 : Double(over.width / third.width)
+            let art = over.isNull ? nil
+                : kayaPictureMean(image, drawn.size, over.offsetBy(dx: -drawn.minX, dy: 0))
+            ends.append((0..<3).map { c in (art?[c] ?? page[c]) * share + page[c] * (1 - share) })
+        }
+        func lum(_ c: [Double]) -> Double {
+            let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+            return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+        }
+        let ys = ends.map(lum)
+        let dark = ys.map { ($0 + 0.05) / 0.05 }.min()! >= ys.map { 1.05 / ($0 + 0.05) }.min()!
+        kayaDiag("ground \(node.id) under the status bar: \(ends.map(kayaHex).joined(separator: " and ")) at its ends "
+            + "over \(Int(up))pt of \(drawn), \(dark ? "dark" : "light") icons")
+        kayaGroundUnder(node.id, dark)
+    #endif
+}
+
+#if os(iOS)
+    /// The mean colour a picture drawn to cover `area` shows over `rect` of it.
+    func kayaPictureMean(_ image: UIImage, _ area: CGSize, _ rect: CGRect) -> [Double]? {
+        guard let cg = image.cgImage, area.width > 0, area.height > 0, rect.width > 0, rect.height > 0 else { return nil }
+        let (w, h) = (CGFloat(cg.width), CGFloat(cg.height))
+        let scale = max(area.width / w, area.height / h)
+        let (cols, rows) = (24, 6)
+        var buf = [UInt8](repeating: 0, count: cols * rows * 4)
+        let ok = buf.withUnsafeMutableBytes { raw -> Bool in
+            guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+                let ctx = CGContext(data: raw.baseAddress, width: cols, height: rows, bitsPerComponent: 8,
+                                    bytesPerRow: cols * 4, space: space,
+                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            let (sx, sy) = (CGFloat(cols) / rect.width, CGFloat(rows) / rect.height)
+            let drawnW = w * scale, drawnH = h * scale
+            let x0 = (area.width - drawnW) / 2 - rect.minX, y0 = (area.height - drawnH) / 2 - rect.minY
+            ctx.interpolationQuality = .medium
+            ctx.draw(cg, in: CGRect(x: x0 * sx, y: CGFloat(rows) - (y0 + drawnH) * sy, width: drawnW * sx, height: drawnH * sy))
+            return true
+        }
+        guard ok else { return nil }
+        var sum = [0.0, 0.0, 0.0]
+        for p in 0..<(cols * rows) { for c in 0..<3 { sum[c] += Double(buf[p * 4 + c]) / 255 } }
+        return sum.map { $0 / Double(cols * rows) }
+    }
+
+    /// The status bar's icon shade an image ground under it asks for, by
+    /// container id (true for dark icons), while it is shown.
+    @MainActor var kayaStatusClaims: [UInt64: Bool] = [:]
+    /// The claim the root controller answers preferredStatusBarStyle with: 0
+    /// none (SwiftUI's own answer), 1 dark icons, 2 light ones.
+    nonisolated(unsafe) var kayaStatusOverride = 0
+    @MainActor private var kayaStatusStyleClasses: Set<ObjectIdentifier> = []
+#endif
+
+/// An image ground's claim on the status bar's icon shade, or its release.
+@MainActor func kayaGroundUnder(_ id: UInt64, _ darkIcons: Bool?) {
+    #if os(iOS)
+        if let darkIcons { kayaStatusClaims[id] = darkIcons } else { kayaStatusClaims.removeValue(forKey: id) }
+        let want = kayaStatusClaims.values.first.map { $0 ? 1 : 2 } ?? 0
+        guard want != kayaStatusOverride || (darkIcons != nil && kayaStatusStyleClasses.isEmpty) else { return }
+        kayaStatusOverride = want
+        guard let root = kayaHarnessWindow()?.rootViewController else { return }
+        // SwiftUI's App lifecycle offers no per-view status bar style (its
+        // toolbarColorScheme needs a visible bar background), so the root
+        // controller's getter is answered from the claim (docs/safe-area-plan.md A2).
+        let cls: AnyClass = type(of: root)
+        if !kayaStatusStyleClasses.contains(ObjectIdentifier(cls)) {
+            kayaStatusStyleClasses.insert(ObjectIdentifier(cls))
+            let sel = #selector(getter: UIViewController.preferredStatusBarStyle)
+            if let method = class_getInstanceMethod(cls, sel) {
+                typealias Getter = @convention(c) (AnyObject, Selector) -> UIStatusBarStyle
+                let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+                let answer: @convention(block) (AnyObject) -> UIStatusBarStyle = { me in
+                    switch kayaStatusOverride {
+                    case 1: return .darkContent
+                    case 2: return .lightContent
+                    default: return original(me, sel)
+                    }
+                }
+                class_replaceMethod(cls, sel, imp_implementationWithBlock(answer), method_getTypeEncoding(method))
+            }
+            // The root hands the question to a child (the navigation stack's
+            // own controller) unless it is told not to while a claim stands.
+            let child = #selector(getter: UIViewController.childForStatusBarStyle)
+            if let method = class_getInstanceMethod(cls, child) {
+                typealias Getter = @convention(c) (AnyObject, Selector) -> UIViewController?
+                let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+                let answer: @convention(block) (AnyObject) -> UIViewController? = { me in
+                    kayaStatusOverride == 0 ? original(me, child) : nil
+                }
+                class_replaceMethod(cls, child, imp_implementationWithBlock(answer), method_getTypeEncoding(method))
+            }
+        }
+        root.setNeedsStatusBarAppearanceUpdate()
+        kayaDiag("status bar claim \(want) on \(cls), answering \(root.preferredStatusBarStyle.rawValue), "
+            + "handing to \(root.childForStatusBarStyle.map { String(describing: type(of: $0)) } ?? "none")")
+    #endif
 }
 
 /// An image's clip (Y6), on the picture and on its loading and failed looks.
@@ -21451,7 +21630,7 @@ func kayaSystemBarWords() -> (String, String) {
             if manager.isStatusBarHidden { return ("none/none", "the status bar is hidden") }
             guard let shot = kayaWindowPixels() else { return ("unreadable", "no window pixels") }
             let y = window.safeAreaInsets.top / 2
-            guard let strip = shot.at(CGPoint(x: 4, y: y)) else {
+            guard let strip = shot.at(CGPoint(x: 4, y: y)), let far = shot.at(CGPoint(x: window.bounds.width - 4, y: y)) else {
                 return ("unreadable", "the status strip falls outside the window at y \(Int(y))")
             }
             let style = manager.statusBarStyle
@@ -21468,10 +21647,13 @@ func kayaSystemBarWords() -> (String, String) {
                 let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
                 return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
             }
-            let y0 = lum(strip)
-            let wantDark = (y0 + 0.05) / 0.05 >= 1.05 / (y0 + 0.05)
+            // A bar split between a picture and the page reads at both ends:
+            // the shade whose worse contrast is the better (Compose's kayaDarkIconsOver).
+            let ys = [lum(strip), lum(far)]
+            let wantDark = ys.map { ($0 + 0.05) / 0.05 }.min()! >= ys.map { 1.05 / ($0 + 0.05) }.min()!
             return ("\(wantDark == darkIcons ? "legible" : "illegible")/none",
-                    "status icons \(darkIcons ? "dark" : "light") (\(how)) over \(kayaHex(strip)) at y \(Int(y))")
+                    "status icons \(darkIcons ? "dark" : "light") (\(how)) over \(kayaHex(strip)) and \(kayaHex(far)) "
+                        + "at its ends, y \(Int(y))")
         }
     #endif
 }
@@ -21485,10 +21667,12 @@ func kayaSystemBarWords() -> (String, String) {
     #else
         guard let cg = image.cgImage else { return nil }
     #endif
+    let (gl, gt, gr, gb) = kayaGroundGrowth(node.id)
+    let area = CGSize(width: box.width + gl + gr, height: box.height + gt + gb)
     let (w, h) = (CGFloat(cg.width), CGFloat(cg.height))
-    let scale = max(box.width / w, box.height / h)
-    let ox = (w * scale - box.width) / 2, oy = (h * scale - box.height) / 2
-    let px = Int((p.x + ox) / scale), py = Int((p.y + oy) / scale)
+    let scale = max(area.width / w, area.height / h)
+    let ox = (w * scale - area.width) / 2, oy = (h * scale - area.height) / 2
+    let px = Int((p.x + gl + ox) / scale), py = Int((p.y + gt + oy) / scale)
     guard px >= 0, py >= 0, px < cg.width, py < cg.height else { return nil }
     var buf = [UInt8](repeating: 0, count: 4)
     let ok = buf.withUnsafeMutableBytes { raw -> Bool in

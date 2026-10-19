@@ -972,7 +972,7 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
         val top = if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF
             else (node.groundTops shr 24) and 0xFF_FFFF
         val stops = listOf(Color(0xFF00_0000L or top), scheme.background)
-        val reach = kayaGroundReach(node, stops[0], stops[1])
+        val reach = kayaGroundReach(node) { Pair(stops[0].toArgb(), stops[1].toArgb()) }
         if (reach == null) {
             Modifier.background(Brush.verticalGradient(stops))
         } else {
@@ -994,22 +994,91 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
     KayaCompose.GROUND_IMAGE -> {
         KayaPictureDoor(node)
         val picture = node.picture
+        var box by remember(node.id) { mutableStateOf(IntSize.Zero) }
+        var boxX by remember(node.id) { mutableStateOf(0) }
+        val windowW = LocalView.current.width
+        val page = MaterialTheme.colorScheme.background.toArgb()
+        val reach = kayaGroundReach(node) { ext ->
+            if (picture == null || box == IntSize.Zero) Pair(null, null)
+            else Pair(kayaPictureStrip(picture, box, boxX, windowW, page, ext, status = true),
+                kayaPictureStrip(picture, box, boxX, windowW, page, ext, status = false))
+        }
+        DisposableEffect(node.id) { onDispose { kayaGroundGrowth.remove(node.id) } }
+        val sized = Modifier.onGloballyPositioned {
+            box = it.size
+            boxX = it.positionInWindow().x.roundToInt()
+        }
         if (picture == null) {
-            Modifier
+            sized
         } else {
             // Not `paint` (docs/traps.md, Compose's Modifier.paint fills bounded constraints).
             val painter = remember(picture) { KayaPicturePainter(picture) }
-            Modifier.clipToBounds().drawBehind {
-                val scale = ContentScale.Crop.computeScaleFactor(painter.intrinsicSize, size)
+            sized.then(if (reach == null) Modifier.clipToBounds() else Modifier).drawBehind {
+                val ltr = layoutDirection == LayoutDirection.Ltr
+                val grow = if (reach == null) FloatArray(4) else {
+                    val (pads, edges) = reach
+                    floatArrayOf(
+                        if (edges[if (ltr) 2 else 3]) pads.getLeft(this, layoutDirection).toFloat() else 0f,
+                        if (edges[0]) pads.getTop(this).toFloat() else 0f,
+                        if (edges[if (ltr) 3 else 2]) pads.getRight(this, layoutDirection).toFloat() else 0f,
+                        if (edges[1]) pads.getBottom(this).toFloat() else 0f,
+                    )
+                }
+                kayaGroundGrowth[node.id] = grow
+                val (left, up, right, down) = grow
+                val area = Size(size.width + left + right, size.height + up + down)
+                val scale = ContentScale.Crop.computeScaleFactor(painter.intrinsicSize, area)
                 val drawn = Size(painter.intrinsicSize.width * scale.scaleX, painter.intrinsicSize.height * scale.scaleY)
                 val at = Alignment.Center.align(
                     IntSize(drawn.width.roundToInt(), drawn.height.roundToInt()),
-                    IntSize(size.width.roundToInt(), size.height.roundToInt()), layoutDirection)
-                translate(at.x.toFloat(), at.y.toFloat()) { with(painter) { draw(drawn) } }
+                    IntSize(area.width.roundToInt(), area.height.roundToInt()), layoutDirection)
+                clipRect(-left, -up, size.width + right, size.height + down) {
+                    translate(at.x - left, at.y - up) { with(painter) { draw(drawn) } }
+                }
             }
         }
     }
     else -> Modifier
+}
+
+/** How far each image ground draws past its box, by container id, in pixels
+ * (left, top, right, bottom): the readers place the picture where it is drawn. */
+internal val kayaGroundGrowth = java.util.concurrent.ConcurrentHashMap<Long, FloatArray>()
+
+/** What is drawn under the status bar's strip (or the navigation bar's) at
+ * its two outer thirds, where a bar's icons sit, as ARGB: the picture where an
+ * image ground drawn under ContentScale.Crop over [box] (at window x [boxX])
+ * grown by [ext] (up, down, left, right) covers it, the page's [ground]
+ * elsewhere; of the two ends, the one whose shade [kayaDarkIconsOver] chose,
+ * or null where no strip. */
+internal fun kayaPictureStrip(
+    picture: KayaPicture, box: IntSize, boxX: Int, windowW: Int, ground: Int, ext: IntArray, status: Boolean,
+): Int? {
+    val (up, down, left, right) = ext
+    val strip = if (status) up else down
+    if (strip <= 0) return null
+    val bitmap = picture.bitmap.asAndroidBitmap()
+    val (bw, bh) = Pair(bitmap.width.toFloat(), bitmap.height.toFloat())
+    val (w, h) = Pair((box.width + left + right).toFloat(), (box.height + up + down).toFloat())
+    val scale = maxOf(w / bw, h / bh)
+    val (ox, oy) = Pair((bw * scale - w) / 2, (bh * scale - h) / 2)
+    val y0 = if (status) 0f else h - strip
+    val across = if (windowW > 0) windowW.toFloat() else w
+    val ends = listOf(0 until 8, 16 until 24).map { cols ->
+        var (r, g, b, n) = IntArray(4)
+        for (j in 0 until 6) for (i in cols) {
+            val x = (i + 0.5f) * across / 24 - boxX + left
+            val c = if (x < 0f || x >= w) ground else {
+                val px = ((x + ox) / scale).toInt().coerceIn(0, bitmap.width - 1)
+                val py = ((y0 + (j + 0.5f) * strip / 6 + oy) / scale).toInt().coerceIn(0, bitmap.height - 1)
+                bitmap.getPixel(px, py)
+            }
+            r += (c shr 16) and 0xFF; g += (c shr 8) and 0xFF; b += c and 0xFF; n++
+        }
+        (0xFF shl 24) or ((r / n) shl 16) or ((g / n) shl 8) or (b / n)
+    }
+    val dark = kayaDarkIconsOver(ends)
+    return ends.first { kayaDarkIconsOn(it) == dark }
 }
 
 /** What a ground draws under each system bar, by container id, as ARGB
@@ -1025,20 +1094,37 @@ internal val kayaBarGrounds = androidx.compose.runtime.mutableStateMapOf<Long, P
  * bars it reaches lasts while it is composed.
  */
 @Composable
-internal fun kayaGroundReach(node: KayaNode, top: Color, bottom: Color): Pair<WindowInsets, BooleanArray>? {
+internal fun kayaGroundReach(node: KayaNode, under: (IntArray) -> Pair<Int?, Int?>): Pair<WindowInsets, BooleanArray>? {
     val pads = LocalKayaSafePads.current?.bleed
     val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
     val edges = if (pads == null || KayaSceneModel.windowInset != 0.0) null
         else kayaBleedEdges(node).takeIf { it.any { side -> side } }
-    val claim = if (pads == null || edges == null) null else Pair(
-        if (edges[0] && pads.getTop(density) > 0) top.toArgb() else null,
-        if (edges[1] && pads.getBottom(density) > 0) bottom.toArgb() else null,
-    ).takeIf { it.first != null || it.second != null }
+    val claim = if (pads == null || edges == null) null else {
+        val ltr = direction == LayoutDirection.Ltr
+        val ext = intArrayOf(
+            if (edges[0]) pads.getTop(density) else 0,
+            if (edges[1]) pads.getBottom(density) else 0,
+            if (edges[if (ltr) 2 else 3]) pads.getLeft(density, direction) else 0,
+            if (edges[if (ltr) 3 else 2]) pads.getRight(density, direction) else 0,
+        )
+        val (status, nav) = under(ext)
+        Pair(if (ext[0] > 0) status else null, if (ext[1] > 0) nav else null)
+            .takeIf { it.first != null || it.second != null }
+    }
     DisposableEffect(node.id, claim) {
         if (claim != null) kayaBarGrounds[node.id] = claim else kayaBarGrounds.remove(node.id)
         onDispose { kayaBarGrounds.remove(node.id) }
     }
     return if (pads == null || edges == null) null else Pair(pads, edges)
+}
+
+/** Dark icons where their worse WCAG contrast over the bar's [colours] (its
+ * two ends) beats light icons' worse one: a bar split between a picture and
+ * the page reads at both ends. */
+internal fun kayaDarkIconsOver(colours: List<Int>): Boolean {
+    val ys = colours.map { Color(it).luminance() }
+    return ys.minOf { (it + 0.05f) / 0.05f } >= ys.minOf { 1.05f / (it + 0.05f) }
 }
 
 /** Dark icons where black reads better than white on [argb]: the larger of
@@ -7999,7 +8085,7 @@ object KayaCompose {
                 holder = KayaSceneModel.parents[holder]
             }
             val pictured = holder?.let { id ->
-                kayaFillBoxes[id]?.let { Pair(it, KayaSceneModel.nodes[id]?.picture) }
+                kayaFillBoxes[id]?.let { Triple(it, KayaSceneModel.nodes[id]?.picture, id) }
             }
             listOf(
                 node?.let { kayaFillBoxes[it.id] },
@@ -8061,10 +8147,10 @@ object KayaCompose {
         // over the art has no one colour to rank against, so it reads as
         // overlay when the sample is dark and under half as bright as the
         // picture the nearest image ground draws behind it.
-        val pictured = gathered[4] as Pair<*, *>?
+        val pictured = gathered[4] as Triple<*, *, *>?
         if (pictured != null) {
             val holderBox = pictured.first as android.graphics.Rect
-            val art = kayaPictureAt(pictured.second as KayaPicture?, (x - origin.x - holderBox.left).toFloat(),
+            val art = kayaPictureAt(pictured.third as Long, pictured.second as KayaPicture?, (x - origin.x - holderBox.left).toFloat(),
                 (y - origin.y - holderBox.top).toFloat(), holderBox.width().toFloat(), holderBox.height().toFloat())
             val sample = got.map { it / 255.0 }.toDoubleArray()
             val mine = kayaLum(sample)
@@ -8159,8 +8245,11 @@ object KayaCompose {
 
     /** The colour the image ground [picture] draws at [x], [y] of a box
      * [w] x [h], all window pixels, under ContentScale.Crop. */
-    private fun kayaPictureAt(picture: KayaPicture?, x: Float, y: Float, w: Float, h: Float): DoubleArray? {
+    private fun kayaPictureAt(id: Long, picture: KayaPicture?, x0: Float, y0: Float, w0: Float, h0: Float): DoubleArray? {
         val bitmap = picture?.bitmap?.asAndroidBitmap() ?: return null
+        val grow = kayaGroundGrowth[id] ?: FloatArray(4)
+        val (x, y) = Pair(x0 + grow[0], y0 + grow[1])
+        val (w, h) = Pair(w0 + grow[0] + grow[2], h0 + grow[1] + grow[3])
         val (bw, bh) = Pair(bitmap.width.toFloat(), bitmap.height.toFloat())
         val scale = maxOf(w / bw, h / bh)
         val (ox, oy) = Pair((bw * scale - w) / 2, (bh * scale - h) / 2)
@@ -8224,7 +8313,7 @@ object KayaCompose {
         val ground = kayaRgb(tokens.ground)
         val seen = "top ${kayaHexOf(top)}, middle ${kayaHexOf(mid)}, bottom ${kayaHexOf(bottom)}, ground ${kayaHexOf(ground)}"
         if (kayaGap(top, ground) <= KAYA_SKIN_TOLERANCE) return "none ($seen)"
-        val art = kayaPictureAt(got.second, box.width() - 4 * u, 4 * u, box.width().toFloat(), box.height().toFloat())
+        val art = kayaPictureAt(nodeId, got.second, box.width() - 4 * u, 4 * u, box.width().toFloat(), box.height().toFloat())
         if (art != null && kayaGap(art, top) <= KAYA_SKIN_TOLERANCE * 2) {
             return "image ($seen, the picture there ${kayaHexOf(art)})"
         }
@@ -8870,13 +8959,16 @@ object KayaCompose {
         val words = read.zip(listOf("status", "navigation")).map { (bar, name) ->
             val (shown, darkIcons, y) = bar
             val strip = shot.at(4 * shot.density, y)
+            val far = shot.at(shot.bitmap.width - 4 * shot.density, y)
             when {
                 !shown -> { seen.add("no $name bar"); "none" }
-                strip == null -> { seen.add("the $name strip falls outside the window at y ${y.toInt()}"); "unreadable" }
+                strip == null || far == null -> { seen.add("the $name strip falls outside the window at y ${y.toInt()}"); "unreadable" }
                 else -> {
-                    val want = kayaDarkIconsOn(android.graphics.Color.rgb(
-                        (strip[0] * 255).roundToInt(), (strip[1] * 255).roundToInt(), (strip[2] * 255).roundToInt()))
-                    seen.add("$name icons ${if (darkIcons) "dark" else "light"} over ${kayaHexOf(strip)} at y ${y.toInt()}")
+                    fun argb(c: DoubleArray) = android.graphics.Color.rgb(
+                        (c[0] * 255).roundToInt(), (c[1] * 255).roundToInt(), (c[2] * 255).roundToInt())
+                    val want = kayaDarkIconsOver(listOf(argb(strip), argb(far)))
+                    seen.add("$name icons ${if (darkIcons) "dark" else "light"} over ${kayaHexOf(strip)} and " +
+                        "${kayaHexOf(far)} at its ends, y ${y.toInt()}")
                     if (want == darkIcons) "legible" else "illegible"
                 }
             }

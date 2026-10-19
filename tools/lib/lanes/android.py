@@ -434,6 +434,9 @@ MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
     # ends at its first hover.
     "cards": {"cut": ("hover", "expect_selected expect_ax", "")},
+    # An image ground at a screen's top runs under the status bar
+    # (docs/media-player-plan.md M15).
+    "grounds": {"append": 'expect_ground_reach column@hero top;expect_system_bars "legible/legible";'},
     # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
     # AMENDED 2026-10-17): this tier's table has no selection of its own to move.
     "tracks": {"cut": ("press down", "expect_tint expect_rows", "")},

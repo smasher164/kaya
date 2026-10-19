@@ -737,8 +737,17 @@ chroma 15 or more, and the dominant colour when none qualifies. The dark wash
 now matches the comparison's B on all four covers. In light the header is
 still a near grey (C0BABB on Through The Olive Branches, BBBCB8 on This
 Painted Life): the core's light clamp lifts L* 30 to 75 by mixing with white,
-which drops the chroma Y2 says it keeps. Whether to change that clamp is still
-open.
+which drops the chroma Y2 says it keeps. BUILT 2026-10-18, the four rulings:
+(1) crates/kaya/src/brand.rs's light clamp lifts L* at the seed's Oklab hue and
+chroma, giving chroma up only where the sRGB gamut ends (673946 lifts to E3ABB9
+where the mix gave C1B8BA), held by brand::tests'
+the_light_top_keeps_the_seeds_hue_and_chroma and skin_routes' light-clamp
+clause; (2) `album_about` reads "2021 · 2 songs, 0:40"; (3) VIVID_SHARE is 1%,
+so The Banquet's gold figure (D2B257, 1.6%) is its seed; (4) an image ground
+first in a window giving no inset runs under the status bar on both phones,
+the bars' icons taking the shade that reads on the picture's strip, the
+grounds scene's hero being the case (tools/lib/safearea_routes.py, the grounds
+phone tails).
 
 ## §6: Build order
 

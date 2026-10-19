@@ -40,7 +40,7 @@ FULL_ART = 300
 # The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
 UNKNOWN_COLOUR = kaya.Color(0x47, 0x47, 0x4A)
 HEADER_L = 30
-VIVID_SHARE = 0.02
+VIVID_SHARE = 0.01
 VIVID_L = (8, 96)
 VIVID_CHROMA = 15
 CLIENT_ID_PREF = "jamendo.client_id"
@@ -485,7 +485,7 @@ def album_arrived(album, surface, entry, answer):
     year = answer.get("releasedate", "")[:4]
     listed = sorted(answer["tracks"], key=lambda t: int(t["position"]))
     total = songs_line(len(listed), sum(int(t["duration"]) for t in listed))
-    page["about"].set(" · ".join(p for p in (artist, year, total) if p))
+    page["about"].set(" · ".join(p for p in (year, total) if p))
     for t in listed:
         key = t["id"]
         songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],

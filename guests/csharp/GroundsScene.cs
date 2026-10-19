@@ -7,7 +7,7 @@ static class GroundsScene
         var app = new KayaApp();
         app.Build(tx =>
         {
-            tx.Window(title: "grounds", width: 480, height: 560);
+            tx.Window(title: "grounds", width: 480, height: 560, inset: 0);
             byte[] art;
             using (var asset = tx.Asset("covers/cover-600.jpg")) art = asset.Bytes();
             var colour = Kaya.ImageDominant(art)
@@ -18,12 +18,6 @@ static class GroundsScene
             var plain = tx.Signal("Plain");
             tx.Mount(tx.Column(root =>
             {
-                tx.Column(header =>
-                {
-                    tx.SetA11yId(tx.Heading(bind: title), "title");
-                    tx.Caption(bind: artist);
-                    tx.SetA11yId(header, "header");
-                }, inset: 24, groundGradient: colour);
                 tx.Column(hero =>
                 {
                     tx.Row(scrim =>
@@ -33,6 +27,12 @@ static class GroundsScene
                     }, filled: Tint.Overlay);
                     tx.SetA11yId(hero, "hero");
                 }, inset: 24, groundImage: art);
+                tx.Column(header =>
+                {
+                    tx.SetA11yId(tx.Heading(bind: title), "title");
+                    tx.Caption(bind: artist);
+                    tx.SetA11yId(header, "header");
+                }, inset: 24, groundGradient: colour);
                 tx.Column(column =>
                 {
                     tx.Label(bind: plain);
