@@ -457,6 +457,34 @@ inside the clip. The readers now leave the content insets out of a row's
 visible part, so a shape or ground read refuses such a row instead of reading
 it; the scroll itself is unfixed. netimage.steps reads t000 unscrolled instead.
 
+## WATCH — a windows drag of a stamped row ended `none` with no drop (dnd_csharp, 2026-10-19)
+KEY: dnd_csharp, dnd.steps, drag ended none, inject_drag, await_hover_by, DragAim, HOVERS_ANSWERED, DropCompleted, dnd verb-trace records
+
+Seen once, matrix 20261019T002729Z: step 12, `drag label@item[y] to label#1`,
+applied ONE transaction where every green drag applies two. label#5 read
+"item y drag ended none", and label#4 and label#1 kept what step 9's drop
+had left ("hello"): the drop was refused or never ran, and no payload was
+delivered at all, stale or otherwise. The bundle could not say why: the
+drag's line reported "1/1 hover at the release point" from ONE global count
+of any widget's hover at any point, a sentence the wait never measured, and
+nothing recorded which widget answered or whether Drop ran. First sighting:
+dnd_csharp 19/20 and every other windows dnd leg 20/20 in the kept lane logs.
+NOT REPRODUCED: 2 legs released with no hover wait at all, 25 legs beside
+five CPU spinners on the VM, and 20 + 20 forced-red legs read release by
+release (VM load alone, then host load 61 with the VM loaded) — all 400
+releases of the shipped wait rode the destination's own hover at the
+release point, and every drop landed. Since 2026-10-19 the wait is keyed on
+that hover (docs/traps.md, the windows drag released on an unmeasured
+hover), and the bundle carries what the next sighting needs: per drag, the
+source and the payload it offered, each change of the widget answering the
+hover with its verdict and point, the release's newest hover against the
+release point with the cursor and the foreground pid, whether Drop ran
+and what it read, and the operation DropCompleted carried
+(tools/check-universal-props.py's drag_waits holds the writers). On the next
+sighting, read the leg's `verb=dnd` and `verb=drag` records (the bundle is
+kept under ~/.local/state/kaya/flightrec/red/ once its run is pruned) before
+any hypothesis.
+
 ## WATCH — a mac caption cue never delivered after a seek (media_tracks-java-swiftui, 2026-10-13)
 KEY: media_tracks, caption cue, second cue, AVPlayerItemLegibleOutput, seek, caption delivery
 

@@ -9621,6 +9621,29 @@ call; the string flavour arrives UTF-16 with a NUL, the
 the VM runs with `EnableLUA=0`, so every process is high integrity and
 there is no UIPI barrier to observe.
 
+## The windows drag released on an unmeasured hover: its wait counted any widget's hover at any point (measured 2026-10-19)
+
+`inject_drag` waited for "the destination's own hover" and reported "1/1
+hover at the release point", but its counter was bumped by every
+`xaml_drag_event` in the window, whatever widget answered and wherever the
+pointer was, so neither half of the sentence was measured. The red that
+found it (dnd_csharp, matrix 20261019T002729Z; docs/deferred.md's WATCH)
+could not be attributed for that reason. What was measured on the lane's VM
+the same day: a release with NO hover wait at all still dropped (2/2 legs),
+and 400 releases of the old wait, beside five CPU spinners on the 6-core VM
+and then also host load 61, all rode the destination's own hover at the
+release point — so a hover answered on the way is not a demonstrated cause,
+only an unmeasured link. The wait is now `await_hover_by(DragAim)`: the
+newest hover must be the destination widget's AND at the nudge's own point
+in that widget's DIPs (`DragAim.landing`, computed in `drag_plan`, within 1
+DIP); every drag in the dnd scene meets it in 2-5ms, so it costs nothing.
+The drag's `verb=dnd` and `verb=drag` records name the source and payload,
+each hover change, the release's newest hover against the release point
+with the cursor and the foreground pid, the drop and its read, and the
+DropCompleted operation. tools/check-universal-props.py's drag_waits holds
+the wait's shape and the records, with the shipped any-hover count among its
+watched negatives.
+
 ## A MIME-shaped custom id registers verbatim on iOS, and no private mapping is needed — the opposite of the same string on macOS (measured 2026-09-03)
 
 macOS refuses `dev.kaya/note` at ITEM level and only a board-level write

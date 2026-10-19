@@ -981,46 +981,85 @@ def fill_reads(swiftui_text):
 # while the same scene ran 20/20 green at 53ms. NO SCENE CAN SEE THIS
 # RULE GO: a dwell long enough is green exactly as a wait is, and short
 # enough it is a flake nobody can attribute. So the shape is held here —
-# the source's own DragStarting and the destination's own hover are
+# the source's own DragStarting and the DESTINATION's own hover are
 # waited for, the button comes up AFTER that wait, and each counter has
-# one writer.
+# one writer. THE HOVER IS KEYED ON THE DESTINATION AND THE RELEASE POINT
+# since 2026-10-19: the count was of any widget's hover at any point, so
+# the report's "at the release point" was never measured (docs/traps.md,
+# the windows drag released on an unmeasured hover).
+# The drag's own verb-trace records are held here too, since a red drop is
+# read from them first.
 def drag_waits(winui_text):
     bad = []
     body = "\n".join(re.sub(r"//.*", "", line) for line in winui_text.splitlines())
-    start = body.find("fn inject_drag(from: (i32, i32), to: (i32, i32)) {")
+    start = body.find("fn inject_drag(aim: DragAim) {")
     if start < 0:
         return [f"{WINUI}: inject_drag is gone — the windows drag moved"]
     drag = body[start:start + 4000]
     for needle, why in (
         ("await_answers(&DRAGS_STARTED, starts, 1, STARTING_BOUND_MS)",
          "the drag no longer waits for the source's own DragStarting"),
-        ("await_answers(&HOVERS_ANSWERED, hovers, 1, NUDGED_BOUND_MS)",
+        ("await_hover_by(aim, hovers, NUDGED_BOUND_MS)",
          "the drag no longer waits for the destination's own hover"),
     ):
         if needle not in drag:
             bad.append(f"{WINUI}: {why} ({needle!r} missing from inject_drag)")
     # THE BUTTON COMES UP AFTER THE WAIT, which is the whole point: a
     # release injected first is the guessed dwell again, spelled as a wait.
-    waited = drag.find("await_answers(&HOVERS_ANSWERED")
+    waited = drag.find("await_hover_by(")
     released = drag.find("mouse_event(LEFTUP")
     if waited >= 0 and released >= 0 and released < waited:
         bad.append(f"{WINUI}: inject_drag releases the button BEFORE it waits for the "
                    "destination's hover, so the wait decides nothing")
+    # THE WAIT ASKS WHO ANSWERED AND WHERE: the newest hover must be the
+    # destination's, at the nudge's own point, or the count is satisfied by
+    # a hover answered on the way.
+    at = body.find("fn await_hover_by(aim: DragAim, from: u64, bound: u64)")
+    waiter = body[at:body.find("\n}\n", at)] if at >= 0 else ""
+    if not waiter:
+        bad.append(f"{WINUI}: await_hover_by is gone — the drag's hover wait moved")
+    else:
+        for needle in ("&& widget == aim.onto",
+                       "(f64::from(point.0) - aim.landing.0).abs() <= 1.0",
+                       "(f64::from(point.1) - aim.landing.1).abs() <= 1.0",
+                       "if landed || waited >= bound"):
+            if needle not in waiter:
+                bad.append(f"{WINUI}: await_hover_by no longer holds {needle!r} — a hover "
+                           "answered on the way, by another widget or at another point, "
+                           "satisfies the wait and the release rides it")
     # WHAT THE WAITS SAW, on every drag: the drag's own line is the only
     # record of a blind gesture, and a red drop is read from it first.
-    for part in ("{start_wait}ms", "{nudged}/1 hover at the release point",
-                 "{nudge_wait}ms"):
+    for part in ("{start_wait}ms", "hover by the destination widget {onto} at the",
+                 "release point in {nudge_wait}ms", "(released on {})"):
         if part not in drag:
             bad.append(f"{WINUI}: inject_drag's report no longer prints {part!r} — a drag "
                        "that waited in vain must say what it measured")
     # ONE WRITER EACH, in the handler that owns the event. A second bump
     # anywhere makes the count a number about nothing.
     for fn, owner in (("drag_started();", "the DragStarting handler"),
-                      ("hover_answered();", "xaml_drag_event")):
+                      ("hover_answered(id, verdict, (point.X, point.Y));", "xaml_drag_event")):
         seen = body.count(f"\n    {fn}") + body.count(f"\n            {fn}")
         if seen != 1:
             bad.append(f"{WINUI}: {fn} is called {seen} time(s); it belongs once, in "
                        f"{owner} — the drag's wait reads that count")
+    # THE DRAG'S RECORDS: who started with what, who answered the hover,
+    # whether a drop ran and what it read, what each DropCompleted carried.
+    for record, where in (
+        ('"-> widget {id} starts, offering {} for {}"', "DragStarting"),
+        ('"<- hover widget {id} answers {} at ({:.0}, {:.0})"', "note_hover"),
+        ("note_hover(id, verdict, (point.X, point.Y));", "xaml_drag_event"),
+        ('"<- drop on widget {id} answers {} at ({:.0}, {:.0}), offered kinds',
+         "xaml_drag_event's drop"),
+        ('"<- drop read {}, reported {}"', "finish_drop_now"),
+        ("\"<- widget {id}'s drag completed: {}\"", "DropCompleted"),
+        ('"-> release: the newest hover widget {widget} answering {} at ({:.1}, {:.1}), the '
+         'release point', "inject_drag"),
+        ("cursor {}; foreground pid {front_pid} (this process {})", "inject_drag's release"),
+    ):
+        if body.count(record) != 1:
+            bad.append(f"{WINUI}: the drag's verb-trace record in {where} is gone "
+                       f"({record!r} found {body.count(record)} times) — a red drop "
+                       "could no longer say which widget answered or what was read")
     return bad
 
 
@@ -1030,7 +1069,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 131
+DECLARED = 135
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1079,24 +1118,36 @@ for label, pattern, repl, want in (
         raise SystemExit(1)
     RAN += 1
 
-# THE WINDOWS DRAG'S four, one per link of the wait: the destination's
-# answer replaced by a return, the button released before the wait it is
-# supposed to follow, the count's one writer deleted, and the report that
-# stopped saying how long it waited.
+# THE WINDOWS DRAG'S, one per link of the wait: the destination's answer
+# replaced by a return, the SHIPPED any-hover count put back (the
+# 2026-10-19 red), the widget check cut out of the waiter, the button
+# answer at another point accepted, the button
+# released before the wait it is supposed to follow, the count's one writer
+# deleted, the report that stopped saying how long it waited, and the
+# drop's own verb-trace record deleted.
 for label, pattern, repl, want in (
     ("the destination's hover no longer waited for",
-     r"await_answers\(&HOVERS_ANSWERED, hovers, 1, NUDGED_BOUND_MS\)",
-     "(1u64, 0u64)", 1),
+     r"await_hover_by\(aim, hovers, NUDGED_BOUND_MS\)",
+     "(true, 0u64, onto, 0u32, (0f32, 0f32))", 1),
+    ("the shipped any-hover count put back",
+     r"let \(nudged, nudge_wait, widget, verdict, point\) = await_hover_by\(aim, hovers, "
+     r"NUDGED_BOUND_MS\);",
+     "let (n, nudge_wait) = await_answers(&HOVERS_ANSWERED, hovers, 1, NUDGED_BOUND_MS); "
+     "let (nudged, widget, verdict, point) = (n >= 1, onto, 0u32, (0f32, 0f32));", 1),
+    ("the waiter no longer asking who answered",
+     r"\n *&& widget == aim\.onto", "", 1),
+    ("the waiter no longer asking where (any hover by the destination, its first step in)",
+     r"\n *&& \(f64::from\(point\.0\) - aim\.landing\.0\)\.abs\(\) <= 1\.0", "", 1),
     ("the button released before the wait",
-     r"    let \(nudged, nudge_wait\) = await_answers\(&HOVERS_ANSWERED, hovers, 1, "
-     "NUDGED_BOUND_MS\\);\\n    unsafe \\{ mouse_event\\(LEFTUP, 0, 0, 0, 0\\) \\};",
+     r"    let \(nudged, nudge_wait, widget, verdict, point\) = await_hover_by",
      "    unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };\n"
-     "    let (nudged, nudge_wait) = await_answers(&HOVERS_ANSWERED, hovers, 1, "
-     "NUDGED_BOUND_MS);", 1),
+     "    let (nudged, nudge_wait, widget, verdict, point) = await_hover_by", 1),
     ("the hover count's one writer deleted",
-     r"\n    hover_answered\(\);", "", 1),
+     r"\n    hover_answered\(id, verdict, \(point\.X, point\.Y\)\);", "", 1),
     ("the report no longer saying how long it waited",
-     r"\{nudge_wait\}ms, \{\}ms in all", "{}ms in all", 1),
+     r"release point in \{nudge_wait\}ms", "release point", 1),
+    ("the drop's verb-trace record deleted",
+     r'"<- drop on widget \{id\} answers', '"<- drop answers', 1),
 ):
     doctored = g.doctor(label, real[WINUI], pattern, repl, want=want)
     if not census(load({WINUI: doctored})):

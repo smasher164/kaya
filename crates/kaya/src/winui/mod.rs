@@ -10324,6 +10324,83 @@ fn emit_dropped(
     sink.send(occurrence);
 }
 
+/// The drag's `dnd` verb-trace records (docs/traps.md, the windows drag
+/// released on an unmeasured hover); check-universal-props' drag_waits
+/// holds their writers.
+fn op_word(operation: u32) -> &'static str {
+    match operation {
+        crate::wire::DRAG_OP_NONE => "none",
+        crate::wire::DRAG_OP_COPY => "copy",
+        crate::wire::DRAG_OP_MOVE => "move",
+        _ => "copy|move",
+    }
+}
+
+fn clip_out_said(clip: &crate::protocol::ClipOut) -> String {
+    let mut parts = Vec::new();
+    if let Some(text) = &clip.text {
+        parts.push(format!("text {:?}", text.chars().take(40).collect::<String>()));
+    }
+    if clip.html.is_some() {
+        parts.push("html".to_owned());
+    }
+    if let Some(image) = &clip.image {
+        parts.push(format!("image {} bytes", image.0.len()));
+    }
+    if !clip.files.is_empty() {
+        parts.push(format!("{} file(s)", clip.files.len()));
+    }
+    for (id, bytes) in &clip.custom {
+        parts.push(format!("{id} {:?}", String::from_utf8_lossy(&bytes.0[..bytes.0.len().min(40)])));
+    }
+    if parts.is_empty() { "nothing".to_owned() } else { parts.join(", ") }
+}
+
+fn representation_said(clip: &crate::protocol::Representation) -> String {
+    use crate::protocol::Representation as R;
+    match clip {
+        R::Text(text) => format!("text {:?}", text.chars().take(40).collect::<String>()),
+        R::Html(_) => "html".to_owned(),
+        R::Image(image) => format!("image {} bytes", image.0.len()),
+        R::Files(files) => format!("{} file(s)", files.len()),
+        R::Custom { id, bytes } => {
+            format!("{id} {:?}", String::from_utf8_lossy(&bytes.0[..bytes.0.len().min(40)]))
+        }
+    }
+}
+
+#[cfg(feature = "harness")]
+fn dnd_tracing() -> bool {
+    crate::vtrace::on()
+}
+
+#[cfg(not(feature = "harness"))]
+fn dnd_tracing() -> bool {
+    false
+}
+
+#[cfg(feature = "harness")]
+fn dnd_note(what: std::fmt::Arguments<'_>) {
+    crate::vtrace::note("dnd", what);
+}
+
+#[cfg(not(feature = "harness"))]
+fn dnd_note(_what: std::fmt::Arguments<'_>) {}
+
+thread_local! {
+    static HOVER_SAID: std::cell::Cell<Option<(u64, u32)>> = const { std::cell::Cell::new(None) };
+}
+
+fn note_hover(id: u64, verdict: u32, point: (f32, f32)) {
+    if !dnd_tracing() || HOVER_SAID.get() == Some((id, verdict)) {
+        return;
+    }
+    HOVER_SAID.set(Some((id, verdict)));
+    dnd_note(
+        format_args!("<- hover widget {id} answers {} at ({:.0}, {:.0})", op_word(verdict), point.0, point.1),
+    );
+}
+
 fn emit_drag_ended(core: &CoreState, tag: &[u8], operation: u32) {
     let occurrence = match crate::wire::decode_click_tag(tag) {
         Occurrence::ButtonClicked { id } => Occurrence::DragEnded { id, operation },
@@ -10551,6 +10628,13 @@ fn finish_drop(landing: WinDropLanding, clip: Option<crate::protocol::Representa
 }
 
 fn finish_drop_now(landing: WinDropLanding, clip: Option<crate::protocol::Representation>) {
+    if dnd_tracing() {
+        dnd_note(format_args!(
+            "<- drop read {}, reported {}",
+            clip.as_ref().map_or_else(|| "NOTHING, so no dropped is sent".to_owned(), representation_said),
+            op_word(landing.operation)
+        ));
+    }
     if let Some(clip) = clip {
         emit_dropped(
             &landing.sink,
@@ -10851,9 +10935,18 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
                 core.as_ref().and_then(|core| source_payload(core, id))
             });
             let Some((clip, operations)) = declared else {
+                dnd_note(format_args!("<- widget {id} refuses to start: no payload"));
                 args.SetCancel(true)?;
                 return Ok(());
             };
+            HOVER_SAID.set(None);
+            if dnd_tracing() {
+                dnd_note(format_args!(
+                    "-> widget {id} starts, offering {} for {}",
+                    clip_out_said(&clip),
+                    op_word(operations)
+                ));
+            }
             args.SetAllowedOperations(package_op(operations))?;
             start_drag_payload(args.Data()?, clip, operations, args.GetDeferral()?);
             drag_started();
@@ -10866,6 +10959,10 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
             // The source learns the outcome (D1) — WinUI's counterpart to
             // AppKit's session-ended operation.
             let operation = drag_ops_of(args.DropResult()?);
+            dnd_note(
+                format_args!("<- widget {id}'s drag completed: {}", op_word(operation)),
+            );
+            HOVER_SAID.set(None);
             hide_drop_line();
             CORE.with_borrow(|core| {
                 if let Some(core) = core.as_ref() {
@@ -10881,6 +10978,10 @@ fn wire_dnd(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
     element.DragEnter(&hover)?;
     element.DragOver(&hover)?;
     element.DragLeave(&DragEventHandler::new(move |_, _| {
+        if HOVER_SAID.get().is_some_and(|(said, _)| said == id) {
+            HOVER_SAID.set(None);
+            dnd_note(format_args!("<- hover left widget {id}"));
+        }
         hide_drop_line();
         Ok(())
     }))?;
@@ -10912,7 +11013,6 @@ fn xaml_drag_event(
     });
     args.SetAcceptedOperation(package_op(verdict))?;
     args.SetHandled(true)?;
-    hover_answered();
     let element = CORE.with_borrow(|core| {
         core.as_ref()
             .and_then(|core| core.widgets.get(&WidgetId(id)))
@@ -10924,6 +11024,20 @@ fn xaml_drag_event(
     };
     // `point` is the DESTINATION's own top-left DIP coordinates.
     let point = args.GetPosition(&element)?;
+    hover_answered(id, verdict, (point.X, point.Y));
+    if dropping {
+        HOVER_SAID.set(None);
+        dnd_note(
+            format_args!(
+                "<- drop on widget {id} answers {} at ({:.0}, {:.0}), offered kinds {offered:#x} custom {custom:?} local {local}",
+                op_word(verdict),
+                point.X,
+                point.Y
+            ),
+        );
+    } else {
+        note_hover(id, verdict, (point.X, point.Y));
+    }
     let height = element.cast::<FrameworkElement>()?.ActualHeight()?;
     let upper = f64::from(point.Y) < height / 2.0;
     let reorder_row = CORE.with_borrow(|core| {
@@ -22745,13 +22859,69 @@ fn drag_started() {
 #[cfg(not(feature = "harness"))]
 fn drag_started() {}
 
+/// The widget and verdict of the newest hover, written BEFORE the count
+/// moves, so a count the drag sees has its widget beside it.
 #[cfg(feature = "harness")]
-fn hover_answered() {
-    HOVERS_ANSWERED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+static HOVER_WIDGET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+#[cfg(feature = "harness")]
+static HOVER_VERDICT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The newest hover's point in its widget's own DIPs, x and y as f32 bits.
+#[cfg(feature = "harness")]
+static HOVER_POINT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(feature = "harness")]
+fn hover_answered(id: u64, verdict: u32, point: (f32, f32)) {
+    use std::sync::atomic::Ordering::{Relaxed, Release};
+    HOVER_WIDGET.store(id, Relaxed);
+    HOVER_VERDICT.store(verdict, Relaxed);
+    HOVER_POINT.store((u64::from(point.0.to_bits()) << 32) | u64::from(point.1.to_bits()), Relaxed);
+    HOVERS_ANSWERED.fetch_add(1, Release);
 }
 
 #[cfg(not(feature = "harness"))]
-fn hover_answered() {}
+fn hover_answered(_id: u64, _verdict: u32, _point: (f32, f32)) {}
+
+/// Where the release goes, past the travel's last step: the nudge is the
+/// arrival (docs/measurements/win-drag-pace-2026-09-24.md).
+#[cfg(feature = "harness")]
+const DRAG_NUDGE: (i32, i32) = (2, 1);
+
+/// What the drag aims at: both screen points, the destination widget, and
+/// the nudge's point in the destination's own DIPs, which is what its hover
+/// for the release point reports.
+#[cfg(feature = "harness")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DragAim {
+    from: (i32, i32),
+    to: (i32, i32),
+    onto: u64,
+    landing: (f64, f64),
+}
+
+/// THE DESTINATION'S OWN HOVER AT THE RELEASE POINT, not any hover
+/// (docs/traps.md, the windows drag released on an unmeasured hover).
+/// Bounded like await_answers.
+#[cfg(feature = "harness")]
+fn await_hover_by(aim: DragAim, from: u64, bound: u64) -> (bool, u64, u64, u32, (f32, f32)) {
+    use std::sync::atomic::Ordering::{Acquire, Relaxed};
+    let began = std::time::Instant::now();
+    loop {
+        let moved = HOVERS_ANSWERED.load(Acquire) > from;
+        let widget = HOVER_WIDGET.load(Relaxed);
+        let verdict = HOVER_VERDICT.load(Relaxed);
+        let bits = HOVER_POINT.load(Relaxed);
+        let point = (f32::from_bits((bits >> 32) as u32), f32::from_bits(bits as u32));
+        let landed = moved
+            && widget == aim.onto
+            && (f64::from(point.0) - aim.landing.0).abs() <= 1.0
+            && (f64::from(point.1) - aim.landing.1).abs() <= 1.0;
+        let waited = began.elapsed().as_millis() as u64;
+        if landed || waited >= bound {
+            return (landed, waited, widget, verdict, point);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
 
 /// How many of `counter` arrived inside `bound`, and how long it took.
 /// BOUNDED, because a destination that is no drop target answers nothing
@@ -22785,7 +22955,8 @@ fn await_answers(
 /// (docs/measurements/win-drag-pace-2026-09-24.md). THE VERB DOES NOT
 /// WAIT FOR THE DROP: the scene's expects retry.
 #[cfg(feature = "harness")]
-fn inject_drag(from: (i32, i32), to: (i32, i32)) {
+fn inject_drag(aim: DragAim) {
+    let DragAim { from, to, onto, landing } = aim;
     /// The cursor at the source before the press, and the press before
     /// the first move: neither end has a signal to wait for, so these
     /// two stay sleeps.
@@ -22847,16 +23018,46 @@ fn inject_drag(from: (i32, i32), to: (i32, i32)) {
     // arrive in order, so it says every move before it was processed too,
     // and it is the position the button comes up at.
     let hovers = HOVERS_ANSWERED.load(Relaxed);
-    move_to(to.0 + 2, to.1 + 1);
-    let (nudged, nudge_wait) = await_answers(&HOVERS_ANSWERED, hovers, 1, NUDGED_BOUND_MS);
+    move_to(to.0 + DRAG_NUDGE.0, to.1 + DRAG_NUDGE.1);
+    let (nudged, nudge_wait, widget, verdict, point) = await_hover_by(aim, hovers, NUDGED_BOUND_MS);
+    let mut cursor = Point32 { x: 0, y: 0 };
+    // SAFETY: a stack POINT.
+    let cursor_read = unsafe { GetCursorPos(&mut cursor) } != 0;
+    let mut front_pid = 0u32;
+    // SAFETY: a plain window query and a stack u32.
+    unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut front_pid) };
+    crate::vtrace::note(
+        "drag",
+        format_args!(
+            "-> release: the newest hover widget {widget} answering {} at ({:.1}, {:.1}), the release point ({:.1}, {:.1}) of widget {onto}; cursor {}; foreground pid {front_pid} (this process {})",
+            op_word(verdict),
+            point.0,
+            point.1,
+            landing.0,
+            landing.1,
+            if cursor_read { format!("({}, {})", cursor.x, cursor.y) } else { "unreadable".to_owned() },
+            std::process::id()
+        ),
+    );
     unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
     // WHAT EACH WAIT SAW, never what it hoped for: a destination that is
     // no drop target of kaya's answers no hover at all, and the drop that
     // follows then fails for a reason this line is the only record of.
     let saw = format!(
-        "{} start in {start_wait}ms, {nudged}/1 hover at the release point in \
-         {nudge_wait}ms, {}ms in all",
+        "{} start in {start_wait}ms, {}/1 hover by the destination widget {onto} at the \
+         release point in {nudge_wait}ms (released on {}), {}ms in all",
         if started >= 1 { "began" } else { "NO" },
+        u8::from(nudged),
+        if widget == u64::MAX {
+            "no hover at all".to_owned()
+        } else {
+            format!(
+                "widget {widget}'s hover at ({:.1}, {:.1}), answering {}",
+                point.0,
+                point.1,
+                op_word(verdict)
+            )
+        },
         began.elapsed().as_millis()
     );
     crate::vtrace::note("drag", format_args!("<- {saw}"));
@@ -22872,8 +23073,8 @@ fn drag_plan(
     destination: crate::harness::Target,
     reorder: Option<bool>,
     across: Option<u32>,
-) -> windows_core::Result<Result<((i32, i32), (i32, i32)), String>> {
-    type Aim = Result<((i32, i32), (i32, i32)), String>;
+) -> windows_core::Result<Result<DragAim, String>> {
+    type Aim = Result<DragAim, String>;
     WinUiStage::on_ui_read(move |core| -> windows_core::Result<Aim> {
         let Some(from) = target_widget_id(core, source) else {
             return Ok(Err(format!("no such target {source:?}")));
@@ -22926,13 +23127,26 @@ fn drag_plan(
             Some(false) => 0.75,
             None => 0.5,
         };
-        Ok(Ok((
-            ((src.0 + src.2 / 2.0) as i32, (src.1 + src.3 / 2.0) as i32),
-            (
-                (dst.0 + dst.2 * across.map_or(0.5, |n| f64::from(n) / 100.0)) as i32,
-                (dst.1 + dst.3 * share) as i32,
+        let to = (
+            (dst.0 + dst.2 * across.map_or(0.5, |n| f64::from(n) / 100.0)) as i32,
+            (dst.1 + dst.3 * share) as i32,
+        );
+        let scale = core
+            .widgets
+            .get(&WidgetId(onto))
+            .and_then(|widget| widget.element().ok())
+            .and_then(|element| element.XamlRoot().ok())
+            .and_then(|root| root.RasterizationScale().ok())
+            .unwrap_or(1.0);
+        Ok(Ok(DragAim {
+            from: ((src.0 + src.2 / 2.0) as i32, (src.1 + src.3 / 2.0) as i32),
+            to,
+            onto,
+            landing: (
+                (f64::from(to.0 + DRAG_NUDGE.0) - dst.0) / scale,
+                (f64::from(to.1 + DRAG_NUDGE.1) - dst.1) / scale,
             ),
-        )))
+        }))
     })
 }
 
@@ -25739,7 +25953,7 @@ impl crate::harness::Stage for WinUiStage {
         // REAL INPUT, from the leg's own process (docs/dnd-plan.md D10):
         // WinUI's own remarks say there is no generalized DoDragDrop for a
         // UI element, and OLE's modal loop reads real mouse messages.
-        type Aim = Result<((i32, i32), (i32, i32)), String>;
+        type Aim = Result<DragAim, String>;
         // A BOUNDED SETTLE, not a sleep: a scene's first step can reach
         // this before the window has laid out at all, and the boxes this
         // aims at are the layout's (measured 2026-09-03 — the first dnd
@@ -25754,7 +25968,7 @@ impl crate::harness::Stage for WinUiStage {
         // a moving box, and the blind injection below cannot see that it
         // missed.
         let mut aimed: Aim = Err(UNLAID.to_owned());
-        let mut last: Option<((i32, i32), (i32, i32))> = None;
+        let mut last: Option<DragAim> = None;
         for _ in 0..80 {
             aimed = match drag_plan(source, destination, reorder, across) {
                 Ok(aim) => aim,
@@ -25767,7 +25981,7 @@ impl crate::harness::Stage for WinUiStage {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let (from, to) = match (aimed, last) {
+        let aim = match (aimed, last) {
             (Ok(points), Some(settled)) if points == settled => points,
             (Ok(points), _) => {
                 return format!("the drag's boxes never settled — last read {points:?}");
@@ -25777,8 +25991,8 @@ impl crate::harness::Stage for WinUiStage {
         // WHERE IT AIMED, on every drag: this verb drives BLIND real input
         // at screen pixels, so the two points are the only record of what
         // it actually did (docs/dnd-plan.md D10).
-        eprintln!("kaya: winui drag {source:?} at {from:?} -> {destination:?} at {to:?}");
-        inject_drag(from, to);
+        eprintln!("kaya: winui drag {source:?} at {:?} -> {destination:?} at {:?}", aim.from, aim.to);
+        inject_drag(aim);
         String::new()
     }
 

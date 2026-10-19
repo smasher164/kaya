@@ -64,7 +64,10 @@ moves the cursor nowhere, Windows sends no message, and no hover is ever
 answered for it. The nudge is the arrival, and its hover is the better
 signal anyway — messages arrive in order, so an answer for the nudge's
 position says every move before it was processed, and it is the position
-the button comes up at.
+the button comes up at. AMENDED 2026-10-19: the count was of ANY widget's
+hover at ANY point, so "an answer for the nudge's position" was never what
+it read; the wait is keyed on the destination widget and the nudge's point
+since (docs/traps.md, the windows drag released on an unmeasured hover).
 
 ## What ships
 

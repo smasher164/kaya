@@ -1970,6 +1970,10 @@ DROP_LINE_ARMS = [
      "    let _ = (reorder_row, upper);"),
     ("cleared when the pointer leaves the row",
      "    element.DragLeave(&DragEventHandler::new(move |_, _| {\n"
+     "        if HOVER_SAID.get().is_some_and(|(said, _)| said == id) {\n"
+     "            HOVER_SAID.set(None);\n"
+     "            dnd_note(format_args!(\"<- hover left widget {id}\"));\n"
+     "        }\n"
      "        hide_drop_line();\n"
      "        Ok(())\n"
      "    }))?;\n",
