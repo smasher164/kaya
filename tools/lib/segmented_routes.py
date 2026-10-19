@@ -26,6 +26,9 @@ RUST_MODEL = r"segmented_options|segmented_symbols|core\.scene\b|\.toggle\(|\.ac
 # view and presses it, never writing the bar's selection.
 FORBID = {WINUI: ("fn choose_segment(t: crate::harness::Target, index: usize) {",
                   ["SetSelectedItem(", "SetSelectedIndex(", "send_value_tag("])}
+# SelectorBar's own look keeps each item at its natural width (docs/segmented-plan.md
+# G8, WinUI): the bar draws no segment frames, so equal widths read as gaps.
+NATURAL = {WINUI: ("WidgetKind::Segmented => {", ["selector_bar_equalize", "SetMinWidth("])}
 # The widget backends' rows (docs/segmented-plan.md §3): per backend, (label,
 # opener, which occurrence, what the block must hold, whether it is a read
 # that may not reach kaya's model). The create arm's emit sits behind its
@@ -55,7 +58,7 @@ ROWS = {
         ("the SelectorBar's door", "WidgetKind::Segmented => {", 0,
          ["SelectorBar::new()?", "bar.SelectionChanged(",
           "if quiet.load(std::sync::atomic::Ordering::Relaxed) {\n                            return Ok(());",
-          "sink.send_value_tag(&tag, f64::from(index));", "selector_bar_equalize(&equalize)"], False),
+          "sink.send_value_tag(&tag, f64::from(index));"], False),
         ("the app's write", "(NativeWidget::Segmented(bar), Prop::Value, Value::F64(v)) => {", 0,
          [".store(true, std::sync::atomic::Ordering::Relaxed);", "bar.SetSelectedItem(&item)",
           ".store(false, std::sync::atomic::Ordering::Relaxed);"], False),
@@ -277,6 +280,14 @@ def row_findings(sources, backends):
                 if call in body:
                     out.append(f"segmented: {backends[rel]}'s choose calls {call}...), writing the "
                                f"selection instead of bringing the segment into view and pressing it")
+    for rel, (opener, calls) in NATURAL.items():
+        if rel not in backends or rel not in sources:
+            continue
+        for body in blocks(sources[rel], opener):
+            for call in calls:
+                if call in body:
+                    out.append(f"segmented: {backends[rel]}'s door calls {call}, sizing the items "
+                               f"apart from the bar's natural widths")
     for rel, rows in ROWS.items():
         if rel not in backends or rel not in sources:
             continue
@@ -397,7 +408,8 @@ def run(g):
                    want=want)
     g.counted("segmented GTK and WinUI clauses held",
               sum(len(needs) + 1 for rows in ROWS.values() for _, _, _, needs, _ in rows)
-              + sum(len(calls) for _, calls in FORBID.values()), floor=55)
+              + sum(len(calls) for _, calls in FORBID.values())
+              + sum(len(calls) for _, calls in NATURAL.values()), floor=55)
     row_cuts = [
         ("GTK's read answering from the model", GTK,
          r"(fn segments\(&self, t: crate::harness::Target\) -> String \{\n\s+Self::on_main\(move \|core\| \{\n)",
@@ -441,6 +453,8 @@ def run(g):
         ("WinUI's app write unguarded", WINUI,
          r"(\(NativeWidget::Segmented\(bar\), Prop::Value, Value::F64\(v\)\) => \{\n)\s+core\.apply_quiet\n\s+\.store\(true, std::sync::atomic::Ordering::Relaxed\);\n",
          r"\1", "the WinUI arm's the app's write lacks .store(true"),
+        ("WinUI's items equalized again", WINUI, r"(let bar = SelectorBar::new\(\)\?;\n)",
+         r"\1                    selector_bar_equalize(&bar)?;\n", "sizing the items apart from the bar's natural widths"),
         ("WinUI's pick unheard", WINUI,
          r"(if let Some\(index\) = selector_bar_selected\(bar\)\? \{)\n\s+sink\.send_value_tag\(&tag, f64::from\(index\)\);",
          r"\1",

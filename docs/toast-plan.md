@@ -256,6 +256,10 @@ in an overlay, T10). It sits at the bottom centre, above a bottom section bar
 on the phones (Material's placement, Scaffold's slot) and above the home
 indicator's safe area on iOS. Closing its window closes it (`closed`).
 
+The dock (docs/styling-pass-plan.md Y8) is one of those bottom bars: on
+GTK, WinUI and Android the toast sits above it, and `expect_toast` reads the
+toast's frame against the dock's (docs/traps.md, the toast over the dock).
+
 A modal over the window (an alert, a sheet, a file dialog) covers it on
 every platform that layers modals over content (Compose's sheet is its own
 window, an iOS sheet a presented controller). RECOMMEND kaya does not

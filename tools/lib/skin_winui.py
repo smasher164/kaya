@@ -119,6 +119,12 @@ CALLS = [
     ("a window's new content keeps its dock", "children.Append(element)?;\nskin::keep_dock(core, window)"),
     ("the batch's end syncs the skin", "images::serve_requested(core)?;\nskin::sync(core)"),
     ("a destroyed widget leaves the skin", "skin::forget(core, id);"),
+    # docs/traps.md, the emptied shelf's strip.
+    ("a destroyed activatable container's host leaves its parent",
+     "let outer = core.widgets.get(&id).expect(\"scene validated the id\").element();\n"
+     "let widget = core.widgets.remove(&id).expect(\"scene validated the id\");\n"
+     "images::forget(core, id);\nskin::forget(core, id);"),
+    ("a destroyed widget is removed by its outer element", "if children.IndexOf(&outer?, &mut index)? {"),
     ("an activatable container takes the filled inset",
      "if core.filled.contains_key(&id) || skin::is_activatable(id) && !in_declared_table(core, id) {\nFILLED_DEFAULT_INSET"),
     ("the caption follows the content's theme", "follow_caption(core, mode == crate::canvas::Mode::Dark);"),
@@ -282,6 +288,12 @@ CUTS = [
      r"(fn wrap\(core: &mut CoreState, id: WidgetId\) -> windows_core::Result<\(\)> \{\n)",
      r"\1    let _ = |h: &ItemContainer| h.SetIsSelected(true);\n", "activatable host names SetIsSelected(true)"),
     ("WinUI: hover without the real pointer", r"\n(\s+)SetCursorPos\(px, py\);", "", "hover lacks SetCursorPos"),
+    ("WinUI: a destroyed card's host left in its parent", r"children\.IndexOf\(&outer\?, &mut index\)",
+     "children.IndexOf(&widget.element()?, &mut index)", "a destroyed widget is removed by its outer element"),
+    ("WinUI: the outer element read after the host is forgotten",
+     r"let outer = core\.widgets\.get\(&id\)\.expect\(\"scene validated the id\"\)\.element\(\);\n(\s+)(let widget = core\.widgets\.remove\(&id\)\.expect\(\"scene validated the id\"\);)\n(\s+)images::forget\(core, id\);\n(\s+)skin::forget\(core, id\);",
+     r"\2\n\3images::forget(core, id);\n\4skin::forget(core, id);\n\1let outer = widget.element();",
+     "a destroyed activatable container's host leaves its parent"),
     ("WinUI: the host left out of the layout", r"let inner = skin::host_of\(&inner\)\.unwrap_or\(inner\);", "",
      "a parent lays out an activatable container's host"),
     ("WinUI: the skin's props never reach the arm", r"if skin::set_prop\(core, id, prop, &value\)\? \{", "if false {",

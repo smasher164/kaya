@@ -1449,26 +1449,6 @@ fn selector_bar_states(bar: &SelectorBar) -> String {
     read().unwrap_or_else(|e| format!("<unreadable: {e}>"))
 }
 
-fn selector_bar_equalize(bar: &SelectorBar) -> windows_core::Result<()> {
-    let items = bar.Items()?;
-    let mut widest = 0.0f64;
-    let mut all = Vec::new();
-    for n in 0..items.Size()? {
-        let fe: FrameworkElement = windows_core::Interface::cast(&items.GetAt(n)?)?;
-        widest = widest.max(fe.ActualWidth()?);
-        all.push(fe);
-    }
-    if widest <= 0.0 {
-        return Ok(());
-    }
-    for fe in all {
-        if (fe.MinWidth()? - widest).abs() > 0.5 && fe.ActualWidth()? < widest - 0.5 {
-            fe.SetMinWidth(widest)?;
-        }
-    }
-    Ok(())
-}
-
 /// The name any live element publishes to UIA — what an assistive client
 /// hears — or a short description of which of the three ways the read
 /// failed. `what` names the thing being read so the sentence says what it
@@ -14020,7 +14000,7 @@ fn info_bar_ms(duration: crate::protocol::ToastDuration) -> i64 {
     own.max(floor) * 1000
 }
 
-fn info_bar_place(popup: &Popup, bar: &bindings::Microsoft::UI::Xaml::Controls::InfoBar) -> windows_core::Result<()> {
+fn info_bar_place(window: u64, popup: &Popup, bar: &bindings::Microsoft::UI::Xaml::Controls::InfoBar) -> windows_core::Result<()> {
     let Ok(root) = popup.XamlRoot() else { return Ok(()) };
     let size = root.Size()?;
     let (w, h) = (f64::from(size.Width), f64::from(size.Height));
@@ -14030,7 +14010,8 @@ fn info_bar_place(popup: &Popup, bar: &bindings::Microsoft::UI::Xaml::Controls::
         element.SetMaxWidth(widest)?;
     }
     let x = ((w - element.ActualWidth()?) / 2.0).max(0.0);
-    let y = (h - element.ActualHeight()? - INFO_BAR_MARGIN).max(0.0);
+    // docs/toast-plan.md T8: above the window's bottom bars, the dock among them.
+    let y = (h - element.ActualHeight()? - INFO_BAR_MARGIN - skin::dock_height(window)?).max(0.0);
     if (popup.HorizontalOffset()? - x).abs() > 0.5 {
         popup.SetHorizontalOffset(x)?;
     }
@@ -14136,7 +14117,7 @@ fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {
     let placed = popup.clone();
     let laid = bar.clone();
     let fe: FrameworkElement = bar.cast()?;
-    fe.LayoutUpdated(&EventHandler::new(move |_, _| info_bar_place(&placed, &laid)))?;
+    fe.LayoutUpdated(&EventHandler::new(move |_, _| info_bar_place(window, &placed, &laid)))?;
     let timer = DISPATCHER.get().expect("the dispatcher is up").0.CreateTimer()?;
     timer.SetInterval(bindings::Windows::Foundation::TimeSpan { Duration: INFO_BAR_TICK_MS * 10_000 })?;
     timer.SetIsRepeating(true)?;
@@ -14203,7 +14184,7 @@ fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec) -> w
     }
     popup.SetIsOpen(true)?;
     bar.SetIsOpen(true)?;
-    info_bar_place(&popup, &bar)?;
+    info_bar_place(window, &popup, &bar)?;
     timer.Start()?;
     info_bar_announce(&bar, &spec)
 }
@@ -15825,14 +15806,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         }
                         Ok(())
                     }))?;
-                    // G8.
-                    let weak = windows_core::Interface::cast::<SelectorBar>(&bar)?;
-                    let equalize = weak.clone();
-                    bar.LayoutUpdated(&bindings::Windows::Foundation::EventHandler::<
-                        windows_core::IInspectable,
-                    >::new(move |_, _| {
-                        selector_bar_equalize(&equalize)
-                    }))?;
+                    // Items keep their natural width (docs/segmented-plan.md G8, WinUI).
                     core.segmenteds.push(bar.clone());
                     NativeWidget::Segmented(bar)
                 }
@@ -16719,6 +16693,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.open_context = None;
                 }
             }
+            // Before skin::forget, which drops the host that resolves it
+            // (docs/traps.md, the emptied shelf's strip).
+            let outer = core.widgets.get(&id).expect("scene validated the id").element();
             let widget = core.widgets.remove(&id).expect("scene validated the id");
             images::forget(core, id);
             skin::forget(core, id);
@@ -16779,7 +16756,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             if let Some(panel) = core.parents.remove(&id) {
                 let children = panel.Children()?;
                 let mut index = 0u32;
-                if children.IndexOf(&widget.element()?, &mut index)? {
+                if children.IndexOf(&outer?, &mut index)? {
                     children.RemoveAt(index)?;
                 }
                 core.child_order.detach(id);
@@ -21245,12 +21222,17 @@ struct WinUiStage;
 /// lowest window first.
 #[cfg(feature = "harness")]
 fn info_bar_on_screen() -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::Controls::InfoBar>> {
+    Ok(info_bar_window_on_screen()?.map(|(_, bar)| bar))
+}
+
+#[cfg(feature = "harness")]
+fn info_bar_window_on_screen() -> windows_core::Result<Option<(u64, bindings::Microsoft::UI::Xaml::Controls::InfoBar)>> {
     let mut bars: Vec<(u64, Popup, bindings::Microsoft::UI::Xaml::Controls::InfoBar)> = INFO_BAR_TOASTS
         .with_borrow(|bars| bars.iter().map(|(w, t)| (*w, t.popup.clone(), t.bar.clone())).collect());
     bars.sort_by_key(|(w, _, _)| *w);
-    for (_, popup, bar) in bars {
+    for (window, popup, bar) in bars {
         if popup.IsOpen()? && bar.IsOpen()? {
-            return Ok(Some(bar));
+            return Ok(Some((window, bar)));
         }
     }
     Ok(None)
@@ -27910,6 +27892,25 @@ impl crate::harness::Stage for WinUiStage {
             Ok(Some((text, action)))
         })
         .unwrap_or_else(|e| Some((format!("<the InfoBar did not answer: {e}>"), String::new())))
+    }
+    fn toast_over_dock(&self) -> Option<String> {
+        Self::on_ui_bare(|| {
+            let Some((window, bar)) = info_bar_window_on_screen()? else { return Ok(None) };
+            let Some(host) = skin::dock_shown(window)? else { return Ok(None) };
+            let origin = bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 };
+            let bar_el: UIElement = bar.cast()?;
+            let bar_fe: FrameworkElement = bar.cast()?;
+            let t = bar_el.TransformToVisual(None::<&UIElement>)?.TransformPoint(origin)?;
+            let top = f64::from(host.TransformToVisual(None::<&UIElement>)?.TransformPoint(origin)?.Y);
+            let bottom = f64::from(t.Y) + bar_fe.ActualHeight()?;
+            Ok((bottom > top + 1.0).then(|| {
+                format!(
+                    "ends at {bottom} over the dock, whose top is {top} (the InfoBar {},{} {}x{})",
+                    t.X, t.Y, bar_fe.ActualWidth().unwrap_or(0.0), bar_fe.ActualHeight().unwrap_or(0.0)
+                )
+            }))
+        })
+        .unwrap_or_else(|e| Some(format!("<the InfoBar's placement did not answer: {e}>")))
     }
     fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {
         let said = info_bar_ear::said(text, action);

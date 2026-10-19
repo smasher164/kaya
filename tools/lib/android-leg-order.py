@@ -178,6 +178,19 @@ def py_function(text: str, name: str) -> str | None:
     return None
 
 
+def py_class(text: str, name: str) -> str | None:
+    """py_function's twin for a top-level class."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return None
+    lines = text.splitlines(keepends=True)
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return "".join(lines[node.lineno - 1:node.end_lineno])
+    return None
+
+
 def load_lane(text: str) -> dict | None:
     """The lane module's namespace, evaluated from TEXT so the
     self-tests can perturb a copy. The module is plain data by its own
@@ -328,12 +341,20 @@ def staging_problem(text: str) -> str | None:
         return ("staging must follow every artifact verification — "
                 "build_suite's verify/icon/assets/stage order moved")
     driver = re.search(
-        r"if not build_suite\(_suite\):\s*sys\.exit\(1\)\s*"
+        r"if not _builds\.wait\(_suite\):\s*sys\.exit\(1\)\s*"
         r"run_suite_legs\(_suite\)",
         text,
     )
     if driver is None:
         return "every suite's staging must precede its first leg"
+    # docs/traps.md, the android lane's serial builds: the suites build on
+    # their own thread, ahead of the pool, never between two suites' legs.
+    builder = py_class(text, "SuiteBuilds")
+    if builder is None or "ok = build_suite(suite)" not in builder \
+            or "self.thread.start()" not in builder \
+            or len(re.findall(r"\bbuild_suite\(", text)) != 2:
+        return ("every suite builds on SuiteBuilds' thread alone — a build "
+                "called from the driver stands between two suites' legs")
     return None
 
 
@@ -997,6 +1018,20 @@ def main() -> int:
                   f"good)", file=sys.stderr)
             return 1
         print(f"android-leg-order: {label} -> {problem}")
+
+    # N19f: the serial driver back, a build between two suites' legs.
+    doctored, n = doctor(
+        "serial builds",
+        text,
+        re.escape("    if not _builds.wait(_suite):\n"),
+        "    build_suite(_suite)\n    if not _builds.wait(_suite):\n",
+    )
+    problem = staging_problem(doctored)
+    if n != 1 or problem is None or "SuiteBuilds" not in problem:
+        print(f"android-leg-order: SELF-TEST FAIL (serial builds read as "
+              f"good: {problem})", file=sys.stderr)
+        return 1
+    print(f"android-leg-order: serial builds -> {problem}")
 
     # N20/N21: a roster missing its ranges or editor leg must red.
     for leg, label in (("ranges-compose", "ranges roster"),

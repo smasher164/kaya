@@ -144,6 +144,56 @@ def findings(sources, backends=None):
     return out
 
 
+# T8's "above its bottom bars" with a dock under the panes (docs/traps.md, the
+# toast over the dock): each arm lifts its toast by the dock it measured, and
+# expect_toast reads the toast's frame against the dock's on every harness.
+# (file, what holds, the spelling, a cut that breaks it)
+PLACEMENT = [
+    (HARNESS, "expect_toast reads the toast's placement",
+     "} else if let Some(over) = stage.toast_over_dock() {",
+     (r"\} else if let Some\(over\) = stage\.toast_over_dock\(\) \{", "} else if let Some(over) = None::<String> {")),
+    (GTK, "the toast sits above the window's bottom bars",
+     "lift_toasts(&overlay, window_shell(core, window).bottom_bar_height());",
+     (r"\n\s+lift_toasts\(&overlay, window_shell\(core, window\)\.bottom_bar_height\(\)\);", "")),
+    (GTK, "a bottom bar's new height lifts the shown toast", "view.connect_bottom_bar_height_notify(",
+     (r"view\.connect_bottom_bar_height_notify\(", "view.connect_top_bar_height_notify(")),
+    (GTK, "the placement read compares the toast with the dock", "(t.y() + t.height() > d.y() + 1.0).then(",
+     (r"\(t\.y\(\) \+ t\.height\(\) > d\.y\(\) \+ 1\.0\)\.then\(", "(false).then(")),
+    (WINUI, "the InfoBar sits above the dock", "INFO_BAR_MARGIN - skin::dock_height(window)?",
+     (r" - skin::dock_height\(window\)\?", "")),
+    (WINUI, "the placement read compares the InfoBar with the dock", "Ok((bottom > top + 1.0).then(",
+     (r"Ok\(\(bottom > top \+ 1\.0\)\.then\(", "Ok((false).then(")),
+    (SWIFT, "expect_toast reads the toast's placement",
+     "} else if let over = DispatchQueue.main.sync(execute: { kayaToastOverDock() }) {",
+     (r"DispatchQueue\.main\.sync\(execute: \{ kayaToastOverDock\(\) \}\)", "Optional<String>.none")),
+    (SWIFT, "the toast's frame is recorded", ".onChange(of: g.frame(in: .global)) { _, f in kayaToastFrame = f }",
+     (r"\.onChange\(of: g\.frame\(in: \.global\)\) \{ _, f in kayaToastFrame = f \}", ".onChange(of: g.frame(in: .global)) { _, _ in }")),
+    (COMPOSE, "the snackbar sits above the dock",
+     "KayaSceneModel.sectionBarHeight + KayaSceneModel.dockHeight",
+     (r" \+ KayaSceneModel\.dockHeight\n", "\n")),
+    (COMPOSE, "the dock's height is composition state",
+     "KayaSceneModel.dockHeight = with(density) { it.size.height.toDp() }",
+     (r"KayaSceneModel\.dockHeight = with\(density\) \{ it\.size\.height\.toDp\(\) \}", "Unit")),
+    (COMPOSE, "expect_toast reads the toast's placement", "val over = onUi(activity) { kayaToastOverDock() }",
+     (r"val over = onUi\(activity\) \{ kayaToastOverDock\(\) \}", "val over: String? = null")),
+]
+
+
+def placement_findings(sources):
+    return [f"toast: {rel}: {label} no longer holds — the file lacks {call}"
+            for rel, label, call, _ in PLACEMENT if flat(call) not in flat(sources[rel])]
+
+
+def placement_run(g, sources):
+    g.counted("toast placement clauses held", len(PLACEMENT), floor=11)
+    for line in placement_findings(sources):
+        g.finding(line)
+    for rel, label, _call, (pattern, repl) in PLACEMENT:
+        broken = g.doctor(f"toast: {label} ({rel})", sources[rel], pattern, repl)
+        g.negative(f"toast: {label} ({rel})",
+                   lambda rel=rel, broken=broken: placement_findings({**sources, rel: broken}), want=label)
+
+
 def run(g):
     sources = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in [HARNESS, SWIFT, *STUBBED]}
     still = [rel for rel, stub in STUBBED.items() if stub in sources[rel]]
@@ -191,7 +241,7 @@ def run(g):
          "the mac press"),
         ("the listener never installed", r"\n\s+kayaToastEarInstall\(\)(\n\s+#endif\n\s+Thread \{)", r"\1",
          "the listener is installed"),
-        ("the sentence reworded in Swift", r'failures\.append\("no toast shown, wanted',
+        ("the sentence reworded in Swift", r'failures\.append\("no toast shown, wanted (?=\\"\\\(want\)\\""\))',
          'failures.append("no toast on screen, wanted', "no longer says"),
     ]
     for label, pattern, repl, want in cuts:
@@ -199,6 +249,7 @@ def run(g):
         g.negative(f"toast: {label}", lambda broken=broken: findings({**sources, SWIFT: broken}), want=want)
     compose_run(g, sources)
     native_run(g, sources)
+    placement_run(g, sources)
     for rel in STUBBED:
         n = sources[rel].count(STUBBED[rel])
         if n == 0:
@@ -341,7 +392,7 @@ def compose_run(g, sources):
          "the host rides", COMPOSE),
         ("the service deaf to live regions", r"synchronized\(heard\) \{ heard\.add\(said\) \}", "Unit",
          "no longer hears a live region", A11Y),
-        ("the sentence reworded in Kotlin", r'failures\.add\("no toast shown, wanted',
+        ("the sentence reworded in Kotlin", r'failures\.add\("no toast shown, wanted (?=\\"\$want\\""\))',
          'failures.add("no toast on screen, wanted', "no longer says", COMPOSE),
     ]
     for label, pattern, repl, want, rel in cuts:
@@ -403,7 +454,7 @@ NATIVE_READS = [
      ["toast_widget_parts(&widget).2 else { return false };", "button.activate()"]),
     (GTK, "expect_toast_announced", "fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {",
      ['format!("A toast appeared: {text}, has a button: {action}")', "toast_ear::heard()"]),
-    (WINUI, "the read", "fn info_bar_on_screen() -> windows_core::Result<",
+    (WINUI, "the read", "fn info_bar_window_on_screen() -> windows_core::Result<",
      ["popup.IsOpen()? && bar.IsOpen()?"]),
     (WINUI, "expect_toast", "fn toast(&self) -> Option<(String, String)> {",
      ['named_descendant(&element, "Message")?', ".GetName()?"]),

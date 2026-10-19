@@ -13118,11 +13118,17 @@ private func kayaRunScript(_ script: String) {
                     }
                 } else if let (text, action) = shown.first {
                     let got = "\(text)|\(action)"
-                    if kayaBytesEqual(got, want) {
-                        observed.append("toast \"\(want)\"")
-                    } else {
+                    if !kayaBytesEqual(got, want) {
                         failures.append("toast \"\(got)\", wanted \"\(want)\"")
+                    } else if let over = DispatchQueue.main.sync(execute: { kayaToastOverDock() }) {
+                        kayaToastOverSeen[want] = over
+                        failures.append("toast \"\(want)\" \(over)")
+                    } else {
+                        kayaToastOverSeen[want] = nil
+                        observed.append("toast \"\(want)\"")
                     }
+                } else if let over = kayaToastOverSeen[want] {
+                    failures.append("no toast shown, wanted \"\(want)\"; while it showed it \(over)")
                 } else {
                     failures.append("no toast shown, wanted \"\(want)\"")
                 }
@@ -20354,6 +20360,18 @@ private struct KayaSynthesizedTable: View {
     }
 }
 
+/// docs/traps.md, a sideways shelf widened the window.
+struct KayaSidewaysIdeal: ViewModifier {
+    let on: Bool
+    func body(content: Content) -> some View {
+        if on {
+            content.frame(idealWidth: 0)
+        } else {
+            content
+        }
+    }
+}
+
 struct KayaFlex: Layout {
     let vertical: Bool
     let spacing: CGFloat
@@ -21786,6 +21804,10 @@ func kayaSystemBarWords() -> (String, String) {
 
 /// The dock's laid-out frame in window points, recorded by its root's reader.
 @MainActor var kayaDockFrame: CGRect? = nil
+/// The shown toast's frame, for expect_toast (docs/toast-plan.md T8), and the
+/// placement a toast that has since closed showed in, by the step's text.
+@MainActor var kayaToastFrame: CGRect? = nil
+nonisolated(unsafe) var kayaToastOverSeen: [String: String] = [:]
 
 /// expect_ground, expect_shape, expect_tint and expect_selected
 /// (docs/styling-pass-plan.md Y9), polled for five seconds: the observation,
@@ -21995,6 +22017,16 @@ struct KayaDockHost: ViewModifier {
     }
 }
 
+/// expect_toast's placement half (docs/toast-plan.md T8): nil when the shown
+/// toast ends above the primary window's dock, else what was measured.
+@MainActor func kayaToastOverDock() -> String? {
+    guard kayaScene.toasts[0] != nil, let toast = kayaToastFrame,
+        let dock = kayaScene.windows[0]?.dock, kayaHoldsWidget(dock), let frame = kayaDockFrame, frame.height > 1,
+        toast.maxY > frame.minY + 1
+    else { return nil }
+    return "ends at \(Int(toast.maxY)) over the dock, whose top is \(Int(frame.minY)) (the toast \(kayaRectText(toast)))"
+}
+
 /// expect_dock's read (Y8): the dock's frame against the window's content
 /// and every pane's frame.
 @MainActor func kayaDockRead() -> String {
@@ -22051,7 +22083,8 @@ struct KayaDockHost: ViewModifier {
     if let shown = window.entries.last?.root { walk(shown) }
     for n in leaves {
         let name = n.a11yId.isEmpty ? "content widget \(n.id) (kind \(n.kind) \"\(n.text)\")" : n.a11yId
-        guard let f = kayaPlatformFrame(n) else { return "\(name) of the window's content was never laid out" }
+        let viewport = n.kind == kindScroll && n.scrollViewportGlobal.height > 0 ? n.scrollViewportGlobal : nil
+        guard let f = viewport ?? kayaPlatformFrame(n) else { return "\(name) of the window's content was never laid out" }
         let shown = kayaVisibleFrame(n, f).shown
         if shown.width <= 0 || shown.height <= 0 {
             return "\(name) of the window's content has nothing on screen at \(kayaRectText(f))"
@@ -25573,6 +25606,8 @@ struct KayaRender: View {
                 // (docs/hscroll-plan.md §2); a ScrollView otherwise takes all
                 // the height it is offered.
                 .fixedSize(horizontal: false, vertical: sideways && node.grow == 0)
+                // docs/traps.md, a sideways shelf widened the window.
+                .modifier(KayaSidewaysIdeal(on: sideways))
                 .coordinateSpace(name: "kaya-scroll-\(node.id)")
                 .background(
                     GeometryReader { g in
@@ -29837,6 +29872,13 @@ struct KayaToastView: View {
         .background(.regularMaterial, in: Capsule())
         .overlay(Capsule().strokeBorder(.separator.opacity(0.5), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.18), radius: 14, y: 6)
+        .background(
+            GeometryReader { g in
+                Color.clear
+                    .onAppear { kayaToastFrame = g.frame(in: .global) }
+                    .onChange(of: g.frame(in: .global)) { _, f in kayaToastFrame = f }
+                    .onDisappear { kayaToastFrame = nil }
+            })
         .frame(maxWidth: 560)
         .padding(.horizontal, 16)
         .padding(.top, 8)

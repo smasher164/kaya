@@ -816,6 +816,22 @@ pub(super) fn docked_in(core: &CoreState, id: WidgetId) -> Option<u64> {
     })
 }
 
+/// The window's dock host while it shows.
+pub(super) fn dock_shown(window: u64) -> windows_core::Result<Option<Grid>> {
+    let Some(host) = SKIN.with_borrow(|s| Some(s.docks.get(s.dock_of.get(&window)?)?.host.clone())) else {
+        return Ok(None);
+    };
+    Ok((host.Visibility()? == Visibility::Visible && host.ActualHeight()? > 1.0).then_some(host))
+}
+
+/// The height the window's dock takes at its foot, 0 while it is collapsed.
+pub(super) fn dock_height(window: u64) -> windows_core::Result<f64> {
+    Ok(match dock_shown(window)? {
+        Some(host) => host.ActualHeight()?,
+        None => 0.0,
+    })
+}
+
 /// A widget the dock's root holds, through any rows and columns.
 fn holds_widget(core: &CoreState, id: WidgetId) -> bool {
     match core.widgets.get(&id) {

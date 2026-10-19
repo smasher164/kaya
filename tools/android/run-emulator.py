@@ -61,13 +61,15 @@ def die(msg):
     sys.exit(1)
 
 
-_t0 = time.monotonic()
+# Two clocks: the lane's phases, and the suites' builds, which run on their own
+# thread (SuiteBuilds).
+_t0 = {"lane": time.monotonic(), "build": time.monotonic()}
 
 
-def timing(phase):
-    global _t0
-    print(f"TIMING {phase} {int(time.monotonic() - _t0)}s", flush=True)
-    _t0 = time.monotonic()
+def timing(phase, clock="lane"):
+    now = time.monotonic()
+    print(f"TIMING {phase} {int(now - _t0[clock])}s", flush=True)
+    _t0[clock] = now
 
 
 # NO check-targets HERE (the maintainer, 2026-10-06; docs/traps.md, the
@@ -4485,7 +4487,7 @@ def build_suite(suite):
         return False
     if not apk_assets_verify(apk):
         return False
-    timing(f"build-{suite}")
+    timing(f"build-{suite}", clock="build")
     targets = ([*SERIALS, TABLET_SERIAL] if suite == "compose"
                else list(SERIALS))
     return stage_suite_apk(suite, apk, package, targets)
@@ -4679,13 +4681,52 @@ if media_queued():
             MEDIA_UNROUTED.append(f"{_serial}: {_said}")
         print(f"media-server: {_serial} -> {MEDIA_URL}: {_said}", flush=True)
 
+class SuiteBuilds:
+    """Every suite's build and staging, in order, on one thread of their own,
+    so the pool runs the built suites' legs while the next suite builds and no
+    build stands between two suites' legs (docs/traps.md, the android lane's
+    serial builds). A failed build ends the thread, and every suite after it
+    reads as failed."""
+
+    def __init__(self, suites):
+        self.suites = suites
+        self.done = {suite: threading.Event() for suite in suites}
+        self.ok = {}
+        self.thread = threading.Thread(target=self._build_all, name="suite-builds")
+        self.thread.start()
+
+    def _build_all(self):
+        _t0["build"] = time.monotonic()
+        ok = True
+        try:
+            for suite in self.suites:
+                ok = False
+                try:
+                    ok = build_suite(suite)
+                except SystemExit as e:  # die() inside a build ends only this thread
+                    print(f"run-emulator: the {suite} build died ({e.code})",
+                          file=sys.stderr, flush=True)
+                self.ok[suite] = ok
+                self.done[suite].set()
+                if not ok:
+                    return
+        finally:
+            for suite in self.suites:
+                if not self.done[suite].is_set():
+                    self.ok[suite] = False
+                    self.done[suite].set()
+
+    def wait(self, suite):
+        self.done[suite].wait()
+        return self.ok[suite]
+
+
+_suites = [s for s in lane.SUITES if SUITE in (s, "all")
+           and not ((only.active() or QUIET_MODE) and not selected_legs(s))]
+_builds = SuiteBuilds(_suites)
 _staged = []
-for _suite in lane.SUITES:
-    if SUITE not in (_suite, "all"):
-        continue
-    if (only.active() or QUIET_MODE) and not selected_legs(_suite):
-        continue
-    if not build_suite(_suite):
+for _suite in _suites:
+    if not _builds.wait(_suite):
         sys.exit(1)
     run_suite_legs(_suite)
     _staged.append(_suite)

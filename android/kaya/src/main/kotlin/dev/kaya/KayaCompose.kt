@@ -1282,6 +1282,11 @@ fun kayaHoldsWidget(node: KayaNode): Boolean =
 var kayaDockFrame: androidx.compose.ui.geometry.Rect? = null
 @Volatile
 var kayaDockAbove: androidx.compose.ui.geometry.Rect? = null
+/** The shown toast's frame in window pixels, for expect_toast (docs/toast-plan.md
+ * T8), and the placement a toast that has since closed showed in, by the step's text. */
+@Volatile
+var kayaToastFrame: androidx.compose.ui.geometry.Rect? = null
+val kayaToastOverSeen = java.util.concurrent.ConcurrentHashMap<String, String>()
 
 /** The dock (docs/styling-pass-plan.md Y8): the bar surface across the
  * window's foot, running under the navigation bar when nothing sits below
@@ -1290,21 +1295,31 @@ var kayaDockAbove: androidx.compose.ui.geometry.Rect? = null
 internal fun KayaDockBar(consumesBottom: Boolean) {
     val root = KayaSceneModel.dockRoot
     if (root == null || !kayaHoldsWidget(root)) {
-        SideEffect { kayaDockFrame = null }
+        SideEffect {
+            kayaDockFrame = null
+            KayaSceneModel.dockHeight = 0.dp
+        }
         return
     }
+    val density = LocalDensity.current
     val edges = WindowInsets.systemBars.union(WindowInsets.displayCutout).only(
         if (consumesBottom) WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom else WindowInsetsSides.Horizontal)
     Box(
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .onGloballyPositioned { kayaDockFrame = it.boundsInWindow() }
+            .onGloballyPositioned { KayaSceneModel.dockHeight = with(density) { it.size.height.toDp() } }
             .windowInsetsPadding(edges)
             .padding(KayaSceneModel.windowInset.dp),
     ) {
         KayaRender(root)
     }
-    DisposableEffect(Unit) { onDispose { kayaDockFrame = null } }
+    DisposableEffect(Unit) {
+        onDispose {
+            kayaDockFrame = null
+            KayaSceneModel.dockHeight = 0.dp
+        }
+    }
 }
 
 /** The foreground of the filled container a composable sits in, null outside
@@ -1812,6 +1827,7 @@ object KayaSceneModel {
     var alertCancel: String = ""
     var toast by mutableStateOf<KayaToast?>(null)
     var sectionBarHeight by mutableStateOf(0.dp)
+    var dockHeight by mutableStateOf(0.dp)
     // The primary surface's navigation stack, bottom to top
     // (DESIGN.md, Navigation). Android has one surface, so this is THE
     // stack.
@@ -8536,6 +8552,16 @@ object KayaCompose {
         }
     }
 
+    /** expect_toast's placement half (docs/toast-plan.md T8): null when the
+     * shown toast ends above the dock, else what was measured. */
+    private fun kayaToastOverDock(): String? {
+        val root = KayaSceneModel.dockRoot ?: return null
+        val toast = kayaToastFrame?.takeIf { KayaSceneModel.toast != null } ?: return null
+        val dock = kayaDockFrame?.takeIf { kayaHoldsWidget(root) && it.height > 1f } ?: return null
+        if (toast.bottom <= dock.top + 1) return null
+        return "ends at ${toast.bottom.toInt()} over the dock, whose top is ${dock.top.toInt()} (the toast ${kayaRectText(toast)})"
+    }
+
     /** expect_dock's read (§5.4): the dock's laid-out frame spans the window
      * at its foot (above the section bar where there is one) and the surface
      * above it ends where it begins. */
@@ -13200,12 +13226,17 @@ object KayaCompose {
                             }
                         } else {
                             val one = shown.firstOrNull()
-                            if (one == null) {
+                            val seen = kayaToastOverSeen[want]
+                            if (one == null && seen != null) {
+                                failures.add("no toast shown, wanted \"$want\"; while it showed it $seen")
+                            } else if (one == null) {
                                 failures.add("no toast shown, wanted \"$want\"")
-                            } else if ("${one.first}|${one.second}" == want) {
-                                observed.add("toast \"$want\"")
-                            } else {
+                            } else if ("${one.first}|${one.second}" != want) {
                                 failures.add("toast \"${one.first}|${one.second}\", wanted \"$want\"")
+                            } else {
+                                val over = onUi(activity) { kayaToastOverDock() }
+                                if (over != null) kayaToastOverSeen[want] = over else kayaToastOverSeen.remove(want)
+                                if (over != null) failures.add("toast \"$want\" $over") else observed.add("toast \"$want\"")
                             }
                         }
                     }
@@ -22085,10 +22116,10 @@ internal fun KayaToastHost(modifier: Modifier) {
             KayaPresent.emitToastClosed(shown.id)
         }
     }
-    // Above the section bar when it shows, which already consumed the
-    // navigation bar; above the keyboard or the navigation bar otherwise
+    // Above the section bar and the dock when they show, which already consumed
+    // the navigation bar; above the keyboard or the navigation bar otherwise
     // (docs/toast-plan.md T8, docs/safe-area-plan.md A6).
-    val bar = if (WindowInsets.isImeVisible) 0.dp else KayaSceneModel.sectionBarHeight
+    val bar = if (WindowInsets.isImeVisible) 0.dp else KayaSceneModel.sectionBarHeight + KayaSceneModel.dockHeight
     val sides = if (bar > 0.dp) WindowInsetsSides.Horizontal + WindowInsetsSides.Top
         else WindowInsetsSides.Horizontal + WindowInsetsSides.Top + WindowInsetsSides.Bottom
     SnackbarHost(
@@ -22109,7 +22140,8 @@ private fun KayaToastBar(data: SnackbarData) {
     )
     SwipeToDismissBox(state = state, backgroundContent = {}) {
         Snackbar(
-            modifier = Modifier.padding(12.dp).testTag(KayaCompose.TOAST_TAG),
+            modifier = Modifier.padding(12.dp).testTag(KayaCompose.TOAST_TAG)
+                .onGloballyPositioned { kayaToastFrame = it.boundsInWindow() },
             action = data.visuals.actionLabel?.let { label ->
                 {
                     TextButton(

@@ -18115,3 +18115,87 @@ needs_bridge and needs_driver read it.
 GUARD: both self-tests at run-sim's start include an extra-shaped line
 (`select_section 1; type "an"`); the shipped reader answers False on it, so the
 lane would refuse to start.
+
+
+## A sideways shelf widened the window (measured 2026-10-19)
+
+On the mac a For of cards in a horizontal scroll, on a pushed page of a
+two-pane window, set the WINDOW's minimum width to the shelf's content: the
+media player's Search against Jamendo live ("piano", ten album cards) made the
+window 2483 pt wide, and a scratch probe of sixty cards 11021 pt, which
+`resize_window` could not shrink. NavigationSplitView asks its detail column
+for a minimum with a zero width proposal; KayaFlex reads a zero proposal as no
+proposal (`offeredCross`) and measures its children unproposed, and a
+horizontal ScrollView answers an unproposed width with its content's width. A
+plain window never asks that question, so the scroll scene and every lane
+stayed green. A sideways scroll's ideal width is 0 now (`KayaSidewaysIdeal`),
+GTK's own answer (a ScrolledWindow does not propagate its content's natural
+width): it takes the width its parent gives it and scrolls inside it.
+
+GUARD: tools/scenes/music_search.steps resizes the desktops' window to
+560x600 with two album cards on the shelf and reads `expect_window_size
+560x600` (watched red on the mac with the modifier cut: `window 736x600,
+wanted 560x600`).
+
+
+## The toast over the dock (measured 2026-10-19)
+
+T8 puts the toast "above its content and its bottom bars", and the media
+player's dock (Y8) is a bottom bar, but three arms placed the toast against
+the window's bottom edge: GTK's AdwToastOverlay wraps the whole AdwToolbarView
+whose bottom bar the dock is, WinUI's InfoBar popup sat 16 DIP over the
+window's edge, and Compose padded the snackbar by the section bar alone. The
+search screen's capture showed "Added to Liked Songs" over the dock's
+transport on GTK and WinUI; `expect_toast` read the text and passed. GTK
+lifts each AdwToastWidget by `bottom_bar_height()`, WinUI subtracts the dock's
+height, Compose pads by the dock's measured height too. A placement read hung
+on `expect_dock` passed vacuously: the toast timed out inside the step's retry
+window and the step went green, so the placement rides `expect_toast`.
+
+Reading `expect_dock` on the search page found two content halves that
+disagreed with the others: the mac answered a page whose root is a scroll
+"never laid out" (no frame is recorded for a scroll; it reads the viewport
+now), and GTK walked into the page's scroll and refused a track list running
+past the dock under it (a scroll is read by its viewport there now, as WinUI,
+Compose and the mac read it).
+
+GUARD: `expect_toast` reads the toast's frame against the dock's on every
+harness (Stage::toast_over_dock, kayaToastOverDock in both interpreters);
+tools/lib/toast_routes.py PLACEMENT holds the lifts and the reads, each cut
+watched red; a toast that times out over the dock says where it showed
+(harness::tests' expect_toast_reads_the_placement_and_keeps_it_past_the_timeout,
+watched red); music_search reads the toast and `expect_dock` on the search page
+on every lane; tools/lib/skin_gtk.py holds GTK's viewport read, cut watched.
+
+
+## The emptied shelf's strip (measured 2026-10-19)
+
+On WinUI a For of activatable cards that had rows and lost them all drew a
+full-width bordered strip (filled cards) or an empty band (plain ones): a For
+never filled drew nothing. `ApplyOp::Destroy` ran `skin::forget`, which drops
+the ItemContainer host an activatable container is seated in and the key that
+resolves it, before it asked `widget.element()` for the element to take out of
+its parent; the lookup then answered the inner Grid, `IndexOf` missed, and the
+host stayed in the panel. No target can name it, since it is no kaya widget.
+The outer element is resolved before anything is forgotten.
+
+GUARD: tools/lib/skin_winui.py's CALLS hold the order and the removal by the
+outer element, both cut and watched red; probe captures before and after in
+the fix batch's notes.
+
+
+## The android lane's serial builds (measured 2026-10-19)
+
+The android lane built each suite, then queued its legs, then built the next:
+`queue_leg` blocks while the pool is full, so a suite's build started only once
+its predecessor's last leg had a phone, and the pool ran down to that suite's
+stragglers while gradle and cargo ran. Every suite's build now runs ahead on a
+thread of its own (`SuiteBuilds`) and the driver waits only for the suite it is
+about to queue.
+Measured with the lane run alone, two pairs: 482 s and 455 s serial against
+423 s and 444 s pipelined. Alone, the python phase is 14-21 s: the 116 s of
+`queued-python` on matrix 20261019T053243Z is the matrix's contention, not the
+phase's own work.
+
+GUARD: tools/lib/android-leg-order.py refuses a `build_suite(` call outside
+SuiteBuilds (the serial driver put back is watched red).

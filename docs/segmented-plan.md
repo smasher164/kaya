@@ -222,6 +222,16 @@ any other control. It never scrolls, wraps or folds (§0 fact 4). A text too
 long for its share is the platform's to truncate. The two-to-five guidance
 is the docs', not a refusal.
 
+AMENDED 2026-10-19 for WinUI, FOR THE MAINTAINER'S CONFIRMATION (his review
+of the search screen: "Why is there so much space after the All"): the arm
+no longer gives SelectorBar's items the widest one's width. SelectorBar
+draws no segment frames, only the text and the selected item's pill, so an
+equal cell around a short label reads as a gap after it; Windows' own bars
+(SelectorBar's documentation: items take their natural width) size each
+item to its text and padding. The other four arms keep equal widths, each
+its platform's own default. tools/lib/segmented_routes.py's NATURAL row
+refuses an item width set in the WinUI door.
+
 ### G9 — Both construction zones (RULED 2026-10-08)
 
 A segmented control in a stamped row works as the select and the radio

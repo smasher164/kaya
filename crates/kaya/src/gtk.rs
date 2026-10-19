@@ -7457,6 +7457,14 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
     autohide_bar(window, &view, &header);
     let toasts = adw::ToastOverlay::new();
     toasts.set_child(Some(&view));
+    {
+        let lifted = toasts.downgrade();
+        view.connect_bottom_bar_height_notify(move |view| {
+            if let Some(overlay) = lifted.upgrade() {
+                lift_toasts(&overlay, view.bottom_bar_height());
+            }
+        });
+    }
     let hosted = tight::host(&toasts);
     if let Some(primary) = window.downcast_ref::<adw::ApplicationWindow>() {
         primary.set_content(Some(&hosted));
@@ -11221,7 +11229,7 @@ fn window_content(core: &CoreState, window: u64) -> Option<gtk4::Widget> {
 /// above the dock's top, so a dock drawn over the content or in its place
 /// reads misplaced.
 fn dock_content_fault(core: &CoreState, view: &adw::ToolbarView, dock_top: f64) -> Option<String> {
-    use gtk4::prelude::WidgetExt;
+    use gtk4::prelude::{ObjectExt, WidgetExt};
     let content = window_content(core, 0)?;
     let mut leaves: Vec<(u64, gtk4::Widget)> = core
         .widgets
@@ -11234,11 +11242,15 @@ fn dock_content_fault(core: &CoreState, view: &adw::ToolbarView, dock_top: f64) 
     for (id, w) in leaves {
         let mut at = Some(w.clone());
         let mut shown = true;
+        // A scroll is read by its viewport, as the other three arms read it:
+        // what it holds may run past the dock and scroll.
+        let mut scrolled = false;
         while let Some(x) = at.filter(|x| *x != content) {
             shown &= x.is_visible();
+            scrolled |= x != w && x.is::<gtk4::ScrolledWindow>();
             at = x.parent();
         }
-        if !shown {
+        if !shown || scrolled {
             continue;
         }
         let Some(f) = w.compute_bounds(view) else {
@@ -12133,7 +12145,21 @@ fn present_toast(core: &mut CoreState, spec: crate::protocol::ToastSpec) {
     }
     toast.connect_dismissed(move |_| toast_dismissed(window, id));
     overlay.add_toast(toast.clone());
+    lift_toasts(&overlay, window_shell(core, window).bottom_bar_height());
     core.shown_toasts.insert(window, (id, toast));
+}
+
+/// docs/toast-plan.md T8: the toast sits above the window's bottom bars, the
+/// dock among them (docs/traps.md, the toast over the dock).
+fn lift_toasts(overlay: &adw::ToastOverlay, bars: i32) {
+    use gtk4::prelude::WidgetExt;
+    let mut child = overlay.first_child();
+    while let Some(widget) = child {
+        if widget.type_().name() == "AdwToastWidget" && widget.margin_bottom() != bars {
+            widget.set_margin_bottom(bars);
+        }
+        child = widget.next_sibling();
+    }
 }
 
 fn withdraw_toast(core: &mut CoreState, window: u64, id: u64) {
@@ -25498,6 +25524,27 @@ impl crate::harness::Stage for GtkStage {
             let widget = shown_toast_widget(core)?;
             let (text, action, _) = toast_widget_parts(&widget);
             Some((text, action.map(|b| b.label().map(String::from).unwrap_or_default()).unwrap_or_default()))
+        })
+    }
+    fn toast_over_dock(&self) -> Option<String> {
+        Self::on_main(|core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let shown = shown_toast_widget(core)?;
+            let window = *core
+                .toast_overlays
+                .iter()
+                .find(|(_, o)| shown.parent().is_some_and(|p| p == *o.upcast_ref::<gtk4::Widget>()))?
+                .0;
+            let dock = core.skin.docks.iter().find(|(_, w)| **w == window).map(|(d, _)| *d)?;
+            let root = core.skin.dock_roots.get(&dock).filter(|r| r.is_mapped())?;
+            let view = window_shell(core, window);
+            let (t, d) = (shown.compute_bounds(&view)?, root.compute_bounds(&view)?);
+            (t.y() + t.height() > d.y() + 1.0).then(|| {
+                format!(
+                    "ends at {} over the dock, whose top is {} (the toast {},{} {}x{})",
+                    t.y() + t.height(), d.y(), t.x(), t.y(), t.width(), t.height()
+                )
+            })
         })
     }
     fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {

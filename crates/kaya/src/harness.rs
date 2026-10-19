@@ -2132,6 +2132,9 @@ pub trait Stage: Send + 'static {
     /// its action's label ("" for none) read off the platform's own surface,
     /// None when none is on screen. Never the scene model.
     fn toast(&self) -> Option<(String, String)>;
+    /// None when the shown toast ends above its window's dock (docs/toast-plan.md
+    /// T8: above the content and its bottom bars); else what was measured.
+    fn toast_over_dock(&self) -> Option<String>;
     /// Ok when the platform published an announcement of a toast with this
     /// text and action to a listener the harness holds; otherwise every
     /// announcement it heard.
@@ -6712,17 +6715,28 @@ fn run_with_log(
                     None => Err(format!("{t:?} reads {got:?}, which has no letters")),
                 }
             })),
-            Step::ExpectToast(want) => Some(poll(|| match stage.toast() {
-                Some((text, action)) => {
-                    let got = format!("{text}|{action}");
-                    if got == *want {
-                        Ok(format!("toast {want:?}"))
-                    } else {
-                        Err(format!("toast {got:?}, wanted {want:?}"))
+            Step::ExpectToast(want) => {
+                // A toast that times out over the dock reads "no toast" last,
+                // so the placement it showed in rides that sentence.
+                let mut over_seen: Option<String> = None;
+                Some(poll_named("expect_toast", || match stage.toast() {
+                    Some((text, action)) => {
+                        let got = format!("{text}|{action}");
+                        if got != *want {
+                            Err(format!("toast {got:?}, wanted {want:?}"))
+                        } else if let Some(over) = stage.toast_over_dock() {
+                            over_seen = Some(over.clone());
+                            Err(format!("toast {want:?} {over}"))
+                        } else {
+                            Ok(format!("toast {want:?}"))
+                        }
                     }
-                }
-                None => Err(format!("no toast shown, wanted {want:?}")),
-            })),
+                    None => match &over_seen {
+                        Some(over) => Err(format!("no toast shown, wanted {want:?}; while it showed it {over}")),
+                        None => Err(format!("no toast shown, wanted {want:?}")),
+                    },
+                }))
+            }
             Step::ExpectNoToast => Some(poll(|| match stage.toast() {
                 Some((text, action)) => Err(format!("toast {:?} shown, wanted none", format!("{text}|{action}"))),
                 None => Ok("no toast".to_owned()),
@@ -9308,6 +9322,33 @@ mod tests {
         static MOCK_EXPANDED: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
         static MOCK_COLLAPSED: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
         static MOCK_KEYBOARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        static MOCK_TOAST_READS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+        static MOCK_TOAST_OVER: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+
+    /// docs/toast-plan.md T8: a toast over the dock fails expect_toast, and one
+    /// that times out there says where it showed (docs/traps.md, the toast over
+    /// the dock).
+    #[test]
+    fn expect_toast_reads_the_placement_and_keeps_it_past_the_timeout() {
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        let script = "expect_toast \"Hi|Undo\"";
+        MOCK_TOAST_READS.with(|c| c.set(u32::MAX));
+        MOCK_TOAST_OVER.with(|c| c.set(false));
+        let (code, verdict) = run(script);
+        assert_eq!(code, 0, "{verdict}");
+        MOCK_TOAST_OVER.with(|c| c.set(true));
+        MOCK_TOAST_READS.with(|c| c.set(3));
+        let (code, verdict) = run(script);
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("no toast shown") && verdict.contains("while it showed it ends at 700"), "{verdict}");
+        MOCK_TOAST_READS.with(|c| c.set(0));
+        MOCK_TOAST_OVER.with(|c| c.set(false));
     }
 
     /// docs/expander-plan.md K5, K8: the two platform readings must agree, and a
@@ -9878,7 +9919,18 @@ mod tests {
         }
         fn dismiss_sheet(&self) {}
         fn toast(&self) -> Option<(String, String)> {
-            None
+            MOCK_TOAST_READS.with(|c| {
+                let left = c.get();
+                (left > 0).then(|| {
+                    c.set(left - 1);
+                    ("Hi".to_owned(), "Undo".to_owned())
+                })
+            })
+        }
+        fn toast_over_dock(&self) -> Option<String> {
+            MOCK_TOAST_OVER
+                .with(|c| c.get())
+                .then(|| "ends at 700 over the dock, whose top is 600 (the mock)".to_owned())
         }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
             Err(Vec::new())
@@ -11077,6 +11129,9 @@ mod tests {
         fn toast(&self) -> Option<(String, String)> {
             None
         }
+        fn toast_over_dock(&self) -> Option<String> {
+            None
+        }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
             Err(Vec::new())
         }
@@ -11565,6 +11620,9 @@ mod tests {
         }
         fn dismiss_sheet(&self) {}
         fn toast(&self) -> Option<(String, String)> {
+            None
+        }
+        fn toast_over_dock(&self) -> Option<String> {
             None
         }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {

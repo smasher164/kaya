@@ -1181,12 +1181,17 @@ def search_body(page):
         kaya.search(placeholder="Artists, albums or tracks",
                     on_change=lambda text: on_query(page, text)) \
             .a11y_id("find").a11y_label("Search")
-        # A phone's width holds the four chips only when they share it.
+        # Centred on the desktops, as iTunes' was; a phone's width holds the
+        # four chips only when they share it.
         with kaya.row() if desktop else kaya.column(align="stretch"):
+            if desktop:
+                kaya.spacer()
             chips = kaya.segmented(CHIPS, selected=page["chip"],
                                    on_select=lambda i: on_chip(page, i)) \
                 .a11y_id("chips").a11y_label("Show")
-            if not desktop:
+            if desktop:
+                kaya.spacer()
+            else:
                 chips.fill(True)
         kaya.caption(bind=page["status"]).a11y_id("search_status")
         found_shelf(page, "albums", "Albums", kaya.Shape.ROUNDED,

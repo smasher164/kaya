@@ -27,6 +27,12 @@ expect label@found_track_name[1243462] "Gnarly (feat. Devyn Rush)"
 expect label@found_track_time[1243462] "0:20"
 expect_image_phase image@found_track_art[1243462] shown
 expect_no_clipping
+# A sideways shelf scrolls inside the window and never sets its width
+# (docs/traps.md, a sideways shelf widened the window).
+resize_window 560x600
+expect_window_size 560x600
+resize_window 1100x720
+expect_window_size 1100x720
 choose segmented@chips 1
 expect_segments segmented@chips "All|[Albums]|Artists|Tracks"
 expect label@search_status "2 albums"
@@ -44,6 +50,7 @@ click row@found_track[1243462]
 expect label@dock_title "Gnarly (feat. Devyn Rush)"
 expect_tint label@found_track_name[1243462] accent
 toggle checkbox@like on
+# expect_toast reads the toast above the dock (docs/toast-plan.md T8).
 expect_toast "Added to Liked Songs|Undo"
 toast_action
 expect_no_toast
@@ -53,6 +60,7 @@ expect_toast "Added to Liked Songs|Undo"
 expect_checked checkbox@like on
 choose segmented@chips 0
 expect label@search_status "2 albums · 1 artist · 3 tracks"
+expect_dock shown
 clear_search search@find
 expect search@find ""
 expect label@search_status "Search Jamendo for artists, albums and tracks."
