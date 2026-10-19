@@ -38,7 +38,8 @@ first, then the most recent other. Each album keeps its two tracks highest in
 Jamendo's popularity among the artist's own tracks, the chart's track
 first, and an artist whose tracks Jamendo will not list by popularity is
 passed over (the artist page's top tracks are that list). The searches are
-the first artist's name and the first track's title.
+'Pierce Murphy', 'Athens', 'David', 'zzqxv': the first artist's name, the first
+track's title and tools/scenes/music_search.steps' terms.
 
 The licence: CC BY or CC BY-SA per track, named in ATTRIBUTION.md; the
 generator refuses any other, and `--check` refuses a committed answer naming

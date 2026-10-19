@@ -26179,9 +26179,9 @@ impl crate::harness::Stage for WinUiStage {
                     }
                     return Ok(Some(hits[0] as isize));
                 }
-                // A COLUMN'S TAG IS ITS TABLE'S SORT TAG: a stamped
-                // container's Create carries none, so this one kind reads
-                // the declaration instead of `widget_tags`.
+                // A COLUMN'S TAG IS ITS TABLE'S SORT TAG when it is a table's
+                // nested For container, and its occurrence tag otherwise
+                // (docs/traps.md, the stamped column no keyed target named).
                 return TABLES.with_borrow(|tables| {
                     let hits: Vec<usize> = core
                         .columns
@@ -26192,9 +26192,11 @@ impl crate::harness::Stage for WinUiStage {
                             core.widgets.contains_key(*widget)
                                 && carries_id(*column, &id)
                                 && widget_is_live(core, widget.0)
-                                && tables.get(&widget.0).is_some_and(|table| {
-                                    crate::harness::table_tag_keys_match(&table.tag, keys)
-                                })
+                                && tables
+                                    .get(&widget.0)
+                                    .map(|table| &table.tag)
+                                    .or_else(|| core.widget_tags.get(&widget.0))
+                                    .is_some_and(|tag| crate::harness::table_tag_keys_match(tag, keys))
                         })
                         .map(|(i, _)| i)
                         .collect();

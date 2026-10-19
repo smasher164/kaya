@@ -801,6 +801,19 @@ phone tails).
    the session, declared with the album cover's bytes (M7); `expect_symbol`
    reads a button's glyph on each platform. The desktops' third pane is not
    built yet.
+   Search and the toasts (2026-10-19, music_search.steps): a Search row in
+   the desktops' sidebar and a Search section on the phones; the platform
+   search field asks the catalogue's three searches (albums and artists by
+   name, tracks by text) once the user pauses for 300 ms, a later answer
+   replacing an earlier one; the segmented control (All, Albums, Artists,
+   Tracks) narrows the answer as a diff of each kind's rows; albums and
+   artists as sideways shelves of cards (an artist's round), tracks as a list
+   of rows that play on activation; a line under the control says the counts,
+   the empty state, or "No results for …". The heart says "Added to Liked
+   Songs" or "Removed from Liked Songs" in a toast whose Undo is the window's
+   undo of that step (docs/toast-plan.md T4); a search that fails says
+   "Couldn't reach the catalogue" with Retry. The snapshot holds the scene's
+   two searches (tools/gen-catalogue.py `SCENE_SEARCHES`, `--add-searches`).
 6. The matrix once, then the review page: every lane's capture of every
    screen in light and dark, a card hovered on the desktops and selected,
    the playing row's tinted title, the dock on the desktops and above the tab

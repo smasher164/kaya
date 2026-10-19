@@ -378,7 +378,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
 
     if (stable is not None and starget is not None) and not (
         "type == valueStr" in stable
-        and 'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)' in starget
+        and ('kayaTableStamp(kind == "column" && !$0.sortTag.isEmpty '
+             '? $0.sortTag : $0.tag)') in starget
         # Each copy matches under ITS OWN tag's node (2026-09-05, the
         # first-copy read resolved one template of five sharing an id).
         and "$0.a11yId == id && stampOf($0)?.keys == keys" in starget
@@ -626,7 +627,8 @@ def target_surfaces(harness_src=None, swift_src=None, kotlin_src=None):
         "type != VALUE_STR" in ktable
         # The stamp comes off the table's sortTag OR a widget's own
         # occurrence tag (one layout; the keyed-target entry, 2026-09-01).
-        and 'tableStamp(if (kind == "column") n.sortTag else n.tag)' in ktarget
+        and ('tableStamp(if (kind == "column" && n.sortTag.isNotEmpty()) '
+             'n.sortTag else n.tag)') in ktarget
         and "it.a11yId == id && stampOf(it)?.keys == keys" in ktarget
         and "if (hits.size != 1)" in ktarget
     ):
@@ -774,7 +776,7 @@ if not target_out:
         "strict UTF-8")
     target_watch(
         "Swift sortTag route", 1, "swift", S,
-        'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)',
+        'kayaTableStamp(kind == "column" && !$0.sortTag.isEmpty ? $0.sortTag : $0.tag)',
         "kayaTableStamp($0.tag)",
         "check-steps: swift/KayaSwiftUI.swift keyed targets do not "
         "resolve through the table sortTag")
@@ -890,7 +892,7 @@ if not target_out:
         "kayaStartSelftest() call(s), wanted 1")
     target_watch(
         "Compose sortTag route", 1, "kotlin", K,
-        'tableStamp(if (kind == "column") n.sortTag else n.tag)',
+        'tableStamp(if (kind == "column" && n.sortTag.isNotEmpty()) n.sortTag else n.tag)',
         "tableStamp(n.tag)",
         "check-steps: android/kaya/src/main/kotlin/dev/kaya/"
         "KayaCompose.kt keyed targets do not resolve through the "

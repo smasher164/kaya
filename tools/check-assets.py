@@ -1569,7 +1569,24 @@ snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=1, sort_keys=Tr
 g.negative("N42 (an artist whose only candidate cover is NC/ND)",
            lambda: catalogue_derivation(s), want="has no CC BY or BY-SA album")
 
-g.negatives_ran(44)
+# N43 — C14: a search the snapshot names with one of its answers gone, so
+# the app's search against the mirror would fail (tools/scenes/music_search.steps).
+s = fresh("n43")
+snap_path = s / "guests/assets/catalogue/api.json"
+snap = json.loads(snap_path.read_text(encoding="utf-8"))
+gone = [k for k in snap if k.startswith("albums?") and "namesearch=David" in k]
+for k in gone:
+    del snap[k]
+print(f"check-assets: self-test N43 removed {len(gone)} search answer(s)")
+if len(gone) != 1:
+    g.refuse("SELF-TEST BROKEN — N43 removed no search answer, so it would prove nothing")
+snap_path.unlink()
+snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=1, sort_keys=True) + "\n",
+                     encoding="utf-8")
+g.negative("N43 (a named search with an answer missing)",
+           lambda: catalogue_derivation(s), want="has no answer")
+
+g.negatives_ran(45)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",

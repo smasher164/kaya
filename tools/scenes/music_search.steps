@@ -1,0 +1,74 @@
+# The media player demo's sixth screen (docs/media-player-plan.md §1, §6 step 5;
+# docs/search-plan.md; docs/segmented-plan.md; docs/toast-plan.md T4): the
+# Search destination's field asks the catalogue as the user types, the app
+# waiting for a pause; the results are shelves of album and artist cards and a
+# list of tracks, the segmented control narrows them to one kind, clearing the
+# field restores the empty state, and a query that finds nothing says so.
+# Liking the playing track offers an undo toast. A phone opens Search from
+# its tab bar and likes in the full player (tools/lib/lanes/ios.py, android.py).
+expect_image_phase image@art_116452 shown
+click row@go_search
+expect_selected row@go_search on
+expect_selected row@go_home off
+expect_title "Search"
+expect_placeholder search@find "Artists, albums or tracks"
+expect_ax search@find "field/Search"
+expect label@search_status "Search Jamendo for artists, albums and tracks."
+expect_segments segmented@chips "[All]|Albums|Artists|Tracks"
+click search@find
+expect_focused search@find
+type "David"
+expect label@search_status "2 albums · 1 artist · 3 tracks"
+expect_image_phase image@found_album_art[149020] shown
+expect_shape image@found_album_art[149020] rounded
+expect label@found_album_name[149020] "David Amber and Friends, Vol. 1"
+expect label@found_artist_name[476280] "David Amber"
+expect label@found_track_name[1243462] "Gnarly (feat. Devyn Rush)"
+expect label@found_track_time[1243462] "0:20"
+expect_image_phase image@found_track_art[1243462] shown
+expect_no_clipping
+choose segmented@chips 1
+expect_segments segmented@chips "All|[Albums]|Artists|Tracks"
+expect label@search_status "2 albums"
+expect_no_target column@found_artist[476280]
+expect_no_target row@found_track[1243462]
+choose segmented@chips 2
+expect label@search_status "1 artist"
+expect_image_phase image@found_artist_art[476280] shown
+expect_shape image@found_artist_art[476280] circle
+expect_no_target column@found_album[149020]
+choose segmented@chips 3
+expect label@search_status "3 tracks"
+expect_no_target column@found_artist[476280]
+click row@found_track[1243462]
+expect label@dock_title "Gnarly (feat. Devyn Rush)"
+expect_tint label@found_track_name[1243462] accent
+toggle checkbox@like on
+expect_toast "Added to Liked Songs|Undo"
+toast_action
+expect_no_toast
+expect_checked checkbox@like off
+toggle checkbox@like on
+expect_toast "Added to Liked Songs|Undo"
+expect_checked checkbox@like on
+choose segmented@chips 0
+expect label@search_status "2 albums · 1 artist · 3 tracks"
+clear_search search@find
+expect search@find ""
+expect label@search_status "Search Jamendo for artists, albums and tracks."
+expect_segments segmented@chips "[All]|Albums|Artists|Tracks"
+expect_no_target column@found_album[149020]
+expect_no_target row@found_track[1243462]
+click search@find
+expect_focused search@find
+type "zzqxv"
+expect label@search_status "No results for “zzqxv”."
+expect_no_target column@found_artist[476280]
+set_text search@find "David"
+expect label@search_status "2 albums · 1 artist · 3 tracks"
+expect label@found_artist_name[476280] "David Amber"
+click column@found_artist[476280]
+expect_title "David Amber"
+expect_selected row@go_search off
+click row@go_home
+expect_title "Home"

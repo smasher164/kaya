@@ -11,6 +11,8 @@ dev_shell_or_die()
 #
 #   tools/gen-catalogue.py                 fetch and write guests/assets/catalogue/
 #   tools/gen-catalogue.py --dry           fetch and print the selection only
+#   tools/gen-catalogue.py --add-searches  fetch the searches the rule names that
+#                                          api.json lacks, and keep everything else
 #   tools/gen-catalogue.py --check [--against DIR]
 #                                          read the committed files only
 #
@@ -53,6 +55,10 @@ LICENCE = re.compile(r"^https?://creativecommons\.org/licenses/(by|by-sa)/\d(?:\
 CREDIT_KEYS = ("shareurl", "shorturl", "prourl", "license_ccurl", "website")
 STRIPPED = ("waveform", "audiodownload", "audiodownload_allowed", "zip", "zip_allowed")
 DOCS = ("README.md", "ATTRIBUTION.md")
+# tools/scenes/music_search.steps' terms: one finding an artist, albums and
+# tracks in the snapshot, one finding nothing on Jamendo itself.
+SCENE_SEARCHES = ("David", "zzqxv")
+SEARCH_FIELDS = (("tracks", "search"), ("artists", "namesearch"), ("albums", "namesearch"))
 META = "_snapshot"
 
 
@@ -223,11 +229,10 @@ def select(j, log):
         raise SystemExit(f"gen-catalogue: {len(artists)} artist(s) qualified over "
                          f"{', '.join(GENRES)}, wanted {ARTISTS}")
 
-    searches = [artists[0]["name"], tracks[0]["name"]]
+    searches = [artists[0]["name"], tracks[0]["name"], *SCENE_SEARCHES]
     for term in searches:
-        for endpoint, field in (("tracks", "search"), ("artists", "namesearch"),
-                                ("albums", "namesearch")):
-            keep(*j.api(endpoint, may_be_empty=True, limit=str(WIDE_LIMIT), **{field: term}))
+        for endpoint, field in SEARCH_FIELDS:
+            keep(*j.api(endpoint, limit=str(WIDE_LIMIT), **{field: term}))
     return {"raw": raw, "images": images, "artists": artists, "albums": albums,
             "tracks": tracks, "home": home, "searches": searches}
 
@@ -320,6 +325,37 @@ def snapshot_albums(answers):
             for r in ans["results"]:
                 held[r["id"]] = (r["artist_id"], [t["license_ccurl"] for t in r["tracks"]])
     return [(a, *held[a]) for a in answers[META]["albums"] if a in held]
+
+
+def search_keys(term):
+    return [catalogue.canonical(endpoint, urllib.parse.urlencode(
+        sorted({"limit": str(WIDE_LIMIT), field: term}.items()), quote_via=urllib.parse.quote))
+        for endpoint, field in SEARCH_FIELDS]
+
+
+def add_searches(j, log):
+    """The searches the selection rule names that the committed api.json
+    lacks, fetched and narrowed to the committed selection; every other
+    answer and file is kept byte for byte."""
+    answers = json.loads((FAMILY / catalogue.ANSWERS).read_text(encoding="utf-8"))
+    meta = answers[META]
+    terms = list(dict.fromkeys([*meta["searches"][:2], *SCENE_SEARCHES]))
+    ids = {"track": set(meta["tracks"]), "album": set(meta["albums"]),
+           "artist": set(meta["artists"])}
+    _, held = tracks_of(answers)
+    durations = {tid: int(t["duration"]) for tid, t in held.items()}
+    for term in terms:
+        for (endpoint, field), key in zip(SEARCH_FIELDS, search_keys(term)):
+            if key in answers:
+                continue
+            got, raw = j.api(endpoint, limit=str(WIDE_LIMIT), **{field: term})
+            if got != key:
+                raise SystemExit(f"gen-catalogue: asked for {key} and Jamendo's key is {got}")
+            answers[key] = rewrite(narrow(key, raw, ids), durations)
+            log(f"{key}: {len(raw['results'])} result(s) on Jamendo, "
+                f"{len(answers[key]['results'])} in the snapshot")
+    meta["searches"] = terms
+    return answers
 
 
 def narrow(key, answer, ids):
@@ -478,7 +514,8 @@ first, then the most recent other. Each album keeps its two tracks highest in
 Jamendo's popularity among the artist's own tracks, the chart's track
 first, and an artist whose tracks Jamendo will not list by popularity is
 passed over (the artist page's top tracks are that list). The searches are
-the first artist's name and the first track's title.
+{', '.join(repr(s) for s in meta['searches'])}: the first artist's name, the first
+track's title and tools/scenes/music_search.steps' terms.
 
 The licence: CC BY or CC BY-SA per track, named in ATTRIBUTION.md; the
 generator refuses any other, and `--check` refuses a committed answer naming
@@ -556,6 +593,11 @@ def check(family):
                 bad.append(f"{key}: track {tid} is licensed {lic}, outside CC BY and CC BY-SA "
                            f"— the snapshot may carry only those (docs/media-player-plan.md M2)")
     meta = answers[META]
+    for term in meta["searches"]:
+        for key in search_keys(term):
+            if key not in answers:
+                bad.append(f"{META} names the search {term!r} and {key} has no answer — the "
+                           f"app's search would fail against the mirror")
     for key in meta["home"]:
         if not answers.get(key, {}).get("results"):
             bad.append(f"Home's shelf {key} holds no track — the shelf would be empty")
@@ -604,6 +646,7 @@ def main():
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--against", type=pathlib.Path, default=FAMILY)
     ap.add_argument("--dry", action="store_true")
+    ap.add_argument("--add-searches", action="store_true")
     args = ap.parse_args()
     if args.check:
         bad, n = check(args.against)
@@ -619,6 +662,28 @@ def main():
     def log(line):
         print(f"gen-catalogue: {j.scrub(line)}", flush=True)
 
+    if args.add_searches:
+        answers = add_searches(j, log)
+        text = json.dumps(answers, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+        with scratch_dir("kaya-gen-catalogue-") as d:
+            fresh = d / "catalogue"
+            shutil.copytree(FAMILY, fresh)
+            (fresh / catalogue.ANSWERS).write_text(text, encoding="utf-8")
+            for name, body in docs(answers).items():
+                (fresh / name).write_text(body, encoding="utf-8")
+            if any(j.cid.encode() in p.read_bytes() for p in fresh.iterdir()):
+                raise SystemExit("gen-catalogue: the client id reached the snapshot; "
+                                 "nothing was written")
+            bad, n = check(fresh)
+            if bad:
+                for b in bad:
+                    print(f"gen-catalogue: {b}", file=sys.stderr)
+                raise SystemExit("gen-catalogue: the snapshot with the searches added fails "
+                                 "its own --check; nothing was written")
+            for name in (catalogue.ANSWERS, *DOCS):
+                shutil.copyfile(fresh / name, FAMILY / name)
+        log(f"wrote {catalogue.ANSWERS} and the docs in {j.calls} API calls")
+        return
     if args.dry:
         s = select(j, log)
         log(f"{len(s['tracks'])} tracks, {len(s['albums'])} albums, {len(s['artists'])} artists, "

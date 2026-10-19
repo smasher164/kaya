@@ -6443,8 +6443,10 @@ object KayaCompose {
             }
             // A stamped copy of ANY tagged kind resolves by key: the table's
             // sort tag and a widget's occurrence tag carry the same
-            // node-and-keys encoding (the keyed-target entry, 2026-09-01).
-            val stampOf = { n: KayaNode -> tableStamp(if (kind == "column") n.sortTag else n.tag) }
+            // node-and-keys encoding (the keyed-target entry, 2026-09-01). A
+            // table's nested For container carries its copy in the sort tag; a
+            // stamped column of any other kind in its occurrence tag.
+            val stampOf = { n: KayaNode -> tableStamp(if (kind == "column" && n.sortTag.isNotEmpty()) n.sortTag else n.tag) }
             val live = registry.filter(isLive)
             // EVERY copy carrying the id is a candidate, whichever template
             // stamped it: the key path names the copy (tools/scenes/tasks.steps).

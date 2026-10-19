@@ -23645,10 +23645,17 @@ impl crate::harness::Stage for GtkStage {
                         .enumerate()
                         .filter(|(_, (column, widget))| {
                             column.widget_name() == id
+                                && core.widgets.contains_key(*widget)
                                 && live(core, column.upcast_ref())
-                                && table_tag(core, **widget).is_some_and(|tag| {
-                                    crate::harness::table_tag_keys_match(&tag, keys)
-                                })
+                                // A table's nested For container carries its
+                                // copy in the sort tag; any other stamped column
+                                // in its occurrence tag (docs/traps.md, the
+                                // stamped column no keyed target named).
+                                && table_tag(core, **widget)
+                                    .or_else(|| core.widget_tags.get(&widget.0).cloned())
+                                    .is_some_and(|tag| {
+                                        crate::harness::table_tag_keys_match(&tag, keys)
+                                    })
                         })
                         .map(|(i, _)| i)
                         .collect();

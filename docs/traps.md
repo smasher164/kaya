@@ -18081,3 +18081,37 @@ red says whether the read was of the live widget.
 GUARD: harness::tests::observation_rebinds_a_superseded_id (the mock's
 `superseded` id answers a dead index first); with the rebind or the slice
 cut removed it fails at 15 s, both watched.
+
+## The stamped column no keyed target named (measured 2026-10-19)
+
+The media player's search results are cards: a `column` stamped per row of a
+collection, with an a11y id. On the mac `click column@found_artist[476280]`
+answered `no such target` while `image@found_artist_art[476280]`, inside the
+same copy, resolved. The SwiftUI keyed-target reader took a column's copy keys
+from its SORT tag alone, the table header's tag, which only a table's nested
+For container carries; every other stamped column carries its keys in its
+occurrence tag like any other kind (the leg log's `keyed target ... 2 carrying
+id ac, tags 32b,32b`). Compose had the same line. So no scene could address a
+stamped card, and `expect_no_target column@...[k]` passed vacuously. Both read
+the sort tag when the column has one and the occurrence tag otherwise.
+
+GUARD: tools/scenes/music_search.steps clicks and reads stamped cards on every
+lane (watched red on the mac before the fix); check-verbs' KEYED_ARMS doctors
+the Swift and Compose arms back to the shipped spelling and watches them red,
+and check-steps pins both spellings.
+
+
+## The phone extra whose typing had no watcher (measured 2026-10-19)
+
+The iOS lane starts the simdrive watcher, which types for `type` and pans for
+`dismiss_sheet`, only for a leg whose script names a bridge verb, and it read
+each line's FIRST word. A MODS extra rides as one `;`-joined line after the
+scene's own lines, so music_search's phone tail (`select_section 1; ...; type
+"David"; ...`) read as one `select_section` step: no watcher started and the
+leg waited 60 s at `type` ("the simdrive watcher did not answer #1 type_b64").
+run-sim's `script_verbs` splits every line into the harness's own steps, and
+needs_bridge and needs_driver read it.
+
+GUARD: both self-tests at run-sim's start include an extra-shaped line
+(`select_section 1; type "an"`); the shipped reader answers False on it, so the
+lane would refuse to start.

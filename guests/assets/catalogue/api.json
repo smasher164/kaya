@@ -31,7 +31,9 @@
   ],
   "searches": [
    "Pierce Murphy",
-   "Athens"
+   "Athens",
+   "David",
+   "zzqxv"
   ],
   "taken": "2026-10-17",
   "tracks": [
@@ -299,7 +301,48 @@
   },
   "results": []
  },
+ "albums?limit=200&namesearch=David": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 2,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "artist_id": "476280",
+    "artist_name": "David Amber",
+    "id": "149020",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "name": "David Amber and Friends, Vol. 1",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/list/a149020",
+    "shorturl": "https://jamen.do/l/a149020"
+   },
+   {
+    "artist_id": "476280",
+    "artist_name": "David Amber",
+    "id": "154466",
+    "image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "name": "David Amber and Friends, Vol. 2 Instrumentals",
+    "releasedate": "2015-12-08",
+    "shareurl": "https://www.jamendo.com/list/a154466",
+    "shorturl": "https://jamen.do/l/a154466"
+   }
+  ]
+ },
  "albums?limit=200&namesearch=Pierce%20Murphy": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "albums?limit=200&namesearch=zzqxv": {
   "headers": {
    "code": 0,
    "error_message": "",
@@ -475,6 +518,26 @@
   },
   "results": []
  },
+ "artists?limit=200&namesearch=David": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 1,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "id": "476280",
+    "image": "/catalogue/usercontent?type=artist&id=476280&width=300",
+    "joindate": "2015-06-22",
+    "name": "David Amber",
+    "shareurl": "https://www.jamendo.com/artist/476280",
+    "shorturl": "https://jamen.do/a/476280",
+    "website": "http://www.ambersongs.com"
+   }
+  ]
+ },
  "artists?limit=200&namesearch=Pierce%20Murphy": {
   "headers": {
    "code": 0,
@@ -494,6 +557,16 @@
     "website": ""
    }
   ]
+ },
+ "artists?limit=200&namesearch=zzqxv": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
  },
  "tracks?artist_id=357359&limit=200&order=popularity_total": {
   "headers": {
@@ -1023,7 +1096,88 @@
   },
   "results": []
  },
+ "tracks?limit=200&search=David": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 3,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": [
+   {
+    "album_id": "149020",
+    "album_image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "album_name": "David Amber and Friends, Vol. 1",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1243462&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1243462",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "Gnarly (feat. Devyn Rush)",
+    "position": 3,
+    "prourl": "",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/track/1243462",
+    "shorturl": "https://jamen.do/t/1243462"
+   },
+   {
+    "album_id": "154466",
+    "album_image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "album_name": "David Amber and Friends, Vol. 2 Instrumentals",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1296792&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1296792",
+    "image": "/catalogue/usercontent?type=album&id=154466&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "BoomShaKaLaKa ~ Instrumental Version",
+    "position": 1,
+    "prourl": "",
+    "releasedate": "2015-12-08",
+    "shareurl": "https://www.jamendo.com/track/1296792",
+    "shorturl": "https://jamen.do/t/1296792"
+   },
+   {
+    "album_id": "149020",
+    "album_image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "album_name": "David Amber and Friends, Vol. 1",
+    "artist_id": "476280",
+    "artist_idstr": "David_Amber",
+    "artist_name": "David Amber",
+    "audio": "/catalogue/storage/?trackid=1243461&format=mp31",
+    "content_id_free": false,
+    "duration": 20,
+    "id": "1243461",
+    "image": "/catalogue/usercontent?type=album&id=149020&width=300",
+    "license_ccurl": "http://creativecommons.org/licenses/by/3.0/",
+    "name": "i LuV iT (feat. Ashley Jana)",
+    "position": 1,
+    "prourl": "",
+    "releasedate": "2015-06-23",
+    "shareurl": "https://www.jamendo.com/track/1243461",
+    "shorturl": "https://jamen.do/t/1243461"
+   }
+  ]
+ },
  "tracks?limit=200&search=Pierce%20Murphy": {
+  "headers": {
+   "code": 0,
+   "error_message": "",
+   "results_count": 0,
+   "status": "success",
+   "warnings": ""
+  },
+  "results": []
+ },
+ "tracks?limit=200&search=zzqxv": {
   "headers": {
    "code": 0,
    "error_message": "",

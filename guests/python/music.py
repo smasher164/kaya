@@ -3,7 +3,8 @@ and Home (tools/scenes/music_home.steps), an album's track table that plays
 through kaya's player (tools/scenes/music_playlist.steps), and the album's
 gradient header (tools/scenes/music_header.steps), and the dock with the
 media session and the phones' full player (tools/scenes/music_dock.steps),
-and the artist page (tools/scenes/music_artist.steps)."""
+the artist page (tools/scenes/music_artist.steps), and search with the
+toasts (tools/scenes/music_search.steps)."""
 
 import html
 import json
@@ -25,6 +26,7 @@ DOCK = 21
 PLAYER_SHEET = 22
 SECTION_HOME = 30
 SECTION_LIBRARY = 31
+SECTION_SEARCH = 32
 FIRST_ALBUM_ENTRY = 100
 
 SHELVES = [("jazz", "Jazz"), ("electronic", "Electronic"), ("rock", "Rock")]
@@ -37,6 +39,13 @@ DOCK_ART = 48
 # Previous restarts the track past this point (docs/media-player-plan.md M14).
 RESTART_AFTER_MS = 3000
 FULL_ART = 300
+SEARCH_DEBOUNCE_S = 0.3
+# The snapshot's searches ask for this many (tools/gen-catalogue.py WIDE_LIMIT).
+SEARCH_LIMIT = 200
+FOUND_MAX = 10
+CHIPS = ("All", "Albums", "Artists", "Tracks")
+SEARCHES = (("albums", "albums", "namesearch"), ("artists", "artists", "namesearch"),
+            ("tracks", "tracks", "search"))
 # The header's colour until the cover has decoded (docs/styling-pass-plan.md Y2).
 UNKNOWN_COLOUR = kaya.Color(0x47, 0x47, 0x4A)
 HEADER_L = 30
@@ -64,6 +73,15 @@ class Saved:
     art: bytes
     phase: kaya.ImagePhase
     selected: bool
+
+
+@dataclass
+class Found:
+    name: str
+    caption: str
+    art_url: str
+    art: bytes
+    phase: kaya.ImagePhase
 
 
 @dataclass
@@ -102,12 +120,16 @@ class Sampler:
         if parts.path.startswith("/catalogue/v3.0/"):
             pairs = sorted((k, v) for k, v in urllib.parse.parse_qsl(parts.query)
                            if k not in ("client_id", "format"))
-            key = parts.path[len("/catalogue/v3.0/"):].strip("/")
+            endpoint = parts.path[len("/catalogue/v3.0/"):].strip("/")
+            key = endpoint
             if pairs:
                 key += "?" + urllib.parse.urlencode(pairs, quote_via=urllib.parse.quote)
-            if key not in self.answers:
+            if key in self.answers:
+                return json.dumps(self.answers[key]).encode("utf-8")
+            term = query.get("search") or query.get("namesearch")
+            if term is None:
                 raise OSError(f"the sampler holds no answer for {key}")
-            return json.dumps(self.answers[key]).encode("utf-8")
+            return json.dumps(self.search(endpoint, term)).encode("utf-8")
         if parts.path == "/catalogue/usercontent":
             album = query["id"]
             if query["type"] == "artist":
@@ -115,6 +137,29 @@ class Sampler:
             with kaya.asset(f"catalogue/album-{album}-{query['width']}.jpg") as asset:
                 return asset.bytes()
         raise OSError(f"the sampler holds nothing at {parts.path}")
+
+    def search(self, endpoint, term):
+        """A search the snapshot did not record, answered from what the
+        sampler holds: a name holding the term, in Jamendo's answer shape."""
+        found = {}
+        for key, answer in self.answers.items():
+            if key.startswith("albums/tracks?"):
+                for album in answer["results"]:
+                    if endpoint == "albums":
+                        found[album["id"]] = album
+                    for track in album["tracks"] if endpoint == "tracks" else ():
+                        found[track["id"]] = {**track, "album_id": album["id"],
+                                              "album_name": album["name"],
+                                              "album_image": album["image"],
+                                              "artist_id": album["artist_id"],
+                                              "artist_name": album["artist_name"]}
+            elif key.startswith("artists?id=") and endpoint == "artists":
+                for artist in answer["results"]:
+                    found[artist["id"]] = artist
+        word = term.casefold()
+        hits = [r for r in found.values()
+                if word in r["name"].casefold() or word in r.get("artist_name", "").casefold()]
+        return {"headers": {"status": "success"}, "results": hits}
 
 
 class Catalogue:
@@ -189,6 +234,12 @@ class Catalogue:
     def album(self, album_id):
         return self.get("albums/tracks", id=album_id, imagesize=600)[0]
 
+    def search(self, term):
+        """Albums, artists and tracks for a term, asked at once."""
+        jobs = {group: art_pool.submit(self.get, endpoint, limit=SEARCH_LIMIT, **{field: term})
+                for group, endpoint, field in SEARCHES}
+        return {group: job.result() for group, job in jobs.items()}
+
     def artist(self, artist_id):
         """The artist, their albums and their most played tracks."""
         about = self.get("artists", id=artist_id)[0]
@@ -206,6 +257,11 @@ artist_cards = {}
 viewing = {"album": None}
 library_keys = []
 known = {}
+# The phones' Search section, a page with no entry of its own.
+roots = []
+# The like steps the window's undo ledger holds, newest last.
+like_steps = []
+redo_steps = []
 # Each surface's navigation stack of album and artist pages, top last.
 stacks = {}
 songs = {}
@@ -215,7 +271,9 @@ playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
 favorites = set()
 liked = set()
 covers = {}
+fetching = set()
 dock_ready = {"built": False}
+home_state = {"shown": False, "search_asked": False}
 live = {"play": [], "repeat": [], "sheet": False}
 entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
 
@@ -238,9 +296,9 @@ def show_library_selection(album_id):
         library.patch(key, selected=key == album_id)
 
 
-def open_album(album):
+def open_album(album, surface=None):
     key = album["id"]
-    show_album(album, 0 if desktop else SECTION_HOME)
+    show_album(album, (0 if desktop else SECTION_HOME) if surface is None else surface)
     if key not in library_keys:
         library.insert(key, Saved(title=album["name"], caption=f"Album · {album['artist']}",
                                   art_url=album["image"], art=b"",
@@ -265,10 +323,22 @@ def go_home():
     # The album last opened stays the selected card under Home.
     show_library_selection(None)
     home_shown.set(True)
+    search_shown.set(False)
+
+
+def show_destination():
+    """The desktops' sidebar names Home or Search while one is on top."""
+    top = stacks.get(0, [])
+    home_shown.set(not top)
+    search_shown.set(len(top) == 1 and top[0]["kind"] == "search")
 
 
 def all_pages():
-    return [page for stack in stacks.values() for page in stack]
+    return [page for stack in stacks.values() for page in stack] + roots
+
+
+def page_open(page):
+    return any(p is page for p in all_pages())
 
 
 def find_page(surface, entry):
@@ -288,15 +358,15 @@ def open_page(surface, kind, key):
 
 
 def show_album(album, surface):
-    if desktop:
-        home_shown.set(False)
     stack = open_page(surface, "album", album["id"])
     if stack is None:
         return
     entry = next(entries)
     page = {"kind": "album", "id": album["id"], "album": album["id"], "entry": entry,
-            "keys": []}
+            "surface": surface, "keys": []}
     stack.append(page)
+    if desktop:
+        show_destination()
     with app.push_entry(entry, title=album["name"], window=surface,
                         on_popped=lambda: page_closed(surface, entry)):
         page["about"] = kaya.signal(album["artist"])
@@ -357,7 +427,8 @@ def header_content(album, page):
             .max_width(HEADER_ART).max_height(HEADER_ART).a11y_id("album_art")
         with kaya.column(spacing=6, align="start"):
             kaya.heading(album["name"]).a11y_id("album_title")
-            kaya.button(album["artist"], on_click=lambda: open_artist(album)) \
+            kaya.button(album["artist"],
+                        on_click=lambda: open_artist(album["artist_id"], page["surface"])) \
                 .role(kaya.Role.PLAIN).a11y_id("album_artist")
             kaya.caption(bind=page["about"]).a11y_id("album_about")
             with kaya.row(spacing=12, align="center"):
@@ -384,6 +455,8 @@ def page_closed(surface, entry):
     page = find_page(surface, entry)
     if page is not None:
         stacks[surface].remove(page)
+        if desktop and surface == 0:
+            show_destination()
 
 
 def load_album(album, surface, entry):
@@ -563,9 +636,14 @@ def play_track(key, start):
 
 
 def show_art():
-    cover = covers.get(songs[playback["key"]]["album"])
+    song = songs[playback["key"]]
+    cover = covers.get(song["album"])
     if cover is None:
         dock_phase.set(kaya.ImagePhase.LOADING)
+        # A track found by a search may be from an album nothing has shown.
+        if "art_url" in song and song["album"] not in fetching:
+            fetching.add(song["album"])
+            art_pool.submit(fetch_cover, song["album"], song["art_url"])
         return
     dock_art.set(cover)
     dock_phase.set(kaya.ImagePhase.SHOWN)
@@ -660,14 +738,38 @@ def cycle_repeat():
 
 
 def set_liked(on):
+    """The heart offers its undo in a toast (docs/toast-plan.md T4)."""
     key = playback["key"]
     if key is None:
         return
+    kaya.undoable(f"{'Like' if on else 'Unlike'} {songs[key]['title']}")
+    apply_like(key, on)
+    like_steps.append((key, on))
+    redo_steps.clear()
+    kaya.show_toast("Added to Liked Songs" if on else "Removed from Liked Songs",
+                    action="Undo", undo=True)
+
+
+def apply_like(key, on):
     if on:
         liked.add(key)
     else:
         liked.discard(key)
-    liked_now.set(on)
+    liked_now.set(playback["key"] in liked)
+
+
+def on_undone(_label, _delta):
+    if like_steps:
+        key, on = like_steps.pop()
+        redo_steps.append((key, on))
+        apply_like(key, not on)
+
+
+def on_redone(_label, _delta):
+    if redo_steps:
+        key, on = redo_steps.pop()
+        like_steps.append((key, on))
+        apply_like(key, on)
 
 
 def show_play_state(playing):
@@ -864,12 +966,26 @@ def card_art_landed(album_id, data, registry=None):
     card["art"].set(data)
     card["phase"].set(kaya.ImagePhase.SHOWN)
     # A track played from an artist page may be from an album never opened.
-    if album_id not in covers:
-        covers[album_id] = data
-        key = playback["key"]
-        if key is not None and songs[key]["album"] == album_id:
-            show_art()
-            declare_session()
+    cover_known(album_id, data)
+
+
+def fetch_cover(album_id, url):
+    try:
+        data = catalogue.fetch(catalogue.address(url))
+    except OSError as e:
+        print(f"music: album {album_id}'s cover did not load: {e!r}", file=sys.stderr)
+        return
+    app.post(cover_known, album_id, data)
+
+
+def cover_known(album_id, data):
+    if album_id in covers:
+        return
+    covers[album_id] = data
+    key = playback["key"]
+    if key is not None and songs[key]["album"] == album_id:
+        show_art()
+        declare_session()
 
 
 def fetch_card_art(album_id, url, registry=None):
@@ -880,23 +996,13 @@ def fetch_card_art(album_id, url, registry=None):
     app.post(card_art_landed, album_id, data, registry)
 
 
-def open_artist(album):
+def open_artist(artist_id, surface):
     """The artist page opens once its answer is in: its shelf is a grid of
     cards, which is built whole."""
-    surface = 0 if desktop else current_surface(album["id"])
     top = stacks.get(surface, [])[-1:]
-    if top and top[0]["kind"] == "artist" and top[0]["id"] == album["artist_id"]:
+    if top and top[0]["kind"] == "artist" and top[0]["id"] == artist_id:
         return
-    threading.Thread(target=load_artist, args=(album["artist_id"], surface),
-                     daemon=True).start()
-
-
-def current_surface(album_id):
-    """The phone's section whose stack shows the album."""
-    for surface, stack in stacks.items():
-        if stack and stack[-1].get("album") == album_id:
-            return surface
-    return SECTION_HOME
+    threading.Thread(target=load_artist, args=(artist_id, surface), daemon=True).start()
 
 
 def load_artist(artist_id, surface):
@@ -915,9 +1021,11 @@ def show_artist(surface, answer):
         return
     name = html.unescape(about["name"])
     entry = next(entries)
-    page = {"kind": "artist", "id": about["id"], "entry": entry, "keys": [],
-            "cards": {}}
+    page = {"kind": "artist", "id": about["id"], "entry": entry, "surface": surface,
+            "keys": [], "cards": {}}
     stack.append(page)
+    if desktop:
+        show_destination()
     shelf = [{"id": a["id"], "name": html.unescape(a["name"]), "artist": name,
               "artist_id": about["id"], "image": catalogue.address(a["image"])}
              for a in albums]
@@ -980,7 +1088,7 @@ def artist_body(name, about, shelf, page):
             kaya.heading("Albums")
             with kaya.grid(1, spacing=12) as grid:
                 for album in shelf:
-                    card(album, page["cards"], prefix="artist_")
+                    card(album, page["cards"], prefix="artist_", surface=page["surface"])
             grid.columns_auto(CARD_ART + 24).a11y_id("artist_shelf")
 
 
@@ -1008,15 +1116,16 @@ def albums_line(count):
     return "1 album" if count == 1 else f"{count} albums"
 
 
-def card(album, registry=None, prefix=""):
-    """A Home card, or with `registry` and `prefix` an artist page's."""
+def card(album, registry=None, prefix="", surface=None):
+    """A Home card, or with `registry`, `prefix` and `surface` an artist
+    page's."""
     registry = cards if registry is None else registry
     known[album["id"]] = album
     art = kaya.signal(b"")
     phase = kaya.signal(kaya.ImagePhase.LOADING)
     selected = kaya.signal(False)
     with kaya.column(filled=kaya.Tint.NEUTRAL, selected=selected,
-                     on_activate=lambda: open_album(album)) as tile:
+                     on_activate=lambda: open_album(album, surface)) as tile:
         tile.a11y_id(f"{prefix}card_{album['id']}").fill(True)
         kaya.image(art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=phase) \
             .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"{prefix}art_{album['id']}")
@@ -1024,6 +1133,242 @@ def card(album, registry=None, prefix=""):
         kaya.caption(album["artist"])
     registry[album["id"]] = {"art": art, "phase": phase, "selected": selected,
                              "url": album["image"]}
+
+
+def open_search():
+    """The desktops' Search destination, the content pane's page above Home;
+    asked before Home has arrived, it opens once Home is under it."""
+    if not home_state["shown"]:
+        home_state["search_asked"] = True
+        return
+    top = stacks.get(0, [])
+    if len(top) == 1 and top[0]["kind"] == "search":
+        return
+    for _ in stacks.pop(0, []):
+        kaya.pop_entry()
+    show_library_selection(None)
+    entry = next(entries)
+    page = search_page(0, entry)
+    stacks[0] = [page]
+    with app.push_entry(entry, title="Search", on_popped=lambda: page_closed(0, entry)):
+        search_body(page)
+    show_destination()
+
+
+def search_page(surface, entry):
+    return {"kind": "search", "id": None, "entry": entry, "surface": surface, "keys": [],
+            "gen": 0, "query": "", "answer": None, "chip_at": 0,
+            "shown": {group: [] for group, _, _ in SEARCHES}}
+
+
+def search_body(page):
+    """Search (docs/media-player-plan.md §1; docs/search-plan.md): the field
+    asks the catalogue as the user types, the segmented control narrows the
+    answer, and the results are shelves of cards and a list of tracks."""
+    page["chip"] = kaya.signal(0.0)
+    page["status"] = kaya.signal(search_hint())
+    page["heads"] = {group: kaya.signal(False) for group, _, _ in SEARCHES}
+    page["albums"] = kaya.collection(Found)
+    page["artists"] = kaya.collection(Found)
+    page["tracks"] = kaya.collection(Track)
+    for group in ("albums", "artists", "tracks"):
+        page[f"{group}_art"] = kaya.RowImages(app, page[group], url="art_url", art="art",
+                                              phase="phase", fetch=catalogue.fetch)
+    with kaya.scroll(grow=1) as page_scroll, \
+            kaya.column(spacing=16, inset=PAGE_INSET, align="stretch") as body:
+        page_scroll.a11y_id("search_page")
+        body.a11y_id("search")
+        kaya.search(placeholder="Artists, albums or tracks",
+                    on_change=lambda text: on_query(page, text)) \
+            .a11y_id("find").a11y_label("Search")
+        # A phone's width holds the four chips only when they share it.
+        with kaya.row() if desktop else kaya.column(align="stretch"):
+            chips = kaya.segmented(CHIPS, selected=page["chip"],
+                                   on_select=lambda i: on_chip(page, i)) \
+                .a11y_id("chips").a11y_label("Show")
+            if not desktop:
+                chips.fill(True)
+        kaya.caption(bind=page["status"]).a11y_id("search_status")
+        found_shelf(page, "albums", "Albums", kaya.Shape.ROUNDED,
+                    lambda row: open_album(known[row.key], page["surface"]))
+        found_shelf(page, "artists", "Artists", kaya.Shape.CIRCLE,
+                    lambda row: open_artist(row.key, page["surface"]))
+        with kaya.column(spacing=8, align="stretch"):
+            with kaya.when(page["heads"]["tracks"]):
+                kaya.heading("Tracks")
+            found_list(page)
+
+
+def found_list(page):
+    for track in page["tracks"].rows(a11y_id="found_tracks", align="stretch"):
+        with kaya.row(spacing=12, align="center",
+                      on_activate=lambda row: play_found(page, row.key)) as line:
+            line.a11y_id("found_track")
+            kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                       phase=track.phase, on_needed=page["tracks_art"].needed,
+                       on_released=page["tracks_art"].released) \
+                .max_width(ROW_ART).max_height(ROW_ART).a11y_id("found_track_art")
+            with kaya.column(spacing=0, grow=1):
+                kaya.label(bind=track.title, tint=track.tint).a11y_id("found_track_name")
+                kaya.caption(bind=track.artist)
+            kaya.label(bind=track.duration).a11y_id("found_track_time")
+
+
+def found_shelf(page, group, title, shape, on_open):
+    """One kind of result as a sideways shelf of cards under its heading."""
+    one = group[:-1]
+    with kaya.column(spacing=8, align="stretch"):
+        with kaya.when(page["heads"][group]):
+            kaya.heading(title)
+        found_strip(page, group, one, shape, on_open)
+
+
+def found_strip(page, group, one, shape, on_open):
+    with kaya.scroll(axis=kaya.Axis.HORIZONTAL) as strip:
+        strip.a11y_id(f"{group}_shelf")
+        for found in page[group].rows(a11y_id=f"found_{group}"):
+            with kaya.column(spacing=4, filled=kaya.Tint.NEUTRAL, on_activate=on_open) as tile:
+                tile.a11y_id(f"found_{one}")
+                kaya.image(found.art, fit=kaya.Fit.COVER, shape=shape, phase=found.phase,
+                           on_needed=page[f"{group}_art"].needed,
+                           on_released=page[f"{group}_art"].released) \
+                    .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"found_{one}_art")
+                kaya.label(bind=found.name).a11y_id(f"found_{one}_name")
+                kaya.caption(bind=found.caption)
+    page[group].container().axis(kaya.Axis.HORIZONTAL)
+    page[group].container().spacing(12)
+
+
+def search_hint():
+    where = "the bundled sampler" if catalogue.sampler else "Jamendo"
+    return f"Search {where} for artists, albums and tracks."
+
+
+def on_query(page, text):
+    """Debounced: the catalogue is asked once the user pauses."""
+    query = text.strip()
+    page["gen"] += 1
+    page["query"] = query
+    if not query:
+        page["answer"] = None
+        page["chip_at"] = 0
+        page["chip"].set(0.0)
+        show_found(page)
+        return
+    page["status"].set(f"Searching for “{query}”…")
+    timer = threading.Timer(SEARCH_DEBOUNCE_S, ask_catalogue, args=(page, page["gen"], query))
+    timer.daemon = True
+    timer.start()
+
+
+def ask_catalogue(page, gen, query):
+    if page["gen"] != gen:
+        return
+    try:
+        answer = catalogue.search(query)
+    except (OSError, ValueError, KeyError) as e:
+        print(f"music: the search for {query!r} did not load: {e!r}", file=sys.stderr)
+        answer = None
+    app.post(search_answered, page, gen, query, answer)
+
+
+def search_answered(page, gen, query, answer):
+    if page["gen"] != gen or not page_open(page):
+        return
+    if answer is None:
+        page["status"].set("Couldn't reach the catalogue.")
+        kaya.show_toast("Couldn't reach the catalogue", action="Retry",
+                        on_result=lambda outcome: retry_search(page, gen, query, outcome))
+        return
+    page["answer"] = answer
+    show_found(page)
+
+
+def retry_search(page, gen, query, outcome):
+    if outcome != kaya.ToastOutcome.ACTION or page["gen"] != gen or not page_open(page):
+        return
+    page["gen"] += 1
+    page["status"].set(f"Searching for “{query}”…")
+    threading.Thread(target=ask_catalogue, args=(page, page["gen"], query), daemon=True).start()
+
+
+def on_chip(page, index):
+    page["chip_at"] = int(index)
+    page["chip"].set(float(index))
+    show_found(page)
+
+
+def found_rows(group, results):
+    """(key, row) per result, the albums known to open_album and the
+    tracks to the queue."""
+    rows = []
+    for r in results[:FOUND_MAX]:
+        key = r["id"]
+        if group == "albums":
+            album = {"id": key, "name": html.unescape(r["name"]),
+                     "artist": html.unescape(r["artist_name"]), "artist_id": r["artist_id"],
+                     "image": catalogue.address(r["image"])}
+            known[key] = album
+            rows.append((key, Found(name=album["name"], caption=album["artist"],
+                                    art_url=album["image"], art=b"",
+                                    phase=kaya.ImagePhase.LOADING)))
+        elif group == "artists":
+            rows.append((key, Found(name=html.unescape(r["name"]), caption="Artist",
+                                    art_url=catalogue.address(r["image"]), art=b"",
+                                    phase=kaya.ImagePhase.LOADING)))
+        else:
+            art = catalogue.address(r["album_image"])
+            songs[key] = {"title": html.unescape(r["name"]), "audio": r["audio"],
+                          "artist": html.unescape(r["artist_name"]), "album": r["album_id"],
+                          "album_name": html.unescape(r["album_name"]),
+                          "seconds": int(r["duration"]), "art_url": art}
+            rows.append((key, Track(
+                number="", title=songs[key]["title"], artist=songs[key]["artist"],
+                album=songs[key]["album_name"],
+                duration=kaya.fmt.duration(int(r["duration"]) * 1000), art_url=art, art=b"",
+                phase=kaya.ImagePhase.LOADING,
+                tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
+                selected=False)))
+    return rows
+
+
+def show_found(page):
+    """The answer narrowed to the chosen chip, as a diff of each kind's
+    rows (docs/search-plan.md S9)."""
+    answer = page["answer"] or {group: [] for group, _, _ in SEARCHES}
+    chip = CHIPS[page["chip_at"]]
+    counts = []
+    for group, _, _ in SEARCHES:
+        wanted = found_rows(group, answer[group]) if chip in ("All", group.title()) else []
+        keys = [key for key, _ in wanted]
+        for key in page["shown"][group]:
+            if key not in keys:
+                page[group].remove(key)
+        for key, row in wanted:
+            if key not in page["shown"][group]:
+                page[group].insert(key, row)
+        for key in keys:
+            page[group].move_to_end(key)
+        page["shown"][group] = keys
+        page["heads"][group].set(bool(keys))
+        if keys:
+            one = group[:-1]
+            counts.append(f"1 {one}" if len(keys) == 1 else f"{len(keys)} {group}")
+    page["keys"] = page["shown"]["tracks"]
+    query = page["query"]
+    if page["answer"] is None:
+        page["status"].set(search_hint())
+    elif counts:
+        page["status"].set(" · ".join(counts))
+    elif chip == "All":
+        page["status"].set(f"No results for “{query}”.")
+    else:
+        page["status"].set(f"No {chip.lower()} for “{query}”.")
+
+
+def play_found(page, key):
+    select_track(key)
+    start_queue(page["keys"], key)
 
 
 def connect_typed(text):
@@ -1085,6 +1430,9 @@ def library_body():
             with kaya.row(selected=home_shown, on_activate=go_home) as destination:
                 destination.a11y_id("go_home")
                 kaya.label("Home")
+            with kaya.row(selected=search_shown, on_activate=open_search) as destination:
+                destination.a11y_id("go_search")
+                kaya.label("Search")
         kaya.heading("Your Library")
         kaya.caption(bind=library_hint)
         for item in library:
@@ -1103,10 +1451,16 @@ def home_arrived(shelves):
     if desktop:
         with app.push_entry(HOME, title="Home"):
             home_body(shelves)
+        home_state["shown"] = True
         home_shown.set(True)
+        if home_state["search_asked"]:
+            open_search()
     else:
         with app.add_section(SECTION_HOME, title="Home", symbol=kaya.Symbol.HOME):
             home_body(shelves)
+        with app.add_section(SECTION_SEARCH, title="Search", symbol=kaya.Symbol.SEARCH):
+            roots.append(search_page(SECTION_SEARCH, None))
+            search_body(roots[-1])
         with app.add_section(SECTION_LIBRARY, title="Library", symbol=kaya.Symbol.QUEUE):
             library_body()
     for album_id, entry in cards.items():
@@ -1131,13 +1485,15 @@ def load_home():
 
 with app.window(title="Music", width=1100, height=720,
                 panes=2 if desktop else None, inset=0,
-                sections_presentation=None if desktop else kaya.SectionsPresentation.BAR):
+                sections_presentation=None if desktop else kaya.SectionsPresentation.BAR,
+                on_undone=on_undone, on_redone=on_redone):
     notice = kaya.signal("Browsing the bundled sampler.")
     library_hint = kaya.signal(library_caption())
     library = kaya.collection(Saved)
     library_art = kaya.RowImages(app, library, url="art_url", art="art", phase="phase",
                                  fetch=catalogue.fetch)
     home_shown = kaya.signal(False)
+    search_shown = kaya.signal(False)
     dock_title = kaya.signal("")
     dock_artist = kaya.signal("")
     dock_art = kaya.signal(b"")

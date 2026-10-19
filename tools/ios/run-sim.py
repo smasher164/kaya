@@ -1487,15 +1487,24 @@ BRIDGE_VERBS = frozenset((
 ))
 
 
+def script_verbs(script):
+    """Every step's verb: a lane's extra rides as one `;`-joined line after
+    the scene's own lines, and the harness splits it into steps."""
+    return [step.split()[0]
+            for line in script.splitlines() if not line.lstrip().startswith("#")
+            for step in line.split(";") if step.strip()]
+
+
 def needs_bridge(script):
     """Does this leg's script reach the host bridge? Read off its verbs."""
-    return any(line.split()[0] in BRIDGE_VERBS
-               for line in script.splitlines()
-               if line.strip() and not line.lstrip().startswith("#"))
+    return any(verb in BRIDGE_VERBS for verb in script_verbs(script))
 
 
-# The derivation watched both ways before any leg trusts it.
+# The derivation watched both ways before any leg trusts it, and over a
+# phone extra's `;` line (music_search's Search section typed with no
+# watcher, sixty seconds of silence; docs/traps.md).
 if not needs_bridge('expect label#0 "x"\ntype "an"') \
+        or not needs_bridge('expect label#0 "x"\nselect_section 1; type "an"') \
         or needs_bridge('expect label#0 "x"\n# type "an"'):
     die("run-sim: needs_bridge does not read the script's verbs — the host "
         "bridge would be started by luck")
@@ -1510,12 +1519,11 @@ HOST_ONLY_VERBS = frozenset(("clipboard_seed", "expect_clipboard", "expect_video
 def needs_driver(script):
     """docs/traps.md, XCTest's notifier loaded over an open animation: a leg
     whose verbs reach the xcui driver attaches it before its first step."""
-    return any(line.split()[0] in BRIDGE_VERBS - HOST_ONLY_VERBS
-               for line in script.splitlines()
-               if line.strip() and not line.lstrip().startswith("#"))
+    return any(verb in BRIDGE_VERBS - HOST_ONLY_VERBS for verb in script_verbs(script))
 
 
 if not needs_driver('expect label#0 "x"\ntype "an"') \
+        or not needs_driver('expect label#0 "x"\nselect_section 1; type "an"') \
         or needs_driver('clipboard_seed text "x"\nexpect_clipboard "x"') \
         or not HOST_ONLY_VERBS < BRIDGE_VERBS:
     die("run-sim: needs_driver does not read the script's driver verbs — the xcui "

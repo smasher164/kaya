@@ -8909,7 +8909,11 @@ private func kayaTarget(_ spec: Substring, _ kind: String, _ registry: [KayaNode
         // A stamped copy of ANY tagged kind resolves by key: the table's
         // sort tag and a widget's occurrence tag carry the same node-and-
         // keys encoding (the keyed-target entry, 2026-09-01).
-        let stampOf: (KayaNode) -> KayaTableStamp? = { kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag) }
+        // A table's nested For container carries its copy in the sort tag; a
+        // stamped column of any other kind in its occurrence tag.
+        let stampOf: (KayaNode) -> KayaTableStamp? = {
+            kayaTableStamp(kind == "column" && !$0.sortTag.isEmpty ? $0.sortTag : $0.tag)
+        }
         let live = registry.filter(isLive)
         // EVERY copy carrying the id is a candidate, whichever template
         // stamped it: the key path names the copy, so five lists' templates

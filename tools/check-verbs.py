@@ -1846,7 +1846,9 @@ if failures:
 # so every arm resolves any tagged kind through it (docs/deferred.md's
 # keyed-target entry). This pins each arm's generic spelling and refuses
 # the column-only guard coming back — byte-frozen markers, doctored away
-# one at a time and watched red.
+# one at a time and watched red. The Swift and Compose doctorings are the
+# shipped column arm that read only the sort tag (docs/traps.md, the stamped
+# column no target named).
 KEYED_ARMS = [
     ("crates/kaya/src/gtk.rs",
      "let candidates = kind_registry(core, kind);",
@@ -1855,11 +1857,11 @@ KEYED_ARMS = [
      "let candidates = registry_ids(core, kind);",
      "let candidates: Vec<u64> = Vec::new();"),
     ("swift/KayaSwiftUI.swift",
-     'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)',
-     "kayaTableStamp($0.sortTag)"),
+     'kayaTableStamp(kind == "column" && !$0.sortTag.isEmpty ? $0.sortTag : $0.tag)',
+     'kayaTableStamp(kind == "column" ? $0.sortTag : $0.tag)'),
     ("android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
-     'tableStamp(if (kind == "column") n.sortTag else n.tag)',
-     "tableStamp(n.sortTag)"),
+     'tableStamp(if (kind == "column" && n.sortTag.isNotEmpty()) n.sortTag else n.tag)',
+     'tableStamp(if (kind == "column") n.sortTag else n.tag)'),
 ]
 # The first-copy read: the template node taken off the first copy carrying
 # the id resolved only the first template's rows when five templates shared
