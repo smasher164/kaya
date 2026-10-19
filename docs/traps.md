@@ -18009,3 +18009,52 @@ three probes is drawn as the picture there and not as the page, and answers
 
 GUARD: the music_artistdark legs on every lane (red on linux before:
 `ground reads none (top 2B201C, middle E10505, bottom DD0709, ground 222226)`).
+
+## The catalog that read English: GTK's setlocale raced the Rust app thread's locale read (measured 2026-10-18)
+
+Matrix 20261018T232020Z: `formatde-rust-wayland` and `formatar-rust-wayland`
+read every formatter in German and Arabic, `expect_locale` and the
+`fmt::locale()` label read the knob's tag, and the three `tr!` labels read
+the ENGLISH catalog. Every other binding's leg and both x11 Rust legs were
+green, and neither leg had failed in any kept journal. The Rust tier's
+`run()` spawns the app thread and then enters gtk.rs's `run_core`, whose
+`gtk4::init()` calls `setlocale(LC_ALL, "")`, while the app thread's first
+call, `kaya::catalog`, reads the locale with `setlocale(LC_ALL, NULL)`.
+glibc's write mallocs a new name and frees the old one even when the locale
+is unchanged, and the read returns that pointer with no lock. Measured in
+kaya-linux:latest with one thread writing `setlocale(LC_ALL, "")` in a loop
+and one reading: 147585 and 145020 of 2,000,000 reads were not
+`de_DE.UTF-8` (an empty string, garbage bytes). A garbage tag leaves the
+catalog's chain only the declared default, so English loaded with no word.
+The other bindings call `catalog` before `kaya_run`, so GTK has not started.
+The rule now: the C locale has one writer, `fmt::install_locale_knob` before
+any app thread (gtk.rs calls `gtk4::disable_setlocale()` before its init),
+and `catalog()` refuses a locale read whose language is not the knob's.
+The leg log's `KAYA_DIAG catalog` line names the locale it read and the file
+it loaded. tools/check-appearance.py L1-L3 hold all three.
+
+
+## The superseded heart: a kind@id target resolved once read a popped page's copy for 15 s (measured 2026-10-18)
+
+Matrix 20261018T231905Z, windows `music_header_python`: after `click
+row@saved[201715]` (which pops the Fellow Traveler album page and pushes
+Through The Olive Branches in one handler), `expect_checked checkbox@favorite
+on` read `off (the ToggleButton peer's ToggleState 0)` for the whole
+deadline while the step shot showed the heart filled. The verb trace had the
+answer: the click's answer wait returned 25 ms after the click on
+transactions that were not the handler's (playback ticks and row art move
+the applied count), the id resolved in a 248 ms UI hop to checkbox#4, the
+popped page's heart, still live because the pop had not been applied, and
+the next step resolved the same id to checkbox#5. The Rust harness (GTK,
+WinUI) resolved a kind@id target ONCE per step and polled that index; the
+SwiftUI and Compose harnesses resolve inside every read, so only two lanes
+could pin a superseded widget. The rule now: an observation with a kind@id
+target polls in 500 ms slices (harness.rs `mod rebind`), the ids are
+re-resolved at each slice's end inside the step's one POLL_DEADLINE, and
+every re-resolution is a `verb=rebind` trace line naming what the step read
+and what the ids name now (`(MOVED)`, `the same widgets`, `nothing`), so a
+red says whether the read was of the live widget.
+
+GUARD: harness::tests::observation_rebinds_a_superseded_id (the mock's
+`superseded` id answers a dead index first); with the rebind or the slice
+cut removed it fails at 15 s, both watched.

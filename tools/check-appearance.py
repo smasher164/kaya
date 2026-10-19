@@ -30,7 +30,22 @@ GTK = "crates/kaya/src/gtk.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
 
-FILES = [MAC, ENTRY, CANVAS, GTK, WINUI, COMPOSE]
+L10N = "crates/kaya/src/l10n.rs"
+FMT = "crates/kaya/src/fmt.rs"
+
+FILES = [MAC, ENTRY, CANVAS, GTK, WINUI, COMPOSE, L10N, FMT]
+
+# THE C LOCALE HAS ONE WRITER (docs/traps.md, the catalog that read
+# English): glibc's setlocale(LC_ALL, ...) frees the name a concurrent
+# setlocale(LC_ALL, NULL) is returning, so a write after the app thread
+# exists races fmt.rs's read. The writers allowed, by enclosing function.
+LOCALE_WRITERS = {
+    (FMT, "adopt_environment"),
+    (FMT, "install_locale"),
+    (FMT, "the_glibc_arm_composes_in_the_locales_order"),
+}
+LOCALE_WRITE = re.compile(
+    r"setlocale\s*\(\s*(?:libc::)?LC_\w+\s*,\s*(?![\s]|(?:std::)?ptr::null\(\))")
 
 # One dark leg per lane: the runner, the spelling that wires it, and the
 # lane's own name for the leg. A runner missing from this table is a lane
@@ -434,6 +449,49 @@ def census(src):
             f"report different modes (see kayaCanvasAppearance's comment)"
         )
 
+    # --- L1. GTK's own setlocale is off before its init. ------------------
+    gtk = code[GTK]
+    start = gtk.find("pub(crate) fn run_core(")
+    body = gtk[start:start + 4000] if start >= 0 else ""
+    off = body.find("gtk4::disable_setlocale()")
+    init = body.find("gtk4::init()")
+    if start < 0 or init < 0:
+        out.append(f"{GTK}: no run_core calling gtk4::init() — clause L1 is blind")
+    elif off < 0 or off > init:
+        out.append(
+            f"{GTK}: run_core reaches gtk4::init() without gtk4::disable_setlocale() "
+            f"before it — gtk_init's setlocale(LC_ALL, \"\") then runs on the main "
+            f"thread while a Rust guest's app thread reads the locale, and the read "
+            f"answers freed memory (formatde-rust-wayland loaded the English catalog)"
+        )
+
+    # --- L2. No other setlocale writer in the core. ----------------------
+    for path, text in code.items():
+        if not path.startswith("crates/kaya/src/"):
+            continue
+        for hit in LOCALE_WRITE.finditer(text):
+            fns = re.findall(r"\bfn\s+(\w+)", text[:hit.start()])
+            where = fns[-1] if fns else "<top level>"
+            if (path, where) not in LOCALE_WRITERS:
+                line = text.count("\n", 0, hit.start()) + 1
+                out.append(
+                    f"{path}:{line}: a setlocale WRITE in `{where}` — the C locale's "
+                    f"writers are fmt.rs's adopt_environment and install_locale alone, "
+                    f"before the app thread; a later write races every locale read"
+                )
+
+    # --- L3. The catalog refuses a locale read off the knob's language. ---
+    l10n = code[L10N]
+    start = l10n.find("pub fn catalog(")
+    loop = l10n.find("for candidate in &chain", start)
+    wall = l10n.find('knob_disagreement(app, std::env::var("KAYA_LOCALE")', start)
+    if start < 0 or loop < 0 or wall < 0 or wall > loop:
+        out.append(
+            f"{L10N}: catalog() resolves its chain without knob_disagreement first — "
+            f"a locale read that disagrees with KAYA_LOCALE then loads the default "
+            f"catalog in silence instead of refusing"
+        )
+
     # --- C. One dark leg per lane. ---------------------------------------
     for path, spelling, lane in LEGS:
         if spelling not in src[path]:
@@ -449,7 +507,12 @@ g = Gate("check-appearance")
 src = {p: g.read(p) for p in FILES}
 for path, _spelling, _lane in LEGS:
     src[path] = g.read(path)
-g.counted("files read", list(src), floor=11)
+g.counted("files read", list(src), floor=13)
+_root = pathlib.Path(__file__).resolve().parent.parent
+for p in g.counted("core sources read for setlocale writers",
+                   g.walk("*.rs", under="crates/kaya/src"), floor=40):
+    rel = p.resolve().relative_to(_root).as_posix()
+    src.setdefault(rel, g.read(rel))
 
 # ---- Watched negatives: the census's own refusals, made to fire. -------
 # Each removes ONE link from a copy in memory, with the substitution count
@@ -658,7 +721,29 @@ g.negative(
         "crate::fmt::text_scale_override().unwrap_or(1.0)", "N28")),
     want="derives its factor from the knob",
 )
-g.negatives_ran(28)
+g.negative(
+    "L1 GTK's own setlocale left on",
+    lambda: census(without(GTK, r"gtk4::disable_setlocale\(\);", "();", "L1")),
+    want="without gtk4::disable_setlocale() before it",
+)
+g.negative(
+    "L2 a second setlocale writer in the GTK backend",
+    lambda: census(without(
+        GTK, r"if !gtk4::is_initialized\(\) \{",
+        'unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };\n    if !gtk4::is_initialized() {',
+        "L2")),
+    want="a setlocale WRITE in `run_core`",
+)
+g.negative(
+    "L3 the catalog loading its chain without the knob's wall",
+    lambda: census(without(
+        L10N,
+        r'knob_disagreement\(app, std::env::var\("KAYA_LOCALE"\)'
+        r'\.ok\(\)\.as_deref\(\), &locale\)',
+        "None::<String>", "L3")),
+    want="without knob_disagreement first",
+)
+g.negatives_ran(31)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

@@ -19424,6 +19424,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
     // GApplication built with FLAGS_NONE has no `open` signal to receive a
     // URL on at all, and org.freedesktop.Application.Open is refused
     // before any arm of ours could run.
+    // THE C LOCALE'S ONE WRITER is fmt::install_locale_knob (docs/traps.md,
+    // the catalog that read English; tools/check-appearance.py L1).
+    if !gtk4::is_initialized() {
+        gtk4::disable_setlocale();
+    }
     if let Err(e) = gtk4::init() {
         let var = |k: &str| std::env::var(k).ok();
         eprintln!(

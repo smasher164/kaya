@@ -1366,7 +1366,13 @@ in docs/deferred.md.
    the door's own latch — WinUI's read the window ground's Language and
    FlowDirection back, which the ground wears from the process locale
    since a FrameworkElement's Language defaults to en-US whatever the
-   user's is. Twenty-eight watched negatives, counts printed. The runtime halves are
+   user's is. AND THE C LOCALE HAS ONE WRITER SINCE 2026-10-18: GTK's own
+   setlocale is disabled before its init and the core writes the locale only
+   in fmt.rs's two install functions, since glibc frees the name a concurrent
+   read returns and a Rust guest's catalog then loaded English under the
+   German knob; catalog() refuses a locale read off the knob's language
+   (docs/traps.md, the catalog that read English). Thirty-one watched
+   negatives, counts printed. The runtime halves are
    the legs: `canvas-*` is the unset proof and `canvasdark-*` the set
    proof, on all five lanes, the tasks scene's Dark-then-System round trip,
    and the `format*` legs under three locales),

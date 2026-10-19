@@ -145,6 +145,9 @@ fn through_the_door(value: &FluentValue<'_>, _: &intl_memoizer::concurrent::Intl
 pub fn catalog(app: &str) {
     crate::fmt::install_locale_knob();
     let locale = crate::fmt::locale().tag;
+    if let Some(refusal) = knob_disagreement(app, std::env::var("KAYA_LOCALE").ok().as_deref(), &locale) {
+        panic!("{refusal}");
+    }
     let default = crate::scene::declared_default_locale();
     let mut chain: Vec<String> = vec![locale.clone()];
     if let Some((language, _)) = locale.split_once('-') {
@@ -229,6 +232,9 @@ pub fn catalog(app: &str) {
                         errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join("; ")
                     )
                 });
+                if std::env::var_os("KAYA_SELFTEST").is_some() {
+                    eprintln!("KAYA_DIAG catalog \"{app}\": process locale {locale}, loaded {name}");
+                }
                 *CATALOG.lock().unwrap_or_else(|e| e.into_inner()) =
                     Some(Catalog { app: app.to_owned(), locale: candidate.clone(), bundle });
                 return;
@@ -242,6 +248,19 @@ pub fn catalog(app: &str) {
          (docs/compliance-plan.md §2.4)",
         tried.join(", ")
     );
+}
+
+/// A catalog resolved under the knob for another language is refused, never
+/// loaded (docs/traps.md, the catalog that read English).
+fn knob_disagreement(app: &str, knob: Option<&str>, read: &str) -> Option<String> {
+    let knob = knob?;
+    let language = |t: &str| t.split(['-', '_']).next().unwrap_or("").to_ascii_lowercase();
+    (language(knob) != language(read)).then(|| {
+        format!(
+            "kaya: catalog(\"{app}\") read the process locale as {read:?} while KAYA_LOCALE={knob}, \
+             so it would load another language's words (docs/traps.md, the catalog that read English)"
+        )
+    })
 }
 
 /// The catalog's locale, for the harness and the curious: `None` before
@@ -353,6 +372,16 @@ mod tests {
         with_catalog(bundle_of("en-US", "hello = Hello, { $name }!\n"), || {
             tr("hello", &[]);
         });
+    }
+
+    #[test]
+    fn a_locale_read_off_the_knob_s_language_is_refused() {
+        assert_eq!(knob_disagreement("format", None, "en-US"), None);
+        assert_eq!(knob_disagreement("format", Some("de-DE"), "de-DE"), None);
+        assert_eq!(knob_disagreement("format", Some("ar-EG"), "ar_EG"), None);
+        let refusal = knob_disagreement("format", Some("de-DE"), "en-US-u-va-posix").expect("refused");
+        assert!(refusal.contains("\"en-US-u-va-posix\" while KAYA_LOCALE=de-DE"), "{refusal}");
+        assert!(knob_disagreement("format", Some("de-DE"), "").is_some());
     }
 
     #[test]

@@ -1146,17 +1146,18 @@ mod platform {
         }
     }
 
-    /// `setlocale(LC_ALL, "")`, what `gtk_init` does and a guest that formats
-    /// before it would otherwise miss; idempotent under GTK's own call.
+    /// `setlocale(LC_ALL, "")`, which `gtk_init` would otherwise do on the
+    /// main thread while the app thread reads the locale (docs/traps.md, the
+    /// catalog that read English): the process's one writer, with
+    /// install_locale.
     pub(super) fn adopt_environment() {
         super::refuse_clock_knob("GNOME's clock-format through a settings backend");
         unsafe { libc::setlocale(libc::LC_ALL, c"".as_ptr()) };
     }
 
-    /// `setlocale` from the tag, and the environment GTK's own init reads —
-    /// `gtk_init` calls `setlocale(LC_ALL, "")`, which would put the
-    /// container's back. A locale the image has not generated is refused
-    /// naming tools/linux/Dockerfile.
+    /// `setlocale` from the tag, and the environment a child process and
+    /// gettext read. A locale the image has not generated is refused naming
+    /// tools/linux/Dockerfile.
     pub(super) fn install_locale(tag: &str, direction: Direction) {
         let posix = format!("{}.UTF-8", tag.replace('-', "_"));
         let c = CString::new(posix.clone()).expect("no NUL in a tag");

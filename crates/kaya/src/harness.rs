@@ -5060,7 +5060,7 @@ fn run_with_log(
                 );
                 loop {
                     tries += 1;
-                    if let Some(index) = stage.resolve_id(t.kind, id, t.keys) {
+                    if let Some(index) = rebind::resolve_one(&stage, t) {
                         vtrace::attempt(
                             "resolve_id",
                             tries,
@@ -5153,6 +5153,16 @@ fn run_with_log(
         // retries (see POLL_DEADLINE): each arm builds a pass/fail
         // outcome, and `poll` re-evaluates a failing one until it passes
         // or the deadline lands the last failure text.
+        // AN OBSERVATION'S kind@id TARGET IS RE-RESOLVED WHILE IT POLLS, as
+        // the two interpreters resolve on every read (docs/traps.md, the
+        // superseded heart).
+        let rebinds = step_norm.is_assertion() && authored.clone().targets_mut().iter().any(|t| t.id.is_some());
+        let poll_until = Instant::now() + POLL_DEADLINE;
+        let outcome = loop {
+        let step = &step_norm;
+        if rebinds {
+            rebind::arm(poll_until);
+        }
         let outcome: Option<Result<String, String>> = match step {
             Step::Settle(ms) => {
                 std::thread::sleep(Duration::from_millis(*ms));
@@ -7327,6 +7337,33 @@ fn run_with_log(
                 }))
             }
         };
+        let cut = rebind::disarm();
+        if !rebinds || !matches!(outcome, Some(Err(_))) {
+            break outcome;
+        }
+        let fresh = rebind::resolve(&stage, authored);
+        let moved = fresh.as_ref().is_some_and(|fresh| *fresh != step_norm);
+        vtrace::note(
+            "rebind",
+            format_args!(
+                "<- {}: the step read {}; the ids now resolve to {}",
+                if cut { "not yet at the slice's end" } else { "not at the deadline" },
+                rebind::specs(&step_norm),
+                match &fresh {
+                    Some(fresh) if moved => format!("{} (MOVED)", rebind::specs(fresh)),
+                    Some(_) => "the same widgets".to_owned(),
+                    None => "nothing".to_owned(),
+                }
+            ),
+        );
+        if let (true, Some(fresh)) = (moved, fresh) {
+            step_norm = fresh;
+        }
+        if !cut {
+            break outcome;
+        }
+        };
+        let step = &step_norm;
         match outcome.map(|o| respell(o, authored, step)) {
             Some(Ok(o)) => observed.push(o),
             Some(Err(e)) => {
@@ -8370,11 +8407,74 @@ fn poll_named(
     poll_inner(Some(verb), eval)
 }
 
+/// The poll slice an observation with a kind@id target runs in: its poll
+/// gives up at the slice's end so the runner can re-resolve the ids, and
+/// the step's one POLL_DEADLINE spans every slice.
+mod rebind {
+    use super::{Stage, Step, Target};
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    pub(super) const SLICE: Duration = Duration::from_millis(500);
+
+    thread_local! {
+        static ARMED: Cell<Option<(Instant, Instant)>> = const { Cell::new(None) };
+        static CUT: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) fn arm(deadline: Instant) {
+        ARMED.set(Some((deadline, (Instant::now() + SLICE).min(deadline))));
+        CUT.set(false);
+    }
+
+    /// Whether a poll inside the step gave up at the slice's end.
+    pub(super) fn disarm() -> bool {
+        ARMED.set(None);
+        CUT.replace(false)
+    }
+
+    /// (deadline, slice end) for a poll starting now.
+    pub(super) fn window(fallback: Instant) -> (Instant, Option<Instant>) {
+        match ARMED.get() {
+            Some((deadline, slice)) => (deadline, Some(slice)),
+            None => (fallback, None),
+        }
+    }
+
+    pub(super) fn cut() {
+        CUT.set(true);
+    }
+
+    /// The authored step with every kind@id target resolved once, or None
+    /// when one of them resolves to nothing right now.
+    pub(super) fn resolve(stage: &impl Stage, authored: &Step) -> Option<Step> {
+        let mut fresh = authored.clone();
+        for t in fresh.targets_mut() {
+            if t.id.is_none() {
+                continue;
+            }
+            let index = resolve_one(stage, t)?;
+            *t = Target { kind: t.kind, index, id: None, keys: None };
+        }
+        Some(fresh)
+    }
+
+    /// The one route a kind@id target takes to the backend, keys and all.
+    pub(super) fn resolve_one(stage: &impl Stage, t: &Target) -> Option<isize> {
+        let id = t.id?;
+        stage.resolve_id(t.kind, id, t.keys)
+    }
+
+    pub(super) fn specs(step: &Step) -> String {
+        step.clone().targets_mut().iter().map(|t| super::target_spec(t)).collect::<Vec<_>>().join(", ")
+    }
+}
+
 fn poll_inner(
     verb: Option<&'static str>,
     mut eval: impl FnMut() -> Result<String, String>,
 ) -> Result<String, String> {
-    let deadline = Instant::now() + POLL_DEADLINE;
+    let (deadline, slice) = rebind::window(Instant::now() + POLL_DEADLINE);
     let mut tries = 0u32;
     loop {
         let outcome = eval();
@@ -8390,6 +8490,10 @@ fn poll_inner(
         // so the rest of POLL_DEADLINE is dead time — the "six steps took
         // EXACTLY 15.0s" shape one layer down.
         if outcome.is_ok() || Instant::now() >= deadline || crate::fault::latched().is_some() {
+            return outcome;
+        }
+        if slice.is_some_and(|end| Instant::now() >= end) {
+            rebind::cut();
             return outcome;
         }
         std::thread::sleep(POLL_INTERVAL);
@@ -9697,6 +9801,13 @@ mod tests {
             if id == "missing" {
                 return None;
             }
+            // The superseded heart (docs/traps.md): the first answer names a
+            // widget that reads off for good, every later one its live
+            // replacement, which reads on.
+            if id == "superseded" {
+                let asked = SUPERSEDED_ASKS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                return Some(if asked == 0 { 1 } else { 0 });
+            }
             if let Some(keys) = keys {
                 RESOLVE_SEEN
                     .lock()
@@ -10170,6 +10281,7 @@ mod tests {
     static SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static RESOLVE_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
     static NORMALIZED_SEEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+    static SUPERSEDED_ASKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     static WEDGE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     /// The scene-ready wait's negative: a stage that never mounts a root.
     static UNMOUNTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -12069,6 +12181,27 @@ mod tests {
             vec!["column#7".to_owned()]
         );
         assert_eq!(verdict, "KAYA_SELFTEST: OK ()");
+    }
+
+    /// An observation's kind@id target that resolves to a widget the scene
+    /// then supersedes is re-resolved while it polls, so the step reads the
+    /// live replacement instead of the dead copy until the deadline.
+    #[test]
+    fn observation_rebinds_a_superseded_id() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let began = Instant::now();
+        run(
+            parse("expect_checked checkbox@superseded on").unwrap(),
+            MockStage { seen: &SEEN, verdict: tx },
+        );
+        let (code, verdict) = rx.recv().unwrap();
+        assert_eq!(code, 0, "{verdict}");
+        assert!(SUPERSEDED_ASKS.load(std::sync::atomic::Ordering::SeqCst) >= 2);
+        assert!(
+            began.elapsed() < POLL_DEADLINE / 2,
+            "the rebind took {:?}, so it did not happen at the slice",
+            began.elapsed()
+        );
     }
 
     /// A missing keyed copy reports the complete script target instead
