@@ -749,6 +749,41 @@ the bars' icons taking the shade that reads on the picture's strip, the
 grounds scene's hero being the case (tools/lib/safearea_routes.py, the grounds
 phone tails).
 
+### M16: The review round of 2026-10-20 (RULED 2026-10-20)
+
+The maintainer accepted these as recommended ("I'm okay with all rulings except
+the tests/matrix ones"):
+
+Cards: (1) a card fills its grid column and every card in a row takes the
+tallest's height, tops aligned, on every platform; (2) a label gains a maximum
+line count in the core and all nine bindings, cards two lines, the dock one;
+(3) a hidden section takes no space; (4) iOS's selected card uses the stronger
+selected fill; (5) the artist page's albums drop their outer card on iOS.
+Tables: (6) a two-line title cell is centred on its art; (7) the macOS table
+sizes "#" to its content and draws no filler stripes; (8) Android's selected
+row covers the number. Navigation: (9) a pushed screen in a two-pane window
+shows its back button; (10) an Android pushed page shows the top app bar with
+back; (11) iOS drops the repeated uppercase album name; (12) no third pane for
+now; (13) the artist page opens at once with a loading state. Dock and player:
+(14) repeat is a lit toggle that swaps to the repeat-one symbol; (15) Android's
+lit toggle takes a tinted background; (16) a muted-volume symbol; (17) a slider
+takes a maximum width; (18) no volume on phones; (19) the phone dock opens the
+player from its art and title only; (20) the toast shows above an open sheet;
+(21) a button's symbol is settable from a template in all nine bindings; (22)
+dark dock legs. Header: (23) an album's total in "1 hr 12 min" style, a
+track's in "3:45"; (24) favourites persist, cleared under the harness; (25) the
+600 px artist picture where the snapshot has one. iOS: (26) keep the status
+bar style hook, with a check that refuses loudly if its method is not found;
+(27) a screen whose top is a picture uses the inline title. Bindings: (28)
+Python and JS can add children to a built container; (29) a symbol on a
+stamped row in Python, the others checked; (30) the bindings' default image
+fetch sends "kaya/<version>" as its User-Agent; (31) G8's WinUI amendment
+confirmed: SelectorBar items keep their natural widths.
+Refused: (32) no refusal to start on battery (the maintainer handles power);
+(33) the linux lane's ceiling keeps the container's core rebuild ("forces us to
+get a feel for the real inner loop"); (36) no driver-side bypass of XCTest's
+animations-idle wait; the cause stays under investigation.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

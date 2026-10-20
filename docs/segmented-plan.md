@@ -222,7 +222,7 @@ any other control. It never scrolls, wraps or folds (§0 fact 4). A text too
 long for its share is the platform's to truncate. The two-to-five guidance
 is the docs', not a refusal.
 
-AMENDED 2026-10-19 for WinUI, FOR THE MAINTAINER'S CONFIRMATION (his review
+AMENDED 2026-10-19 for WinUI, CONFIRMED by the maintainer 2026-10-20 (his review
 of the search screen: "Why is there so much space after the All"): the arm
 no longer gives SelectorBar's items the widest one's width. SelectorBar
 draws no segment frames, only the text and the selected item's pill, so an
