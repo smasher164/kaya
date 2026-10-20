@@ -782,7 +782,11 @@ confirmed: SelectorBar items keep their natural widths.
 Refused: (32) no refusal to start on battery (the maintainer handles power);
 (33) the linux lane's ceiling keeps the container's core rebuild ("forces us to
 get a feel for the real inner loop"); (36) no driver-side bypass of XCTest's
-animations-idle wait; the cause stays under investigation.
+animations-idle wait; the cause stays under investigation. Then also accepted (the maintainer:
+"I'm okay with 34 and 35", and on 36 "I agree to keep watching it"): (34) a
+harness verb that fails a label drawn underneath a neighbour; (35) a reader of
+a gradient ground's actual top colour, so a header back on the neutral
+placeholder fails a scene.
 
 ## §6: Build order
 
