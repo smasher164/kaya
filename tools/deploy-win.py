@@ -42,6 +42,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 import os
 
 from lanes import win as lane
@@ -53,6 +54,7 @@ import scene_cut
 import flightrec_lane
 import lane_health
 import secure_scan
+import walls
 import media_server
 import contextlib
 
@@ -170,20 +172,41 @@ SSH_MUX = ["-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=15",
            "-o", f"ControlPath={CONTROL_PATH}", "-o", "ControlPersist=120"]
 
 
-def run_ssh(cmd, log=None):
+# EVERY HOST-SIDE CALL TO THE VM IS BOUNDED (tools/lib/walls.py): the
+# ServerAlive keepalive breaks a call only when the master's connection dies,
+# and a channel that stalls under a live connection blocked its caller with no
+# bound at all. The longest phase on record is the 184s cross-build.
+SSH_CALL_WALL_S = 900
+
+
+def ssh_walled(what, wall, log=None):
+    print(f"deploy-win: WALL — `{what[:160]}` over ssh had not returned after "
+          f"{wall}s on the host; killed the ssh (tools/lib/walls.py)",
+          file=log if log is not None else sys.stderr, flush=True)
+
+
+def run_ssh(cmd, log=None, wall=SSH_CALL_WALL_S):
     """One remote command over the mux; returns the rc. Output goes to
     this process's streams (or the leg's log when given)."""
-    return subprocess.run(
-        ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST, cmd],
-        stdout=log, stderr=log, check=False).returncode
+    try:
+        return subprocess.run(
+            ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST, cmd],
+            stdout=log, stderr=log, check=False, timeout=wall).returncode
+    except subprocess.TimeoutExpired:
+        ssh_walled(cmd, wall, log)
+        return 124
 
 
-def run_ssh_out(cmd, log=None):
+def run_ssh_out(cmd, log=None, wall=SSH_CALL_WALL_S):
     """Captured stdout of a remote command, or None on failure."""
-    out = subprocess.run(
-        ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST, cmd],
-        stdout=subprocess.PIPE, stderr=log, text=True,
-        encoding="utf-8", errors="replace", check=False)
+    try:
+        out = subprocess.run(
+            ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST, cmd],
+            stdout=subprocess.PIPE, stderr=log, text=True,
+            encoding="utf-8", errors="replace", check=False, timeout=wall)
+    except subprocess.TimeoutExpired:
+        ssh_walled(cmd, wall, log)
+        return None
     return out.stdout if out.returncode == 0 else None
 
 
@@ -194,37 +217,52 @@ def must_ssh(cmd):
 
 def scp_to(sources, dest, log=None):
     """scp local files to the VM over the mux; returns the rc."""
-    return subprocess.run(
-        ["scp", *SSH_MUX, "-q", *[str(s) for s in sources],
-         f"{HOST}:{dest}"],
-        stdout=log, stderr=log, check=False).returncode
+    try:
+        return subprocess.run(
+            ["scp", *SSH_MUX, "-q", *[str(s) for s in sources],
+             f"{HOST}:{dest}"],
+            stdout=log, stderr=log, check=False, timeout=SSH_CALL_WALL_S).returncode
+    except subprocess.TimeoutExpired:
+        ssh_walled(f"scp to {dest}", SSH_CALL_WALL_S, log)
+        return 124
 
 
 def scp_dir_to(sources, dest):
     """Recursive copy; a list ships each entry (the shell's `dir/*`)."""
     if not isinstance(sources, list):
         sources = [sources]
-    return subprocess.run(
-        ["scp", *SSH_MUX, "-q", "-r", *[str(s) for s in sources],
-         f"{HOST}:{dest}"],
-        check=False).returncode
+    try:
+        return subprocess.run(
+            ["scp", *SSH_MUX, "-q", "-r", *[str(s) for s in sources],
+             f"{HOST}:{dest}"],
+            check=False, timeout=SSH_CALL_WALL_S).returncode
+    except subprocess.TimeoutExpired:
+        ssh_walled(f"scp -r to {dest}", SSH_CALL_WALL_S)
+        return 124
 
 
 def scp_from(remote, local, log=None):
-    out = subprocess.run(
-        ["scp", *SSH_MUX, "-q", f"{HOST}:{remote}", str(local)],
-        stdout=log, stderr=subprocess.DEVNULL, check=False)
+    try:
+        out = subprocess.run(
+            ["scp", *SSH_MUX, "-q", f"{HOST}:{remote}", str(local)],
+            stdout=log, stderr=subprocess.DEVNULL, check=False, timeout=SSH_CALL_WALL_S)
+    except subprocess.TimeoutExpired:
+        ssh_walled(f"scp from {remote}", SSH_CALL_WALL_S, log)
+        return False
     return out.returncode == 0
 
 
 def ssh_probe():
     """Reachability, NOT through the mux: a dead master must not answer
     for a live guest or the reverse."""
-    return subprocess.run(
-        ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", HOST,
-         "exit 0"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        check=False).returncode == 0
+    try:
+        return subprocess.run(
+            ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", HOST,
+             "exit 0"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False, timeout=60).returncode == 0
+    except subprocess.TimeoutExpired:
+        return False
 
 
 # The trailing grace period lets the console session finish logging in —
@@ -1975,6 +2013,7 @@ _slots = list(range(WIDTH))
 _slots_lock = threading.Condition()
 _leg_names = []
 _leg_threads = []
+_leg_claimed = {}
 _restart_lock = threading.Lock()
 _restarted = False
 status = 0
@@ -2157,6 +2196,9 @@ def second_act(name, out, log):
     return act2_answer(name, door, outfile, log)
 
 
+WAIT_EXIT_GUEST_S = 290
+
+
 def run_one_suite(name, slot, log):
     # A LANE THAT DECLARED ITS VM DEAD STAYS DEAD: without this every
     # remaining leg walks into its own 300-try timeout — 96 minutes of
@@ -2200,12 +2242,20 @@ def run_one_suite(name, slot, log):
     # than hanging it. Stdout is kept even when ssh exits nonzero:
     # wait-exit.ps1 itself always exits 0, so a nonzero rc is the
     # transport's.
-    out = subprocess.run(
-        ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST,
-         f"powershell -NoProfile -ExecutionPolicy Bypass -File "
-         f"C:\\kaya\\wait-exit.ps1 out_{name}.txt 290"],
-        stdout=subprocess.PIPE, stderr=log, text=True,
-        encoding="utf-8", errors="replace", check=False).stdout
+    # The guest's own bound is 290s; the host's is that plus a minute.
+    try:
+        out = subprocess.run(
+            ["ssh", "-n", "-o", "BatchMode=yes", *SSH_MUX, HOST,
+             f"powershell -NoProfile -ExecutionPolicy Bypass -File "
+             f"C:\\kaya\\wait-exit.ps1 out_{name}.txt {WAIT_EXIT_GUEST_S}"],
+            stdout=subprocess.PIPE, stderr=log, text=True,
+            encoding="utf-8", errors="replace", check=False,
+            timeout=WAIT_EXIT_GUEST_S + 60).stdout
+    except subprocess.TimeoutExpired as late:
+        ssh_walled(f"wait-exit.ps1 out_{name}.txt {WAIT_EXIT_GUEST_S}",
+                   WAIT_EXIT_GUEST_S + 60, log)
+        raw = late.stdout or b""
+        out = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
     # KAYA_LINGER is liveness, not a hang: the verdict is out and only
     # the kernel-held termination is pending (wait-exit.ps1). Reading it
     # as a timeout kills a leg that has already passed.
@@ -2309,6 +2359,7 @@ def _leg_worker_slot(name, grouped):
     with open(LEGS_DIR / f"{name}.log", "w", encoding="utf-8",
               errors="replace", buffering=1) as log:
         slot = _claim_slot(grouped)
+        _leg_claimed[name] = time.monotonic()
         (LEGS_DIR / f"{name}.slot").write_text(f"{slot}\n", encoding="utf-8")
         t0 = time.monotonic()
         leg_epoch = int(time.time())
@@ -2457,8 +2508,7 @@ def run_suite(name):
     if name not in lane.EXCLUSIVE:
         _TOASTS["started"].append(name)
     if name in lane.EXCLUSIVE:
-        for t in _leg_threads:
-            t.join()
+        _join_legs(f"before the exclusive leg {name}")
         if lane.toasts_may_be_up(_TOASTS["started"], NOTIFY_LEGS, _TOASTS["dismissed"]):
             if dismiss_toasts():
                 _TOASTS["dismissed"], _TOASTS["started"] = True, []
@@ -2494,20 +2544,65 @@ def run_suite(name):
                              '/d 0 /f >nul && reg add "HKCU\\Control Panel\\International" '
                              '/v sShortTime /t REG_SZ /d "h:mm tt" /f >nul')
         return
-    t = threading.Thread(target=_leg_worker, args=(name,))
+    t = threading.Thread(target=_leg_worker, args=(name,), name=f"leg {name}", daemon=True)
     t.start()
-    _leg_threads.append(t)
+    _leg_threads.append((name, t))
+
+
+# A LEG WORKER IS BOUNDED FROM ITS SLOT CLAIM (tools/lib/walls.py): every ssh
+# under it is walled, so a leg past this is a bug in the runner, and the lane
+# names it, says where its thread is, and goes on without it.
+LEG_WALL_S = 1200
+
+
+def _join_legs(why):
+    global status
+    t0 = progress = time.monotonic()
+    seen = None
+    while True:
+        alive = [(n, t) for n, t in _leg_threads if t.is_alive()]
+        if not alive:
+            break
+        now = time.monotonic()
+        if (len(alive), len(_leg_claimed)) != seen:
+            seen, progress = (len(alive), len(_leg_claimed)), now
+        over = [n for n, _t in alive
+                if n in _leg_claimed and now - _leg_claimed[n] > LEG_WALL_S]
+        if len(over) == len(alive) or now - progress > LEG_WALL_S:
+            break
+        alive[0][1].join(1)
+    stuck = [(n, t) for n, t in _leg_threads if t.is_alive()]
+    if stuck:
+        frames = sys._current_frames()
+        for n, t in stuck:
+            held = (f"{time.monotonic() - _leg_claimed[n]:.0f}s since it took its slot"
+                    if n in _leg_claimed else "it never took a slot")
+            stack = traceback.extract_stack(frames.get(t.ident)) if t.ident in frames else []
+            own = [f for f in stack if f.filename == __file__][-1:]
+            where = " <- ".join(f"{f.name}:{f.lineno} {(f.line or '').strip()[:100]}"
+                                for f in [*stack[-1:], *own]) or "no frame"
+            lfile = LEGS_DIR / f"{n}.log"
+            tail = (walls.last_lines(lfile.read_text(encoding="utf-8", errors="replace"))[0]
+                    if lfile.is_file() else "(no log)")
+            print(f"deploy-win: WALL — the leg {n} is still running {why} ({held}, the "
+                  f"wall is {LEG_WALL_S}s): its thread is at {where}; its log's last "
+                  f"line: {tail[:200]}. The lane goes on without it and fails it.",
+                  file=sys.stderr, flush=True)
+        status = 1
+    waited = time.monotonic() - t0
+    if waited > 60:
+        print(f"== joined {len(_leg_threads)} leg(s) {why} in {waited:.0f}s ==", flush=True)
+    return [n for n, _t in stuck]
 
 
 def drain_suites():
     global status
-    for t in _leg_threads:
-        t.join()
+    stuck = _join_legs("at the block's end")
     _leg_threads.clear()
     for name in _leg_names:
         vfile = LEGS_DIR / f"{name}.verdict"
         verdict = (vfile.read_text(encoding="utf-8").strip()
-                   if vfile.is_file() else "FAIL")
+                   if vfile.is_file() and name not in stuck else "FAIL")
         print(f"== {name} ==")
         lfile = LEGS_DIR / f"{name}.log"
         if lfile.is_file():

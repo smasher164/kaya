@@ -6,6 +6,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, TARGET, dev_shell_or_die
 import exclusive
 from host_lib import HOST_LIB, SWEEP_TARGET, host_lib_stamp
+import walls
 
 dev_shell_or_die()
 
@@ -32,6 +33,8 @@ dev_shell_or_die()
 # run their own per-lane subset, which check-gates.py does not police.
 
 import concurrent.futures
+import contextlib
+import io
 import itertools
 import json
 import os
@@ -396,7 +399,11 @@ def stale_weights(took):
             if dt > 30 and dt > 2 * WEIGHT.get(name, 0)]
 
 
-def sweep(gates, label="gates", lib_root=None, lanes_root=None):
+def gate_wall(name):
+    return walls.gate_wall(WEIGHT.get(name, 0))
+
+
+def sweep(gates, label="gates", lib_root=None, lanes_root=None, wall_of=gate_wall):
     """Run every gate; return True only if every declared one passed.
 
     COUNT IN, COUNT OUT. `declared` comes from the list itself and
@@ -452,9 +459,8 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
         t0 = time.monotonic()
         with lock:
             running.add(name)
-        got = subprocess.run(argv, cwd=ROOT, stdout=subprocess.PIPE,
-                             stderr=subprocess.STDOUT, text=True,
-                             encoding="utf-8", errors="replace", check=False)
+        wall = wall_of(name)
+        rc, output, walled, survivors = walls.run_bounded(argv, wall, cwd=ROOT)
         dt = time.monotonic() - t0
         with lock:
             running.discard(name)
@@ -491,12 +497,23 @@ def sweep(gates, label="gates", lib_root=None, lanes_root=None):
             ran += 1
             took[name] = dt
             print(f"[{ran:02d}/{declared:02d}] {name}")
-            sys.stdout.write(got.stdout)
-            if got.returncode == 0:
+            sys.stdout.write(output)
+            if walled:
+                failed.append(name)
+                print(f"{label}: WALL — {name} was still running {dt:.0f}s in, past its "
+                      f"{wall:.0f}s wall (tools/lib/walls.py's gate_wall over WEIGHT "
+                      f"{WEIGHT.get(name, 0)}); its process group was killed"
+                      + (f" and {len(survivors)} process(es) outlived the kill: "
+                         + "; ".join(f"{pid} {cmd[:120]}" for pid, cmd in survivors)
+                         if survivors else ", nothing left in it")
+                      + f". Its last line: {walls.last_lines(output)[0][:300]}",
+                      file=sys.stderr, flush=True)
+                print(f"        FAIL wall {dt:5.1f}s", flush=True)
+            elif rc == 0:
                 print(f"        OK   {dt:5.1f}s", flush=True)
             else:
                 failed.append(name)
-                print(f"        FAIL rc={got.returncode} {dt:5.1f}s", flush=True)
+                print(f"        FAIL rc={rc} {dt:5.1f}s", flush=True)
         finished[name].set()
 
     for g in todo:
@@ -676,8 +693,40 @@ def selftest():
               "or one inside its weight was", file=sys.stderr)
         ok = False
 
+    # I. a hung gate is killed at its wall with the child it started, failed
+    # by name with its last line, and the sweep still ends.
+    with tempfile.TemporaryDirectory(prefix="kaya-gates-wall-") as tmp:
+        os.environ["KAYA_GATES_SELFTEST_PIDS"] = str(pathlib.Path(tmp) / "pids")
+        hung = [("a", ["true"], False, "x"),
+                ("hung", ["python3", "-c",
+                          "import os, subprocess, time; "
+                          "c = subprocess.Popen(['sleep', '600']); "
+                          "open(os.environ['KAYA_GATES_SELFTEST_PIDS'], 'w').write("
+                          "f'{os.getpid()} {c.pid}'); "
+                          "print('stand-in: hung on purpose', flush=True); time.sleep(600)"],
+                 False, "x")]
+        said = io.StringIO()
+        t0 = time.monotonic()
+        with contextlib.redirect_stderr(said):
+            verdict = sweep(hung, "selftest-I", wall_of=lambda _name: 2)
+        took = time.monotonic() - t0
+        pids = [int(p) for p in pathlib.Path(os.environ.pop("KAYA_GATES_SELFTEST_PIDS"))
+                .read_text(encoding="utf-8").split()]
+        alive = [p for p in pids if subprocess.run(["ps", "-p", str(p), "-o", "stat="],
+                                                   stdout=subprocess.PIPE, text=True,
+                                                   check=False).stdout.strip()[:1] not in ("", "Z")]
+        print(f"selftest-I: {took:.1f}s, the stand-in and its child {pids} alive after: {alive}; "
+              f"{said.getvalue().strip()[:300]}")
+        if (verdict or took > 30 or alive or "WALL — hung" not in said.getvalue()
+                or "stand-in: hung on purpose" not in said.getvalue()):
+            print("gates: SELF-TEST FAIL — a gate hung past its wall was not killed with "
+                  "its child, failed by name with its last line, inside 30s",
+                  file=sys.stderr)
+            ok = False
+
     if ok:
         print("gates: SELF-TEST OK — the count refused an under-run (1 of 3), "
+              "a gate hung past its wall, "
               "a failing gate, a missing script, a gate that relinked the "
               "host libkaya and one that relinked the lanes' copy from a sweep "
               "target of its own")
@@ -786,6 +835,7 @@ def main(args):
           f"(cargo target {TARGET})", flush=True)
     if not build():
         return 1
+    walls.forward_signals()
     return 0 if sweep(GATES) else 1
 
 

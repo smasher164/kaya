@@ -245,7 +245,7 @@ def matrix_parallel_problem(text):
                 "at niceness 10 with CARGO_TARGET_DIR=SWEEP_TARGET")
     run_lane = re.search(r"(?ms)^def run_lane\(.*?(?=^[A-Za-z_#])", text)
     if run_lane is None or not all(part in run_lane.group(0) for part in (
-        "subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf)",
+        "subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf, start_new_session=True)",
         "lane_procs.append(proc)", "lane_names.append(name)")):
         return ("tools/validate-all.py's run_lane no longer backgrounds and "
                 "records every concurrent matrix unit")
@@ -938,8 +938,8 @@ elif matrix_parallel_problem(doctored) is None:
 
 # N7 — run_lane must keep every queued unit in the background.
 doctored, n = re.subn(
-    r"subprocess\.Popen\(argv, env=lane_env, stdout=lf, stderr=lf\)",
-    "subprocess.run(argv, env=lane_env, stdout=lf, stderr=lf)",
+    r"subprocess\.Popen\(argv, env=lane_env, stdout=lf, stderr=lf, start_new_session=True\)",
+    "subprocess.run(argv, env=lane_env, stdout=lf, stderr=lf, start_new_session=True)",
     matrix_text, count=1)
 print("check-gates: self-test N7 foregrounded run_lane, "
       f"{n} substitution(s)")
@@ -1446,6 +1446,15 @@ if proof.returncode != 0:
     fail("tools/gates.py --selftest FAILED — the sweep's count does not refuse "
          "an under-run, so a sweep that ran nothing could print OK:\n"
          + proof.stdout)
+elif "a gate hung past its wall" not in proof.stdout:
+    fail("tools/gates.py --selftest no longer runs a hung gate against its wall "
+         "(tools/lib/walls.py)")
+
+# THE WALLS (tools/lib/walls.py): every gate, lane, leg worker and ssh call
+# bounded where it is launched, each wall run against a hung stand-in.
+from walls_routes import run as check_walls  # noqa: E402
+
+check_walls(fail, print)
 
 
 # ONE FILTER ON THE MATRIX (tools/lib/only.py; the maintainer, 2026-09-24:

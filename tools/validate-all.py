@@ -7,6 +7,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
 import exclusive
 import lane_health
+import walls
 from host_lib import SWEEP_TARGET
 from lanes import android as _android, ios as _ios, linux as _linux, mac as _mac, win as _win
 
@@ -114,203 +115,6 @@ ROSTERS = {"mac": lambda: [name for name, _s, _l in _mac.legs()],
                (ROOT / "tools/linux/run-suites.sh").read_text(encoding="utf-8")))}
 ONLY_LEGS = {}
 
-
-def run_lane(name, argv, env=None):
-    """One matrix unit. Parallel mode BACKGROUNDS it and records the
-    process — the collection below waits on exactly these."""
-    global status
-    lane_env = dict(os.environ, **(env or {}))
-    if (os.environ.get("KAYA_EXCLUSIVE", "") == "only"
-            and not EXCLUSIVE_LEGS.get(name, {"linux declares its own"})):
-        # An exclusive-only run has nothing for this lane, and launching it
-        # would spend its whole setup (the mac lane's 481s for zero legs)
-        # loading the host under the lanes that do have legs. The row reads
-        # 0 legs, as a launched lane's would.
-        print(f"exclusive: {name} names no exclusive legs; not launched",
-              flush=True)
-        if MODE == "serial":
-            print(f"{name}: PASS (0s)")
-        else:
-            lane_done[name] = ("PASS", 0)
-            lane_names.append(name)
-        return
-    if only.active() and (name == "gates" or (
-            name in ROSTERS and not only.matches(ROSTERS[name]()))):
-        # A filtered run is the legs it names: no gate sweep, and a lane
-        # whose roster has no matching leg is not launched (the mac lane's
-        # setup is 481s before its first leg). The row reads SKIP, never
-        # PASS, so the verdict below can count what actually ran.
-        what = ("the gate sweep is not run" if name == "gates"
-                else f"no leg matches KAYA_ONLY={','.join(only.PREFIXES)}")
-        print(f"only: {name}: {what}; not launched", flush=True)
-        if MODE == "serial":
-            print(f"{name}: SKIP (0s)")
-        else:
-            lane_done[name] = ("SKIP", 0)
-            lane_names.append(name)
-        return
-    if MODE == "serial":
-        print(f"== {name} ==")
-        t0 = time.monotonic()
-        with open(LANES_DIR / f"{name}.log", "w", encoding="utf-8",
-                  errors="replace") as lf:
-            rc = subprocess.run(argv, env=lane_env, stdout=lf,
-                                stderr=lf, check=False).returncode
-        secs = int(time.monotonic() - t0)
-        if rc == 0:
-            print(f"{name}: PASS ({secs}s)")
-        elif rc == only.REFUSED and only.active():
-            print(f"{name}: SKIP ({secs}s; no leg matched KAYA_ONLY)")
-        else:
-            print((LANES_DIR / f"{name}.log").read_text(
-                encoding="utf-8", errors="replace"), end="")
-            print(f"{name}: FAIL ({secs}s)")
-            status = 1
-            if not keep_lane_log(name):
-                status = 1
-        return
-    lf = open(LANES_DIR / f"{name}.log", "w", encoding="utf-8",
-              errors="replace")
-    proc = subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf)
-    lf.close()
-    t0 = time.monotonic()
-
-    # The lane's own duration, stamped WHEN IT EXITS: a collection that
-    # waited in queue order would bill an early finisher for its slower
-    # siblings' time.
-    def _wait(name=name, proc=proc, t0=t0):
-        rc = proc.wait()
-        print(f"{name}: exited after {int(time.monotonic() - t0)}s; "
-              f"{lane_health.host_line()[0]}", flush=True)
-        verdict = "PASS" if rc == 0 else "FAIL"
-        if rc == only.REFUSED and only.active():
-            verdict = "SKIP"
-        lane_done[name] = (verdict, int(time.monotonic() - t0))
-
-    waiter = threading.Thread(target=_wait)
-    waiter.start()
-    lane_waiters.append(waiter)
-    lane_procs.append(proc)
-    lane_names.append(name)
-
-
-T0 = time.monotonic()
-# THE HOST'S LOAD RIDES THE RECORD (2026-09-01: three ceilings fired in
-# one contended evening). WITH THE TOP CONSUMERS, because the load figure
-# alone cannot tell the host from the lanes — a quiet matrix's own
-# fifteen-minute figure reaches ~135 by its end. A top consumer that is
-# no lane's process is the host; the pools are expected there.
-LOAD_AT_LAUNCH = os.getloadavg()
-
-
-top_consumers = lane_health.top_consumers
-
-
-# AND THE HOST'S IDLE CLOCK BESIDE THEM (docs/deferred.md, the
-# swallowed-press entry): load says how busy the machine is, never whether
-# a HUMAN is at it, and an input-driving leg admitted under a human's
-# foreground dies with every press swallowed. One reader with the mac
-# funnel's wait (tools/lib/lanes/mac.py).
-_idle_s, _idle_why = _mac.hid_idle_seconds()
-print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
-      f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); HIDIdleTime "
-      + (f"{_idle_s}s" if _idle_s is not None else f"unreadable ({_idle_why})")
-      + f"; top consumers: {top_consumers()}", flush=True)
-# THE MATRIX-WIDE EXCLUSIVE TOKEN (tools/lib/exclusive.py): one directory every
-# lane reaches, the container through its flight-recorder mount.
-EXCLUSIVE_DIR = pathlib.Path(
-    os.environ.get("XDG_STATE_HOME", "") or str(pathlib.Path.home() / ".local/state")
-) / "kaya" / "exclusive"
-EXCLUSIVE_DIR.mkdir(parents=True, exist_ok=True)
-os.environ["KAYA_EXCLUSIVE_DIR"] = str(EXCLUSIVE_DIR)
-print(f"exclusive: the token lives at {EXCLUSIVE_DIR}", flush=True)
-# The protocol watched before the lanes trust it: the mkdir race, the
-# stale break both sides of its ceiling, an expired wait, the holder.
-if not exclusive.selftest():
-    print("exclusive: the self-test failed — the lanes run WITHOUT the token", flush=True)
-    del os.environ["KAYA_EXCLUSIVE_DIR"]
-if MODE == "parallel":
-    # ALL FIVE PLATFORM LANES START TOGETHER; the gate sweep waits for
-    # Android's process, then runs niced and FOUR WIDE (tools/gates.py,
-    # 2026-09-07), which hides it behind the longer lanes. One gate at a
-    # time the wall was Android plus the whole sweep in series (654 +
-    # 422 = 1082s); launched at t0 beside the lanes, four wide and niced,
-    # it cost every lane 150-200s and every ceiling for a 116s gain
-    # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
-    #
-    # IN A CARGO TARGET OF ITS OWN (2026-10-16): the mac guests load the
-    # lanes' libkaya by path, and a sweep that relinked it under a
-    # token-slowed mac lane killed seven legs in dyld (docs/traps.md, the
-    # sweep-relinked-libkaya entry). Built into SWEEP_TARGET it cannot, so
-    # it no longer waits for the mac lane (docs/measurements/
-    # lane-ceilings-2026-10-16.md); gates.py refuses a matrix sweep anywhere
-    # else and both runners still refuse a verdict if that library moved.
-    #
-    # The token is a t0 fingerprint of every keyed gate's inputs, so the
-    # mac lane can skip its own sweep; a hand-run has none and sweeps.
-    # BUILT BEFORE THE TOKEN IS TAKEN, since the keys carry the
-    # artifacts' REAL BYTES — a token over the previous build's made the
-    # mac lane sweep twice (791s against 620, 2026-09-01).
-    # tools/check-gates.py holds the order.
-    if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
-        sys.exit(1)
-    # RUNG 1 RAN JUST NOW: the sweep skips its own run while these inputs
-    # still hold (tools/gates.py's rung1_ran_at_matrix_start).
-    rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],
-                           stdout=subprocess.PIPE, text=True, check=False)
-    if rung1.returncode == 0 and rung1.stdout.strip():
-        os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()
-    got = subprocess.run(["tools/gates.py", "--fingerprint"],
-                         stdout=subprocess.PIPE, text=True,
-                         encoding="utf-8", errors="replace",
-                         check=False)
-    if got.returncode != 0:
-        sys.exit(1)
-    # Line one is the token, line two the per-gate keys behind it, so
-    # the lane can say which gate's inputs moved when the handshake misses.
-    fp_lines = got.stdout.strip().splitlines()
-    os.environ["KAYA_MATRIX_GATES_TOKEN"] = fp_lines[0] if fp_lines else ""
-    os.environ["KAYA_MATRIX_GATES_KEYS"] = fp_lines[1] if len(fp_lines) > 1 else "{}"
-    run_lane("mac", ["tools/validate-mac.py"])
-    # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
-    # bare KAYA_JOBS would resize the mac pool too. Empty means the
-    # lane's own default. Measured under the full matrix 2026-08-20 and 8
-    # STAYS: 6 was 431s, 8 was 401s, 10 was 358s for this lane but flaked
-    # an android stall leg and an iOS picker leg in the same run, moving
-    # the wall only 403 -> 394.
-    run_lane("linux", ["tools/validate-linux.py"],
-             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "skip"})
-    # KAYA_WIN_JOBS scopes the VM's leg pool under the matrix: six slots
-    # on six vCPUs were measured for a VM with the host to itself, and
-    # under the everyday matrix the lane is the wall — 644s at six, 589s
-    # at four with every other lane unchanged (matrices #28 and #30,
-    # 2026-09-07). Empty means the runner's own default.
-    run_lane("windows", ["tools/deploy-win.py", HOST, "all"],
-             env={"KAYA_WIN_JOBS": os.environ.get("KAYA_WIN_JOBS", "4")})
-    run_lane("ios", ["tools/ios/run-sim.py"])
-    run_lane("android", ["tools/android/run-emulator.py"],
-             env={"KAYA_QUIET": "skip"})
-    android_lane_proc = lane_procs[-1]
-    sweep_warm = subprocess.Popen(
-        ["nice", "-n", "10", "tools/gates.py", "--warm"],
-        env=dict(os.environ, CARGO_TARGET_DIR=str(SWEEP_TARGET)),
-        stdout=open(LANES_DIR / "gates-warm.log", "w", encoding="utf-8"),
-        stderr=subprocess.STDOUT)
-    warm_t0 = time.monotonic()
-    android_lane_proc.wait()
-    warm_rc = sweep_warm.wait()
-    print(f"gates-warm: rc={warm_rc}, done within {time.monotonic() - warm_t0:.0f}s of "
-          f"the lanes' launch (the sweep's own target, compiled beside them)", flush=True)
-    if warm_rc != 0:
-        keep_lane_log("gates-warm")
-    run_lane("gates", ["nice", "-n", "10", "tools/gates.py"],
-             env={"CARGO_TARGET_DIR": str(SWEEP_TARGET)})
-else:
-    run_lane("mac", ["tools/validate-mac.py"])
-    run_lane("linux", ["tools/validate-linux.py"])
-    run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
-    run_lane("ios", ["tools/ios/run-sim.py"])
-    run_lane("android", ["tools/android/run-emulator.py"])
 
 # DURATION IS A CORRECTNESS SIGNAL (CLAUDE.md invariant 8): a lane can
 # get six times slower and still report ALL PASS. Measured 2026-07-25:
@@ -472,6 +276,261 @@ BUDGETS = {
     "gates": 600,
 }
 
+
+def lane_watch(name, proc, t0, log=None, wall=None, grace=walls.VERDICT_GRACE_S, tick=5):
+    """Wait for a lane; past its wall, or `grace` past its own verdict line,
+    kill its process group and say so. Returns (rc, None) or (rc, why)."""
+    log = log or LANES_DIR / f"{name}.log"
+    wall = wall if wall is not None else walls.lane_wall(BUDGETS.get(name, 0))
+    seen_at, offset, carry = None, 0, ""
+    while True:
+        try:
+            return proc.wait(timeout=tick), None
+        except subprocess.TimeoutExpired:
+            pass
+        now = time.monotonic()
+        if seen_at is None and log.is_file():
+            with open(log, encoding="utf-8", errors="replace") as f:
+                f.seek(offset)
+                fresh = f.read()
+                offset = f.tell()
+            text = carry + fresh
+            carry = text[text.rfind("\n") + 1:]
+            if walls.verdict_line(name, text):
+                seen_at = now
+        if now - t0 > wall:
+            why = (f"still running {now - t0:.0f}s after its launch, past its {wall:.0f}s "
+                   f"wall ({walls.LANE_WALL_FACTOR}x its {BUDGETS.get(name, 0)}s ceiling, "
+                   f"at least {walls.LANE_WALL_FLOOR_S}s)")
+        elif seen_at is not None and now - seen_at > grace:
+            why = (f"printed its verdict {now - seen_at:.0f}s ago and has not exited "
+                   f"(the grace is {grace}s)")
+        else:
+            continue
+        tail = (log.read_text(encoding="utf-8", errors="replace") if log.is_file() else "")
+        left = walls.kill_group(proc.pid, proc)
+        walls.untrack(proc)
+        print(f"{name}: WALL — the lane {why}; killed its process group {proc.pid}, "
+              + (f"and {len(left)} process(es) outlived the kill: "
+                 + "; ".join(f"{pid} {cmd[:120]}" for pid, cmd in left)
+                 if left else "nothing left in it")
+              + ". Its last lines:\n  " + "\n  ".join(walls.last_lines(tail, 12)),
+              flush=True)
+        return proc.returncode, why
+
+
+def run_lane(name, argv, env=None):
+    """One matrix unit. Parallel mode BACKGROUNDS it and records the
+    process — the collection below waits on exactly these."""
+    global status
+    lane_env = dict(os.environ, **(env or {}))
+    if (os.environ.get("KAYA_EXCLUSIVE", "") == "only"
+            and not EXCLUSIVE_LEGS.get(name, {"linux declares its own"})):
+        # An exclusive-only run has nothing for this lane, and launching it
+        # would spend its whole setup (the mac lane's 481s for zero legs)
+        # loading the host under the lanes that do have legs. The row reads
+        # 0 legs, as a launched lane's would.
+        print(f"exclusive: {name} names no exclusive legs; not launched",
+              flush=True)
+        if MODE == "serial":
+            print(f"{name}: PASS (0s)")
+        else:
+            lane_done[name] = ("PASS", 0)
+            lane_names.append(name)
+        return
+    if only.active() and (name == "gates" or (
+            name in ROSTERS and not only.matches(ROSTERS[name]()))):
+        # A filtered run is the legs it names: no gate sweep, and a lane
+        # whose roster has no matching leg is not launched (the mac lane's
+        # setup is 481s before its first leg). The row reads SKIP, never
+        # PASS, so the verdict below can count what actually ran.
+        what = ("the gate sweep is not run" if name == "gates"
+                else f"no leg matches KAYA_ONLY={','.join(only.PREFIXES)}")
+        print(f"only: {name}: {what}; not launched", flush=True)
+        if MODE == "serial":
+            print(f"{name}: SKIP (0s)")
+        else:
+            lane_done[name] = ("SKIP", 0)
+            lane_names.append(name)
+        return
+    if MODE == "serial":
+        print(f"== {name} ==")
+        t0 = time.monotonic()
+        with open(LANES_DIR / f"{name}.log", "w", encoding="utf-8",
+                  errors="replace") as lf:
+            rc = subprocess.run(argv, env=lane_env, stdout=lf,
+                                stderr=lf, check=False).returncode
+        secs = int(time.monotonic() - t0)
+        if rc == 0:
+            print(f"{name}: PASS ({secs}s)")
+        elif rc == only.REFUSED and only.active():
+            print(f"{name}: SKIP ({secs}s; no leg matched KAYA_ONLY)")
+        else:
+            print((LANES_DIR / f"{name}.log").read_text(
+                encoding="utf-8", errors="replace"), end="")
+            print(f"{name}: FAIL ({secs}s)")
+            status = 1
+            if not keep_lane_log(name):
+                status = 1
+        return
+    lf = open(LANES_DIR / f"{name}.log", "w", encoding="utf-8",
+              errors="replace")
+    # IN A PROCESS GROUP OF ITS OWN, so the lane's wall can kill all of it
+    # (walls.forward_signals passes a ^C on).
+    proc = subprocess.Popen(argv, env=lane_env, stdout=lf, stderr=lf, start_new_session=True)
+    lf.close()
+    walls.track(proc)
+    t0 = time.monotonic()
+
+    # The lane's own duration, stamped WHEN IT EXITS: a collection that
+    # waited in queue order would bill an early finisher for its slower
+    # siblings' time.
+    def _wait(name=name, proc=proc, t0=t0):
+        rc, why = lane_watch(name, proc, t0)
+        print(f"{name}: exited after {int(time.monotonic() - t0)}s; "
+              f"{lane_health.host_line()[0]}", flush=True)
+        verdict = "PASS" if rc == 0 and why is None else "FAIL"
+        if rc == only.REFUSED and only.active() and why is None:
+            verdict = "SKIP"
+        lane_done[name] = (verdict, int(time.monotonic() - t0))
+
+    waiter = threading.Thread(target=_wait)
+    waiter.start()
+    lane_waiters.append(waiter)
+    lane_procs.append(proc)
+    lane_names.append(name)
+
+
+T0 = time.monotonic()
+# A HOST THAT SLEEPS STOPS EVERY CLOCK A WALL READS (docs/traps.md, the
+# matrix that slept 22 hours on battery): the power source rides the launch
+# line and a sleep inside the run is named before the verdict.
+SLEEP = walls.SleepClock()
+SLEEP_EPOCH = time.time()
+walls.forward_signals()
+# THE HOST'S LOAD RIDES THE RECORD (2026-09-01: three ceilings fired in
+# one contended evening). WITH THE TOP CONSUMERS, because the load figure
+# alone cannot tell the host from the lanes — a quiet matrix's own
+# fifteen-minute figure reaches ~135 by its end. A top consumer that is
+# no lane's process is the host; the pools are expected there.
+LOAD_AT_LAUNCH = os.getloadavg()
+
+
+top_consumers = lane_health.top_consumers
+
+
+# AND THE HOST'S IDLE CLOCK BESIDE THEM (docs/deferred.md, the
+# swallowed-press entry): load says how busy the machine is, never whether
+# a HUMAN is at it, and an input-driving leg admitted under a human's
+# foreground dies with every press swallowed. One reader with the mac
+# funnel's wait (tools/lib/lanes/mac.py).
+_idle_s, _idle_why = _mac.hid_idle_seconds()
+print(f"host load at launch: {LOAD_AT_LAUNCH[0]:.1f} {LOAD_AT_LAUNCH[1]:.1f} "
+      f"{LOAD_AT_LAUNCH[2]:.1f} (1, 5, 15 min); HIDIdleTime "
+      + (f"{_idle_s}s" if _idle_s is not None else f"unreadable ({_idle_why})")
+      + f"; top consumers: {top_consumers()}", flush=True)
+_on_battery, _power = walls.power_reading()
+print(f"host power at launch: {_power}"
+      + ("; ON BATTERY — a matrix drains it, and macOS hibernates at its floor "
+         "with every lane frozen mid-leg (docs/traps.md, the matrix that slept "
+         "22 hours on battery)" if _on_battery else ""), flush=True)
+# THE MATRIX-WIDE EXCLUSIVE TOKEN (tools/lib/exclusive.py): one directory every
+# lane reaches, the container through its flight-recorder mount.
+EXCLUSIVE_DIR = pathlib.Path(
+    os.environ.get("XDG_STATE_HOME", "") or str(pathlib.Path.home() / ".local/state")
+) / "kaya" / "exclusive"
+EXCLUSIVE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["KAYA_EXCLUSIVE_DIR"] = str(EXCLUSIVE_DIR)
+print(f"exclusive: the token lives at {EXCLUSIVE_DIR}", flush=True)
+# The protocol watched before the lanes trust it: the mkdir race, the
+# stale break both sides of its ceiling, an expired wait, the holder.
+if not exclusive.selftest():
+    print("exclusive: the self-test failed — the lanes run WITHOUT the token", flush=True)
+    del os.environ["KAYA_EXCLUSIVE_DIR"]
+if MODE == "parallel":
+    # ALL FIVE PLATFORM LANES START TOGETHER; the gate sweep waits for
+    # Android's process, then runs niced and FOUR WIDE (tools/gates.py,
+    # 2026-09-07), which hides it behind the longer lanes. One gate at a
+    # time the wall was Android plus the whole sweep in series (654 +
+    # 422 = 1082s); launched at t0 beside the lanes, four wide and niced,
+    # it cost every lane 150-200s and every ceiling for a 116s gain
+    # (matrix #24, docs/measurements/gate-sweep-2026-09-07.md).
+    #
+    # IN A CARGO TARGET OF ITS OWN (2026-10-16): the mac guests load the
+    # lanes' libkaya by path, and a sweep that relinked it under a
+    # token-slowed mac lane killed seven legs in dyld (docs/traps.md, the
+    # sweep-relinked-libkaya entry). Built into SWEEP_TARGET it cannot, so
+    # it no longer waits for the mac lane (docs/measurements/
+    # lane-ceilings-2026-10-16.md); gates.py refuses a matrix sweep anywhere
+    # else and both runners still refuse a verdict if that library moved.
+    #
+    # The token is a t0 fingerprint of every keyed gate's inputs, so the
+    # mac lane can skip its own sweep; a hand-run has none and sweeps.
+    # BUILT BEFORE THE TOKEN IS TAKEN, since the keys carry the
+    # artifacts' REAL BYTES — a token over the previous build's made the
+    # mac lane sweep twice (791s against 620, 2026-09-01).
+    # tools/check-gates.py holds the order.
+    if subprocess.run(["tools/gates.py", "--build"]).returncode != 0:
+        sys.exit(1)
+    # RUNG 1 RAN JUST NOW: the sweep skips its own run while these inputs
+    # still hold (tools/gates.py's rung1_ran_at_matrix_start).
+    rung1 = subprocess.run(["tools/build-id.py", "--gate", "unit-suite"],
+                           stdout=subprocess.PIPE, text=True, check=False)
+    if rung1.returncode == 0 and rung1.stdout.strip():
+        os.environ["KAYA_MATRIX_RUNG1_KEY"] = rung1.stdout.strip()
+    got = subprocess.run(["tools/gates.py", "--fingerprint"],
+                         stdout=subprocess.PIPE, text=True,
+                         encoding="utf-8", errors="replace",
+                         check=False)
+    if got.returncode != 0:
+        sys.exit(1)
+    # Line one is the token, line two the per-gate keys behind it, so
+    # the lane can say which gate's inputs moved when the handshake misses.
+    fp_lines = got.stdout.strip().splitlines()
+    os.environ["KAYA_MATRIX_GATES_TOKEN"] = fp_lines[0] if fp_lines else ""
+    os.environ["KAYA_MATRIX_GATES_KEYS"] = fp_lines[1] if len(fp_lines) > 1 else "{}"
+    run_lane("mac", ["tools/validate-mac.py"])
+    # KAYA_LINUX_JOBS scopes a leg-pool width to the linux lane alone —
+    # bare KAYA_JOBS would resize the mac pool too. Empty means the
+    # lane's own default. Measured under the full matrix 2026-08-20 and 8
+    # STAYS: 6 was 431s, 8 was 401s, 10 was 358s for this lane but flaked
+    # an android stall leg and an iOS picker leg in the same run, moving
+    # the wall only 403 -> 394.
+    run_lane("linux", ["tools/validate-linux.py"],
+             env={"KAYA_JOBS": os.environ.get("KAYA_LINUX_JOBS", ""), "KAYA_QUIET": "skip"})
+    # KAYA_WIN_JOBS scopes the VM's leg pool under the matrix: six slots
+    # on six vCPUs were measured for a VM with the host to itself, and
+    # under the everyday matrix the lane is the wall — 644s at six, 589s
+    # at four with every other lane unchanged (matrices #28 and #30,
+    # 2026-09-07). Empty means the runner's own default.
+    run_lane("windows", ["tools/deploy-win.py", HOST, "all"],
+             env={"KAYA_WIN_JOBS": os.environ.get("KAYA_WIN_JOBS", "4")})
+    run_lane("ios", ["tools/ios/run-sim.py"])
+    run_lane("android", ["tools/android/run-emulator.py"],
+             env={"KAYA_QUIET": "skip"})
+    android_lane_proc = lane_procs[-1]
+    sweep_warm = subprocess.Popen(
+        ["nice", "-n", "10", "tools/gates.py", "--warm"],
+        env=dict(os.environ, CARGO_TARGET_DIR=str(SWEEP_TARGET)),
+        stdout=open(LANES_DIR / "gates-warm.log", "w", encoding="utf-8"),
+        stderr=subprocess.STDOUT)
+    warm_t0 = time.monotonic()
+    android_lane_proc.wait()
+    warm_rc = sweep_warm.wait()
+    print(f"gates-warm: rc={warm_rc}, done within {time.monotonic() - warm_t0:.0f}s of "
+          f"the lanes' launch (the sweep's own target, compiled beside them)", flush=True)
+    if warm_rc != 0:
+        keep_lane_log("gates-warm")
+    run_lane("gates", ["nice", "-n", "10", "tools/gates.py"],
+             env={"CARGO_TARGET_DIR": str(SWEEP_TARGET)})
+else:
+    run_lane("mac", ["tools/validate-mac.py"])
+    run_lane("linux", ["tools/validate-linux.py"])
+    run_lane("windows", ["tools/deploy-win.py", HOST, "all"])
+    run_lane("ios", ["tools/ios/run-sim.py"])
+    run_lane("android", ["tools/android/run-emulator.py"])
+
+
 if MODE == "parallel":
     for waiter in lane_waiters:
         waiter.join()
@@ -561,6 +620,15 @@ if MODE == "parallel":
 
 print(f"TIMING matrix {int(time.monotonic() - T0)}s ({MODE})",
       flush=True)
+_slept = SLEEP.slept()
+if _slept > walls.SLEEP_NOTICE_S:
+    _lines = walls.sleeps_since(SLEEP_EPOCH - 60)
+    print(f"validate-all: THE HOST SLEPT {_slept}s during this matrix — every lane "
+          f"froze where it stood and resumed on wake, so no duration here is a "
+          f"measurement and the run is not the record. pmset's own lines: "
+          + ("; ".join(_lines) if _lines else "none in `pmset -g log` since the launch"),
+          file=sys.stderr, flush=True)
+    status = 1
 if only.active():
     # A filtered verdict SAYS it is one, in the same line every reader
     # greps, so a run of the legs one change touched is never mistaken for

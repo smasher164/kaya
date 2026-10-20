@@ -348,7 +348,15 @@ in docs/deferred.md.
    The matrix's log-retention helper runs against eight filesystem cases:
    default and explicit destinations, directory failures at both copies,
    and missing source logs. Four counted negatives hold both printed paths,
-   the OS error and the archived bytes),
+   the OS error and the archived bytes. AND THE WALLS SINCE 2026-10-20
+   (tools/lib/walls.py): gates.py kills a gate past max(1200s, 10x its
+   WEIGHT), validate-all kills a lane's process group past max(2400s, 2x
+   its ceiling) or 300s after its own verdict line, and deploy-win bounds
+   every ssh call and joins its leg workers through a 1200s wall that names
+   where a stuck worker's thread is; each wall is run against a hung
+   stand-in on every run. A host sleep fires none of them, since monotonic
+   time stops with the Mac, and is named before the verdict instead
+   (docs/traps.md, the matrix that slept 22 hours on battery)),
    `tools/check-ledger.py` (docs/deferred.md may not disagree with
    itself: an UNSTRUCK headline over an entry that records a terminal
    resolution, or a STRUCK one with no resolution note. Two entries

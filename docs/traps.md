@@ -18199,3 +18199,25 @@ phase's own work.
 
 GUARD: tools/lib/android-leg-order.py refuses a `build_suite(` call outside
 SuiteBuilds (the serial driver put back is watched red).
+
+## The matrix that slept 22 hours on battery (measured 2026-10-20)
+
+Matrix 18 at 7e042aef "hung" for 22.6 hours and nothing in the code looped:
+the host had run on battery through the evening's matrices, and `pmset -g log`
+reads `2026-10-19 01:47:58 Sleep — 'Low Power Sleep' ... Using Batt
+(Charge:1%)` and `2026-10-20 00:26:19 Wake from Hibernate`. Every lane froze
+where it stood. The windows lane's leg verdicts stop at 01:47:53 and resume at
+00:26:32 (numberfield_rust, PASS, 73 s by its own clock), and the gate sweep's
+check-assets reported `OK 198.4s` across the sleep. A `ps` etime of 22 hours,
+a `sample` taken on wake that shows leg workers spawning ssh, and an old
+`target/validate-lanes/windows.log` from the matrix before (which did end with
+ALL PASS) together read like a runner looping after its verdict. The second
+battery hibernation on record; the first, 2026-10-01, left a load generator
+running on wake. A sleep cannot fire any wall here, because time.monotonic,
+which every wall and ceiling reads, does not advance while the Mac sleeps.
+So validate-all prints the power source on its launch line, and before the
+verdict it compares wall time with monotonic time; when they differ by more
+than a minute it names the sleep with pmset's own lines and refuses the
+record. The walls themselves (tools/lib/walls.py) cover the class that only
+looked like this one: a gate, lane, leg worker or ssh call that really hangs.
+check-gates runs each wall against a hung stand-in.
