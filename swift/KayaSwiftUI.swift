@@ -15629,15 +15629,28 @@ private struct KayaBoxReader: View {
     guard let first = boxes.cells.first, let last = boxes.cells.last else { return "no cells" }
     let lead = first.minX - fill.minX
     let trail = fill.maxX - last.maxX
-    if lead + 0.5 >= boxes.pad && trail + 0.5 >= boxes.pad {
+    // The vertical half (M19 G): the fill clears the tallest cell above and
+    // below. The native tier's cell frames are the table's own rows, so AppKit's
+    // rhythm is not read there.
+    let top = (boxes.cells.map(\.minY).min() ?? fill.minY) - fill.minY
+    let bottom = fill.maxY - (boxes.cells.map(\.maxY).max() ?? fill.maxY)
+    let vertical = boxes.native || (top + 0.5 >= kayaRowPadY && bottom + 0.5 >= kayaRowPadY)
+    if lead + 0.5 >= boxes.pad && trail + 0.5 >= boxes.pad && vertical {
         if boxes.native { return "" }
         guard let drawn = kayaRowFillDrawn(fill, boxes.cells) else { return "" }
         return drawn.isEmpty ? "" : "reads \(drawn)"
     }
     let r = { (v: CGFloat) in Int(v.rounded()) }
-    return "reads \(r(lead))/\(r(trail)) (the fill \(r(fill.minX))..\(r(fill.maxX)), the cells "
-        + "\(r(first.minX))..\(r(last.maxX))), wanted at least \(r(boxes.pad)) each side"
+    return "reads \(r(lead))/\(r(trail)) across and \(r(top))/\(r(bottom)) down (the fill \(r(fill.minX))..\(r(fill.maxX)) by "
+        + "\(r(fill.minY))..\(r(fill.maxY)), the cells \(r(first.minX))..\(r(last.maxX))), wanted at least \(r(boxes.pad)) each side "
+        + "and \(r(kayaRowPadY)) above and below"
 }
+
+/// The synthesized tiers' vertical room: the row gap's half on each side of
+/// the tallest cell (KayaTableLayout places the ground at y - rowGap / 2), read
+/// against a floor of two points.
+let kayaRowPadY: CGFloat = 2
+
 
 /// expect_row_centered's read: nil for no such target, "" when every cell's
 /// centre is within two points of the row's, else the furthest cell.

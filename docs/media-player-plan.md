@@ -913,11 +913,25 @@ in the app's numbers:
   bounding a label or a container is a core prop. The Home cards' titles take
   two lines too.
 
+- (G) ON THE DESKTOPS THE SELECTED FILL TOUCHED THE ART TOP AND BOTTOM (the
+  maintainer, 2026-10-21, on the first after-captures: "on desktop, there is
+  no vertical space between the album art thumbnail and the grey highlight of
+  a row"): GTK's and WinUI's table rows carried no vertical padding, so the
+  40 px art filled the row. libadwaita's `row > box.header` is 50 px at
+  minimum, 5 px above and below a 40 px picture, and Fluent's list item keeps
+  its picture off the fill (the WinUI gallery's 6), so a GTK table row pads
+  5 px above and below (TINT_CSS and TABLE_CSS, `TABLE_ROW_PAD_Y`) and a
+  WinUI row 6 (`table_row_thickness`), every kaya table, cells unmoved
+  sideways. AppKit's native table and both phones already leave room (the
+  phones' ground reaches the row gap's half past the tallest cell).
+
 Two verbs read the first two classes in every shared table scene, since no
 existing reader could see either (every table observable answers identically
 with the fill flush or the cells at the top): `expect_row_inset <row>` passes
 when the row's selection surface clears its first and last cells by at least
-the backend's own cell padding (AppKit's own on the native tier, where any
+the backend's own cell padding and, since G, its tallest cell above and below
+by the backend's vertical room (GTK's 5, WinUI's 6, two on the phones;
+AppKit's own on the native tier, where the cells are the table's rows and any
 clearance is the platform's), and `expect_row_centered <row>` when every
 cell's centre is within two units of the row's. tools/scenes/music_header.steps,
 music_artist.steps and tracks.steps read both after the selection; the

@@ -2696,11 +2696,13 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
 /// row's selection surface spans the card while its cells stay on the edges
 /// the instrument reads.
 fn table_row_padding(core: &CoreState, id: WidgetId, pad: f64) -> Thickness {
-    let side = if in_declared_table(core, id) { pad + TABLE_CARD_PAD } else { pad };
+    if in_declared_table(core, id) {
+        return table_row_thickness(pad);
+    }
     Thickness {
-        Left: side,
+        Left: pad,
         Top: pad,
-        Right: side,
+        Right: pad,
         Bottom: pad,
     }
 }
@@ -4127,6 +4129,16 @@ const SHEET_CARD_XAML: &str = concat!(
 /// and the one a DENSE table wants). Symmetric, because `pad` is one
 /// number for four sides here.
 const TABLE_CARD_PAD: f64 = 12.0;
+
+/// A table row's vertical room (M19 G): Fluent's list item keeps its picture
+/// off the item's fill (the WinUI gallery's 6; Windows Media Player's rows).
+const TABLE_ROW_PAD_Y: f64 = 6.0;
+
+/// A declared table's row padding from the container's own: the card's
+/// interior back on the sides, the vertical room above and below.
+fn table_row_thickness(own: f64) -> Thickness {
+    Thickness { Left: own + TABLE_CARD_PAD, Top: own + TABLE_ROW_PAD_Y, Right: own + TABLE_CARD_PAD, Bottom: own + TABLE_ROW_PAD_Y }
+}
 
 /// The margin that takes the head, the rule and the scroll host out to the
 /// card's stroke (M19); the header and every row put the same number back as
@@ -5728,8 +5740,8 @@ fn table_stamp(id: u64, table: &mut WinTable) -> windows_core::Result<()> {
     stamp(&table.header.ColumnDefinitions()?)?;
     for row in &table.rows {
         row.SetColumnSpacing(TABLE_COL_GAP)?;
-        let own = row.Padding()?.Top;
-        row.SetPadding(Thickness { Left: own + TABLE_CARD_PAD, Top: own, Right: own + TABLE_CARD_PAD, Bottom: own })?;
+        let own = (row.Padding()?.Top - TABLE_ROW_PAD_Y).max(0.0);
+        row.SetPadding(table_row_thickness(own))?;
         stamp(&row.ColumnDefinitions()?)?;
     }
     if trace_enabled() {
@@ -27019,33 +27031,47 @@ impl crate::harness::Stage for WinUiStage {
             };
             frame.UpdateLayout()?;
             let width = frame.ActualWidth()?;
+            let height = frame.ActualHeight()?;
             let (mut lead, mut trail) = (f64::INFINITY, f64::NEG_INFINITY);
+            let (mut top, mut bottom) = (f64::INFINITY, f64::NEG_INFINITY);
             let children = grid.Children()?;
             for at in 0..children.Size()? {
                 let cell: FrameworkElement = children.GetAt(at)?.cast()?;
-                let x = f64::from(
-                    cell.TransformToVisual(&frame)?
-                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
-                        .X,
-                );
+                let origin = cell
+                    .TransformToVisual(&frame)?
+                    .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                let (x, y) = (f64::from(origin.X), f64::from(origin.Y));
                 lead = lead.min(x);
                 trail = trail.max(x + cell.ActualWidth()?);
+                top = top.min(y);
+                bottom = bottom.max(y + cell.ActualHeight()?);
             }
             if !lead.is_finite() {
                 return Ok("no cells".to_owned());
             }
             let trail_in = width - trail;
-            Ok(if lead + 0.5 >= TABLE_CARD_PAD && trail_in + 0.5 >= TABLE_CARD_PAD {
+            let bottom_in = height - bottom;
+            Ok(if lead + 0.5 >= TABLE_CARD_PAD
+                && trail_in + 0.5 >= TABLE_CARD_PAD
+                && top + 0.5 >= TABLE_ROW_PAD_Y
+                && bottom_in + 0.5 >= TABLE_ROW_PAD_Y
+            {
                 String::new()
             } else {
                 format!(
-                    "reads {}/{} (the fill 0..{}, the cells {}..{}), wanted at least {} each side",
+                    "reads {}/{} across and {}/{} down (the fill 0..{} by 0..{}, the cells {}..{} by {}..{}), wanted at least {} each side and {} above and below",
                     lead.round() as i64,
                     trail_in.round() as i64,
+                    top.round() as i64,
+                    bottom_in.round() as i64,
                     width.round() as i64,
+                    height.round() as i64,
                     lead.round() as i64,
                     trail.round() as i64,
-                    TABLE_CARD_PAD
+                    top.round() as i64,
+                    bottom.round() as i64,
+                    TABLE_CARD_PAD,
+                    TABLE_ROW_PAD_Y
                 )
             })
         })

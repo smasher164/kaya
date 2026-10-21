@@ -4418,6 +4418,9 @@ const TABLE_ROW_CLASS: &str = "kaya-table-row";
 /// The row padding the classes above put back, the number `row_inset` reads
 /// against.
 const TABLE_ROW_PAD: f64 = 12.0;
+/// A row's vertical room (M19 G): libadwaita's `row > box.header` is 50px
+/// tall at minimum, so a 40px picture sits 5px from the row's fill.
+const TABLE_ROW_PAD_Y: f64 = 5.0;
 /// The stacked fold's marker (docs/adaptive-layout-plan.md D7): a folded
 /// child rides inside the table's content box, above the top spacer, and
 /// every reader of that box skips this class exactly as it skips the
@@ -4456,7 +4459,7 @@ const TABLE_CSS: &str = "\
 outline: 1px solid @borders; outline-offset: -1px; padding: 8px 12px; }
 .kaya-table-head, .kaya-table-body, .kaya-table-divider { margin-left: -12px; margin-right: -12px; }
 .kaya-table-header, .kaya-table-content { padding-left: 12px; padding-right: 12px; }
-.kaya-table-row { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
+.kaya-table-row { margin-left: -12px; margin-right: -12px; padding: 5px 12px; }
 ";
 
 /// One declared table (docs/tables-plan.md decision 6): the header row this
@@ -5517,6 +5520,7 @@ fn reflow_table(core: &mut CoreState, id: u64) {
             continue;
         }
         column.remove(&stray);
+        stray.add_css_class(TABLE_ROW_CLASS);
         content.append(&stray);
     }
     // The spacers bracket the band whatever order the moves left behind:
@@ -5706,6 +5710,16 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
             crate::fault::guard("reporting measured row heights", || {
                 scene.rows_measured(id, band.first, &heights);
             });
+            // THE PARK FOLLOWS THE MEASUREMENT (docs/traps.md, the GTK park
+            // that stayed on the stale pitch): the re-park above ran on the
+            // extents this pass has just corrected, and nothing else turns
+            // the loop once more. Through an idle, since `pending` is held
+            // for the length of a scheduled report and a direct schedule
+            // from inside one is refused.
+            if anchor.get().is_some() {
+                let pending = pending.clone();
+                glib::idle_add_local_once(move || schedule_window_report(&pending, id));
+            }
         }
     }
 
@@ -8432,7 +8446,7 @@ const TINT_CSS: &str = "\
 .kaya-filled.card { margin: 1px 2px 3px 2px; }
 .kaya-filled-pad { padding: 12px; }
 .kaya-activatable-pad { padding: 12px; }
-.kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 0px 12px; }
+.kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 5px 12px; }
 .kaya-filled.osd { background-clip: border-box; }
 .kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
@@ -18038,7 +18052,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // children-first sugar parented before the table existed.
                 NativeWidget::Column(column) => {
                     match core.tables.get(&parent.0).map(|t| t.content.clone()) {
-                        Some(content) => content.append(&child_widget),
+                        // THE ROW CLASS LANDS AS THE ROW JOINS (M19 G): its
+                        // vertical padding is the row's height, and a row first
+                        // measured without it reported a pitch the core kept
+                        // for every row above the band (tracks-rust-x11's park
+                        // 180px short, 2026-10-21).
+                        Some(content) => {
+                            child_widget.add_css_class(TABLE_ROW_CLASS);
+                            content.append(&child_widget)
+                        }
                         // A FORM'S ROWS LIVE IN ITS BOXED LIST
                         // (docs/forms-plan.md §2); anything else lands in the
                         // column itself and ends the form below.
@@ -24939,13 +24961,28 @@ impl crate::harness::Stage for GtkStage {
             };
             let lead_in = f64::from(lead.x() - fill.x());
             let trail_in = f64::from(fill.x() + fill.width() - (trail.x() + trail.width()));
-            if lead_in + 0.5 >= TABLE_ROW_PAD && trail_in + 0.5 >= TABLE_ROW_PAD {
+            let (mut top, mut bottom) = (f32::INFINITY, f32::NEG_INFINITY);
+            for cell in &cells {
+                if let Some(b) = cell.compute_bounds(&row) {
+                    top = top.min(b.y());
+                    bottom = bottom.max(b.y() + b.height());
+                }
+            }
+            let top_in = f64::from(top - fill.y());
+            let bottom_in = f64::from(fill.y() + fill.height() - bottom);
+            if lead_in + 0.5 >= TABLE_ROW_PAD
+                && trail_in + 0.5 >= TABLE_ROW_PAD
+                && top_in + 0.5 >= TABLE_ROW_PAD_Y
+                && bottom_in + 0.5 >= TABLE_ROW_PAD_Y
+            {
                 return String::new();
             }
             format!(
-                "reads {lead_in:.0}/{trail_in:.0} (the fill {:.0}..{:.0}, the cells {:.0}..{:.0}), wanted at least {TABLE_ROW_PAD:.0} each side",
+                "reads {lead_in:.0}/{trail_in:.0} across and {top_in:.0}/{bottom_in:.0} down (the fill {:.0}..{:.0} by {:.0}..{:.0}, the cells {:.0}..{:.0} by {top:.0}..{bottom:.0}), wanted at least {TABLE_ROW_PAD:.0} each side and {TABLE_ROW_PAD_Y:.0} above and below",
                 fill.x(),
                 fill.x() + fill.width(),
+                fill.y(),
+                fill.y() + fill.height(),
                 lead.x(),
                 trail.x() + trail.width()
             )

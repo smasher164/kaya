@@ -18518,3 +18518,24 @@ rule, its cut watched red. A container's inset is a border on GTK (gtk.rs's
 set_container_inset, docs/traps.md's "A GTK table card is paint"), so any
 theme class that clips its background to the padding box hides the inset the
 same way; `.card` does not.
+
+## The GTK park that stayed on the stale pitch (measured 2026-10-21)
+
+The table row's vertical padding (docs/media-player-plan.md M19 G) made nine
+of the linux tracks legs red at `scroll_to_row t60`: "row 't60' at
+2817..2872 in the body, its viewport 2637..2826 (upper 2872)", for the whole
+15 s of the step. The bundle's leg log carried the loop: the band's first
+rows measured a 39 px pitch before their pictures decoded (`window_report
+... average=18.8`, then 40.5), the park landed the viewport at the core's
+row position for t60 (value 2637), that same report then measured the band's
+rows at their real 63 and corrected the core, and NO REPORT FOLLOWED: the
+re-park runs at the top of window_report, the verify half at its end, and
+nothing turned the loop once more, since the adjustment and the layout had
+both settled (no `vadjustment changed` after it). Before the padding the
+rows' real pitch matched what the early measurement presumed closely enough
+that one park sufficed; 24 px a row did not. A measurement that MOVED under
+a held anchor now schedules the next report, THROUGH AN IDLE: `pending` is held
+for the length of a scheduled report and schedule_window_report refuses while
+it is, so the first form of this fix was a no-op and six legs stayed red
+(gtk.rs's window_report, held by tools/lib/skin_gtk.py with a cut); the row class also lands as a row joins
+the table's content box, so no row is measured without it.

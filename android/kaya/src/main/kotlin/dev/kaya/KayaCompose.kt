@@ -8883,12 +8883,21 @@ private fun kayaRowInsetRead(activity: ComponentActivity, spec: String): String?
     val last = cells.last()
     val lead = first.left - fill.left
     val trail = fill.right - last.right
+    val top = cells.minOf { it.top } - fill.top
+    val bottom = fill.bottom - cells.maxOf { it.bottom }
     val pad = KAYA_TABLE_CARD_PAD_X.value
-    if (lead + 0.5f >= pad && trail + 0.5f >= pad) return ""
-    return "reads ${lead.roundToInt()}/${trail.roundToInt()} (the fill ${fill.left.roundToInt()}.." +
-        "${fill.right.roundToInt()}, the cells ${first.left.roundToInt()}..${last.right.roundToInt()}), " +
-        "wanted at least ${pad.roundToInt()} each side"
+    if (lead + 0.5f >= pad && trail + 0.5f >= pad && top + 0.5f >= KAYA_ROW_PAD_Y && bottom + 0.5f >= KAYA_ROW_PAD_Y) return ""
+    return "reads ${lead.roundToInt()}/${trail.roundToInt()} across and ${top.roundToInt()}/${bottom.roundToInt()} down " +
+        "(the fill ${fill.left.roundToInt()}..${fill.right.roundToInt()} by ${fill.top.roundToInt()}..${fill.bottom.roundToInt()}, " +
+        "the cells ${first.left.roundToInt()}..${last.right.roundToInt()}), " +
+        "wanted at least ${pad.roundToInt()} each side and ${KAYA_ROW_PAD_Y.roundToInt()} above and below"
 }
+
+/** The table's vertical room (M19 G): the row gap's half on each side of the
+ * tallest cell (the ground is placed at tops[r] - rowGapPx / 2), read against a
+ * floor of two dp. */
+private const val KAYA_ROW_PAD_Y = 2f
+
 
 /** expect_row_centered's read: null for no such target, "" when every cell's
  * centre is within two dp of the row's, else the furthest cell. */
