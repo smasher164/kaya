@@ -798,8 +798,8 @@ and that the platform decides it, not the app. An app cannot ask which
 platform it runs on (bindings/python/kaya/__init__.py, `Platform`), so the app
 states the fact and each backend draws its own idiom: the dock names the
 player it shows (a dock's `player`, in the core and all nine bindings); the
-Compose arm draws a full-width determinate line at the dock's top edge from
-its own player's position; macOS, iOS, GTK and WinUI keep the association and
+Compose arm draws a full-width determinate line at the dock's bottom edge,
+between the player and the navigation bar, from its own player's position; macOS, iOS, GTK and WinUI keep the association and
 draw nothing, since Apple Music's mini player has no line and the desktop
 docks carry a scrubber. Controls bound to a player are a separate question
 (docs/deferred.md, controls bound to a player).
@@ -809,7 +809,7 @@ root refusing a dock not attached or a player not live and detaching the dock
 when its player is released; the spelling in the nine bindings and the C floor
 (tools/lib/skin_surface.py's `docked player` rows), every dock guest naming a
 player. Compose draws Material's LinearProgressIndicator 2 dp tall across the
-dock's top edge, flat (no gap, no stop dot, butt caps), from its own media3
+dock's bottom edge (above the system inset when no navigation bar is below), flat (no gap, no stop dot, butt caps), from its own media3
 player's position each frame while it plays, and keeps it out of the
 accessibility tree, since the full player's slider is the position's control
 and the line would otherwise be a stop before the dock's buttons.
@@ -817,6 +817,12 @@ and the line would otherwise be a stop before the dock's buttons.
 scene; `expect_dock_line` reads the drawn fraction in the Android lane's
 music_dock extras and `none` in the iOS one (tools/lib/skin_compose.py holds
 the arm).
+
+Amended 2026-10-21 after the review page: the line was first built on the
+dock's top edge, which divides the page from the player, while the review's
+complaint was the player and the navigation bar reading as one surface. The
+maintainer chose to move the same line to the bottom edge, where it is both
+the division and the progress.
 
 ## §6: Build order
 

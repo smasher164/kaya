@@ -1334,8 +1334,10 @@ internal fun KayaDockBar(consumesBottom: Boolean) {
         ) {
             KayaRender(root)
         }
-        KayaDockLine(Modifier.align(Alignment.TopStart))
+        KayaDockLine(Modifier.align(Alignment.BottomStart).windowInsetsPadding(edges.only(WindowInsetsSides.Bottom)))
     }
+    val foot = edges.only(WindowInsetsSides.Bottom).getBottom(density).toFloat()
+    SideEffect { kayaDockFootInset = foot }
     DisposableEffect(Unit) {
         onDispose {
             kayaDockFrame = null
@@ -1348,10 +1350,11 @@ internal fun KayaDockBar(consumesBottom: Boolean) {
  * last drew, null while no line is composed. */
 var kayaDockLineFrame: androidx.compose.ui.geometry.Rect? = null
 var kayaDockLineDrawn: Float? = null
+var kayaDockFootInset = 0f
 
 /**
  * The phone dock's progress line (docs/media-player-plan.md M17): full width at
- * the dock's top edge, from the media3 player the dock names, redrawn each frame
+ * the dock's bottom edge, over the navigation bar or the system inset, from the media3 player the dock names, redrawn each frame
  * while it plays and polled while it does not, with nothing on the wire. Hidden
  * from accessibility: the full player's slider is the position's control.
  */
@@ -8813,7 +8816,7 @@ object KayaCompose {
     }
 
     /** expect_dock_line's read (M17): the fraction the line last drew, while it
-     * lies at the dock's top edge across the dock's width. */
+     * lies at the dock's bottom edge, above any system inset, across its width. */
     private fun kayaDockLineRead(activity: ComponentActivity): String = onUi(activity) {
         val line = kayaDockLineFrame
         val drawn = kayaDockLineDrawn
@@ -8822,7 +8825,7 @@ object KayaCompose {
         if (dock == null) return@onUi "misplaced (the line $line is laid out with no dock frame)"
         val slack = activity.resources.displayMetrics.density
         val detail = "line $line, dock $dock"
-        if (Math.abs(line.top - dock.top) > slack || Math.abs(line.left - dock.left) > slack ||
+        if (Math.abs(line.bottom - (dock.bottom - kayaDockFootInset)) > slack || Math.abs(line.left - dock.left) > slack ||
             Math.abs(line.right - dock.right) > slack || line.height < 1f) "misplaced ($detail, drew $drawn)"
         else String.format(java.util.Locale.ROOT, "%.3f (%s)", drawn, detail)
     }

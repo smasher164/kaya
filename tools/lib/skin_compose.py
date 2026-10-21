@@ -52,7 +52,8 @@ DOORS = [
     ("dock bar", "internal fun KayaDockBar(consumesBottom: Boolean) {",
      ["if (root == null || !kayaHoldsWidget(root)) {", ".background(MaterialTheme.colorScheme.surfaceContainer)",
       ".onGloballyPositioned { kayaDockFrame = it.boundsInWindow() }", ".windowInsetsPadding(edges)",
-      ".padding(KayaSceneModel.windowInset.dp)", "KayaDockLine(Modifier.align(Alignment.TopStart))"], ["Color("]),
+      ".padding(KayaSceneModel.windowInset.dp)", "KayaDockLine(Modifier.align(Alignment.BottomStart).windowInsetsPadding(edges.only(WindowInsetsSides.Bottom)))",
+      "SideEffect { kayaDockFootInset = foot }"], ["Color("]),
     # docs/media-player-plan.md M17: the line is the player's own position, drawn
     # in Material's flat form, out of the accessibility tree, with no wire per tick.
     ("dock line", "private fun KayaDockLine(modifier: Modifier) {",
@@ -86,7 +87,7 @@ READS = [
      ["val frame = kayaDockFrame", "val above = kayaDockAbove", "above.bottom <= frame.top + 1",
       "val fault = kayaDockContentFault(frame)\nif (fault != null) \"misplaced ($fault; $detail)\""]),
     ("expect_dock_line's reader", "private fun kayaDockLineRead(activity: ComponentActivity): String = onUi(activity) {",
-     ["val line = kayaDockLineFrame", "val drawn = kayaDockLineDrawn", "Math.abs(line.top - dock.top) > slack",
+     ["val line = kayaDockLineFrame", "val drawn = kayaDockLineDrawn", "Math.abs(line.bottom - (dock.bottom - kayaDockFootInset)) > slack",
       "Math.abs(line.right - dock.right) > slack"]),
     ("expect_dock's content half", "private fun kayaDockContentFault(dock: androidx.compose.ui.geometry.Rect): String? {",
      ["KayaSceneModel.root", "kayaNodeFrames[n.id]", "kayaNodeVisible[n.id]", "f.bottom > dock.top + 1"]),
@@ -178,7 +179,7 @@ def findings(text):
 
 
 CUTS = [
-    ("Compose: the dock's line not drawn", r"KayaDockLine\(Modifier\.align\(Alignment\.TopStart\)\)", "Unit",
+    ("Compose: the dock's line not drawn", r"KayaDockLine\(Modifier\.align\(Alignment\.BottomStart\)\.windowInsetsPadding\(edges\.only\(WindowInsetsSides\.Bottom\)\)\)", "Unit",
      "dock bar lacks KayaDockLine"),
     ("Compose: the dock's line from a clock of its own", r"exo\.currentPosition\.toFloat\(\) / duration",
      "(System.nanoTime() % 20_000_000_000L).toFloat() / 2e10f", "dock line lacks exo.currentPosition"),
@@ -187,8 +188,8 @@ CUTS = [
     ("Compose: the dock's line a TalkBack stop", r"\.clearAndSetSemantics \{ \}\n", "", "dock line lacks .clearAndSetSemantics"),
     ("Compose: the dock's player dropped", r"if \(dock == KayaSceneModel\.dockId\) KayaSceneModel\.dockPlayer = player",
      "if (dock == KayaSceneModel.dockId) Unit", "the dock keeps the player the core names"),
-    ("Compose: expect_dock_line off the dock's edge", r"Math\.abs\(line\.top - dock\.top\) > slack \|\| ", "",
-     "expect_dock_line's reader lacks Math.abs(line.top"),
+    ("Compose: expect_dock_line off the dock's edge", r"Math\.abs\(line\.bottom - \(dock\.bottom - kayaDockFootInset\)\) > slack \|\| ", "",
+     "expect_dock_line's reader lacks Math.abs(line.bottom"),
     ("Compose: a pushed page in a section without its bar", r"val covered = kayaCovers\(\)",
      "val covered = KayaSceneModel.sections.isEmpty() && kayaCovers()", "a pushed page is covered inside a section too"),
     ("Compose: the toggle unlit while on", r"checkedContainerColor = MaterialTheme\.colorScheme\.secondaryContainer,",
