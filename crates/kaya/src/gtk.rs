@@ -1476,6 +1476,21 @@ fn set_max_across(widget: &gtk4::Widget, points: f64) {
     unsafe { widget.set_data(MAX_ACROSS_KEY, points) }
 }
 
+/// A child's measure under its widest width (M20 (2)): the natural width
+/// is capped, and a height is asked for a width inside the cap, since the
+/// allocate caps the width the child gets.
+fn measure_capped(c: &gtk4::Widget, orientation: gtk4::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+    use gtk4::prelude::WidgetExt;
+    let Some(cap) = max_across(c) else { return c.measure(orientation, for_size) };
+    if orientation == gtk4::Orientation::Horizontal {
+        let (min, nat, bmin, bnat) = c.measure(orientation, for_size);
+        let min = min.min(cap);
+        (min, nat.min(cap).max(min), bmin, bnat)
+    } else {
+        c.measure(orientation, if for_size < 0 { cap } else { for_size.min(cap) })
+    }
+}
+
 fn set_child_track(widget: &gtk4::Widget, extent: f64) {
     // SAFETY: as above — this is the only writer of the key.
     unsafe { widget.set_data(TRACK_KEY, extent) }
@@ -2289,7 +2304,7 @@ mod flex {
                         // child is asked its width at -1, a column's its
                         // height at the column's width.
                         let (min, nat, _, _) =
-                            c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });
+                            super::measure_capped(&c, self.orientation.get(), if vertical { cross_total } else { -1 });
                         (min, nat)
                     };
                     children.push((c.clone(), weight, minimum, natural));
@@ -2371,7 +2386,7 @@ mod flex {
                 let cells: Vec<(i32, i32, i32, i32)> = self
                     .main_extents(widget, for_size, -1)
                     .into_iter()
-                    .map(|(c, extent)| c.measure(orientation, extent))
+                    .map(|(c, extent)| super::measure_capped(&c, orientation, extent))
                     .collect();
                 let (mut minimum, mut natural) = (0, 0);
                 for (cmin, cnat, _, _) in &cells {
@@ -2396,7 +2411,7 @@ mod flex {
             let mut child = widget.first_child();
             while let Some(c) = child {
                 if c.is_visible() && !super::is_ground_picture(&c) {
-                    let (cmin, cnat, _, _) = c.measure(orientation, for_size);
+                    let (cmin, cnat, _, _) = super::measure_capped(&c, orientation, for_size);
                     if self.is_main(orientation) {
                         let weight = super::grow_weight(&c);
                         main_children.push((weight, cmin, cnat));
@@ -2417,7 +2432,7 @@ mod flex {
                 let mut child = widget.first_child();
                 while let Some(c) = child {
                     if c.is_visible() && !super::is_ground_picture(&c) {
-                        let (_, _, bmin, bnat) = c.measure(orientation, for_size);
+                        let (_, _, bmin, bnat) = super::measure_capped(&c, orientation, for_size);
                         return (minimum, natural, bmin, bnat);
                     }
                     child = c.next_sibling();
@@ -17001,6 +17016,24 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     set_max_across(slider.scale.upcast_ref(), bound);
                     slider.scale.queue_resize();
                 }
+                // docs/media-player-plan.md M20 (2): a label wraps under its
+                // widest width, a container is bounded by it.
+                (NativeWidget::Label(label), Prop::MaxWidth, Value::F64(bound)) => {
+                    set_max_across(label.upcast_ref(), bound);
+                    if let Some(parent) = label.parent() {
+                        ensure_flex(&parent);
+                    }
+                    label.queue_resize();
+                }
+                (NativeWidget::Column(container), Prop::MaxWidth, Value::F64(bound))
+                | (NativeWidget::Row(container), Prop::MaxWidth, Value::F64(bound)) => {
+                    let widget = container.clone().upcast::<gtk4::Widget>();
+                    set_max_across(&widget, bound);
+                    if let Some(parent) = widget.parent() {
+                        ensure_flex(&parent);
+                    }
+                    widget.queue_resize();
+                }
                 (NativeWidget::Label(label), Prop::MaxLines, Value::F64(lines)) => {
                     label.set_wrap(true);
                     label.set_lines(lines as i32);
@@ -18141,7 +18174,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // Only now is the parent — and so the main axis — known, so
             // a weight that arrived before the child was attached gets
             // its manager and alignment here rather than being dropped.
-            if grow_weight(&child_widget) > 0.0 {
+            // A widest width (M20 (2)) is the flex manager's too.
+            if grow_weight(&child_widget) > 0.0 || max_across(&child_widget).is_some() {
                 match core.widgets.get(&parent).expect("scene validated the id") {
                     NativeWidget::Column(c) => ensure_flex(c.upcast_ref()),
                     NativeWidget::Row(r) => ensure_flex(r.upcast_ref()),

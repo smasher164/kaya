@@ -3293,9 +3293,12 @@ data Attr (c :: WClass) where
   -- never appearance. Any class: 'Composer' is a row's, the rest a leaf's,
   -- and the root refuses a role on a kind it does not fit.
   Role :: Role -> Attr c
-  -- | This image's bound in points: the picture scales down to fit, its
-  -- shape kept, and never up (docs\/photo-attach-plan.md §2). Images only.
-  MaxWidth :: Double -> Attr 'LeafW
+  -- | This widget's widest width in points: a picture scales down to fit,
+  -- its shape kept, and never up (docs\/photo-attach-plan.md §2); a label
+  -- wraps under it and a row or column is bounded by it
+  -- (docs\/media-player-plan.md M20 (2)). Any class; the root refuses it on
+  -- a kind it does not fit. 'MaxHeight' stays an image's.
+  MaxWidth :: Double -> Attr c
   MaxHeight :: Double -> Attr 'LeafW
   -- | This button draws the platform's glyph in place of its title, which
   -- stays its accessible name (docs\/composer-plan.md §2); an expander

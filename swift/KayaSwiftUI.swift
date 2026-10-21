@@ -14125,6 +14125,35 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     observed.append("\(parts[1]) and \(parts[2]) text aligned")
                 }
+            case "expect_same_width":
+                // harness.rs's ExpectSameWidth, the same sentences (M20 (2)).
+                guard parts.count == 3 else {
+                    failures.append("expect_same_width wants two targets: \(line)")
+                    break
+                }
+                func widthVerdict() -> String? {
+                    let (a, b) = DispatchQueue.main.sync { (kayaFrameWidthRead(parts[1]), kayaFrameWidthRead(parts[2])) }
+                    switch (a, b) {
+                    case (nil, _): return "no such target \(parts[1])"
+                    case (_, nil): return "no such target \(parts[2])"
+                    case (.some(nil), _): return "\(parts[1]) frame unread: <no laid-out frame>"
+                    case (_, .some(nil)): return "\(parts[2]) frame unread: <no laid-out frame>"
+                    case let (w??, v??):
+                        if abs(w - v) <= 1 { return nil }
+                        return "\(parts[1]) \(Int(w.rounded())) wide, \(parts[2]) \(Int(v.rounded())) wide, wanted the same width"
+                    }
+                }
+                var widthWhy = widthVerdict()
+                let widthDeadline = Date().addingTimeInterval(5)
+                while Date() < widthDeadline, widthWhy != nil {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    widthWhy = widthVerdict()
+                }
+                if let why = widthWhy {
+                    failures.append(why)
+                } else {
+                    observed.append("\(parts[1]) and \(parts[2]) same width")
+                }
             case "expect_hugs":
                 // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
                 // the `fill = false` opt-out): a reader that could not read is
@@ -15453,6 +15482,20 @@ var kayaLabelWindowFrames: [UInt64: [UUID: CGRect]] = [:]
 /// asks for the caption's inset inside the control (M20 (1)).
 var kayaMacButtons: [UInt64: NSButton] = [:]
 #endif
+
+/// expect_same_width's read: a column's, row's or label's laid-out width;
+/// nil for no such target, .some(nil) while nothing is laid out (M20 (2)).
+@MainActor func kayaFrameWidthRead(_ spec: Substring) -> Double?? {
+    if let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) {
+        guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id) else { return .some(nil) }
+        return .some(Double(frame.width))
+    }
+    guard let node = kayaTarget(spec, "label", kayaScene.labels) else { return nil }
+    guard let frame = kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }) else {
+        return .some(nil)
+    }
+    return .some(Double(frame.width))
+}
 
 /// expect_text_aligned's read: the left edge, in the window's space, of a
 /// label's text or a button's caption; nil for no such target, .some(nil)
@@ -25954,7 +25997,9 @@ struct KayaRender: View {
                 }
             }
             .frame(
-                maxWidth: gridCell || (!vertical && boxCrosses) ? .infinity : nil,
+                // A container's widest width (M20 (2)) bounds the box.
+                maxWidth: node.maxWidth > 0
+                    ? node.maxWidth : (gridCell || (!vertical && boxCrosses) ? .infinity : nil),
                 maxHeight: gridCell || (vertical && boxCrosses) ? .infinity : nil,
                 alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
@@ -26101,6 +26146,11 @@ struct KayaRender: View {
             // cut with the platform's ellipsis.
             .lineLimit(node.maxLines > 0 ? Int(node.maxLines) : nil)
             .truncationMode(.tail)
+            // docs/media-player-plan.md M20 (2): the text wraps under its
+            // widest width.
+            .frame(
+                idealWidth: node.maxWidth > 0 ? node.maxWidth : nil,
+                maxWidth: node.maxWidth > 0 ? node.maxWidth : nil, alignment: .leading)
             .background(KayaSkinFrameReader(id: node.id))
             .accessibilityAddTraits(
                 node.role == roleHeading ? .isHeader : [])

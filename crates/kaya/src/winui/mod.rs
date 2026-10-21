@@ -18157,6 +18157,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     block.SetMaxLines(lines as i32)?;
                     block.SetTextTrimming(bindings::Microsoft::UI::Xaml::TextTrimming::CharacterEllipsis)?;
                 }
+                // docs/media-player-plan.md M20 (2): a label wraps under its
+                // widest width, a container is bounded by it; Left, since a
+                // stretched element narrower than its slot is centred.
+                (NativeWidget::Label { block, .. }, Prop::MaxWidth, Value::F64(bound)) => {
+                    block.SetMaxWidth(bound)?;
+                    block.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+                    mark_row_for_remeasure(core, id);
+                }
+                (NativeWidget::Column(grid), Prop::MaxWidth, Value::F64(bound))
+                | (NativeWidget::Row(grid), Prop::MaxWidth, Value::F64(bound)) => {
+                    grid.SetMaxWidth(bound)?;
+                    grid.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+                    mark_row_for_remeasure(core, id);
+                }
                 (NativeWidget::Textarea(field), Prop::MaxLines, Value::F64(lines)) => {
                     core.max_lines.insert(id, lines);
                     grow_lines(field, lines)?;

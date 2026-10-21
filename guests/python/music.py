@@ -1291,8 +1291,9 @@ def found_strip(page, group, one, shape, on_open):
                            on_needed=page[f"{group}_art"].needed,
                            on_released=page[f"{group}_art"].released) \
                     .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"found_{one}_art")
-                kaya.label(bind=found.name, max_lines=2).a11y_id(f"found_{one}_name")
-                kaya.caption(bind=found.caption)
+                kaya.label(bind=found.name, max_lines=2).max_width(CARD_ART) \
+                    .a11y_id(f"found_{one}_name")
+                kaya.caption(bind=found.caption).max_width(CARD_ART)
     page[group].container().axis(kaya.Axis.HORIZONTAL)
     page[group].container().spacing(12)
 

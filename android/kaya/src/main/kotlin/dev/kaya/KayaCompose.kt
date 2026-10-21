@@ -8939,6 +8939,21 @@ private fun kayaTextLeftRead(activity: ComponentActivity, spec: String): Double?
     return rect.left / activity.resources.displayMetrics.density.toDouble()
 }
 
+/** expect_same_width's read: a column's or row's outer box width or a label's
+ * text width in dp, null for no such target, NaN while nothing is laid out
+ * (M20 (2)). */
+private fun kayaFrameWidthRead(activity: ComponentActivity, spec: String): Double? {
+    val density = activity.resources.displayMetrics.density.toDouble()
+    val container = target(spec, "column", KayaSceneModel.columns) ?: target(spec, "row", KayaSceneModel.rows)
+    if (container != null) {
+        val outer = kayaInsetOuter[container.id] ?: return Double.NaN
+        return outer.first / density
+    }
+    val node = target(spec, "label", KayaSceneModel.labels) ?: return null
+    val rect = kayaOverlapRects[node.id] ?: kayaTextRects[node.id] ?: return Double.NaN
+    return rect.width / density
+}
+
 private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
         val dock = kayaDockFrame ?: return@onUi "unread (no dock frame is laid out)"
         val density = activity.resources.displayMetrics.density
@@ -14790,6 +14805,33 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             why?.let { failures.add(it) } ?: observed.add("${parts[1]} and ${parts[2]} text aligned")
                         }
                     }
+                    "expect_same_width" -> {
+                        // harness.rs's ExpectSameWidth, the same sentences (M20 (2)).
+                        if (parts.size != 3) {
+                            failures.add("expect_same_width wants two targets: $line")
+                        } else {
+                            fun verdict(): String? {
+                                val w = onUi(activity) { kayaFrameWidthRead(activity, parts[1]) }
+                                val v = onUi(activity) { kayaFrameWidthRead(activity, parts[2]) }
+                                return when {
+                                    w == null -> "no such target ${parts[1]}"
+                                    v == null -> "no such target ${parts[2]}"
+                                    w.isNaN() -> "${parts[1]} frame unread: <no laid-out frame>"
+                                    v.isNaN() -> "${parts[2]} frame unread: <no laid-out frame>"
+                                    kotlin.math.abs(w - v) <= 1 -> null
+                                    else -> "${parts[1]} ${Math.round(w)} wide, ${parts[2]} ${Math.round(v)} wide, " +
+                                        "wanted the same width"
+                                }
+                            }
+                            var why = verdict()
+                            val widthDeadline = System.currentTimeMillis() + 5000
+                            while (why != null && System.currentTimeMillis() < widthDeadline) {
+                                Thread.sleep(100)
+                                why = verdict()
+                            }
+                            why?.let { failures.add(it) } ?: observed.add("${parts[1]} and ${parts[2]} same width")
+                        }
+                    }
                     "expect_hugs" -> {
                         // The same read, wanted SHORT (harness.rs
                         // Step::ExpectHugs, the `fill = false` opt-out): a
@@ -18546,6 +18588,12 @@ private fun KayaRenderCore(
                 if (flexVertical) boxFill.fillMaxWidth() else boxFill.fillMaxHeight()
             fieldFills = flexVertical
         }
+    }
+    // A label's or a container's widest width (docs/media-player-plan.md
+    // M20 (2)), after the slot's fill or weight, which it undercuts.
+    if (node.maxWidth > 0 && (node.kind == KayaCompose.KIND_LABEL || node.kind == KayaCompose.KIND_ROW ||
+            node.kind == KayaCompose.KIND_COLUMN)) {
+        boxFill = boxFill.then(Modifier.wrapContentWidth(Alignment.Start).widthIn(max = node.maxWidth.dp).fillMaxWidth())
     }
     val hugCross = kayaHugCross(node, isRoot, flexVertical, flexStretch)
     // THE UNIVERSAL ACCESSIBILITY PROPS. a11y_id is a plain testTag,

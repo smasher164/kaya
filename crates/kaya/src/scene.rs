@@ -1618,8 +1618,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander | WidgetKind::Checkbox
         ),
         // A slider takes a widest width too, its grown track capped
-        // (docs/media-player-plan.md M16 (17)).
-        Prop::MaxWidth => matches!(kind, WidgetKind::Image | WidgetKind::Slider),
+        // (docs/media-player-plan.md M16 (17)); a label wraps under it and a
+        // container is bounded by it (M20 (2)).
+        Prop::MaxWidth => matches!(
+            kind,
+            WidgetKind::Image | WidgetKind::Slider | WidgetKind::Label | WidgetKind::Row | WidgetKind::Column
+        ),
         Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
@@ -2952,7 +2956,7 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) = (prop, value) {
         assert!(
             bound.is_finite() && *bound > 0.0,
-            "kaya: {prop:?} is an image's bound in points, a positive number, got {bound}"
+            "kaya: {prop:?} is a bound in points, a positive number, got {bound}"
         );
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
@@ -12962,17 +12966,34 @@ mod tests {
     /// The image bound's walls (docs/photo-attach-plan.md §2): an image's,
     /// and a positive number of points.
     #[test]
-    #[should_panic(expected = "Label has no property MaxWidth")]
-    fn a_bounded_label_dies_at_declare() {
+    #[should_panic(expected = "Button has no property MaxWidth")]
+    fn a_bounded_button_dies_at_declare() {
         let mut scene = Scene::new();
         scene.apply(vec![
-            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
             TxOp::SetProperty {
                 widget: WidgetId(1),
                 prop: Prop::MaxWidth,
                 value: PropValue::Const(Value::F64(240.0)),
             },
         ]);
+    }
+
+    /// docs/media-player-plan.md M20 (2): a label and the two arrangement
+    /// containers take a widest width.
+    #[test]
+    fn labels_and_containers_take_max_width() {
+        for kind in [WidgetKind::Label, WidgetKind::Row, WidgetKind::Column] {
+            Scene::new().apply(vec![
+                TxOp::CreateWidget { id: WidgetId(1), kind },
+                TxOp::SetProperty {
+                    widget: WidgetId(1),
+                    prop: Prop::MaxWidth,
+                    value: PropValue::Const(Value::F64(120.0)),
+                },
+                TxOp::Mount { window: WindowId(0), root: WidgetId(1) },
+            ]);
+        }
     }
 
     #[test]

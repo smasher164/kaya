@@ -118,8 +118,16 @@ ENTRIES = (
      "(minimum, natural) = main_children.iter().fold((0, 0), "
      "|(mi, na), (_, cmin, cnat)| (mi + cmin, na + cnat));"),
     ("cross-axis natural read",
-     "c.measure(self.orientation.get(), if vertical { cross_total } else { -1 });",
-     "c.measure(self.orientation.get(), if vertical { -1 } else { cross_total });"),
+     "super::measure_capped(&c, self.orientation.get(), if vertical { cross_total } else { -1 });",
+     "super::measure_capped(&c, self.orientation.get(), if vertical { -1 } else { cross_total });"),
+    # docs/media-player-plan.md M20 (2): a child's natural width stops at its
+    # widest width, and its height is asked for a width inside it.
+    ("widest-width natural cap",
+     "(min, nat.min(cap).max(min), bmin, bnat)",
+     "(min, nat, bmin, bnat)"),
+    ("widest-width height-for-width read",
+     "c.measure(orientation, if for_size < 0 { cap } else { for_size.min(cap) })",
+     "c.measure(orientation, for_size)"),
     ("leading-edge collection",
      "let min_start = edges[0];",
      "let min_start = 0.0;"),

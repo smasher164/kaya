@@ -523,6 +523,11 @@ pub enum Step {
     /// text (docs/media-player-plan.md M20 (1): the plain role's label sits
     /// on the text column).
     ExpectTextAligned(Target, Target),
+    /// `expect_same_width <a> <b>`: the two targets' laid-out frames are the
+    /// same width within a point — two shelf cards bounded to the art's
+    /// width (M20 (2)); a reader of a label's lines alone cannot see a card
+    /// that kept its title's width.
+    ExpectSameWidth(Target, Target),
     /// Two targets, one comparison: the first's drawn height against the
     /// second's. RELATIONAL BECAUSE A HEIGHT IS NOT PORTABLE — the same
     /// list row draws 46pt on the mac, 56 on the phones, 57 on Windows and
@@ -1129,6 +1134,7 @@ impl Step {
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::ExpectGap(a, b, _) => vec![a, b],
             Step::ExpectTextAligned(a, b) => vec![a, b],
+            Step::ExpectSameWidth(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
             | Step::Hold(t, _)
@@ -1377,6 +1383,7 @@ impl Step {
             Step::ExpectRowInset { .. } => true,
             Step::ExpectRowCentered { .. } => true,
             Step::ExpectTextAligned { .. } => true,
+            Step::ExpectSameWidth { .. } => true,
             Step::ExpectNotTaller { .. } => true,
             Step::ExpectHeightFits { .. } => true,
             Step::ExpectFill { .. } => true,
@@ -3235,6 +3242,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     }
                 }
                 Step::ExpectTextAligned(a, b)
+            }
+            "expect_same_width" => {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [a, b] = words[..] else {
+                    return Err(format!("expect_same_width wants two targets: {line:?}"));
+                };
+                let (a, b) = (parse_target(a)?, parse_target(b)?);
+                for t in [&a, &b] {
+                    if !matches!(t.kind, TargetKind::Column | TargetKind::Row | TargetKind::Label) {
+                        return Err(format!("expect_same_width wants column, row or label targets: {line:?}"));
+                    }
+                }
+                Step::ExpectSameWidth(a, b)
             }
             "expect_lines" => {
                 let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7354,6 +7374,20 @@ fn run_with_log(
                 )),
                 (Err(why), _) => Err(format!("{} text unread: {why}", target_spec(a))),
                 (_, Err(why)) => Err(format!("{} text unread: {why}", target_spec(b))),
+            })),
+            Step::ExpectSameWidth(a, b) => Some(poll(|| match (stage.window_frame(*a), stage.window_frame(*b)) {
+                (Ok(fa), Ok(fb)) if (fa.2 - fb.2).abs() <= 1.0 => {
+                    Ok(format!("{} and {} same width", target_spec(a), target_spec(b)))
+                }
+                (Ok(fa), Ok(fb)) => Err(format!(
+                    "{} {} wide, {} {} wide, wanted the same width",
+                    target_spec(a),
+                    fa.2.round(),
+                    target_spec(b),
+                    fb.2.round()
+                )),
+                (Err(why), _) => Err(format!("{} frame unread: {why}", target_spec(a))),
+                (_, Err(why)) => Err(format!("{} frame unread: {why}", target_spec(b))),
             })),
             Step::ExpectHugs(t) => {
                 // The same read, wanted SHORT: a reader that could not read
@@ -13587,6 +13621,9 @@ mod cells_even_tests {
         assert!(matches!(parse("expect_text_aligned button@album_artist label@album_title").expect("parses").as_slice(), [Step::ExpectTextAligned(_, _)]));
         assert!(parse("expect_text_aligned button@album_artist").is_err());
         assert!(parse("expect_text_aligned row@track label@album_title").is_err());
+        assert!(matches!(parse("expect_same_width column@found_album[154466] column@found_artist[476280]").expect("parses").as_slice(), [Step::ExpectSameWidth(_, _)]));
+        assert!(parse("expect_same_width column@a").is_err());
+        assert!(parse("expect_same_width button@a column@b").is_err());
         assert!(parse("expect_dock_height tall").is_err());
         assert!(matches!(
             parse("expect_ground_color column@header \"light 673946 dark 3B2128\"").expect("parses").as_slice(),

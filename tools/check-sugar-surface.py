@@ -2251,7 +2251,7 @@ PHOTO_SURFACES = [
         (r"public func {}\(_ n: KayaNodeHandle", "setMaxHeight")]),
     ("haskell", "bindings/haskell/KayaApp.hs", [
         (r"W\.{}", "fileContentImages"),
-        (r"{} :: Double -> Attr 'LeafW", "MaxWidth"),
+        (r"{} :: Double -> Attr c", "MaxWidth"),
         (r"{} :: Double -> TplAttr", "TplMaxHeight")]),
     ("ocaml", "bindings/ocaml/kaya_app.ml", [
         (r"Kaya_wire\.{}", "file_content_images"),
@@ -11730,6 +11730,11 @@ if check_netimage_surface():
 from skin_surface import run as check_skin_surface
 
 if check_skin_surface():
+    status = 1
+
+from maxwidth_surface import run as check_maxwidth_surface
+
+if check_maxwidth_surface():
     status = 1
 
 from template_symbol_surface import run as check_template_symbol_surface
