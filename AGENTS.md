@@ -1073,8 +1073,12 @@ in docs/deferred.md.
    admission a device more than 1.5 GB over its fresh baseline, printing
    the decision; fourteen cuts watched. An EMPTY KAYA_RECORD is unset in
    all three harnesses' recording linger (validate-linux passes it empty and
-   every linux leg slept 750 ms); three cuts watched.
-   Two hundred and fifty-six watched negatives, counts printed),
+   every linux leg slept 750 ms); three cuts watched. AND A RED ANDROID LEG'S
+   PICTURE MARKS ITS KEYBOARD since 2026-10-21 (docs/traps.md, the android red
+   leg's picture without its keyboard): KayaFailShot reads the IME inset off
+   the window and hatches that band, named, over the picture, since the IME's
+   window is another process's and PixelCopy cannot read it; two cuts watched.
+   Two hundred and sixty-two watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

@@ -137,6 +137,14 @@ def census_android_app_shot(src):
     if "val sheets = sheetLayers(activity, bitmap)" not in kt[kt.find("object KayaFailShot"):]:
         found.append("android: KayaFailShot no longer draws each sheet's own window over the "
                      "activity's (docs/traps.md, the quick-add field panned above its sheet's top)")
+    shot = kt[kt.find("object KayaFailShot"):kt.find("object KayaDiag")]
+    if "val keyboard = keyboardBand(activity, bitmap)" not in shot:
+        found.append("android: KayaFailShot no longer marks the keyboard's band over the app's "
+                     "picture (docs/traps.md, the android red leg's picture without its keyboard)")
+    band = shot[shot.find("private fun keyboardBand("):]
+    if "WindowInsetsCompat.Type.ime()" not in band or "covered its bottom ${bottom}px" not in band:
+        found.append("android: KayaFailShot's keyboard band does not read the ime inset off the "
+                     "window and name it in the sentence")
     runner = src[ANDROID]
     if '["--es", "KAYA_FAIL_SHOT", f"fail-shot-{leg}.png"]' not in runner:
         found.append("android: the runner no longer names KAYA_FAIL_SHOT for the leg")
@@ -2655,6 +2663,14 @@ na6 = doctored(ANDROID,
 gate.negative("NA6 a red bundle carrying earlier reds' dumps",
               lambda: census_android_app_shot(na6),
               want="delete the leg's verb trace before its launch")
+na7 = doctored(COMPOSE, r"^ *val keyboard = keyboardBand\(activity, bitmap\)\n", "",
+               "NA7 cut the keyboard's band from the app's picture, as shipped")
+gate.negative("NA7 the app's picture without its keyboard",
+              lambda: census_android_app_shot(na7), want="no longer marks the keyboard's band")
+na8 = doctored(COMPOSE, r"covered its bottom \$\{bottom\}px", "covered its bottom",
+               "NA8 the keyboard sentence interpolating nothing")
+gate.negative("NA8 a keyboard sentence that measured nothing",
+              lambda: census_android_app_shot(na8), want="name it in the sentence")
 
 # The mac guest's own picture, each link cut from a copy.
 nm1 = doctored(SWIFTUI, r'^ *KayaFailShot\.take\("the first failed step, \\\(line\)"\)\n',
@@ -3624,6 +3640,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(260 + (5 if DRIVES else 0))
+gate.negatives_ran(262 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

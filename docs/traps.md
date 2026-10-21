@@ -18557,3 +18557,35 @@ a table or a non-container (tools/lib/skin_winui.py holds the climb with a
 cut). The read is `expect_text_lines label@artist_about 1 whole` in
 tools/scenes/music_artist.steps, two lines on the lane with the climb cut.
 
+
+## The android red leg's picture without its keyboard (measured 2026-10-21)
+
+A KayaFailShot picture of the music search screen showed the Artists card's
+top ten pixels and then the page ground and the tab bar, and it read as
+"Compose draws nothing below the card's top" (the charge after 86d71acc,
+which had grown the album cards by a line). The device's own screencap,
+taken through a temporary `settle 25000` in the android tail while the lane
+ran the leg, showed the same cut with a flat 3C4043 band from y 525 down:
+`dumpsys window` had `Window{InputMethod}` from dev.kaya.cliphelper at
+`frame=[0,525][360,800]`, `mInputShown=true`. The lane's software keyboard is
+the clipboard helper's 275 px panel (the entry above of 2026-10-11), raised
+at `click search@find` and held up through `expect_no_clipping`; the content
+is padded above it, so the page's scroll viewport ends at the keyboard's top
+and clips the card there, with the rest of the page reachable by scrolling.
+Nothing in the layout is wrong. The picture misled because PixelCopy copies
+the APP's window alone, the IME's window being another process's, and the
+sentence said "no keyboard" by construction rather than by measurement. The
+two-line comparison picture had been taken by an `am start` outside the
+lane, where Gboard is the default method and the pool AVD raises no keyboard,
+so the two pictures differed by the keyboard and not by the line count.
+
+KayaFailShot now reads the IME inset off the window's root insets, hatches
+that band over the picture with the default input method's name written in
+it, and its sentence names the band's height and rows, or says "no keyboard
+up" with the inset it read (tools/check-flightrec.py holds the band and its
+sentence, two cuts watched). `expect_no_clipping` is right not to see this:
+a scroll's content past its viewport is the scroll's own overflow, as a
+shelf's cards past its right edge are, and a label clipped there is not a
+clipped label. A hand capture meant to compare against a lane's picture must
+raise the lane's keyboard too (`ime set dev.kaya.cliphelper/.HelperIme`, and
+`ime reset` after), or it compares a different screen.

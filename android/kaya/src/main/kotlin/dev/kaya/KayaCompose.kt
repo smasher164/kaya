@@ -2543,9 +2543,10 @@ object KayaFailShot {
                     "no picture: PixelCopy answered $result"
                 } else {
                     val sheets = sheetLayers(activity, bitmap)
+                    val keyboard = keyboardBand(activity, bitmap)
                     f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     "PixelCopy of the app's own window (${w}x$h, its surface alone: no system " +
-                        "bars' icons, no keyboard, no other app's window)$sheets, taken in process at $why"
+                        "bars' icons, no other app's window)$sheets$keyboard, taken in process at $why"
                 }
             }
         } catch (e: Exception) {
@@ -2589,6 +2590,45 @@ object KayaFailShot {
             said.add("sheet ${sheet.id} drawn over it at (${at[0] - origin[0]},${at[1] - origin[1]}) ${decor.width}x${decor.height}")
         }
         return if (said.isEmpty()) "" else "; " + said.joinToString("; ")
+    }
+
+    /** The keyboard's band drawn over [base] where the IME's window sat: that
+     * window is another process's, which PixelCopy cannot read, so the band is
+     * hatched and named rather than left as what the app drew under it
+     * (docs/traps.md, the android red leg's picture without its keyboard). */
+    private fun keyboardBand(activity: ComponentActivity, base: Bitmap): String {
+        val decor = activity.window.decorView
+        val latch = java.util.concurrent.CountDownLatch(1)
+        var read: Pair<Boolean, Int>? = null
+        Handler(android.os.Looper.getMainLooper()).post {
+            read = ViewCompat.getRootWindowInsets(decor)?.let {
+                Pair(it.isVisible(WindowInsetsCompat.Type.ime()), it.getInsets(WindowInsetsCompat.Type.ime()).bottom)
+            }
+            latch.countDown()
+        }
+        if (!latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) return "; keyboard unread: the main thread did not answer within 2s"
+        val (up, bottom) = read ?: return "; keyboard unread: the window has no root insets"
+        if (!up || bottom <= 0) return "; no keyboard up (ime ${if (up) "visible" else "not visible"}, inset ${bottom}px)"
+        val top = (base.height - bottom).coerceAtLeast(0)
+        val method = android.provider.Settings.Secure.getString(
+            activity.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD) ?: "unset"
+        val density = decor.resources.displayMetrics.density
+        val canvas = Canvas(base)
+        canvas.drawRect(0f, top.toFloat(), base.width.toFloat(), base.height.toFloat(),
+            android.graphics.Paint().apply { color = 0xB03C4043.toInt() })
+        val hatch = android.graphics.Paint().apply { color = 0x80FFFFFF.toInt(); strokeWidth = 1f }
+        val rise = (base.height - top).toFloat()
+        var x = -rise
+        while (x < base.width) {
+            canvas.drawLine(x, base.height.toFloat(), x + rise, top.toFloat(), hatch)
+            x += 24f * density
+        }
+        val text = android.text.TextPaint().apply { color = 0xFFFFFFFF.toInt(); textSize = 14f * density; isAntiAlias = true }
+        val label = "keyboard: $method"
+        canvas.translate(8f * density, top + 8f * density)
+        android.text.StaticLayout.Builder.obtain(label, 0, label.length, text, base.width).build().draw(canvas)
+        return "; the keyboard ($method) covered its bottom ${bottom}px (y $top..${base.height}), hatched over " +
+            "what the app drew under it since the IME's window is another process's"
     }
 }
 
