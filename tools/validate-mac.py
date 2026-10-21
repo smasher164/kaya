@@ -29,6 +29,7 @@ import exclusive
 import only  # noqa: E402
 import flightrec_lane
 import guest_warnings
+import verdict as verdict_reader
 import lane_health
 import media_server
 from host_lib import HOST_LIB, host_lib_stamp
@@ -839,7 +840,7 @@ def drain():
             # not pick one (invariant 3): a nonzero guest exit (the
             # Stage::finish class), or a wrapper failing after the
             # verdict.
-            if "KAYA_SELFTEST: OK" in log_text:
+            if verdict_reader.green(log_text):
                 print(f"{name}: note — verdict was OK but the leg "
                       f"exited nonzero: the guest's exit path, or a "
                       f"wrapper clause failing after the verdict — its "

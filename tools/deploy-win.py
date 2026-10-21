@@ -49,6 +49,7 @@ from lanes import win as lane
 from packaging import identity as app_identity
 from packaging import windows as win_package
 import exclusive
+import verdict as verdict_reader
 import only  # noqa: E402
 import scene_cut
 import flightrec_lane
@@ -2316,14 +2317,14 @@ def run_one_suite(name, slot, log):
     # The verdict TEXT is the authority and the exit code only
     # corroborates it: WinUI's window-Closed handler overwrote a failing
     # run's exit code with 0, so a scene that printed FAILED exited 0.
-    if "KAYA_SELFTEST: FAILED" in out:
+    if verdict_reader.red(out):
         return False
     # KAYA_LINGER: the guest published its verdict and its process is
     # kernel-held in termination (wait-exit.ps1's grace; docs/traps.md
     # "exit() is not final on Windows"). EXIT= never landed, so the
     # verdict text alone decides.
     if "KAYA_LINGER:" in out:
-        return "KAYA_SELFTEST: OK" in out
+        return verdict_reader.green(out)
     return "EXIT=0" in out
 
 

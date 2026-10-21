@@ -30,6 +30,7 @@ import re
 import time
 
 import secure_scan
+import verdict as verdict_reader
 
 SECTION_CAP = int(os.environ.get("KAYA_FLIGHTREC_SECTION_CAP", "2097152"))
 BUNDLE_CAP = int(os.environ.get("KAYA_FLIGHTREC_BUNDLE_CAP", "33554432"))
@@ -733,7 +734,7 @@ class LaneRecorder:
             return ""
         text = p.read_text(encoding="utf-8", errors="replace")
         for line in text.splitlines():
-            if "KAYA_SELFTEST: FAILED" in line:
+            if verdict_reader.red(line):
                 return line
         for line in text.splitlines():
             if "KAYA_HARNESS: step-failed" in line:

@@ -49,6 +49,7 @@ import scene_cut
 import secure_scan
 import simscreen
 import flightrec_lane
+import verdict as verdict_reader
 import lane_health
 import media_server
 from swift_sdk import require_ios_sdk
@@ -2158,7 +2159,7 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
         # verdict over there (docs/tasks-s9-plan.md R6a).
         ok = second_act(udid, bundle_id, name, scene, env, out, log)
     else:
-        ok = "KAYA_SELFTEST: OK" in out
+        ok = verdict_reader.green(out)
     if not ok:
         # THE PICTURE FIRST: a container lookup and two file copies sit
         # between here and the screen, and what is on it is the one

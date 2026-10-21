@@ -38,6 +38,7 @@ dev_shell_or_die()
 import shutil
 import subprocess
 import time
+import verdict as verdict_reader
 
 HERE = pathlib.Path(__file__).resolve().parent
 OUT = ROOT / "target/mac-dragwitness"
@@ -270,7 +271,7 @@ def hand():
             kaya.wait(timeout=5)
     verdict = [line for line in kaya_lines if "KAYA_SELFTEST:" in line]
     print("\nkaya's own verdict:", verdict[-1] if verdict else "<none>", flush=True)
-    if ok and verdict and "KAYA_SELFTEST: OK" in verdict[-1]:
+    if ok and verdict and verdict_reader.green(verdict[-1]):
         print("dragwitness --hand: BOTH DIRECTIONS VERIFIED — the witness read kaya's text and "
               "custom id, kaya read the witness's text and file through the picked table")
     else:

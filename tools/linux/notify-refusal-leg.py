@@ -32,6 +32,9 @@ import sys
 import tempfile
 import time
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
+import verdict as verdict_reader  # noqa: E402
+
 GUEST = sys.argv[1] if len(sys.argv) > 1 else \
     "/work/target-linux/debug/examples/notify"
 NOTIFYD = "/work/tools/linux/notifyd.py"
@@ -155,7 +158,7 @@ try:
         env={**env, "KAYA_SELFTEST": "1", "KAYA_SELFTEST_SCRIPT": SCRIPT})
     said_by_guest = guest.stdout + guest.stderr
     print(said_by_guest, end="", flush=True)
-    if "KAYA_SELFTEST: OK" not in said_by_guest:
+    if not verdict_reader.green(said_by_guest):
         findings.append(
             "the guest did not read the capability false and answer the post "
             "`refused` — the floor says a host with no registry posts nothing "

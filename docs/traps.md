@@ -18440,3 +18440,25 @@ module lock (check-appearance L4, with negatives for the missing VFS call
 and for a second GSettings site). Upstream has the same class: GLib's
 `_g_io_module_get_default` lock and glib#541 (dconf's worker against a
 class_init).
+
+## The verdict a refusal quoted (measured 2026-10-21)
+
+Matrix run 20261021T074426Z: `dndwitness-out-x11` failed with
+`KAYA_SELFTEST: FAILED (label#5 reads "no drag yet", wanted "drag ended
+none")`, and run-suites.sh still printed "note — verdict was OK but the leg
+exited nonzero", because its `grep -q "KAYA_SELFTEST: OK"` matched the
+wrapper's own refusal, which quotes the token: `dragwitness-leg: kaya never
+published a green verdict: nothing carrying 'KAYA_SELFTEST: OK' within 40s`.
+Eleven more sites decided PASS or picked the failure path with the same bare
+substring test (validate-mac, deploy-win, run-sim, run-emulator's three,
+notify-refusal-leg, both dragwitness runners, flightrec_lane's fail sentence).
+They all ask tools/lib/verdict.py now: the token not after a quote and
+followed by ` (` or the end of the line. Line start alone would be wrong:
+the 20 kept matrix transcripts carry 9,384 real green lines, among them
+logcat's `I kaya    : ` prefix, `ACT2: `, runner summaries after `— ` and
+`+ `, and one windows line where an unterminated stderr sentence runs into
+the verdict (`... STALLED ... 1KAYA_SELFTEST: OK (`); all read green, and
+only the three quoted refusals read not green. check-flightrec's VR clauses
+refuse a bare test anywhere under tools/ (VR1-VR6). The `ACT 1 OK` `in`
+tests that start act two, and guest-side probe.cmd's findstr, are outside
+the clause: act two's own verdict decides those legs.

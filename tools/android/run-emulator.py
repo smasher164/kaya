@@ -38,6 +38,7 @@ import only  # noqa: E402
 import scene_cut
 import secure_scan
 import flightrec_lane
+import verdict as verdict_reader
 import lane_health
 import media_server
 import android_sockets
@@ -2268,13 +2269,13 @@ def run_apk_on(serial, name, apk, component, script, extras,
         print(f"{name}: two acts — "
               f"{said.group(1) if said else '(no ACT 1 verdict)'} + "
               f"{out or '(no ACT 2 verdict)'}", file=log)
-    if "KAYA_SELFTEST: OK" not in out and out and served:
+    if not verdict_reader.green(out) and out and served:
         # The drag WATCH's instrument, beside the injections: every drag
         # event the app saw, so "drag ended none" under a matrix says which
         # target the pointer entered and where the drop landed.
         for line in re.findall(r"^.*KAYA_DRAG_EVENT: .*$", dump, re.M):
             print(f"{name}: {line.split('KAYA_DRAG_EVENT: ', 1)[1]}", file=log)
-    if "KAYA_SELFTEST: OK" not in out and out:
+    if not verdict_reader.green(out) and out:
         # THE THREE-LINK TRACE (docs/deferred.md's android
         # `portfolio-python` WATCH): the app dumps its ring just before
         # the verdict, so the verb's own dispatch, the widget's handler
@@ -2342,7 +2343,7 @@ def run_apk_on(serial, name, apk, component, script, extras,
                   str(t_kill - dur_ms), str(rec_dir / "steps")],
                  stdout=log, stderr=log).returncode != 0:
             failed = True
-    if failed or "KAYA_SELFTEST: OK" not in out:
+    if failed or not verdict_reader.green(out):
         # THE PICTURE FIRST, because it is the only evidence with a
         # CLOCK on it: the scene exits about 300ms after its verdict and
         # every adb round trip below spends some of that (the verb

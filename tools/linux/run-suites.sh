@@ -785,7 +785,8 @@ drain() {
             # Verdict OK and the leg still failed: TWO causes share it
             # and the note may not pick one (invariant 3) — a nonzero
             # exit path, or a WRAPPER failing after the verdict.
-            if grep -q "KAYA_SELFTEST: OK" "$LEGS_DIR/$name.log" 2>/dev/null; then
+            # tools/lib/verdict.py's green(), as an ERE.
+            if grep -qE "(^|[^'\"\`])KAYA_SELFTEST: OK( [(]|\$)" "$LEGS_DIR/$name.log" 2>/dev/null; then
                 echo "$name: note — verdict was OK but the leg exited nonzero: the guest's exit path, or a wrapper clause failing after the verdict — its sentence, if any, is above"
             fi
             status=1

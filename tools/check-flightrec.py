@@ -3,7 +3,8 @@ import pathlib
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from kaya_gate import Gate, dev_shell_or_die
+from kaya_gate import ROOT, Gate, dev_shell_or_die
+import verdict as verdict_reader
 
 dev_shell_or_die()
 
@@ -853,10 +854,7 @@ def census_android_history(src):
     for node in ast.walk(ast.parse(body)):
         if isinstance(node, ast.If):
             tests = node.test.values if isinstance(node.test, ast.BoolOp) else [node.test]
-            if any(isinstance(test, ast.Compare) and isinstance(test.left, ast.Constant)
-                    and test.left.value == "KAYA_SELFTEST: OK"
-                    and len(test.ops) == 1 and isinstance(test.ops[0], ast.NotIn)
-                    for test in tests):
+            if any(ast.unparse(test) == "not verdict_reader.green(out)" for test in tests):
                 failures.append(ast.get_source_segment(body, node))
     for call, suffix in (("android_system_events", ".system-events"),
                          ("android_anr_history", ".anr-history"),
@@ -951,7 +949,8 @@ def android_recording_checks(src, film):
         found.append("android: recording cannot locate failure capture")
     else:
         condition = compile(ast.Expression(branches[0].test), ANDROID, "eval")
-        if not eval(condition, {"failed": True, "out": "KAYA_SELFTEST: OK"}):
+        if not eval(condition, {"failed": True, "out": "KAYA_SELFTEST: OK (x)",
+                                "verdict_reader": verdict_reader}):
             found.append("android: recording failure skipped recorder sections")
     if 'dur_ms = recording_duration_ms(rec_dir / "video.mp4", log)' not in src[ANDROID]:
         found.append("android: recording duration reader is not reached")
@@ -2418,6 +2417,79 @@ def lane_health_checks(src, echo=False):
     return found
 
 
+# THE ONE VERDICT READER (docs/traps.md, the verdict a refusal quoted): a
+# bare substring test for the token also matches a sentence quoting it.
+VERDICT_READER = "tools/lib/verdict.py"
+VERDICT_TOKENS = ("KAYA_SELFTEST: OK", "KAYA_SELFTEST: FAILED")
+SHELL_GREEN = re.compile(r'grep -qE "(\(\^\|\[\^.*?\)KAYA_SELFTEST: OK\( \[\(\]\|\\\$\))"')
+QUOTED_REFUSAL = ("dragwitness-leg: kaya never published a green verdict: nothing carrying "
+                  "'KAYA_SELFTEST: OK' within 40s. What it did say: ['KAYA_SELFTEST: OK (x)']")
+PREFIXED_GREEN = ("10-20 13:16:35.941 26943 26964 I kaya    : KAYA_SELFTEST: OK (title \"menus\")\n"
+                  "dragwitness-leg: kaya said: KAYA_SELFTEST: OK (drag ended copy)\n")
+
+
+def verdict_population():
+    paths = gate.counted("tools python and shell files read for verdict tests",
+                         gate.walk("*.py", "*.sh", under="tools"), floor=200)
+    return {str(p.relative_to(ROOT)): p.read_text(encoding="utf-8") for p in paths}
+
+
+def bare_verdict_reads(texts):
+    found = []
+    for rel, text in sorted(texts.items()):
+        if rel == VERDICT_READER:
+            continue
+        if rel.endswith(".sh"):
+            for no, line in enumerate(text.splitlines(), 1):
+                if ("grep" in line and VERDICT_TOKENS[0] in line
+                        and not SHELL_GREEN.search(line)):
+                    found.append(f"{rel}:{no}: greps the bare verdict token; use the "
+                                 f"anchored grep -E of verdict.green()")
+            continue
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Compare) and any(
+                    isinstance(op, (ast.In, ast.NotIn)) for op in node.ops):
+                if any(isinstance(c, ast.Constant) and c.value in VERDICT_TOKENS
+                       for c in (node.left, *node.comparators)):
+                    found.append(f"{rel}:{node.lineno}: a bare substring test for the "
+                                 f"verdict token; call verdict_reader.green()/red()")
+            elif isinstance(node, ast.Call) and not (
+                    isinstance(node.func, ast.Attribute) and node.func.attr == "startswith"):
+                if any(isinstance(a, ast.Constant) and a.value in VERDICT_TOKENS
+                       for a in node.args):
+                    found.append(f"{rel}:{node.lineno}: the bare verdict token handed to "
+                                 f"{ast.unparse(node.func)}(); pass verdict_reader.green")
+    return found
+
+
+def verdict_reader_checks(src, shell_text):
+    scope = {}
+    exec(compile(src, VERDICT_READER, "exec"), scope)
+    found = []
+    if scope["green"](QUOTED_REFUSAL):
+        found.append("verdict.green() reads the quoted refusal as green")
+    for line in PREFIXED_GREEN.splitlines():
+        if not scope["green"](line):
+            found.append(f"verdict.green() reads a prefixed green verdict as not green: {line}")
+    if scope["red"]("nothing carrying 'KAYA_SELFTEST: FAILED' yet"):
+        found.append("verdict.red() reads a quoted token as red")
+    if not scope["red"]("KAYA_SELFTEST: FAILED (label#5 reads x)"):
+        found.append("verdict.red() misses a failed verdict")
+    ere = SHELL_GREEN.search(shell_text)
+    if ere is None:
+        return found + ["run-suites.sh has no anchored verdict grep"]
+    pattern = ere.group(1).replace('\\"', '"').replace("\\`", "`").replace("\\$", "$")
+    for text, want in ((QUOTED_REFUSAL, False), *((line, True) for line in
+                                                   PREFIXED_GREEN.splitlines())):
+        got = subprocess.run(["grep", "-qE", pattern], input=text + "\n", text=True,
+                             encoding="utf-8", check=False).returncode == 0
+        if got != want:
+            which = "a prefixed green verdict" if want else "the quoted refusal"
+            found.append(f"run-suites.sh's grep reads {which} "
+                         f"as {'green' if got else 'not green'} (pattern {pattern})")
+    return found
+
+
 # ---------------------------------------------------------------- run it
 
 REAL = sources()
@@ -2520,6 +2592,11 @@ for line in lane_health_checks(REAL, echo=True):
     gate.finding(line, at="lane health drive")
 for line in absent_tool_checks(REAL):
     gate.finding(line, at="absent capture tool")
+VERDICT_TEXTS = verdict_population()
+for line in bare_verdict_reads(VERDICT_TEXTS):
+    gate.finding(line, at="verdict reader")
+for line in verdict_reader_checks(VERDICT_TEXTS[VERDICT_READER], REAL[LINUX]):
+    gate.finding(line, at="verdict reader")
 for kind in ("fail", "pass", "nojournal"):
     if kind in DRIVES:
         for line in mac_drive_checks(DRIVES[kind]):
@@ -2982,8 +3059,8 @@ with tempfile.TemporaryDirectory(prefix="kaya-record-probe-") as directory:
             ("guessed duration", 'duration = 0', 'duration = 2000', "guessed duration"),
             ("reader call", 'dur_ms = recording_duration_ms(rec_dir / "video.mp4", log)',
              'dur_ms = 2000', "reader is not reached"),
-            ("capture", 'if failed or "KAYA_SELFTEST: OK" not in out:',
-             'if "KAYA_SELFTEST: OK" not in out:', "skipped recorder sections"),
+            ("capture", 'if failed or not verdict_reader.green(out):',
+             'if not verdict_reader.green(out):', "skipped recorder sections"),
             ("pull status", 'if pulled:', 'if False:', "reuse stale video")):
         changed = doctored(ANDROID, re.escape(before), after, f"Android recording {label}")
         gate.negative(f"Android recording {label} corrupted",
@@ -3520,6 +3597,33 @@ for verb, _ in GTK_MEDIA_NOTES:
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(254 + (5 if DRIVES else 0))
+for label, rel, pattern, repl, want in (
+        ("VR1 a bare substring verdict test planted in run-sim", IOS,
+         r"ok = verdict_reader\.green\(out\)", 'ok = "KAYA_SELFTEST: OK" in out',
+         f"{IOS}:"),
+        ("VR2 the bare token handed to wait_for", "tools/linux/dragwitness-leg.py",
+         r"kaya_said\.wait_for\(verdict_reader\.green,", 'kaya_said.wait_for("KAYA_SELFTEST: OK",',
+         "tools/linux/dragwitness-leg.py:"),
+        ("VR3 run-suites.sh grepping the bare token", LINUX,
+         r'grep -qE "\(\^\|\[\^\'\\"\\`\]\)KAYA_SELFTEST: OK\( \[\(\]\|\\\$\)"',
+         'grep -q "KAYA_SELFTEST: OK"', f"{LINUX}:")):
+    texts = dict(VERDICT_TEXTS)
+    texts[rel] = gate.doctor(label, VERDICT_TEXTS[rel], pattern, repl)
+    gate.negative(label, lambda: bare_verdict_reads(texts), want=want)
+for label, pattern, repl, shell, want in (
+        ("VR4 the reader with its quote refusal cut", r"\(\?<!\['\"`\]\)KAYA_SELFTEST: OK",
+         "KAYA_SELFTEST: OK", False, "reads the quoted refusal as green"),
+        ("VR5 the reader anchored at the line start", r"\(\?<!\['\"`\]\)KAYA_SELFTEST: OK",
+         "^KAYA_SELFTEST: OK", False, "reads a prefixed green verdict as not green"),
+        ("VR6 run-suites.sh's grep with its quote class cut", r"\[\^'\\\"\\`\]",
+         "[^#]", True, "run-suites.sh's grep reads the quoted refusal as green")):
+    reader, shell_text = VERDICT_TEXTS[VERDICT_READER], REAL[LINUX]
+    if shell:
+        shell_text = gate.doctor(label, shell_text, pattern, repl)
+    else:
+        reader = gate.doctor(label, reader, pattern, repl)
+    gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
+
+gate.negatives_ran(260 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

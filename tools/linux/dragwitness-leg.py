@@ -50,6 +50,8 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from dragdrive import DragDriveError, default_injector, injector_argv
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
+import verdict as verdict_reader  # noqa: E402
 
 # kaya's own declared payload, out of guests/rust/dnd.rs, and what this leg
 # hands the witness.
@@ -89,14 +91,18 @@ class Pump:
     def wait_for(self, needle, deadline_s, what, after=-1):
         """The FIRST line carrying `needle` past index `after` — the next
         one, not the first ever, when a caller is reading a sequence."""
+        if callable(needle):
+            matches, sought = needle, f"no line {needle.__module__}.{needle.__name__}() accepts"
+        else:
+            matches, sought = (lambda line: needle in line), f"nothing carrying {needle!r}"
         end = time.monotonic() + deadline_s
         while time.monotonic() < end:
             for i, line in enumerate(list(self.lines)):
-                if i > after and needle in line:
+                if i > after and matches(line):
                     return line
             time.sleep(0.05)
         raise DragDriveError(
-            f"{what}: nothing carrying {needle!r} within {deadline_s:.0f}s. "
+            f"{what}: {sought} within {deadline_s:.0f}s. "
             f"What it did say: {self.lines!r}")
 
 
@@ -338,7 +344,7 @@ def drive(proto, direction, witness, witness_said, kaya, kaya_said):
 
     # BOTH ENDS. kaya's half is its own verdict, byte-compared by the
     # harness against the scene above; the witness's half is its stdout.
-    kaya_said.wait_for("KAYA_SELFTEST: OK", LANDING_DEADLINE_S,
+    kaya_said.wait_for(verdict_reader.green, LANDING_DEADLINE_S,
                        "kaya never published a green verdict")
     if direction == "out":
         witness_said.wait_for(f"got text {KAYA_PAYLOAD_TEXT}",
