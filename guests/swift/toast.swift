@@ -86,6 +86,17 @@ KayaApp.run { app in
                     tx.dismissToast(id)
                 }
             }
+            // A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+            tx.button("sheet") { tx in  // button#6
+                tx.presentSheet(21, title: "Saved items", detent: .large)
+                let body = tx.column { body in
+                    tx.setA11yId(tx.button("save here") { tx in
+                        tx.showToast("Saved in sheet", onResult: answered("Saved in sheet"))
+                    }, "sheet_save")
+                    return body
+                }
+                tx.mountIn(21, body)
+            }
             for row in items.rows {
                 row.row {
                     row.label(row.title)

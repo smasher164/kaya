@@ -11732,6 +11732,16 @@ from skin_surface import run as check_skin_surface
 if check_skin_surface():
     status = 1
 
+from template_symbol_surface import run as check_template_symbol_surface
+
+if check_template_symbol_surface():
+    status = 1
+
+from add_child_surface import run as check_add_child_surface
+
+if check_add_child_surface():
+    status = 1
+
 from nav_surface import run as check_nav_surface
 
 if check_nav_surface():

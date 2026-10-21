@@ -106,6 +106,7 @@ pub(crate) fn selftest() -> bool {
 /// first ask. `None` before Android's attach has handed the files
 /// directory in.
 pub(crate) fn app_data_dir() -> Option<PathBuf> {
+    prepared();
     let dir = data_dir_path()?;
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
@@ -187,7 +188,18 @@ fn selftest_root() -> Option<PathBuf> {
 
 // ------------------------------------------------------------- the store
 
+/// A STORE TOUCHED BEFORE kaya_run IS THE PROCESS'S FIRST STEP: a binding
+/// guest reads its preferences at import, and under the harness the scratch
+/// store is emptied in act2::arm, so a read before it saw the previous leg's
+/// writes (docs/traps.md, the preferences read before the harness emptied
+/// them). Idempotent; Android arms at attach instead.
+fn prepared() {
+    #[cfg(not(any(test, target_os = "android")))]
+    crate::prepare_process();
+}
+
 pub(crate) fn get(key: &str) -> Option<PrefValue> {
+    prepared();
     if key.is_empty() {
         return None;
     }
@@ -209,6 +221,7 @@ pub(crate) fn read_back(key: &str) -> Option<PrefValue> {
 }
 
 pub(crate) fn set(key: &str, value: PrefValue) {
+    prepared();
     if key.is_empty() {
         return;
     }
@@ -216,6 +229,7 @@ pub(crate) fn set(key: &str, value: PrefValue) {
 }
 
 pub(crate) fn remove(key: &str) {
+    prepared();
     if key.is_empty() {
         return;
     }

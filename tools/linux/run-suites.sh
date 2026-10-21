@@ -1736,6 +1736,8 @@ for proto in x11 wayland; do
     # The dock and the media session: MPRIS on the leg's own bus (media-leg.sh).
     run "$proto" music_dock-python env KAYA_SELFTEST=music_dock KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py
+    run "$proto" music_dockdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_dock \
+        KAYA_LIB="$LIB" tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py
     # THE SKIN (docs/styling-pass-plan.md §5): grounds and cards read the
     # accessibility tree (expect_ax, expect_selected), so they run through
     # a11y-leg.sh; hover moves the leg's own pointer (tools/linux/dragdrive.py).

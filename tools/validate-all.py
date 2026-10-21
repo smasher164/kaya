@@ -7,6 +7,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die
 import exclusive
 import lane_health
+import matrix_args
 import walls
 from host_lib import SWEEP_TARGET
 from lanes import android as _android, ios as _ios, linux as _linux, mac as _mac, win as _win
@@ -16,9 +17,8 @@ dev_shell_or_die()
 # The whole matrix, one invocation; the five lanes run CONCURRENTLY by
 # default. --serial is for single-lane benchmarking, debugging under
 # contention, and recording mode (one screen, one recorder).
-#
-# Usage: validate-all.py [--serial] [--exclusive | --no-exclusive]
-#                        [--only <prefix,...>] [windows-host]
+
+# Usage: `tools/validate-all.py --help` (tools/lib/matrix_args.py).
 #
 # tools/check-gates.py pins the parallel launch block.
 
@@ -32,33 +32,19 @@ import time
 
 os.chdir(ROOT)
 
-MODE = "parallel"
-HOST = "akhil@192.168.64.2"
-# --exclusive runs ONLY the exclusive legs (the input-driving ones every
-# lane names in its EXCLUSIVE set), --no-exclusive runs everything but them,
-# and no flag runs everything (the maintainer, 2026-09-06: a flag filters;
-# its absence skips nothing). The choice rides to every lane and to the
-# sweep as KAYA_EXCLUSIVE.
-# --only <prefix,...> runs the legs whose names start with a prefix, on
-# every lane, and nothing else (tools/lib/only.py): the debugging tool the
-# maintainer asked for on 2026-09-24, never the record.
-_args = sys.argv[1:]
-while _args:
-    arg = _args.pop(0)
-    if arg == "--serial":
-        MODE = "serial"
-    elif arg == "--exclusive":
-        os.environ["KAYA_EXCLUSIVE"] = "only"
-    elif arg == "--no-exclusive":
-        os.environ["KAYA_EXCLUSIVE"] = "skip"
-    elif arg == "--only":
-        if not _args or _args[0].startswith("--"):
-            print("validate-all: --only takes a comma-separated list of leg "
-                  "prefixes", file=sys.stderr)
-            sys.exit(2)
-        os.environ["KAYA_ONLY"] = _args.pop(0)
-    else:
-        HOST = arg
+# The flags ride to every lane and to the sweep as KAYA_EXCLUSIVE and
+# KAYA_ONLY (tools/lib/only.py).
+try:
+    ARGS = matrix_args.parse(sys.argv[1:])
+except matrix_args.Refused as refused:
+    print(refused.text, file=sys.stderr if refused.code else sys.stdout)
+    sys.exit(refused.code)
+MODE = ARGS["mode"]
+HOST = ARGS["host"]
+if ARGS["exclusive"]:
+    os.environ["KAYA_EXCLUSIVE"] = ARGS["exclusive"]
+if ARGS["only"]:
+    os.environ["KAYA_ONLY"] = ARGS["only"]
 # only reads KAYA_ONLY at import, so it comes after the flag above.
 import only  # noqa: E402
 

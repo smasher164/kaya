@@ -27,8 +27,11 @@ click column@card_201715
 expect_title "Through The Olive Branches"
 expect_selected row@go_home off
 expect_selected row@saved[201715] on
-click row@go_home
+# A pushed screen in a two-pane window shows its back, which pops it
+# (DESIGN.md's back rule, M16 (9)); the sidebar's Home is kept.
+back
 expect_title "Home"
+expect_selected row@go_home on
 expect_selected row@saved[201715] off
 expect_selected column@card_201715 on
 expect_selected column@card_581719 off

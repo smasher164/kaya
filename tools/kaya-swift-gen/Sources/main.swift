@@ -58,6 +58,8 @@ let wire: [String: (valueCase: String, zero: String)] = [
     "KayaImagePhase": ("i64", ".shown"),
     // docs/styling-pass-plan.md Y7: a label's tint.
     "KayaTint": ("i64", ".none"),
+    // docs/media-player-plan.md M16 (21): a stamped button's symbol.
+    "KayaSymbol": ("i64", ".add"),
 ]
 
 /// The READ direction — `init(values:)`, the shape an undo's restored
@@ -77,6 +79,7 @@ let readWire: [String: (valueCase: String, lift: (String) -> String)] = [
     "KayaPlayer": ("i64", { "kayaPlayer(packed: \($0))" }),
     "KayaImagePhase": ("i64", { "kayaImagePhase(packed: \($0))" }),
     "KayaTint": ("i64", { "kayaTint(packed: \($0))" }),
+    "KayaSymbol": ("i64", { "kayaSymbol(packed: \($0))" }),
 ]
 
 func conformsToKayaGen(_ clause: InheritanceClauseSyntax?) -> Bool {

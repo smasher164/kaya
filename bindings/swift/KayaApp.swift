@@ -167,6 +167,13 @@ public enum KayaTint: Int64, Sendable {
 }
 
 /// A row's tint as the wire carries it.
+public func kayaSymbol(packed: Int64) -> KayaSymbol {
+    guard let symbol = KayaSymbol(rawValue: packed) else {
+        preconditionFailure("kaya: a symbol field holds \(packed), which is no symbol")
+    }
+    return symbol
+}
+
 public func kayaTint(packed: Int64) -> KayaTint {
     guard let tint = KayaTint(rawValue: packed) else {
         preconditionFailure("kaya: a tint field holds \(packed), which is no tint")
@@ -575,7 +582,7 @@ public enum KayaPlatform: Int64 {
 /// docs/styling-plan.md D6, DESIGN.md "Icons want names, not bytes").
 /// THE RAW VALUES ARE WIRE VALUES AND ARE APPEND-ONLY — renumbering
 /// silently redraws every shipped app's menus.
-public enum KayaSymbol: Int64 {
+public enum KayaSymbol: Int64, Sendable {
     case add = 1
     case remove = 2
     /// Destroying something, the wastebasket idiom — distinct from
@@ -621,6 +628,7 @@ public enum KayaSymbol: Int64 {
     case volume = 33
     case queue = 34
     case favorite = 35
+    case muted = 36
 }
 
 public struct KayaWidget {
@@ -5665,6 +5673,19 @@ public final class KayaAppTx {
         tx.addChild(parent.id, child.id)
     }
 
+    /// Declare more children into a container built earlier, typically from a
+    /// handler: everything the body declares joins it after its existing
+    /// children (docs/media-player-plan.md M16 (28)).
+    @discardableResult
+    public func within<R>(_ container: KayaWidget, _ body: () throws -> R) rethrows -> R {
+        app.childFrames.append(KayaApp.KayaChildFrame(template: false))
+        defer {
+            let ids = app.childFrames.removeLast().ids
+            for id in ids { tx.addChild(container.id, id) }
+        }
+        return try body()
+    }
+
     public func collection() -> KayaCollection {
         let c = app.nextCollection()
         app.registerCollection(c.id)
@@ -6836,6 +6857,12 @@ public final class KayaTpl {
         tx.tx.setTint(n.id, tint.rawValue)
     }
 
+    /// A stamped label's most lines, the rest truncated with the platform's
+    /// ellipsis (docs/media-player-plan.md M16 (2)).
+    public func setMaxLines(_ n: KayaNodeHandle, _ lines: Int) {
+        tx.tx.setMaxLines(n.id, Double(lines))
+    }
+
     public func setTint(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTint>) {
         tx.tx.bindTintElement(n.id, level: level, field: f.index)
     }
@@ -6946,6 +6973,12 @@ public final class KayaTpl {
     /// Every stamped button's or expander's glyph (KayaAppTx.setSymbol).
     public func setSymbol(_ n: KayaNodeHandle, _ symbol: KayaSymbol) {
         tx.tx.setSymbol(n.id, symbol.rawValue)
+    }
+
+    /// Every stamped copy's glyph from its row's symbol field
+    /// (docs/media-player-plan.md M16 (21)).
+    public func setSymbol(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaSymbol>) {
+        tx.tx.bindSymbolElement(n.id, level: level, field: f.index)
     }
 
     /// Every stamped copy carries its own show/hide toggle; each flip

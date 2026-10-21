@@ -47,6 +47,7 @@ static class MenusScene
                 tx.Item("Volume", symbol: Symbol.Volume),
                 tx.Item("Queue", symbol: Symbol.Queue),
                 tx.Item("Favorite", symbol: Symbol.Favorite),
+                tx.Item("Muted", symbol: Symbol.Muted),
             });
             // Option order IS the index vocabulary: Name = 0, Date = 1.
             var sortGroup = tx.RadioGroup("Sort",

@@ -100,6 +100,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("const (");
     c.line("\t// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.");
     c.line(&format!("\tSpecHash uint64 = 0x{:016x}", crate::spec_hash()));
+    c.line(&format!("\tVersion = \"{}\"", crate::version()));
     c.line("");
     for e in spec.enums {
         let ty = enum_go_type(e.name);

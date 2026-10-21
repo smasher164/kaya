@@ -249,6 +249,11 @@ pub(crate) fn spec_hash() -> u64 {
     kaya::spec::hash()
 }
 
+/// The package version, which each binding's default fetch sends as `kaya/<version>`.
+pub(crate) fn version() -> &'static str {
+    kaya::VERSION
+}
+
 /// Properties with their value kinds, driving typed setter generation.
 pub(crate) fn prop_variants(_spec: &ProtocolSpec) -> &'static [(&'static str, u32, PropKind)] {
     kaya::spec::PROPS

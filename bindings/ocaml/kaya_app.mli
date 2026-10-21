@@ -836,9 +836,19 @@ type symbol =
   | Volume
   | Queue
   | Favorite
+  | Muted
 
 (* An icon-only button (docs/composer-plan.md §2). *)
 val set_symbol : widget -> symbol -> unit
+
+(* Declare more children into a container built earlier, typically from a
+   handler: each joins it after its existing children
+   (docs/media-player-plan.md M16 (28)). *)
+val within : widget -> (unit -> widget) list -> unit
+
+(* A [symbol] row field's wire form, for the ppx's generated code. *)
+val pack_symbol : symbol -> int64
+val symbol_of_packed : int64 -> symbol
 
 (* WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR. *)
 type platform = Mac | Ios | Linux | Windows | Android
@@ -1697,6 +1707,9 @@ val image_phase_field : int -> ('a, Image_phase.t) field
 (* A row's tint (docs/styling-pass-plan.md Y7): the playing track's title. *)
 val tint_field : int -> ('a, Tint.t) field
 
+(* A row's symbol (docs/media-player-plan.md M16 (21)): the playing row's pause. *)
+val symbol_field : int -> ('a, symbol) field
+
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
    zone as a string field does. *)
@@ -2203,6 +2216,10 @@ module Tpl : sig
   val bind_ground_image_field : ?level:int -> node -> ('e, bytes) field -> unit
   val set_shape : node -> shape -> unit
   val set_tint : node -> Tint.t -> unit
+
+  (* A stamped label's most lines, the rest truncated with the platform's
+     ellipsis (docs/media-player-plan.md M16 (2)). *)
+  val set_max_lines : node -> int -> unit
   val bind_tint_field : ?level:int -> node -> ('e, Tint.t) field -> unit
   val set_selected : node -> bool -> unit
   val bind_selected_field : ?level:int -> node -> ('e, bool) field -> unit
@@ -2234,6 +2251,8 @@ module Tpl : sig
     ?a11y_hint_bind:string signal ->
     ?a11y_hint_field:('d, string) field ->
     ?role:role ->
+    ?symbol:symbol ->
+    ?symbol_field:('f, symbol) field ->
     ?text:string ->
     ?bind:string signal ->
     ?bind_field:('e, string) field ->

@@ -69,6 +69,10 @@ with app.window(title="sliders"):
             value=0.25, min=0.0, max=1.0, step=0.25,
             axis=kaya.Axis.VERTICAL,
         ).a11y_id("fader").a11y_label("Fader")
+        # A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+        with kaya.row():
+            kaya.slider(value=0.5, min=0.0, max=1.0, grow=1) \
+                .max_width(120).a11y_id("capped").a11y_label("Capped")
         kaya.button("reset", on_click=on_reset)                 # button#0
         for track in tracks:
             kaya.label(bind=track.name)

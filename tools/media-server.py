@@ -87,7 +87,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         sys.stderr.flush()
 
     def log_message(self, fmt, *args):
-        self.say(fmt % args)
+        headers = getattr(self, "headers", None)
+        agent = headers.get("User-Agent") if headers is not None else None
+        self.say(f"{fmt % args} user-agent {agent!r}")
 
     def setup(self):
         global OPEN

@@ -1032,6 +1032,28 @@ pub(super) mod read {
     /// expect_ground (§5.1), the SwiftUI arm's probe geometry: 4 units in
     /// from the right edge, 4 down from the top, 4 up from the bottom and the
     /// middle.
+    /// expect_ground_color's read (docs/media-player-plan.md M16 (35)): the ground's
+    /// own top probe as 0xRRGGBB and whether the window reads dark.
+    pub(in super::super) fn ground_top(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<Result<(u32, bool), String>> {
+        let Some(element) = target_element(core, t)? else { return Ok(Err("<no such target>".into())) };
+        let shot = match Shot::take(core) {
+            Ok(shot) => shot,
+            Err(why) => return Ok(Err(format!("<no window pixels: {why}>"))),
+        };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok(Err("<no laid-out frame>".into())) };
+        if fw <= 8.0 || fh <= 16.0 {
+            return Ok(Err(format!("<no laid-out frame: {fw}x{fh}>")));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(Err(why));
+        }
+        let Some(top) = shot.at(fx + fw - 4.0, fy + 4.0) else {
+            return Ok(Err(format!("<the probe falls outside the window: {fx},{fy} {fw}x{fh}>")));
+        };
+        let b = top.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+        Ok(Ok(((b[0] << 16) | (b[1] << 8) | b[2], shot.dark)))
+    }
+
     pub(in super::super) fn ground(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<String> {
         let Some(id) = target_widget_id(core, t).map(WidgetId) else { return Ok("<no such target>".into()) };
         let Some(element) = target_element(core, t)? else { return Ok("<no such target>".into()) };

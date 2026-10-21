@@ -1574,6 +1574,7 @@ pub(crate) const SYMBOL_REPEAT_ONE: u32 = 32;
 pub(crate) const SYMBOL_VOLUME: u32 = 33;
 pub(crate) const SYMBOL_QUEUE: u32 = 34;
 pub(crate) const SYMBOL_FAVORITE: u32 = 35;
+pub(crate) const SYMBOL_MUTED: u32 = 36;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1614,6 +1615,7 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_VOLUME, "volume"),
     (SYMBOL_QUEUE, "queue"),
     (SYMBOL_FAVORITE, "favorite"),
+    (SYMBOL_MUTED, "muted"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside

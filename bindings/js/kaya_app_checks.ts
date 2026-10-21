@@ -2994,6 +2994,75 @@ if (isMainThread) {
       heard.join(",") === "pick,open");
   }
 
+  // docs/media-player-plan.md M16 (28): a handler appends to a built container.
+  {
+    const from = shipped.length;
+    let grid!: K.Widget;
+    let more!: K.Widget;
+    let node!: K.Widget;
+    let card!: K.Widget;
+    app.window({}, () => {
+      kaya.column(() => {
+        kaya.grid(3, (g) => {
+          grid = g;
+          kaya.label("one");
+        });
+        more = kaya.button("More", {
+          onClick: () => {
+            kaya.within(grid, () => {
+              kaya.column((c) => {
+                card = c;
+                kaya.label("Release Radar");
+              });
+            });
+          },
+        });
+        const tracks = kaya.collection();
+        for (const _ of tracks) {
+          node = kaya.label("stamped");
+          check("within() refuses inside a template body", throws(() => kaya.within(grid, () => {}), /blueprint/));
+        }
+      });
+    });
+    check("within() refuses a template node", throws(() => kaya.within(node, () => {}), /live container/));
+    const before = shipped.length;
+    fire({ kind: wire.OCC_BUTTON_CLICKED, id: more.id, keys: [], payload: null });
+    const flat = shipped.slice(before).flat();
+    const adds = flat.filter((r) => sameBytes(r, wire.tx_add_child(grid.id, card.id))).length;
+    check("within() appends a handler's new card to the built grid, and only it",
+      from < before && adds === 1 && !flat.some((r) => sameBytes(r, wire.tx_add_child(more.id, card.id))));
+  }
+
+  // docs/media-player-plan.md M16 (21): a stamped button's symbol.
+  {
+    const from = shipped.length;
+    const TsRow = kaya.record({ name: String, symbol: kaya.Symbol, tint: kaya.Tint }, "TsRow");
+    let constant!: K.Widget;
+    let bound!: K.Widget;
+    let expander!: K.Widget;
+    app.window({}, () => {
+      const rows = kaya.collection(TsRow);
+      kaya.column(() => {
+        for (const r of rows) {
+          constant = kaya.button("Play", { symbol: kaya.Symbol.PLAY });
+          bound = kaya.button("Play", { symbol: r.symbol });
+          kaya.expander("More", { symbol: kaya.Symbol.INFO }, (e) => {
+            expander = e;
+            kaya.label("inside");
+          });
+          check("a template symbol refuses a Tint field",
+            throws(() => kaya.button("Play", { symbol: r.tint as unknown as K.SymbolValue }), /binds a kaya.Symbol field/));
+        }
+      });
+      rows.insert("a", TsRow({ name: "a", symbol: kaya.Symbol.PAUSE, tint: kaya.Tint.NONE }));
+    });
+    const flat = shipped.slice(from).flat();
+    const sent = (want: Uint8Array): boolean => flat.some((r) => sameBytes(r, want));
+    check("a stamped button and expander carry a constant symbol",
+      sent(wire.tx_set_symbol(constant.id, kaya.Symbol.PLAY)) && sent(wire.tx_set_symbol(expander.id, kaya.Symbol.INFO)));
+    check("a stamped button's symbol binds the row's Symbol field", sent(wire.tx_bind_symbol_element(bound.id, 0, 1)));
+  }
+
   if (failures.length > 0) {
     console.log(`kaya_app_checks: ${failures.length} FAILED`);
     process.exit(1);

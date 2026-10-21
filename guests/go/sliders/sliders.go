@@ -50,6 +50,10 @@ func App() *kaya.App {
 				tx.Write(volumeText, fmt.Sprintf("volume: %s", spelled(v)))
 			}).TickSpacing(0.25).A11yLabel("Volume") // slider#1
 			tx.Slider(0.0, 1.0, 0.25, nil).Step(0.25).Axis(kaya.AxisVertical).A11yLabel("Fader").A11yID("fader") // slider#2
+			// A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+			tx.Row(func() {
+				tx.Slider(0.0, 1.0, 0.5, nil).Grow(1).MaxWidth(120).A11yLabel("Capped").A11yID("capped")
+			})
 			tx.Button("reset", func(tx *kaya.Tx) {
 				// Must NOT come back as a value or a commit occurrence.
 				tx.Write(pos, 25.0)

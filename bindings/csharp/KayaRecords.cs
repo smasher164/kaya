@@ -46,6 +46,7 @@ sealed class RecordInfo
         : t == typeof(Player) || t == typeof(Player?) ? KayaWire.ValueI64
         : t == typeof(ImagePhase) ? KayaWire.ValueI64
         : t == typeof(Tint) ? KayaWire.ValueI64
+        : t == typeof(Symbol) ? KayaWire.ValueI64
         : (uint?)null;
 
     // One reflection walk per record type, ever: FieldOf runs per event
@@ -104,7 +105,7 @@ sealed class RecordInfo
     internal object EncodeField(uint wireIndex, object value)
     {
         string name = Ctor.GetParameters()[WireToCtor[wireIndex]].Name!;
-        if (value is DateOnly or TimeOnly or Color or Player or ImagePhase or Tint)
+        if (value is DateOnly or TimeOnly or Color or Player or ImagePhase or Tint or Symbol)
             return KayaRecords.ScalarWire(value);
         if (NoPlayer(wireIndex, value)) return 0L;
         if (Schema[wireIndex] == KayaWire.ValueBlob)
@@ -165,6 +166,8 @@ sealed class RecordInfo
                         ? (ImagePhase)(fields[wire] is long phase ? phase : 0L)
                     : want == typeof(Tint)
                         ? (Tint)(fields[wire] is long tint ? tint : 0L)
+                    : want == typeof(Symbol)
+                        ? (Symbol)(fields[wire] is long symbol ? symbol : 0L)
                     : want == typeof(Document)
                         ? KayaApp.DocumentOfBlob(fields[wire])
                         : fields[wire];
@@ -449,6 +452,7 @@ static class KayaRecords
         Player p => (long)p.Id,
         ImagePhase phase => (long)phase,
         Tint tint => (long)tint,
+        Symbol symbol => (long)symbol,
         // A signal of bytes registers them at the write, as a blob field does.
         byte[] bytes => new KayaWire.BlobHandle(Kaya.RegisterBlob(bytes)),
         _ => v,

@@ -24,7 +24,8 @@ MODEL = r"kayaScene|KayaHost\."
 # (label, opener, what the body must hold)
 ARM = [
     ("the host", "struct KayaToastHost: ViewModifier {",
-     ["let shown = kayaScene.toasts[windowId]", ".overlay(alignment: .top) {",
+     ["let shown = self.shown", "kayaToastLayer(windowId) == nil ? kayaScene.toasts[windowId] : nil",
+      "return covered ? nil : kayaScene.toasts[windowId]", ".overlay(alignment: .top) {",
       "KayaToastView(windowId: windowId, shown: shown)", ".id(shown.token)"]),
     ("the close", "private func closeToast() {",
      ["guard kayaScene.toasts[windowId]?.token == shown.token else { return }",
@@ -57,7 +58,7 @@ READS = [
      ["return toast.accessibilityPerformEscape()", "return button.accessibilityActivate()"]),
 ]
 CALLS = [
-    ("expect_toast reads the platform's toast", "let shown = kayaToastRead()"),
+    ("expect_toast reads the platform's toast", "var shown = kayaToastRead()"),
     ("toast_action and toast_close press the platform's buttons",
      'let pressed = kayaToastPress(parts[0] == "toast_action" ? "kaya.toast.action" : "kaya.toast.close")'),
     ("the listener is installed before the script runs", "kayaToastEarInstall()\n    #endif\n    Thread {"),
@@ -99,9 +100,9 @@ def findings(sources, backends=None):
                        "behind another is a toast the user never sees")
         if re.search(r"\.append\(|\.insert\(|Queue", arm):
             out.append("toast: the present arm queues — T7 replaces the shown toast")
-    if flat(swift).count(flat(".modifier(KayaToastHost(")) < 2:
-        out.append("toast: KayaToastHost rides fewer than the primary and the auxiliary roots, so a "
-                   "window shows no toast")
+    if flat(swift).count(flat(".modifier(KayaToastHost(")) < 3:
+        out.append("toast: KayaToastHost rides fewer than the primary, the auxiliary roots and the sheets "
+                   "(docs/media-player-plan.md M16 (20)), so a window or a sheet shows no toast")
     for label, opener, needs in ARM:
         body = blocks(swift, opener)
         if len(body) != 1:
@@ -269,7 +270,7 @@ BACKENDS[COMPOSE] = "the Compose arm"
 COMPOSE_MODEL = r"KayaSceneModel"
 COMPOSE_ARM = [
     ("the present arm", "APPLY_PRESENT_TOAST -> {", ["KayaSceneModel.toast = KayaToast("]),
-    ("the host", "internal fun KayaToastHost(modifier: Modifier) {",
+    ("the host", "internal fun KayaToastHost(modifier: Modifier, layer: Long = 0L) {",
      ["LaunchedEffect(shown?.token) {", "host.currentSnackbarData?.dismiss()",
       "val result = host.showSnackbar(KayaToastVisuals(shown))",
       "if (KayaSceneModel.toast?.token != shown.token) return@LaunchedEffect",
@@ -426,7 +427,8 @@ NATIVE_ARM = [
     (WINUI, "the present", "fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec)",
      ["info_bar_take(window);\n    let (popup, bar, action, timer)", "toast.left_ms = info_bar_ms(spec.duration);",
       "toast.last_tick = std::time::Instant::now();",
-      "popup.SetIsOpen(true)?;\n    bar.SetIsOpen(true)?;", "timer.Start()?;"]),
+      "let layer = info_bar_host(core, window, &popup, &bar)?;", "popup.SetIsOpen(true)?;",
+      "bar.SetIsOpen(true)?;", "timer.Start()?;"]),
     (WINUI, "the bar", "fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {",
      ["bar.SetIsClosable(true)?;", "args.Reason()? == InfoBarCloseReason::CloseButton",
       "if !(toast.hovered || toast.focused) {\n                toast.left_ms -= gap;",
@@ -455,7 +457,7 @@ NATIVE_READS = [
     (GTK, "expect_toast_announced", "fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {",
      ['format!("A toast appeared: {text}, has a button: {action}")', "toast_ear::heard()"]),
     (WINUI, "the read", "fn info_bar_window_on_screen() -> windows_core::Result<",
-     ["popup.IsOpen()? && bar.IsOpen()?"]),
+     ["if hosted && bar.IsOpen()? {", "popup.IsOpen()? };"]),
     (WINUI, "expect_toast", "fn toast(&self) -> Option<(String, String)> {",
      ['named_descendant(&element, "Message")?', ".GetName()?"]),
     (WINUI, "toast_action", "fn toast_action(&self) -> bool {",
@@ -549,7 +551,7 @@ def native_run(g, sources):
         ("WinUI's action pressed past the core",
          r"core\.scene\.toast_action\(crate::protocol::ToastId\(id\)\)", "Vec::<ApplyOp>::new()",
          "lacks core.scene.toast_action", WINUI),
-        ("WinUI's read answering from the model", r"if popup\.IsOpen\(\)\? && bar\.IsOpen\(\)\? \{",
+        ("WinUI's read answering from the model", r"if hosted && bar\.IsOpen\(\)\? \{",
          "if INFO_BAR_TOASTS.with_borrow(|b| b.values().any(|t| t.shown.is_some())) {",
          "the read reaches kaya's model", WINUI),
     ]

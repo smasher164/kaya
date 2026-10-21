@@ -24,8 +24,14 @@ sealed class RowImages<T>
 
     /// The default fetch: HttpClient, the status checked, cancelled through
     /// the token when no row waits.
-    public static Task<byte[]> HttpFetch(string url, CancellationToken token) =>
-        Client.GetByteArrayAsync(url, token);
+    public static async Task<byte[]> HttpFetch(string url, CancellationToken token)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.UserAgent.ParseAdd("kaya/" + KayaWire.Version);
+        using var response = await Client.SendAsync(request, token).ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(token).ConfigureAwait(false);
+    }
 
     readonly KayaApp app;
     readonly RecordCollection<T> rows;

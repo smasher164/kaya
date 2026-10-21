@@ -147,7 +147,9 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
              ("music_headerdark-python-swiftui", "music_header", "python"),
              # The artist page's picture on the dark page (docs/traps.md, the
              # image ground read as none in the dark).
-             ("music_artistdark-python-swiftui", "music_artist", "python"))
+             ("music_artistdark-python-swiftui", "music_artist", "python"),
+             # The dock in the dark (docs/media-player-plan.md M16 (22)).
+             ("music_dockdark-python-swiftui", "music_dock", "python"))
 
 # EXCLUSIVE and the idle wait are below, after legs() — the set is derived
 # from the queue rather than spelled.

@@ -27,6 +27,7 @@ var theVocabulary = []Symbol{
 	SymbolEmoji, SymbolSend, SymbolAttach, SymbolMic, SymbolImageMissing,
 	SymbolPlay, SymbolPause, SymbolNext, SymbolPrevious, SymbolShuffle,
 	SymbolRepeat, SymbolRepeatOne, SymbolVolume, SymbolQueue, SymbolFavorite,
+	SymbolMuted,
 }
 
 // Pinned whole, so a spec change that grows the vocabulary reddens this
@@ -37,7 +38,7 @@ const theWholeVocabulary = "is not a symbol — the vocabulary is " +
 	"more=14, copy=15, paste=16, star=17, lock=18, person=19, home=20, " +
 	"emoji=21, send=22, attach=23, mic=24, image_missing=25, play=26, " +
 	"pause=27, next=28, previous=29, shuffle=30, repeat=31, repeat_one=32, " +
-	"volume=33, queue=34, favorite=35"
+	"volume=33, queue=34, favorite=35, muted=36"
 
 func TestMenuSymbolOutsideItsTransactionDies(t *testing.T) {
 	app := NewApp()
@@ -59,14 +60,14 @@ func symbolTrap(trap string) {
 		switch trap {
 		case "menu-past-the-end":
 			// The next value the vocabulary would take if it grew.
-			win.Menu("File").Item("Save").Symbol(36)
+			win.Menu("File").Item("Save").Symbol(37)
 		case "menu-zero":
 			// The natural "unset" mistake: no symbol has it.
 			win.Menu("File").Item("Save").Symbol(0)
 		case "menu-negative":
 			win.Menu("File").Item("Save").Symbol(-1)
 		case "section-past-the-end":
-			tx.AddSection(7).Title("Feed").Symbol(36)
+			tx.AddSection(7).Title("Feed").Symbol(37)
 		case "menu-whole-vocabulary":
 			// A Symbol that emitted nothing would sail through the dead cases
 			// too, so this is what tells those two apart.
@@ -133,10 +134,10 @@ func TestTheRootIsTheSymbolWall(t *testing.T) {
 		refused bool
 		want    string
 	}{
-		{"menu-past-the-end", true, "36 " + theWholeVocabulary},
+		{"menu-past-the-end", true, "37 " + theWholeVocabulary},
 		{"menu-zero", true, "0 is not a symbol"},
 		{"menu-negative", true, "-1 is not a symbol"},
-		{"section-past-the-end", true, "36 " + theWholeVocabulary},
+		{"section-past-the-end", true, "37 " + theWholeVocabulary},
 		{"menu-whole-vocabulary", false, "THE ROOT ACCEPTED IT"},
 		{"section-whole-vocabulary", false, "THE ROOT ACCEPTED IT"},
 		{"context-vocabulary", false, "THE ROOT ACCEPTED IT"},

@@ -20,6 +20,12 @@
 #define VIDEO_INK_TOLERANCE 2
 
 /**
+ * expect_ground_color's per-channel tolerance: the skin readers' 0.06 of full scale
+ * (docs/media-player-plan.md M16 (35)); the two interpreters carry the same number.
+ */
+#define GROUND_COLOR_TOLERANCE 15
+
+/**
  * expect_now_playing_art's tolerance per channel: the system's own copy is
  * rescaled and re-encoded (Android's is 300 px for a 600 px cover), and
  * the scene's two covers differ by more than 100 in every channel.
@@ -1730,6 +1736,8 @@
 #define KAYA_SYMBOL_QUEUE 34
 
 #define KAYA_SYMBOL_FAVORITE 35
+
+#define KAYA_SYMBOL_MUTED 36
 
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",

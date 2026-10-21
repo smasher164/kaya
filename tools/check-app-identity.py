@@ -1090,12 +1090,18 @@ def ls_identity_findings(root):
         return [f"{LS_LIB}: no `pub(crate) fn prepare_process()` to read"]
     code = [ln.strip() for ln in prep.splitlines()
             if ln.strip() and not ln.strip().startswith("//")]
-    if code[:2] != ['#[cfg(target_os = "macos")]', "ls_identity::claim_own_identity();"]:
+    head = ["static PREPARED: std::sync::atomic::AtomicBool = "
+            "std::sync::atomic::AtomicBool::new(false);",
+            "if PREPARED.swap(true, std::sync::atomic::Ordering::SeqCst) {", "return;", "}",
+            '#[cfg(target_os = "macos")]', "ls_identity::claim_own_identity();"]
+    if code[:6] != head:
         bad.append(f"{LS_LIB}: prepare_process's first statement is not "
-                   f"`ls_identity::claim_own_identity();` under cfg macos (it begins "
-                   f"{code[:2]!r}); anything before it runs twice when the process respawns, "
-                   f"and anything that checks in before it registers under the record the "
-                   f"pid holds")
+                   f"`ls_identity::claim_own_identity();` under cfg macos right after its "
+                   f"run-once guard (it begins {code[:6]!r}); anything before it runs twice "
+                   f"when the process respawns, anything that checks in before it registers "
+                   f"under the record the pid holds, and a claim outside the guard reads this "
+                   f"process's own record on every later call (docs/traps.md, the identity "
+                   f"claim run twice)")
     for rel, head in ((LS_LIB, "pub fn run("), (LS_CAPI, "pub extern \"C\" fn kaya_run()")):
         body = rust_fn_body(texts[rel], head)
         if body is None:
@@ -1614,10 +1620,18 @@ doctor_shadow("the exempt door record no longer writing a desktop entry", s,
 g.negative("an exemption whose file no longer names the tool",
            lambda p=s: check(p), want="drop the stale exemption")
 
-# N39-N44 — C16's own.
+# N39-N45 — C16's own.
 for _tag, _rel, _pat, _repl, _want in (
     ("lsuncalled", LS_LIB, r"\n    #\[cfg\(target_os = \"macos\"\)\]\n"
      r"    ls_identity::claim_own_identity\(\);", "",
+     "first statement is not `ls_identity::claim_own_identity();`"),
+    ("lsunguarded", LS_LIB,
+     r"(\n    static PREPARED: std::sync::atomic::AtomicBool = "
+     r"std::sync::atomic::AtomicBool::new\(false\);\n"
+     r"    if PREPARED\.swap\(true, std::sync::atomic::Ordering::SeqCst\) \{\n"
+     r"        return;\n    \}\n)"
+     r"(.*?)(    #\[cfg\(target_os = \"macos\"\)\]\n"
+     r"    ls_identity::claim_own_identity\(\);\n)", r"\n\3\1\2",
      "first statement is not `ls_identity::claim_own_identity();`"),
     ("lslate", LS_LIB,
      r"(\n    #\[cfg\(target_os = \"macos\"\)\]\n    ls_identity::claim_own_identity\(\);)"
@@ -1637,7 +1651,7 @@ for _tag, _rel, _pat, _repl, _want in (
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C16 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-g.negatives_ran(44)
+g.negatives_ran(45)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

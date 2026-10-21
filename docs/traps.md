@@ -18137,6 +18137,67 @@ GUARD: tools/scenes/music_search.steps resizes the desktops' window to
 560x600` (watched red on the mac with the modifier cut: `window 736x600,
 wanted 560x600`).
 
+THE AUTO GRID WAS THE SAME QUESTION ONE LAYOUT OVER (2026-10-20, M16 F1):
+Home's shelves against Jamendo live, twelve cards each, made the window 2072
+pt wide, because KayaAutoGrid answered an unproposed width with its cells end
+to end. Its ideal is one column's floor now. The lane's snapshot holds two
+cards a shelf, too few to widen anything, so the guard is a probe:
+tools/check-pane-ladder.py's third half reads the ideal width of a grid of
+twelve (watched red with the old answer: `ideal width is 1860`).
+
+
+## The two-pane detail's stack (measured 2026-10-20)
+
+M16 (9) put the mac's two-pane detail in a NavigationStack so an entry that
+covers another gets the platform's back item. With the LONE entry inside the
+stack too, chat-go-swiftui's thread lost the scroll_to_row its opening asked
+for on every run (`column@thread not scrolled to m27 (row top 1144pt ...)`),
+the later scrolls landing; the toolkit agent's one-cut probe put the plain
+detail back and the leg went green, three runs of three each way. The stack
+now wraps the detail only while two entries or more are on it, so a lone
+entry renders exactly as before. Not measured: whether a scroll_to_row asked
+by an entry opened OVER another is lost the same way. GUARD: chat-go-swiftui
+(green three runs after), music_home's `back` (the stack still drawn at two).
+
+## The preferences read before the harness emptied them (measured 2026-10-20)
+
+The media player's Python guest reads its kept favourites at import, before
+kaya_run, and under the harness act2::arm empties the scratch store inside
+kaya_run: the read saw the previous leg's writes. On the windows lane, whose
+key file lives under the profile rather than the leg's own state directory,
+music_search failed about one run in two: the liked track from the last run
+came back liked, so the dock's heart was already lit when it played, the
+scene's toggle changed nothing, and no toast appeared (the verb trace:
+"toggle button 105 checked (an apply's echo, not sent)" BEFORE the toggle
+verb). Every store entry (prefs get, set, remove and app_data_dir) now runs
+the process's prepare step first, which is idempotent, so a binding guest
+cannot reach the store before it is armed. GUARD: windows music_search's
+like and its toast, red before on that ordering; the scene ends with the
+heart lit, so the next leg is the one that reads it.
+
+## The status bar claim under an inline title (measured 2026-10-20)
+
+With the grounds scene's root on the inline title (M16 (27)), the picture's
+own colour at the status bar's ends (BB5A44) chose dark icons while the
+window drew AE3A25 there, and expect_system_bars read `illegible` on four iOS
+legs: the inline bar dims what runs under it. Sampling narrower strips of the
+picture did not help, since the picture is not what is drawn. The claim now
+takes the shade from the window's own pixels at the two points the reader
+reads, 0.15 s after the frame (kayaStatusRecheck in swift/KayaSwiftUI.swift),
+the picture's estimate standing until then. GUARD: the grounds legs'
+expect_system_bars on iOS, red before and green after.
+
+## NSTableView's alternation paints the whole clip (measured 2026-10-20)
+
+`usesAlternatingRowBackgroundColors` on the mac's native table striped the
+empty foot of a grown table as though rows were there (the album page, two
+tracks over a pane of stripes). An override of `drawBackground(inClipRect:)`
+clipped to the rows' band did NOT stop it under the `.inset` style (the foot
+still alternated in a probe's bitmap), so the alternation is the row views'
+own: the table's is off and `didAdd rowView:` gives each row its stripe from
+`NSColor.alternatingContentBackgroundColors`. GUARD: tools/check-table-tier.py's
+probe Half 7 samples three points of a grown table's foot and demands one
+colour (watched red with the table's own alternation back on).
 
 ## The toast over the dock (measured 2026-10-19)
 
@@ -18221,3 +18282,44 @@ than a minute it names the sleep with pmset's own lines and refuses the
 record. The walls themselves (tools/lib/walls.py) cover the class that only
 looked like this one: a gate, lane, leg worker or ssh call that really hangs.
 check-gates runs each wall against a hung stand-in.
+
+## The GTK role of a container added to a live tree (measured 2026-10-20)
+
+GTK changes a widget's accessible role only until its accessible context is
+realized, and a widget parented into a window that is already on screen gets
+its context at once. A card appended to a built grid with `within`
+(docs/media-player-plan.md M16 (28)) then refused its activatable role with
+`Gtk-CRITICAL: Widget of type "GtkBox" already has an accessible role of type
+"GTK_ACCESSIBLE_ROLE_WIDGET"`, drew correctly and clicked correctly, and
+`expect_ax` on it read `<not in the accessibility tree>` on x11 and wayland
+alike, since the AT-SPI rank walk counts buttons by role. Every container
+built inside the first mount was fine, because nothing is realized before the
+window shows. gtk.rs's set_role_reparenting takes the widget out of its
+parent for the role change and puts it back in the same place (a grid cell
+by query_child, anything else after its previous sibling); the activatable,
+heading, caption and named-container roles all go through it. cards.steps'
+appended card is the leg that sees it.
+
+## The iOS sheet toast host (measured 2026-10-20)
+
+A toast drawn in a sheet's layer (M16 (20)) sat in the sheet's top band, where
+the dismissal's pan starts: the iOS harness's `dismiss_sheet` pans from 12 pt
+below the sheet's top, the pan landed on the toast's capsule and the sheet
+stayed (`sheets 1, wanted 0` on music_dock and music_search, the heart's "Added
+to Liked Songs" still up when the player sheet was dismissed). A
+`simultaneousGesture` on the toast did not free the pan, and neither did
+moving the host inside the sheet's own host. KayaToastHost pads a sheet's toast
+below `kayaSheetGrabberBand` (28 pt on iOS, 0 on the mac), which keeps the
+grabber band the sheet's and the toast over the sheet's content.
+
+## The identity claim run twice (measured 2026-10-20)
+
+`prepare_process` ran `ls_identity::claim_own_identity` before its run-once
+guard, which was harmless while kaya_run was its only caller. The preferences
+store then started calling it on every get, set and remove (the preferences read
+before the harness emptied them), and a Java guest that touched a preference
+after kaya had checked in read its OWN LaunchServices record (`java`, no bundle
+id, at the launcher's symlinked path) as another app's: three respawns, then
+`refusing to check in as that app`, and cards-java died at launch on the mac.
+The claim now runs inside the guard, so it runs once, before the check-in.
+cards-java on the mac is the leg that sees it.

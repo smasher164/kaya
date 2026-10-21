@@ -108,6 +108,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
@@ -134,6 +135,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AttachFile
@@ -192,6 +194,7 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -235,6 +238,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.TimePicker
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.Typography
@@ -827,7 +831,16 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** The children this container LAYS OUT — a folded child renders in
      * its table's viewport instead, while every harness read keeps
      * seeing [children]. */
-    val laidOut: List<KayaNode> get() = children.filter { it.foldedInto == 0L }
+    val laidOut: List<KayaNode> get() = children.filter { it.foldedInto == 0L && !it.vacant }
+
+    /** A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
+     * column or row that draws nothing of its own and holds only such boxes
+     * (a When showing no case, an empty For) is composed by no parent, so it
+     * takes no extent and no gap. */
+    val vacant: Boolean get() =
+        // A grown empty box is a spacer, which takes its share on purpose.
+        (kind == KayaCompose.KIND_COLUMN || kind == KayaCompose.KIND_ROW) && grow == 0.0 && filled == 0L && ground == 0L &&
+            !insetSet && !activatable && tableColumns.isEmpty() && children.all { it.vacant }
 }
 
 /**
@@ -1286,6 +1299,10 @@ var kayaDockAbove: androidx.compose.ui.geometry.Rect? = null
  * T8), and the placement a toast that has since closed showed in, by the step's text. */
 @Volatile
 var kayaToastFrame: androidx.compose.ui.geometry.Rect? = null
+
+/** The layer the toast last drew in, 0 the activity's own, else a sheet id
+ * (docs/media-player-plan.md M16 (20)). */
+var kayaToastDrawnLayer = 0L
 val kayaToastOverSeen = java.util.concurrent.ConcurrentHashMap<String, String>()
 
 /** The dock (docs/styling-pass-plan.md Y8): the bar surface across the
@@ -1980,7 +1997,70 @@ object KayaSceneModel {
     // at place time): the expect_grid_columns observation clusters
     // these — geometry, never the model's columns copy.
     val cellMinX = HashMap<Long, Int>()
+    // Each grid cell's grid-local frame (x, y, width, height), what
+    // expect_cells_even reads (docs/media-player-plan.md M16 (1)).
+    val cellFrames = HashMap<Long, IntArray>()
 }
+
+/** crates/kaya/src/harness.rs's `cells_even` over (x, y, width, height)
+ * frames, null when the cells are even (docs/media-player-plan.md M16 (1)). */
+fun kayaCellsEven(frames: List<IntArray>, tolerance: Int): String? {
+    if (frames.size < 2) return "${frames.size} cell(s), wanted two at least"
+    fun spell(i: Int) = frames[i].let { "cell ${i + 1} is ${it[2]}x${it[3]} at (${it[0]},${it[1]})" }
+    val rows = ArrayList<ArrayList<Int>>()
+    for (i in frames.indices) {
+        val row = rows.lastOrNull()
+        if (row != null && frames[i][1] < row.maxOf { frames[it][1] + frames[it][3] } - tolerance) {
+            row.add(i)
+        } else {
+            rows.add(arrayListOf(i))
+        }
+    }
+    for (i in 1 until frames.size) {
+        if (kotlin.math.abs(frames[i][2] - frames[0][2]) > tolerance) return "${spell(i)}, ${spell(0)}: the widths differ"
+    }
+    var across: Pair<Int, Int>? = null
+    for (row in rows) {
+        val first = row[0]
+        for (k in 1 until row.size) {
+            val i = row[k]
+            if (kotlin.math.abs(frames[i][1] - frames[first][1]) > tolerance) {
+                return "${spell(i)}, ${spell(first)}: the tops differ in one row"
+            }
+            if (kotlin.math.abs(frames[i][3] - frames[first][3]) > tolerance) {
+                return "${spell(i)}, ${spell(first)}: the heights differ in one row"
+            }
+            val prev = row[k - 1]
+            val gap = frames[i][0] - (frames[prev][0] + frames[prev][2])
+            if (gap < -tolerance) return "${spell(i)}, ${spell(prev)}: cell ${i + 1} overlaps cell ${prev + 1} by ${-gap}"
+            val seen = across
+            if (seen == null) {
+                across = Pair(gap, i)
+            } else if (kotlin.math.abs(gap - seen.first) > tolerance) {
+                return "the gap before cell ${i + 1} is $gap, before cell ${seen.second + 1} it is ${seen.first}"
+            }
+        }
+    }
+    var down: Pair<Int, Int>? = null
+    for (r in 1 until rows.size) {
+        val bottom = rows[r - 1].maxOf { frames[it][1] + frames[it][3] }
+        val gap = frames[rows[r][0]][1] - bottom
+        val seen = down
+        if (seen == null) {
+            down = Pair(gap, r)
+        } else if (kotlin.math.abs(gap - seen.first) > tolerance) {
+            return "the gap above row ${r + 1} is $gap, above row ${seen.second + 1} it is ${seen.first}"
+        }
+    }
+    return null
+}
+
+/** A label's line cap and its overflow (docs/media-player-plan.md M16 (2)):
+ * at most max_lines, the rest cut with Material's ellipsis. */
+fun kayaLabelMaxLines(node: KayaNode): Int = if (node.maxLines > 0) node.maxLines else Int.MAX_VALUE
+
+fun kayaLabelOverflow(node: KayaNode): TextOverflow =
+    if (node.maxLines > 0) TextOverflow.Ellipsis else TextOverflow.Clip
 
 /** One section: a peer root in the primary window's section set —
  * presentation context, not lifecycle: ALL retained, never destroyed
@@ -2505,7 +2585,9 @@ internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
         // tasksbig leg, 2026-09-24); a visible label always has a width.
         if (layout.size.width == 0) continue
         measured += 1
-        if (layout.hasVisualOverflow) {
+        // A label cut at its own max_lines is drawn as asked (M16 (2)).
+        val capped = node.maxLines > 0 && layout.lineCount <= node.maxLines && !layout.didOverflowWidth
+        if (layout.hasVisualOverflow && !capped) {
             clipped.add(
                 "${kayaDebugQuoted(node.text)} overflows its ${layout.size.width}x${layout.size.height}px box " +
                     "(${layout.lineCount} lines)"
@@ -2529,6 +2611,48 @@ internal fun kayaClippingReport(presented: Set<Long>): Pair<String, Int> {
     }
     return Pair(clipped.joinToString("; "), measured)
 }
+
+/** expect_no_overlap's reading (docs/media-player-plan.md M16 (34)): every live,
+ * presented label and button, harness.rs's first_overlap rule over their bounds,
+ * "" when none share more than a pixel both ways. */
+internal fun kayaOverlapReport(presented: Set<Long>): Pair<String, Int> {
+    val items = ArrayList<Pair<String, androidx.compose.ui.geometry.Rect>>()
+    val windows = ArrayList<Int>()
+    fun add(what: String, node: KayaNode) {
+        if (KayaSceneModel.nodes[node.id] !== node || node.id !in presented) return
+        val r = kayaOverlapRects[node.id] ?: kayaTextRects[node.id] ?: return
+        if (r.width <= 1f || r.height <= 1f) return
+        items.add(Pair("$what ${kayaDebugQuoted(node.text.take(40))}", r))
+        windows.add(kayaTextWindows[node.id] ?: 0)
+    }
+    for (node in KayaSceneModel.labels) if (node.text.isNotEmpty()) add("label", node)
+    for (node in KayaSceneModel.buttons) add("button", node)
+    fun spell(r: androidx.compose.ui.geometry.Rect) =
+        "${Math.round(r.width)}x${Math.round(r.height)} at (${Math.round(r.left)},${Math.round(r.top)})"
+    for (i in items.indices) for (j in i + 1 until items.size) {
+        val (a, fa) = items[i]
+        val (b, fb) = items[j]
+        if (windows[i] != windows[j]) continue
+        val across = minOf(fa.right, fb.right) - maxOf(fa.left, fb.left)
+        val down = minOf(fa.bottom, fb.bottom) - maxOf(fa.top, fb.top)
+        if (across > 1f && down > 1f) {
+            return Pair("$a ${spell(fa)} and $b ${spell(fb)} share ${Math.round(across)}x${Math.round(down)}", items.size)
+        }
+    }
+    return Pair("", items.size)
+}
+
+/** A plain label's bounds and window for expect_no_overlap alone (M16 (34)); a
+ * rich label and a button record kayaTextRects, which expect_no_clipping reads. */
+internal fun kayaTextRectRead(node: KayaNode): Modifier = Modifier.onGloballyPositioned {
+    kayaOverlapRects[node.id] = it.boundsInRoot()
+    kayaTextWindows[node.id] = System.identityHashCode(it.findRootCoordinates())
+}
+
+internal val kayaOverlapRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** The window each overlap rect was read in, by node id. */
+internal val kayaTextWindows = HashMap<Long, Int>()
 
 /** Each label's and button's bounds in the root's space (docs/flex-shrink-plan.md §4). */
 internal val kayaTextRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
@@ -3092,7 +3216,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x1f0df237536d7515uL
+    private const val SPEC_HASH: ULong = 0x75f6589c1fd09a4auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3512,6 +3636,7 @@ object KayaCompose {
     const val SYMBOL_VOLUME = 33L
     const val SYMBOL_QUEUE = 34L
     const val SYMBOL_FAVORITE = 35L
+    const val SYMBOL_MUTED = 36L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -3556,6 +3681,7 @@ object KayaCompose {
         Triple(SYMBOL_VOLUME, "volume", Icons.AutoMirrored.Filled.VolumeUp),
         Triple(SYMBOL_QUEUE, "queue", Icons.AutoMirrored.Filled.QueueMusic),
         Triple(SYMBOL_FAVORITE, "favorite", Icons.Default.FavoriteBorder),
+        Triple(SYMBOL_MUTED, "muted", Icons.AutoMirrored.Filled.VolumeOff),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -8305,6 +8431,31 @@ object KayaCompose {
     /** expect_ground's read (docs/styling-pass-plan.md §5.1), off the window's
      * pixels 4 units inside the container's right edge, 4 units in from its
      * top and its bottom and at its middle; SwiftUI's kayaGroundRead. */
+    /** expect_ground_color's read (docs/media-player-plan.md M16 (35)): the
+     * ground's own top probe as RRGGBB and whether the window reads dark, or why
+     * not; kayaGroundRead's probe. */
+    private fun kayaGroundTopRead(activity: ComponentActivity, spec: String): Pair<Pair<Int, Boolean>?, String> {
+        val found = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                Pair(kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }, node.id)
+            }
+        } ?: return Pair(null, "no such target")
+        val (box, nodeId) = found
+        if (box == null) return Pair(null, "<no laid-out frame>")
+        val tokens = kayaSkinTokens ?: return Pair(null, "<no skin tokens resolved>")
+        val shot = kayaSkinShot(activity) ?: return Pair(null, "<no window pixels>")
+        val u = shot.density
+        val probed = androidx.compose.ui.geometry.Rect(
+            box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat(),
+        )
+        onUi(activity) { kayaSkinUnseen(nodeId, probed, u) }?.let { return Pair(null, it) }
+        val top = shot.at(box.right - 4 * u, box.top + 4 * u) ?: return Pair(null, "<the probe falls outside the window: $box>")
+        val rgb = top.map { Math.round(it * 255).toInt().coerceIn(0, 255) }
+        return Pair(Pair((rgb[0] shl 16) or (rgb[1] shl 8) or rgb[2], tokens.dark), "")
+    }
+
     private fun kayaGroundRead(activity: ComponentActivity, spec: String): String? {
         val found = onUi(activity) {
             kayaContainerTarget(spec)?.let { node ->
@@ -8502,13 +8653,14 @@ object KayaCompose {
     /** expect_symbol (docs/media-player-plan.md M8): the glyph the button's
      * Icon drew, off the unmerged tree, by symbol name. */
     private fun kayaButtonSymbolRead(activity: ComponentActivity, spec: String): String = onUi(activity) {
-        val node = target(spec, "button", KayaSceneModel.buttons) ?: return@onUi "<no such target>"
+        val node = (if (spec.startsWith("checkbox")) target(spec, "checkbox", KayaSceneModel.checkboxes)
+            else target(spec, "button", KayaSceneModel.buttons)) ?: return@onUi "<no such target>"
         if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
         val roots = kayaComposeRoots(activity).map { it as RootForTest }
         if (roots.isEmpty()) return@onUi "<no Compose root>"
         roots.forEach { it.measureAndLayoutForTest() }
         val glyphs = mutableListOf<ImageVector>()
-        var tagged = 0
+        val hits = mutableListOf<SemanticsNode>()
         fun under(n: SemanticsNode, depth: Int) {
             if (depth > 16) return
             n.config.getOrNull(KayaGlyph)?.let { glyphs.add(it) }
@@ -8517,15 +8669,23 @@ object KayaCompose {
         fun walk(n: SemanticsNode, depth: Int) {
             if (depth > 64) return
             if (n.config.getOrNull(SemanticsProperties.TestTag) == node.a11yId) {
-                tagged++
-                under(n, 0)
+                hits.add(n)
                 return
             }
             n.children.forEach { walk(it, depth + 1) }
         }
         roots.forEach { walk(it.semanticsOwner.unmergedRootSemanticsNode, 0) }
-        if (glyphs.size != 1) return@onUi "<$tagged nodes carry tag '${node.a11yId}', ${glyphs.size} glyphs under them>"
-        SYMBOLS.firstOrNull { it.third == glyphs[0] }?.second ?: "<the button draws a glyph outside the symbol table>"
+        val tagged = hits.size
+        // A stamped copy shares its tag with its siblings: the one holding
+        // this copy's laid-out centre (the mac reader's rule).
+        val box = kayaTextRects[node.id]
+        val chosen = if (hits.size <= 1 || box == null) hits
+            else hits.filter { it.boundsInRoot.contains(box.center) }
+        chosen.forEach { under(it, 0) }
+        if (glyphs.size != 1) return@onUi "<$tagged nodes carry tag '${node.a11yId}', ${chosen.size} hold this copy's centre, ${glyphs.size} glyphs under them>"
+        val filled = SYMBOLS_ON.firstOrNull { it.second == glyphs[0] }?.first
+        SYMBOLS.firstOrNull { it.third == glyphs[0] || it.first == filled }?.second
+            ?: "<the button draws a glyph outside the symbol table>"
     }
 
     private fun kayaCheckedRead(activity: ComponentActivity, spec: String): String? = onUi(activity) {
@@ -8550,6 +8710,16 @@ object KayaCompose {
             states[0] == androidx.compose.ui.state.ToggleableState.On -> "on (ToggleableState.On)"
             else -> "off (ToggleableState.${states[0]})"
         }
+    }
+
+    /** expect_toast's sheet half (M16 (20)): null when the toast draws in the
+     * topmost sheet's window or no sheet is up, else what was measured. */
+    private fun kayaToastUnderSheet(): String? {
+        if (KayaSceneModel.toast == null) return null
+        val top = KayaSceneModel.sheets.lastOrNull { it.root != null } ?: return null
+        if (kayaToastDrawnLayer == top.id) return null
+        val where = if (kayaToastDrawnLayer == 0L) "the activity's own window" else "sheet $kayaToastDrawnLayer"
+        return "is drawn in $where, under the sheet ${kayaDebugQuoted(top.title)} presented over it"
     }
 
     /** expect_toast's placement half (docs/toast-plan.md T8): null when the
@@ -9671,7 +9841,9 @@ object KayaCompose {
      * command catalog gets no phantom bar, so on those scenes the task
      * label is the only surface expect_title can assert.
      */
-    private fun kayaWindowHasChrome(): Boolean = KayaSceneModel.menubar.isNotEmpty()
+    private fun kayaWindowHasChrome(): Boolean =
+        KayaSceneModel.menubar.isNotEmpty() ||
+            (kayaCoveredDepth() >= 1 && !kayaTopIsGround(kayaActiveEntries().lastOrNull()?.root))
 
     /**
      * What the chrome HOLDS: every node under the bar carrying
@@ -10258,7 +10430,15 @@ object KayaCompose {
      * assistive service reads them. MAIN THREAD ONLY. */
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun kayaToastBars(activity: ComponentActivity): Pair<SemanticsNode, List<SemanticsNode>>? {
-        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        // The topmost window holding a toast: a sheet's own window first
+        // (M16 (20)), then the activity's.
+        val views = kayaComposeRoots(activity)
+        val view = views.firstOrNull { v ->
+            val r = v as RootForTest
+            kayaSemanticsWith(r.semanticsOwner.rootSemanticsNode) {
+                it.config.getOrNull(SemanticsProperties.TestTag) == TOAST_TAG
+            } != null
+        } ?: views.lastOrNull() ?: return null
         val root = view as RootForTest
         root.measureAndLayoutForTest()
         val bars = ArrayList<SemanticsNode>()
@@ -13123,6 +13303,18 @@ object KayaCompose {
                             failures.add("text scale $got, wanted ${parts[1]}")
                         }
                     }
+                    "expect_no_overlap" -> {
+                        var (overlap, count) = onUi(activity) { kayaOverlapReport(kayaLivePresentedIds()) }
+                        val deadline = System.currentTimeMillis() + 5000
+                        while (overlap.isNotEmpty() && System.currentTimeMillis() < deadline) {
+                            Thread.sleep(100)
+                            val again = onUi(activity) { kayaOverlapReport(kayaLivePresentedIds()) }
+                            overlap = again.first
+                            count = again.second
+                        }
+                        if (overlap.isEmpty()) observed.add("no overlap ($count measured)")
+                        else failures.add("overlap: $overlap")
+                    }
                     "expect_no_clipping" -> {
                         val (clipped, measured) = onUi(activity) { kayaClippingReport(kayaLivePresentedIds()) }
                         if (clipped.isEmpty()) {
@@ -13236,7 +13428,10 @@ object KayaCompose {
                             } else {
                                 val over = onUi(activity) { kayaToastOverDock() }
                                 if (over != null) kayaToastOverSeen[want] = over else kayaToastOverSeen.remove(want)
-                                if (over != null) failures.add("toast \"$want\" $over") else observed.add("toast \"$want\"")
+                                val under = if (over == null) onUi(activity) { kayaToastUnderSheet() } else null
+                                if (over != null) failures.add("toast \"$want\" $over")
+                                else if (under != null) failures.add("toast \"$want\" $under")
+                                else observed.add("toast \"$want\"")
                             }
                         }
                     }
@@ -13331,9 +13526,126 @@ object KayaCompose {
                         kayaAwaitQuiet()
                         val answered = kayaBatches
                         onUi(activity) {
-                            if (KayaSceneModel.splitPresentation != "split") kayaUserBack()
+                            if (kayaCoveredDepth() >= 1) kayaUserBack()
                         }
                         kayaAwaitAnswer(answered)
+                    }
+                    "expect_gap" -> {
+                        // harness.rs's ExpectGap, the same sentences, between two
+                        // labels' laid-out bounds in dp (docs/media-player-plan.md M16 (3)).
+                        val wantGap = parts.getOrNull(3)?.toDoubleOrNull()
+                        if (parts.size != 4 || wantGap == null) {
+                            failures.add("expect_gap wants two targets and a gap in points: $line")
+                        } else {
+                            fun frame(spec: String): Pair<Boolean, androidx.compose.ui.geometry.Rect?> = onUi(activity) {
+                                val node = target(spec, "label", KayaSceneModel.labels) ?: return@onUi Pair(false, null)
+                                Pair(true, kayaOverlapRects[node.id] ?: kayaTextRects[node.id])
+                            }
+                            val density = activity.resources.displayMetrics.density.toDouble()
+                            fun read(): Pair<Double?, String?> {
+                                val (aKnown, a) = frame(parts[1])
+                                val (bKnown, b) = frame(parts[2])
+                                return when {
+                                    !aKnown -> Pair(null, "no such target ${parts[1]}")
+                                    !bKnown -> Pair(null, "no such target ${parts[2]}")
+                                    a == null -> Pair(null, "${parts[1]} frame unread: <no laid-out frame>")
+                                    b == null -> Pair(null, "${parts[2]} frame unread: <no laid-out frame>")
+                                    else -> {
+                                        val gap = (b.top - a.bottom) / density
+                                        if (kotlin.math.abs(gap - wantGap) <= 1) Pair(gap, null)
+                                        else Pair(gap, "${parts[1]} to ${parts[2]} gap ${Math.round(gap)}, wanted ${parts[3]} " +
+                                            "(${parts[1]} ends at ${Math.round(a.bottom / density)}, ${parts[2]} starts at ${Math.round(b.top / density)})")
+                                    }
+                                }
+                            }
+                            var got = read()
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (got.second != null && System.currentTimeMillis() < deadline) {
+                                Thread.sleep(100)
+                                got = read()
+                            }
+                            got.second?.let { failures.add(it) } ?: observed.add("${parts[1]} to ${parts[2]} gap ${parts[3]}")
+                        }
+                    }
+                    "expect_width" -> {
+                        // harness.rs's ExpectWidth, the same sentences: the
+                        // slider's drawn width in dp.
+                        val wantWidth = parts.getOrNull(2)?.toDoubleOrNull()
+                        if (parts.size != 3 || wantWidth == null) {
+                            failures.add("expect_width wants a target and a width in points: $line")
+                        } else {
+                            fun read(): Double? = onUi(activity) {
+                                val node = target(parts[1], "slider", KayaSceneModel.sliders) ?: return@onUi null
+                                val coords = kayaTravelCoords[node.id] ?: return@onUi -1.0
+                                coords.size.width / activity.resources.displayMetrics.density.toDouble()
+                            }
+                            var got = read()
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (got != null && got >= 0 && kotlin.math.abs(got - wantWidth) > 1 &&
+                                System.currentTimeMillis() < deadline) {
+                                Thread.sleep(100)
+                                got = read()
+                            }
+                            when {
+                                got == null -> failures.add("no such target ${parts[1]}")
+                                got < 0 -> failures.add("${parts[1]} width unread: <no laid-out slider>")
+                                kotlin.math.abs(got - wantWidth) <= 1 -> observed.add("${parts[1]} ${parts[2]} wide")
+                                else -> failures.add("${parts[1]} ${Math.round(got)} wide, wanted ${parts[2]}")
+                            }
+                        }
+                    }
+                    "expect_text_lines" -> {
+                        // harness.rs's ExpectTextLines, the same sentences.
+                        val wantLines = parts.getOrNull(2)?.toIntOrNull()
+                        val cutWord = parts.getOrNull(3)
+                        if (parts.size != 4 || wantLines == null || (cutWord != "truncated" && cutWord != "whole")) {
+                            failures.add("expect_text_lines wants a label, a line count and truncated|whole: $line")
+                        } else {
+                            val wantCut = cutWord == "truncated"
+                            fun word(c: Boolean) = if (c) "truncated" else "whole"
+                            fun read(): Pair<Int, Boolean>? = onUi(activity) {
+                                val node = target(parts[1], "label", KayaSceneModel.labels) ?: return@onUi null
+                                val layout = kayaLabelLayouts[node.id] ?: return@onUi Pair(-1, false)
+                                Pair(layout.lineCount,
+                                    layout.didOverflowHeight || layout.isLineEllipsized(layout.lineCount - 1))
+                            }
+                            var got = read()
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (got != null && got != Pair(wantLines, wantCut) && System.currentTimeMillis() < deadline) {
+                                Thread.sleep(100)
+                                got = read()
+                            }
+                            when {
+                                got == null -> failures.add("no such target ${parts[1]}")
+                                got.first < 0 -> failures.add("${parts[1]} lines unread: <no text layout recorded>")
+                                got == Pair(wantLines, wantCut) -> observed.add("${parts[1]} ${got.first} lines ${word(got.second)}")
+                                else -> failures.add(
+                                    "${parts[1]} ${got.first} lines ${word(got.second)}, wanted $wantLines lines ${word(wantCut)}")
+                            }
+                        }
+                    }
+                    "expect_cells_even" -> {
+                        // docs/media-player-plan.md M16 (1): harness.rs's
+                        // cells_even, the same rule and sentences.
+                        fun read(): String? = onUi(activity) {
+                            val grid = target(parts[1], "grid", KayaSceneModel.grids) ?: return@onUi null
+                            val frames = grid.children.mapIndexed { i, cell ->
+                                KayaSceneModel.cellFrames[cell.id]
+                                    ?: return@onUi "unread: cell ${i + 1} has no laid-out frame"
+                            }
+                            kayaCellsEven(frames, 2)?.let { "uneven: $it" } ?: ""
+                        }
+                        var got = read()
+                        val deadline = System.currentTimeMillis() + 5000
+                        while (got != null && got != "" && System.currentTimeMillis() < deadline) {
+                            Thread.sleep(100)
+                            got = read()
+                        }
+                        when (got) {
+                            "" -> observed.add("${parts[1]} cells even")
+                            null -> failures.add("no such target ${parts[1]}")
+                            else -> failures.add("${parts[1]} cells $got")
+                        }
                     }
                     "expect_grid_columns" -> {
                         val want = parts[2].toInt()
@@ -14029,6 +14341,35 @@ object KayaCompose {
                     // lane cuts a scene at its first hover (tools/lib/lanes/android.py MODS).
                     "hover" -> failures.add("hover ${parts[1]}: an Android phone has no pointer to hover with")
                     // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
+                    "expect_ground_color" -> {
+                        // harness.rs's ExpectGroundColor, the same sentences and tolerance.
+                        val spec = quoted(parts.drop(2)).split(" ")
+                        val light = spec.getOrNull(1)?.takeIf { spec.size == 4 && spec[0] == "light" && spec[2] == "dark" }?.toIntOrNull(16)
+                        val dark = spec.getOrNull(3)?.toIntOrNull(16)
+                        if (light == null || dark == null) {
+                            failures.add("expect_ground_color wants a container and \"light RRGGBB dark RRGGBB\": $line")
+                        } else {
+                            val said = "light %06X dark %06X".format(light, dark)
+                            fun near(a: Int, b: Int) = (0..2).all { k -> Math.abs(((a shr (8 * k)) and 0xFF) - ((b shr (8 * k)) and 0xFF)) <= 15 }
+                            var got = kayaGroundTopRead(activity, parts[1])
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (System.currentTimeMillis() < deadline &&
+                                got.first?.let { (c, d) -> !near(c, if (d) dark else light) } != false) {
+                                Thread.sleep(100)
+                                got = kayaGroundTopRead(activity, parts[1])
+                            }
+                            val read = got.first
+                            when {
+                                read == null && got.second == "no such target" -> failures.add("no such target ${parts[1]}")
+                                read == null -> failures.add("${parts[1]} ground top unread: ${got.second}")
+                                near(read.first, if (read.second) dark else light) ->
+                                    observed.add("${parts[1]} ground color \"$said\"")
+                                else -> failures.add(
+                                    "${parts[1]} ground top %06X in the %s, wanted %06X".format(
+                                        read.first, if (read.second) "dark" else "light", if (read.second) dark else light))
+                            }
+                        }
+                    }
                     "expect_ground" ->
                         kayaSkinExpect(parts, failures) { kayaGroundRead(activity, parts[1]) }?.let { observed.add(it) }
                     "expect_shape" ->
@@ -17119,9 +17460,12 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.headerRestPx = foldedBlock
         val bodySeg = measurables[measurables.size - 1]
             .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
+        // A ROW'S SURFACE REACHES PAST ITS CELLS (M16 (8)): from the cells'
+        // edge it cut through the first column's number.
+        val groundOut = padX / 2
         val grounds = measurables.subList(nFolded + cols + 1, nFolded + cols + 1 + nRows)
             .mapIndexed { r, m ->
-                m.measure(kayaFixedRepresentable(innerW, rowExtents.getOrElse(r) { 0 }))
+                m.measure(kayaFixedRepresentable(innerW + 2 * groundOut, rowExtents.getOrElse(r) { 0 }))
             }
         val tops = IntArray(rowExtents.size)
         var y = topH
@@ -17159,7 +17503,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             headers.forEachIndexed { c, p -> p.place(padX + colX[c], headerY + padY, zIndex = 1f) }
             top.place(0, rowsTop)
             grounds.forEachIndexed { r, p ->
-                if (r < tops.size) p.place(padX, rowsTop + tops[r] - rowGapPx / 2)
+                if (r < tops.size) p.place(padX - groundOut, rowsTop + tops[r] - rowGapPx / 2)
             }
             cells.chunked(cols).forEachIndexed { r, row ->
                 row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }
@@ -18035,20 +18379,47 @@ private fun KayaRenderCore(
                     } else {
                         0
                     }
-                val placeables = measurables.map {
-                    it.measure(
-                        if (auto && share > 0) {
-                            androidx.compose.ui.unit.Constraints(maxWidth = share)
-                        } else {
-                            androidx.compose.ui.unit.Constraints()
-                        })
+                val rows = (measurables.size + cols - 1) / cols
+                // An auto grid's container takes its column and its row's
+                // tallest height (docs/media-player-plan.md M16 (1)): its
+                // height is asked first and it is measured once at the row's.
+                val stretch = BooleanArray(measurables.size) { i ->
+                    auto && share > 0 && node.children[i].kind in
+                        setOf(KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW, KayaCompose.KIND_GRID)
                 }
-                val rows = (placeables.size + cols - 1) / cols
-                val colW = IntArray(cols)
+                val tall = IntArray(measurables.size) { i ->
+                    if (!stretch[i]) {
+                        0
+                    } else {
+                        try {
+                            measurables[i].maxIntrinsicHeight(share)
+                        } catch (_: IllegalStateException) {
+                            stretch[i] = false
+                            0
+                        }
+                    }
+                }
+                val loose = arrayOfNulls<androidx.compose.ui.layout.Placeable>(measurables.size)
+                measurables.forEachIndexed { i, m ->
+                    if (!stretch[i]) {
+                        loose[i] = m.measure(
+                            if (auto && share > 0) {
+                                androidx.compose.ui.unit.Constraints(maxWidth = share)
+                            } else {
+                                androidx.compose.ui.unit.Constraints()
+                            })
+                    }
+                }
                 val rowH = IntArray(rows)
+                for (i in measurables.indices) {
+                    rowH[i / cols] = maxOf(rowH[i / cols], loose[i]?.height ?: tall[i])
+                }
+                val placeables = measurables.mapIndexed { i, m ->
+                    loose[i] ?: m.measure(androidx.compose.ui.unit.Constraints.fixed(share, rowH[i / cols]))
+                }
+                val colW = IntArray(cols)
                 placeables.forEachIndexed { i, p ->
                     colW[i % cols] = maxOf(colW[i % cols], p.width)
-                    rowH[i / cols] = maxOf(rowH[i / cols], p.height)
                 }
                 if (auto && share > 0) for (c in 0 until cols) colW[c] = share
                 // Coerced into the incoming constraints, so a GROWN grid
@@ -18071,6 +18442,9 @@ private fun KayaRenderCore(
                             // A cell centres in its row, as a row's children do (R5).
                             placeables[i].placeRelative(x, y + (rowH[r] - placeables[i].height) / 2)
                             KayaSceneModel.cellMinX[node.children[i].id] = x
+                            KayaSceneModel.cellFrames[node.children[i].id] =
+                                intArrayOf(x, y + (rowH[r] - placeables[i].height) / 2,
+                                    placeables[i].width, placeables[i].height)
                             x += colW[c] + gapPx
                         }
                         y += rowH[r] + gapPx
@@ -18252,7 +18626,7 @@ private fun KayaRenderCore(
                     // under every align mode (the 2026-08-22 breadth
                     // ruling) — beside stretch, which spans every child's.
                     if (node.align == KayaCompose.ALIGN_STRETCH ||
-                        child.kind == KayaCompose.KIND_ROW ||
+                        (child.kind == KayaCompose.KIND_ROW && child.fill != false) ||
                         child.kind == KayaCompose.KIND_LABELED
                     ) {
                         cell = cell.fillMaxWidth()
@@ -18352,8 +18726,10 @@ private fun KayaRenderCore(
                     // The crossing COLUMN's track — the column arm's
                     // sibling, one axis over; the row's Layout hands a
                     // stretched cell the row's own height.
+                    // The child's own `fill = false` outranks the crossing
+                    // default (docs/layout-knobs-plan.md §1, gtk.rs's rule).
                     if (node.align == KayaCompose.ALIGN_STRETCH ||
-                        child.kind == KayaCompose.KIND_COLUMN
+                        (child.kind == KayaCompose.KIND_COLUMN && child.fill != false)
                     ) {
                         cell = cell.fillMaxHeight()
                     }
@@ -18446,7 +18822,9 @@ private fun KayaRenderCore(
             }
         }
         KayaCompose.KIND_BUTTON -> {
-            val buttonRect = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot() }
+            val buttonRect = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot()
+                kayaTextWindows[node.id] = System.identityHashCode(it.findRootCoordinates())
+            }
             // THE ROLE TIER, in M3's own emphasis ladder
             // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, filled
             // reserved for `prominent`, or a roleless button would leave
@@ -18565,7 +18943,9 @@ private fun KayaRenderCore(
                 val document = remember(node, node.text, node.richSeq, palette) {
                     kayaRichAnnotated(node.text, node.richRuns, palette)
                 }
-                val rectRead = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot() }
+                val rectRead = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot()
+                kayaTextWindows[node.id] = System.identityHashCode(it.findRootCoordinates())
+            }
                 val base = if (node.role == KayaCompose.ROLE_HEADING)
                     boxFill.then(a11y).then(rectRead).semantics { heading() }
                 else boxFill.then(a11y).then(rectRead)
@@ -18578,6 +18958,7 @@ private fun KayaRenderCore(
                     },
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
                         kayaCaptionColor() else kayaLabelTintColor(node),
+                    maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = base,
                 )
@@ -18596,8 +18977,9 @@ private fun KayaRenderCore(
                     // this label takes its style from `typography`, so
                     // it goes on reading the platform face if the
                     // theme's first write is missing.
+                    maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaTypefaceSites["heading"] = it; kayaLabelLayouts[node.id] = it },
-                    modifier = boxFill.then(a11y).semantics { heading() },
+                    modifier = boxFill.then(a11y).then(kayaTextRectRead(node)).semantics { heading() },
                 )
             } else if (node.role == KayaCompose.ROLE_CAPTION) {
                 // The caption role: Material's supporting-text reading —
@@ -18608,8 +18990,9 @@ private fun KayaRenderCore(
                     node.text,
                     style = MaterialTheme.typography.bodySmall,
                     color = kayaCaptionColor(),
+                    maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaTypefaceSites["caption"] = it; kayaLabelLayouts[node.id] = it },
-                    modifier = boxFill.then(a11y),
+                    modifier = boxFill.then(a11y).then(kayaTextRectRead(node)),
                 )
             } else if (node.role == KayaCompose.ROLE_LINK) {
                 // THE LINK ROLE (docs/tasks-s2-plan.md T3): the URL rides
@@ -18632,8 +19015,9 @@ private fun KayaRenderCore(
                             append(node.text)
                         }
                     },
+                    maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
-                    modifier = boxFill.then(a11y)
+                    modifier = boxFill.then(a11y).then(kayaTextRectRead(node))
                         .semantics(mergeDescendants = true) { this[KayaAxKind] = "link" },
                 )
             } else {
@@ -18648,8 +19032,9 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     color = kayaLabelTintColor(node),
+                    maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaTypefaceSites["label"] = it; kayaLabelLayouts[node.id] = it },
-                    modifier = boxFill.then(a11y),
+                    modifier = boxFill.then(a11y).then(kayaTextRectRead(node)),
                 )
             }
         KayaCompose.KIND_CHECKBOX -> {
@@ -18674,10 +19059,20 @@ private fun KayaRenderCore(
                         KayaPresent.emitToggled(node.tag, newValue)
                     },
                     modifier = boxFill.then(a11y).semantics { this[KayaAxKind] = "toggle" },
+                    // LIT WHILE ON (M16 (15)): Material's tonal container, so
+                    // a toggle whose glyph has no filled form still reads on.
+                    colors = IconButtonDefaults.iconToggleButtonColors(
+                        checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        checkedContentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
                 ) {
                     val icon = KayaCompose.toggleIcon(node.symbol, node.checked)
-                    if (node.symbol != 0L && icon != null) Icon(icon, contentDescription = node.text)
-                    else Text(node.text)
+                    if (node.symbol != 0L && icon != null) {
+                        // An a11y label names the toggle itself; the glyph then adds
+                        // nothing (the expander's rule): "Repeat off Repeat" otherwise.
+                        Icon(icon, contentDescription = if (node.a11yLabel.isEmpty()) node.text else null,
+                            modifier = Modifier.semantics { this[KayaGlyph] = icon })
+                    } else Text(node.text)
                 }
             } else {
             // Uncontrolled toward the app, the entry's shape. The TOGGLE
@@ -20268,6 +20663,8 @@ class KayaSafePads(val content: WindowInsets, val bleed: WindowInsets)
 
 val LocalKayaSafePads = compositionLocalOf<KayaSafePads?> { null }
 
+
+
 /** What the content box pads by: the safe area the bars left, the keyboard
  * included (docs/safe-area-plan.md A1, A2). */
 @OptIn(ExperimentalLayoutApi::class)
@@ -20733,14 +21130,24 @@ fun KayaRoot() {
         // A PUSHED SCREEN WEARS THE BAR TOO: its title and back arrow are how
         // Material presents a covered stack, and without a catalog the chat
         // app's thread had neither (docs/deferred.md, the chat C0 captures).
-        // Not over a sections scaffold, which draws its own bar.
-        val covered = KayaSceneModel.sections.isEmpty() &&
-            kayaActiveEntries().isNotEmpty() && !kayaSplitArm()
+        // Inside a section too, whose own bar is at the bottom (M16 (10)).
+        val covered = kayaCovers()
+        val shownTop = kayaActiveEntries().lastOrNull()?.root
         if (KayaSceneModel.menubar.isEmpty() && !covered) {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).
             KayaSceneModel.menuPresentation = "none"
             KayaSurface(topConsumed = false)
+        } else if (KayaSceneModel.menubar.isEmpty() && kayaTopIsGround(shownTop)) {
+            // A PAGE WHOSE TOP IS A PICTURE OR A GRADIENT keeps it under the
+            // status bar (M15) and the back arrow floats over it on a clear
+            // bar, the page's own heading its title (M16 (10)): a bar with the
+            // title pushed the album's rows under the dock on a phone.
+            KayaSceneModel.menuPresentation = "none"
+            Box(modifier = Modifier.fillMaxSize()) {
+                KayaSurface(topConsumed = false)
+                KayaMenuTopBar(clear = true)
+            }
         } else {
             // The window catalog's phone lowering (DESIGN.md, Menus).
             // STAMPED BY THE ARM THAT RENDERS, not inferred from the
@@ -20764,9 +21171,7 @@ fun KayaRoot() {
     // nothing, so an enabled handler pops to a blank detail pane.
     // Compose's own rule, where canNavigateBack reports false once both
     // panes are visible.
-    androidx.activity.compose.BackHandler(
-        enabled = kayaActiveEntries().isNotEmpty() && !kayaSplitArm()
-    ) { kayaUserBack() }
+    androidx.activity.compose.BackHandler(enabled = kayaCovers()) { kayaUserBack() }
 
     // The sheets over the window, an entry or a section; a chain nests
     // inside its parent sheet's content (docs/sheet-plan.md).
@@ -21178,8 +21583,12 @@ private fun KayaMenuPopupRoot() {
  */
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
-fun KayaMenuTopBar() {
+fun KayaMenuTopBar(clear: Boolean = false) {
     TopAppBar(
+        colors = if (clear) {
+            TopAppBarDefaults.topAppBarColors(
+                containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent)
+        } else TopAppBarDefaults.topAppBarColors(),
         windowInsets = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top),
         // The tag IS the chrome's identity for the toolbar reads: they
         // search this subtree and nowhere else, so "the promoted set
@@ -21190,14 +21599,14 @@ fun KayaMenuTopBar() {
             // Tagged because expect_title READS THIS NODE — the bar is
             // the title's visible materialization on this platform, and
             // the task label is the other one (see TOOLBAR_TITLE_TAG).
-            Text(
+            if (!clear) Text(
                 kayaActiveEntries().lastOrNull()?.title
                     ?: KayaSceneModel.windowTitle,
                 modifier = Modifier.testTag(KayaCompose.TOOLBAR_TITLE_TAG),
             )
         },
         navigationIcon = {
-            if (kayaActiveEntries().isNotEmpty()) {
+            if (kayaCovers()) {
                 IconButton(onClick = { kayaUserBack() }) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -21856,6 +22265,32 @@ private fun kayaActiveEntries(): MutableList<KayaNavEntry> =
         ?.takeIf { KayaSceneModel.sections.isNotEmpty() }
         ?: KayaSceneModel.navEntries
 
+/** Whether back reveals something on the active surface (DESIGN.md's back
+ * rule): any entry covers a stack's root, and with both panes up the top
+ * covers the entry beneath it only (M16 (9)). The bar's arrow and the
+ * system back both ask this. */
+@Composable
+internal fun kayaCovers(): Boolean {
+    val depth = kayaActiveEntries().size
+    return if (kayaSplitArm()) depth >= 2 else depth >= 1
+}
+
+/** How many entries back can reveal, read off the arm the scaffold STAMPED:
+ * the harness's half of [kayaCovers], which needs the composition. */
+internal fun kayaCoveredDepth(): Int =
+    kayaActiveEntries().size - (if (KayaSceneModel.splitPresentation == "split") 1 else 0)
+
+/** Whether [root]'s top is a ground that reaches the status bar: a page whose
+ * header is a picture or a gradient (M15, M16 (10)). */
+internal fun kayaTopIsGround(root: KayaNode?): Boolean {
+    var node = root ?: return false
+    while (true) {
+        if (node.ground != 0L) return kayaBleedEdges(node)[0]
+        if (node.kind != KayaCompose.KIND_COLUMN && node.kind != KayaCompose.KIND_ROW) return false
+        node = node.children.firstOrNull() ?: return false
+    }
+}
+
 fun kayaUserBack() {
     // Back routes to the ACTIVE section's stack when sections are
     // present (back never switches sections — DESIGN.md, Sections).
@@ -22064,6 +22499,7 @@ private fun KayaSheetView(sheet: KayaSheet, root: KayaNode) {
             )
             Box(modifier = Modifier.padding(16.dp)) { KayaRender(node = root, isRoot = true) }
             KayaSheetHost(sheet.id)
+            KayaToastHost(Modifier.align(Alignment.CenterHorizontally), sheet.id)
         }
     }
 }
@@ -22098,9 +22534,13 @@ private class KayaToastVisuals(toast: KayaToast) : SnackbarVisuals {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun KayaToastHost(modifier: Modifier) {
+internal fun KayaToastHost(modifier: Modifier, layer: Long = 0L) {
     val host = remember { SnackbarHostState() }
-    val shown = KayaSceneModel.toast
+    // The toast draws in the topmost sheet's own window when one is up
+    // (docs/media-player-plan.md M16 (20)), never under it.
+    val top = KayaSceneModel.sheets.lastOrNull { it.root != null }?.id ?: 0L
+    val shown = KayaSceneModel.toast.takeIf { top == layer }
+    if (shown != null) SideEffect { kayaToastDrawnLayer = layer }
     LaunchedEffect(shown?.token) {
         host.currentSnackbarData?.dismiss()
         if (shown == null) return@LaunchedEffect
@@ -22909,7 +23349,12 @@ private fun KayaSliderSurface(node: KayaNode, boxFill: Modifier, a11y: Modifier)
         )
     }
     if (!kayaSliderVertical(node)) {
-        slider(boxFill.then(KayaSliderNatural).then(a11y))
+        // The app's widest width (docs/media-player-plan.md M16 (17)).
+        // After the slot's fill or weight, which fix the width the cap must undercut.
+        val capped = if (node.maxWidth > 0) {
+            Modifier.wrapContentWidth(Alignment.Start).widthIn(max = node.maxWidth.dp).fillMaxWidth()
+        } else Modifier
+        slider(boxFill.then(capped).then(KayaSliderNatural).then(a11y))
         return
     }
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {

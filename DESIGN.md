@@ -2173,9 +2173,13 @@ Two further rulings, ratified 2026-07-27 with the wrapper adoption:
   `tools/check-steps.py` enforces that band. The separate 600 that
   decides compact-vs-regular FOR MENUS is a different question and is
   not affected.
-- **Back on a two-pane window does not pop.** Back reveals what the top
-  entry covers, and in the split arm it covers nothing, so popping
-  would blank the detail pane. This is the platforms' own rule —
+- **Back on a two-pane window pops only what covers something.** Back
+  reveals what the top entry covers. In the split arm the FIRST entry
+  covers nothing, so popping it would blank the detail pane; a second
+  entry covers the first in that same pane, so it shows its back and
+  pops (the maintainer, 2026-10-20, docs/media-player-plan.md M16 (9):
+  the media player's album over Home). The three-pane arm keeps the
+  earlier rule, no back while spread. This is the platforms' own rule —
   Compose's `canNavigateBack` reports false with both panes visible,
   and neither libadwaita nor NavigationSplitView draws a back button in
   an uncollapsed content pane. It must be REAL behavior rather than the

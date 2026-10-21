@@ -17,6 +17,7 @@ final class LibraryPlaylistKaya {
 
     static final KayaRecords.Field<String> NAME = KayaRecords.fieldAt(0);
     static final KayaRecords.Field<Boolean> SELECTED = KayaRecords.fieldAt(1);
+    static final KayaRecords.Field<dev.kaya.KayaApp.Symbol> SYMBOL = KayaRecords.fieldAt(2);
 
     static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Cards.LibraryPlaylist> c, String key) {
         return new Patch(c.patch(tx, key));
@@ -36,6 +37,11 @@ final class LibraryPlaylistKaya {
 
         Patch selected(boolean v) {
             p.set(SELECTED, v);
+            return this;
+        }
+
+        Patch symbol(dev.kaya.KayaApp.Symbol v) {
+            p.set(SYMBOL, v);
             return this;
         }
     }
@@ -62,6 +68,11 @@ final class LibraryPlaylistKaya {
 
         PatchIf selected(boolean v) {
             p.set(SELECTED, v);
+            return this;
+        }
+
+        PatchIf symbol(dev.kaya.KayaApp.Symbol v) {
+            p.set(SYMBOL, v);
             return this;
         }
     }
@@ -93,6 +104,7 @@ final class LibraryPlaylistKaya {
         private final KayaRecords.Collection<String, Cards.LibraryPlaylist> c;
         final KayaRecords.Field<String> name = NAME;
         final KayaRecords.Field<Boolean> selected = SELECTED;
+        final KayaRecords.Field<dev.kaya.KayaApp.Symbol> symbol = SYMBOL;
 
         Row(KayaApp.Tpl t, KayaRecords.Collection<String, Cards.LibraryPlaylist> c) {
             super(t);

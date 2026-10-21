@@ -151,10 +151,12 @@ export type ImagePhaseToken = typeof ImagePhase;
 /** A stamped copy's document is a FIELD of its row: a Blob carrying the
  * document's own value list (docs/rich-text-plan.md §19). */
 export type DocumentToken = typeof Document;
-export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken | ImagePhaseToken | TintToken;
+export type Token = StringConstructor | BooleanConstructor | NumberConstructor | Uint8ArrayConstructor | IntToken | CivilDateToken | CivilTimeToken | DocumentToken | ColorToken | PlayerToken | ImagePhaseToken | TintToken | SymbolToken;
 export type Schema = { readonly [name: string]: Token };
 type FieldOf<T> = T extends TintToken
   ? TintValue
+  : T extends SymbolToken
+  ? SymbolValue
   : T extends PlayerToken
   ? Player | null
   : T extends ImagePhaseToken
@@ -201,7 +203,7 @@ function wireTag(token: Token, name: string): number {
   if (token === Number) return wire.VALUE_F64;
   if (token === Uint8Array) return wire.VALUE_BLOB;
   if (token === Int) return wire.VALUE_I64;
-  if (token === CivilDate || token === CivilTime || token === ImagePhase || token === Color || token === Player || token === Tint) return wire.VALUE_I64;
+  if (token === CivilDate || token === CivilTime || token === ImagePhase || token === Color || token === Player || token === Tint || token === Symbol_) return wire.VALUE_I64;
   if (token === Document) return wire.VALUE_BLOB;
   throw new TypeError(
     `kaya: field ${JSON.stringify(name)} has no wire type — a schema names String, Boolean, Number, kaya.Int, kaya.CivilDate, kaya.CivilTime, kaya.Color, kaya.Player, kaya.ImagePhase, kaya.Document or Uint8Array per field`,
@@ -1581,6 +1583,7 @@ function fieldDecoder(token: Token): (v: wire.Decoded | Uint8Array) => unknown {
   if (token === Color) return (v) => Color.fromHex(v as number);
   if (token === ImagePhase) return (v) => ImagePhase._of(Number(v));
   if (token === Tint) return (v) => Number(v);
+  if (token === Symbol_) return (v) => Number(v);
   // A row's player (docs/media-plan.md §7b): its id, 0 for none.
   if (token === Player) return (v) => (Number(v) === 0 ? null : (app()._players.get(Number(v)) ?? new Player(Number(v))));
   if (token === Document) return (v) => documentOfBytes(v as Uint8Array);
@@ -1596,6 +1599,7 @@ function fieldEncoder(token: Token, tag: number, type: string): (v: unknown, nam
   if (token === Color) return (v, name) => (v instanceof Color ? new wire.I64(v.hex()) : refuse(v, name, "kaya.Color"));
   if (token === ImagePhase) return (v, name) => (v instanceof ImagePhase ? new wire.I64(v._wire) : refuse(v, name, "kaya.ImagePhase"));
   if (token === Tint) return (v, name) => (typeof v === "number" && Object.values(Tint).includes(v as TintValue) ? new wire.I64(v) : refuse(v, name, "kaya.Tint"));
+  if (token === Symbol_) return (v, name) => (typeof v === "number" && Object.values(Symbol_).includes(v as SymbolValue) ? new wire.I64(v) : refuse(v, name, "kaya.Symbol"));
   if (token === Player) return (v, name) => (v === null ? new wire.I64(0) : v instanceof Player ? new wire.I64(v.id) : refuse(v, name, "kaya.Player or null"));
   // A Document field IS a Blob field carrying `documentBytes`' list (§19).
   if (token === Document) return (v, name) => (v instanceof Document ? new BlobHandle(runtime.registerBlob(documentBytes(v))) : refuse(v, name, "kaya.Document"));
@@ -4337,16 +4341,32 @@ export const Symbol_ = Object.freeze({
   VOLUME: wire.SYMBOL_VOLUME,
   QUEUE: wire.SYMBOL_QUEUE,
   FAVORITE: wire.SYMBOL_FAVORITE,
+  MUTED: wire.SYMBOL_MUTED,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.
 export { Symbol_ as Symbol };
 export type SymbolValue = (typeof Symbol_)[keyof typeof Symbol_];
+export type SymbolToken = typeof Symbol_;
 export type SymbolName = Lowercase<keyof typeof Symbol_>;
 const SYMBOL_NAMES: Record<string, number> = Object.fromEntries(Object.entries(Symbol_).map(([k, v]) => [k.toLowerCase(), v]));
 
 function symbolValue(symbol: unknown): number {
   return vocab(SYMBOL_NAMES, "symbol", symbol, "kaya.Symbol.COPY");
+}
+
+/** A constructor's symbol in either zone: a constant, or in a template a row's
+ * kaya.Symbol field (docs/media-player-plan.md M16 (21)). */
+function setSymbol(handle: Widget, symbol: SymbolValue | SymbolName | FieldRef): void {
+  if (symbol instanceof FieldRef) {
+    if (_tplDepth === 0) {
+      throw new TypeError("kaya: a symbol bound to a row's field is template-only — live, pass kaya.Symbol.PLAY and set another with symbol()");
+    }
+    pickerField("a symbol", symbol, Symbol_, "kaya.Symbol");
+    records().push(wire.tx_bind_symbol_element(handle.id, symbol._level(), symbol._index));
+    return;
+  }
+  records().push(wire.tx_set_symbol(handle.id, symbolValue(symbol)));
 }
 
 /** How a window presents its sections. The table is keyed BY THE UNION,
@@ -4569,7 +4589,7 @@ export function labeled<T = void>(label: string | Bindable, optsOrBody?: Labeled
 export type ExpanderOptions = Omit<ContainerOptions, "filled"> & {
   summary?: Bindable | string;
   expanded?: boolean | Signal<boolean> | FieldRef;
-  symbol?: SymbolValue | SymbolName;
+  symbol?: SymbolValue | SymbolName | FieldRef;
   onToggle?: Handler;
 };
 
@@ -4584,10 +4604,30 @@ export function expander<T = void>(text: string | Bindable, optsOrBody?: Expande
   records().push(propSource("expander text", handle, text, wire.tx_set_text, wire.tx_bind_text, wire.tx_bind_text_element));
   if (opts.summary !== undefined) handle.summary(opts.summary);
   if (opts.expanded !== undefined) handle.expanded(opts.expanded);
-  if (opts.symbol !== undefined) handle.symbol(opts.symbol);
+  if (opts.symbol !== undefined) setSymbol(handle, opts.symbol);
   if (opts.onToggle !== undefined) app()._register(handle, wire.OCC_TOGGLED, opts.onToggle);
   setLayout(handle, opts);
   return new Container(handle).run(run);
+}
+
+/** Append to a live container built earlier, typically from a handler:
+ * everything declared in `body` joins `container` after its existing
+ * children, the other bindings' add_child (docs/media-player-plan.md M16). */
+export function within<T = void>(container: Widget, body: (container: Widget) => T): T {
+  if (!(container instanceof Widget) || container.isNode) {
+    throw new Error("kaya: within() takes a live container — a template's children are declared inside its own body");
+  }
+  if (_tplDepth > 0) {
+    throw new Error(
+      "kaya: within() inside a template body would add live children to a blueprint — declare the template's children in its own body",
+    );
+  }
+  _parents.push(container.id);
+  try {
+    return body(container);
+  } finally {
+    _parents.pop();
+  }
 }
 
 /** A spacer: PURE SUGAR for an empty grown column. */
@@ -4655,7 +4695,7 @@ function bindText(what: string, handle: Handle, bind: unknown): void {
   }
 }
 
-export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler; symbol?: SymbolValue | SymbolName };
+export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler; symbol?: SymbolValue | SymbolName | FieldRef };
 
 /** A button: a constant caption, or `{bind}` for one the row supplies —
  * template-only, as in all eight other bindings (docs/tpl-props-plan.md F5). */
@@ -4673,7 +4713,7 @@ export function button(a: string | ButtonOptions, b?: ButtonOptions): Widget {
     }
     bindText("button", handle, opts.bind);
   }
-  if (opts.symbol !== undefined) records().push(wire.tx_set_symbol(handle.id, symbolValue(opts.symbol)));
+  if (opts.symbol !== undefined) setSymbol(handle, opts.symbol);
   if (opts.onClick !== undefined) app()._register(handle, wire.OCC_BUTTON_CLICKED, opts.onClick);
   setGrow(handle, opts);
   return handle;
@@ -5058,7 +5098,9 @@ export function secureField(opts: SecureFieldOptions = {}): Widget {
 
 /** `tint` draws the label in a tint's standalone colour — a constant or,
  * in a template, the row's kaya.Tint field (docs/styling-pass-plan.md Y7). */
-export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean; tint?: TintValue | TintName | FieldRef };
+// maxLines: at most this many lines, the rest truncated with the platform's
+// ellipsis (docs/media-player-plan.md M16 (2)).
+export type LabelOptions = GrowOption & { bind?: Bindable; href?: Bindable | string; rich?: boolean; maxLines?: number; tint?: TintValue | TintName | FieldRef };
 
 /** A label: a constant, or `{bind}` for a Signal or the enclosing For's
  * element or field.
@@ -5081,6 +5123,12 @@ export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
       pickerField("a label's tint", opts.tint, Tint, "kaya.Tint");
       records().push(wire.tx_bind_tint_element(handle.id, opts.tint._level(), opts.tint._index));
     } else records().push(wire.tx_set_tint(handle.id, tintValue(opts.tint)));
+  }
+  if (opts.maxLines !== undefined) {
+    if (!Number.isInteger(opts.maxLines) || opts.maxLines < 1) {
+      throw new TypeError(`kaya: maxLines takes a whole number of lines, at least 1, not ${String(opts.maxLines)}`);
+    }
+    records().push(wire.tx_set_max_lines(handle.id, opts.maxLines));
   }
   setGrow(handle, opts);
   return handle;
@@ -5217,7 +5265,7 @@ export class RowImages<E> {
   /** The fetch when the app gives none: the platform's own `fetch`,
    * rejecting for an HTTP error status. */
   static async defaultFetch(url: string, signal: AbortSignal): Promise<Uint8Array> {
-    const response = await fetch(url, { signal });
+    const response = await fetch(url, { signal, headers: { "User-Agent": `kaya/${wire.VERSION}` } });
     if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
     return new Uint8Array(await response.arrayBuffer());
   }

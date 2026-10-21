@@ -240,6 +240,7 @@ module KayaApp
     setAlign,
     setFilled,
     setMaxLines,
+    within,
     setAxis,
     stackWhen,
     columnsWhen,
@@ -1454,7 +1455,8 @@ data Symbol
   | SymbolVolume
   | SymbolQueue
   | SymbolFavorite
-  deriving (Eq, Show)
+  | SymbolMuted
+  deriving (Eq, Show, Enum, Bounded)
 
 -- From the generated table, never literals: the discriminants are spec
 -- facts, append-only, and a hand-typed copy here would drift.
@@ -1495,6 +1497,7 @@ symbolWire s = fromIntegral $ case s of
   SymbolVolume -> W.symbolVolume
   SymbolQueue -> W.symbolQueue
   SymbolFavorite -> W.symbolFavorite
+  SymbolMuted -> W.symbolMuted
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -2830,6 +2833,17 @@ instance KayaValue Tint where
   toWire = W.VI64 . tintWire
   fromWire v = case v of W.VI64 n -> tintOfWire n; _ -> error "kaya: value is not a tint"
 
+symbolOfWire :: Int64 -> Symbol
+symbolOfWire n = case filter ((== n) . symbolWire) [minBound .. maxBound] of
+  s : _ -> s
+  [] -> error ("kaya: symbol " ++ show n ++ " is not one this build knows")
+
+-- | A row's symbol (docs\/media-player-plan.md M16 (21)): the playing row's pause.
+instance KayaFieldType Symbol where
+  fieldTag _ = W.valueI64
+  toFieldValue = W.VI64 . symbolWire
+  fromFieldValue v = case v of W.VI64 n -> symbolOfWire n; _ -> error "kaya: field is not a symbol"
+
 -- | A row's tint (Y7): the playing track's title.
 instance KayaFieldType Tint where
   fieldTag _ = W.valueI64
@@ -3437,6 +3451,12 @@ scroll attrs child = withAttrs attrs (containerOf W.kindScroll [child])
 -- express).
 grid :: Int -> [Build Widget] -> Build Widget
 grid = gridWith
+
+-- | Declare more children into a container built earlier, typically from a
+-- handler: each joins it after its existing children
+-- (docs\/media-player-plan.md M16 (28)).
+within :: Widget -> [Build Widget] -> Build ()
+within container children = mapM_ (>>= addChild container) children
 
 gridWith :: (Declare m) => Int -> [m (El m)] -> m (El m)
 gridWith columns children = do
@@ -4676,6 +4696,8 @@ data TplAttr where
   TplSummaryField :: KField Text -> TplAttr
   -- | Each stamped button's or expander's glyph (the live 'Symbol').
   TplSymbol :: Symbol -> TplAttr
+  -- | Each copy's glyph from its row's 'Symbol' field (M16 (21)).
+  TplSymbolField :: KField Symbol -> TplAttr
   TplNumberFormat :: NumberFormat -> TplAttr
   -- | A stamped slider's granularity (docs\/slider-plan.md S1): constant
   -- across the copies, like the range.
@@ -4724,6 +4746,8 @@ data TplAttr where
   TplSelectedField :: KField Bool -> TplAttr
   TplShapeAs :: Shape -> TplAttr
   TplTintAs :: Tint -> TplAttr
+  -- | A stamped label's most lines, the rest truncated (M16 (2)).
+  TplMaxLines :: Int -> TplAttr
   TplTintBound :: Signal Tint -> TplAttr
   TplTintField :: KField Tint -> TplAttr
   -- | A stamped video view's box ratio, constant across the copies.
@@ -4771,6 +4795,7 @@ applyTplAttr (TplSelectedBound (Signal s)) (Node n) = emitT (W.txBindSelected n 
 applyTplAttr (TplSelectedField (KField i)) (Node n) = emitT (W.txBindSelectedElement n 0 i)
 applyTplAttr (TplShapeAs sh) (Node n) = emitT (W.txSetShape n (shapeWire sh))
 applyTplAttr (TplTintAs t) (Node n) = emitT (W.txSetTint n (tintWire t))
+applyTplAttr (TplMaxLines k) (Node n) = emitT (W.txSetMaxLines n (fromIntegral k))
 applyTplAttr (TplTintBound (Signal s)) (Node n) = emitT (W.txBindTint n s)
 applyTplAttr (TplTintField (KField i)) (Node n) = emitT (W.txBindTintElement n 0 i)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
@@ -4805,6 +4830,7 @@ applyTplAttr (TplSummary t) (Node n) = emitT (W.txSetSummary n (T.unpack t))
 applyTplAttr (TplSummaryBound (Signal s)) (Node n) = emitT (W.txBindSummary n s)
 applyTplAttr (TplSummaryField (KField i)) (Node n) = emitT (W.txBindSummaryElement n 0 i)
 applyTplAttr (TplSymbol sym) (Node n) = emitT (W.txSetSymbol n (symbolWire sym))
+applyTplAttr (TplSymbolField (KField i)) (Node n) = emitT (W.txBindSymbolElement n 0 i)
 applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)
 applyTplAttr (TplMinGap gap) (Node n) = emitT (W.txSetMinGap n gap)

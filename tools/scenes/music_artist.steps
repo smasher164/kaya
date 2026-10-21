@@ -16,10 +16,15 @@ expect_ground column@artist_header image
 expect_fill column@artist_panel overlay
 expect_shape image@artist_avatar circle
 expect_ax label@artist_name "heading/Kellee Maize"
-expect label@artist_about "2 albums · 4 songs, 1:20"
+expect label@artist_about "2 albums · 4 songs, 1 min 20 sec"
+# The header's picture is the 600 px one the snapshot holds (M16 (25)).
+expect image@artist_avatar "600x600"
 expect_inset 0
 expect_inset column@artist_rest 16
 expect_image_phase image@top_track_art[989871] shown
+# A track's title cell is centred on its art (M16 (6)): the two lines hug
+# and the row centres them.
+expect_hugs column@top_track_lines[989871]
 double_click row@top_track[989871]
 expect_selected row@top_track[989871] on
 expect label@dock_title "In Tune"

@@ -85,3 +85,11 @@ expect_toast "Saved|"
 toast_close
 expect label#1 "answers 9"
 expect label#0 "Saved: closed"
+
+# docs/media-player-plan.md M16 (20): a toast shows above an open sheet.
+click button#6
+expect_sheets 1
+click button@sheet_save
+expect_toast "Saved in sheet|"
+toast_close
+expect label#0 "Saved in sheet: closed"

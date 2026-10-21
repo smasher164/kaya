@@ -7,13 +7,13 @@ import Kaya
 extension Playlist: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at
     /// its zero value.
-    static let prototype = Playlist(name: "", selected: false)
+    static let prototype = Playlist(name: "", selected: false, symbol: .add)
 
     init(values: [KayaValue]) {
-        guard case .str(let name) = values[0], case .bool(let selected) = values[1] else {
+        guard case .str(let name) = values[0], case .bool(let selected) = values[1], case .i64(let symbol) = values[2] else {
             preconditionFailure("kaya: Playlist fields out of order")
         }
-        self.init(name: name, selected: selected)
+        self.init(name: name, selected: selected, symbol: kayaSymbol(packed: symbol))
     }
 }
 
@@ -21,6 +21,7 @@ extension Playlist: KayaRecord {
 enum PlaylistFields {
     static let name = KayaField<String>(index: 0)
     static let selected = KayaField<Bool>(index: 1)
+    static let symbol = KayaField<KayaSymbol>(index: 2)
 }
 
 /// The collection factory; the struct is the schema.
@@ -34,6 +35,7 @@ struct PlaylistRow {
     let t: KayaTpl
     let name = PlaylistFields.name
     let selected = PlaylistFields.selected
+    let symbol = PlaylistFields.symbol
 
     @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {

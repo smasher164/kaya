@@ -101,6 +101,7 @@ static void build_scene(void) {
         {"Volume", KAYA_SYMBOL_VOLUME},
         {"Queue", KAYA_SYMBOL_QUEUE},
         {"Favorite", KAYA_SYMBOL_FAVORITE},
+        {"Muted", KAYA_SYMBOL_MUTED},
     };
     for (uint32_t i = 0; i < sizeof transport / sizeof transport[0]; i++) {
         kaya_tx_menu_item_create(&tx, M_TRANSPORT + i, KAYA_MENU_KIND_ACTION);

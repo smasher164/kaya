@@ -81,6 +81,8 @@ main = kayaMain $ \app -> do
           pure master,
           sliderOn 0.0 1.0 0.5 onVolume [TickSpacing 0.25, A11yLabel "Volume"], -- slider#1
           sliderOn 0.0 1.0 0.25 (\_ -> return ()) [Step 0.25, Axis AxisVertical, A11yLabel "Fader", A11yId "fader"], -- slider#2
+          -- A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+          row [sliderOn 0.0 1.0 0.5 (\_ -> return ()) [Grow 1, MaxWidth 120, A11yLabel "Capped", A11yId "capped"]],
           buttonOn "reset" onReset, -- button#0
           pure trackList
         ]

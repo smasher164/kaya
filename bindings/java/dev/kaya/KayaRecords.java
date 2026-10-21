@@ -71,6 +71,7 @@ public final class KayaRecords {
             if (t == KayaApp.ImagePhase.class) return KayaWire.VALUE_I64;
             // A label's tint (docs/styling-pass-plan.md Y7).
             if (t == KayaApp.Tint.class) return KayaWire.VALUE_I64;
+            if (t == KayaApp.Symbol.class) return KayaWire.VALUE_I64;
             return null;
         }
 
@@ -178,7 +179,8 @@ public final class KayaRecords {
             }
             if (value instanceof LocalDate || value instanceof LocalTime
                     || value instanceof KayaApp.Color || value instanceof KayaApp.Player
-                    || value instanceof KayaApp.ImagePhase || value instanceof KayaApp.Tint) {
+                    || value instanceof KayaApp.ImagePhase || value instanceof KayaApp.Tint
+                    || value instanceof KayaApp.Symbol) {
                 return scalarWire(value);
             }
             if (schema[wireIndex] == KayaWire.VALUE_BLOB) {
@@ -231,6 +233,8 @@ public final class KayaRecords {
                     args[at] = KayaApp.ImagePhase.ofWire((Long) fields.get(wire));
                 } else if (want == KayaApp.Tint.class) {
                     args[at] = KayaApp.Tint.ofWire((Long) fields.get(wire));
+                } else if (want == KayaApp.Symbol.class) {
+                    args[at] = KayaApp.Symbol.ofWire((Long) fields.get(wire));
                 } else if (want == KayaApp.Document.class) {
                     // A restored Document field is the blob's BYTES,
                     // redeemed by KayaWire.parseValue
@@ -790,6 +794,9 @@ public final class KayaRecords {
         if (v instanceof KayaApp.Tint t) {
             return t.wire;
         }
+        if (v instanceof KayaApp.Symbol s) {
+            return s.wire;
+        }
         // A signal of bytes: handles are single-submit, so every write
         // registers its own copy (docs/traps.md, a blob signal).
         if (v instanceof byte[] bytes) {
@@ -831,6 +838,7 @@ public final class KayaRecords {
         if (t == KayaApp.Color.class) return DEFAULT_COLOR;
         if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.SHOWN;
         if (t == KayaApp.Tint.class) return KayaApp.Tint.NONE;
+        if (t == KayaApp.Symbol.class) return KayaApp.Symbol.ADD;
         if (t == int.class) return 0;
         return null; // guest-only reference fields
     }
@@ -847,6 +855,7 @@ public final class KayaRecords {
         if (t == KayaApp.Player.class) return SENTINEL_PLAYER;
         if (t == KayaApp.ImagePhase.class) return KayaApp.ImagePhase.FAILED;
         if (t == KayaApp.Tint.class) return KayaApp.Tint.OVERLAY;
+        if (t == KayaApp.Symbol.class) return KayaApp.Symbol.REMOVE;
         throw new IllegalStateException("kaya: no sentinel for " + t.getName());
     }
 
@@ -960,6 +969,7 @@ public final class KayaRecords {
                         c = (java.net.HttpURLConnection)
                                 java.net.URI.create(target).toURL().openConnection();
                         c.setRequestProperty("Connection", "close");
+                        c.setRequestProperty("User-Agent", "kaya/" + KayaWire.VERSION);
                         c.setReadTimeout(IDLE_MS);
                         int status = c.getResponseCode();
                         if (status < 200 || status > 299) {

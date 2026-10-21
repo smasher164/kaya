@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x1f0df237536d7515
+let kayaSpecHash: UInt64 = 0x75f6589c1fd09a4a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -300,6 +300,7 @@ private let symbolRepeatOne: Int64 = 32
 private let symbolVolume: Int64 = 33
 private let symbolQueue: Int64 = 34
 private let symbolFavorite: Int64 = 35
+private let symbolMuted: Int64 = 36
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -486,6 +487,7 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolVolume, "volume", "speaker.wave.2.fill", nil),
     (symbolQueue, "queue", "list.bullet", nil),
     (symbolFavorite, "favorite", "heart", nil),
+    (symbolMuted, "muted", "speaker.slash.fill", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -995,7 +997,18 @@ final class KayaNode: Identifiable {
     /// The children this container LAYS OUT — a folded child renders in
     /// its table's viewport instead, while every harness read and
     /// addressing path keeps seeing `children`.
-    var laidOut: [KayaNode] { children.filter { $0.foldedInto == 0 } }
+    var laidOut: [KayaNode] { children.filter { $0.foldedInto == 0 && !$0.vacant } }
+    /// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
+    /// column or row that draws nothing of its own and holds only such boxes
+    /// (a When showing no case, an empty For) is laid out by no parent, so
+    /// it takes no extent and no gap.
+    var vacant: Bool {
+        // A grown empty box is a spacer, which takes its share on purpose.
+        guard kind == kindColumn || kind == kindRow, grow == 0, filled == 0, ground == 0, !insetSet, !activatable,
+            tableColumns.isEmpty
+        else { return false }
+        return children.allSatisfy { $0.vacant }
+    }
     /// TABLE (docs/tables-plan.md): the declared header bar — titles in
     /// visual order, the indicator column (kayaSortNone for none) and
     /// its direction, and the core-minted sort tag a header click hands
@@ -7771,7 +7784,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
 
     /// expect_symbol: the AXButton carrying the id, and the glyph its render
     /// arm drew (kayaButtonGlyphs), by symbol name.
-    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64) -> String {
+    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64, at centre: CGPoint?) -> String {
         guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
         _ = kayaAwaitWindow(0)
         return DispatchQueue.main.sync { () -> String in
@@ -7779,9 +7792,25 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
             AXUIElementSetMessagingTimeout(app, 2.0)
             var matches: [AXUIElement] = []
             kayaAxFindAll(app, identifier, 0, &matches)
-            let buttons = matches.filter { kayaAxCopy($0, kAXRoleAttribute) as? String == kAXButtonRole }
-            guard buttons.count == 1 else {
-                return "<\(matches.count) elements carry id '\(identifier)', \(buttons.count) of them AXButton>"
+            let buttons = matches.filter {
+                let role = kayaAxCopy($0, kAXRoleAttribute) as? String
+                return role == kAXButtonRole || role == kAXCheckBoxRole
+            }
+            // A stamped copy shares its id with its siblings (M16 (21)): the one
+            // whose frame holds the copy's laid-out centre.
+            func holds(_ element: AXUIElement, _ p: CGPoint) -> Bool {
+                guard let position = kayaAxCopy(element, kAXPositionAttribute as String),
+                    let size = kayaAxCopy(element, kAXSizeAttribute as String)
+                else { return false }
+                var origin = CGPoint.zero, extent = CGSize.zero
+                AXValueGetValue(position as! AXValue, .cgPoint, &origin)
+                AXValueGetValue(size as! AXValue, .cgSize, &extent)
+                return CGRect(origin: origin, size: extent).contains(p)
+            }
+            let chosen = buttons.count == 1 ? buttons : buttons.filter { e in centre.map { holds(e, $0) } ?? false }
+            guard chosen.count == 1 else {
+                return "<\(matches.count) elements carry id '\(identifier)', \(buttons.count) of them AXButton or AXCheckBox, "
+                    + "\(chosen.count) holding \(centre.map(String.init(describing:)) ?? "no centre")>"
             }
             return kayaButtonGlyphName(node)
         }
@@ -8351,7 +8380,7 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
 
     /// expect_symbol: the element UIKit publishes for the id, and the glyph
     /// the button's render arm drew (kayaButtonGlyphs), by symbol name.
-    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64) -> String {
+    func kayaAxButtonSymbolRead(_ identifier: String, _ node: UInt64, at _: CGPoint?) -> String {
         guard !identifier.isEmpty else { return "<the target has no a11y_id to find it by>" }
         kayaAxEnableAutomation()
         return DispatchQueue.main.sync { () -> String in
@@ -11927,16 +11956,138 @@ private func kayaRunScript(_ script: String) {
                 let answered = kayaAnswers()
                 let (wid, _, _) = kayaWindowTarget(Array(parts[1...]))
                 DispatchQueue.main.sync {
-                    // NO back affordance while both panes are on screen:
-                    // NavigationSplitView draws no back button in a detail
-                    // column beside its sidebar, so driving the pop would let
-                    // the harness do what the screen does not offer.
-                    guard !kayaSplitArm(wid) else { return }
+                    // NO back affordance where the top covers nothing in its
+                    // pane (DESIGN.md's back rule): the verb must not do what
+                    // the screen does not offer.
                     let surface = kayaActiveSurface(wid)
                     let depth = max(0, kayaStackDepth(surface))
+                    guard !kayaSplitArm(wid) || depth > kayaSplitCoveredDepth(wid) else { return }
                     kayaUserPops(surface, to: max(0, depth - 1))
                 }
                 kayaAwaitAnswer(answered)
+            case "expect_gap":
+                // harness.rs's ExpectGap, the same sentences, between two labels'
+                // laid-out frames (docs/media-player-plan.md M16 (3)).
+                guard parts.count == 4, let wantGap = Double(parts[3]) else {
+                    failures.append("expect_gap wants two targets and a gap in points: \(line)")
+                    break
+                }
+                func frameOf(_ spec: Substring) -> CGRect?? {
+                    DispatchQueue.main.sync { () -> CGRect?? in
+                        guard let node = kayaTarget(spec, "label", kayaScene.labels) else { return nil }
+                        return .some(kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }))
+                    }
+                }
+                // nil when the gap is the one wanted, else what was read.
+                func readGap() -> String? {
+                    switch (frameOf(parts[1]), frameOf(parts[2])) {
+                    case (nil, _): return "no such target \(parts[1])"
+                    case (_, nil): return "no such target \(parts[2])"
+                    case (.some(nil), _): return "\(parts[1]) frame unread: <no laid-out frame>"
+                    case (_, .some(nil)): return "\(parts[2]) frame unread: <no laid-out frame>"
+                    case let (a??, b??):
+                        let gap = Double(b.minY - a.maxY)
+                        if abs(gap - wantGap) <= 1 { return nil }
+                        return
+                            "\(parts[1]) to \(parts[2]) gap \(Int(gap.rounded())), wanted \(parts[3]) (\(parts[1]) ends at \(Int(a.maxY.rounded())), \(parts[2]) starts at \(Int(b.minY.rounded())))"
+                    }
+                }
+                var gapRead = readGap()
+                let gapDeadline = Date().addingTimeInterval(5)
+                while Date() < gapDeadline, gapRead != nil {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gapRead = readGap()
+                }
+                if let why = gapRead {
+                    failures.append(why)
+                } else {
+                    observed.append("\(parts[1]) to \(parts[2]) gap \(parts[3])")
+                }
+            case "expect_width":
+                // harness.rs's ExpectWidth, the same sentences; a slider's drawn width.
+                guard parts.count == 3, let wantWidth = Double(parts[2]) else {
+                    failures.append("expect_width wants a target and a width in points: \(line)")
+                    break
+                }
+                func readWidth() -> Double?? {
+                    DispatchQueue.main.sync { () -> Double?? in
+                        guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else { return nil }
+                        return .some(kayaDrawnWidths[node.id].map(Double.init))
+                    }
+                }
+                var gotWidth = readWidth()
+                let widthDeadline = Date().addingTimeInterval(5)
+                while Date() < widthDeadline, case let w?? = gotWidth, abs(w - wantWidth) > 1 {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotWidth = readWidth()
+                }
+                switch gotWidth {
+                case nil: failures.append("no such target \(parts[1])")
+                case .some(nil): failures.append("\(parts[1]) width unread: <no drawn width recorded>")
+                case let w??:
+                    if abs(w - wantWidth) <= 1 {
+                        observed.append("\(parts[1]) \(parts[2]) wide")
+                    } else {
+                        failures.append("\(parts[1]) \(Int(w.rounded())) wide, wanted \(parts[2])")
+                    }
+                }
+            case "expect_text_lines":
+                // crates/kaya/src/harness.rs's ExpectTextLines, the same sentences.
+                guard parts.count == 4, let wantLines = Int(parts[2]), parts[3] == "truncated" || parts[3] == "whole" else {
+                    failures.append("expect_text_lines wants a label, a line count and truncated|whole: \(line)")
+                    break
+                }
+                let wantCut = parts[3] == "truncated"
+                func readLines() -> (Int, Bool)?? {
+                    DispatchQueue.main.sync { () -> (Int, Bool)?? in
+                        guard let node = kayaTarget(parts[1], "label", kayaScene.labels) else { return nil }
+                        return .some(kayaLabelLinesRead(node))
+                    }
+                }
+                var gotLines = readLines()
+                let linesDeadline = Date().addingTimeInterval(5)
+                while Date() < linesDeadline, case let got?? = gotLines, got != (wantLines, wantCut) {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotLines = readLines()
+                }
+                let word = { (cut: Bool) in cut ? "truncated" : "whole" }
+                switch gotLines {
+                case nil: failures.append("no such target \(parts[1])")
+                case .some(nil): failures.append("\(parts[1]) lines unread: <no laid-out frame>")
+                case let got??:
+                    if got == (wantLines, wantCut) {
+                        observed.append("\(parts[1]) \(got.0) lines \(word(got.1))")
+                    } else {
+                        failures.append("\(parts[1]) \(got.0) lines \(word(got.1)), wanted \(wantLines) lines \(word(wantCut))")
+                    }
+                }
+            case "expect_cells_even":
+                // docs/media-player-plan.md M16 (1): crates/kaya/src/harness.rs's
+                // cells_even, the same rule and sentences.
+                func readCells() -> String? {
+                    DispatchQueue.main.sync { () -> String? in
+                        guard let grid = kayaTarget(parts[1], "grid", kayaScene.grids) else { return nil }
+                        var frames: [CGRect] = []
+                        for cell in grid.children {
+                            guard let f = kayaAnchoredFrame(cell.id) ?? kayaGridCellFrames[cell.id] else {
+                                return "unread: cell \(frames.count + 1) has no laid-out frame"
+                            }
+                            frames.append(f)
+                        }
+                        return kayaCellsEven(frames, 2).map { "uneven: \($0)" } ?? ""
+                    }
+                }
+                var cells = readCells()
+                let cellsDeadline = Date().addingTimeInterval(5)
+                while cells != nil && cells != "" && Date() < cellsDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    cells = readCells()
+                }
+                switch cells {
+                case ""?: observed.append("\(parts[1]) cells even")
+                case let s?: failures.append("\(parts[1]) cells \(s)")
+                case nil: failures.append("no such target \(parts[1])")
+                }
             case "expect_grid_columns":
                 let want = Int(parts[2])!
                 let off = DispatchQueue.main.sync { () -> String? in
@@ -12555,14 +12706,19 @@ private func kayaRunScript(_ script: String) {
                 if let ok { observed.append(ok) } else { failures.append(fail) }
             case "expect_symbol":
                 guard parts.count >= 3 else {
-                    failures.append("expect_symbol wants a button and a quoted symbol name: \(line)")
+                    failures.append("expect_symbol wants a button or checkbox and a quoted symbol name: \(line)")
                     break
                 }
                 let wantSymbol = kayaQuoted(Array(parts.dropFirst(2)))
                 func readSymbol() -> String {
-                    guard let node = DispatchQueue.main.sync(execute: { kayaTarget(parts[1], "button", kayaScene.buttons) })
+                    let toggle = parts[1].hasPrefix("checkbox")
+                    guard let (node, centre) = DispatchQueue.main.sync(execute: { () -> (KayaNode, CGPoint?)? in
+                        let node = toggle ? kayaTarget(parts[1], "checkbox", kayaScene.checkboxes)
+                            : kayaTarget(parts[1], "button", kayaScene.buttons)
+                        return node.map { ($0, kayaScreenCentre($0)) }
+                    })
                     else { return "<no such target>" }
-                    return kayaAxButtonSymbolRead(node.a11yId, node.id)
+                    return kayaAxButtonSymbolRead(node.a11yId, node.id, at: centre)
                 }
                 var gotSymbol = readSymbol()
                 let symbolDeadline = Date().addingTimeInterval(5)
@@ -13107,7 +13263,20 @@ private func kayaRunScript(_ script: String) {
                 // Off the accessibility tree, never kayaScene.toasts
                 // (docs/toast-plan.md T13).
                 let want = parts[0] == "expect_toast" ? kayaQuoted(Array(parts[1...])) : ""
-                let shown = kayaToastRead()
+                var shown = kayaToastRead()
+                // The wanted toast, drawn over any open sheet (M16 (20)), within the
+                // step's own five seconds; a toast seen under a sheet is said even
+                // when it has closed by the deadline.
+                if parts[0] == "expect_toast" {
+                    let toastDeadline = Date().addingTimeInterval(5)
+                    while Date() < toastDeadline {
+                        let under = DispatchQueue.main.sync(execute: { kayaToastUnderSheet() })
+                        if let under { kayaToastUnderSeen[want] = under }
+                        if under == nil, shown.count == 1, kayaBytesEqual("\(shown[0].0)|\(shown[0].1)", want) { break }
+                        Thread.sleep(forTimeInterval: 0.1)
+                        shown = kayaToastRead()
+                    }
+                }
                 if shown.count > 1 {
                     failures.append("\(shown.count) toasts on screen")
                 } else if parts[0] == "expect_no_toast" {
@@ -13123,12 +13292,17 @@ private func kayaRunScript(_ script: String) {
                     } else if let over = DispatchQueue.main.sync(execute: { kayaToastOverDock() }) {
                         kayaToastOverSeen[want] = over
                         failures.append("toast \"\(want)\" \(over)")
+                    } else if let under = DispatchQueue.main.sync(execute: { kayaToastUnderSheet() }) {
+                        kayaToastUnderSeen[want] = under
+                        failures.append("toast \"\(want)\" \(under)")
                     } else {
                         kayaToastOverSeen[want] = nil
                         observed.append("toast \"\(want)\"")
                     }
                 } else if let over = kayaToastOverSeen[want] {
                     failures.append("no toast shown, wanted \"\(want)\"; while it showed it \(over)")
+                } else if let under = kayaToastUnderSeen[want] {
+                    failures.append("no toast shown, wanted \"\(want)\"; the toast \(under)")
                 } else {
                     failures.append("no toast shown, wanted \"\(want)\"")
                 }
@@ -13166,6 +13340,61 @@ private func kayaRunScript(_ script: String) {
                     observed.append("text scale \(parts[1])")
                 } else {
                     failures.append("text scale \(got), wanted \(parts[1])")
+                }
+            case "expect_ground_color":
+                // harness.rs's ExpectGroundColor, the same sentences and tolerance.
+                let spec = kayaQuoted(Array(parts.dropFirst(2))).split(separator: " ").map(String.init)
+                guard spec.count == 4, spec[0] == "light", spec[2] == "dark",
+                    let light = UInt32(spec[1], radix: 16), let dark = UInt32(spec[3], radix: 16)
+                else {
+                    failures.append("expect_ground_color wants a container and \"light RRGGBB dark RRGGBB\": \(line)")
+                    break
+                }
+                func near(_ a: UInt32, _ b: UInt32) -> Bool {
+                    for k: UInt32 in 0..<3 {
+                        let x = Int((a >> (8 * k)) & 0xFF)
+                        let y = Int((b >> (8 * k)) & 0xFF)
+                        if abs(x - y) > 15 { return false }
+                    }
+                    return true
+                }
+                func readTop() -> (UInt32, Bool)?? {
+                    DispatchQueue.main.sync { () -> (UInt32, Bool)?? in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                            ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                        else { return nil }
+                        return .some(kayaGroundTopRead(node))
+                    }
+                }
+                var gotTop = readTop()
+                let topDeadline = Date().addingTimeInterval(5)
+                while Date() < topDeadline, case let read?? = gotTop, !near(read.0, read.1 ? dark : light) {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotTop = readTop()
+                }
+                let said = String(format: "light %06X dark %06X", light, dark)
+                switch gotTop {
+                case nil: failures.append("no such target \(parts[1])")
+                case .some(nil): failures.append("\(parts[1]) ground top unread: <no laid-out frame or no window pixels>")
+                case let read??:
+                    let want = read.1 ? dark : light
+                    if near(read.0, want) {
+                        observed.append("\(parts[1]) ground color \"\(said)\"")
+                    } else {
+                        failures.append(String(format: "%@ ground top %06X in the %@, wanted %06X", String(parts[1]), read.0, read.1 ? "dark" : "light", want))
+                    }
+                }
+            case "expect_no_overlap":
+                var (overlap, overlapCount) = DispatchQueue.main.sync { kayaOverlapReport() }
+                let overlapDeadline = Date().addingTimeInterval(5)
+                while !overlap.isEmpty && Date() < overlapDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    (overlap, overlapCount) = DispatchQueue.main.sync { kayaOverlapReport() }
+                }
+                if overlap.isEmpty {
+                    observed.append("no overlap (\(overlapCount) measured)")
+                } else {
+                    failures.append("overlap: \(overlap)")
                 }
             case "expect_no_clipping":
                 let (clipped, measured) = DispatchQueue.main.sync { kayaClippingReport() }
@@ -14890,6 +15119,10 @@ private func kayaRunScript(_ script: String) {
                 + pinBreaches.joined(separator: ", ")
                 + " — restore them in swift/KayaSwiftUI.swift, kayaPinPlainText")
     }
+    #if os(iOS)
+    watchdog.enter("<the verdict's status bar hook read>")
+    failures.append(contentsOf: DispatchQueue.main.sync { kayaStatusHookRefusals })
+    #endif
     // THE LAST STEP CAN FAULT TOO, and a fault must never leave a green
     // verdict behind it.
     if !reportedFault, let fault = kayaCoreFaultNote() {
@@ -15011,6 +15244,71 @@ private struct KayaTrackReader: View {
 /// Every flex child's frame in the window's space, by node id — what
 /// `expect_mirrored` reads (docs/compliance-plan.md §4).
 var kayaNodeFrames: [UInt64: CGRect] = [:]
+
+/// An auto grid's cells in the window's space, what `expect_cells_even` reads
+/// (docs/media-player-plan.md M16 (1)).
+var kayaGridCellFrames: [UInt64: CGRect] = [:]
+
+/// A slider's drawn width, never its track, what `expect_width` reads
+/// (docs/media-player-plan.md M16 (17)).
+var kayaDrawnWidths: [UInt64: CGFloat] = [:]
+
+/// crates/kaya/src/harness.rs's `cells_even`, nil when the cells are even.
+func kayaCellsEven(_ frames: [CGRect], _ tolerance: CGFloat) -> String? {
+    if frames.count < 2 { return "\(frames.count) cell(s), wanted two at least" }
+    func spell(_ i: Int) -> String {
+        let f = frames[i]
+        return "cell \(i + 1) is \(Int(f.width.rounded()))x\(Int(f.height.rounded())) at (\(Int(f.minX.rounded())),\(Int(f.minY.rounded())))"
+    }
+    var rows: [[Int]] = []
+    for i in frames.indices {
+        if let row = rows.last, frames[i].minY < (row.map { frames[$0].maxY }.max() ?? 0) - tolerance {
+            rows[rows.count - 1].append(i)
+        } else {
+            rows.append([i])
+        }
+    }
+    for i in 1..<frames.count where abs(frames[i].width - frames[0].width) > tolerance {
+        return "\(spell(i)), \(spell(0)): the widths differ"
+    }
+    var across: (CGFloat, Int)?
+    for row in rows {
+        let first = row[0]
+        for k in 1..<max(1, row.count) {
+            let i = row[k]
+            if abs(frames[i].minY - frames[first].minY) > tolerance {
+                return "\(spell(i)), \(spell(first)): the tops differ in one row"
+            }
+            if abs(frames[i].height - frames[first].height) > tolerance {
+                return "\(spell(i)), \(spell(first)): the heights differ in one row"
+            }
+            let gap = frames[i].minX - frames[row[k - 1]].maxX
+            if gap < -tolerance {
+                return "\(spell(i)), \(spell(row[k - 1])): cell \(i + 1) overlaps cell \(row[k - 1] + 1) by \(Int((-gap).rounded()))"
+            }
+            if let (g, at) = across {
+                if abs(gap - g) > tolerance {
+                    return "the gap before cell \(i + 1) is \(Int(gap.rounded())), before cell \(at + 1) it is \(Int(g.rounded()))"
+                }
+            } else {
+                across = (gap, i)
+            }
+        }
+    }
+    var down: (CGFloat, Int)?
+    for r in rows.indices.dropFirst() {
+        let bottom = rows[r - 1].map { frames[$0].maxY }.max() ?? 0
+        let gap = frames[rows[r][0]].minY - bottom
+        if let (g, at) = down {
+            if abs(gap - g) > tolerance {
+                return "the gap above row \(r + 1) is \(Int(gap.rounded())), above row \(at + 1) it is \(Int(g.rounded()))"
+            }
+        } else {
+            down = (gap, r)
+        }
+    }
+    return nil
+}
 
 /// Each live reader's last record of a node, newest last: when SwiftUI drops a
 /// copy of a subtree it laid out, the newest survivor's record is applied again
@@ -17400,6 +17698,8 @@ struct KayaTableSurface: View {
     /// Y5); a row under the floor is untouched.
     let kayaNativeRowPadding: CGFloat = 8
     let kayaNativeHeaderHeight: CGFloat = 28
+    /// A column whose content floor is at most this keeps it (M16 (7)).
+    let kayaNativeNarrowColumn: CGFloat = 64
     let kayaNativeTopInset: CGFloat = 5
     let kayaNativeApronHeight: CGFloat = 5
 
@@ -17788,7 +18088,10 @@ private struct KayaNativeTable: View {
             tableView.dataSource = self
             tableView.delegate = self
             tableView.style = .inset
-            tableView.usesAlternatingRowBackgroundColors = true
+            // THE STRIPES END WITH THE ROWS (M16 (7)): AppKit's alternation
+            // paints the whole clip, so a grown table's empty foot read as
+            // rows that were not there; each row view wears its own stripe.
+            tableView.usesAlternatingRowBackgroundColors = false
             tableView.gridStyleMask = []
             tableView.intercellSpacing = NSSize(width: 0, height: 0)
             tableView.rowHeight = kayaNativeRowHeight
@@ -17961,6 +18264,11 @@ private struct KayaNativeTable: View {
         /// THE CORE IS THE ONLY ESTIMATOR (§2): measured where this row
         /// has been measured, the pitch where it has not, and the tier's
         /// own floor before anything has been measured at all.
+        func tableView(_ tableView: NSTableView, didAdd rowView: NSTableRowView, forRow row: Int) {
+            let stripes = NSColor.alternatingContentBackgroundColors
+            rowView.backgroundColor = stripes[row % stripes.count]
+        }
+
         func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
             let extent = KayaHost.rowExtent(node.id, row)
             return extent > 0 ? CGFloat(extent) : kayaNativeRowHeight
@@ -18403,8 +18711,13 @@ private struct KayaNativeTable: View {
             var widened = false
             let total = widths.reduce(0, +)
             if track > total {
-                let share = (track - total) / CGFloat(columns.count)
-                for column in widths.indices { widths[column] += share }
+                // A NARROW COLUMN KEEPS ITS CONTENT WIDTH (M16 (7)): "#" and
+                // "Time" stay as wide as their text, as Music's do, and the
+                // wide columns share the leftover; all-narrow tables share it.
+                let wide = widths.indices.filter { floors[$0] > kayaNativeNarrowColumn }
+                let takers = wide.isEmpty ? Array(widths.indices) : wide
+                let share = (track - total) / CGFloat(takers.count)
+                for column in takers { widths[column] += share }
             }
             for (index, column) in columns.enumerated() {
                 // THE MEASURED FLOOR IS THE MINIMUM, not 24: an assignment is
@@ -19555,8 +19868,9 @@ struct KayaAutoGrid: Layout {
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil }
-            ?? (minWidth * CGFloat(subviews.count) + spacing * CGFloat(max(0, subviews.count - 1)))
+        // docs/traps.md, a sideways shelf widened the window: unproposed, the
+        // grid's ideal is one column's floor, never its cells end to end.
+        let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minWidth
         let plan = rows(subviews, width: width)
         let height = plan.heights.reduce(0, +) + spacing * CGFloat(max(0, plan.heights.count - 1))
         return CGSize(width: width, height: height)
@@ -19571,11 +19885,14 @@ struct KayaAutoGrid: Layout {
             for c in 0..<plan.cols {
                 let i = r * plan.cols + c
                 if i >= subviews.count { break }
-                let size = subviews[i].sizeThatFits(ProposedViewSize(width: plan.share, height: nil))
+                // A container takes its column and the row's tallest height
+                // (docs/media-player-plan.md M16 (1)); a leaf keeps its own size,
+                // centred down the row as GTK's and WinUI's cells are.
                 let x = bounds.minX + CGFloat(c) * (plan.share + spacing)
+                let size = subviews[i].sizeThatFits(ProposedViewSize(width: plan.share, height: rowH))
                 subviews[i].place(
-                    at: CGPoint(x: x, y: y + (rowH - size.height) / 2), anchor: .topLeading,
-                    proposal: ProposedViewSize(width: plan.share, height: size.height))
+                    at: CGPoint(x: x, y: y + max(0, rowH - size.height) / 2), anchor: .topLeading,
+                    proposal: ProposedViewSize(width: plan.share, height: rowH))
             }
             y += rowH + spacing
         }
@@ -19737,6 +20054,9 @@ private struct KayaGroupedSection: Identifiable {
         /// A container wearing a ground (Y2, Y3): the app's own surface, bare
         /// on the screen's ground, never carded or dissolved.
         case ground(KayaNode)
+        /// A grid of cards (docs/adaptive-layout-plan.md D7.5, M16 (5)): the
+        /// cards are their own surfaces, so no card goes around them.
+        case shelf(KayaNode)
         case none
     }
     var header: KayaNode?
@@ -19747,7 +20067,7 @@ private struct KayaGroupedSection: Identifiable {
         if let header { return header.id }
         switch content {
         case .run(let nodes): return nodes[0].id
-        case .table(let node), .form(let node), .ground(let node): return node.id
+        case .table(let node), .form(let node), .ground(let node), .shelf(let node): return node.id
         case .none: return footer?.id ?? 0
         }
     }
@@ -19784,6 +20104,12 @@ private func kayaGroupedFlatten(
     }
 }
 
+/// A grid whose cells are cards: filled or activatable containers.
+private func kayaIsShelf(_ node: KayaNode) -> Bool {
+    node.kind == kindGrid && !node.children.isEmpty
+        && node.children.allSatisfy { $0.filled != 0 || $0.activatable }
+}
+
 private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
     var flat: [KayaNode] = []
     var margins: [UInt64: KayaNode] = [:]
@@ -19816,6 +20142,14 @@ private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
         } else if node.ground != groundNone {
             flush()
             out.append(KayaGroupedSection(content: .ground(node)))
+        } else if kayaIsShelf(node) {
+            if run.isEmpty, header != nil {
+                out.append(KayaGroupedSection(header: header, content: .shelf(node)))
+                header = nil
+            } else {
+                flush()
+                out.append(KayaGroupedSection(content: .shelf(node)))
+            }
         } else if node.role == roleHeading {
             flush()
             header = node
@@ -19836,7 +20170,7 @@ private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
             if let header = out[i].header { return header.id }
             switch out[i].content {
             case .run(let nodes): return nodes.first?.id
-            case .table(let node), .form(let node), .ground(let node): return node.id
+            case .table(let node), .form(let node), .ground(let node), .shelf(let node): return node.id
             case .none: return out[i].footer?.id
             }
         }()
@@ -19873,6 +20207,9 @@ private struct KayaGroupedSections: View {
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
                         case .run(let nodes):
                             kayaCarded(nodes)
+                        case .shelf(let grid):
+                            KayaRender(node: grid, flexVertical: true, flexStretch: true)
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
                         case .ground(let node):
                             KayaRender(node: node, flexVertical: true, flexStretch: true)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -20152,6 +20489,9 @@ struct KayaToggleButton: View {
         .toggleStyle(.button)
         .accessibilityLabel(node.text)
         .fixedSize()
+        .onAppear { kayaButtonGlyphs[node.id] = kayaToggleSF(node.symbol, on: node.checked) }
+        .onChange(of: kayaToggleSF(node.symbol, on: node.checked)) { _, drawn in kayaButtonGlyphs[node.id] = drawn }
+        .onDisappear { kayaButtonGlyphs[node.id] = nil }
     }
 }
 
@@ -20753,8 +21093,8 @@ private func kayaRGB(_ rgb: UInt32) -> Color {
 }
 
 /// A selected activatable container wears the selected surface in place of
-/// its fill (Y4): under it, iOS's translucent systemFill over the neutral
-/// fill drew a third grey neither token names.
+/// its fill (Y4): under a translucent selection over the neutral fill, a
+/// third grey neither token names would be drawn.
 @MainActor func kayaShownFill(_ node: KayaNode) -> Int64 {
     node.activatable && node.selected ? 0 : node.filled
 }
@@ -20942,7 +21282,8 @@ struct KayaGroundSurface: ViewModifier {
             return
         }
         // Each end third of the bar, where its icons sit: the picture where it
-        // is drawn there, the page's ground over the rest.
+        // is drawn there, the page's ground over the rest; then the window's
+        // own pixels once drawn (kayaStatusRecheck, docs/traps.md).
         var page: [Double] = [1, 1, 1]
         var (r, g, b, a): (CGFloat, CGFloat, CGFloat, CGFloat) = (1, 1, 1, 1)
         if UIColor.systemBackground.resolvedColor(with: window.traitCollection).getRed(&r, green: &g, blue: &b, alpha: &a) {
@@ -20965,9 +21306,45 @@ struct KayaGroundSurface: ViewModifier {
         let dark = ys.map { ($0 + 0.05) / 0.05 }.min()! >= ys.map { 1.05 / ($0 + 0.05) }.min()!
         kayaDiag("ground \(node.id) under the status bar: \(ends.map(kayaHex).joined(separator: " and ")) at its ends "
             + "over \(Int(up))pt of \(drawn), \(dark ? "dark" : "light") icons")
-        kayaGroundUnder(node.id, dark)
+        kayaGroundUnder(node.id, kayaStatusDrawn[node.id] ?? dark)
+        kayaStatusRecheck(node.id)
     #endif
 }
+
+#if os(iOS)
+    /// The shade each image ground's claim takes from the window's own drawn
+    /// pixels at the bar's two ends, which is what the icons sit on
+    /// (docs/traps.md, the status bar claim under an inline title).
+    @MainActor var kayaStatusDrawn: [UInt64: Bool] = [:]
+    @MainActor private var kayaStatusRechecks: Set<UInt64> = []
+
+    @MainActor func kayaStatusRecheck(_ id: UInt64) {
+        guard kayaStatusRechecks.insert(id).inserted else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            MainActor.assumeIsolated {
+                kayaStatusRechecks.remove(id)
+                guard kayaStatusClaims[id] != nil, let window = kayaHarnessWindow(),
+                    let shot = kayaWindowPixels()
+                else { return }
+                let y = window.safeAreaInsets.top / 2
+                let width = window.bounds.width
+                guard let near = shot.at(CGPoint(x: 4, y: y)), let away = shot.at(CGPoint(x: width - 4, y: y))
+                else { return }
+                func lum(_ c: [Double]) -> Double {
+                    let l = c.prefix(3).map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+                    return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+                }
+                let ys = [lum(near), lum(away)]
+                let dark = ys.map { ($0 + 0.05) / 0.05 }.min()! >= ys.map { 1.05 / ($0 + 0.05) }.min()!
+                guard kayaStatusDrawn[id] != dark else { return }
+                kayaStatusDrawn[id] = dark
+                kayaDiag("ground \(id) under the status bar, as drawn: \(kayaHex(near)) and \(kayaHex(away)) "
+                    + "at its ends, y \(Int(y)), \(dark ? "dark" : "light") icons")
+                kayaGroundUnder(id, dark)
+            }
+        }
+    }
+#endif
 
 #if os(iOS)
     /// The mean colour a picture drawn to cover `area` shows over `rect` of it.
@@ -21003,12 +21380,24 @@ struct KayaGroundSurface: ViewModifier {
     /// none (SwiftUI's own answer), 1 dark icons, 2 light ones.
     nonisolated(unsafe) var kayaStatusOverride = 0
     @MainActor private var kayaStatusStyleClasses: Set<ObjectIdentifier> = []
+    /// What the status bar style hook could not replace; the harness's verdict fails on any.
+    @MainActor var kayaStatusHookRefusals: [String] = []
+
+    @MainActor func kayaStatusHookRefused(_ cls: AnyClass, _ getter: String) {
+        let said = "the status bar style hook found no \(getter) on \(cls) to replace, so an image ground "
+            + "under the status bar cannot set its icons' shade (docs/safe-area-plan.md A2)"
+        kayaDiag(said)
+        kayaStatusHookRefusals.append(said)
+    }
 #endif
 
 /// An image ground's claim on the status bar's icon shade, or its release.
 @MainActor func kayaGroundUnder(_ id: UInt64, _ darkIcons: Bool?) {
     #if os(iOS)
-        if let darkIcons { kayaStatusClaims[id] = darkIcons } else { kayaStatusClaims.removeValue(forKey: id) }
+        if let darkIcons { kayaStatusClaims[id] = darkIcons } else {
+            kayaStatusClaims.removeValue(forKey: id)
+            kayaStatusDrawn.removeValue(forKey: id)
+        }
         let want = kayaStatusClaims.values.first.map { $0 ? 1 : 2 } ?? 0
         guard want != kayaStatusOverride || (darkIcons != nil && kayaStatusStyleClasses.isEmpty) else { return }
         kayaStatusOverride = want
@@ -21031,6 +21420,8 @@ struct KayaGroundSurface: ViewModifier {
                     }
                 }
                 class_replaceMethod(cls, sel, imp_implementationWithBlock(answer), method_getTypeEncoding(method))
+            } else {
+                kayaStatusHookRefused(cls, "preferredStatusBarStyle")
             }
             // The root hands the question to a child (the navigation stack's
             // own controller) unless it is told not to while a claim stands.
@@ -21042,6 +21433,8 @@ struct KayaGroundSurface: ViewModifier {
                     kayaStatusOverride == 0 ? original(me, child) : nil
                 }
                 class_replaceMethod(cls, child, imp_implementationWithBlock(answer), method_getTypeEncoding(method))
+            } else {
+                kayaStatusHookRefused(cls, "childForStatusBarStyle")
             }
         }
         root.setNeedsStatusBarAppearanceUpdate()
@@ -21066,7 +21459,7 @@ struct KayaImageShape: ViewModifier {
 /// The selected surface's fill and foreground (Y4): AppKit's selected
 /// content pair, the grouped list's on iOS.
 /// Whether the selected surface recolours the text on it: the mac's accent
-/// fill does, iOS's neutral systemFill keeps a tinted label's colour (Y4, Y7).
+/// fill does, iOS's neutral gray keeps a tinted label's colour (Y4, Y7).
 let kayaSelectionTakesText: Bool = {
     #if os(macOS)
         true
@@ -21079,7 +21472,8 @@ let kayaSelectionTakesText: Bool = {
     #if os(macOS)
         (Color(nsColor: .selectedContentBackgroundColor), Color(nsColor: .alternateSelectedControlTextColor))
     #else
-        (Color(uiColor: .systemFill), Color(uiColor: .label))
+        // docs/styling-pass-plan.md §3, the stronger fill (M16 (4)).
+        (Color(uiColor: .systemGray4), Color(uiColor: .label))
     #endif
 }
 
@@ -21224,7 +21618,7 @@ struct KayaLabelTint: ViewModifier {
         var accent = rgba(.tintColor)
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(.secondarySystemFill))]
-        let skin = (hover: rgba(.quaternarySystemFill), neutral: rgba(.secondarySystemFill), selected: rgba(.systemFill))
+        let skin = (hover: rgba(.quaternarySystemFill), neutral: rgba(.secondarySystemFill), selected: rgba(.systemGray4))
     #endif
     if let brand = kayaScene.brand {
         let rgb = dark ? brand[6] : brand[1]
@@ -21567,6 +21961,18 @@ struct KayaSkinFrameReader: View {
 /// expect_ground's read (docs/styling-pass-plan.md §5.1), off the pixels at
 /// the container's right edge, 4 units in from its top and its bottom and at
 /// its middle.
+/// expect_ground_color's read (docs/media-player-plan.md M16 (35)): the ground's
+/// own top probe as 0xRRGGBB and whether the window reads dark, or why not;
+/// kayaGroundRead's probe.
+@MainActor func kayaGroundTopRead(_ node: KayaNode) -> (UInt32, Bool)? {
+    guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16,
+        kayaSkinUnseen(node, frame) == nil, let shot = kayaWindowPixels(),
+        let top = shot.at(CGPoint(x: frame.maxX - 4, y: frame.minY + 4))
+    else { return nil }
+    let b = top.map { UInt32(max(0, min(255, ($0 * 255).rounded()))) }
+    return ((b[0] << 16) | (b[1] << 8) | b[2], shot.dark)
+}
+
 @MainActor func kayaGroundRead(_ node: KayaNode) -> String {
     guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16 else {
         return "<no laid-out frame>"
@@ -22019,6 +22425,41 @@ struct KayaDockHost: ViewModifier {
 
 /// expect_toast's placement half (docs/toast-plan.md T8): nil when the shown
 /// toast ends above the primary window's dock, else what was measured.
+/// The window's topmost presented sheet, nil when none is up, which is the
+/// layer its toast draws in (docs/media-player-plan.md M16 (20)). A sheet
+/// over an entry or a section belongs to the primary window.
+@MainActor func kayaToastLayer(_ windowId: UInt64) -> UInt64? {
+    var best: UInt64?
+    for (sid, sheet) in kayaScene.sheets where sheet.root != nil {
+        if let child = kayaScene.childSheet[sid], kayaScene.sheets[child]?.root != nil { continue }
+        if kayaSheetOwnerWindow(sid) == windowId { best = max(best ?? sid, sid) }
+    }
+    return best
+}
+
+@MainActor func kayaSheetOwnerWindow(_ sid: UInt64) -> UInt64 {
+    var base = kayaScene.sheets[sid]?.parent ?? 0
+    while let sheet = kayaScene.sheets[base] { base = sheet.parent }
+    return kayaScene.windows[base] != nil ? base : 0
+}
+
+/// A wanted toast seen drawn under a sheet, said even once it has closed.
+nonisolated(unsafe) var kayaToastUnderSeen: [String: String] = [:]
+
+/// The layer each window's toast last drew in, what expect_toast's sheet
+/// half reads (M16 (20)).
+var kayaToastDrawnLayer: [UInt64: UInt64?] = [:]
+
+/// nil when the shown toast draws over every sheet presented on its window,
+/// else what was measured (harness.rs's Stage::toast_under_sheet).
+@MainActor func kayaToastUnderSheet() -> String? {
+    guard kayaScene.toasts[0] != nil, let top = kayaToastLayer(0) else { return nil }
+    let drawn = kayaToastDrawnLayer[0] ?? nil
+    guard drawn != top else { return nil }
+    let title = kayaScene.sheets[top]?.title ?? ""
+    return "is drawn \(drawn.map { "in sheet \($0)" } ?? "in the window's own layer"), under the sheet \(title.debugDescription) presented over it"
+}
+
 @MainActor func kayaToastOverDock() -> String? {
     guard kayaScene.toasts[0] != nil, let toast = kayaToastFrame,
         let dock = kayaScene.windows[0]?.dock, kayaHoldsWidget(dock), let frame = kayaDockFrame, frame.height > 1,
@@ -23228,7 +23669,11 @@ func kayaPlatformLocaleTag() -> String {
     for node in kayaScene.labels where !node.text.isEmpty {
         guard let size = kayaLabelFrames[node.id], size.width > 0 else { continue }
         measured += 1
-        let need = kayaTextNeed(kayaClippingText(node), kayaClippingFont(node), width: size.width)
+        // A label capped at max_lines needs those lines alone (M16 (2)).
+        let need = node.maxLines > 0
+            ? kayaTextLineHeights(kayaClippingText(node), kayaClippingFont(node), width: size.width)
+                .prefix(Int(node.maxLines)).reduce(0, +)
+            : kayaTextNeed(kayaClippingText(node), kayaClippingFont(node), width: size.width)
         if need > size.height + 1.0 {
             return (
                 "label \(node.id) \(node.text.prefix(40).debugDescription) needs \(Int(need.rounded()))pt at \(Int(size.width.rounded()))pt wide and got \(Int(size.height.rounded()))pt",
@@ -23252,6 +23697,39 @@ func kayaPlatformLocaleTag() -> String {
         if let past = kayaOffScreen("button", node) { return (past, measured) }
     }
     return ("", measured)
+}
+
+/// expect_no_overlap's reading (docs/media-player-plan.md M16 (34)): every live
+/// label and button frame inside the window, and harness.rs's first_overlap rule
+/// over them, "" when none share more than a point both ways.
+@MainActor func kayaOverlapReport() -> (String, Int) {
+    guard let room = kayaWindowRoom() else { return ("", 0) }
+    var items: [(String, CGRect)] = []
+    func add(_ what: String, _ node: KayaNode) {
+        guard kayaScene.nodes[node.id] === node,
+            let frame = kayaLabelWindowFrames[node.id]?.values.first(where: {
+                $0.width > 1 && $0.height > 1 && $0.minX >= -1 && $0.minY >= -1
+                    && $0.maxX <= room.width + 1 && $0.maxY <= room.height + 1
+            })
+        else { return }
+        items.append(("\(what) \(String(node.text.prefix(40)).debugDescription)", frame))
+    }
+    for node in kayaScene.labels where !node.text.isEmpty { add("label", node) }
+    for node in kayaScene.buttons { add("button", node) }
+    func spell(_ f: CGRect) -> String {
+        "\(Int(f.width.rounded()))x\(Int(f.height.rounded())) at (\(Int(f.minX.rounded())),\(Int(f.minY.rounded())))"
+    }
+    for i in items.indices {
+        for j in items.indices where j > i {
+            let (a, fa) = items[i], (b, fb) = items[j]
+            let across = min(fa.maxX, fb.maxX) - max(fa.minX, fb.minX)
+            let down = min(fa.maxY, fb.maxY) - max(fa.minY, fb.minY)
+            if across > 1 && down > 1 {
+                return ("\(a) \(spell(fa)) and \(b) \(spell(fb)) share \(Int(across.rounded()))x\(Int(down.rounded()))", items.count)
+            }
+        }
+    }
+    return ("", items.count)
 }
 
 /// THE SECOND CLAUSE (docs/flex-shrink-plan.md §4): the frame must lie
@@ -23378,6 +23856,38 @@ func kayaLongestWord(_ text: String, _ font: KayaPlatformFont) -> CGFloat {
 
 /// CoreText's lines for `text` at `width` in `font`, each line's ascent plus
 /// descent summed — leading left out, since SwiftUI's frame leaves it out.
+/// Each line's height as CoreText lays `text` out at `width`, what
+/// expect_text_lines and a capped label's clipping read count
+/// (docs/media-player-plan.md M16 (2)).
+func kayaTextLineHeights(_ text: String, _ font: KayaPlatformFont, width: CGFloat) -> [CGFloat] {
+    let attributed = NSAttributedString(string: text, attributes: [.font: font])
+    let setter = CTFramesetterCreateWithAttributedString(attributed)
+    let path = CGPath(rect: CGRect(x: 0, y: 0, width: width, height: 100_000), transform: nil)
+    let frame = CTFramesetterCreateFrame(setter, CFRange(location: 0, length: 0), path, nil)
+    return (CTFrameGetLines(frame) as! [CTLine]).map { line in
+        var ascent: CGFloat = 0
+        var descent: CGFloat = 0
+        var leading: CGFloat = 0
+        _ = CTLineGetTypographicBounds(line, &ascent, &descent, &leading)
+        return ascent + descent
+    }
+}
+
+/// How many of a label's lines its laid-out frame holds and whether more
+/// were cut, or why there is no reading.
+@MainActor func kayaLabelLinesRead(_ node: KayaNode) -> (Int, Bool)? {
+    guard let size = kayaLabelFrames[node.id], size.width > 0 else { return nil }
+    let heights = kayaTextLineHeights(kayaClippingText(node), kayaClippingFont(node), width: size.width)
+    var used: CGFloat = 0
+    var drawn = 0
+    for h in heights {
+        if used + h > size.height + 1 { break }
+        used += h
+        drawn += 1
+    }
+    return (drawn, drawn < heights.count)
+}
+
 func kayaTextNeed(_ text: String, _ font: KayaPlatformFont, width: CGFloat) -> CGFloat {
     let attributed = NSAttributedString(string: text, attributes: [.font: font])
     let setter = CTFramesetterCreateWithAttributedString(attributed)
@@ -24918,6 +25428,9 @@ struct KayaRender: View {
     /// The reorderable For this node is a stamped row of, if any
     /// (docs/dnd-plan.md D8): its surface then drags and takes rows.
     var reorderIn: KayaNode? = nil
+    /// A grid's cell: a container fills the cell both ways, its surface with it
+    /// (docs/media-player-plan.md M16 (1)).
+    var gridCell = false
     /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
     @Environment(\.kayaGroupedButtonRow) private var kayaGroupedButtonRow
@@ -25133,8 +25646,8 @@ struct KayaRender: View {
                 }
             }
             .frame(
-                maxWidth: !vertical && boxCrosses ? .infinity : nil,
-                maxHeight: vertical && boxCrosses ? .infinity : nil,
+                maxWidth: gridCell || (!vertical && boxCrosses) ? .infinity : nil,
+                maxHeight: gridCell || (vertical && boxCrosses) ? .infinity : nil,
                 alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
             .background(
@@ -25276,6 +25789,10 @@ struct KayaRender: View {
                 }
             }
             .modifier(KayaLabelTint(tint: node.labelTint))
+            // docs/media-player-plan.md M16 (2): at most max_lines, the rest
+            // cut with the platform's ellipsis.
+            .lineLimit(node.maxLines > 0 ? Int(node.maxLines) : nil)
+            .truncationMode(.tail)
             .background(KayaSkinFrameReader(id: node.id))
             .accessibilityAddTraits(
                 node.role == roleHeading ? .isHeader : [])
@@ -25344,8 +25861,17 @@ struct KayaRender: View {
                 // A slider has no natural width, so 200 stands in as the
                 // intrinsic size every other toolkit's slider has. A grower must NOT
                 // keep that cap: capping the drawn control below its track rendered
-                // a 1:3 row as 38/62 while expect_shares kept passing.
-                .frame(maxWidth: node.grow > 0 ? .infinity : 200)
+                // a 1:3 row as 38/62 while expect_shares kept passing. The app's own
+                // max_width caps it (docs/media-player-plan.md M16 (17)).
+                .frame(maxWidth: node.maxWidth > 0
+                    ? (node.grow > 0 ? node.maxWidth : min(200, node.maxWidth))
+                    : (node.grow > 0 ? .infinity : 200))
+                .background(
+                    GeometryReader { g in
+                        Color.clear
+                            .onAppear { kayaDrawnWidths[node.id] = g.size.width }
+                            .onChange(of: g.size.width) { _, w in kayaDrawnWidths[node.id] = w }
+                    })
             }
         case kindRange:
             // The stacked pair (docs/range-plan.md §6), the slider's stand-in
@@ -25436,16 +25962,20 @@ struct KayaRender: View {
             // grid's do, so expect_grid_columns reads both the same way.
             KayaAutoGrid(minWidth: node.minColumnWidth, spacing: node.spacing) {
                 ForEach(node.children, id: \.id) { cell in
-                    KayaRender(node: cell)
+                    KayaRender(node: cell, gridCell: true)
                         .background(
                             GeometryReader { g in
                                 Color.clear
                                     .onAppear {
                                         kayaCellMinX[cell.id] =
                                             g.frame(in: .named("kaya-grid-\(node.id)")).minX
+                                        kayaGridCellFrames[cell.id] = g.frame(in: .global)
                                     }
                                     .onChange(of: g.frame(in: .named("kaya-grid-\(node.id)")).minX) { _, x in
                                         kayaCellMinX[cell.id] = x
+                                    }
+                                    .onChange(of: g.frame(in: .global)) { _, f in
+                                        kayaGridCellFrames[cell.id] = f
                                     }
                             }
                         )
@@ -29806,16 +30336,38 @@ func kayaToastAnnouncement(_ text: String, _ label: String) -> String {
 /// amended: a capsule under the toolbar on macOS, dropping from the top on
 /// iOS). Rides every window root, outside the arm chain, so a push or a
 /// section switch leaves it in place.
+/// A sheet's toast clears the sheet's grabber band, the top the dismissal's
+/// pan starts on (docs/traps.md, the iOS sheet toast host).
+#if os(macOS)
+    let kayaSheetGrabberBand: CGFloat = 0
+#else
+    let kayaSheetGrabberBand: CGFloat = 28
+#endif
+
 struct KayaToastHost: ViewModifier {
     let windowId: UInt64
+    /// The sheet this host sits in, nil for the window's own content: the toast
+    /// draws in the window's topmost presented layer (docs/media-player-plan.md
+    /// M16 (20)), never under an open sheet.
+    var layer: UInt64? = nil
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var shown: KayaToastShown? {
+        if let layer {
+            let covered = kayaScene.childSheet[layer].map { kayaScene.sheets[$0]?.root != nil } ?? false
+            return covered ? nil : kayaScene.toasts[windowId]
+        }
+        return kayaToastLayer(windowId) == nil ? kayaScene.toasts[windowId] : nil
+    }
+
     func body(content: Content) -> some View {
-        let shown = kayaScene.toasts[windowId]
+        let shown = self.shown
         content
             .overlay(alignment: .top) {
                 if let shown {
                     KayaToastView(windowId: windowId, shown: shown)
+                        .padding(.top, layer == nil ? 0 : kayaSheetGrabberBand)
+                        .onAppear { kayaToastDrawnLayer[windowId] = layer }
                         .id(shown.token)
                         .transition(
                             reduceMotion
@@ -30126,6 +30678,7 @@ struct KayaSheetRoot: View {
         .padding(scene.windows[0]?.inset ?? 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .modifier(KayaSheetHost(surface: sheetId))
+        .modifier(KayaToastHost(windowId: kayaSheetOwnerWindow(sheetId), layer: sheetId))
         .tint(kayaBrandTint())
         .font(kayaBrandFont())
         #if os(macOS)
@@ -30366,6 +30919,7 @@ struct KayaAuxRoot: View {
             .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(kayaWindowCaption(windowId))
+            .modifier(KayaPictureTopTitle(root: scene.windows[windowId]?.root))
             #if os(iOS)
                 .background(
                     scene.windows[windowId]?.root.map { kayaRootScrollsAsPage($0) } == false
@@ -30511,9 +31065,21 @@ struct KayaSplitRoot: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(kayaWindowCaption(windowId))
         } detail: {
-            // The TOP of the stack is the detail. An empty stack gets the
-            // platform's own empty state.
-            if let top = scene.windows[windowId]?.entries.last {
+            // The TOP of the stack is the detail, the entries above the first
+            // in its own NavigationStack, so an entry that covers another in
+            // this pane has a real back item (DESIGN.md's back rule, M16 (9)).
+            // An empty stack gets the platform's own empty state.
+            // ONLY WHILE ONE COVERS ANOTHER: a lone entry inside the stack lost
+            // the scroll_to_row its opening asked for (chat-go-swiftui, every
+            // run; docs/traps.md, the two-pane detail's stack).
+            if let entries = scene.windows[windowId]?.entries, entries.count >= 2, let base = entries.first {
+                NavigationStack(path: kayaSplitDetailPath(windowId)) {
+                    KayaEntryRoot(entryId: base.id)
+                        .navigationDestination(for: UInt64.self) { eid in
+                            KayaEntryRoot(entryId: eid)
+                        }
+                }
+            } else if let top = scene.windows[windowId]?.entries.last {
                 KayaEntryRoot(entryId: top.id)
             } else {
                 // THE WINDOW'S TITLE HANGS OFF THE DETAIL COLUMN: on macOS a
@@ -30537,6 +31103,21 @@ struct KayaSplitRoot: View {
     private func record() {
         kayaScene.windows[windowId]?.splitPresentation = "split"
     }
+}
+
+/// The two-pane detail's covered entries, as a path: every entry above the
+/// first; the platform's back shortens it through the user's pop.
+@MainActor func kayaSplitDetailPath(_ windowId: UInt64) -> Binding<[UInt64]> {
+    Binding(
+        get: { (kayaScene.windows[windowId]?.entries.dropFirst() ?? []).map(\.id) },
+        set: { newPath in kayaUserPops(windowId, to: newPath.count + 1) })
+}
+
+/// How deep a two-pane split's stack must be before its top covers an entry in
+/// its own pane (DESIGN.md's back rule, M16 (9)); the three-pane arm keeps the
+/// earlier rule, no back while spread, on every backend.
+@MainActor func kayaSplitCoveredDepth(_ windowId: UInt64) -> Int {
+    (kayaScene.windows[windowId]?.panes ?? 2) >= 3 ? Int.max : 1
 }
 
 /// The THREE-column presentation (docs/multicolumn-plan.md D1/D3): pane 0 the
@@ -33307,7 +33888,8 @@ let kayaSectionSymbolIdent = "kaya-section-symbol:"
 
 @MainActor func kayaButtonGlyphName(_ node: UInt64) -> String {
     guard let sf = kayaButtonGlyphs[node] else { return "<the button's body drew no symbol>" }
-    return kayaSymbolTable.first { $0.sf == sf || $0.rendered == sf }?.name
+    let filled = kayaSymbolOnTable.first { $0.sf == sf }?.value
+    return kayaSymbolTable.first { $0.sf == sf || $0.rendered == sf || $0.value == filled }?.name
         ?? "<the button drew \(sf), which is not in this interpreter's table>"
 }
 
@@ -33488,6 +34070,38 @@ struct KayaSectionPane: View {
     }
 }
 
+/// A ROOT SCREEN WHOSE TOP IS A PICTURE TAKES THE INLINE TITLE on the phone
+/// (docs/media-player-plan.md M16 (27)): a large title over a picture can
+/// be unreadable. Every other root keeps its large title.
+struct KayaPictureTopTitle: ViewModifier {
+    let root: KayaNode?
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+            if let root, kayaTopIsPicture(root) {
+                content.navigationBarTitleDisplayMode(.inline)
+            } else {
+                content
+            }
+        #else
+            content
+        #endif
+    }
+}
+
+/// Whether the first thing a screen draws is a picture: a container's image
+/// ground, or a bled image, reached through its leading containers.
+func kayaTopIsPicture(_ root: KayaNode) -> Bool {
+    var node = root
+    while true {
+        if node.ground == groundImage || (node.kind == kindImage && node.bleed) { return true }
+        guard node.kind == kindColumn || node.kind == kindRow || node.kind == kindScroll,
+            let first = node.laidOut.first
+        else { return false }
+        node = first
+    }
+}
+
 /// macOS only: a section screen on the phones keeps its own bar untitled.
 private struct KayaMacWindowCaption: ViewModifier {
     let windowId: UInt64
@@ -33611,6 +34225,7 @@ struct KayaRoot: View {
         // prop changes nothing): SwiftUI's blessed window titling path on macOS;
         // harmless on iOS, where the switcher label is stamped in the apply arm.
         .navigationTitle(kayaWindowCaption(0))
+        .modifier(KayaPictureTopTitle(root: scene.root))
         #if os(iOS)
             .background(scene.root.map { kayaRootScrollsAsPage($0) } == false ? KayaBarScrollPin() : nil)
         #endif

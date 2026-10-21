@@ -69,3 +69,5 @@ release slider#0
 expect_value slider#0 "100"
 expect label#0 "value: 100"
 expect label#1 "commits: 5"
+# docs/media-player-plan.md M16 (17): a grown slider capped at its widest width.
+expect_width slider@capped 120

@@ -49,6 +49,14 @@ let () =
                 write volume_text (("volume: " ^ spelled v)));
             slider ~a11y_id:"fader" ~a11y_label:"Fader"       (* slider#2 *)
               ~min:0.0 ~max:1.0 ~value:0.25 ~step:0.25 ~axis:Vertical;
+            (* A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)). *)
+            row
+              [
+                (fun () ->
+                  let s = slider ~a11y_id:"capped" ~a11y_label:"Capped" ~min:0.0 ~max:1.0 ~value:0.5 ~grow:1.0 () in
+                  set_max_width s 120.0;
+                  s);
+              ];
             button ~text:"reset"                              (* button#0 *)
               ~on_click:(fun () ->
                 (* Must NOT come back as a value or a commit occurrence. *)

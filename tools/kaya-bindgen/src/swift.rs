@@ -79,6 +79,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("/// `bytes`; submit with kaya_submit.");
     c.line("/// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.");
     c.line(&format!("let kayaSpecHash: UInt64 = 0x{:016x}", crate::spec_hash()));
+    c.line(&format!("let kayaVersion = \"{}\"", crate::version()));
     c.line("");
     // A guest never assembles the packed integer by hand: the typed
     // setters take components and these pack them (spec.rs PropKind).

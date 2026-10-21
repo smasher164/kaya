@@ -112,9 +112,23 @@ enum KayaPaneLadderProbe {
         ns.setContentSize(NSSize(width: 1400, height: 800))
         columns(3, "wide again (1400): the shed pane returns")
 
+        // --- Half 3: a pane's grid sets no window width (M16 F1). --------
+        // NavigationSplitView takes its detail's ideal as the window's
+        // floor, so twelve 144-point cards made the window 2072 pt wide.
+        let grid = NSHostingView(rootView: KayaAutoGrid(minWidth: 144, spacing: 12) {
+            ForEach(0..<12, id: \.self) { _ in Color.gray.frame(width: 120, height: 120) }
+        })
+        let ideal = grid.fittingSize.width
+        print("  an auto grid of twelve 144-point cells: ideal width \(Int(ideal))")
+        if ideal > 144 {
+            print("swiftui-pane-ladder: FAIL — an auto grid's ideal width is \(Int(ideal)), "
+                + "wanted at most its one-column floor 144: a pane holding it widens its window")
+            failures += 1
+        }
+
         if failures == 0 {
-            print("swiftui-pane-ladder: OK — arithmetic and the real "
-                + "1400 -> 700 -> 1400 walk")
+            print("swiftui-pane-ladder: OK — arithmetic, the real "
+                + "1400 -> 700 -> 1400 walk and the grid's ideal width")
         }
         exit(failures == 0 ? 0 : 1)
     }

@@ -281,12 +281,22 @@ public final class KayaApp {
         REPEAT_ONE(KayaWire.SYMBOL_REPEAT_ONE),
         VOLUME(KayaWire.SYMBOL_VOLUME),
         QUEUE(KayaWire.SYMBOL_QUEUE),
-        FAVORITE(KayaWire.SYMBOL_FAVORITE);
+        FAVORITE(KayaWire.SYMBOL_FAVORITE),
+        MUTED(KayaWire.SYMBOL_MUTED);
 
         final long wire;
 
         Symbol(long wire) {
             this.wire = wire;
+        }
+
+        static Symbol ofWire(long wire) {
+            for (Symbol s : values()) {
+                if (s.wire == wire) {
+                    return s;
+                }
+            }
+            throw new IllegalArgumentException("kaya: " + wire + " is not a symbol");
         }
     }
 
@@ -6219,6 +6229,11 @@ public final class KayaApp {
             t.setTint(n, tint);
         }
 
+        /** This row's copy of that label's most lines (Tpl.setMaxLines). */
+        public void setMaxLines(Node n, int lines) {
+            t.setMaxLines(n, lines);
+        }
+
         public void setTint(Node n, Signal<Tint> s) {
             t.setTint(n, s);
         }
@@ -6344,6 +6359,10 @@ public final class KayaApp {
          * (Tpl.setSymbol). */
         public void setSymbol(Node n, Symbol symbol) {
             t.setSymbol(n, symbol);
+        }
+
+        public void setSymbol(Node n, KayaRecords.Field<Symbol> f) {
+            t.setSymbol(n, f);
         }
 
         /** This row's copy of that secure field's reveal (Tpl.setRevealed). */
@@ -8513,6 +8532,20 @@ public final class KayaApp {
         }
 
         /**
+         * Declare more children into a container built earlier, typically
+         * from a handler: everything the body declares joins it after its
+         * existing children (docs/media-player-plan.md M16 (28)).
+         */
+        public void within(Widget container, Runnable body) {
+            parents.add(container.id);
+            try {
+                body.run();
+            } finally {
+                parents.remove(parents.size() - 1);
+            }
+        }
+
+        /**
          * Drop the widget's owned content — a one-shot command riding
          * this transaction, so the insert and the clear beside it commit
          * together or not at all. A clear arrives back as a text change
@@ -9632,6 +9665,12 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetTint(n.id, tint.wire));
         }
 
+        /** A stamped label's most lines, the rest truncated with the
+         * platform's ellipsis (docs/media-player-plan.md M16 (2)). */
+        public void setMaxLines(Node n, int lines) {
+            tx.emit(KayaWire.txSetMaxLines(n.id, lines));
+        }
+
         public void setTint(Node n, Signal<Tint> s) {
             tx.emit(KayaWire.txBindTint(n.id, s.id));
         }
@@ -9788,6 +9827,12 @@ public final class KayaApp {
          * of {@link Tx#setSymbol}. */
         public void setSymbol(Node n, Symbol symbol) {
             tx.emit(KayaWire.txSetSymbol(n.id, symbol.wire));
+        }
+
+        /** Every stamped copy's glyph from its row's Symbol field
+         * (docs/media-player-plan.md M16 (21)). */
+        public void setSymbol(Node n, KayaRecords.Field<Symbol> f) {
+            tx.emit(KayaWire.txBindSymbolElement(n.id, 0, f.index()));
         }
 
         /** Every stamped copy carries its own show/hide toggle; each flip

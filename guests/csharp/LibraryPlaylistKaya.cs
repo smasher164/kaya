@@ -12,6 +12,7 @@ static class LibraryPlaylistKaya
 
     public static readonly Field<string> Name = KayaRecords.FieldAt<string>(0);
     public static readonly Field<bool> Selected = KayaRecords.FieldAt<bool>(1);
+    public static readonly Field<Symbol> Symbol = KayaRecords.FieldAt<Symbol>(2);
 
     public static LibraryPlaylistKayaPatch Patch(Tx tx, RecordCollection<LibraryPlaylist> c, object key) =>
         new LibraryPlaylistKayaPatch(c.Patch(tx, key));
@@ -77,6 +78,7 @@ sealed class LibraryPlaylistRow
     readonly Tpl t;
     public readonly Field<string> Name = LibraryPlaylistKaya.Name;
     public readonly Field<bool> Selected = LibraryPlaylistKaya.Selected;
+    public readonly Field<Symbol> Symbol = LibraryPlaylistKaya.Symbol;
 
     internal LibraryPlaylistRow(Tpl t) => this.t = t;
 
@@ -472,6 +474,9 @@ sealed class LibraryPlaylistRow
 
     public void SetSymbol(Node n, Symbol symbol) => t.SetSymbol(n, symbol);
 
+    public void SetSymbol(Node n, Field<Symbol> f, uint level = 0) =>
+        t.SetSymbol(n, f, level);
+
     public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
 
     public void SetFilled(Node n, Tint tint) => t.SetFilled(n, tint);
@@ -515,6 +520,8 @@ sealed class LibraryPlaylistRow
     public void SetShape(Node n, Shape shape) => t.SetShape(n, shape);
 
     public void SetTint(Node n, Tint tint) => t.SetTint(n, tint);
+
+    public void SetMaxLines(Node n, int lines) => t.SetMaxLines(n, lines);
 
     public void SetTint(Node n, Signal s) => t.SetTint(n, s);
 
@@ -594,6 +601,12 @@ sealed class LibraryPlaylistKayaPatch
         p.Set(LibraryPlaylistKaya.Selected, v);
         return this;
     }
+
+    public LibraryPlaylistKayaPatch Symbol(Symbol v)
+    {
+        p.Set(LibraryPlaylistKaya.Symbol, v);
+        return this;
+    }
 }
 
 sealed class LibraryPlaylistKayaPatchIf
@@ -611,6 +624,12 @@ sealed class LibraryPlaylistKayaPatchIf
     public LibraryPlaylistKayaPatchIf Selected(bool v)
     {
         p.Set(LibraryPlaylistKaya.Selected, v);
+        return this;
+    }
+
+    public LibraryPlaylistKayaPatchIf Symbol(Symbol v)
+    {
+        p.Set(LibraryPlaylistKaya.Symbol, v);
         return this;
     }
 }

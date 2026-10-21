@@ -260,6 +260,9 @@ selftest("N9", COMPOSE, r"        Pair\(SYMBOL_FAVORITE, Icons\.Default\.Favorit
 # N8: a transport row withheld (docs/media-player-plan.md M8).
 selftest("N8", SWIFTUI, r'\(symbolRepeatOne, "repeat_one", "repeat\.1", nil\),', "",
          "kayaSymbolTable has no row for SYMBOL_REPEAT_ONE")
+# N10: the muted row withheld from GTK (docs/media-player-plan.md M16).
+selftest("N10", GTK, r'    \(crate::wire::SYMBOL_MUTED, "audio-volume-muted-symbolic"\),\n', "",
+         "no row for SYMBOL_MUTED")
 
 if status == 0:
     print(f"check-symbol-parity: OK ({payload})")

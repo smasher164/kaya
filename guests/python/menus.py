@@ -87,6 +87,7 @@ with app.window(title="menus"):
         kaya.item("Volume", symbol=kaya.Symbol.VOLUME)
         kaya.item("Queue", symbol=kaya.Symbol.QUEUE)
         kaya.item("Favorite", symbol=kaya.Symbol.FAVORITE)
+        kaya.item("Muted", symbol=kaya.Symbol.MUTED)
 
     # Option order IS the index.
     with app.radio_group("Sort", value=sort, on_select=on_sorted):

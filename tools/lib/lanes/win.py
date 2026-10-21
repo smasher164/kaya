@@ -97,7 +97,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # (docs/media-player-plan.md M10): in the pool four of six legs
              # went red and every one is green alone (measured 2026-10-17).
              "sliders_rust", "sliders_python", "sliders_js", "sliders_go", "sliders_csharp",
-             "sliders_java", "music_dock_python"}
+             "sliders_java", "music_dock_python", "music_dockdark_python"}
 
 # The legs that run under the user's 24-hour clock: HKCU\Control Panel\
 # International's iTime and sShortTime, written by deploy-win before the leg
@@ -437,6 +437,9 @@ ORDER = [
     # scrubber is held under the VM's real button (EXCLUSIVE).
     [
      "music_dock_python",
+    ],
+    [
+     "music_dockdark_python",
     ],
     # dirty_rust ALONE: the leg drives a real WM_CLOSE on its own
     # window and the veto keeps it — a window disappearing out from
@@ -940,7 +943,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
-              "music_headerdark": "music", "music_dock": "music", "music_artist": "music",
+              "music_headerdark": "music", "music_dock": "music", "music_dockdark": "music", "music_artist": "music",
               "music_artistdark": "music", "music_search": "music"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host

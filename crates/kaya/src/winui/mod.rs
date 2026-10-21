@@ -1112,6 +1112,7 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Volume => FluentIcon::Member(Fluent::Volume),
         S::Queue => FluentIcon::Member(Fluent::List),
         S::Favorite => FluentIcon::Glyph("\u{EB51}"),
+        S::Muted => FluentIcon::Member(Fluent::Mute),
     }
 }
 
@@ -1155,18 +1156,19 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Volume => crate::wire::SYMBOL_VOLUME,
         S::Queue => crate::wire::SYMBOL_QUEUE,
         S::Favorite => crate::wire::SYMBOL_FAVORITE,
+        S::Muted => crate::wire::SYMBOL_MUTED,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 35] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 36] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
         S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
         S::ImageMissing, S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat,
-        S::RepeatOne, S::Volume, S::Queue, S::Favorite,
+        S::RepeatOne, S::Volume, S::Queue, S::Favorite, S::Muted,
     ]
 };
 
@@ -2779,8 +2781,17 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
         let cell = child.cast::<FrameworkElement>()?;
         Grid::SetColumn(&cell, i % cols)?;
         Grid::SetRow(&cell, i / cols)?;
-        // A cell centres in its row, as a row's children do (R5).
-        cell.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+        // A container fills its cell both ways, a card taking its column and
+        // its row's tallest height (docs/media-player-plan.md M16 (1)); a leaf
+        // centres in its row, as a row's children do (R5).
+        let container = child.cast::<Grid>().is_ok()
+            || child.cast::<bindings::Microsoft::UI::Xaml::Controls::ItemContainer>().is_ok();
+        if container {
+            cell.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+            cell.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
+        } else {
+            cell.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+        }
         slots.Append(child)?;
     }
     Ok(())
@@ -3110,6 +3121,32 @@ fn wrap_retry(rid: u64, probe: Grid) {
     let _ = dispatcher.0.TryEnqueue(&handler);
 }
 
+thread_local! {
+    /// The children reindex collapsed because they are vacant (M16 (3)).
+    static VACATED: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
+}
+
+/// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
+/// column or row that draws nothing of its own and holds only such boxes (a
+/// When showing no case, an empty For) is vacant.
+fn vacant(core: &CoreState, id: WidgetId) -> bool {
+    let (Some(NativeWidget::Column(grid)) | Some(NativeWidget::Row(grid))) = core.widgets.get(&id) else {
+        return false;
+    };
+    // A grown empty box is a spacer, which takes its share on purpose.
+    if core.mounted_roots.values().any(|r| *r == id)
+        || grid.Background().is_ok()
+        || core.grow.get(&id).copied().unwrap_or(0.0) > 0.0
+    {
+        return false;
+    }
+    let pad = grid.Padding().unwrap_or_default();
+    if pad.Left + pad.Top + pad.Right + pad.Bottom > 0.0 {
+        return false;
+    }
+    core.child_order.children(id).iter().all(|c| vacant(core, *c))
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let grid = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
@@ -3122,6 +3159,16 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         _ => return Ok(()),
     };
     let vertical = effective_vertical(core, parent);
+    // A vacant child takes no track, so no extent and no gap (M16 (3)).
+    for child in core.child_order.children(parent).iter().copied() {
+        let empty = vacant(core, child);
+        if empty != VACATED.with_borrow(|v| v.contains(&child.0)) {
+            if let Some(widget) = core.widgets.get(&child) {
+                widget.element()?.SetVisibility(if empty { Visibility::Collapsed } else { Visibility::Visible })?;
+            }
+            VACATED.with_borrow_mut(|v| if empty { v.insert(child.0) } else { v.remove(&child.0) });
+        }
+    }
     // The children this container LAYS OUT (D7): a folded child renders
     // inside its table's viewport instead; its order entry stays, so the
     // unfold re-stamps it exactly where it was declared.
@@ -3130,9 +3177,15 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         .children(parent)
         .iter()
         .copied()
-        .filter(|c| !core.folded_into.contains_key(&c.0))
+        .filter(|c| !core.folded_into.contains_key(&c.0) && !VACATED.with_borrow(|v| v.contains(&c.0)))
         .collect();
     let order = &order[..];
+    // This container's own vacancy may have moved with its children.
+    if let Some(&above) = core.tree_parent.get(&parent.0) {
+        if vacant(core, parent) != VACATED.with_borrow(|v| v.contains(&parent.0)) {
+            reindex(core, WidgetId(above))?;
+        }
+    }
     if !vertical && core.wrapping.contains(&parent.0) {
         // The children must be in the panel for their desired sizes to
         // exist; the flex path below appends them, so stamp membership
@@ -8870,7 +8923,10 @@ fn apply_split_back_bar(core: &CoreState, window: u64) -> windows_core::Result<(
     let Some(view) = core.split_views.get(&window) else {
         return Ok(());
     };
-    let covering = view.Mode()? == TwoPaneViewMode::SinglePane;
+    // DESIGN.md's back rule (M16 (9)): with both panes up the top still
+    // covers the entry beneath it in the trailing pane.
+    let depth = core.nav_stacks.get(&window).map_or(0, |s| s.len());
+    let covering = view.Mode()? == TwoPaneViewMode::SinglePane || depth >= 2;
     let Some(top) = core.nav_stacks.get(&window).and_then(|s| s.last()).copied() else {
         return Ok(());
     };
@@ -11853,10 +11909,13 @@ fn number_input(field: &NumberBox) -> windows_core::Result<Result<TextBox, Strin
 /// button, Escape and the harness's clear_search all come here, so the app
 /// sees the same text_changed("") for each and the focus stays. Answers
 /// whether the button was there to operate — the caller says what it saw.
+#[track_caller]
 fn search_clear(field: &TextBox) -> windows_core::Result<bool> {
     use bindings::Microsoft::UI::Xaml::Automation::{
         Peers::ButtonAutomationPeer, Provider::IInvokeProvider,
     };
+    #[cfg(feature = "harness")]
+    crate::vtrace::line(&format!("search field cleared by winui/mod.rs:{}", std::panic::Location::caller().line()));
     let Some(button) = search_delete_button(field)? else {
         return Ok(false);
     };
@@ -13976,6 +14035,9 @@ struct InfoBarToast {
     last_tick: std::time::Instant,
     hovered: bool,
     focused: bool,
+    /// The sheet whose layer holds the bar, None for the toast's own popup
+    /// (docs/media-player-plan.md M16 (20)).
+    in_sheet: Option<u64>,
 }
 
 thread_local! {
@@ -14024,11 +14086,17 @@ fn info_bar_place(window: u64, popup: &Popup, bar: &bindings::Microsoft::UI::Xam
 /// Takes the shown toast off screen and answers which one it was. Every
 /// close goes through here; the platform calls run after the borrow drops,
 /// since `SetIsOpen(false)` raises `Closed` synchronously.
+#[track_caller]
 fn info_bar_take(window: u64) -> Option<u64> {
     let (shown, popup, bar, timer) = INFO_BAR_TOASTS.with_borrow_mut(|bars| {
         let toast = bars.get_mut(&window)?;
         Some((toast.shown.take(), toast.popup.clone(), toast.bar.clone(), toast.timer.clone()))
     })?;
+    #[cfg(feature = "harness")]
+    if let Some(id) = shown {
+        let at = std::panic::Location::caller();
+        crate::vtrace::line(&format!("toast {id} on window {window} taken down by winui/mod.rs:{}", at.line()));
+    }
     let _ = timer.Stop();
     let _ = bar.SetIsOpen(false);
     let _ = popup.SetIsOpen(false);
@@ -14140,13 +14208,15 @@ fn info_bar_make(window: u64) -> windows_core::Result<InfoBarToast> {
         }
         Ok(())
     }))?;
-    Ok(InfoBarToast { popup, bar, action, timer, shown: None, left_ms: 0, last_tick: std::time::Instant::now(), hovered: false, focused: false })
+    Ok(InfoBarToast { popup, bar, action, timer, shown: None, left_ms: 0, last_tick: std::time::Instant::now(), hovered: false, focused: false, in_sheet: None })
 }
 
 /// T7: the shown toast is closed and the bar re-opened with the new one,
 /// so its notification fires again.
 fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec) -> windows_core::Result<()> {
     let window = spec.window.0;
+    #[cfg(feature = "harness")]
+    crate::vtrace::line(&format!("toast {} asked on window {window}", spec.toast.0));
     let host = winui_window(core, window)?;
     let root: FrameworkElement = windows_core::Interface::cast(&host.Content()?)?;
     let Ok(xaml_root) = root.XamlRoot() else {
@@ -14182,11 +14252,82 @@ fn info_bar_present(core: &mut CoreState, spec: crate::protocol::ToastSpec) -> w
         action.SetContent(&PropertyValue::CreateString(&HSTRING::from(spec.action_label.as_str()))?)?;
         bar.SetActionButton(&action)?;
     }
-    popup.SetIsOpen(true)?;
+    // A toast is drawn in the window's topmost sheet's own layer, above
+    // that sheet (docs/media-player-plan.md M16 (20)).
+    let layer = info_bar_host(core, window, &popup, &bar)?;
+    if layer.is_none() {
+        popup.SetIsOpen(true)?;
+    }
     bar.SetIsOpen(true)?;
-    info_bar_place(window, &popup, &bar)?;
+    if layer.is_none() {
+        info_bar_place(window, &popup, &bar)?;
+    }
+    #[cfg(feature = "harness")]
+    crate::vtrace::line(&format!(
+        "toast {} presented on window {window}: popup open {:?}, bar open {:?}",
+        spec.toast.0,
+        popup.IsOpen().ok(),
+        bar.IsOpen().ok()
+    ));
     timer.Start()?;
     info_bar_announce(&bar, &spec)
+}
+
+/// The window's topmost presented sheet, the layer its toast draws in.
+fn info_bar_top_sheet(core: &CoreState, window: u64) -> Option<u64> {
+    core.sheets
+        .iter()
+        .filter(|(id, s)| s.presented && surface_window(core, **id) == window)
+        .filter(|(id, _)| !core.sheets.values().any(|c| c.presented && c.parent == **id))
+        .map(|(id, _)| *id)
+        .max()
+}
+
+/// Puts the bar in the layer it draws in: the top sheet's smoke, over the
+/// sheet's card, or the toast's own popup when no sheet is up.
+fn info_bar_host(
+    core: &CoreState,
+    window: u64,
+    popup: &Popup,
+    bar: &bindings::Microsoft::UI::Xaml::Controls::InfoBar,
+) -> windows_core::Result<Option<u64>> {
+    let element: UIElement = bar.cast()?;
+    let layer = info_bar_top_sheet(core, window);
+    let was = INFO_BAR_TOASTS.with_borrow(|bars| bars.get(&window).and_then(|t| t.in_sheet));
+    if was == layer && (layer.is_some() || popup.Child().is_ok_and(|c| c == element)) {
+        return Ok(layer);
+    }
+    let fe: FrameworkElement = bar.cast()?;
+    popup.SetIsOpen(false)?;
+    popup.SetChild(None::<&UIElement>)?;
+    // A sheet's smoke, even one whose sheet has gone since.
+    if let Some(panel) = fe.Parent().ok().and_then(|p| p.cast::<bindings::Microsoft::UI::Xaml::Controls::Panel>().ok()) {
+        let kids = panel.Children()?;
+        let mut at = 0u32;
+        if kids.IndexOf(&element, &mut at)? {
+            kids.RemoveAt(at)?;
+        }
+    }
+    match layer.and_then(|s| core.sheets.get(&s)) {
+        Some(sheet) => {
+            fe.SetHorizontalAlignment(HorizontalAlignment::Center)?;
+            fe.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Bottom)?;
+            fe.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: INFO_BAR_MARGIN })?;
+            sheet.smoke.Children()?.Append(&element)?;
+        }
+        None => {
+            fe.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+            fe.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
+            fe.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: 0.0 })?;
+            popup.SetChild(&element)?;
+        }
+    }
+    INFO_BAR_TOASTS.with_borrow_mut(|bars| {
+        if let Some(toast) = bars.get_mut(&window) {
+            toast.in_sheet = layer;
+        }
+    });
+    Ok(layer)
 }
 
 /// T12: the text, then the action's label, the sentence every arm hands
@@ -14670,7 +14811,13 @@ fn apply_control_role(
                 if let Some(sender) = sender.as_ref() {
                     toggle_glyph(&sender.cast::<ToggleButton>()?, checked)?;
                 }
-                if !quiet.load(std::sync::atomic::Ordering::Relaxed) {
+                let hushed = quiet.load(std::sync::atomic::Ordering::Relaxed);
+                // An echo the apply swallowed named the M16 windows-search red
+                // (docs/traps.md, the preferences read before the harness emptied them).
+                #[cfg(feature = "harness")]
+                crate::vtrace::line(&format!("toggle button {} {}{}", id.0,
+                    if checked { "checked" } else { "unchecked" }, if hushed { " (an apply's echo, not sent)" } else { "" }));
+                if !hushed {
                     sink.send_toggle_tag(&tag, checked);
                 }
                 Ok(())
@@ -16008,6 +16155,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         }
                         let text = lf(field_for_handler.Text()?.to_string());
                         if bank_text_changed(bank_id, &text) {
+                            // A search field emptied by no clear is the M16
+                            // windows-search red's question (docs/traps.md).
+                            #[cfg(feature = "harness")]
+                            if text.is_empty() {
+                                let focus = field_for_handler.FocusState().map(|f| f.0).unwrap_or(-1);
+                                crate::vtrace::line(&format!(
+                                    "search field {bank_id} reports \"\" (focus state {focus})"));
+                            }
                             sink.send_text_tag(&handler_tag, &text);
                         }
                         Ok(())
@@ -17958,6 +18113,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // follows only when the view sat within a line of that old end.
                 // Weak and atomic for the caption handler's two reasons: a
                 // strong viewer is a cycle, and the handler must be Send.
+                // docs/media-player-plan.md M16 (2): at most this many lines,
+                // the rest cut with the platform's ellipsis.
+                (NativeWidget::Label { block, .. }, Prop::MaxLines, Value::F64(lines)) => {
+                    block.SetMaxLines(lines as i32)?;
+                    block.SetTextTrimming(bindings::Microsoft::UI::Xaml::TextTrimming::CharacterEllipsis)?;
+                }
                 (NativeWidget::Textarea(field), Prop::MaxLines, Value::F64(lines)) => {
                     core.max_lines.insert(id, lines);
                     grow_lines(field, lines)?;
@@ -18473,6 +18634,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // THE VERTICAL SLIDER (docs/range-plan.md §6): the platform's
                 // own orientation, minimum at the bottom, taking the slider's
                 // stand-in length as its height.
+                // docs/media-player-plan.md M16 (17): a widest width, the
+                // grown track's leading edge kept.
+                (NativeWidget::Slider(slider), Prop::MaxWidth, Value::F64(bound)) => {
+                    let element: FrameworkElement = slider.cast()?;
+                    element.SetMaxWidth(bound)?;
+                    // A minimum beats a maximum in XAML layout.
+                    if element.MinWidth()? > bound {
+                        element.SetMinWidth(bound)?;
+                    }
+                    element.SetHorizontalAlignment(HorizontalAlignment::Left)?;
+                }
                 (NativeWidget::Slider(slider), Prop::Axis, Value::I64(v)) => {
                     let vertical = v == i64::from(crate::wire::AXIS_VERTICAL);
                     slider.SetOrientation(if vertical {
@@ -18480,7 +18652,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     } else {
                         Orientation::Horizontal
                     })?;
-                    slider.SetMinWidth(if vertical { 0.0 } else { 160.0 })?;
+                    slider.SetMinWidth(if vertical { 0.0 } else { slider.MaxWidth()?.min(160.0) })?;
                     slider.SetMinHeight(if vertical { 160.0 } else { 0.0 })?;
                 }
                 (NativeWidget::Range(pair), Prop::Min, Value::F64(v))
@@ -21227,11 +21399,13 @@ fn info_bar_on_screen() -> windows_core::Result<Option<bindings::Microsoft::UI::
 
 #[cfg(feature = "harness")]
 fn info_bar_window_on_screen() -> windows_core::Result<Option<(u64, bindings::Microsoft::UI::Xaml::Controls::InfoBar)>> {
-    let mut bars: Vec<(u64, Popup, bindings::Microsoft::UI::Xaml::Controls::InfoBar)> = INFO_BAR_TOASTS
-        .with_borrow(|bars| bars.iter().map(|(w, t)| (*w, t.popup.clone(), t.bar.clone())).collect());
-    bars.sort_by_key(|(w, _, _)| *w);
-    for (window, popup, bar) in bars {
-        if popup.IsOpen()? && bar.IsOpen()? {
+    let mut bars: Vec<(u64, Popup, bindings::Microsoft::UI::Xaml::Controls::InfoBar, bool)> = INFO_BAR_TOASTS
+        .with_borrow(|bars| bars.iter().map(|(w, t)| (*w, t.popup.clone(), t.bar.clone(), t.in_sheet.is_some())).collect());
+    bars.sort_by_key(|(w, _, _, _)| *w);
+    for (window, popup, bar, in_sheet) in bars {
+        // In a sheet's layer the bar is up while it sits in a live tree.
+        let hosted = if in_sheet { bar.cast::<FrameworkElement>()?.IsLoaded()? } else { popup.IsOpen()? };
+        if hosted && bar.IsOpen()? {
             return Ok(Some((window, bar)));
         }
     }
@@ -26546,6 +26720,9 @@ impl crate::harness::Stage for WinUiStage {
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
+    fn ground_top(&self, t: crate::harness::Target) -> Result<(u32, bool), String> {
+        Self::on_ui_read(move |core| skin::read::ground_top(core, t)).unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
     fn ground_read(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| skin::read::ground(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -27686,7 +27863,9 @@ impl crate::harness::Stage for WinUiStage {
                 if presented(&element, &ground)? {
                     read += 1;
                 }
-                if label.IsTextTrimmed()? {
+                // A label cut at its own max_lines is drawn as asked (M16 (2)).
+                let capped = label.MaxLines()? > 0;
+                if label.IsTextTrimmed()? && !capped {
                     return Ok(format!("label {text:?} is trimmed at {width}px wide"));
                 }
                 // DesiredSize carries the margin and ActualHeight does not; a
@@ -27694,7 +27873,7 @@ impl crate::harness::Stage for WinUiStage {
                 let margin = element.Margin()?;
                 let need = f64::from(element.DesiredSize()?.Height) - margin.Top - margin.Bottom;
                 let got = element.ActualHeight()?;
-                if need > got + 1.0 {
+                if need > got + 1.0 && !capped {
                     return Ok(format!(
                         "label {text:?} needs {need}px at {width}px wide and got {got}px (margin {}+{})",
                         margin.Top, margin.Bottom
@@ -27912,6 +28091,22 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or_else(|e| Some(format!("<the InfoBar's placement did not answer: {e}>")))
     }
+    fn toast_under_sheet(&self) -> Option<String> {
+        Self::on_ui_read(|core| {
+            let Some((window, _)) = info_bar_window_on_screen()? else { return Ok(None) };
+            let Some(top) = info_bar_top_sheet(core, window) else { return Ok(None) };
+            let layer = INFO_BAR_TOASTS.with_borrow(|bars| bars.get(&window).and_then(|t| t.in_sheet));
+            if layer == Some(top) {
+                return Ok(None);
+            }
+            let title = core.sheets.get(&top).map(|s| s.title.clone()).unwrap_or_default();
+            Ok(Some(format!(
+                "is drawn {}, under the sheet {title:?} presented over it",
+                layer.map_or("in its own popup".to_owned(), |s| format!("in sheet {s}'s layer"))
+            )))
+        })
+        .unwrap_or_else(|e| Some(format!("<the toast's layer did not answer: {e}>")))
+    }
     fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {
         let said = info_bar_ear::said(text, action);
         let heard = info_bar_ear::heard();
@@ -28030,6 +28225,110 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))> {
+        Self::on_ui_read(|core| {
+            let ground: FrameworkElement = windows_core::Interface::cast(&window_ground(&core.window)?)?;
+            let ground_ui: UIElement = ground.cast()?;
+            let mut out = Vec::new();
+            let mut push = |what: &str, text: String, element: FrameworkElement| -> windows_core::Result<()> {
+                let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+                if w <= 1.0 || h <= 1.0 || !presented(&element, &ground)? {
+                    return Ok(());
+                }
+                let ui: UIElement = element.cast()?;
+                let o = ui.TransformToVisual(&ground_ui)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+                let short: String = text.chars().take(40).collect();
+                out.push((format!("{what} {short:?}"), 0, (f64::from(o.X), f64::from(o.Y), w, h)));
+                Ok(())
+            };
+            for label in &core.labels {
+                push("label", label.Text()?.to_string(), windows_core::Interface::cast(label)?)?;
+            }
+            for button in &core.button_controls {
+                use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+                let name = FrameworkElementAutomationPeer::CreatePeerForElement(&button.cast::<UIElement>()?)?
+                    .GetName()?
+                    .to_string();
+                push("button", name, windows_core::Interface::cast(button)?)?;
+            }
+            Ok(out)
+        })
+        .unwrap_or_default()
+    }
+
+    fn width_of(&self, t: crate::harness::Target) -> Result<f64, String> {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else {
+                return Ok(Err("<no such target>".to_string()));
+            };
+            let element: FrameworkElement = element.cast()?;
+            Ok(Ok(element.ActualWidth()?))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+
+    fn window_frame(&self, t: crate::harness::Target) -> Result<(f64, f64, f64, f64), String> {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else {
+                return Ok(Err("<no such target>".to_string()));
+            };
+            let fe: FrameworkElement = element.cast()?;
+            let at = element
+                .TransformToVisual(None::<&UIElement>)?
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            Ok(Ok((f64::from(at.X), f64::from(at.Y), fe.ActualWidth()?, fe.ActualHeight()?)))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+
+    fn text_lines(&self, t: crate::harness::Target) -> Result<(usize, bool), String> {
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, t)? else {
+                return Ok(Err("<no such target>".to_string()));
+            };
+            let Ok(block) = element.cast::<TextBlock>() else {
+                return Ok(Err("<the target is not a TextBlock>".to_string()));
+            };
+            // One line of the block's own face, measured on a probe, divides the
+            // block's laid-out height (docs/media-player-plan.md M16 (2)).
+            let probe = TextBlock::new()?;
+            probe.SetFontFamily(&block.FontFamily()?)?;
+            probe.SetFontSize(block.FontSize()?)?;
+            probe.SetFontWeight(block.FontWeight()?)?;
+            probe.SetFontStyle(block.FontStyle()?)?;
+            probe.SetText(&HSTRING::from("Ag"))?;
+            let ui: UIElement = probe.cast()?;
+            ui.Measure(bindings::Windows::Foundation::Size { Width: f32::INFINITY, Height: f32::INFINITY })?;
+            let line = f64::from(ui.DesiredSize()?.Height);
+            if line <= 0.0 {
+                return Ok(Err("<the probe line measured 0 tall>".to_string()));
+            }
+            let lines = (block.ActualHeight()? / line).round() as usize;
+            Ok(Ok((lines, block.IsTextTrimmed()?)))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+
+    fn grid_cell_frames(&self, t: crate::harness::Target) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.grids.len()) else {
+                return Ok(Err("<no such target>".to_string()));
+            };
+            let grid = &core.grids[i];
+            let children = grid.Children()?;
+            let mut frames = Vec::new();
+            for k in 0..children.Size()? {
+                let cell: UIElement = children.GetAt(k)?;
+                let transform = cell.TransformToVisual(&grid.cast::<UIElement>()?)?;
+                let origin = transform.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+                let element = cell.cast::<FrameworkElement>()?;
+                frames.push((f64::from(origin.X), f64::from(origin.Y), element.ActualWidth()?, element.ActualHeight()?));
+            }
+            Ok(Ok(frames))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
     }
 
     fn grid_columns(&self, t: crate::harness::Target, want: usize) -> String {
@@ -28238,7 +28537,9 @@ impl crate::harness::Stage for WinUiStage {
     fn button_symbol(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(element) = target_element(core, t)? else { return Ok("<no such target>".to_owned()) };
-            let Ok(button) = element.cast::<Button>() else { return Ok("<the target is not a Button>".to_owned()) };
+            let Ok(button) = element.cast::<bindings::Microsoft::UI::Xaml::Controls::ContentControl>() else {
+                return Ok("<the target is not a Button or ToggleButton>".to_owned());
+            };
             let Ok(icon) = button.Content().and_then(|c| c.cast::<FontIcon>()) else {
                 return Ok("<the button's content is no FontIcon>".to_owned());
             };

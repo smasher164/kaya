@@ -54,6 +54,7 @@ func App() *kaya.App {
 		view.Item("Volume").Symbol(kaya.SymbolVolume)
 		view.Item("Queue").Symbol(kaya.SymbolQueue)
 		view.Item("Favorite").Symbol(kaya.SymbolFavorite)
+		view.Item("Muted").Symbol(kaya.SymbolMuted)
 
 		// Option order IS the index.
 		sortGroup := win.RadioGroup("Sort")

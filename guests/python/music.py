@@ -53,6 +53,10 @@ VIVID_SHARE = 0.01
 VIVID_L = (8, 96)
 VIVID_CHROMA = 15
 CLIENT_ID_PREF = "jamendo.client_id"
+# The harness's preference store is scratch, emptied at a leg's start
+# (crates/kaya/src/prefs.rs), so no leg reads another's favourites.
+FAVORITES_PREF = "music.favorites"
+LIKED_PREF = "music.liked"
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
 # A lane's leg takes the host's Now Playing only in the scene that reads it
@@ -249,6 +253,7 @@ class Catalogue:
 
 
 app = kaya.App()
+kaya.catalog("music")
 catalogue = Catalogue()
 desktop = kaya.capabilities().aux_windows
 art_pool = ThreadPoolExecutor(max_workers=6)
@@ -257,6 +262,7 @@ artist_cards = {}
 viewing = {"album": None}
 library_keys = []
 known = {}
+artist_names = {}
 # The phones' Search section, a page with no entry of its own.
 roots = []
 # The like steps the window's undo ledger holds, newest last.
@@ -268,8 +274,16 @@ songs = {}
 playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
             "shuffle": False, "repeat": "off", "seconds": 0, "ms": 0,
             "muted": False}
-favorites = set()
-liked = set()
+def kept(key):
+    return {k for k in kaya.prefs().get(key, "").split(",") if k}
+
+
+def keep(key, ids):
+    kaya.prefs().set(key, ",".join(sorted(ids)))
+
+
+favorites = kept(FAVORITES_PREF)
+liked = kept(LIKED_PREF)
 covers = {}
 fetching = set()
 dock_ready = {"built": False}
@@ -327,10 +341,11 @@ def go_home():
 
 
 def show_destination():
-    """The desktops' sidebar names Home or Search while one is on top."""
+    """The desktops' sidebar names Home, Search or the album on top."""
     top = stacks.get(0, [])
     home_shown.set(not top)
     search_shown.set(len(top) == 1 and top[0]["kind"] == "search")
+    show_library_selection(top[-1]["album"] if top and top[-1]["kind"] == "album" else None)
 
 
 def all_pages():
@@ -399,12 +414,16 @@ def track_table(page, names, a11y="tracks", prefix="", grow: float | None = 1, t
                       on_activate=on_play) as line:
             line.a11y_id(f"{prefix}track")
             kaya.label(bind=track.number)
-            with kaya.row(spacing=8):
+            with kaya.row(spacing=8, align="center") as cell:
+                cell.a11y_id(f"{prefix}track_cell")
                 kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                            phase=track.phase, on_needed=page["art"].needed,
                            on_released=page["art"].released) \
                     .max_width(ROW_ART).max_height(ROW_ART).a11y_id(f"{prefix}track_art")
-                with kaya.column(spacing=0):
+                # A column hugs only when asked; then the row centres it
+                # (the breadth rule, docs/layout-knobs-plan.md §1).
+                with kaya.column(spacing=0) as lines:
+                    lines.fill(False).a11y_id(f"{prefix}track_lines")
                     kaya.label(bind=track.title, tint=track.tint).a11y_id(f"{prefix}track_name")
                     kaya.caption(bind=track.artist)
             if desktop:
@@ -428,7 +447,8 @@ def header_content(album, page):
         with kaya.column(spacing=6, align="start"):
             kaya.heading(album["name"]).a11y_id("album_title")
             kaya.button(album["artist"],
-                        on_click=lambda: open_artist(album["artist_id"], page["surface"])) \
+                        on_click=lambda: open_artist(album["artist_id"], album["artist"],
+                                                     page["surface"])) \
                 .role(kaya.Role.PLAIN).a11y_id("album_artist")
             kaya.caption(bind=page["about"]).a11y_id("album_about")
             with kaya.row(spacing=12, align="center"):
@@ -446,6 +466,7 @@ def set_favorite(album_id, on):
         favorites.add(album_id)
     else:
         favorites.discard(album_id)
+    keep(FAVORITES_PREF, favorites)
     for page in all_pages():
         if page["kind"] == "album" and page["album"] == album_id:
             page["liked"].set(on)
@@ -543,8 +564,15 @@ def cover_arrived(surface, entry, cover, colour):
 
 
 def songs_line(count, seconds):
-    songs_word = "1 song" if count == 1 else f"{count} songs"
-    return f"{songs_word}, {kaya.fmt.duration(seconds * 1000)}"
+    """A list's length in words, as a track's is positional (M16 (23))."""
+    hours, minutes, rest = seconds // 3600, seconds // 60 % 60, seconds % 60
+    if hours:
+        length = kaya.tr("length-hours", hours=hours, minutes=minutes)
+    elif minutes:
+        length = kaya.tr("length-minutes", minutes=minutes, seconds=rest)
+    else:
+        length = kaya.tr("length-seconds", seconds=rest)
+    return kaya.tr("songs-length", songs=kaya.tr("songs", count=count), length=length)
 
 
 def album_arrived(album, surface, entry, answer):
@@ -730,11 +758,14 @@ def repeat_symbol():
     return kaya.Symbol.REPEAT_ONE if playback["repeat"] == "one" else kaya.Symbol.REPEAT
 
 
-def cycle_repeat():
+def cycle_repeat(_on):
+    """Repeat is lit while on and draws repeat-one for "one" (M16 (14)), so
+    the box's own bit is set back from the cycle."""
     playback["repeat"] = REPEAT_NEXT[playback["repeat"]]
+    repeat_on.set(playback["repeat"] != "off")
     repeat_name.set(REPEAT_NAME[playback["repeat"]])
-    for button in live["repeat"]:
-        button.symbol(repeat_symbol())
+    for box in live["repeat"]:
+        box.symbol(repeat_symbol())
 
 
 def set_liked(on):
@@ -755,6 +786,7 @@ def apply_like(key, on):
         liked.add(key)
     else:
         liked.discard(key)
+    keep(LIKED_PREF, liked)
     liked_now.set(playback["key"] in liked)
 
 
@@ -845,7 +877,8 @@ def transport(full):
         kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
             .a11y_id("full_next" if full else "next")
         live["repeat"].append(
-            kaya.button("Repeat", on_click=cycle_repeat, symbol=repeat_symbol())
+            kaya.checkbox("Repeat", checked=repeat_on, on_toggle=cycle_repeat)
+            .role(kaya.Role.TOGGLE).symbol(repeat_symbol())
             .a11y_label(repeat_name).a11y_id("repeat"))
         kaya.spacer()
 
@@ -927,7 +960,8 @@ def now_playing(grow):
     with kaya.row(spacing=12, align="center", grow=grow):
         kaya.image(dock_art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=dock_phase) \
             .max_width(DOCK_ART).max_height(DOCK_ART).a11y_id("dock_art")
-        with kaya.column(spacing=0):
+        with kaya.column(spacing=0) as lines:
+            lines.fill(False).a11y_id("dock_lines")
             kaya.label(bind=dock_title).a11y_id("dock_title")
             kaya.caption(bind=dock_artist).a11y_id("dock_artist")
 
@@ -938,7 +972,7 @@ def open_full_player():
     live["sheet"] = True
     with app.sheet(PLAYER_SHEET, title="Now Playing", detent="large",
                    on_dismissed=full_player_closed):
-        with kaya.column(spacing=16, align="stretch") as full:
+        with kaya.column(spacing=16, align="stretch", inset=PAGE_INSET) as full:
             full.a11y_id("full_player")
             with kaya.column(align="center"):
                 kaya.image(dock_art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=dock_phase) \
@@ -996,49 +1030,57 @@ def fetch_card_art(album_id, url, registry=None):
     app.post(card_art_landed, album_id, data, registry)
 
 
-def open_artist(artist_id, surface):
-    """The artist page opens once its answer is in: its shelf is a grid of
-    cards, which is built whole."""
-    top = stacks.get(surface, [])[-1:]
-    if top and top[0]["kind"] == "artist" and top[0]["id"] == artist_id:
-        return
-    threading.Thread(target=load_artist, args=(artist_id, surface), daemon=True).start()
-
-
-def load_artist(artist_id, surface):
-    try:
-        answer = catalogue.artist(artist_id)
-    except (OSError, ValueError, KeyError, IndexError) as e:
-        print(f"music: artist {artist_id} did not load: {e!r}", file=sys.stderr)
-        return
-    app.post(show_artist, surface, answer)
-
-
-def show_artist(surface, answer):
-    about, albums, tracks = answer
-    stack = open_page(surface, "artist", about["id"])
+def open_artist(artist_id, name, surface):
+    """The artist page opens at once, its picture loading and its lists
+    empty, and fills in when the catalogue answers (M16 (13))."""
+    stack = open_page(surface, "artist", artist_id)
     if stack is None:
         return
-    name = html.unescape(about["name"])
     entry = next(entries)
-    page = {"kind": "artist", "id": about["id"], "entry": entry, "surface": surface,
-            "keys": [], "cards": {}}
+    page = {"kind": "artist", "id": artist_id, "entry": entry, "surface": surface,
+            "keys": [], "cards": {}, "name": name}
     stack.append(page)
     if desktop:
         show_destination()
-    shelf = [{"id": a["id"], "name": html.unescape(a["name"]), "artist": name,
-              "artist_id": about["id"], "image": catalogue.address(a["image"])}
-             for a in albums]
-    seconds = sum(int(t["duration"]) for t in tracks)
     with app.push_entry(entry, title=name, window=surface,
                         on_popped=lambda: page_closed(surface, entry)):
         page["picture"] = kaya.signal(b"")
         page["picture_phase"] = kaya.signal(kaya.ImagePhase.LOADING)
+        page["about"] = kaya.signal("Loading…")
         page["tracks"] = kaya.collection(Track)
         page["art"] = kaya.RowImages(app, page["tracks"], url="art_url", art="art",
                                      phase="phase", fetch=catalogue.fetch)
-        artist_body(name, f"{albums_line(len(albums))} · {songs_line(len(tracks), seconds)}",
-                    shelf, page)
+        artist_body(name, page)
+    threading.Thread(target=load_artist, args=(artist_id, surface, entry), daemon=True).start()
+
+
+def load_artist(artist_id, surface, entry):
+    try:
+        answer = catalogue.artist(artist_id)
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        print(f"music: artist {artist_id} did not load: {e!r}", file=sys.stderr)
+        answer = None
+    app.post(artist_arrived, surface, entry, answer)
+
+
+def artist_arrived(surface, entry, answer):
+    page = find_page(surface, entry)
+    if page is None:
+        return
+    if answer is None:
+        page["about"].set("Couldn't reach the catalogue.")
+        page["picture_phase"].set(kaya.ImagePhase.FAILED)
+        return
+    about, albums, tracks = answer
+    name = page["name"]
+    shelf = [{"id": a["id"], "name": html.unescape(a["name"]), "artist": name,
+              "artist_id": about["id"], "image": catalogue.address(a["image"])}
+             for a in albums]
+    seconds = sum(int(t["duration"]) for t in tracks)
+    page["about"].set(f"{albums_line(len(albums))} · {songs_line(len(tracks), seconds)}")
+    with kaya.within(page["shelf"]):
+        for album in shelf:
+            card(album, page["cards"], prefix="artist_", surface=surface)
     for album in shelf:
         art_pool.submit(fetch_card_art, album["id"], album["image"], page["cards"])
     for rank, t in enumerate(tracks, start=1):
@@ -1060,7 +1102,14 @@ def show_artist(surface, answer):
                      daemon=True).start()
 
 
-def artist_body(name, about, shelf, page):
+def wide(url):
+    """The artist's picture at 600 px, the header's width (M16 (25))."""
+    parts = urllib.parse.urlsplit(url)
+    query = [(k, "600" if k == "width" else v) for k, v in urllib.parse.parse_qsl(parts.query)]
+    return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+
+
+def artist_body(name, page):
     """The artist page (docs/media-player-plan.md §1, M13; docs/styling-pass-plan.md
     Y3): the picture as the header's ground, the round avatar and the name in an
     overlay panel, then the top tracks as a table and the albums as a shelf."""
@@ -1078,7 +1127,7 @@ def artist_body(name, about, shelf, page):
                                          filled=kaya.Tint.OVERLAY) as panel:
                 panel.a11y_id("artist_panel")
                 kaya.heading(name).a11y_id("artist_name")
-                kaya.caption(about).a11y_id("artist_about")
+                kaya.caption(bind=page["about"]).a11y_id("artist_about")
         with kaya.column(spacing=16, inset=PAGE_INSET, align="stretch") as rest:
             rest.a11y_id("artist_rest")
             kaya.heading("Top tracks")
@@ -1087,14 +1136,17 @@ def artist_body(name, about, shelf, page):
             track_table(page, names, a11y="top_tracks", prefix="top_", grow=None, timed=desktop)
             kaya.heading("Albums")
             with kaya.grid(1, spacing=12) as grid:
-                for album in shelf:
-                    card(album, page["cards"], prefix="artist_", surface=page["surface"])
+                pass
             grid.columns_auto(CARD_ART + 24).a11y_id("artist_shelf")
+            page["shelf"] = grid
 
 
 def load_picture(url, surface, entry):
     try:
-        picture = catalogue.fetch(catalogue.address(url))
+        try:
+            picture = catalogue.fetch(catalogue.address(wide(url)))
+        except OSError:
+            picture = catalogue.fetch(catalogue.address(url))
     except OSError as e:
         print(f"music: the artist's picture did not load: {e!r}", file=sys.stderr)
         picture = None
@@ -1113,7 +1165,7 @@ def picture_arrived(surface, entry, picture):
 
 
 def albums_line(count):
-    return "1 album" if count == 1 else f"{count} albums"
+    return kaya.tr("albums", count=count)
 
 
 def card(album, registry=None, prefix="", surface=None):
@@ -1197,7 +1249,7 @@ def search_body(page):
         found_shelf(page, "albums", "Albums", kaya.Shape.ROUNDED,
                     lambda row: open_album(known[row.key], page["surface"]))
         found_shelf(page, "artists", "Artists", kaya.Shape.CIRCLE,
-                    lambda row: open_artist(row.key, page["surface"]))
+                    lambda row: open_artist(row.key, artist_names[row.key], page["surface"]))
         with kaya.column(spacing=8, align="stretch"):
             with kaya.when(page["heads"]["tracks"]):
                 kaya.heading("Tracks")
@@ -1213,7 +1265,8 @@ def found_list(page):
                        phase=track.phase, on_needed=page["tracks_art"].needed,
                        on_released=page["tracks_art"].released) \
                 .max_width(ROW_ART).max_height(ROW_ART).a11y_id("found_track_art")
-            with kaya.column(spacing=0, grow=1):
+            with kaya.column(spacing=0, grow=1) as lines:
+                lines.fill(False)
                 kaya.label(bind=track.title, tint=track.tint).a11y_id("found_track_name")
                 kaya.caption(bind=track.artist)
             kaya.label(bind=track.duration).a11y_id("found_track_time")
@@ -1318,6 +1371,7 @@ def found_rows(group, results):
                                     art_url=album["image"], art=b"",
                                     phase=kaya.ImagePhase.LOADING)))
         elif group == "artists":
+            artist_names[key] = html.unescape(r["name"])
             rows.append((key, Found(name=html.unescape(r["name"]), caption="Artist",
                                     art_url=catalogue.address(r["image"]), art=b"",
                                     phase=kaya.ImagePhase.LOADING)))
@@ -1441,13 +1495,14 @@ def library_body():
         kaya.heading("Your Library")
         kaya.caption(bind=library_hint)
         for item in library:
-            with kaya.row(selected=item.selected, on_activate=on_saved) as entry:
+            with kaya.row(align="center", selected=item.selected, on_activate=on_saved) as entry:
                 entry.a11y_id("saved")
                 kaya.image(item.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                            phase=item.phase, on_needed=library_art.needed,
                            on_released=library_art.released) \
                     .max_width(ROW_ART).max_height(ROW_ART).a11y_id("saved_art")
-                with kaya.column(spacing=0):
+                with kaya.column(spacing=0) as lines:
+                    lines.fill(False)
                     kaya.label(bind=item.title)
                     kaya.caption(bind=item.caption)
 
@@ -1507,6 +1562,7 @@ with app.window(title="Music", width=1100, height=720,
     shuffle_on = kaya.signal(False)
     play_name = kaya.signal("Play")
     repeat_name = kaya.signal(REPEAT_NAME["off"])
+    repeat_on = kaya.signal(False)
     position = kaya.signal(0.0)
     elapsed = kaya.signal(kaya.fmt.duration(0))
     remaining = kaya.signal("-" + kaya.fmt.duration(0))

@@ -86,6 +86,16 @@ static class ToastScene
                         t.DismissToast(id);
                     }
                 });
+                // A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+                tx.Button("sheet", onClick: t =>                          // button#6
+                {
+                    t.PresentSheet(21, title: "Saved items", detent: Detent.Large);
+                    t.MountIn(21, t.Column(body =>
+                    {
+                        t.SetA11yId(t.Button("save here", onClick: async _ => await Show("Saved in sheet", null)), "sheet_save");
+                        return body;
+                    }));
+                });
                 foreach (var row in items.Rows())
                     row.Row(() => row.Label(row.Title));
                 return root;

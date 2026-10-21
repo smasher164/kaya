@@ -110,7 +110,7 @@ BASELINE_LINKS = (
     (WINUI, "fn apply_badge(item: &NavigationViewItem, count: f64)", 1200, (
         "pill.SetMaxHeight(16.0 * scale)?;",
     )),
-    (WINUI, "fn clipping(&self) -> String {", 5000, (
+    (WINUI, "fn clipping(&self) -> String {", 6000, (
         'named_descendant(&root, "ValueTextBlock")?',
         # A BUTTON'S CAPTION AGAINST ITS OWN ROOM, and a reader that refuses a
         # VACUOUS answer (docs/deferred.md's WinUI button clip): before the
@@ -533,7 +533,7 @@ def compose_slider_names(compose_text):
                    "node has a child again and its name leaves the node info")
     for head, needles in (
         ("private fun KayaSliderSurface(",
-         ("slider(boxFill.then(KayaSliderNatural).then(a11y))", "slider(a11y)")),
+         ("slider(boxFill.then(capped).then(KayaSliderNatural).then(a11y))", "slider(a11y)")),
         ("private fun KayaRangeSurface(",
          ("modifier = boxFill.then(a11y)",
           "CompositionLocalProvider(LocalContext provides words)")),
@@ -600,7 +600,9 @@ def compose_pushed_screen(compose_text):
     if panes == 0 or wrapped != panes:
         bad.append(f"{COMPOSE}: {wrapped} of {panes} scaffold panes take the reveal's focus "
                    "themselves (KayaPaneFocus); the rest hand it to their first text field")
-    covered = ("kayaActiveEntries().isNotEmpty() && !kayaSplitArm()\n"
+    # A covered stack is kayaCovers()'s (DESIGN.md's back rule, M16 (9), (10)).
+    covered = ("val covered = kayaCovers()\n"
+               "        val shownTop = kayaActiveEntries().lastOrNull()?.root\n"
                "        if (KayaSceneModel.menubar.isEmpty() && !covered)")
     if covered not in compose_text:
         bad.append(f"{COMPOSE}: a covered stack no longer wears the top bar")
@@ -1531,8 +1533,8 @@ for label, pattern, repl in (
     ("kaya's thumb painted through background",
      r"\.hoverable\(source\)\.drawBehind \{", ".hoverable(source).background(color).drawBehind {"),
     ("the plain slider's a11y dropped",
-     r"slider\(boxFill\.then\(KayaSliderNatural\)\.then\(a11y\)\)",
-     "slider(boxFill.then(KayaSliderNatural))"),
+     r"slider\(boxFill\.then\(capped\)\.then\(KayaSliderNatural\)\.then\(a11y\)\)",
+     "slider(boxFill.then(capped).then(KayaSliderNatural))"),
     ("the range's thumb words dropped",
      r"CompositionLocalProvider\(LocalContext provides words\) \{\n        RangeSlider",
      "run {\n        RangeSlider"),

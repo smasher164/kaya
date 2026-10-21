@@ -873,9 +873,10 @@ pub enum Step {
     /// The SEMANTIC ICON NAME the segment at the 0-based index draws, read
     /// off the platform's own segment (docs/segmented-plan.md G5).
     ExpectSegmentSymbol(Target, usize, String),
-    /// `expect_symbol <button> "<name>"`: the SEMANTIC ICON NAME a button
-    /// draws, read off the platform's own control (docs/media-player-plan.md
-    /// M8, the repeat button whose symbol the app swaps).
+    /// `expect_symbol <button|checkbox> "<name>"`: the SEMANTIC ICON NAME a
+    /// button or a toggle-role checkbox draws, read off the platform's own
+    /// control (docs/media-player-plan.md M8; M16 (14), the repeat toggle
+    /// whose symbol the app swaps).
     ExpectSymbol(Target, String),
     /// `expect_expanded <expander> on|off`: the header's published expanded
     /// state AND the body's presence on screen, read off the platform and
@@ -908,6 +909,32 @@ pub enum Step {
     /// each column's cells sharing their leading edge — geometry from the
     /// toolkit, never a model copy.
     ExpectGridColumns(Target, usize),
+    /// `expect_cells_even <grid>`: the grid's cells as laid out are one width,
+    /// each row's one top and one height, with one gap across and one down
+    /// (docs/media-player-plan.md M16 (1)), read through [`cells_even`].
+    ExpectCellsEven(Target),
+    /// `expect_text_lines <label> <n> <truncated|whole>`: how many lines the
+    /// label is drawn in and whether its text was cut short with the
+    /// platform's ellipsis, read off the toolkit's own text layout
+    /// (docs/media-player-plan.md M16 (2), `max_lines`).
+    ExpectTextLines(Target, usize, bool),
+    /// `expect_width <target> <points>`: the control's drawn width, never its
+    /// track, within a point (docs/media-player-plan.md M16 (17), a slider's
+    /// `max_width`). Points are every toolkit's logical unit.
+    ExpectWidth(Target, f64),
+    /// `expect_gap <upper> <lower> <points>`: from the upper target's bottom
+    /// edge to the lower one's top, within a point, which is how a hidden
+    /// section that takes no space is read (docs/media-player-plan.md M16 (3)).
+    ExpectGap(Target, Target, f64),
+    /// `expect_no_overlap`: no visible label or button is drawn over another,
+    /// their laid-out window frames read off the toolkit (docs/media-player-plan.md
+    /// M16 (34): a caption squashed under a table passed expect_no_clipping).
+    ExpectNoOverlap,
+    /// `expect_ground_color <container> "light RRGGBB dark RRGGBB"`: the
+    /// gradient ground's drawn top, its own probe 4 units in from the top and
+    /// right, within [`GROUND_COLOR_TOLERANCE`] of the colour for the mode the
+    /// window reads (docs/media-player-plan.md M16 (35)).
+    ExpectGroundColor(Target, u32, u32),
     /// Drive the REAL activation path of the menu item at the `>`-joined
     /// label path — resolved wherever the item surfaced: the bar (or its
     /// phone overflow), or the OPEN context menu after a context_open. The
@@ -1073,6 +1100,7 @@ impl Step {
             | Step::ExpectTint(t, _)
             | Step::ExpectFill(t, _) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
+            Step::ExpectGap(a, b, _) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
             | Step::Hold(t, _)
@@ -1112,6 +1140,10 @@ impl Step {
             | Step::ExpectOutOfReach(t)
             | Step::ExpectSafe(t, _)
             | Step::ExpectGridColumns(t, _)
+            | Step::ExpectCellsEven(t)
+            | Step::ExpectTextLines(t, _, _)
+            | Step::ExpectWidth(t, _)
+            | Step::ExpectGroundColor(t, _, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
@@ -1214,6 +1246,7 @@ impl Step {
             | Step::ExpectSheetDetent(..)
             | Step::ExpectTextScale(..)
             | Step::ExpectNoClipping
+            | Step::ExpectNoOverlap
             | Step::ExpectDirection(..)
             | Step::ExpectLocale(..)
             | Step::ExpectHourCycle(..)
@@ -1412,6 +1445,12 @@ impl Step {
             Step::ExpectGroundReach(..) => true,
             Step::ExpectSystemBars(..) => true,
             Step::ExpectGridColumns { .. } => true,
+            Step::ExpectCellsEven { .. } => true,
+            Step::ExpectTextLines { .. } => true,
+            Step::ExpectWidth { .. } => true,
+            Step::ExpectGap { .. } => true,
+            Step::ExpectNoOverlap => true,
+            Step::ExpectGroundColor { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
             Step::ExpectMenu { .. } => true,
@@ -1510,6 +1549,117 @@ pub(crate) fn note_drop(widget: u64, x: f64) {
 /// The x of the last drop on `widget`, if the last drop was on it.
 pub(crate) fn last_drop_x(widget: u64) -> Option<f64> {
     LAST_DROP.lock().ok().and_then(|last| last.filter(|(id, _)| *id == widget).map(|(_, x)| x))
+}
+
+/// expect_ground_color's per-channel tolerance: the skin readers' 0.06 of full scale
+/// (docs/media-player-plan.md M16 (35)); the two interpreters carry the same number.
+pub const GROUND_COLOR_TOLERANCE: u32 = 15;
+
+/// The `expect_no_overlap` rule (docs/media-player-plan.md M16 (34)): the first two
+/// frames in one window whose intersection is wider and taller than `tolerance`.
+/// The two interpreters carry the same rule and sentence.
+pub fn first_overlap(frames: &[(String, u64, (f64, f64, f64, f64))], tolerance: f64) -> Option<String> {
+    let spell = |(x, y, w, h): (f64, f64, f64, f64)| format!("{}x{} at ({},{})", w.round(), h.round(), x.round(), y.round());
+    for (i, (a, wa, fa)) in frames.iter().enumerate() {
+        for (b, wb, fb) in &frames[i + 1..] {
+            if wa != wb {
+                continue;
+            }
+            let across = (fa.0 + fa.2).min(fb.0 + fb.2) - fa.0.max(fb.0);
+            let down = (fa.1 + fa.3).min(fb.1 + fb.3) - fa.1.max(fb.1);
+            if across > tolerance && down > tolerance {
+                return Some(format!(
+                    "{a} {} and {b} {} share {}x{}",
+                    spell(*fa),
+                    spell(*fb),
+                    across.round(),
+                    down.round()
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// The `expect_cells_even` rule (docs/media-player-plan.md M16 (1)), over a grid's
+/// cells as laid out, `(x, y, width, height)` in child order: every cell one
+/// width, each row's cells one top and one height, one gap across and one down.
+/// The two interpreters carry the same rule and the same sentences.
+pub fn cells_even(frames: &[(f64, f64, f64, f64)], tolerance: f64) -> Result<(), String> {
+    if frames.len() < 2 {
+        return Err(format!("{} cell(s), wanted two at least", frames.len()));
+    }
+    let spell = |i: usize| {
+        let (x, y, w, h) = frames[i];
+        format!("cell {} is {}x{} at ({},{})", i + 1, w.round(), h.round(), x.round(), y.round())
+    };
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    for (i, &(_, y, _, _)) in frames.iter().enumerate() {
+        let joins = rows.last().is_some_and(|row| {
+            let bottom = row.iter().map(|&j| frames[j].1 + frames[j].3).fold(f64::MIN, f64::max);
+            y < bottom - tolerance
+        });
+        if joins {
+            rows.last_mut().expect("a row").push(i);
+        } else {
+            rows.push(vec![i]);
+        }
+    }
+    for i in 1..frames.len() {
+        if (frames[i].2 - frames[0].2).abs() > tolerance {
+            return Err(format!("{}, {}: the widths differ", spell(i), spell(0)));
+        }
+    }
+    let mut across: Option<(f64, usize)> = None;
+    for row in &rows {
+        let first = row[0];
+        for (k, &i) in row.iter().enumerate().skip(1) {
+            if (frames[i].1 - frames[first].1).abs() > tolerance {
+                return Err(format!("{}, {}: the tops differ in one row", spell(i), spell(first)));
+            }
+            if (frames[i].3 - frames[first].3).abs() > tolerance {
+                return Err(format!("{}, {}: the heights differ in one row", spell(i), spell(first)));
+            }
+            let prev = row[k - 1];
+            let gap = frames[i].0 - (frames[prev].0 + frames[prev].2);
+            if gap < -tolerance {
+                return Err(format!("{}, {}: cell {} overlaps cell {} by {}", spell(i), spell(prev), i + 1, prev + 1, (-gap).round()));
+            }
+            match across {
+                None => across = Some((gap, i)),
+                Some((g, at)) if (gap - g).abs() > tolerance => {
+                    return Err(format!(
+                        "the gap before cell {} is {}, before cell {} it is {}",
+                        i + 1,
+                        gap.round(),
+                        at + 1,
+                        g.round()
+                    ));
+                }
+                Some(_) => {}
+            }
+        }
+    }
+    let mut down: Option<(f64, usize)> = None;
+    for r in 1..rows.len() {
+        let above = &rows[r - 1];
+        let bottom = above.iter().map(|&j| frames[j].1 + frames[j].3).fold(f64::MIN, f64::max);
+        let gap = frames[rows[r][0]].1 - bottom;
+        match down {
+            None => down = Some((gap, r)),
+            Some((g, at)) if (gap - g).abs() > tolerance => {
+                return Err(format!(
+                    "the gap above row {} is {}, above row {} it is {}",
+                    r + 1,
+                    gap.round(),
+                    at + 1,
+                    g.round()
+                ));
+            }
+            Some(_) => {}
+        }
+    }
+    Ok(())
 }
 
 pub fn video_box_shaped(got: &str, aspect: (u32, u32)) -> bool {
@@ -2135,6 +2285,9 @@ pub trait Stage: Send + 'static {
     /// None when the shown toast ends above its window's dock (docs/toast-plan.md
     /// T8: above the content and its bottom bars); else what was measured.
     fn toast_over_dock(&self) -> Option<String>;
+    /// None when the shown toast draws over every sheet presented on its window
+    /// (docs/media-player-plan.md M16 (20)); else what was measured.
+    fn toast_under_sheet(&self) -> Option<String>;
     /// Ok when the platform published an announcement of a toast with this
     /// text and action to a listener the harness holds; otherwise every
     /// announcement it heard.
@@ -2224,6 +2377,26 @@ pub trait Stage: Send + 'static {
     /// units); otherwise the toolkit's own description of the mismatch, for
     /// the failure text. Geometry, never a model copy.
     fn grid_columns(&self, target: Target, want: usize) -> String;
+    /// Each cell of the grid as laid out, `(x, y, width, height)` in the grid's
+    /// own space and child order, read off the toolkit; Err says why there is
+    /// no reading (docs/media-player-plan.md M16 (1)).
+    fn grid_cell_frames(&self, target: Target) -> Result<Vec<(f64, f64, f64, f64)>, String>;
+    /// How many lines the label is drawn in and whether its text was cut
+    /// short, off the toolkit's text layout (docs/media-player-plan.md M16 (2)).
+    fn text_lines(&self, target: Target) -> Result<(usize, bool), String>;
+    /// The control's drawn width in points, off the toolkit; Err says why
+    /// there is no reading (docs/media-player-plan.md M16 (17)).
+    fn width_of(&self, target: Target) -> Result<f64, String>;
+    /// The target's laid-out frame in window points, (x, y, width, height)
+    /// (expect_gap, M16 (3)).
+    fn window_frame(&self, target: Target) -> Result<(f64, f64, f64, f64), String>;
+    /// Every visible label and button: a description, the window it is in, and
+    /// its laid-out frame `(x, y, width, height)` in that window, off the toolkit
+    /// (docs/media-player-plan.md M16 (34)).
+    fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))>;
+    /// A container ground's drawn top as 0xRRGGBB and whether the window reads
+    /// dark, off the window's pixels (docs/media-player-plan.md M16 (35)).
+    fn ground_top(&self, target: Target) -> Result<(u32, bool), String>;
     /// The scroll viewport's overflow, read from the toolkit after forcing
     /// pending layout: the empty string when the content exceeds the
     /// viewport, otherwise a short platform-flavored description of the two
@@ -3706,11 +3879,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_symbol" => {
                 let Some((target, want)) = rest.trim().split_once(char::is_whitespace) else {
-                    return Err(format!("expect_symbol wants a button and a quoted symbol name: {line:?}"));
+                    return Err(format!("expect_symbol wants a button or checkbox and a quoted symbol name: {line:?}"));
                 };
                 let target = parse_target(target)?;
-                if target.kind != TargetKind::Button {
-                    return Err(format!("expect_symbol reads a button, not {target:?}"));
+                if !matches!(target.kind, TargetKind::Button | TargetKind::Checkbox) {
+                    return Err(format!("expect_symbol reads a button or a checkbox, not {target:?}"));
                 }
                 Step::ExpectSymbol(target, parse_string(want.trim())?)
             }
@@ -3776,6 +3949,67 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     ));
                 }
                 Step::ExpectSystemBars(want)
+            }
+            "expect_ground_color" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_ground_color wants a container and \"light RRGGBB dark RRGGBB\": {line:?}"))?;
+                let spec = parse_string(text)?;
+                let words: Vec<&str> = spec.split_whitespace().collect();
+                let hex = |w: &str| (w.len() == 6).then(|| u32::from_str_radix(w, 16).ok()).flatten();
+                let ["light", light, "dark", dark] = words[..] else {
+                    return Err(format!("expect_ground_color wants \"light RRGGBB dark RRGGBB\": {line:?}"));
+                };
+                let (Some(light), Some(dark)) = (hex(light), hex(dark)) else {
+                    return Err(format!("expect_ground_color wants six hex digits per colour: {line:?}"));
+                };
+                Step::ExpectGroundColor(parse_target(target)?, light, dark)
+            }
+            "expect_no_overlap" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("expect_no_overlap takes nothing: {line:?}"));
+                }
+                Step::ExpectNoOverlap
+            }
+            "expect_width" => {
+                let (target, n) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_width wants a target and a width in points: {line:?}"))?;
+                let n: f64 = n
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("expect_width wants a width in points: {line:?}"))?;
+                Step::ExpectWidth(parse_target(target)?, n)
+            }
+            "expect_gap" => {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [upper, lower, n] = words[..] else {
+                    return Err(format!("expect_gap wants two targets and a gap in points: {line:?}"));
+                };
+                let n: f64 = n.parse().map_err(|_| format!("expect_gap wants a gap in points: {line:?}"))?;
+                Step::ExpectGap(parse_target(upper)?, parse_target(lower)?, n)
+            }
+            "expect_text_lines" => {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [target, n, cut] = words[..] else {
+                    return Err(format!("expect_text_lines wants a label, a line count and truncated|whole: {line:?}"));
+                };
+                let n: usize = n
+                    .parse()
+                    .map_err(|_| format!("expect_text_lines wants a whole line count: {line:?}"))?;
+                let cut = match cut {
+                    "truncated" => true,
+                    "whole" => false,
+                    _ => return Err(format!("expect_text_lines wants truncated or whole: {line:?}")),
+                };
+                Step::ExpectTextLines(parse_target(target)?, n, cut)
+            }
+            "expect_cells_even" => {
+                let target = rest.trim();
+                if target.is_empty() || target.contains(char::is_whitespace) {
+                    return Err(format!("expect_cells_even wants one grid target: {line:?}"));
+                }
+                Step::ExpectCellsEven(parse_target(target)?)
             }
             "expect_grid_columns" => {
                 let (target, n) = rest
@@ -6727,13 +6961,16 @@ fn run_with_log(
                         } else if let Some(over) = stage.toast_over_dock() {
                             over_seen = Some(over.clone());
                             Err(format!("toast {want:?} {over}"))
+                        } else if let Some(under) = stage.toast_under_sheet() {
+                            Err(format!("toast {want:?} {under}"))
                         } else {
                             Ok(format!("toast {want:?}"))
                         }
                     }
-                    None => match &over_seen {
-                        Some(over) => Err(format!("no toast shown, wanted {want:?}; while it showed it {over}")),
-                        None => Err(format!("no toast shown, wanted {want:?}")),
+                    None => match (&over_seen, stage.toast_under_sheet()) {
+                        (Some(over), _) => Err(format!("no toast shown, wanted {want:?}; while it showed it {over}")),
+                        (None, Some(under)) => Err(format!("no toast shown, wanted {want:?}; the toast {under}")),
+                        (None, None) => Err(format!("no toast shown, wanted {want:?}")),
                     },
                 }))
             }
@@ -7025,6 +7262,90 @@ fn run_with_log(
                                 target_spec(t)
                             ))
                         }
+                    }))
+                }
+            }
+            Step::ExpectGroundColor(t, light, dark) => Some(poll(|| {
+                let spec = format!("light {light:06X} dark {dark:06X}");
+                match stage.ground_top(*t) {
+                    Ok((got, is_dark)) => {
+                        let want = if is_dark { *dark } else { *light };
+                        let near = (0..3).all(|k| {
+                            let (a, b) = ((got >> (8 * k)) & 0xFF, (want >> (8 * k)) & 0xFF);
+                            a.abs_diff(b) <= GROUND_COLOR_TOLERANCE
+                        });
+                        let mode = if is_dark { "dark" } else { "light" };
+                        if near {
+                            Ok(format!("{} ground color {spec:?}", target_spec(t)))
+                        } else {
+                            Err(format!("{} ground top {got:06X} in the {mode}, wanted {want:06X}", target_spec(t)))
+                        }
+                    }
+                    Err(why) => Err(format!("{} ground top unread: {why}", target_spec(t))),
+                }
+            })),
+            Step::ExpectNoOverlap => Some(poll(|| {
+                let frames = stage.laid_out_frames();
+                match first_overlap(&frames, 1.0) {
+                    None => Ok(format!("no overlap ({} measured)", frames.len())),
+                    Some(why) => Err(format!("overlap: {why}")),
+                }
+            })),
+            Step::ExpectGap(a, b, want) => Some(poll(|| match (stage.window_frame(*a), stage.window_frame(*b)) {
+                (Ok(fa), Ok(fb)) => {
+                    let gap = fb.1 - (fa.1 + fa.3);
+                    if (gap - want).abs() <= 1.0 {
+                        Ok(format!("{} to {} gap {want}", target_spec(a), target_spec(b)))
+                    } else {
+                        Err(format!(
+                            "{} to {} gap {}, wanted {want} ({} ends at {}, {} starts at {})",
+                            target_spec(a),
+                            target_spec(b),
+                            gap.round(),
+                            target_spec(a),
+                            (fa.1 + fa.3).round(),
+                            target_spec(b),
+                            fb.1.round()
+                        ))
+                    }
+                }
+                (Err(why), _) => Err(format!("{} frame unread: {why}", target_spec(a))),
+                (_, Err(why)) => Err(format!("{} frame unread: {why}", target_spec(b))),
+            })),
+            Step::ExpectWidth(t, want) => Some(poll(|| match stage.width_of(*t) {
+                Ok(w) if (w - want).abs() <= 1.0 => Ok(format!("{} {want} wide", target_spec(t))),
+                Ok(w) => Err(format!("{} {} wide, wanted {want}", target_spec(t), w.round())),
+                Err(why) => Err(format!("{} width unread: {why}", target_spec(t))),
+            })),
+            Step::ExpectTextLines(t, want, cut) => {
+                let word = |c: bool| if c { "truncated" } else { "whole" };
+                if t.kind != TargetKind::Label {
+                    Some(Err(format!("{t:?} is not a label target")))
+                } else {
+                    Some(poll(|| match stage.text_lines(*t) {
+                        Ok((n, c)) if n == *want && c == *cut => {
+                            Ok(format!("{} {n} lines {}", target_spec(t), word(c)))
+                        }
+                        Ok((n, c)) => Err(format!(
+                            "{} {n} lines {}, wanted {want} lines {}",
+                            target_spec(t),
+                            word(c),
+                            word(*cut)
+                        )),
+                        Err(why) => Err(format!("{} lines unread: {why}", target_spec(t))),
+                    }))
+                }
+            }
+            Step::ExpectCellsEven(t) => {
+                if t.kind != TargetKind::Grid {
+                    Some(Err(format!("{t:?} is not a grid target")))
+                } else {
+                    Some(poll(|| match stage.grid_cell_frames(*t) {
+                        Ok(frames) => match cells_even(&frames, 2.0) {
+                            Ok(()) => Ok(format!("{} cells even", target_spec(t))),
+                            Err(why) => Err(format!("{} cells uneven: {why}", target_spec(t))),
+                        },
+                        Err(why) => Err(format!("{} cells unread: {why}", target_spec(t))),
                     }))
                 }
             }
@@ -9695,17 +10016,18 @@ mod tests {
         assert!(parse("choose segmented#0 1").is_ok());
     }
 
-    /// docs/media-player-plan.md M8: a button's symbol read in one spelling,
-    /// and a target that is not a button refused at parse.
+    /// docs/media-player-plan.md M8, M16 (14): a button's or a toggle's
+    /// symbol read in one spelling, and any other target refused at parse.
     #[test]
-    fn expect_symbol_reads_a_button_only() {
+    fn expect_symbol_reads_a_button_or_checkbox_only() {
         let (tx, rx) = std::sync::mpsc::channel();
         run(parse("expect_symbol button@repeat \"repeat\"").unwrap(), MockStage { seen: &SEEN, verdict: tx });
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1, "{verdict}");
         assert!(verdict.contains("symbol \"repeat_one\", wanted \"repeat\""), "{verdict}");
         assert!(parse("expect_symbol button@repeat \"repeat_one\"").is_ok());
-        assert!(parse("expect_symbol checkbox@shuffle \"shuffle\"").is_err());
+        assert!(parse("expect_symbol checkbox@repeat \"repeat_one\"").is_ok());
+        assert!(parse("expect_symbol label@repeat \"repeat\"").is_err());
         assert!(parse("expect_symbol button@repeat").is_err());
     }
 
@@ -9932,6 +10254,9 @@ mod tests {
                 .with(|c| c.get())
                 .then(|| "ends at 700 over the dock, whose top is 600 (the mock)".to_owned())
         }
+        fn toast_under_sheet(&self) -> Option<String> {
+            None
+        }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
             Err(Vec::new())
         }
@@ -9969,6 +10294,24 @@ mod tests {
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
+        }
+        fn grid_cell_frames(&self, _: Target) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+            Ok(vec![(0.0, 0.0, 100.0, 50.0), (112.0, 0.0, 100.0, 50.0)])
+        }
+        fn text_lines(&self, _: Target) -> Result<(usize, bool), String> {
+            Ok((2, true))
+        }
+        fn window_frame(&self, _: Target) -> Result<(f64, f64, f64, f64), String> {
+            Err("<the mock lays nothing out>".to_owned())
+        }
+        fn width_of(&self, _: Target) -> Result<f64, String> {
+            Ok(120.0)
+        }
+        fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))> {
+            Vec::new()
+        }
+        fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
+            Ok((0x673946, false))
         }
         fn progress_state(&self, _: Target) -> String {
             String::new()
@@ -11132,6 +11475,9 @@ mod tests {
         fn toast_over_dock(&self) -> Option<String> {
             None
         }
+        fn toast_under_sheet(&self) -> Option<String> {
+            None
+        }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
             Err(Vec::new())
         }
@@ -11169,6 +11515,24 @@ mod tests {
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
+        }
+        fn grid_cell_frames(&self, _: Target) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+            Ok(vec![(0.0, 0.0, 100.0, 50.0), (112.0, 0.0, 100.0, 50.0)])
+        }
+        fn text_lines(&self, _: Target) -> Result<(usize, bool), String> {
+            Ok((2, true))
+        }
+        fn window_frame(&self, _: Target) -> Result<(f64, f64, f64, f64), String> {
+            Err("<the mock lays nothing out>".to_owned())
+        }
+        fn width_of(&self, _: Target) -> Result<f64, String> {
+            Ok(120.0)
+        }
+        fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))> {
+            Vec::new()
+        }
+        fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
+            Ok((0x673946, false))
         }
         fn progress_state(&self, _: Target) -> String {
             String::new()
@@ -11625,6 +11989,9 @@ mod tests {
         fn toast_over_dock(&self) -> Option<String> {
             None
         }
+        fn toast_under_sheet(&self) -> Option<String> {
+            None
+        }
         fn toast_announced(&self, _: &str, _: &str) -> Result<(), Vec<String>> {
             Err(Vec::new())
         }
@@ -11662,6 +12029,24 @@ mod tests {
         }
         fn grid_columns(&self, _: Target, _: usize) -> String {
             String::new()
+        }
+        fn grid_cell_frames(&self, _: Target) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+            Ok(vec![(0.0, 0.0, 100.0, 50.0), (112.0, 0.0, 100.0, 50.0)])
+        }
+        fn text_lines(&self, _: Target) -> Result<(usize, bool), String> {
+            Ok((2, true))
+        }
+        fn window_frame(&self, _: Target) -> Result<(f64, f64, f64, f64), String> {
+            Err("<the mock lays nothing out>".to_owned())
+        }
+        fn width_of(&self, _: Target) -> Result<f64, String> {
+            Ok(120.0)
+        }
+        fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))> {
+            Vec::new()
+        }
+        fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
+            Ok((0x673946, false))
         }
         fn progress_state(&self, _: Target) -> String {
             String::new()
@@ -12897,5 +13282,72 @@ mod win_exit_tests {
         let _ = c.kill();
         let _ = c.wait();
         assert!(held, "std::process::exit escaped the atexit wedge — the platform changed; re-derive harness_exit");
+    }
+}
+
+#[cfg(test)]
+mod cells_even_tests {
+    use super::{cells_even, parse, Step};
+
+    const EVEN: [(f64, f64, f64, f64); 4] =
+        [(0.0, 0.0, 150.0, 80.0), (162.0, 0.0, 150.0, 80.0), (324.0, 0.0, 150.0, 80.0), (0.0, 92.0, 150.0, 60.0)];
+
+    #[test]
+    fn an_even_grid_reads_even_and_a_last_short_row_keeps_its_own_height() {
+        assert_eq!(cells_even(&EVEN, 2.0), Ok(()));
+    }
+
+    #[test]
+    fn a_hugging_card_a_centred_card_and_an_odd_gap_each_say_which() {
+        let mut narrow = EVEN;
+        narrow[1].2 = 120.0;
+        assert!(cells_even(&narrow, 2.0).unwrap_err().contains("the widths differ"));
+        let mut centred = EVEN;
+        centred[2] = (324.0, 10.0, 150.0, 60.0);
+        assert!(cells_even(&centred, 2.0).unwrap_err().contains("the tops differ in one row"));
+        let mut short = EVEN;
+        short[2].3 = 60.0;
+        assert!(cells_even(&short, 2.0).unwrap_err().contains("the heights differ in one row"));
+        let mut over = EVEN;
+        over[1].0 = 100.0;
+        over[2].0 = 200.0;
+        assert!(cells_even(&over, 2.0).unwrap_err().contains("cell 2 overlaps cell 1 by 50"));
+        let mut wide = EVEN;
+        wide[2].0 = 340.0;
+        assert!(cells_even(&wide, 2.0).unwrap_err().contains("the gap before cell 3"));
+        assert!(cells_even(&EVEN[..1], 2.0).unwrap_err().contains("wanted two at least"));
+    }
+
+    #[test]
+    fn an_overlap_names_both_and_touching_frames_do_not_count() {
+        use super::first_overlap;
+        let a = ("label 1".to_owned(), 0, (0.0, 0.0, 100.0, 20.0));
+        let touching = ("label 2".to_owned(), 0, (0.0, 20.0, 100.0, 20.0));
+        let under = ("label 3".to_owned(), 0, (10.0, 10.0, 50.0, 20.0));
+        let other_window = ("label 4".to_owned(), 1, (10.0, 10.0, 50.0, 20.0));
+        assert_eq!(first_overlap(&[a.clone(), touching.clone(), other_window], 1.0), None);
+        let why = first_overlap(&[a, touching, under], 1.0).expect("an overlap");
+        assert!(why.contains("label 1") && why.contains("label 3") && why.contains("share 50x10"), "{why}");
+    }
+
+    #[test]
+    fn the_step_parses_one_grid_target() {
+        let steps = parse("expect_cells_even grid@cards").expect("parses");
+        assert!(matches!(steps.as_slice(), [Step::ExpectCellsEven(_)]));
+        assert!(parse("expect_cells_even").is_err());
+        assert!(parse("expect_cells_even grid@a grid@b").is_err());
+        let lines = parse("expect_text_lines label@blurb 2 truncated").expect("parses");
+        assert!(matches!(lines.as_slice(), [Step::ExpectTextLines(_, 2, true)]));
+        assert!(parse("expect_text_lines label@blurb two truncated").is_err());
+        assert!(parse("expect_text_lines label@blurb 2 cut").is_err());
+        assert!(matches!(parse("expect_width slider@capped 120").expect("parses").as_slice(), [Step::ExpectWidth(_, w)] if *w == 120.0));
+        assert!(matches!(parse("expect_gap label@above label@below 8").expect("parses").as_slice(), [Step::ExpectGap(_, _, g)] if *g == 8.0));
+        assert!(parse("expect_gap label@above 8").is_err());
+        assert!(parse("expect_width slider@capped wide").is_err());
+        assert!(matches!(
+            parse("expect_ground_color column@header \"light 673946 dark 3B2128\"").expect("parses").as_slice(),
+            [Step::ExpectGroundColor(_, 0x673946, 0x3B2128)]
+        ));
+        assert!(parse("expect_ground_color column@header \"light 673946\"").is_err());
     }
 }

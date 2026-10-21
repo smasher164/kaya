@@ -54,6 +54,10 @@ public final class Sliders {
                 tx.slider(0.0, 1.0, 0.25, null)
                         .step(0.25).axis(KayaApp.Axis.VERTICAL)
                         .a11yId("fader").a11yLabel("Fader"); // slider#2
+                // A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+                tx.row(r -> {
+                    tx.slider(0.0, 1.0, 0.5, null).grow(1).maxWidth(120).a11yId("capped").a11yLabel("Capped");
+                });
                 // A programmatic write must NOT echo a value or a commit.
                 tx.button("reset", t -> t.write(pos, 25.0)); // button#0
                 for (var row : TrackKaya.rows(tx, tracks)) {

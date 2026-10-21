@@ -87,25 +87,50 @@ else:
     with scratch_dir("check-pane-ladder-") as tmp:
         # The probe compiles the interpreter's OWN source, so no
         # interpreter artifact in this path can go stale.
-        build = subprocess.run(
-            ["bash", "-c",
-             'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
-             "kaya_swiftc "
-             "-import-objc-header crates/kaya/include/kaya.h "
-             '"$2" "$3" -L "$5" -lkaya '
-             "-framework AppKit -framework Foundation -o \"$4\"",
-             "swift-toolchain", str(ROOT), SWIFTUI, PROBE,
-             str(tmp / "swiftui-pane-ladder"), str(TARGET / "debug")],
-            check=False)
-        if build.returncode != 0:
+        def build_probe(source, out):
+            return subprocess.run(
+                ["bash", "-c",
+                 'source "$1/tools/lib/swift-toolchain.sh" && cd "$1" && '
+                 "kaya_swiftc "
+                 "-import-objc-header crates/kaya/include/kaya.h "
+                 '"$2" "$3" -L "$5" -lkaya '
+                 "-framework AppKit -framework Foundation -o \"$4\"",
+                 "swift-toolchain", str(ROOT), str(source), PROBE,
+                 str(out), str(TARGET / "debug")],
+                check=False)
+
+        def run_probe(binary):
+            return subprocess.run(
+                [str(binary)], env=dict(os.environ, DYLD_LIBRARY_PATH=str(TARGET / "debug")),
+                check=False, capture_output=True, text=True, encoding="utf-8")
+
+        if build_probe(ROOT / SWIFTUI, tmp / "swiftui-pane-ladder").returncode != 0:
             print("check-pane-ladder: the ladder probe did not compile",
                   file=sys.stderr)
             sys.exit(1)
-        run = subprocess.run(
-            [str(tmp / "swiftui-pane-ladder")],
-            env=dict(os.environ,
-                     DYLD_LIBRARY_PATH=str(TARGET / "debug")),
-            check=False)
+        run = run_probe(tmp / "swiftui-pane-ladder")
+        print(run.stdout, end="")
+        # NG1 (M16 F1): the grid's old unproposed answer, its cells end to
+        # end, must be named by the probe's third half.
+        old = ("?? (minWidth * CGFloat(subviews.count) + spacing * "
+               "CGFloat(max(0, subviews.count - 1)))")
+        floor = "let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minWidth"
+        n = swiftui_text.count(floor)
+        doctored = swiftui_text.replace(floor, floor.replace("?? minWidth", old))
+        print(f"check-pane-ladder: self-test NG1 put the grid's cells-end-to-end ideal back, "
+              f"{n} substitution(s)")
+        (tmp / "doctored.swift").write_text(doctored, encoding="utf-8")
+        if n != 1 or build_probe(tmp / "doctored.swift", tmp / "doctored").returncode != 0:
+            print("check-pane-ladder: SELF-TEST NG1 did not apply or did not compile",
+                  file=sys.stderr)
+            sys.exit(1)
+        red = run_probe(tmp / "doctored")
+        if red.returncode == 0 or "an auto grid's ideal width is" not in red.stdout:
+            print("check-pane-ladder: SELF-TEST NG1 FAIL — a grid whose ideal is its cells "
+                  "end to end passed the probe", file=sys.stderr)
+            sys.exit(1)
+        print("check-pane-ladder: self-test NG1 red: " + next(
+            line for line in red.stdout.splitlines() if "ideal width is" in line).strip())
         if run.returncode != 0:
             print(f"check-pane-ladder: FAIL — the ladder probe exited "
                   f"{run.returncode} (its own output", file=sys.stderr)

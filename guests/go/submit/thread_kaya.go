@@ -80,6 +80,10 @@ func (r threadRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, string)) 
 	return r.c.Button(r.t, f, onClick)
 }
 
+func (r threadRow) ButtonText(text string, onClick func(*kaya.Tx, string)) kaya.Node {
+	return r.c.Button(r.t, text, onClick)
+}
+
 func (r threadRow) Spacer() kaya.Node { return r.t.Spacer() }
 
 func (r threadRow) Entry(onChange func(*kaya.Tx, string, string)) kaya.Node {
@@ -169,7 +173,9 @@ func (r threadRow) SetSummary(n kaya.Node, text string) { r.t.SetSummary(n, text
 
 func (r threadRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n, f) }
 
-func (r threadRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }
+func (r threadRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
+func (r threadRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r threadRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 
 func (r threadRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r threadRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

@@ -1245,7 +1245,9 @@ class Widget(_Handle):
 
     def max_lines(self, lines: int) -> None:
         """Make this textarea one line tall at rest, growing with its text to
-        `lines` lines and then scrolling (docs/grow-lines-plan.md)."""
+        `lines` lines and then scrolling (docs/grow-lines-plan.md); draw this
+        label in at most `lines` lines, the rest truncated with the platform's
+        ellipsis (docs/media-player-plan.md M16 (2))."""
         if isinstance(lines, bool) or not isinstance(lines, int) or lines < 1:
             raise KayaTypeError(f"kaya: max_lines takes a whole number of lines, at least 1, not {lines!r}")
         _records().append(wire.tx_set_max_lines(self.id, float(lines)))
@@ -4938,6 +4940,7 @@ class Symbol(enum.IntEnum):
     VOLUME = wire.SYMBOL_VOLUME
     QUEUE = wire.SYMBOL_QUEUE
     FAVORITE = wire.SYMBOL_FAVORITE
+    MUTED = wire.SYMBOL_MUTED
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -4962,6 +4965,29 @@ _SYMBOL_NAMES = {
     for name, value in vars(Symbol).items()
     if name.isupper()
 }
+
+
+_WIRE_TYPES.append((Symbol, wire.VALUE_I64))
+_FIELD_ENCODERS[Symbol] = int
+_FIELD_DECODERS[Symbol] = Symbol
+
+
+def _set_symbol(handle: _Handle, symbol: Symbol | str | Source) -> None:
+    """A constructor's symbol in either zone: a constant, or in a template a
+    row's Symbol field (docs/media-player-plan.md M16 (21), (29))."""
+    if isinstance(symbol, (Signal, Element)):
+        raise KayaTypeError(
+            "kaya: a symbol takes a kaya.Symbol or, in a template, a row's Symbol "
+            f"field — not a {type(symbol).__name__}")
+    if isinstance(symbol, FieldRef):
+        if _tpl_depth == 0:
+            raise KayaTypeError(
+                "kaya: a symbol bound to a row's field is template-only — live, "
+                "pass kaya.Symbol.PLAY and set another with .symbol()")
+        _picker_field("a symbol", symbol, Symbol)
+        _records().append(wire.tx_bind_symbol_element(handle.id, symbol._level(), symbol._index))
+        return
+    _records().append(wire.tx_set_symbol(handle.id, _symbol_value(symbol)))
 
 
 def _symbol_value(symbol: Symbol | str | int) -> Symbol:
@@ -5086,7 +5112,7 @@ def labeled(label: TextSource, *, grow: float | None = None,
 
 def expander(text: TextSource, *, summary: TextSource | None = None,
              expanded: FlagSource | None = None,
-             symbol: Symbol | str | None = None,
+             symbol: Symbol | str | Source | None = None,
              on_toggle: Handler | None = None,
              grow: float | None = None, spacing: float | None = None,
              align: Align | str | None = None,
@@ -5106,7 +5132,7 @@ def expander(text: TextSource, *, summary: TextSource | None = None,
     if expanded is not None:
         handle.expanded(expanded)
     if symbol is not None:
-        handle.symbol(symbol)
+        _set_symbol(handle, symbol)
     if on_toggle is not None:
         _app._register(handle, wire.OCC_TOGGLED, on_toggle)
     _set_grow(handle, grow)
@@ -5114,6 +5140,36 @@ def expander(text: TextSource, *, summary: TextSource | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     return _Container(handle)
+
+
+class _Within(_Scope["Widget"]):
+    """within()'s block: appends to a container that already exists."""
+
+    def __init__(self, handle: Widget) -> None:
+        self.handle: Widget = handle
+
+    def _enter(self) -> Widget:
+        _parents.append(self.handle.id)
+        return self.handle
+
+    def _exit(self) -> None:
+        _parents.pop()
+
+
+def within(container: Widget) -> _Within:
+    """Append to a live container built earlier, typically from a handler:
+    everything declared inside the block joins `container` after its
+    existing children, the other bindings' add_child
+    (docs/media-player-plan.md M16)."""
+    if isinstance(container, Node) or not isinstance(container, Widget):
+        raise KayaTypeError(
+            f"kaya: within() takes a live container, not {type(container).__name__} "
+            "— a template's children are declared inside its own block")
+    if _tpl_depth > 0:
+        raise KayaStateError(
+            "kaya: within() inside a template body would add live children to "
+            "a blueprint — declare the template's children in its own block")
+    return _Within(container)
 
 
 def spacer(grow: float = 1.0) -> Widget:
@@ -5156,7 +5212,7 @@ def column(*, grow: float | None = None, spacing: float | None = None,
 def button(text: str | None = None, bind: TextSource | None = None, *,
            on_click: Handler | None = None,
            grow: float | None = None,
-           symbol: Symbol | str | None = None) -> Widget:
+           symbol: Symbol | str | Source | None = None) -> Widget:
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
     fields (`row.title`).
@@ -5193,7 +5249,7 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
                 "field: kaya.button(bind=note.text)"
             )
     if symbol is not None:
-        handle.symbol(symbol)
+        _set_symbol(handle, symbol)
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
     _set_grow(handle, grow)
@@ -5790,11 +5846,14 @@ def secure_field(text: str | None = None, *,
 
 def label(text: str | None = None, bind: TextSource | None = None, *,
           grow: float | None = None, href: TextSource | None = None,
-          rich: bool = False, tint: Tint | str | Source | None = None) -> Widget:
+          rich: bool = False, tint: Tint | str | Source | None = None,
+          max_lines: int | None = None) -> Widget:
     """A label; `text` for a constant, `bind` for a Signal or an
     Element (the enclosing For's, levels computed). `href=` with
     `role="link"` is the destination the platform opens
-    (docs/tasks-s2-plan.md T3).
+    (docs/tasks-s2-plan.md T3). `max_lines` caps it at that many lines,
+    the rest truncated with the platform's ellipsis
+    (docs/media-player-plan.md M16 (2)).
 
     `rich=True` draws the inline vocabulary READ-ONLY
     (docs/rich-text-plan.md R8, §15): `set_document` and `apply_edit`
@@ -5825,23 +5884,34 @@ def label(text: str | None = None, bind: TextSource | None = None, *,
     if href is not None:
         handle.href(href)
     _set_label_tint(handle, tint)
+    _set_max_lines(handle, max_lines)
     _set_grow(handle, grow)
     return handle
 
 
+def _set_max_lines(handle: _Handle, lines: int | None) -> None:
+    if lines is None:
+        return
+    if isinstance(lines, bool) or not isinstance(lines, int) or lines < 1:
+        raise KayaTypeError(f"kaya: max_lines takes a whole number of lines, at least 1, not {lines!r}")
+    _records().append(wire.tx_set_max_lines(handle.id, float(lines)))
+
+
 def heading(text: str | None = None, bind: TextSource | None = None, *,
-            grow: float | None = None, tint: Tint | str | Source | None = None) -> Widget:
+            grow: float | None = None, tint: Tint | str | Source | None = None,
+            max_lines: int | None = None) -> Widget:
     """A label wearing the heading role: the platform's heading text
     style AND the accessibility heading trait, and on a grouped screen
     the section-header seat (docs/styling-plan.md D4)."""
-    return label(text=text, bind=bind, grow=grow, tint=tint).role("heading")
+    return label(text=text, bind=bind, grow=grow, tint=tint, max_lines=max_lines).role("heading")
 
 
 def caption(text: str | None = None, bind: TextSource | None = None, *,
-            grow: float | None = None, tint: Tint | str | Source | None = None) -> Widget:
+            grow: float | None = None, tint: Tint | str | Source | None = None,
+            max_lines: int | None = None) -> Widget:
     """A label wearing the caption role: the platform's footnote text
     tier, and on a grouped screen the section-footer seat."""
-    return label(text=text, bind=bind, grow=grow, tint=tint).role("caption")
+    return label(text=text, bind=bind, grow=grow, tint=tint, max_lines=max_lines).role("caption")
 
 
 def _bleed(handle: Widget, bleed: bool) -> None:
@@ -6632,7 +6702,8 @@ class RowImages(Generic[T]):
         the standard library's urllib.request, raising for an HTTP error
         status."""
         import urllib.request
-        with urllib.request.urlopen(url, timeout=30) as response:
+        request = urllib.request.Request(url, headers={"User-Agent": f"kaya/{wire.VERSION}"})
+        with urllib.request.urlopen(request, timeout=30) as response:
             return response.read()
 
     def __init__(self, app: App, rows: Collection[T], *, url: str, art: str,

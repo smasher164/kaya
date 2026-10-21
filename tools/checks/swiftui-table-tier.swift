@@ -799,6 +799,81 @@ enum KayaTableTierProbe {
         }
         steadyWindow.orderOut(nil)
 
+        // --- Half 7 (M16 (7)): a narrow column keeps its content width,
+        // and a grown table's foot below its last row is not striped.
+        let musicTable = KayaNode(
+            id: 70, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("music".utf8))
+        musicTable.tableColumns = ["#", "Title", "Time"]
+        musicTable.sortTag = Array("music-sort".utf8)
+        for r in 0..<2 {
+            let row = KayaNode(
+                id: UInt64(71_000 + r), kind: UInt32(KAYA_KIND_ROW), tag: Array("music-r\(r)".utf8))
+            for (c, value) in ["\(r + 1)", "Seven Chimes", "0:20"].enumerated() {
+                let cell = KayaNode(
+                    id: UInt64(72_000 + r * 3 + c), kind: UInt32(KAYA_KIND_LABEL),
+                    tag: Array("music-c\(r)-\(c)".utf8))
+                cell.text = value
+                row.children.append(cell)
+            }
+            musicTable.children.append(row)
+        }
+        musicTable.grow = 1
+        kayaScene.columns.append(musicTable)
+        let musicWindow = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 400),
+            styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        // The album page's shape: a stretching column whose grown child is the table.
+        let musicRoot = KayaNode(
+            id: 73, kind: UInt32(KAYA_KIND_COLUMN), tag: Array("music-root".utf8))
+        musicRoot.align = 3
+        musicRoot.children = [musicTable]
+        musicWindow.contentView = NSHostingView(
+            rootView: KayaRender(node: musicRoot, flexVertical: false, flexStretch: false)
+                .frame(width: 700, height: 400))
+        musicWindow.orderFront(nil)
+        var musicWidths: [CGFloat] = []
+        var musicFloors: [CGFloat] = []
+        var footColours: [String] = []
+        let musicDeadline = Date().addingTimeInterval(6)
+        while Date() < musicDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+            guard let content = musicWindow.contentView, let table = findTableView(content),
+                table.tableColumns.count == 3
+            else { continue }
+            musicWidths = table.tableColumns.map { $0.width }
+            musicFloors = table.tableColumns.map { $0.minWidth }
+            let rows = table.rect(ofRow: 0).union(table.rect(ofRow: max(0, table.numberOfRows - 1)))
+            guard table.numberOfRows == 2, let clip = table.enclosingScrollView,
+                clip.bounds.height > rows.maxY + 5 * table.rowHeight,
+                let shot = clip.bitmapImageRepForCachingDisplay(in: clip.bounds)
+            else { continue }
+            clip.cacheDisplay(in: clip.bounds, to: shot)
+            // The bitmap's rows run top down at the backing scale; the scroll
+            // view's own space is not flipped.
+            let scale = CGFloat(shot.pixelsHigh) / clip.bounds.height
+            let below = clip.bounds.height - table.convert(NSPoint(x: 0, y: rows.maxY), to: clip).y
+            footColours = (0..<3).map { k -> String in
+                let y = Int((below + (CGFloat(k) + 0.5) * table.rowHeight) * scale)
+                let c = shot.colorAt(x: Int(clip.bounds.midX * scale), y: y)?.usingColorSpace(.sRGB)
+                print("    foot sample \(k): y \(y) of \(shot.pixelsHigh) (below \(Int(below)), scale \(scale))")
+                return c.map { String(format: "%02X%02X%02X", Int($0.redComponent * 255),
+                                      Int($0.greenComponent * 255), Int($0.blueComponent * 255)) } ?? "?"
+            }
+            if musicWidths[1] > musicFloors[1] + 100, Set(footColours).count == 1 { break }
+        }
+        print("  narrow columns: table \(Int(findTableView(musicWindow.contentView!)?.bounds.width ?? 0))x"
+            + "\(Int(findTableView(musicWindow.contentView!)?.enclosingScrollView?.bounds.height ?? 0)), widths \(musicWidths.map { Int($0) }) over floors "
+            + "\(musicFloors.map { Int($0) }); the foot below the rows \(footColours)")
+        expectBool("the narrow-column clause read the table", musicWidths.count == 3, true)
+        expectBool("the wide column took the leftover (the clause asks something)",
+            musicWidths.count == 3 && musicWidths[1] > musicFloors[1] + 100, true)
+        expectBool("a narrow column keeps its content width",
+            musicWidths.count == 3 && musicWidths[0] <= musicFloors[0] + 0.5
+                && musicWidths[2] <= musicFloors[2] + 0.5, true)
+        expectBool("the foot below a grown table's last row is not striped",
+            footColours.count == 3 && !footColours.contains("?") && Set(footColours).count == 1, true)
+        musicWindow.orderOut(nil)
+
         if failures == 0 {
             print("swiftui-table-tier: OK — rule, geometry, this host's branch, "
                 + "and the rendered tier")

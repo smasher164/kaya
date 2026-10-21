@@ -1628,6 +1628,7 @@ pub const KAYA_SYMBOL_REPEAT_ONE: u32 = 32;
 pub const KAYA_SYMBOL_VOLUME: u32 = 33;
 pub const KAYA_SYMBOL_QUEUE: u32 = 34;
 pub const KAYA_SYMBOL_FAVORITE: u32 = 35;
+pub const KAYA_SYMBOL_MUTED: u32 = 36;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1664,6 +1665,7 @@ const _: () = assert!(
         && KAYA_SYMBOL_VOLUME == wire::SYMBOL_VOLUME
         && KAYA_SYMBOL_QUEUE == wire::SYMBOL_QUEUE
         && KAYA_SYMBOL_FAVORITE == wire::SYMBOL_FAVORITE
+        && KAYA_SYMBOL_MUTED == wire::SYMBOL_MUTED
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1681,7 +1683,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 35,
+        variants == 36,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );

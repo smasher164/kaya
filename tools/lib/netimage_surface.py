@@ -3,7 +3,8 @@
 Each row is one surface in one binding, read out of that binding's own file:
 the phase type, `phase` in the live and template zones, the conditional
 write, the two realization handlers, the helper and, in the six bindings with
-a standard client, its default fetch. `fit` on the image is the video view's
+a standard client, its default fetch and the `kaya/<version>` User-Agent it
+sends (docs/media-player-plan.md M16). `fit` on the image is the video view's
 spelling in every binding and is held by the media rows already."""
 
 import re
@@ -44,6 +45,7 @@ ROWS = [
     ("python on_released", PY, r"^def image\(source[^)]*\bon_released: Handler \| None = None,", "on_released"),
     ("python helper", PY, r"^class RowImages\(Generic\[T\]\):", "RowImages"),
     ("python default fetch", PY, r"def default_fetch\(url: str\) -> bytes:", "default_fetch"),
+    ("python default fetch user agent", PY, r'def default_fetch\(url: str\) -> bytes:(?:\n[^\n]*){0,6}?\n[^\n]*headers=\{"User-Agent": f"kaya/\{wire\.VERSION\}"\}', "User-Agent"),
 
     ("js phase type", JS, r"^export class ImagePhase \{", "ImagePhase"),
     ("js phase both zones", JS, r"^\s+phase\?: ImagePhase \| Signal<ImagePhase> \| FieldRef;", "phase"),
@@ -53,6 +55,7 @@ ROWS = [
     ("js on_released", JS, r"^\s+onReleased\?: Handler;", "onReleased"),
     ("js helper", JS, r"^export class RowImages<E> \{", "RowImages"),
     ("js default fetch", JS, r"static async defaultFetch\(url: string, signal: AbortSignal\): Promise<Uint8Array> \{", "defaultFetch"),
+    ("js default fetch user agent", JS, r'static async defaultFetch\(url: string, signal: AbortSignal\)[^\n]*\n[^\n]*headers: \{ "User-Agent": `kaya/\$\{wire\.VERSION\}` \}', "User-Agent"),
 
     ("go phase type", GO, r"^type ImagePhase int64", "ImagePhase"),
     ("go live phase", GO, r"func \(w Widget\) Phase\(phase ImagePhase\) Widget", "Phase"),
@@ -64,6 +67,7 @@ ROWS = [
     ("go on_released", GO, r"func \(n Node\) OnReleased\(fn func\(\*Tx, \[\]any\)\) Node", "OnReleased"),
     ("go helper", GO, r"func NewRowImages\[K Key, T any\]\(app \*App, rows RecordCollection\[K, T\],", "NewRowImages"),
     ("go default fetch", GO, r"func FetchHTTP\(ctx context\.Context, url string\)", "FetchHTTP"),
+    ("go default fetch user agent", GO, r'func FetchHTTP\(ctx context\.Context, url string\)[^\n]*(?:\n[^\n]*){0,5}?\n\treq\.Header\.Set\("User-Agent", "kaya/"\+Version\)', "User-Agent"),
 
     ("csharp phase type", CS, r"^enum ImagePhase : long", "ImagePhase"),
     ("csharp live phase", CS, r"public Widget Image\(byte\[\]\? source = null[^)]*ImagePhase\? phase = null[,)]", "phase"),
@@ -73,7 +77,8 @@ ROWS = [
     ("csharp on_needed", CS, r"public void OnNeeded\(Node image, Action<Tx, List<object>> handler\)", "OnNeeded"),
     ("csharp on_released", CS, r"public void OnReleased\(Node image, Action<Tx, List<object>> handler\)", "OnReleased"),
     ("csharp helper", CSI, r"sealed class RowImages<T>", "RowImages"),
-    ("csharp default fetch", CSI, r"public static Task<byte\[\]> HttpFetch\(string url, CancellationToken token\)", "HttpFetch"),
+    ("csharp default fetch", CSI, r"public static async Task<byte\[\]> HttpFetch\(string url, CancellationToken token\)", "HttpFetch"),
+    ("csharp default fetch user agent", CSI, r'public static async Task<byte\[\]> HttpFetch\(string url, CancellationToken token\)(?:\n[^\n]*){0,3}?\n[^\n]*request\.Headers\.UserAgent\.ParseAdd\("kaya/" \+ KayaWire\.Version\)', "UserAgent"),
 
     ("java phase type", JV, r"public enum ImagePhase \{", "ImagePhase"),
     ("java live phase", JV, r"public Widget phase\(ImagePhase phase\)", "phase"),
@@ -84,6 +89,7 @@ ROWS = [
     ("java on_released", JV, r"public void onReleased\(Node image, BiConsumer<Tx, List<Object>> handler\)", "onReleased"),
     ("java helper", JVR, r"public static final class RowImages<K, T> implements ImageFeed", "RowImages"),
     ("java default fetch", JVR, r"public static Fetch http\(\)", "http"),
+    ("java default fetch user agent", JVR, r'public static Fetch http\(\) \{(?:\n[^\n]*){0,12}?\n[^\n]*c\.setRequestProperty\("User-Agent", "kaya/" \+ KayaWire\.VERSION\)', "User-Agent"),
 
     ("swift phase type", SWI, r"public enum KayaImagePhase: Int64, Sendable", "KayaImagePhase"),
     ("swift live phase", SW, r"public func image\(\s*_ source: Data\? = nil[^)]*phase: KayaImagePhase\? = nil\s*\) -> KayaWidget", "phase"),
@@ -94,6 +100,7 @@ ROWS = [
     ("swift on_released", SWI, r"public func onReleased\(\s*_ image: KayaNodeHandle, _ handler: @escaping", "onReleased"),
     ("swift helper", SWI, r"public final class KayaRowImages<T: KayaRecord>", "KayaRowImages"),
     ("swift default fetch", SWI, r"public let kayaURLSessionFetch: KayaImageFetch", "kayaURLSessionFetch"),
+    ("swift default fetch user agent", SWI, r'public let kayaURLSessionFetch: KayaImageFetch = \{ url in(?:\n[^\n]*){0,3}?\n[^\n]*request\.setValue\("kaya/\\\(kayaVersion\)", forHTTPHeaderField: "User-Agent"\)', "User-Agent"),
 
     ("ocaml phase type", ML, r"^module Image_phase : sig\n  type t = Shown \| Loading \| Failed", "Image_phase"),
     ("ocaml live phase", ML, r"^val image :[^\n]*(?:\n  [^\n]*)*?\?phase:Image_phase\.t ->", "phase"),
@@ -127,6 +134,8 @@ def findings(texts, rows=ROWS):
         for part in ("phase", "conditional write", "on_needed", "on_released", "helper"):
             if not any(part in label for label in mine):
                 out.append(f"network image census holds no {part} row for {lang}")
+        if any(label == "default fetch" for label in mine) and "default fetch user agent" not in mine:
+            out.append(f"network image census holds no default fetch user agent row for {lang}")
     return out
 
 
@@ -157,7 +166,10 @@ def run():
     gate.negative("empty reader", lambda: findings(texts, []), want=f"fewer than {FLOOR}")
     withheld = [row for row in ROWS if row[0] != "go helper"]
     gate.negative("a binding's row withheld", lambda: findings(texts, withheld), want="no helper row for go")
-    gate.negatives_ran(len(ROWS) + 2)
+    no_ua = [row for row in ROWS if row[0] != "swift default fetch user agent"]
+    gate.negative("a binding's user agent row withheld", lambda: findings(texts, no_ua),
+                  want="no default fetch user agent row for swift")
+    gate.negatives_ran(len(ROWS) + 3)
     if gate.status == 0:
         print(f"check-netimage-surface: OK ({len(ROWS)} network image surfaces in nine bindings)")
     return gate.status

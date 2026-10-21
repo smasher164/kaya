@@ -45,6 +45,15 @@ function onDismiss(): void {
   held = null;
 }
 
+// A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+function onSheet(): void {
+  app.sheet(21, { title: "Saved items", detent: "large" }, () => {
+    kaya.column(() => {
+      kaya.button("save here", { onClick: () => toast("Saved in sheet") }).a11yId("sheet_save");
+    });
+  });
+}
+
 function undone(label: string): void {
   undos += 1;
   undoneText.set(`undone ${undos}: ${label}`);
@@ -72,6 +81,7 @@ const { last, count, undoneText, rows, items } = app.window({ title: "toast", on
     kaya.button("delete", { onClick: onDelete }); // button#3
     kaya.button("hold", { onClick: onHold }); // button#4
     kaya.button("dismiss", { onClick: onDismiss }); // button#5
+    kaya.button("sheet", { onClick: onSheet }); // button#6
     for (const item of items) {
       kaya.row(() => {
         kaya.label({ bind: item.title });

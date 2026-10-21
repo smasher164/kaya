@@ -69,6 +69,20 @@ def on_dismiss():
         held = None
 
 
+# A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+SAVED = 21
+
+
+def on_sheet():
+    with app.sheet(SAVED, title="Saved items", detent="large"):
+        with kaya.column():
+            kaya.button("save here", on_click=on_sheet_save).a11y_id("sheet_save")
+
+
+def on_sheet_save():
+    kaya.show_toast("Saved in sheet", on_result=answered("Saved in sheet"))
+
+
 def on_undone(label, _delta):
     global undos
     undos += 1
@@ -98,6 +112,7 @@ with app.window(title="toast", on_undone=on_undone):
         kaya.button("delete", on_click=on_delete)    # button#3
         kaya.button("hold", on_click=on_hold)        # button#4
         kaya.button("dismiss", on_click=on_dismiss)  # button#5
+        kaya.button("sheet", on_click=on_sheet)      # button#6
         for item in items:
             with kaya.row():
                 kaya.label(bind=item.title)

@@ -98,7 +98,7 @@ static class Program
     // runtime schema.
     static readonly System.Collections.Generic.HashSet<string> Wire =
         new() { "string", "bool", "long", "double", "byte[]", "Document",
-            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?", "ImagePhase", "Tint" };
+            "System.DateOnly", "System.TimeOnly", "Color", "Player", "Player?", "ImagePhase", "Tint", "Symbol" };
 
     // The generated files carry no usings of their own — every type
     // Program.cs emits is spelled fully, the two picker types included,
@@ -568,6 +568,7 @@ static class Program
         Set("SetSummary", ["Node n", "Signal s"], "n, s");
         Set("SetSummary", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetSymbol", ["Node n", "Symbol symbol"], "n, symbol");
+        Set("SetSymbol", ["Node n", "Field<Symbol> f", "uint level = 0"], "n, f, level");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxWidth", ["Node n", "double points"], "n, points");
@@ -587,6 +588,7 @@ static class Program
         Set("SetGroundImage", ["Node n", "Field<byte[]> f", "uint level = 0"], "n, f, level");
         Set("SetShape", ["Node n", "Shape shape"], "n, shape");
         Set("SetTint", ["Node n", "Tint tint"], "n, tint");
+        Set("SetMaxLines", ["Node n", "int lines"], "n, lines");
         Set("SetTint", ["Node n", "Signal s"], "n, s");
         Set("SetTint", ["Node n", "Field<Tint> f", "uint level = 0"], "n, f, level");
         Set("SetSelected", ["Node n", "bool on"], "n, on");

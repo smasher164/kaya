@@ -51,6 +51,13 @@ KayaApp.run { app in
                 min: 0.0, max: 1.0, value: 0.25, step: 0.25, axis: .vertical)
             tx.setA11yLabel(fader, "Fader")
             tx.setA11yId(fader, "fader")
+            // A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+            tx.row { _ in
+                let capped = tx.slider(min: 0.0, max: 1.0, value: 0.5, grow: 1)
+                tx.setMaxWidth(capped, 120)
+                tx.setA11yLabel(capped, "Capped")
+                tx.setA11yId(capped, "capped")
+            }
             tx.button("reset") { tx in  // button#0
                 // Must NOT come back as a value or a commit occurrence.
                 tx.write(pos, .f64(25.0))

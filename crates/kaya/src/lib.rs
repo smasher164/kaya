@@ -79,6 +79,9 @@ mod scene;
 mod stall;
 /// The protocol as data — the root document tools/kaya-bindgen walks.
 pub mod spec;
+
+/// The package version every binding names in its default fetch's User-Agent (docs/media-player-plan.md M16).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 // Gated exactly like harness: a scripted-verb instrument is not something
 // a shipped app carries.
 #[cfg(any(target_os = "windows", target_os = "linux", test))]
@@ -143,7 +146,7 @@ pub use app::{
     Field, ForScope, KayaCases, KayaField, KayaPatch, KayaRecord, KayaSum, MenuAnchor, MenuItemRef,
     PathKey,
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
-    CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
+    CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
@@ -237,17 +240,19 @@ fn bundled_executable() -> bool {
 /// entry cannot skip a step (the notification grant was once in `run`
 /// alone, and every other binding read `notifications` false).
 pub(crate) fn prepare_process() {
-    // BEFORE EVERYTHING, since a respawn runs this process again
-    // (docs/traps.md, the Preview a Go guest's checkin relaunched).
-    #[cfg(target_os = "macos")]
-    ls_identity::claim_own_identity();
     // ONCE: a host that starts a thread of its own before kaya_run calls it
     // first through kaya_prepare_process (tools/ios/pyhost.c; docs/traps.md,
-    // the iOS Python host's environment race).
+    // the iOS Python host's environment race). The preferences call it too,
+    // and a claim run after this process's own check-in reads its own record
+    // as another app's (docs/traps.md, the identity claim run twice).
     static PREPARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     if PREPARED.swap(true, std::sync::atomic::Ordering::SeqCst) {
         return;
     }
+    // BEFORE EVERYTHING ELSE, since a respawn runs this process again
+    // (docs/traps.md, the Preview a Go guest's checkin relaunched).
+    #[cfg(target_os = "macos")]
+    ls_identity::claim_own_identity();
     // THE LOCALE KNOB FIRST, before any thread formats or any toolkit
     // reads the locale (docs/compliance-plan.md §2.2).
     fmt::install_locale_knob();

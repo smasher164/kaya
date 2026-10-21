@@ -48,6 +48,7 @@ public final class Menus {
             view.item("Volume").symbol(KayaApp.Symbol.VOLUME);
             view.item("Queue").symbol(KayaApp.Symbol.QUEUE);
             view.item("Favorite").symbol(KayaApp.Symbol.FAVORITE);
+            view.item("Muted").symbol(KayaApp.Symbol.MUTED);
 
             // Option order IS the index vocabulary: Name = 0, Date = 1.
             KayaApp.MenuItem sortGroup = win.radioGroup("Sort");

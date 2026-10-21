@@ -474,6 +474,9 @@ sealed class MediaClipRow
 
     public void SetSymbol(Node n, Symbol symbol) => t.SetSymbol(n, symbol);
 
+    public void SetSymbol(Node n, Field<Symbol> f, uint level = 0) =>
+        t.SetSymbol(n, f, level);
+
     public void SetAlign(Node n, Align align) => t.SetAlign(n, align);
 
     public void SetFilled(Node n, Tint tint) => t.SetFilled(n, tint);
@@ -517,6 +520,8 @@ sealed class MediaClipRow
     public void SetShape(Node n, Shape shape) => t.SetShape(n, shape);
 
     public void SetTint(Node n, Tint tint) => t.SetTint(n, tint);
+
+    public void SetMaxLines(Node n, int lines) => t.SetMaxLines(n, lines);
 
     public void SetTint(Node n, Signal s) => t.SetTint(n, s);
 

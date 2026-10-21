@@ -1,7 +1,7 @@
 # The media player demo's third screen (docs/media-player-plan.md §6 step 5,
 # M9, M13; docs/styling-pass-plan.md Y2): an album's header is its rounded
 # cover, the title as a heading, the artist's link, then the year, track count
-# and total time (the artist not repeated, M15),
+# and total time in words (the artist not repeated, M15; M16 (23)),
 # a Play button and the favourite heart, over a gradient from the cover's
 # most vivid colour (kaya.image_palette over the fetched bytes, the dominant
 # when none is vivid) clamped by the core and fading into the window's
@@ -14,15 +14,19 @@ click column@card_201715
 expect_image_phase image@album_art shown
 expect_shape image@album_art rounded
 expect_ground column@album_header gradient
+# M16 (35): the gradient's drawn top is the cover's vivid colour clamped by the core.
+expect_ground_color column@album_header "light E3ABB9 dark 673946"
 expect_inset 0
 expect_inset column@album_tracks 16
 expect_ax label@album_title "heading/Through The Olive Branches"
-expect label@album_about "2021 · 2 songs, 0:40"
+expect label@album_about "2021 · 2 songs, 40 sec"
 expect_ax button@play_album "button/Play"
 expect_ax checkbox@favorite "toggle/Favorite"
 expect_checked checkbox@favorite off
 toggle checkbox@favorite on
 expect_checked checkbox@favorite on
+# The favourites are kept in the app's preferences (M16 (24)).
+expect_pref music.favorites "201715"
 click button@play_album
 expect_selected row@track[1860160] on
 expect label@dock_title "Seven Chimes"
@@ -40,3 +44,4 @@ click row@saved[201715]
 expect_checked checkbox@favorite on
 toggle checkbox@favorite off
 expect_checked checkbox@favorite off
+expect_pref music.favorites ""

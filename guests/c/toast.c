@@ -33,6 +33,12 @@
 #define N_ROW 13
 #define N_TITLE 14
 
+/* A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)). */
+#define W_SHEET 15      /* button#6 */
+#define W_SHEET_COL 16
+#define W_SHEET_SAVE 17
+#define SHEET_SAVED 21
+
 #define F_TITLE 0
 
 #define MAX_ITEMS 8
@@ -92,6 +98,8 @@ static void build_scene(void) {
     kaya_tx_set_text(&tx, W_HOLD, "hold");
     kaya_tx_create_widget(&tx, W_DISMISS, KAYA_KIND_BUTTON);
     kaya_tx_set_text(&tx, W_DISMISS, "dismiss");
+    kaya_tx_create_widget(&tx, W_SHEET, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(&tx, W_SHEET, "sheet");
 
     kaya_tx_create_collection(&tx, C_ITEMS,
                               (KayaVariantSchema[]){{(uint32_t[]){KAYA_VALUE_STR}, 1}}, 1);
@@ -112,6 +120,7 @@ static void build_scene(void) {
     kaya_tx_add_child(&tx, W_COLUMN, W_DELETE);
     kaya_tx_add_child(&tx, W_COLUMN, W_HOLD);
     kaya_tx_add_child(&tx, W_COLUMN, W_DISMISS);
+    kaya_tx_add_child(&tx, W_COLUMN, W_SHEET);
     kaya_tx_add_child(&tx, W_COLUMN, W_FOR_ITEMS);
     kaya_tx_mount(&tx, 0, W_COLUMN);
 
@@ -286,6 +295,32 @@ static void show(KayaTx *tx, uint64_t toast, uint32_t duration, uint32_t action,
     remember(toast, text);
 }
 
+static void open_sheet(KayaTx *tx) {
+    kaya_tx_present_sheet(tx, 0, SHEET_SAVED);
+    {
+        size_t start = kaya_wire_begin(tx, KAYA_TX_SET_SHEET_PROP);
+        kaya_wire_u64(tx, SHEET_SAVED);
+        kaya_wire_u32(tx, KAYA_SHPROP_TITLE);
+        kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+        kaya_wire_value(tx, kaya_str("Saved items"));
+        kaya_wire_end(tx, start);
+    }
+    {
+        size_t start = kaya_wire_begin(tx, KAYA_TX_SET_SHEET_PROP);
+        kaya_wire_u64(tx, SHEET_SAVED);
+        kaya_wire_u32(tx, KAYA_SHPROP_DETENT);
+        kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+        kaya_wire_value(tx, kaya_i64(KAYA_DETENT_LARGE));
+        kaya_wire_end(tx, start);
+    }
+    kaya_tx_create_widget(tx, W_SHEET_COL, KAYA_KIND_COLUMN);
+    kaya_tx_create_widget(tx, W_SHEET_SAVE, KAYA_KIND_BUTTON);
+    kaya_tx_set_text(tx, W_SHEET_SAVE, "save here");
+    kaya_tx_set_a11y_id(tx, W_SHEET_SAVE, "sheet_save");
+    kaya_tx_add_child(tx, W_SHEET_COL, W_SHEET_SAVE);
+    kaya_tx_mount(tx, SHEET_SAVED, W_SHEET_COL);
+}
+
 static void *app(void *arg) {
     (void)arg;
     build_scene();
@@ -347,6 +382,11 @@ static void *app(void *arg) {
                     continue;
                 kaya_tx_dismiss_toast(&tx, held);
                 held = 0;
+            } else if (id == W_SHEET) {
+                open_sheet(&tx);
+            } else if (id == W_SHEET_SAVE) {
+                show(&tx, ++toasts, KAYA_TOAST_DURATION_SHORT, KAYA_TOAST_ACTION_NONE,
+                     "Saved in sheet", "");
             } else {
                 continue;
             }

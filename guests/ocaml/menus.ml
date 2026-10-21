@@ -48,6 +48,7 @@ let () =
                  item ~label:"Volume" ~symbol:Volume;
                  item ~label:"Queue" ~symbol:Queue;
                  item ~label:"Favorite" ~symbol:Favorite;
+                 item ~label:"Muted" ~symbol:Muted;
                ];
              (* Option order IS the index vocabulary: Name = 0, Date = 1. *)
              radio_group ~label:"Sort" ~bind_value:sort

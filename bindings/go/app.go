@@ -2112,6 +2112,15 @@ func (tx *Tx) Spacer() Widget {
 	return w.Grow(1)
 }
 
+// Within declares more children into a container built earlier, typically
+// from a handler: everything body declares joins the container after its
+// existing children (docs/media-player-plan.md M16 (28)).
+func (tx *Tx) Within(container Widget, body func()) {
+	tx.app.parents = append(tx.app.parents, container.id)
+	defer func() { tx.app.parents = tx.app.parents[:len(tx.app.parents)-1] }()
+	body()
+}
+
 func (tx *Tx) containerOf(kind uint32, body func()) Widget {
 	parent := tx.Widget(kind)
 	tx.app.parents = append(tx.app.parents, parent.id)
@@ -4774,7 +4783,7 @@ func (r SectionRef) Title(title string) SectionRef {
 	return r
 }
 
-// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolFavorite),
+// Symbol is the semantic-icon vocabulary (SymbolAdd..SymbolMuted),
 // shared by SectionRef.Symbol, MenuItem.Symbol and Widget.Symbol.
 type Symbol int64
 
@@ -6244,6 +6253,19 @@ func (t *Tpl) BindSummary[S interface {
 // for symbol (Tx.SetSymbol).
 func (t *Tpl) SetSymbol(n Node, symbol Symbol) {
 	t.tx.emit(TxSetSymbol(n.id, int64(symbol)))
+}
+
+// BindSymbol reads each copy's symbol from the row's field: the playing
+// row's pause (docs/media-player-plan.md M16 (21)).
+func (t *Tpl) BindSymbol(n Node, f Field[Symbol]) {
+	t.tx.emit(TxBindSymbolElement(n.id, 0, f.index))
+}
+
+// SetMaxLines caps every stamped copy of a label at that many lines, the
+// rest truncated with the platform's ellipsis (docs/media-player-plan.md
+// M16 (2)).
+func (t *Tpl) SetMaxLines(n Node, lines int) {
+	t.tx.emit(TxSetMaxLines(n.id, float64(lines)))
 }
 
 // Spacer is an empty grown column in the blueprint, consuming the

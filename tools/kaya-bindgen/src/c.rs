@@ -226,6 +226,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
 
     c.line(&format!("/* KAYA_SPEC_HASH: {}. */", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
     c.line(&format!("#define KAYA_SPEC_HASH 0x{:016x}ULL", crate::spec_hash()));
+    c.line(&format!("#define KAYA_VERSION \"{}\"", crate::version()));
     c.line("");
     for r in spec.tx {
         if r.name == "set_property" {

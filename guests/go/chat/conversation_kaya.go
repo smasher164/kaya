@@ -104,6 +104,10 @@ func (r conversationRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, str
 	return r.c.Button(r.t, f, onClick)
 }
 
+func (r conversationRow) ButtonText(text string, onClick func(*kaya.Tx, string)) kaya.Node {
+	return r.c.Button(r.t, text, onClick)
+}
+
 func (r conversationRow) Spacer() kaya.Node { return r.t.Spacer() }
 
 func (r conversationRow) Entry(onChange func(*kaya.Tx, string, string)) kaya.Node {
@@ -197,7 +201,9 @@ func (r conversationRow) SetSummary(n kaya.Node, text string) { r.t.SetSummary(n
 
 func (r conversationRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n, f) }
 
-func (r conversationRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }
+func (r conversationRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
+func (r conversationRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r conversationRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 
 func (r conversationRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r conversationRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

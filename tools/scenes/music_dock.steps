@@ -18,6 +18,8 @@ expect label@dock_title "In Tune"
 expect label@dock_artist "Kellee Maize"
 expect_image_phase image@dock_art shown
 expect_shape image@dock_art rounded
+# The two lines are centred on the art (M16 (6)).
+expect_hugs column@dock_lines
 expect_ax button@play_pause "button/Pause"
 expect_ax button@next "button/Next"
 expect_now_playing "In Tune" playing
@@ -62,24 +64,29 @@ release slider@progress
 expect_value slider@progress "0"
 expect label@elapsed "0:00"
 expect label@remaining "-0:20"
-# Shuffle is a toggle; repeat a button whose symbol the app swaps (M8).
+# Shuffle is a toggle; repeat a toggle lit while on, whose symbol the app
+# swaps to repeat-one for "one" (M8, M16 (14)).
 expect_ax checkbox@shuffle "toggle/Shuffle"
 expect_checked checkbox@shuffle off
 toggle checkbox@shuffle on
 expect_checked checkbox@shuffle on
 toggle checkbox@shuffle off
 expect_checked checkbox@shuffle off
-expect_ax button@repeat "button/Repeat off"
-expect_symbol button@repeat "repeat"
-click button@repeat
-expect_ax button@repeat "button/Repeat all"
-expect_symbol button@repeat "repeat"
-click button@repeat
-expect_ax button@repeat "button/Repeat one"
-expect_symbol button@repeat "repeat_one"
-click button@repeat
-expect_ax button@repeat "button/Repeat off"
-expect_symbol button@repeat "repeat"
+expect_ax checkbox@repeat "toggle/Repeat off"
+expect_checked checkbox@repeat off
+expect_symbol checkbox@repeat "repeat"
+toggle checkbox@repeat on
+expect_ax checkbox@repeat "toggle/Repeat all"
+expect_checked checkbox@repeat on
+expect_symbol checkbox@repeat "repeat"
+toggle checkbox@repeat off
+expect_ax checkbox@repeat "toggle/Repeat one"
+expect_checked checkbox@repeat on
+expect_symbol checkbox@repeat "repeat_one"
+toggle checkbox@repeat off
+expect_ax checkbox@repeat "toggle/Repeat off"
+expect_checked checkbox@repeat off
+expect_symbol checkbox@repeat "repeat"
 # The heart is the playing track's.
 expect_ax checkbox@like "toggle/Like"
 toggle checkbox@like on

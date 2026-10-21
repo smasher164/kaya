@@ -14,7 +14,26 @@ expect_fill row@lib[p2] selected
 click row@lib[p3]
 expect_selected row@lib[p3] on
 expect_selected row@lib[p2] off
+# docs/media-player-plan.md M16 (21): a stamped button's symbol from its row.
+expect_symbol button@go[p1] "play"
+click button@go[p2]
+expect_symbol button@go[p2] "pause"
+expect_symbol button@go[p1] "play"
+# M16 (28): a handler adds a card to the grid the build made.
+click button@more
+expect_ax column@card4 "button/Release Radar, Made for you"
+click column@card4
+expect label@status "opened: Release Radar"
+# M16 (1): a card fills its column and its row's tallest height, tops aligned.
+expect_cells_even grid@cards
+# M16 (2): a label's maximum line count, the rest cut with the ellipsis.
+expect_text_lines label@blurb 2 truncated
+expect_text_lines label@status 1 whole
 expect_no_clipping
+# M16 (34): no label or button is drawn over another.
+expect_no_overlap
+# M16 (3): a When showing nothing and an empty For take no space and no gap.
+expect_gap label@status label@end 16
 hover column@card2
 expect_fill column@card2 hovered
 expect_fill column@card1 neutral

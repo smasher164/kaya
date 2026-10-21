@@ -60,6 +60,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_label("Fader")
                     .id();
                 tx.a11y_id(fader, "fader");
+                // A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+                tx.row(|tx| {
+                    tx.slider(0.0, 1.0, 0.5).grow(1.0).max_width(120.0).a11y_id("capped").a11y_label("Capped");
+                });
                 let reset = tx.button("reset").id(); // button#0
                 msgs.on_click(reset, Msg::Reset);
                 for mut row in tracks.rows(tx) {

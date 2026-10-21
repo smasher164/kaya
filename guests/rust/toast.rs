@@ -13,6 +13,8 @@ enum Msg {
     Delete,
     Hold,
     Dismiss,
+    Sheet,
+    SheetSave,
     Answer(String, kaya::ToastOutcome),
     Undone(String),
 }
@@ -70,6 +72,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(hold, Msg::Hold);
                 let dismiss = tx.button("dismiss").id(); // button#5
                 msgs.on_click(dismiss, Msg::Dismiss);
+                let sheet = tx.button("sheet").id(); // button#6
+                msgs.on_click(sheet, Msg::Sheet);
                 for mut row in items.rows(tx) {
                     row.row(|t| {
                         t.label(Item::title());
@@ -127,6 +131,21 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 if let Some(id) = held.take() {
                     ctx.apply(|tx| tx.dismiss_toast(id));
                 }
+            }
+            // A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+            Msg::Sheet => ctx.apply(|tx| {
+                let sheet = tx.present_sheet(kaya::WindowId(21)).title("Saved items").detent(kaya::Detent::Large).id();
+                let body = tx
+                    .column(|tx| {
+                        let save = tx.button("save here").a11y_id("sheet_save").id();
+                        msgs.on_click(save, Msg::SheetSave);
+                    })
+                    .id();
+                tx.mount_in(sheet, body);
+            }),
+            Msg::SheetSave => {
+                let id = ctx.apply(|tx| toast(tx, "Saved in sheet", None));
+                msgs.on_toast(id, |o| Msg::Answer("Saved in sheet".into(), o));
             }
             Msg::Answer(text, o) => {
                 answers += 1;

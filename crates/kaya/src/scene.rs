@@ -1546,7 +1546,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         ),
         Prop::Filled => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::FollowsEnd => kind == WidgetKind::Scroll,
-        Prop::MaxLines => kind == WidgetKind::Textarea,
+        // A label truncates past it with the platform's ellipsis
+        // (docs/media-player-plan.md M16 (2)); a textarea scrolls.
+        Prop::MaxLines => matches!(kind, WidgetKind::Textarea | WidgetKind::Label),
         // A container's own padding (docs/styling-plan.md D3): spacing's
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
@@ -1612,7 +1614,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             kind,
             WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander | WidgetKind::Checkbox
         ),
-        Prop::MaxWidth | Prop::MaxHeight => kind == WidgetKind::Image,
+        // A slider takes a widest width too, its grown track capped
+        // (docs/media-player-plan.md M16 (17)).
+        Prop::MaxWidth => matches!(kind, WidgetKind::Image | WidgetKind::Slider),
+        Prop::MaxHeight => kind == WidgetKind::Image,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -7098,6 +7103,22 @@ impl Scene {
             .collect();
         let mut out = Vec::new();
         for window in stale {
+            // The reason rides the verb trace: a toast closed by its step's
+            // overtaking read like one that never showed (M16, windows search).
+            #[cfg(all(feature = "harness", target_os = "windows"))]
+            {
+                let shown = &self.toasts[&window];
+                let newest = match self.ledgers.get(&window).and_then(|l| l.done.last()) {
+                    Some(LedgerEntry::Group { label, step, .. }) => format!("step {step} {label:?}"),
+                    Some(LedgerEntry::Episode(ep)) => {
+                        format!("an edit of field {} from {:?} to {:?}", ep.field.0, ep.before, ep.current)
+                    }
+                    None => "nothing (the step was undone)".to_owned(),
+                };
+                crate::vtrace::line(&format!(
+                    "toast {} on window {} closed by the ledger: its step {:?} is no longer the newest, {newest} is",
+                    shown.toast.0, window.0, shown.step));
+            }
             let old = self.retire_toast(window).expect("just found");
             self.answer_toast(old.toast, crate::protocol::ToastOutcome::Closed);
             out.push(ApplyOp::WithdrawToast { window, toast: old.toast });
@@ -12841,7 +12862,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "36 is not a symbol")]
+    #[should_panic(expected = "37 is not a symbol")]
     fn a_button_symbol_outside_the_vocabulary_dies_at_declare() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -12849,7 +12870,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(1),
                 prop: Prop::Symbol,
-                value: PropValue::Const(Value::I64(36)),
+                value: PropValue::Const(Value::I64(37)),
             },
         ]);
     }
@@ -14248,7 +14269,7 @@ mod tests {
     /// each, and the tab draws with no icon. 21 is the first free id — what a
     /// guest generated against a NEWER spec sends.
     #[test]
-    #[should_panic(expected = "36 is not a symbol")]
+    #[should_panic(expected = "37 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -14256,7 +14277,7 @@ mod tests {
             TxOp::SetSectionProp {
                 section: WindowId(7),
                 prop: SectionProp::Symbol,
-                value: PropValue::Const(Value::I64(36)),
+                value: PropValue::Const(Value::I64(37)),
             },
         ]);
     }
@@ -16808,7 +16829,7 @@ mod tests {
     /// section side, which is the point: one vocabulary, one sentence,
     /// two surfaces that cannot answer differently.
     #[test]
-    #[should_panic(expected = "36 is not a symbol")]
+    #[should_panic(expected = "37 is not a symbol")]
     fn menu_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -16816,7 +16837,7 @@ mod tests {
             TxOp::SetMenuProp {
                 item: MenuItemId(1),
                 prop: MenuProp::Symbol,
-                value: PropValue::Const(Value::I64(36)),
+                value: PropValue::Const(Value::I64(37)),
             },
         ]);
     }
@@ -22288,5 +22309,63 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             })
             .expect("a live row carries its tag");
         assert_eq!(crate::wire::decode_activated_tag(&tag), Occurrence::Activated { id: WidgetId(1) });
+    }
+}
+
+#[cfg(test)]
+mod label_max_lines_tests {
+    use super::*;
+
+    fn label_with(lines: f64) -> Vec<TxOp> {
+        vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::MaxLines, value: PropValue::Const(Value::F64(lines)) },
+            TxOp::Mount { window: WindowId(0), root: WidgetId(1) },
+        ]
+    }
+
+    /// docs/media-player-plan.md M16 (2): a label takes a maximum line count.
+    #[test]
+    fn a_label_takes_max_lines() {
+        Scene::new().apply(label_with(2.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "max_lines is a whole number of lines, at least 1, got 0")]
+    fn a_label_refuses_zero_lines() {
+        Scene::new().apply(label_with(0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "Button has no property MaxLines")]
+    fn a_button_refuses_max_lines() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::MaxLines, value: PropValue::Const(Value::F64(2.0)) },
+        ]);
+    }
+}
+
+#[cfg(test)]
+mod slider_max_width_tests {
+    use super::*;
+
+    /// docs/media-player-plan.md M16 (17): a slider takes a widest width.
+    #[test]
+    fn a_slider_takes_max_width() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::MaxWidth, value: PropValue::Const(Value::F64(120.0)) },
+            TxOp::Mount { window: WindowId(0), root: WidgetId(1) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Slider has no property MaxHeight")]
+    fn a_slider_refuses_max_height() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Slider },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::MaxHeight, value: PropValue::Const(Value::F64(120.0)) },
+        ]);
     }
 }

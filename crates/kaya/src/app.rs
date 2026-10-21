@@ -82,6 +82,11 @@ pub struct TintKind;
 impl ValueKind for TintKind {
     const TYPE: ValueType = ValueType::I64;
 }
+/// docs/media-player-plan.md M16 (21): a stamped button's symbol, an I64 on the wire.
+pub struct SymbolKind;
+impl ValueKind for SymbolKind {
+    const TYPE: ValueType = ValueType::I64;
+}
 /// docs/network-images-plan.md N2: an image's phase, an I64 on the wire.
 pub struct ImagePhaseKind;
 impl ValueKind for ImagePhaseKind {
@@ -188,6 +193,12 @@ impl<T: Into<crate::protocol::Blob>> From<T> for TplSource<BlobKind> {
 impl From<crate::protocol::PlayerId> for TplSource<PlayerKind> {
     fn from(p: crate::protocol::PlayerId) -> Self {
         TplSource { inner: SourceInner::Const(Value::from(p)), _kind: PhantomData }
+    }
+}
+
+impl From<Symbol> for TplSource<SymbolKind> {
+    fn from(s: Symbol) -> Self {
+        TplSource { inner: SourceInner::Const(Value::I64(s as i64)), _kind: PhantomData }
     }
 }
 
@@ -487,6 +498,20 @@ impl KayaField for crate::Color {
             Value::I64(n) => crate::Color::from_packed(*n)
                 .unwrap_or_else(|why| panic!("kaya: a Color field holds {n}, which is not one: {why}")),
             other => panic!("kaya: expected a Color field (I64 on the wire), model holds {other:?}"),
+        }
+    }
+}
+
+/// A row's symbol (docs/media-player-plan.md M16 (21)): the playing row's pause.
+impl KayaField for Symbol {
+    type Kind = SymbolKind;
+    fn to_value(&self) -> Value {
+        Value::I64(*self as i64)
+    }
+    fn from_value(v: &Value) -> Self {
+        match v {
+            Value::I64(n) => Symbol::from_wire(*n).unwrap_or_else(|| panic!("kaya: {n} is no symbol")),
+            other => panic!("kaya: expected a symbol (an I64 on the wire), model holds {other:?}"),
         }
     }
 }
@@ -2018,7 +2043,8 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     }
 
     /// This textarea is one line tall at rest and grows with its text to
-    /// `lines` lines, then scrolls — [`Tx::max_lines`] chained.
+    /// `lines` lines, then scrolls; this label is drawn in at most `lines`
+    /// lines, the rest truncated — [`Tx::max_lines`] chained.
     pub fn max_lines(self, lines: u32) -> Self {
         self.tx.max_lines(self.id, lines);
         self
@@ -3739,6 +3765,16 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// Declare more children into a container built earlier, typically from a
+    /// handler: everything the body declares joins `container` after its
+    /// existing children (docs/media-player-plan.md M16 (28)).
+    pub fn within<R>(&mut self, container: WidgetId, body: impl FnOnce(&mut Self) -> R) -> R {
+        self.parents.push(container.0);
+        let out = body(self);
+        self.parents.pop();
+        out
+    }
+
     fn container_of<R>(
         &mut self,
         kind: WidgetKind,
@@ -5239,8 +5275,8 @@ impl<'b> Row<'_, 'b> {
         self.tpl().summary(node, src)
     }
 
-    pub fn symbol(&mut self, node: TemplateNodeId, symbol: crate::Symbol) {
-        self.tpl().symbol(node, symbol)
+    pub fn symbol(&mut self, node: TemplateNodeId, src: impl Into<TplSource<SymbolKind>>) {
+        self.tpl().symbol(node, src)
     }
 
     pub fn progress(&mut self, src: impl Into<TplSource<F64Kind>>) -> TemplateNodeId {
@@ -5392,6 +5428,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn tint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<TintKind>>) {
         self.tpl().tint(node, src)
+    }
+
+    pub fn max_lines(&mut self, node: TemplateNodeId, lines: u32) {
+        self.tpl().max_lines(node, lines)
     }
 
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
@@ -8084,7 +8124,7 @@ pub enum Platform {
 /// The semantic icon vocabulary (spec enum "symbol"; docs/styling-plan.md
 /// D6): an app names a concept and each backend draws its own platform's
 /// glyph. The discriminants are wire values and append-only — a new
-/// concept takes 36.
+/// concept takes 37.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Symbol {
     Add = 1,
@@ -8139,7 +8179,39 @@ pub enum Symbol {
     Queue = 34,
     /// A liked item, the heart idiom; `Star` stays the generic favourite.
     Favorite = 35,
+    /// Sound turned off, the volume glyph struck through (docs/media-player-plan.md M16).
+    Muted = 36,
 }
+
+impl Symbol {
+    /// The vocabulary in wire order; the pin below holds it to wire::SYMBOLS.
+    pub(crate) const ALL: [Symbol; 36] = {
+        use Symbol as S;
+        [
+            S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
+            S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
+            S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic, S::ImageMissing,
+            S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat, S::RepeatOne, S::Volume,
+            S::Queue, S::Favorite, S::Muted,
+        ]
+    };
+
+    pub(crate) fn from_wire(n: i64) -> Option<Symbol> {
+        Symbol::ALL.iter().copied().find(|s| *s as i64 == n)
+    }
+}
+
+const _: () = {
+    assert!(
+        Symbol::ALL.len() == crate::wire::SYMBOLS.len(),
+        "the symbol vocabulary grew: add the new concept to Symbol::ALL"
+    );
+    let mut i = 0;
+    while i < Symbol::ALL.len() {
+        assert!(Symbol::ALL[i] as u32 == crate::wire::SYMBOLS[i].0, "Symbol::ALL is out of wire order");
+        i += 1;
+    }
+};
 
 /// One entry of an accept list: a closed kind, or a custom format id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8960,9 +9032,10 @@ impl<'b> Tpl<'_, 'b> {
         self.apply_source(node, Prop::Summary, src.into().inner);
     }
 
-    /// A stamped button's or expander's glyph.
-    pub fn symbol(&mut self, node: TemplateNodeId, symbol: crate::Symbol) {
-        self.set(node, Prop::Symbol, symbol as i64);
+    /// A stamped button's or expander's glyph, constant or a row's Symbol field
+    /// (docs/media-player-plan.md M16 (21)).
+    pub fn symbol(&mut self, node: TemplateNodeId, src: impl Into<TplSource<SymbolKind>>) {
+        self.apply_source(node, Prop::Symbol, src.into().inner);
     }
 
     /// A spacer: an empty grown column, the same pure sugar the live
@@ -9029,6 +9102,12 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped label's tint, the blueprint twin of [`Tx::tint`].
     pub fn tint(&mut self, node: TemplateNodeId, src: impl Into<TplSource<TintKind>>) {
         self.apply_source(node, Prop::Tint, src.into().inner);
+    }
+
+    /// A stamped label's most lines, the rest truncated with the platform's
+    /// ellipsis (docs/media-player-plan.md M16 (2)); [`Tx::max_lines`]'s twin.
+    pub fn max_lines(&mut self, node: TemplateNodeId, lines: u32) {
+        self.set(node, Prop::MaxLines, f64::from(lines));
     }
 
     /// A stamped container's selected surface, the blueprint twin of [`Tx::selected`].

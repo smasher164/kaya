@@ -248,7 +248,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // its content grows, until the user scrolls away from the end.
     ("follows_end", 39, PropKind::Bool),
     // docs/grow-lines-plan.md: a textarea one line tall at rest that grows
-    // with its text to this many lines, then scrolls. Whole, at least 1.
+    // with its text to this many lines, then scrolls; a label drawn in at
+    // most this many lines, the rest truncated with the platform's ellipsis
+    // (docs/media-player-plan.md M16 (2)). Whole, at least 1.
     ("max_lines", 40, PropKind::F64),
     // An icon-only button (docs/composer-plan.md §2): the closed symbol
     // vocabulary each backend draws in its own glyphs; the title stays the
@@ -256,7 +258,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("symbol", 41, PropKind::Enum("symbol")),
     // docs/photo-attach-plan.md §2, §5: an image's bound in points. The
     // picture scales down to fit inside both with its shape kept and never
-    // scales up. Positive; images only.
+    // scales up. Positive. max_width also caps a slider's width
+    // (docs/media-player-plan.md M16 (17)).
     ("max_width", 42, PropKind::F64),
     ("max_height", 43, PropKind::F64),
     // docs/color-picker-plan.md §2: a colour picker's committed value, and
@@ -4605,7 +4608,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // THE IDS ARE APPEND-ONLY, FOREVER: wire values in eight
             // generated bindings and four backends' lowering tables, so
             // a renumber would silently redraw every shipped app's menus.
-            // A new concept takes 36.
+            // A new concept takes 37.
             name: "symbol",
             variants: &[
                 ("add", 1),
@@ -4643,6 +4646,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("volume", 33),
                 ("queue", 34),
                 ("favorite", 35),
+                ("muted", 36),
             ],
         },
         EnumSpec {
@@ -5691,6 +5695,7 @@ mod tests {
                     ("symbol", "volume") => wire::SYMBOL_VOLUME,
                     ("symbol", "queue") => wire::SYMBOL_QUEUE,
                     ("symbol", "favorite") => wire::SYMBOL_FAVORITE,
+                    ("symbol", "muted") => wire::SYMBOL_MUTED,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -6035,7 +6040,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(36), None);
+        assert_eq!(wire::symbol_name(37), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

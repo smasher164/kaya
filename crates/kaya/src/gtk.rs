@@ -101,6 +101,7 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_QUEUE, "view-list-symbolic"),
     // Adwaita has no outline heart; its one heart is the love emote.
     (crate::wire::SYMBOL_FAVORITE, "emote-love-symbolic"),
+    (crate::wire::SYMBOL_MUTED, "audio-volume-muted-symbolic"),
 ];
 
 const _: () = assert!(
@@ -1459,6 +1460,22 @@ fn child_track(widget: &gtk4::Widget) -> Option<f64> {
     unsafe { widget.data::<f64>(TRACK_KEY).map(|p| *p.as_ref()) }
 }
 
+/// A control's widest width (docs/media-player-plan.md M16 (17), a slider's
+/// `max_width`): no GtkWidget has a maximum width, so the flex layout caps
+/// the child's allocation at it, the slot's leading edge kept.
+const MAX_ACROSS_KEY: &str = "kaya-max-across";
+
+fn max_across(widget: &gtk4::Widget) -> Option<i32> {
+    // SAFETY: the key is private to this module and only ever holds an f64,
+    // written by set_max_across.
+    unsafe { widget.data::<f64>(MAX_ACROSS_KEY).map(|p| p.as_ref().round() as i32) }
+}
+
+fn set_max_across(widget: &gtk4::Widget, points: f64) {
+    // SAFETY: the only writer of the key.
+    unsafe { widget.set_data(MAX_ACROSS_KEY, points) }
+}
+
 fn set_child_track(widget: &gtk4::Widget, extent: f64) {
     // SAFETY: as above — this is the only writer of the key.
     unsafe { widget.set_data(TRACK_KEY, extent) }
@@ -2445,6 +2462,11 @@ mod flex {
                     (cross_total, extent, 0, offset)
                 } else {
                     (extent, cross_total, x, 0)
+                };
+                // A widest width (M16 (17)) keeps the slot's leading edge.
+                let (w, x) = match super::max_across(&c) {
+                    Some(cap) if w > cap => (cap, if rtl && !vertical { x + w - cap } else { x }),
+                    _ => (w, x),
                 };
 // The track, recorded BEFORE the allocate: what GTK stores on the
 // child afterwards is the box its own align and margins shrank it to.
@@ -5838,6 +5860,9 @@ struct GtkSheet {
     intercept_dismiss: bool,
     root: Option<gtk4::Widget>,
     presented: bool,
+    /// The sheet's own toast overlay, over its content, where the window's toast
+    /// shows while the sheet is the topmost one (docs/media-player-plan.md M16 (20)).
+    toasts: Option<adw::ToastOverlay>,
 }
 
 /// One section's materialized state: the stack page's container Box
@@ -6315,6 +6340,7 @@ fn drain_transactions() {
             presentation_report(core);
             refresh_bleeds(core);
             skin_refresh(core);
+            refresh_vacancy(core);
         });
     });
 }
@@ -7790,6 +7816,13 @@ fn three_pane_positions(core: &CoreState, window: u64) -> Option<Vec<u64>> {
 /// the surface beneath the top is not on screen. The same rule the mac
 /// detail column's chevron computes for itself (its stack is non-empty
 /// exactly then), so the affordance is uniform across the platforms.
+/// THE TWO-PANE BACK RULE (DESIGN.md's back rule, M16 (9)): back shows where
+/// it reveals something. Collapsed, any entry covers the list; with both
+/// panes up, the top covers the entry beneath it in the trailing pane.
+fn two_pane_back_visible(collapsed: bool, depth: usize) -> bool {
+    if collapsed { depth >= 1 } else { depth >= 2 }
+}
+
 fn three_pane_back_visible(core: &CoreState, window: u64) -> bool {
     let entries = core.nav_stacks.get(&window).map_or(0, |s| s.len()) as u64;
     if entries == 0 {
@@ -8087,10 +8120,9 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
                 glib::idle_add_local_once(move || {
                     CORE.with_borrow_mut(|core| {
                         let Some(core) = core.as_mut() else { return };
-                        let covers =
-                            core.nav_stacks.get(&window).is_some_and(|s| !s.is_empty());
+                        let depth = core.nav_stacks.get(&window).map_or(0, |s| s.len());
                         if let Some(back) = core.back_buttons.get(&window) {
-                            back.set_visible(collapsed && covers);
+                            back.set_visible(two_pane_back_visible(collapsed, depth));
                         }
                     });
                 });
@@ -8114,8 +8146,9 @@ fn refresh_nav(core: &mut CoreState, window: u64) {
             // — its own button lives inside a header bar IT owns).
             // Best-effort here and authoritative in the notify handler above:
             // nothing is measured yet at build time.
+            let depth = core.nav_stacks.get(&window).map_or(0, |s| s.len());
             if let Some(back) = core.back_buttons.get(&window) {
-                back.set_visible(collapsed && top.is_some());
+                back.set_visible(two_pane_back_visible(collapsed, depth));
             }
             return;
         }
@@ -9460,6 +9493,32 @@ fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl
 /// Y4: the container takes a click as a whole. libadwaita paints the hover
 /// and press (`.card.activatable`, or the row rules SKIN_CSS carries), the
 /// tree says button, and the press, Return and Space all go through one door.
+/// A widget already in a live tree has a realized accessible context, whose
+/// role GTK refuses to change (Gtk-CRITICAL "already has an accessible role";
+/// docs/traps.md, the GTK role of a container added to a live tree), so it
+/// leaves its parent for the change and returns to the same place.
+fn set_role_reparenting(widget: &gtk4::Widget, role: gtk4::AccessibleRole) {
+    use gtk4::prelude::{AccessibleExt, Cast, GridExt, WidgetExt};
+    if widget.accessible_role() == role {
+        return;
+    }
+    let Some(parent) = widget.parent().filter(|_| widget.root().is_some()) else {
+        widget.set_accessible_role(role);
+        return;
+    };
+    if let Some(grid) = parent.downcast_ref::<gtk4::Grid>() {
+        let (column, row, width, height) = grid.query_child(widget);
+        grid.remove(widget);
+        widget.set_accessible_role(role);
+        grid.attach(widget, column, row, width, height);
+        return;
+    }
+    let previous = widget.prev_sibling();
+    widget.unparent();
+    widget.set_accessible_role(role);
+    widget.insert_after(&parent, previous.as_ref());
+}
+
 fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: bool) {
     if !on {
         widget.remove_css_class(ACTIVATABLE_CLASS);
@@ -9479,7 +9538,7 @@ fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: boo
     };
     widget.add_css_class(ACTIVATABLE_CLASS);
     widget.add_css_class("activatable");
-    widget.set_accessible_role(gtk4::AccessibleRole::Button);
+    set_role_reparenting(widget, gtk4::AccessibleRole::Button);
     widget.set_focusable(true);
     let sink = core.occurrences.clone();
     let door = widget.downgrade();
@@ -9613,6 +9672,58 @@ fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
         _ => return,
     };
     widget.add_css_class(class);
+}
+
+const VACATED_KEY: &str = "kaya-vacated";
+
+/// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
+/// column or row that draws nothing of its own and holds nothing but such
+/// boxes (a When showing no case, an empty For, or a box of them) is hidden,
+/// so the flex layout gives it no extent and no gap; it shows again the
+/// moment it holds something.
+fn refresh_vacancy(core: &mut CoreState) {
+    use std::collections::HashSet;
+    let boxes: Vec<(u64, gtk4::Widget)> = core
+        .widgets
+        .iter()
+        .filter_map(|(id, w)| match w {
+            NativeWidget::Column(b) | NativeWidget::Row(b) => Some((id.0, b.clone().upcast::<gtk4::Widget>())),
+            _ => None,
+        })
+        .collect();
+    let kaya_boxes: HashSet<gtk4::Widget> = boxes.iter().map(|(_, w)| w.clone()).collect();
+    let mut roots: HashSet<gtk4::Widget> = core.window_roots.values().cloned().collect();
+    roots.extend(core.sheets.values().filter_map(|s| s.root.clone()));
+    roots.extend(core.skin.dock_roots.values().cloned());
+    fn vacant(w: &gtk4::Widget, boxes: &HashSet<gtk4::Widget>, roots: &HashSet<gtk4::Widget>) -> bool {
+        // A grown empty box is a spacer, which takes its share on purpose.
+        if !boxes.contains(w) || roots.contains(w) || grow_weight(w) > 0.0 {
+            return false;
+        }
+        if w.css_classes().iter().any(|c| c != "vertical" && c != "horizontal") {
+            return false;
+        }
+        let mut child = w.first_child();
+        while let Some(c) = child {
+            if !vacant(&c, boxes, roots) {
+                return false;
+            }
+            child = c.next_sibling();
+        }
+        true
+    }
+    for (_, w) in &boxes {
+        let empty = vacant(w, &kaya_boxes, &roots);
+        // SAFETY: the key is private to this function and only holds a bool.
+        let vacated = unsafe { w.data::<bool>(VACATED_KEY).is_some_and(|p| *p.as_ref()) };
+        if empty && !vacated && w.is_visible() {
+            w.set_visible(false);
+            unsafe { w.set_data(VACATED_KEY, true) };
+        } else if !empty && vacated {
+            w.set_visible(true);
+            unsafe { w.set_data(VACATED_KEY, false) };
+        }
+    }
 }
 
 /// After every batch: the ground stylesheet, an activatable container's
@@ -10024,8 +10135,15 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     }
     for (i, child) in children.iter().enumerate() {
         let i = i as i32;
-        // A cell centres in its row, as a row's children do (R5).
-        child.set_valign(gtk4::Align::Center);
+        // A container fills its cell both ways, a card taking its column and
+        // its row's tallest height (docs/media-player-plan.md M16 (1)); a leaf
+        // centres in its row, as a row's children do (R5).
+        if child.is::<gtk4::Box>() || child.is::<gtk4::Grid>() {
+            child.set_halign(gtk4::Align::Fill);
+            child.set_valign(gtk4::Align::Fill);
+        } else {
+            child.set_valign(gtk4::Align::Center);
+        }
         grid.attach(child, i % cols, i / cols, 1, 1);
     }
 }
@@ -12124,11 +12242,33 @@ fn send_asks(core: &mut CoreState) {
 
 /// docs/toast-plan.md §3's GTK row. T7: the shown toast is dismissed before
 /// the next is added, and HIGH so nothing waits behind another.
+/// The window's topmost presented sheet, the layer its toast shows in
+/// (docs/media-player-plan.md M16 (20)); a sheet over an entry or a section
+/// belongs to the primary window.
+fn toast_sheet(core: &CoreState, window: u64) -> Option<u64> {
+    core.sheets
+        .iter()
+        .filter(|(sid, s)| {
+            s.presented && !core.child_sheet.get(sid).is_some_and(|c| core.sheets.get(c).is_some_and(|c| c.presented))
+        })
+        .filter(|(_, s)| {
+            let mut base = s.parent;
+            while let Some(up) = core.sheets.get(&base) {
+                base = up.parent;
+            }
+            (if core.toast_overlays.contains_key(&base) { base } else { 0 }) == window
+        })
+        .map(|(sid, _)| *sid)
+        .max()
+}
+
 fn present_toast(core: &mut CoreState, spec: crate::protocol::ToastSpec) {
     let window = spec.window.0;
-    let Some(overlay) = core.toast_overlays.get(&window).cloned() else {
+    let Some(own) = core.toast_overlays.get(&window).cloned() else {
         panic!("kaya: present_toast {} names window#{window}, which has no toast overlay", spec.toast.0)
     };
+    let sheet = toast_sheet(core, window).and_then(|sid| core.sheets[&sid].toasts.clone());
+    let overlay = sheet.clone().unwrap_or(own);
     if let Some((_, old)) = core.shown_toasts.remove(&window) {
         old.dismiss();
     }
@@ -12145,7 +12285,9 @@ fn present_toast(core: &mut CoreState, spec: crate::protocol::ToastSpec) {
     }
     toast.connect_dismissed(move |_| toast_dismissed(window, id));
     overlay.add_toast(toast.clone());
-    lift_toasts(&overlay, window_shell(core, window).bottom_bar_height());
+    if sheet.is_none() {
+        lift_toasts(&overlay, window_shell(core, window).bottom_bar_height());
+    }
     core.shown_toasts.insert(window, (id, toast));
 }
 
@@ -15267,6 +15409,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     intercept_dismiss: false,
                     root: None,
                     presented: false,
+                    toasts: None,
                 },
             );
             core.child_sheet.insert(parent.0, sid);
@@ -16687,6 +16830,17 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let picture = picture.clone();
                     set_shape(&picture, shape);
                 }
+                // docs/media-player-plan.md M16 (2): at most this many lines,
+                // the rest cut with Pango's ellipsis.
+                (NativeWidget::Slider(slider), Prop::MaxWidth, Value::F64(bound)) => {
+                    set_max_across(slider.scale.upcast_ref(), bound);
+                    slider.scale.queue_resize();
+                }
+                (NativeWidget::Label(label), Prop::MaxLines, Value::F64(lines)) => {
+                    label.set_wrap(true);
+                    label.set_lines(lines as i32);
+                    label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                }
                 (NativeWidget::Label(label), Prop::Tint, Value::I64(tint)) => {
                     set_label_tint(label.upcast_ref(), tint);
                 }
@@ -16881,7 +17035,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                                 | NativeWidget::Labeled(_)
                         ) && widget.accessible_role() != gtk4::AccessibleRole::Button
                         {
-                            widget.set_accessible_role(gtk4::AccessibleRole::Group);
+                            set_role_reparenting(&widget, gtk4::AccessibleRole::Group);
                         }
                         // AN AUTHORED NAME MUST WIN. GTK's name computation
                         // reads the LABELLED_BY relation FIRST and the label
@@ -17010,9 +17164,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // (measured: a `.title-1` label still publishes `label`), so
                 // without this line the role is invisible to `expect_ax`.
                 (NativeWidget::Label(label), Prop::Role, Value::I64(3)) => {
-                    use gtk4::prelude::{AccessibleExt, WidgetExt};
+                    use gtk4::prelude::WidgetExt;
                     label.add_css_class("heading");
-                    label.set_accessible_role(gtk4::AccessibleRole::Heading);
+                    set_role_reparenting(label.upcast_ref(), gtk4::AccessibleRole::Heading);
                 }
                 // The caption role, the heading's counterpart: Adwaita's
                 // caption type tier plus dim-label for the secondary
@@ -17020,10 +17174,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // ACCESSIBLE role to publish beside the style (Apple and
                 // UIA have none; a11yrows.steps records the carve-out).
                 (NativeWidget::Label(label), Prop::Role, Value::I64(4)) => {
-                    use gtk4::prelude::{AccessibleExt, WidgetExt};
+                    use gtk4::prelude::WidgetExt;
                     label.add_css_class("caption");
                     label.add_css_class("dim-label");
-                    label.set_accessible_role(gtk4::AccessibleRole::Caption);
+                    set_role_reparenting(label.upcast_ref(), gtk4::AccessibleRole::Caption);
                 }
                 // THE TWO ROLES THAT DECIDE THE CONTROL (docs/tasks-s2-plan.md
                 // T1, T3). Everything a switch is to the model stays the
@@ -17870,7 +18024,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 let parent = sheet_parent_widget(core, parent_id);
                 let record = core.sheets.get_mut(&window.0).expect("just checked");
                 record.root = Some(root_widget.clone());
-                record.dialog.set_child(Some(&tight::host(&view)));
+                let toasts = adw::ToastOverlay::new();
+                toasts.set_child(Some(&view));
+                record.dialog.set_child(Some(&tight::host(&toasts)));
+                record.toasts = Some(toasts);
                 record.presented = true;
                 record.dialog.present(Some(&parent));
                 // The focus goes into the dialog a moment later, by the
@@ -20498,10 +20655,14 @@ impl GtkStage {
 /// newest AdwToastWidget, since a replaced one stays a child while it hides.
 #[cfg(feature = "harness")]
 fn shown_toast_widget(core: &CoreState) -> Option<gtk4::Widget> {
+    let mut sheets: Vec<(&u64, &adw::ToastOverlay)> =
+        core.sheets.iter().filter_map(|(sid, s)| s.toasts.as_ref().map(|t| (sid, t))).collect();
+    sheets.sort_by_key(|(sid, _)| std::cmp::Reverse(**sid));
     let mut windows: Vec<&u64> = core.toast_overlays.keys().collect();
     windows.sort();
-    windows.into_iter().find_map(|w| {
-        let overlay = &core.toast_overlays[w];
+    let overlays: Vec<&adw::ToastOverlay> =
+        sheets.into_iter().map(|(_, t)| t).chain(windows.into_iter().map(|w| &core.toast_overlays[w])).collect();
+    overlays.into_iter().find_map(|overlay| {
         let mut newest = None;
         let mut child = overlay.first_child();
         while let Some(widget) = child {
@@ -24072,6 +24233,26 @@ impl crate::harness::Stage for GtkStage {
         );
         Self::await_frames(2);
     }
+    fn ground_top(&self, t: crate::harness::Target) -> Result<(u32, bool), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            let shot = skin::shot_of(&widget)?;
+            let Some(f) = shot.frame(&widget) else { return Err("<no laid-out frame>".to_owned()) };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 8.0 || fh <= 16.0 {
+                return Err(format!("<no laid-out frame: {fw}x{fh}>"));
+            }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return Err(why);
+            }
+            let Some(top) = shot.at(fx + fw - 4.0, fy + 4.0) else {
+                return Err(format!("<the probe falls outside the window: {fx},{fy} {fw}x{fh}>"));
+            };
+            let b = top.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+            Ok(((b[0] << 16) | (b[1] << 8) | b[2], shot.dark))
+        })
+    }
+
     fn ground_read(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             let Some(widget) = skin_layout_widget(core, t) else { return "<no such target>".to_owned() };
@@ -25547,6 +25728,19 @@ impl crate::harness::Stage for GtkStage {
             })
         })
     }
+    fn toast_under_sheet(&self) -> Option<String> {
+        Self::on_main(|core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let shown = shown_toast_widget(core)?;
+            let top = toast_sheet(core, 0)?;
+            let record = &core.sheets[&top];
+            let inside = record
+                .toasts
+                .as_ref()
+                .is_some_and(|t| shown.parent().is_some_and(|p| p == *t.upcast_ref::<gtk4::Widget>()));
+            (!inside).then(|| format!("is drawn outside the sheet {:?} presented over its window, under it", record.title))
+        })
+    }
     fn toast_announced(&self, text: &str, action: &str) -> Result<(), Vec<String>> {
         let said = if action.is_empty() {
             format!("A toast appeared: {text}")
@@ -25704,6 +25898,96 @@ impl crate::harness::Stage for GtkStage {
             } else {
                 format!("{}%", (bar.fraction() * 100.0).round() as i64)
             }
+        })
+    }
+
+    fn laid_out_frames(&self) -> Vec<(String, u64, (f64, f64, f64, f64))> {
+        Self::on_main(|core| {
+            use gtk4::prelude::{Cast, ObjectType, WidgetExt};
+            let widgets: Vec<(&str, gtk4::Widget)> = core
+                .labels
+                .iter()
+                .map(|w| ("label", w.clone()))
+                .chain(core.buttons.iter().map(|b| ("button", b.clone().upcast())))
+                .collect();
+            let mut out = Vec::new();
+            for (what, widget) in widgets {
+                if !widget.is_mapped() || widget.width() <= 1 || widget.height() <= 1 {
+                    continue;
+                }
+                let Some(root) = widget.root() else { continue };
+                let root: gtk4::Widget = root.upcast();
+                let Some(b) = widget.compute_bounds(&root) else { continue };
+                let text = widget
+                    .downcast_ref::<gtk4::Label>()
+                    .map(|l| l.text().to_string())
+                    .or_else(|| widget.downcast_ref::<gtk4::Button>().and_then(|b| b.label().map(String::from)))
+                    .unwrap_or_default();
+                let short: String = text.chars().take(40).collect();
+                out.push((
+                    format!("{what} {short:?}"),
+                    root.as_ptr() as u64,
+                    (f64::from(b.x()), f64::from(b.y()), f64::from(b.width()), f64::from(b.height())),
+                ));
+            }
+            out
+        })
+    }
+
+    fn width_of(&self, t: crate::harness::Target) -> Result<f64, String> {
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            if !widget.is_mapped() {
+                return Err("<the widget is not mapped>".to_owned());
+            }
+            // The border box, which the allocation sized: width() is the
+            // content box inside the scale's own padding.
+            widget
+                .compute_bounds(&widget)
+                .map(|b| f64::from(b.width()))
+                .ok_or_else(|| "<the widget has no bounds>".to_owned())
+        })
+    }
+
+    fn window_frame(&self, t: crate::harness::Target) -> Result<(f64, f64, f64, f64), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            if !widget.is_mapped() {
+                return Err("<the widget is not mapped>".to_owned());
+            }
+            let Some(root) = widget.root() else { return Err("<the widget has no window>".to_owned()) };
+            widget
+                .compute_bounds(&root)
+                .map(|b| (f64::from(b.x()), f64::from(b.y()), f64::from(b.width()), f64::from(b.height())))
+                .ok_or_else(|| "<the widget has no bounds>".to_owned())
+        })
+    }
+
+    fn text_lines(&self, t: crate::harness::Target) -> Result<(usize, bool), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = target_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            let Some(label) = widget.downcast_ref::<gtk4::Label>() else {
+                return Err(format!("<the target is a {}, not a GtkLabel>", widget.type_().name()));
+            };
+            let layout = label.layout();
+            Ok((usize::try_from(layout.line_count()).unwrap_or(0), layout.is_ellipsized()))
+        })
+    }
+
+    fn grid_cell_frames(&self, t: crate::harness::Target) -> Result<Vec<(f64, f64, f64, f64)>, String> {
+        Self::on_main(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.grids.len()) else {
+                return Err("<no such target>".to_string());
+            };
+            let grid = &core.grids[i];
+            let mut frames = Vec::new();
+            let mut child = grid.first_child();
+            while let Some(c) = child {
+                let a = c.allocation();
+                frames.push((f64::from(a.x()), f64::from(a.y()), f64::from(a.width()), f64::from(a.height())));
+                child = c.next_sibling();
+            }
+            Ok(frames)
         })
     }
 

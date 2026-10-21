@@ -478,6 +478,12 @@ func (sc SumCase[K, V]) BindSummary(n Node, sel func(*V) *string) {
 // (Tpl.SetSymbol).
 func (sc SumCase[K, V]) SetSymbol(n Node, symbol Symbol) { sc.t.SetSymbol(n, symbol) }
 
+// BindSymbol is Tpl.BindSymbol for the nodes this arm stamps.
+func (sc SumCase[K, V]) BindSymbol(n Node, f Field[Symbol]) { sc.t.BindSymbol(n, f) }
+
+// SetMaxLines is Tpl.SetMaxLines for the labels this arm stamps.
+func (sc SumCase[K, V]) SetMaxLines(n Node, lines int) { sc.t.SetMaxLines(n, lines) }
+
 // SetAlpha lets a colour picker this arm stamps choose translucency
 // (Tpl.SetAlpha).
 func (sc SumCase[K, V]) SetAlpha(n Node, on bool) { sc.t.SetAlpha(n, on) }

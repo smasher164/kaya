@@ -2166,7 +2166,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         if name.isupper()
     }
     check("kaya.Symbol is exactly the generated vocabulary, name for name",
-          authored == generated and len(authored) == 35)
+          authored == generated and len(authored) == 36)
     check("and the name spelling is derived from it, not typed twice",
           kaya._SYMBOL_NAMES == generated)
 
@@ -2262,7 +2262,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         bad_item = kaya.item("Save")
         for what, value, kind, fragment in (
             ("an unknown name", "save", ValueError, "must be one of"),
-            ("a number past the vocabulary", 36, ValueError,
+            ("a number past the vocabulary", 37, ValueError,
              "is not a symbol"),
             ("zero", 0, ValueError, "is not a symbol"),
             ("a bool", True, TypeError, "not bool"),
@@ -5678,5 +5678,96 @@ try:
           sk_heard == ["pick", "open"])
 finally:
     kaya.runtime.submit = _sk_real_submit
+
+# docs/media-player-plan.md M16 (28): a handler appends to a built container.
+wi_app = kaya.App()
+wi_shipped = []
+_wi_real_submit = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: wi_shipped.append(list(records))
+try:
+    wi_added = []
+
+    def wi_more():
+        with kaya.within(wi_grid):
+            with kaya.column() as wi_card:
+                kaya.label("Release Radar")
+            wi_added.append(wi_card)
+        wi_added.append(kaya.label("after"))
+
+    with wi_app.window(2700):
+        with kaya.column() as wi_root:
+            with kaya.grid(3) as wi_grid:
+                kaya.label("one")
+            wi_button = kaya.button("More", on_click=wi_more)
+            wi_tracks = kaya.collection()
+            with kaya.for_each(wi_tracks):
+                wi_node = kaya.label("stamped")
+                try:
+                    kaya.within(wi_grid)
+                    check("within() refuses inside a template body", False)
+                except kaya.KayaStateError as e:
+                    check("within() refuses inside a template body", "blueprint" in str(e))
+    try:
+        kaya.within(wi_node)
+        check("within() refuses a template node", False)
+    except kaya.KayaTypeError as e:
+        check("within() refuses a template node", "live container" in str(e))
+    wi_shipped.clear()
+    wi_queue = [(kaya.wire.OCC_BUTTON_CLICKED, wi_button.id, [], None)]
+    _wi_real_next = kaya.runtime.next_occurrence
+    kaya.runtime.next_occurrence = lambda: wi_queue.pop(0) if wi_queue else None
+    try:
+        wi_app._dispatch_loop()
+    finally:
+        kaya.runtime.next_occurrence = _wi_real_next
+    wi_flat = [r for batch in wi_shipped for r in batch]
+    wi_card, wi_after = wi_added
+    check("within() appends a handler's new card to the built grid, and only it",
+          kaya.wire.tx_add_child(wi_grid.id, wi_card.id) in wi_flat
+          and sum(1 for r in wi_flat if r == kaya.wire.tx_add_child(wi_grid.id, wi_card.id)) == 1
+          and not any(r == kaya.wire.tx_add_child(wi_grid.id, wi_after.id) for r in wi_flat)
+          and not any(r == kaya.wire.tx_mount(2700, wi_card.id) for r in wi_flat))
+finally:
+    kaya.runtime.submit = _wi_real_submit
+
+# docs/media-player-plan.md M16 (21), (29): a stamped button's symbol.
+ts_app = kaya.App()
+ts_shipped = []
+_ts_real_submit = kaya.runtime.submit
+kaya.runtime.submit = lambda *records: ts_shipped.append(list(records))
+try:
+    @dataclass
+    class TsRow:
+        name: str
+        symbol: kaya.Symbol
+        tint: kaya.Tint
+
+    with ts_app.window(2800):
+        ts_rows = kaya.collection(TsRow)
+        with kaya.column():
+            for ts_row in ts_rows:
+                ts_const = kaya.button("Play", symbol=kaya.Symbol.PLAY)
+                ts_bound = kaya.button("Play", symbol=ts_row.symbol)
+                with kaya.expander("More", symbol=kaya.Symbol.INFO) as ts_exp:
+                    kaya.label("inside")
+                try:
+                    kaya.button("Play", symbol=ts_row.tint)
+                    check("a template symbol refuses a Tint field", False)
+                except kaya.KayaTypeError as e:
+                    check("a template symbol refuses a Tint field", "binds a Symbol field" in str(e))
+            try:
+                kaya.button("Play", symbol=kaya.FieldRef.__new__(kaya.FieldRef))
+                check("a live symbol refuses a row's field", False)
+            except kaya.KayaTypeError as e:
+                check("a live symbol refuses a row's field", "template-only" in str(e))
+        ts_rows.insert("a", TsRow(name="a", symbol=kaya.Symbol.PAUSE, tint=kaya.Tint.NONE))
+    ts_flat = [r for batch in ts_shipped for r in batch]
+    check("a stamped button and expander carry a constant symbol",
+          kaya.wire.tx_set_symbol(ts_const.id, kaya.Symbol.PLAY) in ts_flat
+          and kaya.wire.tx_set_symbol(ts_exp.id, kaya.Symbol.INFO) in ts_flat)
+    check("a stamped button's symbol binds the row's Symbol field",
+          kaya.wire.tx_bind_symbol_element(ts_bound.id, 0, 1) in ts_flat)
+finally:
+    kaya.runtime.submit = _ts_real_submit
 
 sys.exit(1 if failures else 0)

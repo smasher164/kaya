@@ -288,7 +288,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # docs/styling-pass-plan.md Y10: the skin in the template zone.
              "ground_gradient", "ground_image", "shape", "tint", "selected", "on_activate",
              # Y4, AMENDED 2026-10-17: the user's pick of a stamped container.
-             "on_select"]
+             "on_select",
+             # docs/media-player-plan.md M16 (2): a stamped label's most lines.
+             "max_lines"]
 
 # Rust's `grow` is the generic floor `set(node, prop, value)` and not a
 # named setter, so that one row cannot tell grow from any other generic
@@ -309,6 +311,7 @@ PROP_MEMBERS = {
         "phase": "phase",
         "ground_gradient": "ground_gradient", "ground_image": "ground_image", "shape": "shape",
         "tint": "tint", "selected": "selected", "on_activate": "on_activate", "on_select": "on_select",
+        "max_lines": "max_lines",
     },
     "go": {
         "format": "SetFormat",
@@ -326,6 +329,7 @@ PROP_MEMBERS = {
         "phase": "SetPhase",
         "ground_gradient": "BindGroundGradient", "ground_image": "BindGroundImage", "shape": "SetShape",
         "tint": "BindTint", "selected": "BindSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
+        "max_lines": "SetMaxLines",
     },
     "csharp": {
         "format": "SetFormat",
@@ -343,6 +347,7 @@ PROP_MEMBERS = {
         "phase": "SetPhase",
         "ground_gradient": "SetGroundGradient", "ground_image": "SetGroundImage", "shape": "SetShape",
         "tint": "SetTint", "selected": "SetSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
+        "max_lines": "SetMaxLines",
     },
     "java": {
         "format": "setFormat",
@@ -360,6 +365,7 @@ PROP_MEMBERS = {
         "phase": "setPhase",
         "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
         "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
+        "max_lines": "setMaxLines",
     },
     "swift": {
         "format": "setFormat",
@@ -377,6 +383,7 @@ PROP_MEMBERS = {
         "phase": "setPhase",
         "ground_gradient": "setGroundGradient", "ground_image": "setGroundImage", "shape": "setShape",
         "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
+        "max_lines": "setMaxLines",
     },
     "ocaml": {
         "format": "set_format",
@@ -394,6 +401,7 @@ PROP_MEMBERS = {
         "phase": "set_phase",
         "ground_gradient": "set_ground_gradient", "ground_image": "set_ground_image", "shape": "set_shape",
         "tint": "set_tint", "selected": "set_selected", "on_activate": "on_activate", "on_select": "on_select",
+        "max_lines": "set_max_lines",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -413,6 +421,7 @@ PROP_MEMBERS = {
         "phase": "TplPhaseField",
         "ground_gradient": "TplGroundGradientField", "ground_image": "TplGroundImageField", "shape": "TplShapeAs",
         "tint": "TplTintField", "selected": "TplSelectedField", "on_activate": "TplOnActivate", "on_select": "TplOnSelect",
+        "max_lines": "TplMaxLines",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -432,6 +441,7 @@ PROP_MEMBERS = {
         "phase": "phase",
         "ground_gradient": "groundGradient", "ground_image": "groundImage", "shape": "shape",
         "tint": "tint", "selected": "selected", "on_activate": "onActivate", "on_select": "onSelect",
+        "max_lines": "maxLines",
     },
 }
 
@@ -544,7 +554,8 @@ def members_js(_):
                                   ("selected", skin, "wire.tx_bind_selected_element("),
                                   ("onActivate", skin, "wire.OCC_ACTIVATED"),
                                   ("onSelect", skin, "wire.OCC_SELECTION_CHANGED"),
-                                  ("tint", label, "wire.tx_bind_tint_element(")):
+                                  ("tint", label, "wire.tx_bind_tint_element("),
+                                  ("maxLines", label, "wire.tx_set_max_lines(")):
         if emitter in writer and "isNode" not in writer and "_tplDepth" not in writer:
             names.add(prop)
     # The image's writer asks isNode for its two realization handlers, so

@@ -178,6 +178,7 @@ func wireValue(_ any: Any) -> KayaValue? {
     case let p as KayaPlayer: return .i64(Int64(bitPattern: p.id))
     case let p as KayaImagePhase: return .i64(p.rawValue)
     case let t as KayaTint: return .i64(t.rawValue)
+    case let s as KayaSymbol: return .i64(s.rawValue)
     case let s as String: return .str(s)
     case let b as Bool: return .bool(b)
     case let n as Int64: return .i64(n)
@@ -255,6 +256,8 @@ extension KayaRecord {
             probe[keyPath: keyPath] = (p == .shown ? KayaImagePhase.loading : .shown) as! V
         case let t as KayaTint:
             probe[keyPath: keyPath] = (t == .none ? KayaTint.accent : .none) as! V
+        case let s as KayaSymbol:
+            probe[keyPath: keyPath] = (s == .add ? KayaSymbol.remove : .add) as! V
         case let doc as KayaDocument:
             probe[keyPath: keyPath] = doc.mark(0..<0, "kaya", "probe") as! V
         default: preconditionFailure("kaya: \(V.self) is not a wire type")

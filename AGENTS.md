@@ -2207,6 +2207,8 @@ in docs/deferred.md.
    touched, in minutes, BEFORE the matrix — two locale races took two full
    matrices to find when six filtered legs would have said it. Never the
    record.
+   Any other flag, `--help` among them, prints the usage and starts
+   nothing (tools/lib/matrix_args.py; check-gates runs its cases).
    After Android exits, the one `nice -n 10` gate sweep runs in its own
    cargo target (since 2026-10-16, so it no longer waits for the mac lane;
    docs/traps.md, the sweep-relinked-libkaya entry) FOUR GATES

@@ -825,6 +825,7 @@ enum Symbol : long
     Volume = KayaWire.SymbolVolume,
     Queue = KayaWire.SymbolQueue,
     Favorite = KayaWire.SymbolFavorite,
+    Muted = KayaWire.SymbolMuted,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
@@ -4566,6 +4567,19 @@ sealed class Tx : IDisposable
     public void AddChild(Widget parent, Widget child) =>
         Records.Add(KayaWire.TxAddChild(parent.Id, child.Id));
 
+    /// Declare more children into a container built earlier, typically from
+    /// a handler: everything the body declares joins it after its existing
+    /// children (docs/media-player-plan.md M16 (28)).
+    public void Within(Widget container, Action body) =>
+        Within<object?>(container, () => { body(); return null; });
+
+    public T Within<T>(Widget container, Func<T> body)
+    {
+        App.Parents.Add(container.Id);
+        try { return body(); }
+        finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
+    }
+
     /// Drop the widget's owned content — a one-shot command riding this
     /// transaction, so the insert and the clear beside it commit together
     /// or not at all. A clear arrives back as a text change with empty
@@ -7124,6 +7138,11 @@ sealed class Tpl
     public void SetSymbol(Node n, Symbol symbol) =>
         tx.Records.Add(KayaWire.TxSetSymbol(n.Id, (long)symbol));
 
+    /// Every stamped copy's glyph from its row's Symbol field
+    /// (docs/media-player-plan.md M16 (21)).
+    public void SetSymbol(Node n, Field<Symbol> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindSymbolElement(n.Id, level, f.Index));
+
     /// A stamped container's cross-axis child placement (Tx.SetAlign).
     public void SetAlign(Node n, Align align) =>
         tx.Records.Add(KayaWire.TxSetAlign(n.Id, (long)align));
@@ -7180,6 +7199,11 @@ sealed class Tpl
     /// row's own Tint field.
     public void SetTint(Node n, Tint tint) =>
         tx.Records.Add(KayaWire.TxSetTint(n.Id, (long)tint));
+
+    /// A stamped label's most lines, the rest truncated with the platform's
+    /// ellipsis (docs/media-player-plan.md M16 (2); Tx.SetMaxLines).
+    public void SetMaxLines(Node n, int lines) =>
+        tx.Records.Add(KayaWire.TxSetMaxLines(n.Id, lines));
 
     public void SetTint(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindTint(n.Id, s.Id));
 

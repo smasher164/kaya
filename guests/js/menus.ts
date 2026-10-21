@@ -80,6 +80,7 @@ const { status, canExport, details, sort, file, share, items, groups } = app.win
     kaya.item("Volume", { symbol: kaya.Symbol.VOLUME });
     kaya.item("Queue", { symbol: kaya.Symbol.QUEUE });
     kaya.item("Favorite", { symbol: kaya.Symbol.FAVORITE });
+    kaya.item("Muted", { symbol: kaya.Symbol.MUTED });
   });
 
   // Option order IS the index.

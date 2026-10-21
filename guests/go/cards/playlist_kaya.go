@@ -36,6 +36,11 @@ func (p playlistPatchBuilder) Selected(v bool) playlistPatchBuilder {
 	return p
 }
 
+func (p playlistPatchBuilder) Symbol(v kaya.Symbol) playlistPatchBuilder {
+	p.p.Set(func(t *Playlist) *kaya.Symbol { return &t.Symbol }, v)
+	return p
+}
+
 // PlaylistPatchIf is PlaylistPatch made only while the entry exists and the
 // guard's field still holds expected; otherwise nothing, and no panic
 // (docs/network-images-plan.md N7). The chain is one record.
@@ -57,6 +62,11 @@ func (p playlistPatchIfBuilder) Selected(v bool) playlistPatchIfBuilder {
 	return p
 }
 
+func (p playlistPatchIfBuilder) Symbol(v kaya.Symbol) playlistPatchIfBuilder {
+	p.p.Set(func(t *Playlist) *kaya.Symbol { return &t.Symbol }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type playlistRow struct {
@@ -67,6 +77,8 @@ type playlistRow struct {
 func (r playlistRow) Name() kaya.Field[string] { return kaya.FieldAt[string](0) }
 
 func (r playlistRow) Selected() kaya.Field[bool] { return kaya.FieldAt[bool](1) }
+
+func (r playlistRow) Symbol() kaya.Field[kaya.Symbol] { return kaya.FieldAt[kaya.Symbol](2) }
 
 func (r playlistRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
@@ -90,6 +102,10 @@ func (r playlistRow) Expander(text kaya.Field[string], expanded kaya.Field[bool]
 
 func (r playlistRow) Button(f kaya.Field[string], onClick func(*kaya.Tx, string)) kaya.Node {
 	return r.c.Button(r.t, f, onClick)
+}
+
+func (r playlistRow) ButtonText(text string, onClick func(*kaya.Tx, string)) kaya.Node {
+	return r.c.Button(r.t, text, onClick)
 }
 
 func (r playlistRow) Spacer() kaya.Node { return r.t.Spacer() }
@@ -183,7 +199,9 @@ func (r playlistRow) SetSummary(n kaya.Node, text string) { r.t.SetSummary(n, te
 
 func (r playlistRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n, f) }
 
-func (r playlistRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }
+func (r playlistRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
+func (r playlistRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r playlistRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 
 func (r playlistRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r playlistRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

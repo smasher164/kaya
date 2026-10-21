@@ -82,6 +82,14 @@ public final class Toast {
                         held = 0;
                     }
                 });
+                // A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+                tx.button("sheet", t -> {
+                    KayaApp.SheetRef sheet = t.presentSheet(21).title("Saved items").detent(KayaApp.Detent.LARGE);
+                    t.mountIn(sheet.id(), t.column(body -> {
+                        t.button("save here", s -> s.showToast("Saved in sheet")
+                                .onResult((r, o) -> answer(r, last, count, "Saved in sheet", o)).show()).a11yId("sheet_save");
+                    }));
+                });
                 for (var row : ToastItemKaya.rows(tx, items)) {
                     row.row(() -> row.label(row.title));
                 }

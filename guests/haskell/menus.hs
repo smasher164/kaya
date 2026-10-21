@@ -67,7 +67,8 @@ main = kayaMain $ \app -> do
                 item "Repeat One" [ISymbol SymbolRepeatOne],
                 item "Volume" [ISymbol SymbolVolume],
                 item "Queue" [ISymbol SymbolQueue],
-                item "Favorite" [ISymbol SymbolFavorite]
+                item "Favorite" [ISymbol SymbolFavorite],
+                item "Muted" [ISymbol SymbolMuted]
               ],
             -- Option order IS the index vocabulary: Name = 0, Date = 1.
             radioGroup

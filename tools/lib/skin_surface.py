@@ -56,7 +56,7 @@ ROWS = [
     ("python ground gradient", PY, r"^\s+ground_gradient: Color \| Source \| None = None,", "ground_gradient"),
     ("python ground image", PY, r"^\s+ground_image: bytes \| bytearray \| memoryview \| Asset \| Source \| None = None,", "ground_image"),
     ("python image shape", PY, r"^\s+shape: Shape \| str \| None = None\) -> Widget:", "shape"),
-    ("python label tint", PY, r"tint: Tint \| str \| Source \| None = None\) -> Widget:", "tint"),
+    ("python label tint", PY, r"tint: Tint \| str \| Source \| None = None,\n\s*max_lines: int \| None = None\) -> Widget:", "tint"),
     ("python selected", PY, r"^\s+selected: FlagSource \| None = None,\n\s+on_activate", "selected"),
     ("python on_activate", PY, r"^\s+on_activate: Handler \| None = None,\n\s+on_select: Handler \| None = None\) -> _Container:", "on_activate"),
     ("python template ground gradient", PY, r"elif isinstance\(ground_gradient, FieldRef\):", "ground_gradient"),

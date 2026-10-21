@@ -98,6 +98,15 @@ func App() *kaya.App {
 					held = 0
 				}
 			})
+			// A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+			tx.Button("sheet", func(tx *kaya.Tx) { // button#6
+				sheet := tx.PresentSheet(21).Title("Saved items").Detent(kaya.DetentLarge)
+				tx.MountIn(sheet.Id(), tx.Column(func() {
+					tx.Button("save here", func(tx *kaya.Tx) {
+						tx.ShowToast("Saved in sheet").OnResult(answer("Saved in sheet")).Show()
+					}).A11yID("sheet_save")
+				}))
+			})
 			for row := range ItemRows(tx, items).All() {
 				row.Row(func() {
 					row.Label(row.Title())

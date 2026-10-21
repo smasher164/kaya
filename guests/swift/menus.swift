@@ -41,6 +41,7 @@ KayaApp.run { app in
                 tx.item("Volume", symbol: .volume),
                 tx.item("Queue", symbol: .queue),
                 tx.item("Favorite", symbol: .favorite),
+                tx.item("Muted", symbol: .muted),
             ])
         // Option order IS the index vocabulary: Name = 0, Date = 1.
         let sortGroup = tx.radioGroup(

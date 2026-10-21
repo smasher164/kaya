@@ -1475,7 +1475,7 @@ ONLY_FILES = {
 }
 ONLY_SHELL = ('IFS=, read -r -a kaya_prefixes <<< "$KAYA_ONLY"',
               'matched no leg of this runner — no verdict" >&2\n    exit 3')
-ONLY_MATRIX = ('os.environ["KAYA_ONLY"] = _args.pop(0)',
+ONLY_MATRIX = ('os.environ["KAYA_ONLY"] = ARGS["only"]',
                "rc == only.REFUSED and only.active()",
                'verdict = "SKIP"',
                "validate-all: ALL PASS — FILTERED (KAYA_ONLY=",
@@ -1553,6 +1553,74 @@ if n != 1:
          "is not reading the real matrix")
 elif only_problem({**only_texts, "tools/validate-all.py": doctored}) is None:
     fail("self-test N27: a filtered verdict spelled like the record passed")
+
+# THE MATRIX REFUSES A FLAG IT DOES NOT KNOW (tools/lib/matrix_args.py;
+# docs/media-player-plan.md M16 F3): `--help` once started a whole matrix.
+# The parser is run over its cases, and validate-all is held to reading
+# argv through it alone.
+ARG_CASES = [(["--help"], 0, "usage:"), (["-h"], 0, "usage:"),
+             (["--bogus"], 2, "unknown flag '--bogus'"), (["-x"], 2, "unknown flag '-x'"),
+             (["--only"], 2, "--only takes"), (["--only", "--serial"], 2, "--only takes"),
+             (["a@b", "c@d"], 2, "a second windows host"),
+             (["--exclusive", "--no-exclusive"], 2, "together leave nothing"),
+             ([], None, "parallel|None|None|akhil@192.168.64.2"),
+             (["--serial", "--only", "music_,canvas", "--no-exclusive", "u@h"], None,
+              "serial|skip|music_,canvas|u@h")]
+
+
+def args_problem(module_text, matrix_text):
+    space = {}
+    exec(compile(module_text, "tools/lib/matrix_args.py", "exec"), space)
+    for argv, code, want in ARG_CASES:
+        try:
+            got = space["parse"](argv)
+        except space["Refused"] as refused:
+            if refused.code != code or want not in refused.text:
+                return (f"matrix_args.parse({argv}) refused with {refused.code} and "
+                        f"{refused.text[:60]!r}, wanted {code} and {want!r}")
+            continue
+        seen = "|".join(str(got[k]) for k in ("mode", "exclusive", "only", "host"))
+        if code is not None or seen != want:
+            return f"matrix_args.parse({argv}) answered {seen!r}, wanted a refusal {code} {want!r}"
+    readers = [line for line in code_lines(matrix_text) if "sys.argv" in line]
+    if readers != ["    ARGS = matrix_args.parse(sys.argv[1:])"]:
+        return f"tools/validate-all.py reads argv outside matrix_args.parse: {readers}"
+    if matrix_text.index("matrix_args.parse(") > matrix_text.index("LANES_DIR = "):
+        return "tools/validate-all.py parses its flags after it has started making the run"
+    return None
+
+
+args_text = (root / "tools/lib/matrix_args.py").read_text(encoding="utf-8")
+problem = args_problem(args_text, matrix_text)
+if problem:
+    fail("the matrix's flags: " + problem)
+print(f"check-gates: matrix flags, {len(ARG_CASES)} cases run")
+for label, rel, pattern, repl in (
+        ("NA1 let an unknown flag through", "args", r'elif arg\.startswith\("-"\):',
+         'elif False:'),
+        ("NA2 dropped --help", "args", r'if arg in \("-h", "--help"\):', 'if False:'),
+        ("NA3 let --only take a flag", "args", r' or args\[0\]\.startswith\("-"\)', ''),
+        ("NA4 gave the matrix a second argv reader", "matrix",
+         r'HOST = ARGS\["host"\]', 'HOST = sys.argv[-1]'),
+        ("NA5 parsed the flags after the run's scratch", "matrix",
+         r'(try:\n    ARGS = matrix_args\.parse\(sys\.argv\[1:\]\)\n)',
+         '')):
+    texts = {"args": args_text, "matrix": matrix_text}
+    texts[rel], n = re.subn(pattern, repl, texts[rel], count=1)
+    if label.startswith("NA5") and n == 1:
+        texts[rel] = texts[rel].replace(
+            "LANES_DIR = pathlib.Path(tempfile.mkdtemp())\n",
+            "LANES_DIR = pathlib.Path(tempfile.mkdtemp())\ntry:\n"
+            "    ARGS = matrix_args.parse(sys.argv[1:])\n", 1)
+    print(f"check-gates: self-test {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test {label[:3]} did not apply — the clause is not reading the real file")
+    else:
+        verdict = args_problem(texts["args"], texts["matrix"])
+        if verdict is None:
+            fail(f"self-test {label[:3]}: the doctored copy passed")
+        else:
+            print(f"check-gates: self-test {label[:3]} refused: {verdict[:90]}")
 
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "

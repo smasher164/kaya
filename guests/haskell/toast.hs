@@ -73,6 +73,11 @@ main = kayaMain $ \app -> do
           held <- readIORef heldRef
           writeIORef heldRef Nothing
           mapM_ (submitTx app . dismissToast) held
+        -- A sheet over the window, and a toast shown from it (docs/media-player-plan.md M16 (20)).
+        onSheet = buildTx app $ do
+          presentSheet 21 [ShTitle "Saved items", ShDetent DetentLarge]
+          body <- column [] [buttonOn "save here" (ask "Saved in sheet" []) [A11yId "sheet_save"]]
+          mountIn 21 body
         walked label _ = do
           undos <- atomicModifyIORef' undosRef (\n -> (n + 1, n + 1))
           submitTx app $ do
@@ -106,6 +111,7 @@ main = kayaMain $ \app -> do
           buttonOn "delete" onDelete,
           buttonOn "hold" onHold,
           buttonOn "dismiss" onDismiss,
+          buttonOn "sheet" onSheet,
           each (recordHandle items) $ rowOf [label (field @"title" @Item)]
         ]
     mount root

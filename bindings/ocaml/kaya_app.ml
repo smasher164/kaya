@@ -2192,6 +2192,7 @@ type symbol =
   | Volume
   | Queue
   | Favorite
+  | Muted
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2229,6 +2230,23 @@ let symbol_wire = function
   | Volume -> Int64.of_int Kaya_wire.symbol_volume
   | Queue -> Int64.of_int Kaya_wire.symbol_queue
   | Favorite -> Int64.of_int Kaya_wire.symbol_favorite
+  | Muted -> Int64.of_int Kaya_wire.symbol_muted
+
+(* A [symbol] row field's wire form, for the ppx's generated code
+   (docs/media-player-plan.md M16 (21)). Every constructor, in wire order;
+   tools/lib/symbol_field_surface.py holds it to the type. *)
+let all_symbols =
+  [ Add; Remove; Delete; Edit; Done; Close; Search; Settings; Refresh; Info; Warning; Back;
+    Forward; More; Copy; Paste; Star; Lock; Person; Home; Emoji; Send; Attach; Mic;
+    ImageMissing; Play; Pause; Next; Previous; Shuffle; Repeat; RepeatOne; Volume; Queue;
+    Favorite; Muted ]
+
+let pack_symbol = symbol_wire
+
+let symbol_of_packed n =
+  match List.find_opt (fun s -> symbol_wire s = n) all_symbols with
+  | Some s -> s
+  | None -> failwith (Printf.sprintf "kaya: symbol %Ld is not one this build knows" n)
 
 (* An icon-only button (docs/composer-plan.md §2): the glyph in place of
    the title, which stays its accessible name. *)
@@ -2673,6 +2691,8 @@ let can_redo (Widget id) on =
 let add_child (Widget parent) (Widget child) =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_add_child parent child)
+
+let within container children = List.iter (fun child -> add_child container (child ())) children
 
 
 let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?symbol ?text ?on_click () =
@@ -3917,6 +3937,10 @@ let image_phase_field index : ('a, Image_phase.t) field =
 (* A row's tint (docs/styling-pass-plan.md Y7): the playing track's title. *)
 let tint_field index : ('a, Tint.t) field =
   { fd_index = index; fd_to_value = (fun t -> Kaya_wire.I64 (pack_tint t)) }
+
+(* A row's symbol (docs/media-player-plan.md M16 (21)): the playing row's pause. *)
+let symbol_field index : ('a, symbol) field =
+  { fd_index = index; fd_to_value = (fun s -> Kaya_wire.I64 (pack_symbol s)) }
 
 (* A [document] field: a Blob slot whose bytes are the document's own
    wire list, so a stamped copy's document binds through the template
@@ -5724,6 +5748,7 @@ module Tpl = struct
 
   let set_shape (Node id) (sh : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire sh))
   let set_tint (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
+  let set_max_lines (Node id) n = emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int n))
 
   let bind_tint_field ?(level = 0) (Node id) (fd : (_, Tint.t) field) =
     emit (the_tx ()) (Kaya_wire.tx_bind_tint_element ~level ~field:fd.fd_index id)
@@ -5765,9 +5790,15 @@ module Tpl = struct
 
   let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
-      ?a11y_hint_field ?role ?text ?bind ?bind_field ?(level = 0)
+      ?a11y_hint_field ?role ?symbol ?symbol_field ?text ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_click () =
     let n = Floor.widget Kaya_wire.kind_button in
+    Option.iter (fun s -> Floor.set_symbol n s) symbol;
+    Option.iter
+      (fun (fd : (_, symbol) field) ->
+        let (Node id) = n in
+        emit (the_tx ()) (Kaya_wire.tx_bind_symbol_element ~level ~field:fd.fd_index id))
+      symbol_field;
     Option.iter (fun g -> Floor.set_grow n g) grow;
     Option.iter (fun v -> Floor.set_fill n v) fill;
     Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label

@@ -14,7 +14,8 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x1f0df237536d7515
+	SpecHash uint64 = 0x75f6589c1fd09a4a
+	Version = "0.0.0"
 
 	ValueBool = 1
 	ValueI64 = 2
@@ -286,6 +287,7 @@ const (
 	SymbolVolume Symbol = 33
 	SymbolQueue Symbol = 34
 	SymbolFavorite Symbol = 35
+	SymbolMuted Symbol = 36
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -903,6 +905,8 @@ func (s Symbol) String() string {
 		return "queue"
 	case SymbolFavorite:
 		return "favorite"
+	case SymbolMuted:
+		return "muted"
 	}
 	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
 }

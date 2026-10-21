@@ -52,6 +52,14 @@ static class SlidersScene
                     min: 0.0, max: 1.0, value: 0.25, step: 0.25, axis: Axis.Vertical);
                 tx.SetA11yLabel(fader, "Fader");
                 tx.SetA11yId(fader, "fader");
+                // A grown slider capped at its widest width (docs/media-player-plan.md M16 (17)).
+                tx.Row(_ =>
+                {
+                    var capped = tx.Slider(min: 0.0, max: 1.0, value: 0.5, grow: 1);
+                    tx.SetMaxWidth(capped, 120);
+                    tx.SetA11yLabel(capped, "Capped");
+                    tx.SetA11yId(capped, "capped");
+                });
                 // A programmatic write must NOT echo a value or a commit.
                 tx.Button("reset", t => t.Write(pos, 25.0));       // button#0
                 foreach (var row in tracks.Rows())

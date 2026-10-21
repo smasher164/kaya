@@ -1642,6 +1642,24 @@ doctored["unrepresented-widening"] = perturb(
 refuses(doctored["unrepresented-widening"],
         "does not call `represent(visible)`",
         "a widened column that never re-presents its cells")
+
+# M16 (7): the leftover shared by every column again, and the alternation
+# painted down the empty foot, each watched reddening the probe's Half 7.
+doctored["equal-leftover"] = perturb(
+    REAL, r"let takers = wide\.isEmpty \? Array\(widths\.indices\) : wide",
+    "let takers = Array(widths.indices)",
+    "the leftover shared by the narrow columns too",
+    "struct KayaNativeTable > class KayaTableDriver > "
+    "func layoutColumns")
+runtime_refuses("equal-leftover", "a narrow column keeps its content width",
+                "a narrow column widened by the leftover")
+doctored["striped-foot"] = perturb(
+    REAL, r"tableView\.usesAlternatingRowBackgroundColors = false",
+    "tableView.usesAlternatingRowBackgroundColors = true",
+    "AppKit's alternation painted across the whole clip",
+    "struct KayaNativeTable > class KayaTableDriver > func build")
+runtime_refuses("striped-foot", "the foot below a grown table's last row is not striped",
+                "a grown table striped below its last row")
 run_probes()
 
 # REGISTRY READS HOP TO THE MAIN THREAD (docs/traps.md: A registry

@@ -66,6 +66,8 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line(&format!("-- | specHash: {}.", "the protocol fingerprint; the runtime asserts the loaded core agrees"));
     c.line("specHash :: Word64");
     c.line(&format!("specHash = 0x{:016x}", crate::spec_hash()));
+    c.line("kayaVersion :: String");
+    c.line(&format!("kayaVersion = \"{}\"", crate::version()));
     c.line("");
     for e in spec.enums {
         for (name, value) in e.variants {

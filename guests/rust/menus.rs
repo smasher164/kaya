@@ -67,6 +67,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     ("Volume", kaya::Symbol::Volume),
                     ("Queue", kaya::Symbol::Queue),
                     ("Favorite", kaya::Symbol::Favorite),
+                    ("Muted", kaya::Symbol::Muted),
                 ] {
                     m.item(title).symbol(symbol).id();
                 }
