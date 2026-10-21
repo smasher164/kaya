@@ -3387,6 +3387,14 @@ def ios_media_rows(code):
         bad.append("KayaPlayer.seek does not print its issue and its landing clock — a "
                    "paused seek that got no cue is unreadable from the bundle (docs/traps.md, "
                    "the tx3g seek with no cue)")
+    silent = re.search(r"private func noteSilentLegible\(after ms: UInt64, pushes: Int\) \{"
+                       r"(.*?)\n    \}\n", code, re.S)
+    schedule = "self.noteSilentLegible(after: ms, pushes: self.legiblePushes)"
+    if seek_body is None or schedule not in seek_body.group(1) \
+            or silent is None or '"legible silent player=' not in silent.group(1):
+        bad.append("a paused seek's landing does not schedule noteSilentLegible, or it prints "
+                   "nothing — a seek whose cue never came is unreadable from the bundle "
+                   "(docs/traps.md, the mac tx3g caption)")
     push = re.search(r"didOutputAttributedStrings strings: \[NSAttributedString\],.*?\n    \}",
                      code, re.S)
     if push is None or not re.search(r'kayaDiag\(\s*"legible player=.*?guard let p = kayaPlayers',
@@ -3575,6 +3583,8 @@ for pattern, repl, label, rel, want in (
      "a seek landing unprinted", SWIFT, 1),
     (r'(\n)        kayaDiag\(\n            "legible player=', "        _ = (\n            \"",
      "a legible push unprinted", SWIFT, 1),
+    (r"(\n) {16}self\.noteSilentLegible\(after: ms, pushes: self\.legiblePushes\)\n", "",
+     "a silent seek unreported", SWIFT, 1),
     (r"(guard let picked = )kayaPickedURLs\[locator\]", "Optional<URL>.none",
      "the iOS picked URL not handed over", SWIFT, 1),
     (r"(let url = )platformURL\(locator\)", "URL(string: locator)",

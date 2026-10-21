@@ -34359,6 +34359,9 @@ final class KayaPlayer {
     /// from.
     var kayaCaption = ""
     var platformCue = ""
+    var legiblePushes = 0
+    private var seeksIssued = 0
+    var lastPush = ""
     /// An http(s) sidecar being fetched through URLSession (docs/media-plan.md §3).
     var captionsFetch: URLSessionDataTask?
     private var captionTimes: [UInt64] = []
@@ -34729,6 +34732,28 @@ final class KayaPlayer {
         }
     }
 
+    /// docs/traps.md, the mac tx3g caption: what the item says when a paused
+    /// seek with a caption option selected got no push.
+    private func noteSilentLegible(after ms: UInt64, pushes: Int) {
+        let gen = generation
+        let seeks = seeksIssued
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(400)) { [weak self] in
+            guard let self, self.generation == gen, self.seeksIssued == seeks, self.legiblePushes == pushes,
+                self.player.rate == 0,
+                let item = self.player.currentItem, let legible = self.legible,
+                let option = item.currentMediaSelection.selectedMediaOption(in: legible)
+            else { return }
+            let now = self.player.currentTime()
+            let base = item.timebase.map { CMTimebaseGetTime($0).seconds * 1000 } ?? -1
+            let enabled = item.tracks.filter(\.isEnabled).map { $0.assetTrack?.mediaType.rawValue ?? "none" }
+            kayaDiag(
+                "legible silent player=\(self.id) to=\(ms) ms: no push in the 400 ms after the seek; "
+                    + "clock=\(now.isNumeric ? now.seconds * 1000 : -1) ms timebase=\(base) ms "
+                    + "option=\(kayaB64(option.displayName)) enabled=\(enabled) outputs=\(item.outputs.count) "
+                    + "pushes=\(self.legiblePushes) last=\(kayaB64(self.lastPush))")
+        }
+    }
+
     func seek(_ ms: UInt64, report: Bool, waited: Int = 0) {
         if legibleSwitching && waited < 400 {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(5)) { [weak self] in
@@ -34736,6 +34761,7 @@ final class KayaPlayer {
             }
             return
         }
+        seeksIssued += 1
         wakeAtTheBound(generation)
         let to = CMTime(value: CMTimeValue(ms), timescale: 1000)
         let id = self.id
@@ -34752,6 +34778,7 @@ final class KayaPlayer {
                     "seek player=\(id) to=\(ms) ms finished=true clock=\(landed.isNumeric ? landed.seconds * 1000 : -1) ms "
                         + "cue=\(kayaB64(self.platformCue))")
                 self.askCaption()
+                self.noteSilentLegible(after: ms, pushes: self.legiblePushes)
                 guard report else { return }
                 let now = UInt64(max(0, (self.player.currentTime().seconds * 1000).rounded()))
                 kayaPlayerReport(self.id) { KayaHost.api.player_seeked(self.id, now) }
@@ -34781,6 +34808,8 @@ final class KayaLegibleDelegate: NSObject, AVPlayerItemLegibleOutputPushDelegate
             "legible player=\(id) gen=\(generation) item=\(itemTime.isNumeric ? itemTime.seconds * 1000 : -1) ms "
                 + "text=\(kayaB64(text))")
         guard let p = kayaPlayers[id], p.generation == generation else { return }
+        p.legiblePushes += 1
+        p.lastPush = text
         p.platformCueArrived(text)
     }
 }

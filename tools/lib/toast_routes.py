@@ -473,6 +473,10 @@ NATIVE_CALLS = [
     (GTK, "the listener walks before it starts anything", "walked = walk(root, 0).await;"),
     (GTK, "the listener holds the script for EAR_BOUND at most (docs/traps.md, the toast leg that never started)",
      "std::thread::sleep(EAR_BOUND);\n                if slot.lock().unwrap().is_some() {"),
+    (GTK, "the listener's stream takes the announcements alone (docs/traps.md, the toast ear's full queue)",
+     '.and_then(|b| b.member("Announcement"))'),
+    (GTK, "the listener's stream takes the announcements alone (docs/traps.md, the toast ear's full queue)",
+     "atspi::zbus::MessageStream::for_match_rule(rule, conn.connection(), None).await"),
     (GTK, "the Core undo route sends the toast's answer", "core.occurrences.send(occurrence);\n                        send_asks(core);"),
     (GTK, "a banked edit withdraws an undo toast", "for op in core.scene.take_toast_out() {"),
     (WINUI, "every present is announced", "timer.Start()?;\n    info_bar_announce(&bar, &spec)"),
@@ -502,6 +506,9 @@ def native_findings(sources):
     present = flat("".join(blocks(sources[GTK], NATIVE_ARM[1][2])))
     if present.find(flat("old.dismiss();")) > present.find(flat("overlay.add_toast(")):
         out.append("toast: GTK adds the new toast before it dismisses the shown one — libadwaita queues it")
+    if "MessageStream::from(" in sources[GTK]:
+        out.append(f"toast: {GTK} reads an unfiltered MessageStream::from(...): every reply lands in it, and "
+                   f"unread past 64 it stops the connection reading (docs/traps.md, the toast ear's full queue)")
     for rel, label, call in NATIVE_CALLS:
         if flat(call) not in flat(sources[rel]):
             out.append(f"toast: {rel}: {label} no longer holds — the file lacks {call.splitlines()[0]}")
@@ -511,7 +518,7 @@ def native_findings(sources):
 def native_run(g, sources):
     g.counted("toast GTK and WinUI clauses held",
               sum(len(n) for _, _, _, n in NATIVE_ARM) + sum(len(n) + 1 for _, _, _, n in NATIVE_READS)
-              + 4 + 1 + len(NATIVE_CALLS), floor=60)
+              + 4 + 1 + 1 + len(NATIVE_CALLS), floor=60)
     for line in native_findings(sources):
         g.finding(line)
     cuts = [
@@ -531,6 +538,10 @@ def native_run(g, sources):
          "expect_toast reaches kaya's model", GTK),
         ("GTK's listener starting nothing first", r"walked = walk\(root, 0\)\.await;", "walked = 8;",
          "the listener walks before", GTK),
+        ("GTK's listener reading every message, its replies included",
+         r"let stream = match rule \{[^}]*\};",
+         "let stream: Result<_, atspi::zbus::Error> = Ok(atspi::zbus::MessageStream::from(conn.connection()));",
+         "unfiltered MessageStream::from", GTK),
         ("GTK's listener holding the script unbounded", r"std::thread::sleep\(EAR_BOUND\);",
          "std::thread::park();", "for EAR_BOUND at most", GTK),
         ("WinUI re-opening without closing", r"\n\s+info_bar_take\(window\);(\n\s+let \(popup, bar, action, timer\))",

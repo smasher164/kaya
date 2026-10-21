@@ -20716,11 +20716,32 @@ mod toast_ear {
         HEARD.lock().unwrap().push(format!("<the toast listener is deaf: {why}>"));
     }
 
+    static PASSES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static ANSWERED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    static AWAITING: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+    fn walk_state() -> String {
+        use std::sync::atomic::Ordering::SeqCst;
+        format!(
+            "pass {}, {} calls answered, the call outstanding: {}",
+            PASSES.load(SeqCst),
+            ANSWERED.load(SeqCst),
+            match AWAITING.lock().unwrap().as_str() {
+                "" => "none",
+                call => call,
+            }
+        )
+    }
+
     async fn walk(node: AccessibleProxy<'_>, depth: usize) -> usize {
         if depth > 32 {
             return 0;
         }
-        let Ok(children) = node.get_children().await else { return 1 };
+        *AWAITING.lock().unwrap() = format!("GetChildren of {} {}", node.inner().destination(), node.inner().path());
+        let children = node.get_children().await;
+        AWAITING.lock().unwrap().clear();
+        ANSWERED.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let Ok(children) = children else { return 1 };
         let mut seen = 1;
         for child in children {
             let Some(dest) = child.name() else { continue };
@@ -20741,15 +20762,17 @@ mod toast_ear {
     /// never answers left the harness unstarted and the leg silent until the
     /// runner's 180 s kill (docs/traps.md, the toast leg that never started).
     const EAR_BOUND: std::time::Duration = std::time::Duration::from_secs(20);
+    const WALK: &str = "the walk of this process's accessibility tree";
 
     type Start = Box<dyn FnOnce() + Send>;
 
     fn begin(slot: &std::sync::Mutex<Option<Start>>, phase: &std::sync::Mutex<&'static str>, since: std::time::Instant) {
         let Some(start) = slot.lock().unwrap().take() else { return };
         println!(
-            "KAYA_DIAG toast ear: the script starts after {} ms, the ear waiting on {}",
+            "KAYA_DIAG toast ear: the script starts after {} ms, the ear waiting on {} (walk {})",
             since.elapsed().as_millis(),
-            phase.lock().unwrap()
+            phase.lock().unwrap(),
+            walk_state()
         );
         start();
     }
@@ -20767,9 +20790,10 @@ mod toast_ear {
             std::thread::spawn(move || {
                 std::thread::sleep(EAR_BOUND);
                 if slot.lock().unwrap().is_some() {
+                    let waiting = phase.lock().unwrap().to_string();
+                    let waiting = if waiting == WALK { format!("{waiting} ({})", walk_state()) } else { waiting };
                     deaf(format!(
-                        "the ear was still waiting on {} after {} s, so the script started without it",
-                        phase.lock().unwrap(),
+                        "the ear was still waiting on {waiting} after {} s, so the script started without it",
                         EAR_BOUND.as_secs()
                     ));
                     begin(&slot, &phase, since);
@@ -20787,12 +20811,27 @@ mod toast_ear {
                 if let Err(e) = conn.register_event::<atspi::events::object::AnnouncementEvent>().await {
                     return deaf(format!("the registry refused the listener: {e}"));
                 }
-                let mut messages = std::pin::pin!(atspi::zbus::MessageStream::from(conn.connection()));
+                // Announcements only (docs/traps.md, the toast ear's full queue).
+                let rule = atspi::zbus::MatchRule::builder()
+                    .msg_type(atspi::zbus::message::Type::Signal)
+                    .interface("org.a11y.atspi.Event.Object")
+                    .and_then(|b| b.member("Announcement"))
+                    .map(|b| b.build());
+                let stream = match rule {
+                    Ok(rule) => atspi::zbus::MessageStream::for_match_rule(rule, conn.connection(), None).await,
+                    Err(e) => Err(e),
+                };
+                let stream = match stream {
+                    Ok(stream) => stream,
+                    Err(e) => return deaf(format!("no stream for the announcements: {e}")),
+                };
+                let mut messages = std::pin::pin!(stream);
                 let started = std::time::Instant::now();
                 let mut walked = 0;
-                at("the walk of this process's accessibility tree");
+                at(WALK);
                 while walked < 8 && started.elapsed() < std::time::Duration::from_secs(10) {
                     walked = 0;
+                    PASSES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     if let Ok(root) = AccessibleProxy::builder(conn.connection())
                         .destination("org.a11y.atspi.Registry")
                         .and_then(|b| b.path("/org/a11y/atspi/accessible/root"))
@@ -20806,7 +20845,7 @@ mod toast_ear {
                     }
                 }
                 if walked < 8 {
-                    deaf(format!("the window never reached the bus ({walked} nodes after 10 s)"));
+                    deaf(format!("the window never reached the bus ({walked} nodes after 10 s; {})", walk_state()));
                 }
                 at("nothing (the walk was done)");
                 begin(&slot, &phase, since);

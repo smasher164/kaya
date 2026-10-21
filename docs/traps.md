@@ -16467,6 +16467,31 @@ some of them beside load, so the cause stays open until the next sighting.
 GUARD: tools/check-verbs.py's media arms, "a seek landing unprinted" and "a
 legible push unprinted", both watched red.
 
+Second sighting, matrix of 2026-10-20 (`media_tracks-python-swiftui`, the same
+step, the maintainer's Terminal frontmost). The seek to 1.5 s landed exactly
+(`finished=true clock=1500.0 ms`) and no `legible` line came for 15 s. The
+guest's unified log and a passing hand run's, normalized and diffed, carry the
+same calls in the same order (both tx3g sends at the selection, none at
+either seek), so the log cannot tell them apart. The frontmost Terminal covers
+every guest window on this host in passing legs too, and App Nap was measured
+not engaging for such a guest (the toast that outlived its seconds), so it is
+not a discriminator on this evidence. Not reproduced: a standalone AVPlayer
+probe of the same sequence failed 0 of 310 (window on screen, offscreen,
+none; 60 of them beside 17 host spinners), and 81 mac media_tracks legs in
+nine languages passed, 45 of them beside 14 host spinners. Measured in the probe: a fresh
+AVPlayerItemLegibleOutput added to the paused item pushes the current cue in
+1-2 ms and the original output gets a second push of it, which makes adding
+an output a candidate recovery once the cause is named, and a diagnostic that
+would hide the red, so it is not wired. The SwiftUI arm now prints `legible
+silent player= to= ms: no push in the 400 ms after the seek; clock= timebase=
+option= enabled= outputs= pushes= last=` when a paused seek with a caption
+option selected gets no push and no later seek was issued, which tells a
+timebase that did not jump, a caption track that lost its enable, a detached
+output and an output that went quiet apart. A forced red (pushes past 1 s
+dropped in the delegate) carried the line in the bundle's leg log. Cause: NOT
+NAMED (two sightings). GUARD: check-verbs' media arms, "a silent seek
+unreported", watched red.
+
 ## The emoji leg took the maintainer's keystrokes (measured 2026-10-14)
 
 The full matrix at 0446a86a failed `emoji-rust-swiftui`: `pick_emoji "😀": no
@@ -16845,8 +16870,8 @@ thread had never started. The toast scene starts its harness through
 gtk.rs's toast_ear, after an AT-SPI connect, a listener registration and a
 tree walk; the walk's loop was bounded at 10 s but none of its awaits was,
 so one D-Bus call that never answered held the script forever, and nothing
-in the bundle could say which. Cause of the unanswered call: NOT NAMED (one
-sighting, no stacks at a 180 s kill). Now the ear holds the script for 20 s
+in the bundle could say which. Cause of the unanswered call: named 2026-10-20 in the next
+entry (the ear's own unread stream). Now the ear holds the script for 20 s
 at most and then starts it, recording `the ear was still waiting on <the
 call> after 20 s`, which expect_toast_announced prints; a KAYA_DIAG line
 gives the ear's start time and phase on every toast leg. And a linux leg
@@ -16856,6 +16881,30 @@ process's stacks (tools/linux/leg-ceiling.py, which replaced run_one's bare
 (tools/linux/stack-names.py, section `stack-names`, from `eu-stack -b`'s
 build ids through debuginfod, outside any ceiling). GUARDS: toast_routes'
 EAR_BOUND clause and its negative; check-flightrec LC1-LC5.
+
+## The toast ear's full queue: an unread zbus stream stopped the walk's replies (measured 2026-10-20)
+
+toast-haskell-wayland failed again in the matrix of 2026-10-20 (`the ear was
+still waiting on the walk of this process's accessibility tree after 20 s`),
+and the walk never finished: no later toast was heard either. The ear made
+`MessageStream::from(conn.connection())`, zbus's UNFILTERED stream, before
+the walk and polled it only after. zbus 5.18 queues every incoming message
+in each active stream, 64 deep, and its socket reader awaits room in every
+queue after it hands a reply to its caller (connection/socket_reader.rs), so
+once 64 replies sat unread the reader stopped reading and the walk's next
+GetChildren reply never arrived. Measured: green toast legs answer 60 calls
+in two passes (61 in three), 4 under the queue; a forced extra pass hung at
+`pass 5, 65 calls answered, the call outstanding: GetChildren of :1.1
+/dev/kaya/aurora/notes/a11y/<id>` with the matrix sentence. A slow start
+(the Haskell guest, a loaded host) makes more short passes while the window
+is still arriving on the bus, which is how a green leg crosses 64. The ear's
+stream is now a match rule for `org.a11y.atspi.Event.Object.Announcement`
+signals alone (replies never enter it), and the same forced extra pass then
+answered 121 calls and passed. The ear's KAYA_DIAG line and both deaf
+sentences carry the walk's pass, its answered count and the call it awaits.
+GUARD: tools/lib/toast_routes.py's stream clauses (the filtered stream, no
+`MessageStream::from(` in gtk.rs) and the cut that puts the unfiltered
+stream back, watched red.
 
 ## The linux lane's "docker VM up 4s" is Resource Saver, not a crash (measured 2026-10-14)
 
