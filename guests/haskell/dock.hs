@@ -13,7 +13,8 @@ main = kayaMain $ \app -> do
   buildTx app $ do
     playing <- signalBool True
     window primary [WTitle "dock", WSize 720 480]
-    dock primary 40 $ do
+    nowPlaying <- player [PlayerMutedIs True]
+    dock primary 40 [DockPlayer nowPlaying] $ do
       (bar, _) <-
         when_ playing $
           withTplAttrs

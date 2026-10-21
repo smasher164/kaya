@@ -1,8 +1,10 @@
 # docs/styling-pass-plan.md Y8, §5.4: the dock lies at the window's foot
 # across its width with the content ending above it, its controls inside the
-# safe area, and it collapses while its root holds no widget.
+# safe area, and it collapses while its root holds no widget. The dock names
+# the player it shows (docs/media-player-plan.md M17).
 expect_title "dock"
 expect_dock shown
+expect_dock_player bound
 expect_safe slider@progress
 expect_safe button@pause
 click button@stop

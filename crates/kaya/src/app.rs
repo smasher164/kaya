@@ -2835,7 +2835,7 @@ impl<'a> Tx<'a> {
     /// `tx.create_window(WindowId(1)).title("inspector").size(480.0, 320.0)`.
     pub fn create_window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
         self.ops.push(TxOp::CreateWindow { window });
-        WindowRef { tx: self, window }
+        WindowRef { tx: self, window, dock_player: None }
     }
 
     /// Request the app's brand accent: one hex is the whole call
@@ -2914,7 +2914,7 @@ impl<'a> Tx<'a> {
     }
 
     pub fn window(&mut self, window: WindowId) -> WindowRef<'_, 'a> {
-        WindowRef { tx: self, window }
+        WindowRef { tx: self, window, dock_player: None }
     }
 
     /// Close and forget an auxiliary window. Also the veto grammar's
@@ -7377,6 +7377,7 @@ impl NotificationRef<'_, '_> {
 pub struct WindowRef<'t, 'a> {
     tx: &'t mut Tx<'a>,
     window: WindowId,
+    dock_player: Option<crate::protocol::PlayerId>,
 }
 
 impl<'t, 'a> WindowRef<'t, 'a> {
@@ -7390,7 +7391,7 @@ impl<'t, 'a> WindowRef<'t, 'a> {
         label: impl Into<MenuSource<StrKind>>,
         body: impl FnOnce(&mut MenuItems<'_, 'a, BarAnchor>) -> R,
     ) -> MenuRef<'t, 'a, R> {
-        let WindowRef { tx, window } = self;
+        let WindowRef { tx, window, .. } = self;
         let item = tx.menu_item(MenuItemKind::Menu);
         label.into().apply(tx, item, MenuProp::Label);
         tx.ops.push(TxOp::MenubarAppend { window, item });
@@ -7417,7 +7418,7 @@ impl<'t, 'a> WindowRef<'t, 'a> {
         label: impl Into<MenuSource<StrKind>>,
         body: impl FnOnce(&mut RadioOptions<'_, 'a, BarAnchor>) -> R,
     ) -> RadioGroupRef<'t, 'a, R> {
-        let WindowRef { tx, window } = self;
+        let WindowRef { tx, window, .. } = self;
         let item = tx.menu_item(MenuItemKind::RadioGroup);
         label.into().apply(tx, item, MenuProp::Label);
         tx.ops.push(TxOp::MenubarAppend { window, item });
@@ -7527,12 +7528,22 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// The player the [`WindowRef::dock`] declared after it shows
+    /// (docs/media-player-plan.md M17).
+    pub fn dock_player(mut self, player: crate::protocol::PlayerId) -> Self {
+        self.dock_player = Some(player);
+        self
+    }
+
     /// This window's DOCK, the surface under every pane and above a phone's
     /// tab bar (docs/styling-pass-plan.md Y8): `dock` is a fresh surface id,
     /// and `build` makes the root it shows, returning `(root, value)`; the
     /// value comes back out. One per window.
     pub fn dock<R>(self, dock: WindowId, build: impl FnOnce(&mut Tx<'_>) -> (WidgetId, R)) -> R {
         self.tx.ops.push(TxOp::AttachDock { window: self.window, dock });
+        if let Some(player) = self.dock_player {
+            self.tx.ops.push(TxOp::SetDockPlayer { dock, player: Some(player) });
+        }
         let (root, value) = build(self.tx);
         self.tx.mount_in(dock, root);
         value

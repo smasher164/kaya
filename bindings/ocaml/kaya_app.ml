@@ -4295,10 +4295,12 @@ let mount_in window (Widget root) = emit (the_tx ()) (Kaya_wire.tx_mount window 
 (* [window]'s DOCK, the surface under every pane and above a phone's tab bar
    (docs/styling-pass-plan.md Y8): [dock] is a fresh surface id, and [body]
    builds its root, answering [(root, value)]; the value comes back out. One
-   per window. *)
-let dock ?(window = 0L) dock (body : unit -> widget * 'a) : 'a =
+   per window. [player] is the player the dock shows
+   (docs/media-player-plan.md M17). *)
+let dock ?(window = 0L) ?player dock (body : unit -> widget * 'a) : 'a =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_attach_dock window dock);
+  Option.iter (fun (Player p) -> emit tx (Kaya_wire.tx_set_dock_player dock p)) player;
   let Widget root, value = body () in
   emit tx (Kaya_wire.tx_mount dock root);
   value

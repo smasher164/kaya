@@ -3558,6 +3558,7 @@ public final class KayaApp {
         private final Tx tx;
         private final KayaApp app;
         private final long id;
+        private Player dockPlayer;
 
         WindowRef(Tx tx, KayaApp app, long id) {
             this.tx = tx;
@@ -3579,7 +3580,7 @@ public final class KayaApp {
          * a fresh surface id and {@code body} builds the root it shows,
          * whose value comes back out. One per window. */
         public <R> R dock(long dock, java.util.function.Supplier<Built<R>> body) {
-            tx.emit(KayaWire.txAttachDock(id, dock));
+            attachDock(dock);
             Built<R> root = body.get();
             tx.mountIn(dock, root.id());
             return root.value();
@@ -3587,8 +3588,20 @@ public final class KayaApp {
 
         /** The dock whose root is a column holding {@code body}'s widgets. */
         public void dock(long dock, java.util.function.Consumer<Widget> body) {
-            tx.emit(KayaWire.txAttachDock(id, dock));
+            attachDock(dock);
             tx.mountIn(dock, tx.column(body));
+        }
+
+        /** The player the {@code dock} declared after it shows
+         * (docs/media-player-plan.md M17). */
+        public WindowRef dockPlayer(Player player) {
+            this.dockPlayer = java.util.Objects.requireNonNull(player, "dockPlayer");
+            return this;
+        }
+
+        private void attachDock(long dock) {
+            tx.emit(KayaWire.txAttachDock(id, dock));
+            if (dockPlayer != null) tx.emit(KayaWire.txSetDockPlayer(dock, dockPlayer.id));
         }
 
         /** Binds the closed handler to THIS window: fires when the

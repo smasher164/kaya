@@ -1466,6 +1466,11 @@ fn seek_reading(p: &WinPlayer) -> String {
     out.join("; ")
 }
 
+#[cfg(feature = "harness")]
+pub(super) fn is_live(core: &CoreState, id: u64) -> bool {
+    core.media.players.contains_key(&id)
+}
+
 pub(super) fn release(core: &mut CoreState, id: u64) -> windows_core::Result<()> {
     let Some(p) = core.media.players.remove(&id) else { return Ok(()) };
     p.generation.fetch_add(1, Ordering::SeqCst);

@@ -2135,6 +2135,17 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   windows, entries, sections and sheets. One per window, a \
                   second refused at the root; it goes when its window does.",
         },
+        Record {
+            kind: 86,
+            name: "set_dock_player",
+            fields: &[f("dock", FieldTy::U64), f("player", FieldTy::U64)],
+            payload: None,
+            doc: "The dock `dock` shows `player` (docs/media-player-plan.md \
+                  M17), 0 for none: the backend draws its own idiom from that \
+                  player, Android a progress line at the dock's top edge and \
+                  the others nothing. The root refuses an unknown dock or a \
+                  player that is not live; releasing the player detaches it.",
+        },
     ],
     apply: &[
         Record {
@@ -3157,6 +3168,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "The window's dock surface (docs/styling-pass-plan.md Y8); \
                   its root arrives by `mount` like any surface's.",
+        },
+        Record {
+            kind: 74,
+            name: "set_dock_player",
+            fields: &[f("dock", FieldTy::U64), f("player", FieldTy::U64)],
+            payload: None,
+            doc: "The dock `dock` shows `player` (0: none; \
+                  docs/media-player-plan.md M17).",
         },
     ],
     occurrence: &[
@@ -5057,6 +5076,7 @@ mod tests {
             ("dismiss_toast", wire::TX_DISMISS_TOAST),
             ("collection_patch_if", wire::TX_COLLECTION_PATCH_IF),
             ("attach_dock", wire::TX_ATTACH_DOCK),
+            ("set_dock_player", wire::TX_SET_DOCK_PLAYER),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5141,6 +5161,7 @@ mod tests {
                 ("present_toast", wire::APPLY_PRESENT_TOAST),
                 ("withdraw_toast", wire::APPLY_WITHDRAW_TOAST),
                 ("attach_dock", wire::APPLY_ATTACH_DOCK),
+                ("set_dock_player", wire::APPLY_SET_DOCK_PLAYER),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says

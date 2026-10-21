@@ -11,7 +11,8 @@ static class DockScene
             using (var asset = tx.Asset("covers/cover-600.jpg")) art = asset.Bytes();
             var playing = tx.Signal(true);
             tx.Window(title: "dock", width: 720, height: 480);
-            tx.Dock(40, () => tx.Column(root =>
+            var player = tx.Player(muted: true);
+            tx.Dock(40, player: player, body: () => tx.Column(root =>
             {
                 tx.When(playing, t =>
                 {

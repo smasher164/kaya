@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x75f6589c1fd09a4a
+	SpecHash uint64 = 0xcfb6ed50af9e65de
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -493,6 +493,7 @@ const (
 	txDismissToast = 83
 	txCollectionPatchIf = 84
 	txAttachDock = 85
+	txSetDockPlayer = 86
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -564,6 +565,7 @@ const (
 	applyPresentToast = 71
 	applyWithdrawToast = 72
 	applyAttachDock = 73
+	applySetDockPlayer = 74
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -1886,6 +1888,14 @@ func TxAttachDock(window uint64, dock uint64) []byte {
 	b := beginRecord(txAttachDock)
 	b = binary.LittleEndian.AppendUint64(b, window)
 	b = binary.LittleEndian.AppendUint64(b, dock)
+	return endRecord(b)
+}
+
+// TxSetDockPlayer: The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it.
+func TxSetDockPlayer(dock uint64, player uint64) []byte {
+	b := beginRecord(txSetDockPlayer)
+	b = binary.LittleEndian.AppendUint64(b, dock)
+	b = binary.LittleEndian.AppendUint64(b, player)
 	return endRecord(b)
 }
 

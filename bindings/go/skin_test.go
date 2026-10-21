@@ -96,16 +96,21 @@ func TestGroundsQueueTheirPair(t *testing.T) {
 
 func TestDockAttachesThenMounts(t *testing.T) {
 	var root Widget
+	var p Player
 	recs := skinRecords(t, func(tx *Tx) {
-		tx.Window(0).Dock(40, func() Widget {
+		p = tx.Player().ID()
+		tx.Window(0).DockPlayer(p).Dock(40, func() Widget {
 			root = tx.Column(func() {})
 			return root
 		})
 	})
-	attach, mount := -1, -1
+	attach, mount, named := -1, -1, -1
 	for i, r := range recs {
 		if bytes.Equal(r, TxAttachDock(0, 40)) {
 			attach = i
+		}
+		if bytes.Equal(r, TxSetDockPlayer(40, p.id)) {
+			named = i
 		}
 		if bytes.Equal(r, TxMount(40, root.id)) {
 			mount = i
@@ -113,6 +118,9 @@ func TestDockAttachesThenMounts(t *testing.T) {
 	}
 	if attach < 0 || mount < attach {
 		t.Fatalf("the dock attached at %d and mounted at %d; the mount needs the surface first", attach, mount)
+	}
+	if named < attach {
+		t.Fatalf("the dock named its player at %d and attached at %d; the root refuses a dock not yet attached", named, attach)
 	}
 }
 

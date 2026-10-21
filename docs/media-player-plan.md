@@ -788,6 +788,36 @@ harness verb that fails a label drawn underneath a neighbour; (35) a reader of
 a gradient ground's actual top colour, so a header back on the neutral
 placeholder fails a scene.
 
+### M17: The phone dock's progress line (RULED 2026-10-21)
+
+From the review page of 2026-10-21: Android's dock and navigation bar read as
+one surface (YouTube Music's layout, docs/styling-pass-plan.md Y8), and YouTube
+Music marks the player's edge with a thin progress line. The maintainer ruled
+the line on Android ONLY ("it goes with the pattern of using native visuals"),
+and that the platform decides it, not the app. An app cannot ask which
+platform it runs on (bindings/python/kaya/__init__.py, `Platform`), so the app
+states the fact and each backend draws its own idiom: the dock names the
+player it shows (a dock's `player`, in the core and all nine bindings); the
+Compose arm draws a full-width determinate line at the dock's top edge from
+its own player's position; macOS, iOS, GTK and WinUI keep the association and
+draw nothing, since Apple Music's mini player has no line and the desktop
+docks carry a scrubber. Controls bound to a player are a separate question
+(docs/deferred.md, controls bound to a player).
+
+Built 2026-10-21: `set_dock_player { dock, player }` (TX 86, apply 74), the
+root refusing a dock not attached or a player not live and detaching the dock
+when its player is released; the spelling in the nine bindings and the C floor
+(tools/lib/skin_surface.py's `docked player` rows), every dock guest naming a
+player. Compose draws Material's LinearProgressIndicator 2 dp tall across the
+dock's top edge, flat (no gap, no stop dot, butt caps), from its own media3
+player's position each frame while it plays, and keeps it out of the
+accessibility tree, since the full player's slider is the position's control
+and the line would otherwise be a stop before the dock's buttons.
+`expect_dock_player` reads the backend's association in every shared dock
+scene; `expect_dock_line` reads the drawn fraction in the Android lane's
+music_dock extras and `none` in the iOS one (tools/lib/skin_compose.py holds
+the arm).
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

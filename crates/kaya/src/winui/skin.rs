@@ -25,6 +25,7 @@ struct Ground {
 struct Dock {
     host: Grid,
     root: Option<WidgetId>,
+    player: Option<u64>,
 }
 
 #[derive(Default)]
@@ -755,10 +756,19 @@ pub(super) fn attach_dock(core: &mut CoreState, window: u64, dock: u64) -> windo
     }
     ground.Children()?.Append(&host)?;
     SKIN.with_borrow_mut(|s| {
-        s.docks.insert(dock, Dock { host, root: None });
+        s.docks.insert(dock, Dock { host, root: None, player: None });
         s.dock_of.insert(window, dock);
     });
     Ok(())
+}
+
+/// `set_dock_player` (docs/media-player-plan.md M17): held, and drawn as nothing.
+pub(super) fn set_dock_player(dock: u64, player: Option<u64>) {
+    SKIN.with_borrow_mut(|s| {
+        if let Some(d) = s.docks.get_mut(&dock) {
+            d.player = player;
+        }
+    });
 }
 
 pub(super) fn is_dock(surface: u64) -> bool {
@@ -1210,6 +1220,21 @@ pub(super) mod read {
             return Ok(format!("<the {} peer carries no SelectionItem>", peer.GetClassName()?));
         };
         Ok(if item.IsSelected()? { "on" } else { "off" }.to_owned())
+    }
+
+    /// expect_dock_player (M17): the player the primary window's dock holds.
+    pub(in super::super) fn dock_player(core: &CoreState) -> windows_core::Result<String> {
+        let Some((dock, player)) = SKIN.with_borrow(|s| {
+            let dock = *s.dock_of.get(&0)?;
+            Some((dock, s.docks.get(&dock)?.player))
+        }) else {
+            return Ok("none (the primary window has no dock)".to_owned());
+        };
+        Ok(match player {
+            None => format!("none (dock {dock} names no player)"),
+            Some(p) if super::super::media::is_live(core, p) => format!("bound (dock {dock} shows player {p})"),
+            Some(p) => format!("released (dock {dock} names player {p}, which this backend no longer holds)"),
+        })
     }
 
     /// expect_dock (Y8): the dock's host laid out at the window ground's foot

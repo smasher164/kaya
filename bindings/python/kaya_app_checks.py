@@ -5627,7 +5627,8 @@ try:
                               ground_gradient=sk_r.colour) as sk_line:
                     kaya.label(bind=sk_r.title, tint=sk_r.tint)
                     kaya.image(sk_r.art, shape="circle")
-        with sk_app.dock(40):
+        sk_player = kaya.player(muted=True)
+        with sk_app.dock(40, player=sk_player):
             with kaya.column() as sk_dock_root:
                 kaya.label("now playing")
         sk_rows.insert("r1", SkRow("a", kaya.Tint.ACCENT, True, sk_art, sk_colour or kaya.Color(0, 0, 0)))
@@ -5650,6 +5651,15 @@ try:
           kaya.wire.tx_attach_dock(0, 40) in sk_flat
           and kaya.wire.tx_mount(40, sk_dock_root.id) in sk_flat
           and kaya.wire.tx_mount(0, sk_root.id) in sk_flat)
+    check("the dock names its player after it attaches (M17)",
+          kaya.wire.tx_set_dock_player(40, sk_player.id) in sk_flat
+          and sk_flat.index(kaya.wire.tx_attach_dock(0, 40))
+          < sk_flat.index(kaya.wire.tx_set_dock_player(40, sk_player.id)))
+    try:
+        sk_app.dock(41, player=7)  # type: ignore[arg-type]
+        check("the dock refuses a player that is not a kaya.Player", False)
+    except TypeError:
+        check("the dock refuses a player that is not a kaya.Player", True)
 
     # Y4, AMENDED 2026-10-17: the user's pick, apart from the activation.
     sk_shipped.clear()

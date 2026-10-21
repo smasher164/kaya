@@ -8465,6 +8465,8 @@ mod skin {
         pub docks: HashMap<u64, u64>,
         /// dock surface id -> the root mounted into it.
         pub dock_roots: HashMap<u64, gtk4::Widget>,
+        /// dock surface id -> the player it shows (docs/media-player-plan.md M17).
+        pub dock_players: HashMap<u64, u64>,
         /// A ground changed this batch, so the stylesheet is rewritten.
         pub dirty: bool,
         /// container id -> its image ground's picture (super::GROUND_PICTURE_KEY).
@@ -15488,6 +15490,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::AttachDock { window, dock } => {
             core.skin.docks.insert(dock.0, window.0);
         }
+        ApplyOp::SetDockPlayer { dock, player } => match player {
+            Some(p) => {
+                core.skin.dock_players.insert(dock.0, p.0);
+            }
+            None => {
+                core.skin.dock_players.remove(&dock.0);
+            }
+        },
         ApplyOp::PresentSheet { parent, sheet } => {
             // The platform's own dialog (docs/sheet-plan.md U3): AdwDialog
             // chains, Esc reaches the topmost, `can-close` off is the veto
@@ -20176,6 +20186,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                     activations: HashMap::new(),
                     docks: HashMap::new(),
                     dock_roots: HashMap::new(),
+                    dock_players: HashMap::new(),
                     dirty: false,
                     ground_pictures: HashMap::new(),
                 },
@@ -24623,6 +24634,21 @@ impl crate::harness::Stage for GtkStage {
                 skin::hex(ink),
                 candidates.iter().take(3).map(|(n, c)| format!("{n} {}", skin::hex(*c))).collect::<Vec<_>>().join(", ")
             )
+        })
+    }
+    fn dock_line_read(&self) -> String {
+        "none (the GTK dock draws no progress line; docs/media-player-plan.md M17)".to_owned()
+    }
+    fn dock_player_read(&self) -> String {
+        Self::on_main(move |core| {
+            let Some(dock) = core.skin.docks.iter().find(|(_, w)| **w == 0).map(|(d, _)| *d) else {
+                return "none (the primary window has no dock)".to_owned();
+            };
+            match core.skin.dock_players.get(&dock) {
+                None => format!("none (dock {dock} names no player)"),
+                Some(&p) if gtk_media::is_live(p) => format!("bound (dock {dock} shows player {p})"),
+                Some(&p) => format!("released (dock {dock} names player {p}, which this backend no longer holds)"),
+            }
         })
     }
     fn dock_read(&self) -> String {
@@ -29631,6 +29657,10 @@ mod gtk_media {
             })
             .expect("kaya: a new pipeline's bus already had a watch");
         Pipe { playbin, sink, paintable, _watch: watch }
+    }
+
+    pub(super) fn is_live(id: u64) -> bool {
+        PLAYERS.with_borrow(|p| p.contains_key(&id))
     }
 
     pub(super) fn release_player(core: &mut CoreState, id: u64) {

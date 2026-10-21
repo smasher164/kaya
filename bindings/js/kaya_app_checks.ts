@@ -2958,8 +2958,12 @@ if (isMainThread) {
     check("a stamped row sends activatable, its selected field and its gradient's colour field",
       sent(from, wire.tx_set_activatable(line.id, true)) && sent(from, wire.tx_bind_selected_element(line.id, 0, 2))
         && sent(from, wire.tx_set_ground(line.id, wire.GROUND_GRADIENT)) && sent(from, wire.tx_bind_color_element(line.id, 0, 4)));
+    let dockPlayer!: K.Player;
+    app.build(() => {
+      dockPlayer = kaya.player({ muted: true });
+    });
     const dockFrom = shipped.length;
-    app.dock(40, () => {
+    app.dock(40, { player: dockPlayer }, () => {
       kaya.column((w) => {
         root = w;
         kaya.label("now playing");
@@ -2967,6 +2971,7 @@ if (isMainThread) {
     });
     check("the dock attaches to the primary window and mounts its root",
       sent(dockFrom, wire.tx_attach_dock(0, 40)) && sent(dockFrom, wire.tx_mount(40, root.id)));
+    check("the dock names its player (M17)", sent(dockFrom, wire.tx_set_dock_player(40, dockPlayer.id)));
     // Y4, AMENDED 2026-10-17: the user's pick, apart from the activation.
     const pickFrom = shipped.length;
     const heard: string[] = [];

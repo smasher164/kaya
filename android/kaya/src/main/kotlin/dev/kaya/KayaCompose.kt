@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import android.graphics.Canvas
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
@@ -1325,16 +1326,75 @@ internal fun KayaDockBar(consumesBottom: Boolean) {
         Modifier.fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .onGloballyPositioned { kayaDockFrame = it.boundsInWindow() }
-            .onGloballyPositioned { KayaSceneModel.dockHeight = with(density) { it.size.height.toDp() } }
-            .windowInsetsPadding(edges)
-            .padding(KayaSceneModel.windowInset.dp),
+            .onGloballyPositioned { KayaSceneModel.dockHeight = with(density) { it.size.height.toDp() } },
     ) {
-        KayaRender(root)
+        Box(
+            Modifier.windowInsetsPadding(edges)
+                .padding(KayaSceneModel.windowInset.dp),
+        ) {
+            KayaRender(root)
+        }
+        KayaDockLine(Modifier.align(Alignment.TopStart))
     }
     DisposableEffect(Unit) {
         onDispose {
             kayaDockFrame = null
             KayaSceneModel.dockHeight = 0.dp
+        }
+    }
+}
+
+/** What expect_dock_line reads: the line's laid-out frame and the fraction it
+ * last drew, null while no line is composed. */
+var kayaDockLineFrame: androidx.compose.ui.geometry.Rect? = null
+var kayaDockLineDrawn: Float? = null
+
+/**
+ * The phone dock's progress line (docs/media-player-plan.md M17): full width at
+ * the dock's top edge, from the media3 player the dock names, redrawn each frame
+ * while it plays and polled while it does not, with nothing on the wire. Hidden
+ * from accessibility: the full player's slider is the position's control.
+ */
+@Composable
+private fun KayaDockLine(modifier: Modifier) {
+    val player = KayaSceneModel.dockPlayer
+    if (player == 0L) {
+        SideEffect {
+            kayaDockLineFrame = null
+            kayaDockLineDrawn = null
+        }
+        return
+    }
+    val fraction = remember(player) { mutableFloatStateOf(0f) }
+    LaunchedEffect(player) {
+        while (true) {
+            val exo = kayaPlayers[player]?.exo
+            val duration = exo?.duration ?: androidx.media3.common.C.TIME_UNSET
+            fraction.floatValue = if (exo == null || duration == androidx.media3.common.C.TIME_UNSET || duration <= 0L) 0f
+                else (exo.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+            if (exo?.isPlaying == true) withFrameNanos { } else kotlinx.coroutines.delay(100)
+        }
+    }
+    androidx.compose.material3.LinearProgressIndicator(
+        progress = {
+            val f = fraction.floatValue
+            kayaDockLineDrawn = f
+            f
+        },
+        modifier = modifier.fillMaxWidth()
+            .height(2.dp)
+            .clearAndSetSemantics { }
+            .onGloballyPositioned { kayaDockLineFrame = it.boundsInWindow() },
+        color = MaterialTheme.colorScheme.primary,
+        trackColor = MaterialTheme.colorScheme.outlineVariant,
+        strokeCap = androidx.compose.ui.graphics.StrokeCap.Butt,
+        gapSize = 0.dp,
+        drawStopIndicator = { },
+    )
+    DisposableEffect(player) {
+        onDispose {
+            kayaDockLineFrame = null
+            kayaDockLineDrawn = null
         }
     }
 }
@@ -1741,6 +1801,8 @@ object KayaSceneModel {
      * the root mounted into it; Android has the one window. */
     var dockId by mutableStateOf(0L)
     var dockRoot by mutableStateOf<KayaNode?>(null)
+    /** The player the dock shows, 0 for none (docs/media-player-plan.md M17). */
+    var dockPlayer by mutableStateOf(0L)
     // The title materializes on TWO surfaces — the Activity task label
     // and the top bar's title slot — and expect_title asserts both.
     // Width/height are advisory only. A COMPOSITION STATE AND NOT A
@@ -3216,7 +3278,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x75f6589c1fd09a4auL
+    private const val SPEC_HASH: ULong = 0xcfb6ed50af9e65deuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3301,6 +3363,7 @@ object KayaCompose {
     private const val APPLY_PRESENT_TOAST = 71
     private const val APPLY_WITHDRAW_TOAST = 72
     private const val APPLY_ATTACH_DOCK = 73
+    private const val APPLY_SET_DOCK_PLAYER = 74
     private const val TOAST_DURATION_LONG = 1
     private const val FRAME_ACCURACY_EXACT = 1
     /** The rich-text pair (docs/rich-text-plan.md §4); the arm is a depth slice. */
@@ -5137,6 +5200,11 @@ object KayaCompose {
                 APPLY_ATTACH_DOCK -> {
                     b.long
                     KayaSceneModel.dockId = b.long
+                }
+                APPLY_SET_DOCK_PLAYER -> {
+                    val dock = b.long
+                    val player = b.long
+                    if (dock == KayaSceneModel.dockId) KayaSceneModel.dockPlayer = player
                 }
                 APPLY_WITHDRAW_TOAST -> {
                     b.long
@@ -8156,6 +8224,8 @@ object KayaCompose {
      * their own copies; tools/check-verbs.py pins all three at 1.
      */
     private const val INK_TOLERANCE = 1
+    /** harness.rs DOCK_LINE_TOLERANCE. */
+    private const val DOCK_LINE_TOLERANCE = 0.02
 
     /**
      * The half of a PER-MODE expectation that names [mode], out of
@@ -8730,6 +8800,31 @@ object KayaCompose {
         val dock = kayaDockFrame?.takeIf { kayaHoldsWidget(root) && it.height > 1f } ?: return null
         if (toast.bottom <= dock.top + 1) return null
         return "ends at ${toast.bottom.toInt()} over the dock, whose top is ${dock.top.toInt()} (the toast ${kayaRectText(toast)})"
+    }
+
+    /** expect_dock_player's read (docs/media-player-plan.md M17). */
+    private fun kayaDockPlayerRead(activity: ComponentActivity): String = onUi(activity) {
+        val dock = KayaSceneModel.dockId
+        if (dock == 0L) return@onUi "none (the window has no dock)"
+        val player = KayaSceneModel.dockPlayer
+        if (player == 0L) "none (dock $dock names no player)"
+        else if (kayaPlayers[player] == null) "released (dock $dock names player $player, which this backend no longer holds)"
+        else "bound (dock $dock shows player $player)"
+    }
+
+    /** expect_dock_line's read (M17): the fraction the line last drew, while it
+     * lies at the dock's top edge across the dock's width. */
+    private fun kayaDockLineRead(activity: ComponentActivity): String = onUi(activity) {
+        val line = kayaDockLineFrame
+        val drawn = kayaDockLineDrawn
+        val dock = kayaDockFrame
+        if (line == null || drawn == null) return@onUi "none (no line is composed; line $line, drawn $drawn, dock $dock)"
+        if (dock == null) return@onUi "misplaced (the line $line is laid out with no dock frame)"
+        val slack = activity.resources.displayMetrics.density
+        val detail = "line $line, dock $dock"
+        if (Math.abs(line.top - dock.top) > slack || Math.abs(line.left - dock.left) > slack ||
+            Math.abs(line.right - dock.right) > slack || line.height < 1f) "misplaced ($detail, drew $drawn)"
+        else String.format(java.util.Locale.ROOT, "%.3f (%s)", drawn, detail)
     }
 
     /** expect_dock's read (§5.4): the dock's laid-out frame spans the window
@@ -14391,6 +14486,34 @@ object KayaCompose {
                     }
                     "expect_checked" ->
                         kayaSkinExpect(parts, failures) { kayaCheckedRead(activity, parts[1]) }?.let { observed.add(it) }
+                    "expect_dock_player" -> {
+                        val want = parts.getOrElse(1) { "" }
+                        var got = kayaDockPlayerRead(activity)
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (got.substringBefore(' ') != want && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            got = kayaDockPlayerRead(activity)
+                        }
+                        if (got.substringBefore(' ') == want) observed.add("dock player $want")
+                        else failures.add("dock player reads $got, wanted $want")
+                    }
+                    "expect_dock_line" -> {
+                        val want = parts.getOrElse(1) { "" }
+                        val near = { got: String ->
+                            val w = want.toDoubleOrNull()
+                            val g = got.substringBefore(' ').toDoubleOrNull()
+                            if (w != null && g != null) Math.abs(w - g) <= DOCK_LINE_TOLERANCE
+                            else got.substringBefore(' ') == want
+                        }
+                        var got = kayaDockLineRead(activity)
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (!near(got) && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            got = kayaDockLineRead(activity)
+                        }
+                        if (near(got)) observed.add("dock line $want")
+                        else failures.add("dock line reads $got, wanted $want")
+                    }
                     "expect_dock" -> {
                         val want = parts.getOrElse(1) { "" }
                         var got = kayaDockRead(activity)

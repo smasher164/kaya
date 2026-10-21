@@ -4527,12 +4527,15 @@ public final class KayaAppTx {
     /// This window's DOCK, the surface under every pane and above a phone's
     /// tab bar (docs/styling-pass-plan.md Y8): `id` is a fresh surface id, and
     /// `build` makes the root it shows, returning `(root, value)`; the value
-    /// comes back out. One per window.
+    /// comes back out. One per window. `player` is the player the dock shows
+    /// (docs/media-player-plan.md M17).
     @discardableResult
     public func dock<R>(
-        _ id: UInt64, window: UInt64 = 0, _ build: (KayaAppTx) throws -> (KayaWidget, R)
+        _ id: UInt64, window: UInt64 = 0, player: KayaPlayer? = nil,
+        _ build: (KayaAppTx) throws -> (KayaWidget, R)
     ) rethrows -> R {
         tx.attachDock(window, id)
+        if let player { tx.setDockPlayer(id, player.id) }
         let (root, value) = try build(self)
         tx.mount(id, root.id)
         return value

@@ -61,6 +61,18 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
+## DEFER — controls bound to a player (docs/media-player-plan.md M17; 2026-10-21)
+KEY: player-bound controls, slider player, play button player, show_play_state, show_position, seek_to
+
+The music guest wires its transport by hand: the play button's symbol and name
+on every state change, the scrubber's fraction and the elapsed and remaining
+text on every 250 ms tick, and a scrub back into a seek (guests/python/music.py
+show_play_state, show_position, seek_to). Every media app in nine bindings
+writes the same lines. A slider, progress bar or play button bound to a player
+would move them into the core and let each platform use its own transport
+behaviour. Needs the maintainer's ruling on the surface. Trigger: a second
+media app, or the ruling.
+
 ## DEFER — the data-colour tier beyond the gradient (docs/styling-pass-plan.md Y2; 2026-10-16)
 KEY: data colour, dominant colour, raw colour tier, T3
 
@@ -499,6 +511,20 @@ before repeats are dropped (check-verbs holds them; docs/traps.md). On the
 next sighting, read those lines in the leg's bundle (kept under
 ~/.local/state/kaya/flightrec/red/ once its run is pruned) before any
 hypothesis.
+
+SECOND SIGHTING 2026-10-21, on iOS (media_tracks-go, filtered matrix
+`--only music,dock,media` on the docked-player slice, whose change reaches no
+player): the embedded tx3g track, step 61, label#4 "first cue" after the seek
+to 1.5 s. The recorder's lines settle where it stops: both seeks finished
+with the clock at the target (`seek player=1 to=1500 ms finished=true
+clock=1500.0 ms`), and then `legible silent player=1 to=1500 ms: no push in
+the 400 ms after the seek; ... enabled=["vide", "soun", "sbtl"] outputs=1
+pushes=4 last="first cue"`: the legible output was attached and enabled and
+AVFoundation pushed nothing for the new time. Both sightings are the shared
+SwiftUI arm's AVPlayerItemLegibleOutput, so the cause is upstream of kaya's
+delivery; the next step is the seek's own re-delivery (asking the output for
+the cue at the landed time) rather than another watch. Bundle:
+~/.local/state/kaya/flightrec/runs/20261021T132542Z-010290/bundles/ios-media_tracks-go.
 
 ## ~~OPEN — the mac native table's rows taller than its 24pt floor run past the window (2026-10-13)~~ FIXED 2026-10-16 AT THE CAUSE (docs/styling-pass-plan.md Y5): the rows never ran past the window; the clip did not reach the document's end. A scroll to the last row parked the clip at the end of a document built on the floor's 24pt presumption, and the clip moves AppKit made itself as the rows were measured (the band's restamp, `noteHeightOfRows`) reached `boundsMoved`, which read every move it had not issued as the user's and dropped the anchor, so the last rows stayed under the clip (measured with a temporary probe: document 2583 to 2895 points, clip held at 2129, first visible row 43 of 60). The anchor now yields only to a move made under the user's own scroll, drag, press or key event, and a height correction re-parks it; a row taller than the floor keeps the floor's 8pt around its content. A cell's frame is not cut by the clip, so `expect_safe` stayed green throughout; tracks.steps reads `expect_scrolled_to`, which the native tier answers off the table's own visible rect, and the skin's readers ask a platform anchor view for its frame, since a cell's SwiftUI frame is not told when the table scrolls. GUARD: tools/lib/skin_routes.py, the user-only anchor rule, the height correction and the tallest-cell row, each cut watched red; the user-only rule's runtime negative in tracks.steps.
 KEY: kayaNativeRowHeight, native table tall rows, grown table overflow, scroll_to_row last row, netimage 20pt art

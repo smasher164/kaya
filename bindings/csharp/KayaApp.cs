@@ -6909,17 +6909,19 @@ sealed class Tx : IDisposable
     /// The window's DOCK, the surface under every pane and above a phone's
     /// tab bar (docs/styling-pass-plan.md Y8): `dock` is a fresh surface id
     /// and `body` builds the root it shows, returning it with a value that
-    /// comes back out. One per window.
-    public T Dock<T>(ulong dock, Func<(Widget Root, T Value)> body, ulong window = 0)
+    /// comes back out. One per window. `player` is the player the dock
+    /// shows (docs/media-player-plan.md M17).
+    public T Dock<T>(ulong dock, Func<(Widget Root, T Value)> body, ulong window = 0, Player? player = null)
     {
         Records.Add(KayaWire.TxAttachDock(window, dock));
+        if (player is { } shown) Records.Add(KayaWire.TxSetDockPlayer(dock, shown.Id));
         var (root, value) = body();
         MountIn(dock, root);
         return value;
     }
 
-    public void Dock(ulong dock, Func<Widget> body, ulong window = 0) =>
-        Dock<object?>(dock, () => (body(), null), window);
+    public void Dock(ulong dock, Func<Widget> body, ulong window = 0, Player? player = null) =>
+        Dock<object?>(dock, () => (body(), null), window, player);
 
     public void Mount(Widget root) => Records.Add(KayaWire.TxMount(0, root.Id));
 }

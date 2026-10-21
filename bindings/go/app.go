@@ -4469,8 +4469,9 @@ func (n Node) OnDragEnded(fn func(*Tx, []any, Op)) Node {
 
 // WindowRef chains window props, the construction-sugar tier.
 type WindowRef struct {
-	tx *Tx
-	id uint64
+	tx         *Tx
+	id         uint64
+	dockPlayer Player
 }
 
 func (w WindowRef) Title(title string) WindowRef {

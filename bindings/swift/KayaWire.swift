@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x75f6589c1fd09a4a
+let kayaSpecHash: UInt64 = 0xcfb6ed50af9e65de
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -906,6 +906,14 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_ATTACH_DOCK))
         self.u64(window)
         self.u64(dock)
+        self.end(kayaAt)
+    }
+
+    /// The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it.
+    mutating func setDockPlayer(_ dock: UInt64, _ player: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCK_PLAYER))
+        self.u64(dock)
+        self.u64(player)
         self.end(kayaAt)
     }
 

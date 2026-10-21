@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x75f6589c1fd09a4a
+SPEC_HASH = 0xcfb6ed50af9e65de
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -494,6 +494,7 @@ TX_SHOW_TOAST = 82
 TX_DISMISS_TOAST = 83
 TX_COLLECTION_PATCH_IF = 84
 TX_ATTACH_DOCK = 85
+TX_SET_DOCK_PLAYER = 86
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -565,6 +566,7 @@ APPLY_SET_VIDEO_CAPTURE = 70
 APPLY_PRESENT_TOAST = 71
 APPLY_WITHDRAW_TOAST = 72
 APPLY_ATTACH_DOCK = 73
+APPLY_SET_DOCK_PLAYER = 74
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -1046,6 +1048,10 @@ def tx_collection_patch_if(collection_id: int, path: Sequence[Value], key: Value
 def tx_attach_dock(window: int, dock: int) -> bytes:
     """Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does."""
     return record(TX_ATTACH_DOCK, struct.pack("<Q", window) + struct.pack("<Q", dock))
+
+def tx_set_dock_player(dock: int, player: int) -> bytes:
+    """The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it."""
+    return record(TX_SET_DOCK_PLAYER, struct.pack("<Q", dock) + struct.pack("<Q", player))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:

@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x75f6589c1fd09a4a
+let kayaSpecHash: UInt64 = 0xcfb6ed50af9e65de
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -104,6 +104,7 @@ private let applySetVideoCapture: UInt16 = 70
 private let applyPresentToast: UInt16 = 71
 private let applyWithdrawToast: UInt16 = 72
 private let applyAttachDock: UInt16 = 73
+private let applySetDockPlayer: UInt16 = 74
 let kayaToastDurationLong: UInt32 = 1
 let kayaToastActionNone: UInt32 = 0
 let kayaToastActionApp: UInt32 = 1
@@ -1282,6 +1283,9 @@ final class KayaSceneModel {
     var sectionWindow: [UInt64: UInt64] = [:]
     /// dock surface -> its window (docs/styling-pass-plan.md Y8).
     var dockWindow: [UInt64: UInt64] = [:]
+    /// dock surface -> the player it shows (docs/media-player-plan.md M17);
+    /// held, and drawn as nothing on either Apple platform.
+    var dockPlayer: [UInt64: UInt64] = [:]
     /// Menu items by id — their OWN id space, never widget, node or surface
     /// ids.
     var menuItems: [UInt64: KayaMenuItemModel] = [:]
@@ -6859,6 +6863,10 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let window = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let dock = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.dockWindow[dock] = window
+            case applySetDockPlayer:
+                let dock = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let player = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.dockPlayer[dock] = player == 0 ? nil : player
             case applyAddChild:
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let child = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
@@ -12749,6 +12757,27 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(parts[1]) reads checked \(got), wanted \(want)")
                 } else {
                     failures.append("no such target \(parts[1])")
+                }
+            case "expect_dock_player":
+                let want = parts.count > 1 ? String(parts[1]) : ""
+                var got = DispatchQueue.main.sync { kayaDockPlayerRead() }
+                let deadline = Date().addingTimeInterval(5)
+                while got.split(separator: " ").first.map(String.init) != want && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    got = DispatchQueue.main.sync { kayaDockPlayerRead() }
+                }
+                if got.split(separator: " ").first.map(String.init) == want {
+                    observed.append("dock player \(want)")
+                } else {
+                    failures.append("dock player reads \(got), wanted \(want)")
+                }
+            case "expect_dock_line":
+                let want = parts.count > 1 ? String(parts[1]) : ""
+                let got = "none (the SwiftUI dock draws no progress line; docs/media-player-plan.md M17)"
+                if got.split(separator: " ").first.map(String.init) == want {
+                    observed.append("dock line \(want)")
+                } else {
+                    failures.append("dock line reads \(got), wanted \(want)")
                 }
             case "expect_dock":
                 let want = parts.count > 1 ? String(parts[1]) : ""
@@ -22470,6 +22499,18 @@ var kayaToastDrawnLayer: [UInt64: UInt64?] = [:]
 
 /// expect_dock's read (Y8): the dock's frame against the window's content
 /// and every pane's frame.
+/// expect_dock_player's read (docs/media-player-plan.md M17).
+@MainActor func kayaDockPlayerRead() -> String {
+    guard let dock = kayaScene.dockWindow.first(where: { $0.value == 0 })?.key else {
+        return "none (the primary window has no dock)"
+    }
+    guard let player = kayaScene.dockPlayer[dock] else { return "none (dock \(dock) names no player)" }
+    if kayaPlayers[player] == nil {
+        return "released (dock \(dock) names player \(player), which this backend no longer holds)"
+    }
+    return "bound (dock \(dock) shows player \(player))"
+}
+
 @MainActor func kayaDockRead() -> String {
     guard let dock = kayaScene.windows[0]?.dock else { return "hidden (no dock is mounted)" }
     guard kayaHoldsWidget(dock), let frame = kayaDockFrame, frame.height > 1 else {

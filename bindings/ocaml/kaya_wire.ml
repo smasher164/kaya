@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x75f6589c1fd09a4aL
+let spec_hash = 0xcfb6ed50af9e65deL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -509,6 +509,7 @@ let tx_kind_show_toast = 82
 let tx_kind_dismiss_toast = 83
 let tx_kind_collection_patch_if = 84
 let tx_kind_attach_dock = 85
+let tx_kind_set_dock_player = 86
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -580,6 +581,7 @@ let apply_kind_set_video_capture = 70
 let apply_kind_present_toast = 71
 let apply_kind_withdraw_toast = 72
 let apply_kind_attach_dock = 73
+let apply_kind_set_dock_player = 74
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -1299,6 +1301,12 @@ let tx_attach_dock window dock =
   finish tx_kind_attach_dock (fun b ->
       Buffer.add_int64_le b window;
       Buffer.add_int64_le b dock)
+
+(* The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it. *)
+let tx_set_dock_player dock player =
+  finish tx_kind_set_dock_player (fun b ->
+      Buffer.add_int64_le b dock;
+      Buffer.add_int64_le b player)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =

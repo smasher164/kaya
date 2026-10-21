@@ -6313,7 +6313,7 @@ class _TxScope:
                  detent: Detent | str | int | None = None,
                  on_dismissed: Callable[[], object] | None = None,
                  on_dismiss_requested: Callable[[], object] | None = None,
-                 dock: bool = False) -> None:
+                 dock: bool = False, dock_player: Player | None = None) -> None:
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -6352,6 +6352,7 @@ class _TxScope:
         self._on_dismissed = on_dismissed
         self._on_dismiss_requested = on_dismiss_requested
         self._dock = dock
+        self._dock_player = dock_player
 
     def __del__(self) -> None:
         # A construct BUILT AND NEVER ENTERED emits nothing and says
@@ -6444,6 +6445,8 @@ class _TxScope:
             _recording = True
             _pending_root = None
             _records().append(wire.tx_attach_dock(self._parent, self._window))
+            if self._dock_player is not None:
+                _records().append(wire.tx_set_dock_player(self._window, self._dock_player.id))
             return self
         if self._push:
             # UNLIKE EVERY OTHER SCOPE this one NESTS inside an open
@@ -8250,13 +8253,17 @@ class App:
             detent=detent, on_dismissed=on_dismissed,
             on_dismiss_requested=on_dismiss_requested)
 
-    def dock(self, dock_id: int, *, window: int = 0) -> _TxScope:
+    def dock(self, dock_id: int, *, window: int = 0, player: Player | None = None) -> _TxScope:
         """A window's DOCK scope (docs/styling-pass-plan.md Y8): the surface
         under every pane and above a phone's tab bar, hosting the body's
         single top-level container, which mounts INTO IT on exit. Dock ids
         are guest-allocated in the shared surface namespace; one per window.
-        A dock whose root holds no widget collapses."""
-        return _TxScope(self, mount_on_exit=True, window=dock_id, parent=window, dock=True)
+        A dock whose root holds no widget collapses. `player=` is the player
+        the dock shows (docs/media-player-plan.md M17)."""
+        if player is not None and not isinstance(player, Player):
+            raise TypeError(f"dock(player=...) takes a kaya.Player, got {type(player).__name__}")
+        return _TxScope(self, mount_on_exit=True, window=dock_id, parent=window, dock=True,
+                        dock_player=player)
 
     def add_section(self, section_id: int, *, title: str | None = None,
                     symbol: Symbol | str | None = None,

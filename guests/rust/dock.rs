@@ -15,7 +15,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let playing = ctx.apply(|tx| {
         let art = tx.asset("covers/cover-600.jpg").bytes().to_vec();
         let playing = tx.signal(true);
-        tx.window(kaya::DEFAULT_WINDOW).title("dock").size(720.0, 480.0).dock(kaya::WindowId(40), |tx| {
+        let player = tx.player().muted(true).id();
+        tx.window(kaya::DEFAULT_WINDOW).title("dock").size(720.0, 480.0).dock_player(player).dock(kaya::WindowId(40), |tx| {
             let root = tx
                 .column(|tx| {
                     tx.when(playing, |t| {

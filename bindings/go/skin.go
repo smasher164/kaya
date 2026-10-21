@@ -248,6 +248,16 @@ func (t *Tpl) BindSelected[S interface {
 // it shows. One per window.
 func (w WindowRef) Dock(dock uint64, build func() Widget) WindowRef {
 	w.tx.emit(TxAttachDock(w.id, dock))
+	if !w.dockPlayer.IsZero() {
+		w.tx.emit(TxSetDockPlayer(dock, w.dockPlayer.id))
+	}
 	w.tx.MountIn(dock, build())
+	return w
+}
+
+// DockPlayer names the player the Dock declared after it shows
+// (docs/media-player-plan.md M17).
+func (w WindowRef) DockPlayer(p Player) WindowRef {
+	w.dockPlayer = p
 	return w
 }

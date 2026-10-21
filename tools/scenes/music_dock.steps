@@ -14,6 +14,7 @@ click column@card_116452
 expect_image_phase image@album_art shown
 click button@play_album
 expect_dock shown
+expect_dock_player bound
 expect label@dock_title "In Tune"
 expect label@dock_artist "Kellee Maize"
 expect_image_phase image@dock_art shown

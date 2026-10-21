@@ -932,7 +932,7 @@ def build_dock():
     played (M6): the bar at the window's foot on the desktops, above the tab
     bar on the phones, where a tap opens the full player."""
     dock_ready["built"] = True
-    with app.dock(DOCK):
+    with app.dock(DOCK, player=player):
         if desktop:
             with kaya.row(spacing=16, align="center", inset=PAGE_INSET) as bar:
                 bar.a11y_id("dock_bar")

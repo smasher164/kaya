@@ -30,6 +30,7 @@
 
 #define DOCK 40
 #define SIG_PLAYING 1
+#define PLAYER 1
 
 static void submit(KayaTx *tx) {
     if (!kaya_tx_ok(tx)) {
@@ -81,7 +82,9 @@ static void build_scene(void) {
     window_prop(&tx, KAYA_WPROP_TITLE, kaya_str("dock"));
     window_prop(&tx, KAYA_WPROP_WIDTH, kaya_f64(720.0));
     window_prop(&tx, KAYA_WPROP_HEIGHT, kaya_f64(480.0));
+    kaya_tx_create_player(&tx, PLAYER);
     kaya_tx_attach_dock(&tx, 0, DOCK);
+    kaya_tx_set_dock_player(&tx, DOCK, PLAYER);
 
     kaya_tx_create_widget(&tx, W_DOCK_ROOT, KAYA_KIND_COLUMN);
     kaya_tx_create_when(&tx, W_WHEN, SIG_PLAYING);

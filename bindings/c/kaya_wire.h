@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x75f6589c1fd09a4aULL
+#define KAYA_SPEC_HASH 0xcfb6ed50af9e65deULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -974,6 +974,14 @@ static inline void kaya_tx_attach_dock(KayaTx *tx, uint64_t window, uint64_t doc
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_ATTACH_DOCK);
     kaya_wire_u64(tx, window);
     kaya_wire_u64(tx, dock);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it. */
+static inline void kaya_tx_set_dock_player(KayaTx *tx, uint64_t dock, uint64_t player) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DOCK_PLAYER);
+    kaya_wire_u64(tx, dock);
+    kaya_wire_u64(tx, player);
     kaya_wire_end(tx, kaya_at);
 }
 

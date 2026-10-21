@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x75f6589c1fd09a4an;
+export const SPEC_HASH = 0xcfb6ed50af9e65den;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -487,6 +487,7 @@ export const TX_SHOW_TOAST = 82;
 export const TX_DISMISS_TOAST = 83;
 export const TX_COLLECTION_PATCH_IF = 84;
 export const TX_ATTACH_DOCK = 85;
+export const TX_SET_DOCK_PLAYER = 86;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -558,6 +559,7 @@ export const APPLY_SET_VIDEO_CAPTURE = 70;
 export const APPLY_PRESENT_TOAST = 71;
 export const APPLY_WITHDRAW_TOAST = 72;
 export const APPLY_ATTACH_DOCK = 73;
+export const APPLY_SET_DOCK_PLAYER = 74;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -1517,6 +1519,14 @@ export function tx_attach_dock(window: number, dock: number): Uint8Array {
   enc.u64(window);
   enc.u64(dock);
   return enc.end(TX_ATTACH_DOCK);
+}
+
+/** The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it. */
+export function tx_set_dock_player(dock: number, player: number): Uint8Array {
+  enc.begin();
+  enc.u64(dock);
+  enc.u64(player);
+  return enc.end(TX_SET_DOCK_PLAYER);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

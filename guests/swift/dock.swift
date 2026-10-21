@@ -9,7 +9,8 @@ KayaApp.run { app in
     app.build { tx in
         let playing = tx.signal(.bool(true))
         tx.window(title: "dock", width: 720, height: 480)
-        tx.dock(40) { tx in
+        let player = tx.player(muted: true)
+        tx.dock(40, player: player) { tx in
             let root = tx.column { root in
                 _ = tx.when(playing) { t in
                     let bar = t.row {

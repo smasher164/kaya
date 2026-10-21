@@ -14,7 +14,8 @@ public final class Dock {
         }
         app.build(tx -> {
             KayaApp.Signal<Boolean> playing = tx.signal(true);
-            tx.window(0).title("dock").size(720.0, 480.0).dock(40, root -> {
+            KayaApp.Player player = tx.player().muted(true);
+            tx.window(0).title("dock").size(720.0, 480.0).dockPlayer(player).dock(40, root -> {
                 tx.when(playing, t -> {
                     KayaApp.Node bar = t.row(() -> {
                         KayaApp.Node image = t.image(art);

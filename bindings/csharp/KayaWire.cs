@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x75f6589c1fd09a4a;
+    public const ulong SpecHash = 0xcfb6ed50af9e65de;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -491,6 +491,7 @@ static class KayaWire
     public const ushort TxKindDismissToast = 83;
     public const ushort TxKindCollectionPatchIf = 84;
     public const ushort TxKindAttachDock = 85;
+    public const ushort TxKindSetDockPlayer = 86;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -562,6 +563,7 @@ static class KayaWire
     public const ushort ApplyKindPresentToast = 71;
     public const ushort ApplyKindWithdrawToast = 72;
     public const ushort ApplyKindAttachDock = 73;
+    public const ushort ApplyKindSetDockPlayer = 74;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -1554,6 +1556,15 @@ static class KayaWire
         w.Write(window);
         w.Write(dock);
         return Finish(stream, w, TxKindAttachDock);
+    }
+
+    /// The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it.
+    public static byte[] TxSetDockPlayer(ulong dock, ulong player)
+    {
+        var w = Begin(out var stream);
+        w.Write(dock);
+        w.Write(player);
+        return Finish(stream, w, TxKindSetDockPlayer);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

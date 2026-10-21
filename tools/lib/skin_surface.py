@@ -3,7 +3,7 @@
 Each row is one skin surface in one binding, read out of that binding's own
 file: the two grounds, an image's shape, a label's tint, `selected` and
 `on_activate` and `on_select` in the live and template zones, the dock in the window
-construct, the binding's dispatch of the `activated` and `selection_changed`
+construct and the player it names (docs/media-player-plan.md M17), the binding's dispatch of the `activated` and `selection_changed`
 occurrences, the core's
 dominant colour and palette, and the Tint `none`/`overlay` and Shape vocabularies. The
 wire records reach every binding through the generator whether or not a
@@ -43,6 +43,8 @@ ROWS = [
     ("rust template selected", RS, r"pub fn selected\(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>\)", "selected"),
     ("rust template on_activate", RS, r"pub fn on_activate<M: 'static>\(\n\s+&mut self,\n\s+node: TemplateNodeId,", "on_activate"),
     ("rust dock", RS, r"pub fn dock<R>\(self, dock: WindowId, build: impl FnOnce\(&mut Tx<'_>\) -> \(WidgetId, R\)\) -> R", "dock"),
+    ("rust docked player", RS, r"pub fn dock_player\(mut self, player: crate::protocol::PlayerId\) -> Self", "dock_player"),
+    ("rust docked player record", RS, r"self\.tx\.ops\.push\(TxOp::SetDockPlayer \{ dock, player: Some\(player\) \}\);", "SetDockPlayer"),
     ("rust activated dispatch", RS, r"Occurrence::Activated \{ \.\. \} => Some\(msg\.clone\(\)\),", "Activated"),
     ("rust on_select", RS, r"pub fn on_select<M: Clone \+ 'static>\(self, msgs: &Messages<M>, msg: M\) -> Self", "on_select"),
     ("rust template on_select", RS, r"pub fn on_select<M: 'static>\(\n\s+&mut self,\n\s+node: TemplateNodeId,", "on_select"),
@@ -65,7 +67,9 @@ ROWS = [
     ("python template label tint", PY, r"_picker_field\(\"a label's tint\", tint, Tint\)", "tint"),
     ("python template selected", PY, r"^def _set_skin\([^)]*\bselected: FlagSource \| None,", "selected"),
     ("python template on_activate", PY, r"^def _set_skin\([^)]*\bon_activate: Handler \| None,", "on_activate"),
-    ("python dock", PY, r"def dock\(self, dock_id: int, \*, window: int = 0\) -> _TxScope:", "dock"),
+    ("python dock", PY, r"def dock\(self, dock_id: int, \*, window: int = 0, player: Player \| None = None\) -> _TxScope:", "dock"),
+    ("python docked player", PY, r"dock=True,\n\s+dock_player=player\)", "dock_player"),
+    ("python docked player record", PY, r"_records\(\)\.append\(wire\.tx_set_dock_player\(self\._window, self\._dock_player\.id\)\)", "tx_set_dock_player"),
     ("python activated dispatch", PY, r"_app\._register\(handle, wire\.OCC_ACTIVATED, on_activate\)", "OCC_ACTIVATED"),
     ("python on_select", PY, r"^\s+on_activate: Handler \| None = None,\n\s+on_select: Handler \| None = None\) -> _Container:", "on_select"),
     ("python template on_select", PY, r"^def _set_skin\([^)]*\bon_select: Handler \| None\)", "on_select"),
@@ -89,6 +93,8 @@ ROWS = [
     ("js template selected", JS, r"^  selected\?: boolean \| Signal<boolean> \| FieldRef;", "FieldRef"),
     ("js template on_activate", JS, r"app\(\)\._register\(handle, wire\.OCC_ACTIVATED, opts\.onActivate\);", "onActivate"),
     ("js dock", JS, r"^  dock<T = void>\(dockId: number, optsOrBody: DockOptions \| \(\(\) => T\), body\?: \(\) => T\): T \{", "dock"),
+    ("js docked player", JS, r"^export type DockOptions = \{ window\?: number; player\?: Player \};", "player"),
+    ("js docked player record", JS, r"records\(\)\.push\(wire\.tx_set_dock_player\(dockId, shown\.id\)\)", "tx_set_dock_player"),
     ("js activated dispatch", JS, r"app\(\)\._register\(handle, wire\.OCC_ACTIVATED,", "OCC_ACTIVATED"),
     ("js on_select", JS, r"^export type SkinOptions = \{[^}]*\bonSelect\?: Handler;", "onSelect"),
     ("js template on_select", JS, r"app\(\)\._register\(handle, wire\.OCC_SELECTION_CHANGED, opts\.onSelect\);", "onSelect"),
@@ -113,6 +119,8 @@ ROWS = [
     ("go template selected", GO, r"^func \(t \*Tpl\) BindSelected\[S interface \{", "BindSelected"),
     ("go template on_activate", GO, r"^func \(n Node\) OnActivate\(fn func\(\*Tx, \[\]any\)\) Node \{", "OnActivate"),
     ("go dock", GO, r"^func \(w WindowRef\) Dock\(dock uint64, build func\(\) Widget\) WindowRef \{", "Dock"),
+    ("go docked player", GO, r"^func \(w WindowRef\) DockPlayer\(p Player\) WindowRef \{", "DockPlayer"),
+    ("go docked player record", GO, r"w\.tx\.emit\(TxSetDockPlayer\(dock, w\.dockPlayer\.id\)\)", "TxSetDockPlayer"),
     ("go activated dispatch", GOA, r"case kind == occActivated:\n\s+if fn := a\.nodeActivates\[id\]; fn != nil \{", "nodeActivates"),
     ("go on_select", GO, r"^func \(w Widget\) OnSelect\(fn func\(\*Tx\)\) Widget \{", "OnSelect"),
     ("go template on_select", GO, r"^func \(n Node\) OnSelect\(fn func\(\*Tx, \[\]any\)\) Node \{", "OnSelect"),
@@ -137,7 +145,9 @@ ROWS = [
     ("csharp template label tint", CS, r"public void SetTint\(Node n, Field<Tint> f, uint level = 0\) =>", "SetTint"),
     ("csharp template selected", CS, r"public void SetSelected\(Node n, Field<bool> f, uint level = 0\) =>", "SetSelected"),
     ("csharp template on_activate", CS, r"public void OnActivate\(Node n, Action<Tx, List<object>> handler\)", "OnActivate"),
-    ("csharp dock", CS, r"public T Dock<T>\(ulong dock, Func<\(Widget Root, T Value\)> body, ulong window = 0\)", "Dock"),
+    ("csharp dock", CS, r"public T Dock<T>\(ulong dock, Func<\(Widget Root, T Value\)> body, ulong window = 0, Player\? player = null\)", "Dock"),
+    ("csharp docked player", CS, r"public void Dock\(ulong dock, Func<Widget> body, ulong window = 0, Player\? player = null\)", "player"),
+    ("csharp docked player record", CS, r"if \(player is \{ \} shown\) Records\.Add\(KayaWire\.TxSetDockPlayer\(dock, shown\.Id\)\);", "TxSetDockPlayer"),
     ("csharp activated dispatch", CS, r"case Activated activeRow\n\s+when nodeActivates\.TryGetValue\(activeRow\.Id, out var onActivateRow\):", "nodeActivates"),
     ("csharp template on_select", CS, r"public void OnSelect\(Node n, Action<Tx, List<object>> handler\)", "OnSelect"),
     ("csharp selection dispatch", CS, r"case SelectionChanged pickRow\n\s+when nodeSelects\.TryGetValue\(pickRow\.Id, out var onSelectRow\):", "nodeSelects"),
@@ -161,6 +171,8 @@ ROWS = [
     ("java template selected", JV, r"public void setSelected\(Node n, KayaRecords\.Field<Boolean> f\) \{", "setSelected"),
     ("java template on_activate", JV, r"public void onActivate\(Node n, BiConsumer<Tx, List<Object>> handler\) \{", "onActivate"),
     ("java dock", JV, r"public <R> R dock\(long dock, java\.util\.function\.Supplier<Built<R>> body\) \{", "dock"),
+    ("java docked player", JV, r"public WindowRef dockPlayer\(Player player\) \{", "dockPlayer"),
+    ("java docked player record", JV, r"if \(dockPlayer != null\) tx\.emit\(KayaWire\.txSetDockPlayer\(dock, dockPlayer\.id\)\);", "txSetDockPlayer"),
     ("java activated dispatch", JV, r"\} else if \(occ\.kind == KayaWire\.OCC_KIND_ACTIVATED\) \{\n\s+BiConsumer<Tx, List<Object>> handler = nodeActivates\.get\(occ\.id\);", "nodeActivates"),
     ("java on_select", JV, r"public Widget onSelect\(Consumer<Tx> handler\) \{", "onSelect"),
     ("java template on_select", JV, r"public void onSelect\(Node n, BiConsumer<Tx, List<Object>> handler\) \{", "onSelect"),
@@ -186,6 +198,8 @@ ROWS = [
     ("swift template selected", SW, r"public func setSelected\(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>\) \{", "setSelected"),
     ("swift template on_activate", SW, r"public func onActivate\(_ n: KayaNodeHandle, _ handler: @escaping \(KayaAppTx, \[KayaValue\]\) throws -> Void\) \{", "onActivate"),
     ("swift dock", SW, r"public func dock<R>\(", "dock"),
+    ("swift docked player", SW, r"_ id: UInt64, window: UInt64 = 0, player: KayaPlayer\? = nil,", "player"),
+    ("swift docked player record", SW, r"if let player \{ tx\.setDockPlayer\(id, player\.id\) \}", "setDockPlayer"),
     ("swift activated dispatch", SW, r"case \(UInt16\(KAYA_OCCURRENCE_ACTIVATED\), false\):", "KAYA_OCCURRENCE_ACTIVATED"),
     ("swift on_select", SW, r"public func onSelect\(_ w: KayaWidget, _ handler: @escaping \(KayaAppTx\) throws -> Void\) \{", "onSelect"),
     ("swift on_select on the container", SW, r"^\s+onSelect: \(\(KayaAppTx\) throws -> Void\)\? = nil,", "onSelect"),
@@ -210,7 +224,9 @@ ROWS = [
     ("ocaml template label tint", ML, r"^    \?tint_field:\('f, Tint\.t\) field ->", "tint_field"),
     ("ocaml template selected", ML, r"^  val bind_selected_field : \?level:int -> node -> \('e, bool\) field -> unit", "bind_selected_field"),
     ("ocaml template on_activate", ML, r"^  val on_activate : node -> \(key list -> unit\) -> unit", "on_activate"),
-    ("ocaml dock", ML, r"^val dock : \?window:int64 -> int64 -> \(unit -> widget \* 'a\) -> 'a", "dock"),
+    ("ocaml dock", ML, r"^val dock : \?window:int64 -> \?player:player -> int64 -> \(unit -> widget \* 'a\) -> 'a", "dock"),
+    ("ocaml docked player", MLI, r"^let dock \?\(window = 0L\) \?player dock", "?player"),
+    ("ocaml docked player record", MLI, r"Option\.iter \(fun \(Player p\) -> emit tx \(Kaya_wire\.tx_set_dock_player dock p\)\) player;", "tx_set_dock_player"),
     ("ocaml activated dispatch", MLI, r"Hashtbl\.replace tx\.app\.widget_handlers id handler;\n\s+emit tx \(Kaya_wire\.tx_set_activatable id true\)", "tx_set_activatable"),
     ("ocaml template on_select", ML, r"^  val on_select : node -> \(key list -> unit\) -> unit", "on_select"),
     ("ocaml selection dispatch", MLI, r"else if kind = Kaya_wire\.occ_kind_selection_changed then\n(?:.*\n){0,4}\s+\(match Hashtbl\.find_opt app\.widget_selects id with", "widget_selects"),
@@ -233,7 +249,9 @@ ROWS = [
     ("haskell template label tint", HS, r"^  TplTintField :: KField Tint -> TplAttr", "TplTintField"),
     ("haskell template selected", HS, r"^  TplSelectedField :: KField Bool -> TplAttr", "TplSelectedField"),
     ("haskell template on_activate", HS, r"^  TplOnActivate :: \(\[Key\] -> IO \(\)\) -> TplAttr", "TplOnActivate"),
-    ("haskell dock", HS, r"^dock :: Word64 -> Word64 -> Build \(Widget, a\) -> Build a", "dock"),
+    ("haskell dock", HS, r"^dock :: Word64 -> Word64 -> \[DockAttr\] -> Build \(Widget, a\) -> Build a", "dock"),
+    ("haskell docked player", HS, r"^data DockAttr = DockPlayer Player", "DockPlayer"),
+    ("haskell docked player record", HS, r"mapM_ \(\\\(DockPlayer \(Player p\)\) -> emitB \(W\.txSetDockPlayer surface p\)\) attrs", "txSetDockPlayer"),
     ("haskell activated dispatch", HS, r"^applyAttr \(OnActivate handler\) \(Widget n\) = do\n  emitB \(W\.txSetActivatable n True\)\n  pendB \(PClick n handler\)", "OnActivate"),
     ("haskell on_select", HS, r"^  OnSelect :: IO \(\) -> Attr 'BoxW", "OnSelect"),
     ("haskell template on_select", HS, r"^  TplOnSelect :: \(\[Key\] -> IO \(\)\) -> TplAttr", "TplOnSelect"),
@@ -253,7 +271,9 @@ PARTS = ("ground gradient", "ground image", "image shape", "label tint", "select
          "image_palette",
          "tint none", "tint overlay", "shape vocabulary",
          # Y4, AMENDED 2026-10-17: the user's pick, beside the activation.
-         "on_select", "template on_select", "selection dispatch")
+         "on_select", "template on_select", "selection dispatch",
+         # M17, RULED 2026-10-21: the player a dock shows.
+         "docked player")
 FAKE = "kayaFakeSkin"
 
 
@@ -297,7 +317,10 @@ def run():
     gate.negative("empty reader", lambda: findings(texts, []), want=f"fewer than {FLOOR}")
     withheld = [row for row in ROWS if row[0] != "go dock"]
     gate.negative("a binding's row withheld", lambda: findings(texts, withheld), want="no dock row for go")
-    gate.negatives_ran(len(ROWS) + 2)
+    unnamed = [row for row in ROWS if not row[0].startswith("ocaml docked player")]
+    gate.negative("a binding's docked player withheld", lambda: findings(texts, unnamed),
+                  want="no docked player row for ocaml")
+    gate.negatives_ran(len(ROWS) + 3)
     if gate.status == 0:
         print(f"check-skin-surface: OK ({len(ROWS)} skin surfaces in nine bindings)")
     return gate.status

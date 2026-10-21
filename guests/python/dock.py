@@ -11,7 +11,8 @@ art = kaya.asset("covers/cover-600.jpg").bytes()
 
 with app.window(title="dock", width=720, height=480):
     playing = kaya.signal(True)
-    with app.dock(40):
+    player = kaya.player(muted=True)
+    with app.dock(40, player=player):
         with kaya.column():
             with kaya.when(playing):
                 with kaya.row() as bar:

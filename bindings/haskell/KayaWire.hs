@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x75f6589c1fd09a4a
+specHash = 0xcfb6ed50af9e65de
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -980,6 +980,8 @@ txKindCollectionPatchIf :: Word16
 txKindCollectionPatchIf = 84
 txKindAttachDock :: Word16
 txKindAttachDock = 85
+txKindSetDockPlayer :: Word16
+txKindSetDockPlayer = 86
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1122,6 +1124,8 @@ applyKindWithdrawToast :: Word16
 applyKindWithdrawToast = 72
 applyKindAttachDock :: Word16
 applyKindAttachDock = 73
+applyKindSetDockPlayer :: Word16
+applyKindSetDockPlayer = 74
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1611,6 +1615,10 @@ txCollectionPatchIf collectionId path key guardField variant guardValue fields v
 -- Give `window` its DOCK (docs/styling-pass-plan.md Y8): one surface under every pane, above a phone's tab bar, filled by `mount(dock, root)`. Dock ids share the surface namespace with windows, entries, sections and sheets. One per window, a second refused at the root; it goes when its window does.
 txAttachDock :: Word64 -> Word64 -> Builder
 txAttachDock window dock = wireRecord txKindAttachDock (word64LE window <> word64LE dock)
+
+-- The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it.
+txSetDockPlayer :: Word64 -> Word64 -> Builder
+txSetDockPlayer dock player = wireRecord txKindSetDockPlayer (word64LE dock <> word64LE player)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

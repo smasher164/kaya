@@ -9,7 +9,8 @@ const art = kaya.asset("covers/cover-600.jpg").bytes();
 
 app.window({ title: "dock", width: 720, height: 480 }, () => {
   const playing = kaya.signal(true);
-  app.dock(40, () => {
+  const player = kaya.player({ muted: true });
+  app.dock(40, { player }, () => {
     kaya.column(() => {
       kaya.when(playing, () => {
         kaya.row((bar) => {

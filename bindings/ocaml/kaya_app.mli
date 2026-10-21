@@ -1829,7 +1829,7 @@ val mount_in : int64 -> widget -> unit
    bar (docs/styling-pass-plan.md Y8): the int64 is a fresh surface id, the
    body builds its root answering [(root, value)], and the value comes back
    out. One per window. *)
-val dock : ?window:int64 -> int64 -> (unit -> widget * 'a) -> 'a
+val dock : ?window:int64 -> ?player:player -> int64 -> (unit -> widget * 'a) -> 'a
 
 (* Push a navigation entry onto the primary surface's stack. *)
 val push_entry :

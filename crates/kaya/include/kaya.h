@@ -474,6 +474,11 @@
  */
 #define KAYA_TX_ATTACH_DOCK 85
 
+/**
+ * SET_DOCK_PLAYER { u64 dock; u64 player } (docs/media-player-plan.md M17).
+ */
+#define KAYA_TX_SET_DOCK_PLAYER 86
+
 #define KAYA_TX_ADD_SECTION 25
 
 #define KAYA_TX_SELECT_SECTION 26
@@ -884,6 +889,11 @@
  * ATTACH_DOCK { u64 window; u64 dock }.
  */
 #define KAYA_APPLY_ATTACH_DOCK 73
+
+/**
+ * SET_DOCK_PLAYER { u64 dock; u64 player }.
+ */
+#define KAYA_APPLY_SET_DOCK_PLAYER 74
 
 #define KAYA_APPLY_ADD_SECTION 15
 

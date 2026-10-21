@@ -2804,6 +2804,8 @@ pub enum TxOp {
     /// Give a window its dock (docs/styling-pass-plan.md Y8): one per
     /// window, filled by a mount.
     AttachDock { window: WindowId, dock: WindowId },
+    /// The player a dock shows, `None` detaching (docs/media-player-plan.md M17).
+    SetDockPlayer { dock: WindowId, player: Option<PlayerId> },
     /// Dismiss a live sheet and forget its tree, child sheets with it; also
     /// the dismiss-veto grammar's confirmation.
     DismissSheet { sheet: WindowId },
@@ -3116,6 +3118,7 @@ pub enum ApplyOp {
     PresentSheet { parent: WindowId, sheet: WindowId },
     /// The window's dock surface, its root arriving by mount.
     AttachDock { window: WindowId, dock: WindowId },
+    SetDockPlayer { dock: WindowId, player: Option<PlayerId> },
     /// Dismiss the sheet and release its views, child sheets first.
     DismissSheet { sheet: WindowId },
     SetSheetProp { sheet: WindowId, prop: SheetProp, value: Value },

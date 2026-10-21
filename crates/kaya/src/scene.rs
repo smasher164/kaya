@@ -797,6 +797,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::SetEntryProp { .. } => UndoVerdict::Refused("set_entry_prop"),
         TxOp::PresentSheet { .. } => UndoVerdict::Refused("present_sheet"),
         TxOp::AttachDock { .. } => UndoVerdict::Refused("attach_dock"),
+        TxOp::SetDockPlayer { .. } => UndoVerdict::Refused("set_dock_player"),
         TxOp::DismissSheet { .. } => UndoVerdict::Refused("dismiss_sheet"),
         TxOp::SetSheetProp { .. } => UndoVerdict::Refused("set_sheet_prop"),
         TxOp::AddSection { .. } => UndoVerdict::Refused("add_section"),
@@ -897,6 +898,8 @@ pub(crate) struct Scene {
     /// their window.
     dock_of: HashMap<WindowId, WindowId>,
     window_dock: HashMap<WindowId, WindowId>,
+    /// The player each dock shows (docs/media-player-plan.md M17).
+    dock_player: HashMap<WindowId, crate::protocol::PlayerId>,
     /// Every row and column the backends were told to create, live or
     /// stamped: the ids whose `color` is a gradient's (`lower_skin`).
     skin_containers: HashSet<WidgetId>,
@@ -4299,6 +4302,7 @@ impl Scene {
                     self.fullscreen.remove(&window);
                     if let Some(dock) = self.window_dock.remove(&window) {
                         self.dock_of.remove(&dock);
+                        self.dock_player.remove(&dock);
                         self.mounted_windows.remove(&dock);
                     }
                     // ... and its sheet chain: parent-bound, it goes with the window.
@@ -4382,7 +4386,16 @@ impl Scene {
                     self.media.set_prop(player, prop, value, &mut out, &mut self.asks)
                 }
                 TxOp::PlayerCommand { player, command } => self.media.command(player, command, &mut out),
-                TxOp::ReleasePlayer { player } => self.media.release(player, &mut out),
+                TxOp::ReleasePlayer { player } => {
+                    self.media.release(player, &mut out);
+                    let mut held: Vec<WindowId> =
+                        self.dock_player.iter().filter(|(_, p)| **p == player).map(|(d, _)| *d).collect();
+                    held.sort_by_key(|d| d.0);
+                    for dock in held {
+                        self.dock_player.remove(&dock);
+                        out.push(ApplyOp::SetDockPlayer { dock, player: None });
+                    }
+                }
                 TxOp::SelectTrack { player, kind, index } => {
                     self.media.select(player, kind, index, &mut out, &mut self.asks)
                 }
@@ -4796,6 +4809,28 @@ impl Scene {
                     self.dock_of.insert(dock, window);
                     self.window_dock.insert(window, dock);
                     out.push(ApplyOp::AttachDock { window, dock });
+                }
+                TxOp::SetDockPlayer { dock, player } => {
+                    assert!(
+                        self.dock_of.contains_key(&dock),
+                        "kaya: set_dock_player names dock {dock:?}, which is not attached — \
+                         attach_dock first (docs/media-player-plan.md M17)"
+                    );
+                    match player {
+                        Some(p) => {
+                            assert!(
+                                self.media.is_live(p),
+                                "kaya: set_dock_player gives dock {dock:?} player {}, which is not \
+                                 live — create_player first",
+                                p.0
+                            );
+                            self.dock_player.insert(dock, p);
+                        }
+                        None => {
+                            self.dock_player.remove(&dock);
+                        }
+                    }
+                    out.push(ApplyOp::SetDockPlayer { dock, player });
                 }
                 TxOp::DismissSheet { sheet } => {
                     assert!(
@@ -22295,6 +22330,28 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             TxOp::CreateWindow { window: WindowId(5) },
             TxOp::AttachDock { window: WindowId(5), dock: WindowId(50) },
         ]);
+    }
+
+    /// M17: a dock names a live player, and releasing the player detaches it.
+    #[test]
+    fn a_dock_names_its_player() {
+        use crate::protocol::PlayerId;
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreatePlayer { player: PlayerId(7) },
+            TxOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(40) },
+            TxOp::SetDockPlayer { dock: WindowId(40), player: Some(PlayerId(7)) },
+        ]);
+        assert!(ops.contains(&ApplyOp::SetDockPlayer { dock: WindowId(40), player: Some(PlayerId(7)) }), "{ops:?}");
+        let ops = scene.apply(vec![TxOp::ReleasePlayer { player: PlayerId(7) }]);
+        assert!(ops.contains(&ApplyOp::SetDockPlayer { dock: WindowId(40), player: None }), "{ops:?}");
+        let msg = skin_refusal(vec![TxOp::SetDockPlayer { dock: WindowId(40), player: None }]);
+        assert!(msg.contains("which is not attached"), "{msg}");
+        let msg = skin_refusal(vec![
+            TxOp::AttachDock { window: DEFAULT_WINDOW, dock: WindowId(40) },
+            TxOp::SetDockPlayer { dock: WindowId(40), player: Some(PlayerId(9)) },
+        ]);
+        assert!(msg.contains("which is not live"), "{msg}");
     }
 
     /// Y4: a live container's tag decodes as an activation of it.

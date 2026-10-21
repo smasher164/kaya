@@ -75,6 +75,7 @@ pub(crate) const TX_SHOW_TOAST: u16 = 82;
 pub(crate) const TX_DISMISS_TOAST: u16 = 83;
 pub(crate) const TX_COLLECTION_PATCH_IF: u16 = 84;
 pub(crate) const TX_ATTACH_DOCK: u16 = 85;
+pub(crate) const TX_SET_DOCK_PLAYER: u16 = 86;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -196,6 +197,7 @@ pub(crate) const APPLY_SET_VIDEO_CAPTURE: u16 = 70;
 pub(crate) const APPLY_PRESENT_TOAST: u16 = 71;
 pub(crate) const APPLY_WITHDRAW_TOAST: u16 = 72;
 pub(crate) const APPLY_ATTACH_DOCK: u16 = 73;
+pub(crate) const APPLY_SET_DOCK_PLAYER: u16 = 74;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -2833,6 +2835,11 @@ pub fn decode_transaction_with_blobs(
                 window: WindowId(r.u64()),
                 dock: WindowId(r.u64()),
             },
+            TX_SET_DOCK_PLAYER => {
+                let dock = WindowId(r.u64());
+                let player = r.u64();
+                TxOp::SetDockPlayer { dock, player: (player != 0).then_some(crate::protocol::PlayerId(player)) }
+            }
             TX_DISMISS_SHEET => TxOp::DismissSheet {
                 sheet: WindowId(r.u64()),
             },
@@ -4679,6 +4686,10 @@ impl Writer {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&dock.0.to_le_bytes());
             }),
+            ApplyOp::SetDockPlayer { dock, player } => self.record(APPLY_SET_DOCK_PLAYER, |b, _| {
+                b.extend_from_slice(&dock.0.to_le_bytes());
+                b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
+            }),
             ApplyOp::DismissSheet { sheet } => self.record(APPLY_DISMISS_SHEET, |b, _| {
                 b.extend_from_slice(&sheet.0.to_le_bytes());
             }),
@@ -5329,6 +5340,10 @@ impl Writer {
             TxOp::AttachDock { window, dock } => self.record(TX_ATTACH_DOCK, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&dock.0.to_le_bytes());
+            }),
+            TxOp::SetDockPlayer { dock, player } => self.record(TX_SET_DOCK_PLAYER, |b, _| {
+                b.extend_from_slice(&dock.0.to_le_bytes());
+                b.extend_from_slice(&player.map_or(0, |p| p.0).to_le_bytes());
             }),
             TxOp::DismissSheet { sheet } => self.record(TX_DISMISS_SHEET, |b, _| {
                 b.extend_from_slice(&sheet.0.to_le_bytes());

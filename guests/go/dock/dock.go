@@ -12,7 +12,8 @@ func App() *kaya.App {
 		art := a.Bytes()
 		a.Close()
 		playing := tx.Signal(true)
-		tx.Window(0).Title("dock").Size(720, 480).Dock(40, func() kaya.Widget {
+		player := tx.Player().Muted(true).ID()
+		tx.Window(0).Title("dock").Size(720, 480).DockPlayer(player).Dock(40, func() kaya.Widget {
 			return tx.Column(func() {
 				tx.When(playing, func(t *kaya.Tpl) {
 					bar := t.Row(func() {

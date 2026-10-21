@@ -4541,7 +4541,7 @@ export function scroll<T = void>(optsOrBody?: ScrollOptions | ((scroll: Widget) 
 
 export type GridOptions = ContainerOptions & { columnsWhen?: [SizeClass, number] };
 
-export type DockOptions = { window?: number };
+export type DockOptions = { window?: number; player?: Player };
 
 /** A grid container laying its children out row-major into `columns`
  * columns, each at its NATURAL width, aligned across rows. `columnsWhen`
@@ -7052,13 +7052,17 @@ export class App {
    * mounts INTO IT on exit, its value coming back out. Dock ids are
    * guest-allocated in the shared surface namespace; one per window,
    * `window` the primary (0) unless given. A dock whose root holds no
-   * widget collapses. Nests inside the window's scene scope. */
+   * widget collapses. Nests inside the window's scene scope. `player` is
+   * the player the dock shows (docs/media-player-plan.md M17). */
   dock<T = void>(dockId: number, optsOrBody: DockOptions | (() => T), body?: () => T): T {
     const [opts, run] = typeof optsOrBody === "function" ? [{} as DockOptions, optsOrBody] : [optsOrBody, body];
     if (run === undefined) throw new TypeError("kaya: dock(id, opts, body) declares the dock's root in its body");
     const host = opts.window ?? 0;
+    const shown = opts.player;
+    if (shown !== undefined && !(shown instanceof Player)) throw new TypeError("kaya: dock's player takes a kaya.Player");
     return runScope<T>("dock", run, dockId, () => {
       records().push(wire.tx_attach_dock(host, dockId));
+      if (shown !== undefined) records().push(wire.tx_set_dock_player(dockId, shown.id));
     });
   }
 

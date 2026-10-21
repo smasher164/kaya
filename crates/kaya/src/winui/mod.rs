@@ -17105,6 +17105,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.toolbar_buttons.retain(|(w, _), _| *w != window.0);
         }
         ApplyOp::AttachDock { window, dock } => skin::attach_dock(core, window.0, dock.0)?,
+        ApplyOp::SetDockPlayer { dock, player } => skin::set_dock_player(dock.0, player.map(|p| p.0)),
         ApplyOp::PresentSheet { parent, sheet } => {
             // Built hidden; the mount opens it (docs/sheet-plan.md U1).
             let smoke: Grid = XamlReader::Load(&HSTRING::from(SHEET_SMOKE_XAML))?.cast()?;
@@ -26754,6 +26755,12 @@ impl crate::harness::Stage for WinUiStage {
     }
     fn dock_read(&self) -> String {
         Self::on_ui_read(skin::read::dock).unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+    fn dock_line_read(&self) -> String {
+        "none (the WinUI dock draws no progress line; docs/media-player-plan.md M17)".to_owned()
+    }
+    fn dock_player_read(&self) -> String {
+        Self::on_ui_read(skin::read::dock_player).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {

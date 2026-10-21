@@ -9,7 +9,8 @@ let () =
       let art = asset_bytes (asset "covers/cover-600.jpg") in
       let playing = signal Scalar.Bool true in
       window ~title:"dock" ~width:720.0 ~height:480.0 ();
-      dock 40L (fun () ->
+      let now_playing = player ~muted:true () in
+      dock ~player:now_playing 40L (fun () ->
           let root =
             column
               [

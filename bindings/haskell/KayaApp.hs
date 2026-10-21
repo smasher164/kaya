@@ -267,6 +267,7 @@ module KayaApp
     PaletteColor (..),
     imagePalette,
     dock,
+    DockAttr (..),
     Axis (..),
     ContentType (..),
     SizeClass (..),
@@ -1247,13 +1248,18 @@ destroyWindow n = emitB (W.txDestroyWindow n)
 mountIn :: Word64 -> Widget -> Build ()
 mountIn window (Widget n) = emitB (W.txMount window n)
 
+-- | A dock's construction attributes: 'DockPlayer' names the player it
+-- shows (docs\/media-player-plan.md M17).
+data DockAttr = DockPlayer Player
+
 -- | A window's DOCK, the surface under every pane and above a phone's tab
--- bar (docs\/styling-pass-plan.md Y8): the window, a fresh surface id, and
--- the body building its root, answering @(root, value)@; the value comes
--- back out. One per window.
-dock :: Word64 -> Word64 -> Build (Widget, a) -> Build a
-dock window surface body = do
+-- bar (docs\/styling-pass-plan.md Y8): the window, a fresh surface id, its
+-- attributes, and the body building its root, answering @(root, value)@;
+-- the value comes back out. One per window.
+dock :: Word64 -> Word64 -> [DockAttr] -> Build (Widget, a) -> Build a
+dock window surface attrs body = do
   emitB (W.txAttachDock window surface)
+  mapM_ (\(DockPlayer (Player p)) -> emitB (W.txSetDockPlayer surface p)) attrs
   (root, value) <- body
   mountIn surface root
   return value

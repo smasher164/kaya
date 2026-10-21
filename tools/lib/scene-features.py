@@ -154,6 +154,7 @@ VERB_FEATURE = {
     "expect_selected": "cards",
     "expect_tint": "tracks",
     "expect_dock": "dock",
+    "expect_dock_player": "dock",
     # docs/autofill-plan.md §5, the same reasoning.
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.

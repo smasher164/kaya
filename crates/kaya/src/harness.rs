@@ -544,6 +544,13 @@ pub enum Step {
     /// Whether the primary window's dock is on screen under its panes:
     /// `shown` or `hidden` (Y8).
     ExpectDock(String),
+    /// Whether the backend holds a player for the primary window's dock:
+    /// `bound` or `none` (docs/media-player-plan.md M17).
+    ExpectDockPlayer(String),
+    /// The progress line a backend draws at the primary window's dock's top
+    /// edge: `none`, or the fraction it shows within DOCK_LINE_TOLERANCE
+    /// (docs/media-player-plan.md M17; read on the phones' lanes only).
+    ExpectDockLine(String),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -1271,7 +1278,9 @@ impl Step {
             | Step::ExpectSplit(..)
             | Step::ExpectPanes(..)
             | Step::Frame(..)
-            | Step::ExpectDock(_) => Vec::new(),
+            | Step::ExpectDock(_)
+            | Step::ExpectDockPlayer(_)
+            | Step::ExpectDockLine(_) => Vec::new(),
         }
     }
 
@@ -1351,7 +1360,9 @@ impl Step {
             | Step::ExpectSelected { .. }
             | Step::ExpectChecked { .. }
             | Step::ExpectTint { .. }
-            | Step::ExpectDock { .. } => true,
+            | Step::ExpectDock { .. }
+            | Step::ExpectDockPlayer { .. }
+            | Step::ExpectDockLine { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -1506,6 +1517,9 @@ fn word_reading(got: &str, want: &str, what: impl Fn() -> String) -> Result<Stri
         Err(format!("{} reads {got}, wanted {want}", what()))
     }
 }
+
+/// How far `expect_dock_line`'s drawn fraction may sit from the scene's.
+pub(crate) const DOCK_LINE_TOLERANCE: f64 = 0.02;
 
 pub(crate) const VIDEO_GROUND_OFFSET: f64 = 8.0;
 
@@ -2067,6 +2081,12 @@ pub trait Stage: Send + 'static {
     /// its width with every pane ending above it, `hidden` when no dock is
     /// on screen, else a description.
     fn dock_read(&self) -> String;
+    /// `bound` when the backend holds a live player for the primary window's
+    /// dock, `none` when it holds none, else a description.
+    fn dock_player_read(&self) -> String;
+    /// `none` when no progress line is drawn at the primary window's dock,
+    /// else the fraction the drawn line shows, then what was read.
+    fn dock_line_read(&self) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -3106,6 +3126,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_dock takes shown or hidden, got {word:?}"));
                 }
                 Step::ExpectDock(word.to_owned())
+            }
+            "expect_dock_player" => {
+                let word = rest.trim();
+                if !["bound", "none"].contains(&word) {
+                    return Err(format!("expect_dock_player takes bound or none, got {word:?}"));
+                }
+                Step::ExpectDockPlayer(word.to_owned())
+            }
+            "expect_dock_line" => {
+                let word = rest.trim();
+                if word != "none" && !word.parse::<f64>().is_ok_and(|f| (0.0..=1.0).contains(&f)) {
+                    return Err(format!("expect_dock_line takes none or a fraction 0..1, got {word:?}"));
+                }
+                Step::ExpectDockLine(word.to_owned())
             }
             "expect_not_taller" => {
                 let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7165,6 +7199,22 @@ fn run_with_log(
                 word_reading(&stage.checked_read(*t), want, || format!("{} checked", target_spec(t)))
             })),
             Step::ExpectDock(want) => Some(poll(|| word_reading(&stage.dock_read(), want, || "dock".to_owned()))),
+            Step::ExpectDockPlayer(want) => {
+                Some(poll(|| word_reading(&stage.dock_player_read(), want, || "dock player".to_owned())))
+            }
+            Step::ExpectDockLine(want) => Some(poll(|| {
+                let got = stage.dock_line_read();
+                let first = got.split(' ').next().unwrap_or("");
+                let near = match (want.parse::<f64>(), first.parse::<f64>()) {
+                    (Ok(w), Ok(g)) => (w - g).abs() <= DOCK_LINE_TOLERANCE,
+                    _ => first == want,
+                };
+                if near {
+                    Ok(format!("dock line {want}"))
+                } else {
+                    Err(format!("dock line reads {got}, wanted {want}"))
+                }
+            })),
             Step::ExpectHeightFits(t) => Some(poll(|| {
                 let off = stage.height_fits(*t);
                 if off.is_empty() {
@@ -10515,6 +10565,12 @@ mod tests {
         fn dock_read(&self) -> String {
             "shown".into()
         }
+        fn dock_player_read(&self) -> String {
+            "bound".into()
+        }
+        fn dock_line_read(&self) -> String {
+            "none".into()
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -11596,6 +11652,12 @@ mod tests {
             fn dock_read(&self) -> String {
                 String::new()
             }
+            fn dock_player_read(&self) -> String {
+                String::new()
+            }
+            fn dock_line_read(&self) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -12108,6 +12170,12 @@ mod tests {
                 String::new()
             }
             fn dock_read(&self) -> String {
+                String::new()
+            }
+            fn dock_player_read(&self) -> String {
+                String::new()
+            }
+            fn dock_line_read(&self) -> String {
                 String::new()
             }
             fn cross_mode(&self, _: Target) -> String {
