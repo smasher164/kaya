@@ -44,6 +44,8 @@ var wireTypes = map[string]bool{
 	"kaya.ImagePhase": true,
 	// A label's tint (docs/styling-pass-plan.md Y7): an I64.
 	"kaya.Tint": true,
+	// A stamped button's symbol (docs/media-player-plan.md M16 (21)): an I64.
+	"kaya.Symbol": true,
 }
 
 // wireTypeName names a field's declared type in the wire vocabulary: a
@@ -413,6 +415,10 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("\treturn r.c.Button(r.t, f, onClick)")
 	w("}")
 	w("")
+	w("func (r %sRow) ButtonText(text string, onClick func(*kaya.Tx, %s)) kaya.Node {", lowerFirst(name), key)
+	w("\treturn r.c.Button(r.t, text, onClick)")
+	w("}")
+	w("")
 	w("func (r %sRow) Spacer() kaya.Node { return r.t.Spacer() }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) Entry(onChange func(*kaya.Tx, %s, string)) kaya.Node {", lowerFirst(name), key)
@@ -510,6 +516,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n, f) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }", lowerFirst(name))
+	w("func (r %sRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetMaxLines(n kaya.Node, lines int) { r.t.SetMaxLines(n, lines) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
 	w("func (r %sRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }", lowerFirst(name))
