@@ -18893,6 +18893,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         }
                     } else {
                         button.SetStyle(&theme_resource::<Style>("SubtleButtonStyle")?)?;
+                        // docs/media-player-plan.md M20 (1): the caption on the
+                        // text column, the link role's rule one kind over.
+                        let padding = button.Padding()?;
+                        button.SetPadding(Thickness { Left: 0.0, Right: 0.0, ..padding })?;
                     }
                 }
                 (NativeWidget::Button { caption, .. }, Prop::Role, Value::I64(1)) => {
@@ -27113,6 +27117,28 @@ impl crate::harness::Stage for WinUiStage {
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn text_left(&self, t: crate::harness::Target) -> Result<f64, String> {
+        Self::on_ui_read(move |core| {
+            let index = crate::harness::try_resolve(t.index, registry_ids(core, t.kind).len());
+            let Some(id) = index.and_then(|i| registry_widget_at(core, t.kind, i)).map(WidgetId) else {
+                return Ok(Err("<no such target>".to_owned()));
+            };
+            // A button's text is its caption block; a label's is its own block.
+            let block = match core.widgets.get(&id) {
+                Some(NativeWidget::Button { caption, .. }) => caption.clone(),
+                Some(NativeWidget::Label { block, .. }) => block.clone(),
+                _ => return Ok(Err("<the target is not a text control>".to_owned())),
+            };
+            let element: FrameworkElement = block.cast()?;
+            element.UpdateLayout()?;
+            let at = element
+                .TransformToVisual(None::<&UIElement>)?
+                .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+            Ok(Ok(f64::from(at.X)))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
     }
 
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {

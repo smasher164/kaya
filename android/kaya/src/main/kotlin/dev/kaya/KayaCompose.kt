@@ -384,6 +384,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.offset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -2732,6 +2733,15 @@ internal fun kayaTextRectRead(node: KayaNode): Modifier = Modifier.onGloballyPos
     kayaTextWindows[node.id] = System.identityHashCode(it.findRootCoordinates())
 }
 
+/** The plain role's label on the text column (docs/media-player-plan.md M20
+ * (1)): Material's text button pads its label by 12 dp a side, so the slot
+ * gives both sides back and the button overhangs it by its own padding. */
+internal fun kayaPlainTrim(): Modifier = Modifier.layout { measurable, constraints ->
+    val pad = ButtonDefaults.TextButtonContentPadding.calculateLeftPadding(LayoutDirection.Ltr).roundToPx()
+    val placeable = measurable.measure(constraints.offset(horizontal = 2 * pad))
+    layout((placeable.width - 2 * pad).coerceAtLeast(0), placeable.height) { placeable.place(-pad, 0) }
+}
+
 internal val kayaOverlapRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
 
 /** The window each overlap rect was read in, by node id. */
@@ -2739,6 +2749,9 @@ internal val kayaTextWindows = HashMap<Long, Int>()
 
 /** Each label's and button's bounds in the root's space (docs/flex-shrink-plan.md §4). */
 internal val kayaTextRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+/** A button's caption text, by node id, in root pixels — what expect_text_aligned reads (M20 (1)). */
+internal val kayaCaptionRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
 
 /** Each image's drawn box in dp, the layout's own reading, for
  * `expect_image_size` (docs/photo-attach-plan.md §5). */
@@ -8915,6 +8928,17 @@ private fun kayaRowCenteredRead(activity: ComponentActivity, spec: String): Stri
         "${cells[worst].bottom.roundToInt()}, the row ${fill.top.roundToInt()}..${fill.bottom.roundToInt()})"
 }
 
+/** expect_text_aligned's read: the left edge in dp of a label's text or a
+ * button's caption, null for no such target, NaN while nothing is laid out
+ * (M20 (1)). */
+private fun kayaTextLeftRead(activity: ComponentActivity, spec: String): Double? {
+    val node = target(spec, "button", KayaSceneModel.buttons)
+        ?: target(spec, "label", KayaSceneModel.labels) ?: return null
+    val rect = (if (node.kind == KayaCompose.KIND_BUTTON) kayaCaptionRects[node.id]
+        else kayaOverlapRects[node.id] ?: kayaTextRects[node.id]) ?: return Double.NaN
+    return rect.left / activity.resources.displayMetrics.density.toDouble()
+}
+
 private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
         val dock = kayaDockFrame ?: return@onUi "unread (no dock frame is laid out)"
         val density = activity.resources.displayMetrics.density
@@ -14739,6 +14763,33 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         else if (gotRow.isEmpty()) observed.add("${parts[1]} $noun")
                         else failures.add("${parts[1]} $noun $gotRow")
                     }
+                    "expect_text_aligned" -> {
+                        // harness.rs's ExpectTextAligned, the same sentences (M20 (1)).
+                        if (parts.size != 3) {
+                            failures.add("expect_text_aligned wants two targets: $line")
+                        } else {
+                            fun verdict(): String? {
+                                val x = onUi(activity) { kayaTextLeftRead(activity, parts[1]) }
+                                val y = onUi(activity) { kayaTextLeftRead(activity, parts[2]) }
+                                return when {
+                                    x == null -> "no such target ${parts[1]}"
+                                    y == null -> "no such target ${parts[2]}"
+                                    x.isNaN() -> "${parts[1]} text unread: <no laid-out frame>"
+                                    y.isNaN() -> "${parts[2]} text unread: <no laid-out frame>"
+                                    kotlin.math.abs(x - y) <= 1 -> null
+                                    else -> "${parts[1]} text starts at ${Math.round(x)}, ${parts[2]} at ${Math.round(y)}, " +
+                                        "wanted the same edge"
+                                }
+                            }
+                            var why = verdict()
+                            val alignDeadline = System.currentTimeMillis() + 5000
+                            while (why != null && System.currentTimeMillis() < alignDeadline) {
+                                Thread.sleep(100)
+                                why = verdict()
+                            }
+                            why?.let { failures.add(it) } ?: observed.add("${parts[1]} and ${parts[2]} text aligned")
+                        }
+                    }
                     "expect_hugs" -> {
                         // The same read, wanted SHORT (harness.rs
                         // Step::ExpectHugs, the `fill = false` opt-out): a
@@ -19089,6 +19140,7 @@ private fun KayaRenderCore(
             val buttonRect = Modifier.onGloballyPositioned { kayaTextRects[node.id] = it.boundsInRoot()
                 kayaTextWindows[node.id] = System.identityHashCode(it.findRootCoordinates())
             }
+            val captionRect = Modifier.onGloballyPositioned { kayaCaptionRects[node.id] = it.boundsInRoot() }
             // THE ROLE TIER, in M3's own emphasis ladder
             // (docs/styling-plan.md D4). THE FLOOR IS OUTLINED, filled
             // reserved for `prominent`, or a roleless button would leave
@@ -19149,7 +19201,7 @@ private fun KayaRenderCore(
                         // (`Button` provides labelLarge internally), so
                         // this samples the ramp route through a
                         // component kaya never styles.
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                        Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 KayaCompose.ROLE_DESTRUCTIVE ->
                     Button(
@@ -19160,15 +19212,15 @@ private fun KayaRenderCore(
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
                     ) {
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                        Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 // The row accessory's low-emphasis rung (docs/tasks-plan.md §4, R6).
                 KayaCompose.ROLE_PLAIN ->
                     TextButton(
                         onClick = { KayaPresent.emitClicked(node.tag) },
-                        modifier = boxFill.then(a11y).then(buttonRect),
+                        modifier = kayaPlainTrim().then(boxFill).then(a11y).then(buttonRect),
                     ) {
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                        Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 else ->
                     OutlinedButton(
@@ -19180,7 +19232,7 @@ private fun KayaRenderCore(
                         // already do (grow.steps' button#0).
                         modifier = boxFill.then(a11y).then(buttonRect),
                     ) {
-                        Text(node.text, onTextLayout = { kayaTypefaceSites["button"] = it })
+                        Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
             }
         }

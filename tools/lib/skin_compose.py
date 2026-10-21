@@ -103,6 +103,8 @@ READS = [
     ("expect_row_inset's reader", "private fun kayaRowInsetRead(activity: ComponentActivity, spec: String): String? {",
      ["kayaRowBoxes(activity, row)", "val pad = KAYA_TABLE_CARD_PAD_X.value",
       "if (lead + 0.5f >= pad && trail + 0.5f >= pad && top + 0.5f >= KAYA_ROW_PAD_Y && bottom + 0.5f >= KAYA_ROW_PAD_Y) return \"\""]),
+    ("expect_text_aligned's reader", "private fun kayaTextLeftRead(activity: ComponentActivity, spec: String): Double? {",
+     ["kayaCaptionRects[node.id]", "kayaOverlapRects[node.id] ?: kayaTextRects[node.id]"]),
     ("expect_row_centered's reader", "private fun kayaRowCenteredRead(activity: ComponentActivity, spec: String): String? {",
      ["kayaRowBoxes(activity, row)", "if (abs(off) <= 2f) return \"\""]),
     ("the row readers' boxes", "private fun kayaRowBoxes(activity: ComponentActivity, row: KayaNode): Pair<RectF?, List<RectF>>? {",
@@ -115,6 +117,10 @@ READS = [
 ]
 MODEL = r"node\.shape\b|node\.labelTint\b|node\.selected\b|node\.activatable\b|node\.selectedDeclared\b"
 CALLS = [
+    ("the plain button's label on the text column (M20)",
+     "modifier = kayaPlainTrim().then(boxFill).then(a11y).then(buttonRect),"),
+    ("the plain trim gives both sides back (M20)",
+     "layout((placeable.width - 2 * pad).coerceAtLeast(0), placeable.height) { placeable.place(-pad, 0) }"),
     ("the container arm wears its skin", ".then(kayaFilledSurface(node)).then(kayaInsetPadding(node))"),
     ("the phone dock's rhythm (M18)", "val KAYA_DOCK_PAD_Y = 8.dp\nval KAYA_DOCK_LINE = 2.dp"),
     ("a table row's surface reaches the segment's edge (M19)",
@@ -202,6 +208,8 @@ def findings(text):
 
 
 CUTS = [
+    ("Compose: the plain button's padding kept (M20)", r"modifier = kayaPlainTrim\(\)\.then\(boxFill\)",
+     "modifier = boxFill", "the plain button's label on the text column (M20) no longer holds"),
     ("Compose: the dock's line not drawn", r"KayaDockLine\(Modifier\.align\(Alignment\.BottomStart\)\.windowInsetsPadding\(edges\.only\(WindowInsetsSides\.Bottom\)\)\)", "Unit",
      "dock bar lacks KayaDockLine"),
     ("Compose: the dock's line from a clock of its own", r"exo\.currentPosition\.toFloat\(\) / duration",

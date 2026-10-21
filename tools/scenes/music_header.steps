@@ -19,6 +19,8 @@ expect_ground_color column@album_header "light E3ABB9 dark 673946"
 expect_inset 0
 expect_inset column@album_tracks 16
 expect_ax label@album_title "heading/Through The Olive Branches"
+# The artist's plain button sits on the text column (M20 (1)).
+expect_text_aligned button@album_artist label@album_title
 expect label@album_about "2021 · 2 songs, 40 sec"
 expect_ax button@play_album "button/Play"
 expect_ax checkbox@favorite "toggle/Favorite"

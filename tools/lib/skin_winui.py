@@ -109,6 +109,8 @@ READS = [
      ["table_row_grid(core, t)", "skin::frame_of(id)", "cell.TransformToVisual(&frame)?",
       "lead + 0.5 >= TABLE_CARD_PAD", "trail_in + 0.5 >= TABLE_CARD_PAD",
       "top + 0.5 >= TABLE_ROW_PAD_Y", "bottom_in + 0.5 >= TABLE_ROW_PAD_Y"]),
+    ("expect_text_aligned's reader", "fn text_left(&self, t: crate::harness::Target) -> Result<f64, String> {",
+     ["Some(NativeWidget::Button { caption, .. }) => caption.clone()", "TransformToVisual(None::<&UIElement>)"]),
     ("expect_row_centered's reader", "fn row_centered(&self, t: crate::harness::Target) -> String {",
      ["table_row_grid(core, t)", "if off.abs() > 2.0 => format!("]),
     ("expect_fill's skin readings", "fn fill_tint(&self, t: crate::harness::Target) -> String {",
@@ -120,6 +122,9 @@ READS = [
       "let filled = skin::read::gap(sample, fill) < skin::read::gap(sample, ground);", "if marked && filled {"]),
 ]
 CALLS = [
+    ("the plain button's caption on the text column (M20)",
+     "button.SetStyle(&theme_resource::<Style>(\"SubtleButtonStyle\")?)?;\n"
+     "let padding = button.Padding()?;\nbutton.SetPadding(Thickness { Left: 0.0, Right: 0.0, ..padding })?;"),
     ("a parent lays out an activatable container's host", "let inner = skin::host_of(&inner).unwrap_or(inner);"),
     ("the table's host, head and rule reach the card's stroke (M19)",
      "host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;\nhost.SetMargin(table_edge_margin())?;"),
@@ -217,6 +222,9 @@ def findings(text):
 
 
 CUTS = [
+    ("WinUI: the plain button's padding kept (M20)",
+     r"\n\s+let padding = button\.Padding\(\)\?;\n\s+button\.SetPadding\(Thickness \{ Left: 0\.0, Right: 0\.0, \.\.padding \}\)\?;", "",
+     "the plain button's caption on the text column (M20) no longer holds"),
     ("WinUI: the host back inside the card (M19)", r"\n\s+host\.SetMargin\(table_edge_margin\(\)\)\?;", "",
      "the table's host, head and rule reach the card's stroke (M19) no longer holds"),
     ("WinUI: the rows' sides gone (M19)", r"if in_declared_table\(core, id\) \{\n\s+return table_row_thickness\(pad\);\n\s+\}\n",

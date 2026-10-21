@@ -8448,6 +8448,7 @@ const TINT_CSS: &str = "\
 .kaya-activatable-pad { padding: 12px; }
 .kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 5px 12px; }
 .kaya-filled.osd { background-clip: border-box; }
+button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
 .kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
@@ -9458,6 +9459,7 @@ fn symbol_button_classes(button: &gtk4::Button) {
 }
 
 const FILLED_CLASS: &str = "kaya-filled";
+const PLAIN_CLASS: &str = "kaya-plain";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
 const ACTIVATABLE_PAD_CLASS: &str = "kaya-activatable-pad";
 const TINT_CLASSES: [&str; 6] =
@@ -17282,11 +17284,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     button.remove_css_class("destructive-action");
                     button.remove_css_class("suggested-action");
                     button.remove_css_class("flat");
+                    button.remove_css_class(PLAIN_CLASS);
                     button.add_css_class(match role {
                         1 => "destructive-action",
                         2 => "suggested-action",
                         _ => "flat",
                     });
+                    // docs/media-player-plan.md M20 (1): the label on the text column.
+                    if role == 5 {
+                        button.add_css_class(PLAIN_CLASS);
+                    }
                     symbol_button_classes(button);
                 }
                 // An icon-only button (docs/composer-plan.md §2): the glyph in
@@ -25017,6 +25024,26 @@ impl crate::harness::Stage for GtkStage {
                 None => "no cells".to_string(),
                 _ => String::new(),
             }
+        })
+    }
+
+    fn text_left(&self, t: crate::harness::Target) -> Result<f64, String> {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, WidgetExt};
+            let Some(widget) = target_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            // A button's text is its label child; a label's is itself.
+            let text = match widget.downcast_ref::<gtk4::Button>() {
+                Some(button) => button.child().ok_or_else(|| "<the button has no child>".to_owned())?,
+                None => widget.clone(),
+            };
+            if text.downcast_ref::<gtk4::Label>().is_none() {
+                return Err(format!("<the text is a {}, not a GtkLabel>", text.type_().name()));
+            }
+            while glib::MainContext::default().iteration(false) {}
+            let Some(root) = text.root() else { return Err("<the widget has no window>".to_owned()) };
+            text.compute_bounds(&root)
+                .map(|b| f64::from(b.x()))
+                .ok_or_else(|| "<the text has no bounds>".to_owned())
         })
     }
 

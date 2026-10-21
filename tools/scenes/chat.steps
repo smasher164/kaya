@@ -8,6 +8,8 @@
 expect_title "chat"
 expect label@unread[maya] "4 new"
 expect label@unread[sam] "1 new"
+# A thread's plain open button sits on its preview's text column (docs/media-player-plan.md M20 (1)).
+expect_text_aligned button@open[maya] label@preview[maya]
 click button@open[maya]
 expect_scrolled_to column@thread m27
 expect label@unread[maya] ""

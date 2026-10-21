@@ -518,6 +518,11 @@ pub enum Step {
     /// `expect_row_centered <row>`: every cell of a declared table row sits on
     /// the row's vertical centre within two units (M19).
     ExpectRowCentered(Target),
+    /// `expect_text_aligned <a> <b>`: the two targets' text starts at the
+    /// same left edge within a point — a button's caption against a label's
+    /// text (docs/media-player-plan.md M20 (1): the plain role's label sits
+    /// on the text column).
+    ExpectTextAligned(Target, Target),
     /// Two targets, one comparison: the first's drawn height against the
     /// second's. RELATIONAL BECAUSE A HEIGHT IS NOT PORTABLE — the same
     /// list row draws 46pt on the mac, 56 on the phones, 57 on Windows and
@@ -1123,6 +1128,7 @@ impl Step {
             | Step::ExpectFill(t, _) => vec![t],
             Step::ExpectNotTaller(a, b) => vec![a, b],
             Step::ExpectGap(a, b, _) => vec![a, b],
+            Step::ExpectTextAligned(a, b) => vec![a, b],
             Step::Toggle(t, _)
             | Step::SetValue(t, _)
             | Step::Hold(t, _)
@@ -1370,6 +1376,7 @@ impl Step {
             Step::ExpectHugs { .. } => true,
             Step::ExpectRowInset { .. } => true,
             Step::ExpectRowCentered { .. } => true,
+            Step::ExpectTextAligned { .. } => true,
             Step::ExpectNotTaller { .. } => true,
             Step::ExpectHeightFits { .. } => true,
             Step::ExpectFill { .. } => true,
@@ -2077,6 +2084,10 @@ pub trait Stage: Send + 'static {
     /// row's vertical centre within two units; otherwise the furthest cell
     /// with its box and the row's.
     fn row_centered(&self, target: Target) -> String;
+    /// The left edge, in window points, of the target's drawn TEXT — a
+    /// button's caption, a label's own text — off the toolkit; Err says why
+    /// there is no reading (expect_text_aligned, M20 (1)).
+    fn text_left(&self, target: Target) -> Result<f64, String>;
     /// The tint a container's drawn surface is nearest to — `accent`,
     /// `success`, `warning`, `critical`, `neutral`, or `none` for the bare
     /// ground — sampled 4 units inside its RIGHT edge at mid-height, in the
@@ -3211,6 +3222,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_row_centered wants a row target: {line:?}"));
                 }
                 Step::ExpectRowCentered(t)
+            }
+            "expect_text_aligned" => {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [a, b] = words[..] else {
+                    return Err(format!("expect_text_aligned wants two targets: {line:?}"));
+                };
+                let (a, b) = (parse_target(a)?, parse_target(b)?);
+                for t in [&a, &b] {
+                    if !matches!(t.kind, TargetKind::Label | TargetKind::Button) {
+                        return Err(format!("expect_text_aligned wants label or button targets: {line:?}"));
+                    }
+                }
+                Step::ExpectTextAligned(a, b)
             }
             "expect_lines" => {
                 let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7317,6 +7341,20 @@ fn run_with_log(
                     Err(format!("{} row centered {off}", target_spec(t)))
                 }
             })),
+            Step::ExpectTextAligned(a, b) => Some(poll(|| match (stage.text_left(*a), stage.text_left(*b)) {
+                (Ok(x), Ok(y)) if (x - y).abs() <= 1.0 => {
+                    Ok(format!("{} and {} text aligned", target_spec(a), target_spec(b)))
+                }
+                (Ok(x), Ok(y)) => Err(format!(
+                    "{} text starts at {}, {} at {}, wanted the same edge",
+                    target_spec(a),
+                    x.round(),
+                    target_spec(b),
+                    y.round()
+                )),
+                (Err(why), _) => Err(format!("{} text unread: {why}", target_spec(a))),
+                (_, Err(why)) => Err(format!("{} text unread: {why}", target_spec(b))),
+            })),
             Step::ExpectHugs(t) => {
                 // The same read, wanted SHORT: a reader that could not read
                 // ("no ...") is a failure on this side too, never a hug.
@@ -10623,6 +10661,9 @@ mod tests {
         fn row_centered(&self, _: Target) -> String {
             String::new()
         }
+        fn text_left(&self, _: Target) -> Result<f64, String> {
+            Ok(24.0)
+        }
         fn height_fits(&self, t: Target) -> String {
             if t.index > 0 { "62pt around 43pt of content".into() } else { String::new() }
         }
@@ -11719,6 +11760,9 @@ mod tests {
             fn row_centered(&self, _: Target) -> String {
                 String::new()
             }
+            fn text_left(&self, _: Target) -> Result<f64, String> {
+                Err("<the mock lays nothing out>".to_owned())
+            }
             fn height_fits(&self, _: Target) -> String {
                 String::new()
             }
@@ -12247,6 +12291,9 @@ mod tests {
             }
             fn row_centered(&self, _: Target) -> String {
                 String::new()
+            }
+            fn text_left(&self, _: Target) -> Result<f64, String> {
+                Err("<the mock lays nothing out>".to_owned())
             }
             fn height_fits(&self, _: Target) -> String {
                 String::new()
@@ -13537,6 +13584,9 @@ mod cells_even_tests {
         assert!(matches!(parse("expect_row_centered row@track[1860160]").expect("parses").as_slice(), [Step::ExpectRowCentered(_)]));
         assert!(parse("expect_row_inset column@tracks").is_err());
         assert!(parse("expect_row_centered label@x").is_err());
+        assert!(matches!(parse("expect_text_aligned button@album_artist label@album_title").expect("parses").as_slice(), [Step::ExpectTextAligned(_, _)]));
+        assert!(parse("expect_text_aligned button@album_artist").is_err());
+        assert!(parse("expect_text_aligned row@track label@album_title").is_err());
         assert!(parse("expect_dock_height tall").is_err());
         assert!(matches!(
             parse("expect_ground_color column@header \"light 673946 dark 3B2128\"").expect("parses").as_slice(),

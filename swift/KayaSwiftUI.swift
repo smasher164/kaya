@@ -14095,6 +14095,36 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(parts[1]) \(noun) \(gotRow)")
                 }
+            case "expect_text_aligned":
+                // harness.rs's ExpectTextAligned, the same sentences (M20 (1)).
+                guard parts.count == 3 else {
+                    failures.append("expect_text_aligned wants two targets: \(line)")
+                    break
+                }
+                // nil when the two edges agree, else what was read.
+                func alignVerdict() -> String? {
+                    let (x, y) = DispatchQueue.main.sync { (kayaTextLeftRead(parts[1]), kayaTextLeftRead(parts[2])) }
+                    switch (x, y) {
+                    case (nil, _): return "no such target \(parts[1])"
+                    case (_, nil): return "no such target \(parts[2])"
+                    case (.some(nil), _): return "\(parts[1]) text unread: <no laid-out frame>"
+                    case (_, .some(nil)): return "\(parts[2]) text unread: <no laid-out frame>"
+                    case let (x??, y??):
+                        if abs(x - y) <= 1 { return nil }
+                        return "\(parts[1]) text starts at \(Int(x.rounded())), \(parts[2]) at \(Int(y.rounded())), wanted the same edge"
+                    }
+                }
+                var alignWhy = alignVerdict()
+                let alignDeadline = Date().addingTimeInterval(5)
+                while Date() < alignDeadline, alignWhy != nil {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    alignWhy = alignVerdict()
+                }
+                if let why = alignWhy {
+                    failures.append(why)
+                } else {
+                    observed.append("\(parts[1]) and \(parts[2]) text aligned")
+                }
             case "expect_hugs":
                 // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
                 // the `fill = false` opt-out): a reader that could not read is
@@ -15417,6 +15447,31 @@ var kayaLabelFrames: [UInt64: CGSize] = [:]
 /// frame per id would keep whichever copy wrote last. A rendering that
 /// leaves the tree takes its frame with it.
 var kayaLabelWindowFrames: [UInt64: [UUID: CGRect]] = [:]
+
+#if os(macOS)
+/// The live NSButton behind each mac button node — what expect_text_aligned
+/// asks for the caption's inset inside the control (M20 (1)).
+var kayaMacButtons: [UInt64: NSButton] = [:]
+#endif
+
+/// expect_text_aligned's read: the left edge, in the window's space, of a
+/// label's text or a button's caption; nil for no such target, .some(nil)
+/// while nothing is laid out (M20 (1)).
+@MainActor func kayaTextLeftRead(_ spec: Substring) -> Double?? {
+    guard let node = kayaTarget(spec, "button", kayaScene.buttons) ?? kayaTarget(spec, "label", kayaScene.labels) else {
+        return nil
+    }
+    guard let frame = kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }) else {
+        return .some(nil)
+    }
+    var left = Double(frame.minX)
+    #if os(macOS)
+    if node.kind == kindButton, let button = kayaMacButtons[node.id], let cell = button.cell {
+        left += Double(cell.titleRect(forBounds: button.bounds).minX)
+    }
+    #endif
+    return .some(left)
+}
 
 private struct KayaLabelFrameReader: View {
     let id: UInt64
@@ -25974,7 +26029,7 @@ struct KayaRender: View {
             // keeps SwiftUI's Button: it measures what it draws.
             #if os(macOS)
                 KayaMacButton(
-                    title: node.text, tag: node.tag, role: node.role,
+                    id: node.id, title: node.text, tag: node.tag, role: node.role,
                     fillsWidth: node.grow > 0 && flexVertical == false
                 )
                     .alignmentGuide(.top) { d in
@@ -26536,6 +26591,7 @@ struct KayaRender: View {
     /// while drawing the bezel (52x32). An AppKit control cannot disagree with
     /// itself (tools/check-design-generation.py).
     private struct KayaMacButton: NSViewRepresentable {
+        let id: UInt64
         let title: String
         let tag: [UInt8]
         var role: Int64 = 0
@@ -26557,7 +26613,12 @@ struct KayaRender: View {
                 title: title, target: context.coordinator,
                 action: #selector(Coordinator.fire))
             button.bezelStyle = .rounded
+            kayaMacButtons[id] = button
             return button
+        }
+
+        static func dismantleNSView(_ button: NSButton, coordinator: Coordinator) {
+            kayaMacButtons = kayaMacButtons.filter { $0.value !== button }
         }
 
         func updateNSView(_ button: NSButton, context: Context) {

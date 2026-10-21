@@ -194,6 +194,8 @@ READS = [
      ["kayaWindowPixels()", "shot.at(CGPoint(x: fill.minX + 2, y: y))", "shot.at(CGPoint(x: fill.maxX - 2, y: y))",
       "if kayaColourGap(between, outside) <= 0.02 { return nil }",
       "if kayaColourGap(lead, between) <= 0.02 && kayaColourGap(trail, between) <= 0.02 { return \"\" }"]),
+    ("expect_text_aligned's reader", "@MainActor func kayaTextLeftRead(_ spec: Substring) -> Double?? {",
+     ["kayaLabelWindowFrames[node.id]", "cell.titleRect(forBounds: button.bounds).minX"]),
     ("expect_row_centered's reader", "@MainActor func kayaRowCenteredRead(_ spec: Substring) -> String? {",
      ["kayaRowBoxes(row)", "abs(worst.1) > 2 else"]),
     ("the row readers' boxes",

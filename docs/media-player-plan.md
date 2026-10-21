@@ -946,6 +946,19 @@ carries padding, while SwiftUI's plain style has none; the sidebar's heading
 at the sidebar's inset beside rows whose text sits 10-12 further in; and the
 album header's 24 against the page's 16.
 
+### M20: The spacing pass's open questions (RULED 2026-10-21)
+
+The maintainer accepted the recommendations on the spacing page ("im okay with
+your recommendations"): (1) the `plain` role's label lines up with the text
+around it on GTK, Compose and WinUI (each arm takes back its own padding, as
+WinUI's `link` role already does), which moves every plain button in every
+kaya app; (2) a label and the containers take a maximum width in the core and
+all nine bindings, and the app caps the search shelf's cards at the art's
+width with two lines; (3) the WinUI artist panel that wraps its stats line
+instead of growing to fit it is a bug in that backend's flex widths, fixed;
+(4) the album header keeps its 24 inset; (5) the sidebar's "Your Library"
+heading stays at the sidebar's inset.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

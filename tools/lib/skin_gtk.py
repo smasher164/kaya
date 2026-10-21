@@ -93,6 +93,8 @@ READS = [
      ["table_row_box(core, t)", "row.compute_bounds(&row), first.compute_bounds(&row), last.compute_bounds(&row)",
       "lead_in + 0.5 >= TABLE_ROW_PAD", "trail_in + 0.5 >= TABLE_ROW_PAD",
       "top_in + 0.5 >= TABLE_ROW_PAD_Y", "bottom_in + 0.5 >= TABLE_ROW_PAD_Y"]),
+    ("expect_text_aligned's reader", "fn text_left(&self, t: crate::harness::Target) -> Result<f64, String> {",
+     ["button.child()", "text.compute_bounds(&root)"]),
     ("expect_row_centered's reader", "fn row_centered(&self, t: crate::harness::Target) -> String {",
      ["table_row_box(core, t)", "if off.abs() > 2.0 => format!("]),
     ("hover's route", "fn hover(&self, t: crate::harness::Target) {",
@@ -102,6 +104,9 @@ READS = [
 MODEL = (r"image_shape\(|IMAGE_SHAPE_KEY|has_css_class|css_classes\(\)|state_flags\(|LABEL_TINT_CLASSES|"
          r"SHAPE_CLASSES|ACTIVATABLE_CLASS|skin\.activations")
 CALLS = [
+    ("the plain button's label on the text column (M20)",
+     "button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }"),
+    ("the plain role wears the class the rule keys on (M20)", "if role == 5 {\nbutton.add_css_class(PLAIN_CLASS);\n}"),
     ("the ground arms", "(NativeWidget::Column(c) | NativeWidget::Row(c), Prop::Ground, Value::I64(kind)) => {\n"
      "let widget = c.clone().upcast::<gtk4::Widget>();\nset_ground(core, id.0, &widget, |g| g.kind = kind);"),
     ("the gradient's colour reaches the ground",
@@ -216,6 +221,9 @@ def findings(text):
 
 
 CUTS = [
+    ("GTK: the plain button's padding kept (M20)",
+     r"button\.text-button\.kaya-plain \{ margin-left: -17px; margin-right: -17px; \}\n", "",
+     "the plain button's label on the text column (M20) no longer holds"),
     ("GTK: the gradient's bottom stop a literal", r"var\(--window-bg-color\)\); \\",
      r"#242424); \\", "the ground stylesheet lacks linear-gradient"),
     ("GTK: the top stop one appearance's", r"let stop = if dark \{ tops & 0xFF_FFFF \} else \{ \(tops >> 24\) & 0xFF_FFFF \};",
