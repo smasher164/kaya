@@ -41,6 +41,7 @@ import kotlinx.coroutines.withContext
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import android.graphics.Canvas
+import android.graphics.RectF
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
@@ -8849,7 +8850,63 @@ object KayaCompose {
 
     /** expect_dock_height's read (M18): the dock's frame less the system inset
      * and the progress line under its bar, in dp. */
-    private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
+    /** A declared table row's selection surface (its ground's box, dp) and its
+ * cells' boxes (the edge reports, dp), both in window space; null for a row
+ * outside a declared table. */
+private fun kayaRowBoxes(activity: ComponentActivity, row: KayaNode): Pair<RectF?, List<RectF>>? {
+    val table = KayaSceneModel.columns.firstOrNull { t ->
+        t.tableColumns.isNotEmpty() && t.children.any { it.id == row.id }
+    } ?: return null
+    val density = activity.resources.displayMetrics.density
+    val generation = "${table.tableGeometryGeneration}:"
+    val cells = row.children.indices.mapNotNull { i ->
+        val key = "$generation${row.id}/$i"
+        val left = table.cellEdgeX[key] ?: return@mapNotNull null
+        val right = table.cellEdgeRightX[key] ?: return@mapNotNull null
+        val top = table.cellEdgeTopY[key] ?: return@mapNotNull null
+        val bottom = table.cellEdgeBottomY[key] ?: return@mapNotNull null
+        RectF(left, top, right, bottom)
+    }
+    val fill = kayaFillBoxes[row.id]?.let {
+        RectF(it.left / density, it.top / density, it.right / density, it.bottom / density)
+    }
+    return Pair(fill, cells)
+}
+
+/** expect_row_inset's read: null for no such target, "" when the surface
+ * clears the first and last cells by the card's interior, else the numbers. */
+private fun kayaRowInsetRead(activity: ComponentActivity, spec: String): String? {
+    val row = target(spec, "row", KayaSceneModel.rows) ?: return null
+    val (fill, cells) = kayaRowBoxes(activity, row) ?: return "<not a declared table's row>"
+    fill ?: return "<not an activatable row: no selection surface>"
+    val first = cells.firstOrNull() ?: return "no cells"
+    val last = cells.last()
+    val lead = first.left - fill.left
+    val trail = fill.right - last.right
+    val pad = KAYA_TABLE_CARD_PAD_X.value
+    if (lead + 0.5f >= pad && trail + 0.5f >= pad) return ""
+    return "reads ${lead.roundToInt()}/${trail.roundToInt()} (the fill ${fill.left.roundToInt()}.." +
+        "${fill.right.roundToInt()}, the cells ${first.left.roundToInt()}..${last.right.roundToInt()}), " +
+        "wanted at least ${pad.roundToInt()} each side"
+}
+
+/** expect_row_centered's read: null for no such target, "" when every cell's
+ * centre is within two dp of the row's, else the furthest cell. */
+private fun kayaRowCenteredRead(activity: ComponentActivity, spec: String): String? {
+    val row = target(spec, "row", KayaSceneModel.rows) ?: return null
+    val (fill, cells) = kayaRowBoxes(activity, row) ?: return "<not a declared table's row>"
+    fill ?: return "<not an activatable row: no selection surface>"
+    if (cells.isEmpty()) return "no cells"
+    val mid = fill.centerY()
+    var worst = 0
+    cells.forEachIndexed { i, c -> if (abs(c.centerY() - mid) > abs(cells[worst].centerY() - mid)) worst = i }
+    val off = cells[worst].centerY() - mid
+    if (abs(off) <= 2f) return ""
+    return "reads cell $worst off by ${off.roundToInt()} (the cell ${cells[worst].top.roundToInt()}.." +
+        "${cells[worst].bottom.roundToInt()}, the row ${fill.top.roundToInt()}..${fill.bottom.roundToInt()})"
+}
+
+private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
         val dock = kayaDockFrame ?: return@onUi "unread (no dock frame is laid out)"
         val density = activity.resources.displayMetrics.density
         val line = kayaDockLineFrame?.height ?: 0f
@@ -14650,6 +14707,29 @@ object KayaCompose {
                             failures.add("${parts[1]} lines off ($off)")
                         }
                     }
+                    "expect_row_inset", "expect_row_centered" -> {
+                        // A declared table row's selection surface clears its
+                        // cells by the card's interior, and its cells sit on
+                        // its centre (harness.rs Step::ExpectRowInset /
+                        // ExpectRowCentered, M19).
+                        val inset = parts[0] == "expect_row_inset"
+                        val noun = if (inset) "row inset" else "row centered"
+                        val readRow = {
+                            onUi(activity) {
+                                if (inset) kayaRowInsetRead(activity, parts[1])
+                                else kayaRowCenteredRead(activity, parts[1])
+                            }
+                        }
+                        var gotRow = readRow()
+                        val rowDeadline = System.nanoTime() + 5_000_000_000L
+                        while (gotRow != "" && System.nanoTime() < rowDeadline) {
+                            Thread.sleep(100)
+                            gotRow = readRow()
+                        }
+                        if (gotRow == null) failures.add("no such target: ${parts[1]}")
+                        else if (gotRow.isEmpty()) observed.add("${parts[1]} $noun")
+                        else failures.add("${parts[1]} $noun $gotRow")
+                    }
                     "expect_hugs" -> {
                         // The same read, wanted SHORT (harness.rs
                         // Step::ExpectHugs, the `fill = false` opt-out): a
@@ -17631,9 +17711,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         window.headerRestPx = foldedBlock
         val bodySeg = measurables[measurables.size - 1]
             .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
-        // A ROW'S SURFACE REACHES PAST ITS CELLS (M16 (8)): from the cells'
-        // edge it cut through the first column's number.
-        val groundOut = padX / 2
+        // A ROW'S SURFACE REACHES THE SEGMENT'S EDGE (M16 (8), M19): from
+        // the cells' edge it cut through the first column's number, and
+        // Material's list item pads its state layer by the 16dp interior.
+        val groundOut = padX
         val grounds = measurables.subList(nFolded + cols + 1, nFolded + cols + 1 + nRows)
             .mapIndexed { r, m ->
                 m.measure(kayaFixedRepresentable(innerW + 2 * groundOut, rowExtents.getOrElse(r) { 0 }))
@@ -17677,7 +17758,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 if (r < tops.size) p.place(padX - groundOut, rowsTop + tops[r] - rowGapPx / 2)
             }
             cells.chunked(cols).forEachIndexed { r, row ->
-                row.forEachIndexed { c, p -> p.place(padX + colX[c], rowsTop + tops[r]) }
+                // Every cell on its row's vertical centre (M19).
+                row.forEachIndexed { c, p ->
+                    p.place(padX + colX[c], rowsTop + tops[r] + (rowHeights[r] - p.height) / 2)
+                }
             }
             bottom.place(0, rowsTop + topH + bandH - tail)
         }

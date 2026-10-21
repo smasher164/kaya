@@ -509,6 +509,15 @@ pub enum Step {
     /// The inverse: the target sits short of its container's breadth —
     /// the `fill = false` opt-out's observation (docs/layout-knobs-plan.md §1).
     ExpectHugs(Target),
+    /// `expect_row_inset <row>`: a declared table row's selection surface
+    /// clears its first cell's leading edge and its last cell's trailing edge
+    /// by at least the backend's own cell padding (docs/media-player-plan.md
+    /// M19: UIKit's and Material's 16, libadwaita's and Fluent's 12, AppKit's
+    /// own on the native tier).
+    ExpectRowInset(Target),
+    /// `expect_row_centered <row>`: every cell of a declared table row sits on
+    /// the row's vertical centre within two units (M19).
+    ExpectRowCentered(Target),
     /// Two targets, one comparison: the first's drawn height against the
     /// second's. RELATIONAL BECAUSE A HEIGHT IS NOT PORTABLE — the same
     /// list row draws 46pt on the mac, 56 on the phones, 57 on Windows and
@@ -1086,6 +1095,8 @@ impl Step {
             | Step::ExpectFills(t)
             | Step::ExpectBreadth(t)
             | Step::ExpectHugs(t)
+            | Step::ExpectRowInset(t)
+            | Step::ExpectRowCentered(t)
             | Step::ExpectLines(t, _)
             | Step::ExpectOverflow(t)
             | Step::ScrollEnd(t)
@@ -1357,6 +1368,8 @@ impl Step {
             Step::ExpectBreadth { .. } => true,
             Step::ExpectNoTarget { .. } => true,
             Step::ExpectHugs { .. } => true,
+            Step::ExpectRowInset { .. } => true,
+            Step::ExpectRowCentered { .. } => true,
             Step::ExpectNotTaller { .. } => true,
             Step::ExpectHeightFits { .. } => true,
             Step::ExpectFill { .. } => true,
@@ -2054,6 +2067,16 @@ pub trait Stage: Send + 'static {
     /// asks for nothing) plus its padding by no more than one device unit;
     /// otherwise both numbers. A container with no content child is refused.
     fn height_fits(&self, target: Target) -> String;
+    /// Empty when the declared table ROW `target`'s selection surface (the
+    /// ground an activatable row wears) clears its first cell's leading edge
+    /// and its last cell's trailing edge by at least this backend's own cell
+    /// padding; otherwise both readings and what they were measured against.
+    /// A row outside a declared table, or one with no surface, is refused.
+    fn row_inset(&self, target: Target) -> String;
+    /// Empty when every cell of the declared table ROW `target` sits on the
+    /// row's vertical centre within two units; otherwise the furthest cell
+    /// with its box and the row's.
+    fn row_centered(&self, target: Target) -> String;
     /// The tint a container's drawn surface is nearest to — `accent`,
     /// `success`, `warning`, `critical`, `neutral`, or `none` for the bare
     /// ground — sampled 4 units inside its RIGHT edge at mid-height, in the
@@ -3175,6 +3198,20 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectNoTarget(t.kind, id, t.keys)
             }
             "expect_hugs" => Step::ExpectHugs(parse_target(rest)?),
+            "expect_row_inset" => {
+                let t = parse_target(rest)?;
+                if t.kind != TargetKind::Row {
+                    return Err(format!("expect_row_inset wants a row target: {line:?}"));
+                }
+                Step::ExpectRowInset(t)
+            }
+            "expect_row_centered" => {
+                let t = parse_target(rest)?;
+                if t.kind != TargetKind::Row {
+                    return Err(format!("expect_row_centered wants a row target: {line:?}"));
+                }
+                Step::ExpectRowCentered(t)
+            }
             "expect_lines" => {
                 let (target, count) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_lines wants a target and a count: {line:?}")
@@ -7264,6 +7301,22 @@ fn run_with_log(
                     }
                 }))
             }
+            Step::ExpectRowInset(t) => Some(poll(|| {
+                let off = stage.row_inset(*t);
+                if off.is_empty() {
+                    Ok(format!("{} row inset", target_spec(t)))
+                } else {
+                    Err(format!("{} row inset {off}", target_spec(t)))
+                }
+            })),
+            Step::ExpectRowCentered(t) => Some(poll(|| {
+                let off = stage.row_centered(*t);
+                if off.is_empty() {
+                    Ok(format!("{} row centered", target_spec(t)))
+                } else {
+                    Err(format!("{} row centered {off}", target_spec(t)))
+                }
+            })),
             Step::ExpectHugs(t) => {
                 // The same read, wanted SHORT: a reader that could not read
                 // ("no ...") is a failure on this side too, never a hug.
@@ -10564,6 +10617,12 @@ mod tests {
                 String::new()
             }
         }
+        fn row_inset(&self, _: Target) -> String {
+            String::new()
+        }
+        fn row_centered(&self, _: Target) -> String {
+            String::new()
+        }
         fn height_fits(&self, t: Target) -> String {
             if t.index > 0 { "62pt around 43pt of content".into() } else { String::new() }
         }
@@ -11654,6 +11713,12 @@ mod tests {
             fn not_taller_than(&self, _: Target, _: Target) -> String {
                 String::new()
             }
+            fn row_inset(&self, _: Target) -> String {
+                String::new()
+            }
+            fn row_centered(&self, _: Target) -> String {
+                String::new()
+            }
             fn height_fits(&self, _: Target) -> String {
                 String::new()
             }
@@ -12175,6 +12240,12 @@ mod tests {
                 String::new()
             }
             fn not_taller_than(&self, _: Target, _: Target) -> String {
+                String::new()
+            }
+            fn row_inset(&self, _: Target) -> String {
+                String::new()
+            }
+            fn row_centered(&self, _: Target) -> String {
                 String::new()
             }
             fn height_fits(&self, _: Target) -> String {
@@ -13462,6 +13533,10 @@ mod cells_even_tests {
         assert!(parse("expect_gap label@above 8").is_err());
         assert!(parse("expect_width slider@capped wide").is_err());
         assert!(matches!(parse("expect_dock_height 64").expect("parses").as_slice(), [Step::ExpectDockHeight(h)] if *h == 64.0));
+        assert!(matches!(parse("expect_row_inset row@track[1860160]").expect("parses").as_slice(), [Step::ExpectRowInset(_)]));
+        assert!(matches!(parse("expect_row_centered row@track[1860160]").expect("parses").as_slice(), [Step::ExpectRowCentered(_)]));
+        assert!(parse("expect_row_inset column@tracks").is_err());
+        assert!(parse("expect_row_centered label@x").is_err());
         assert!(parse("expect_dock_height tall").is_err());
         assert!(matches!(
             parse("expect_ground_color column@header \"light 673946 dark 3B2128\"").expect("parses").as_slice(),

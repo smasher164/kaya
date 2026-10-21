@@ -4406,6 +4406,18 @@ const TABLE_CELL_CLASS: &str = "kaya-table-header-cell";
 /// like the header above so the table verbs stay tree reads.
 const TABLE_BODY_CLASS: &str = "kaya-table-body";
 const TABLE_SPACER_CLASS: &str = "kaya-table-spacer";
+/// A ROW'S SURFACE SPANS THE CARD (docs/media-player-plan.md M19): the head,
+/// body and divider reach the card's stroke through negative margins, the
+/// header and content boxes and every row put the 12px back as padding, so a
+/// row's `:selected` fill runs edge to edge while its cells stay where the
+/// edge instrument reads them (docs/traps.md, "A GTK table card is paint").
+const TABLE_HEAD_CLASS: &str = "kaya-table-head";
+const TABLE_CONTENT_CLASS: &str = "kaya-table-content";
+const TABLE_DIVIDER_CLASS: &str = "kaya-table-divider";
+const TABLE_ROW_CLASS: &str = "kaya-table-row";
+/// The row padding the classes above put back, the number `row_inset` reads
+/// against.
+const TABLE_ROW_PAD: f64 = 12.0;
 /// The stacked fold's marker (docs/adaptive-layout-plan.md D7): a folded
 /// child rides inside the table's content box, above the top spacer, and
 /// every reader of that box skips this class exactly as it skips the
@@ -4442,6 +4454,9 @@ const TABLE_CSS: &str = "\
 .kaya-table-header-cell label { font-weight: bold; }
 .kaya-table-card { background-color: @card_bg_color; border-radius: 12px; \
 outline: 1px solid @borders; outline-offset: -1px; padding: 8px 12px; }
+.kaya-table-head, .kaya-table-body, .kaya-table-divider { margin-left: -12px; margin-right: -12px; }
+.kaya-table-header, .kaya-table-content { padding-left: 12px; padding-right: 12px; }
+.kaya-table-row { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
 ";
 
 /// One declared table (docs/tables-plan.md decision 6): the header row this
@@ -4752,6 +4767,7 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     }
     let divider = gtk4::Separator::new(gtk4::Orientation::Horizontal);
     divider.set_halign(gtk4::Align::Fill);
+    divider.add_css_class(TABLE_DIVIDER_CLASS);
     let groups = (0..cols)
         .map(|_| gtk4::SizeGroup::new(gtk4::SizeGroupMode::Horizontal))
         .collect();
@@ -4762,6 +4778,7 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     // row's top-to-top pitch here is its box plus that gap and the
     // spacers can be measured in the same units the core answers in.
     let content = gtk4::Box::new(gtk4::Orientation::Vertical, CONTAINER_SPACING);
+    content.add_css_class(TABLE_CONTENT_CLASS);
     content.set_halign(gtk4::Align::Fill);
     content.set_valign(gtk4::Align::Start);
     let top = build_spacer();
@@ -4800,6 +4817,7 @@ fn build_table(sink: &OccSink, cols: usize, tag: Rc<RefCell<Vec<u8>>>, id: u64) 
     // unlike NEVER, does not force its size to follow the header's content,
     // so the header shrinks with the body instead of holding the window open.
     let head = gtk4::ScrolledWindow::new();
+    head.add_css_class(TABLE_HEAD_CLASS);
     head.set_policy(gtk4::PolicyType::External, gtk4::PolicyType::Never);
     head.set_propagate_natural_width(true);
     head.set_propagate_natural_height(true);
@@ -5539,6 +5557,7 @@ fn reflow_table(core: &mut CoreState, id: u64) {
         // TABLE's, not the row template's.
         row_box.set_halign(gtk4::Align::Fill);
         row_box.set_spacing(TABLE_COL_GAP);
+        row_box.add_css_class(TABLE_ROW_CLASS);
         for (c, cell) in children_of(row_box).into_iter().enumerate() {
             let Some(group) = groups.get(c) else { continue };
             cell.set_hexpand(true);
@@ -8413,7 +8432,8 @@ const TINT_CSS: &str = "\
 .kaya-filled.card { margin: 1px 2px 3px 2px; }
 .kaya-filled-pad { padding: 12px; }
 .kaya-activatable-pad { padding: 12px; }
-.kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 0px; }
+.kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 0px 12px; }
+.kaya-filled.osd { background-clip: border-box; }
 .kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
@@ -24901,6 +24921,68 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn row_inset(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(row) = table_row_box(core, t) else {
+                return "<not a declared table's row>".to_string();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let cells = children_of(&row);
+            let (Some(first), Some(last)) = (cells.first(), cells.last()) else {
+                return "no cells".to_string();
+            };
+            let (Some(fill), Some(lead), Some(trail)) =
+                (row.compute_bounds(&row), first.compute_bounds(&row), last.compute_bounds(&row))
+            else {
+                return "no bounds".to_string();
+            };
+            let lead_in = f64::from(lead.x() - fill.x());
+            let trail_in = f64::from(fill.x() + fill.width() - (trail.x() + trail.width()));
+            if lead_in + 0.5 >= TABLE_ROW_PAD && trail_in + 0.5 >= TABLE_ROW_PAD {
+                return String::new();
+            }
+            format!(
+                "reads {lead_in:.0}/{trail_in:.0} (the fill {:.0}..{:.0}, the cells {:.0}..{:.0}), wanted at least {TABLE_ROW_PAD:.0} each side",
+                fill.x(),
+                fill.x() + fill.width(),
+                lead.x(),
+                trail.x() + trail.width()
+            )
+        })
+    }
+
+    fn row_centered(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::prelude::WidgetExt;
+            let Some(row) = table_row_box(core, t) else {
+                return "<not a declared table's row>".to_string();
+            };
+            while glib::MainContext::default().iteration(false) {}
+            let Some(fill) = row.compute_bounds(&row) else {
+                return "no bounds".to_string();
+            };
+            let mid = f64::from(fill.y() + fill.height() / 2.0);
+            let mut worst: Option<(usize, f64, f32, f32)> = None;
+            for (i, cell) in children_of(&row).iter().enumerate() {
+                let Some(b) = cell.compute_bounds(&row) else { continue };
+                let off = f64::from(b.y() + b.height() / 2.0) - mid;
+                if worst.is_none_or(|w| off.abs() > w.1.abs()) {
+                    worst = Some((i, off, b.y(), b.y() + b.height()));
+                }
+            }
+            match worst {
+                Some((i, off, top, bottom)) if off.abs() > 2.0 => format!(
+                    "reads cell {i} off by {off:.0} (the cell {top:.0}..{bottom:.0}, the row {:.0}..{:.0})",
+                    fill.y(),
+                    fill.y() + fill.height()
+                ),
+                None => "no cells".to_string(),
+                _ => String::new(),
+            }
+        })
+    }
+
     fn widget_spans_breadth(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             use gtk4::prelude::{Cast, WidgetExt};
@@ -27546,6 +27628,18 @@ fn apply_content_type(widget: &gtk4::Widget, secure: bool, word: i64) {
     let text = content_text(widget).expect("an entry and a secure field delegate to a GtkText");
     text.set_input_purpose(purpose);
     text.set_input_hints(hints);
+}
+
+/// The stamped row a `row` target names inside a declared table: its parent
+/// is the table's content box (TABLE_CONTENT_CLASS).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn table_row_box(core: &CoreState, target: crate::harness::Target) -> Option<gtk4::Box> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let widget = target_widget(core, target)?;
+    if !widget.parent().is_some_and(|p| p.has_css_class(TABLE_CONTENT_CLASS)) {
+        return None;
+    }
+    widget.downcast::<gtk4::Box>().ok()
 }
 
 /// The widget a `kind#index` target names, from the per-kind registry

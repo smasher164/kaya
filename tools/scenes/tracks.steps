@@ -26,6 +26,10 @@ click row@a[a2]
 expect label@picked "picked: a2"
 expect_selected row@a[a2] on
 expect_selected row@a[a1] off
+# The selected row's fill clears its cells by the platform's own cell padding
+# and every cell sits on the row's centre (docs/media-player-plan.md M19).
+expect_row_inset row@a[a2]
+expect_row_centered row@a[a2]
 click row@a[a3]
 expect label@picked "picked: a3"
 expect_selected row@a[a3] on

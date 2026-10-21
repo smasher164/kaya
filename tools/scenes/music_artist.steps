@@ -27,6 +27,8 @@ expect_image_phase image@top_track_art[989871] shown
 expect_hugs column@top_track_lines[989871]
 double_click row@top_track[989871]
 expect_selected row@top_track[989871] on
+expect_row_inset row@top_track[989871]
+expect_row_centered row@top_track[989871]
 expect label@dock_title "In Tune"
 # The page scrolls whole; at its end the table's rows and the shelf are shown.
 scroll_end scroll@artist_page

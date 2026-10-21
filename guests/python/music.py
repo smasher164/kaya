@@ -1181,7 +1181,7 @@ def card(album, registry=None, prefix="", surface=None):
         tile.a11y_id(f"{prefix}card_{album['id']}").fill(True)
         kaya.image(art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=phase) \
             .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"{prefix}art_{album['id']}")
-        kaya.label(album["name"])
+        kaya.label(album["name"], max_lines=2)
         kaya.caption(album["artist"])
     registry[album["id"]] = {"art": art, "phase": phase, "selected": selected,
                              "url": album["image"]}
@@ -1291,7 +1291,7 @@ def found_strip(page, group, one, shape, on_open):
                            on_needed=page[f"{group}_art"].needed,
                            on_released=page[f"{group}_art"].released) \
                     .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"found_{one}_art")
-                kaya.label(bind=found.name).a11y_id(f"found_{one}_name")
+                kaya.label(bind=found.name, max_lines=2).a11y_id(f"found_{one}_name")
                 kaya.caption(bind=found.caption)
     page[group].container().axis(kaya.Axis.HORIZONTAL)
     page[group].container().spacing(12)

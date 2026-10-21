@@ -378,6 +378,12 @@ pub(super) fn is_table_row(id: u64) -> bool {
     SKIN.with_borrow(|s| s.table_rows.contains(&id))
 }
 
+/// The item frame an activatable container's selection surface is drawn in.
+#[cfg(feature = "harness")]
+pub(super) fn frame_of(id: WidgetId) -> Option<Grid> {
+    SKIN.with_borrow(|s| s.frames.get(&id.0).cloned())
+}
+
 /// Whether a container takes a click as a whole (its inset follows, Y4).
 pub(super) fn is_activatable(id: WidgetId) -> bool {
     SKIN.with_borrow(|s| s.hosts.contains_key(&id.0))

@@ -14071,6 +14071,30 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(parts[1]) lines off (\(off))")
                 }
+            case "expect_row_inset", "expect_row_centered":
+                // A declared table row's selection surface clears its cells by
+                // the tier's own cell padding, and its cells sit on its centre
+                // (harness.rs Step::ExpectRowInset / ExpectRowCentered, M19).
+                let inset = parts[0] == "expect_row_inset"
+                let noun = inset ? "row inset" : "row centered"
+                func readRow() -> String? {
+                    DispatchQueue.main.sync { inset ? kayaRowInsetRead(parts[1]) : kayaRowCenteredRead(parts[1]) }
+                }
+                var gotRow = readRow()
+                let rowDeadline = Date().addingTimeInterval(5)
+                while gotRow != "" && Date() < rowDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotRow = readRow()
+                }
+                guard let gotRow else {
+                    failures.append("no such target: \(parts[1])")
+                    break
+                }
+                if gotRow.isEmpty {
+                    observed.append("\(parts[1]) \(noun)")
+                } else {
+                    failures.append("\(parts[1]) \(noun) \(gotRow)")
+                }
             case "expect_hugs":
                 // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
                 // the `fill = false` opt-out): a reader that could not read is
@@ -15556,6 +15580,83 @@ private struct KayaBoxReader: View {
 /// spec names no row, "" when it spends no more than a point beyond them.
 /// An empty container is a spacer and asks for nothing (harness.rs
 /// Stage::height_fits).
+/// A declared table row's selection surface, its cells' frames and the tier's
+/// own cell padding, all in harness coordinates: the native tier's own rects
+/// (AppKit's inset, so any clearance is its own), or the synthesized tier's
+/// ground and edge reports against kayaTableCardInsetX. Nil for a row outside
+/// a declared table.
+@MainActor func kayaRowBoxes(_ row: KayaNode) -> (fill: CGRect?, cells: [CGRect], pad: CGFloat, native: Bool)? {
+    #if os(macOS)
+        if let driver = kayaTableDrivers.values.first(where: { $0.axRow(of: row) != nil }) {
+            guard let geometry = driver.rowGeometry(of: row) else { return nil }
+            return (geometry.row, geometry.cells, 1, true)
+        }
+    #endif
+    guard let table = kayaScene.columns.first(where: { !$0.tableColumns.isEmpty && $0.children.contains { $0 === row } })
+    else { return nil }
+    let cells = row.children.enumerated().compactMap {
+        table.tableCellFrames[kayaTableCellKey(row, $0.offset, $0.element)]?.frame
+    }
+    return (kayaAnchoredFrame(row.id), cells, kayaTableCardInsetX, false)
+}
+
+/// What the synthesized tier DREW, not what it laid out: the ground's view keeps
+/// its frame under a clip (the columns' clip cut the ground to the cells' box
+/// while the frame read 16 wider, M19), so a drawn fill is read off the window's
+/// pixels. Nil when no fill is drawn (the row is not selected), else the fill's
+/// colour 2 points inside each edge against its colour between the first two
+/// cells, as a sentence when either edge is not the fill.
+@MainActor func kayaRowFillDrawn(_ fill: CGRect, _ cells: [CGRect]) -> String? {
+    guard cells.count >= 2, let shot = kayaWindowPixels() else { return nil }
+    let y = fill.midY
+    guard let between = shot.at(CGPoint(x: (cells[0].maxX + cells[1].minX) / 2, y: y)),
+        let outside = shot.at(CGPoint(x: fill.minX - 3, y: y)),
+        let lead = shot.at(CGPoint(x: fill.minX + 2, y: y)),
+        let trail = shot.at(CGPoint(x: fill.maxX - 2, y: y))
+    else { return nil }
+    if kayaColourGap(between, outside) <= 0.02 { return nil }
+    if kayaColourGap(lead, between) <= 0.02 && kayaColourGap(trail, between) <= 0.02 { return "" }
+    return "drawn short of its box: \(kayaHex(lead)) at its leading edge and \(kayaHex(trail)) at its trailing edge, "
+        + "\(kayaHex(between)) between the cells"
+}
+
+/// expect_row_inset's read: nil for no such target, "" when the surface
+/// clears the first and last cells by the tier's padding, else the numbers.
+@MainActor func kayaRowInsetRead(_ spec: Substring) -> String? {
+    guard let row = kayaTarget(spec, "row", kayaScene.rows) else { return nil }
+    guard let boxes = kayaRowBoxes(row) else { return "<not a declared table's row>" }
+    guard let fill = boxes.fill else { return "<not an activatable row: no selection surface>" }
+    guard let first = boxes.cells.first, let last = boxes.cells.last else { return "no cells" }
+    let lead = first.minX - fill.minX
+    let trail = fill.maxX - last.maxX
+    if lead + 0.5 >= boxes.pad && trail + 0.5 >= boxes.pad {
+        if boxes.native { return "" }
+        guard let drawn = kayaRowFillDrawn(fill, boxes.cells) else { return "" }
+        return drawn.isEmpty ? "" : "reads \(drawn)"
+    }
+    let r = { (v: CGFloat) in Int(v.rounded()) }
+    return "reads \(r(lead))/\(r(trail)) (the fill \(r(fill.minX))..\(r(fill.maxX)), the cells "
+        + "\(r(first.minX))..\(r(last.maxX))), wanted at least \(r(boxes.pad)) each side"
+}
+
+/// expect_row_centered's read: nil for no such target, "" when every cell's
+/// centre is within two points of the row's, else the furthest cell.
+@MainActor func kayaRowCenteredRead(_ spec: Substring) -> String? {
+    guard let row = kayaTarget(spec, "row", kayaScene.rows) else { return nil }
+    guard let boxes = kayaRowBoxes(row) else { return "<not a declared table's row>" }
+    guard let fill = boxes.fill else { return "<not an activatable row: no selection surface>" }
+    guard !boxes.cells.isEmpty else { return "no cells" }
+    let r = { (v: CGFloat) in Int(v.rounded()) }
+    var worst: (Int, CGFloat, CGRect)?
+    for (i, cell) in boxes.cells.enumerated() {
+        let off = cell.midY - fill.midY
+        if worst.map({ abs(off) > abs($0.1) }) ?? true { worst = (i, off, cell) }
+    }
+    guard let worst, abs(worst.1) > 2 else { return "" }
+    return "reads cell \(worst.0) off by \(r(worst.1)) (the cell \(r(worst.2.minY))..\(r(worst.2.maxY)), "
+        + "the row \(r(fill.minY))..\(r(fill.maxY)))"
+}
+
 func kayaHeightFits(_ spec: Substring) -> String? {
     guard let row = kayaTarget(spec, "row", kayaScene.rows) else { return nil }
     guard let spent = kayaContainerCross[row.id], spent > 0 else {
@@ -18505,6 +18606,19 @@ private struct KayaNativeTable: View {
             return window
         }
 
+        /// The row's rect and its cells' frames, both in harness coordinates,
+        /// for expect_row_inset and expect_row_centered on this tier.
+        func rowGeometry(of stamped: KayaNode) -> (row: CGRect, cells: [CGRect])? {
+            guard let at = axRow(of: stamped), at.index >= 0, at.index < numberOfRows(in: tableView) else {
+                return nil
+            }
+            let row = kayaHarnessRect(tableView.rect(ofRow: at.index), in: tableView)
+            let cells = tableView.tableColumns.indices.map {
+                kayaHarnessRect(tableView.frameOfCell(atColumn: $0, row: at.index), in: tableView)
+            }
+            return (row, cells)
+        }
+
         /// The tree's name for this table and the collection position of
         /// `stamped`, for expect_selected's read of the table's own AXRows.
         func axRow(of stamped: KayaNode) -> (table: String, index: Int)? {
@@ -19063,18 +19177,16 @@ private struct KayaTableLayout: Layout {
         return (widths, total)
     }
 
-    private func rowHeights(_ subviews: Subviews) -> (CGFloat, CGFloat, [CGFloat]) {
+    private func rowHeights(_ subviews: Subviews) -> (CGFloat, CGFloat, [CGFloat], [CGFloat]) {
         let headerH = subviews.prefix(cols)
             .map { $0.sizeThatFits(.unspecified).height }.max() ?? 0
         let dividerH = subviews[cols].sizeThatFits(.unspecified).height
         var rows: [CGFloat] = []
-        let cells = Array(cellViews(subviews))
-        for start in stride(from: 0, to: cells.count, by: cols) {
-            rows.append(
-                cells[start..<min(start + cols, cells.count)]
-                    .map { $0.sizeThatFits(.unspecified).height }.max() ?? 0)
+        let heights = cellViews(subviews).map { $0.sizeThatFits(.unspecified).height }
+        for start in stride(from: 0, to: heights.count, by: cols) {
+            rows.append(heights[start..<min(start + cols, heights.count)].max() ?? 0)
         }
-        return (headerH, dividerH, rows)
+        return (headerH, dividerH, rows, heights)
     }
 
     /// The rows' own region. WINDOWED: every row's slot is its pitch, so the
@@ -19094,7 +19206,7 @@ private struct KayaTableLayout: Layout {
         proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGSize {
         let (_, total) = columnWidths(subviews, proposal)
-        let (headerH, dividerH, rows) = rowHeights(subviews)
+        let (headerH, dividerH, rows, _) = rowHeights(subviews)
         let height =
             headerH + rowGap + dividerH + rowGap + top + rowsExtent(rows) + bottom
         // ACCEPT THE OFFER (docs/tables-plan.md, ruled 2026-08-29): answering
@@ -19108,7 +19220,7 @@ private struct KayaTableLayout: Layout {
         in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) {
         let (widths, _) = columnWidths(subviews, proposal)
-        let (headerH, dividerH, rows) = rowHeights(subviews)
+        let (headerH, dividerH, rows, cellHeights) = rowHeights(subviews)
         var colX = [CGFloat](repeating: 0, count: cols)
         let content = widths.reduce(0, +) + colGap * CGFloat(max(0, cols - 1))
         let reach = max(0, content - bounds.width)
@@ -19152,13 +19264,20 @@ private struct KayaTableLayout: Layout {
         let grounds = Array(rowGrounds(subviews))
         for (r, rowH) in rows.enumerated() {
             if r < grounds.count {
+                // THE GROUND SPANS THE CARD'S INTERIOR (docs/media-player-plan.md
+                // M19): the selected fill clears the cells by the card's own
+                // inset, as UIKit's selected cell clears its content.
                 grounds[r].place(
-                    at: CGPoint(x: bounds.minX, y: y - rowGap / 2), anchor: .topLeading,
-                    proposal: ProposedViewSize(width: bounds.width, height: rowH + rowGap))
+                    at: CGPoint(x: bounds.minX - kayaTableCardInsetX, y: y - rowGap / 2),
+                    anchor: .topLeading,
+                    proposal: ProposedViewSize(
+                        width: bounds.width + 2 * kayaTableCardInsetX, height: rowH + rowGap))
             }
             for c in 0..<cols where r * cols + c < cells.count {
+                // Every cell on the row's vertical centre (M19).
+                let cellH = cellHeights[r * cols + c]
                 cells[r * cols + c].place(
-                    at: CGPoint(x: colX[c], y: y), anchor: .topLeading,
+                    at: CGPoint(x: colX[c], y: y + (rowH - cellH) / 2), anchor: .topLeading,
                     proposal: .unspecified)
             }
             y += rowH + rowGap
@@ -19272,7 +19391,7 @@ private struct KayaColumnsDrag: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .clipped()
+            .clipShape(KayaRowGroundClip(outset: kayaTableCardInsetX))
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onChanged { value in
@@ -19284,6 +19403,14 @@ private struct KayaColumnsDrag: ViewModifier {
                     }
                     .onEnded { _ in start = offset })
     }
+}
+
+/// The columns' clip, let out sideways by the card's interior so the row
+/// grounds reach it (M19) while the rows above and below stay cut as
+/// `.clipped()` cut them.
+private struct KayaRowGroundClip: Shape {
+    let outset: CGFloat
+    func path(in rect: CGRect) -> Path { Path(rect.insetBy(dx: -outset, dy: 0)) }
 }
 
 /// Every live SYNTHESIZED table's window, by container widget id — the mac
@@ -20619,6 +20746,7 @@ private struct KayaTableCardFace: ViewModifier {
                 .padding(.horizontal, kayaTableCardInsetX)
                 .padding(.vertical, kayaTableCardInsetY)
                 .background(kayaCardShape())
+                .clipShape(.rect(cornerRadius: kayaTableCardRadius, style: .continuous))
         #endif
     }
 }

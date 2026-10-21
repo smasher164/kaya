@@ -103,6 +103,13 @@ READS = [
      "fn dock_content_fault(core: &CoreState, ground: &UIElement, dock_top: f64) -> windows_core::Result<Option<String>> {",
      ["core.mounted_roots.get(&0)", ".TransformToVisual(ground)", "if w < 1.0 || h < 1.0 {",
       "if top + h > dock_top + 1.0 {"]),
+    # docs/media-player-plan.md M19: a declared table row's selection fill
+    # clears its cells by the card's 12dip, and its cells sit on its centre.
+    ("expect_row_inset's reader", "fn row_inset(&self, t: crate::harness::Target) -> String {",
+     ["table_row_grid(core, t)", "skin::frame_of(id)", "cell.TransformToVisual(&frame)?",
+      "lead + 0.5 >= TABLE_CARD_PAD && trail_in + 0.5 >= TABLE_CARD_PAD"]),
+    ("expect_row_centered's reader", "fn row_centered(&self, t: crate::harness::Target) -> String {",
+     ["table_row_grid(core, t)", "if off.abs() > 2.0 => format!("]),
     ("expect_fill's skin readings", "fn fill_tint(&self, t: crate::harness::Target) -> String {",
      ['layered("ItemContainerPointerOverBackground", bare)?', 'layered("ItemContainerPointerOverBackground", card)?',
       "1.05 / (own + 0.05) >= 4.5 && own < theirs / 2.0", "skin::read::picture_at(pictured,",
@@ -113,6 +120,14 @@ READS = [
 ]
 CALLS = [
     ("a parent lays out an activatable container's host", "let inner = skin::host_of(&inner).unwrap_or(inner);"),
+    ("the table's host, head and rule reach the card's stroke (M19)",
+     "host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;\nhost.SetMargin(table_edge_margin())?;"),
+    ("the table's header puts the card's sides back (M19)",
+     "header.SetPadding(Thickness { Left: TABLE_CARD_PAD, Top: 0.0, Right: TABLE_CARD_PAD, Bottom: 0.0 })?;"),
+    ("a declared table's row puts the card's sides back (M19)",
+     "let side = if in_declared_table(core, id) { pad + TABLE_CARD_PAD } else { pad };"),
+    ("every stamped row carries the card's sides (M19)",
+     "row.SetPadding(Thickness { Left: own + TABLE_CARD_PAD, Top: own, Right: own + TABLE_CARD_PAD, Bottom: own })?;"),
     ("the skin's props reach the arm", "if skin::set_prop(core, id, prop, &value)? {\nreturn Ok(());"),
     ("attach_dock reaches the arm", "ApplyOp::AttachDock { window, dock } => skin::attach_dock(core, window.0, dock.0)?,"),
     ("a dock is a mount target", "} else if skin::is_dock(window.0) {\nskin::mount_dock(core, window.0, root, &element)?;"),
@@ -197,6 +212,15 @@ def findings(text):
 
 
 CUTS = [
+    ("WinUI: the host back inside the card (M19)", r"\n\s+host\.SetMargin\(table_edge_margin\(\)\)\?;", "",
+     "the table's host, head and rule reach the card's stroke (M19) no longer holds"),
+    ("WinUI: the rows' sides gone (M19)", r"let side = if in_declared_table\(core, id\) \{ pad \+ TABLE_CARD_PAD \} else \{ pad \};",
+     "let side = pad;", "a declared table's row puts the card's sides back (M19) no longer holds"),
+    ("WinUI: expect_row_inset passing a flush fill (M19)",
+     r"if lead \+ 0\.5 >= TABLE_CARD_PAD && trail_in \+ 0\.5 >= TABLE_CARD_PAD \{", "if lead + 0.5 >= 0.0 && trail_in + 0.5 >= 0.0 {",
+     "expect_row_inset's reader lacks"),
+    ("WinUI: expect_row_centered passing an off-centre cell (M19)", r"if off\.abs\(\) > 2\.0 => format!\(", "if off.abs() > 200.0 => format!(",
+     "expect_row_centered's reader lacks"),
     ("WinUI: the gradient's bottom stop a literal",
      r'let ground = rgb_of\(resolve\("ApplicationPageBackgroundThemeBrush", dark\)\?\);', "let ground = 0x202020u32;",
      "gradient lacks let ground"),

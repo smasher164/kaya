@@ -2673,12 +2673,7 @@ fn ensure_accent_surface() -> windows_core::Result<()> {
 /// viewer itself: ScrollViewer's default template does not bind it.
 fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let pad = container_padding(core, id);
-    let pad = Thickness {
-        Left: pad,
-        Top: pad,
-        Right: pad,
-        Bottom: pad,
-    };
+    let pad = table_row_padding(core, id, pad);
     match core.widgets.get(&id) {
         Some(
             NativeWidget::Column(grid)
@@ -2692,6 +2687,21 @@ fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Resu
             None => Ok(()),
         },
         _ => Ok(()),
+    }
+}
+
+/// A DECLARED TABLE'S ROW PUTS THE CARD'S INTERIOR BACK AS ITS OWN SIDE
+/// PADDING (docs/media-player-plan.md M19): the host, the head and the rule
+/// reach the card's stroke through a negative margin of TABLE_CARD_PAD, so a
+/// row's selection surface spans the card while its cells stay on the edges
+/// the instrument reads.
+fn table_row_padding(core: &CoreState, id: WidgetId, pad: f64) -> Thickness {
+    let side = if in_declared_table(core, id) { pad + TABLE_CARD_PAD } else { pad };
+    Thickness {
+        Left: side,
+        Top: pad,
+        Right: side,
+        Bottom: pad,
     }
 }
 
@@ -3752,6 +3762,7 @@ fn fold_restack(table: &WinTable) -> windows_core::Result<()> {
     }
     for (i, element) in table.folded.iter().enumerate() {
         Grid::SetRow(element, i as i32)?;
+        element.SetMargin(Thickness { Left: TABLE_CARD_PAD, Top: 0.0, Right: TABLE_CARD_PAD, Bottom: 0.0 })?;
     }
     Grid::SetRow(&table.band.cast::<FrameworkElement>()?, table.folded.len() as i32)?;
     Ok(())
@@ -4117,6 +4128,14 @@ const SHEET_CARD_XAML: &str = concat!(
 /// number for four sides here.
 const TABLE_CARD_PAD: f64 = 12.0;
 
+/// The margin that takes the head, the rule and the scroll host out to the
+/// card's stroke (M19); the header and every row put the same number back as
+/// padding (`table_row_padding`).
+fn table_edge_margin() -> Thickness {
+    let out = -TABLE_CARD_PAD;
+    Thickness { Left: out, Top: 0.0, Right: out, Bottom: 0.0 }
+}
+
 /// The ascending / descending indicator, appended to the sorted column's
 /// title — the glyphs the other synthesized tiers use. `columns_presented`
 /// reads them back off the control as the scene's `^N`/`vN`.
@@ -4269,6 +4288,7 @@ fn declare_table(
         let header = Grid::new()?;
         header.SetColumnSpacing(TABLE_COL_GAP)?;
         header.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        header.SetPadding(Thickness { Left: TABLE_CARD_PAD, Top: 0.0, Right: TABLE_CARD_PAD, Bottom: 0.0 })?;
         let card: Grid = XamlReader::Load(&HSTRING::from(TABLE_CARD_XAML))?.cast()?;
         // ONE number, written here rather than spelled again in the
         // markup: the card sits back out at the container's own box while
@@ -4281,6 +4301,7 @@ fn declare_table(
             Bottom: -TABLE_CARD_PAD,
         })?;
         let rule: Grid = XamlReader::Load(&HSTRING::from(TABLE_RULE_XAML))?.cast()?;
+        rule.SetMargin(table_edge_margin())?;
         // THE SCROLL CONTAINER (§4). BOTH AXES since the overflow ruling
         // (docs/tables-plan.md): Disabled here IS how "the last column is
         // clipped" shipped (docs/probes/table-overflow-2026.md §4.4).
@@ -4293,6 +4314,7 @@ fn declare_table(
         host.SetVerticalScrollMode(ScrollMode::Enabled)?;
         host.SetVerticalScrollBarVisibility(ScrollBarVisibility::Auto)?;
         host.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        host.SetMargin(table_edge_margin())?;
         // THE HEADER RIDES A SCROLLER OF ITS OWN, driven to the body's offset
         // by `table_columns_track`: this backend's bindings project neither
         // RenderTransform nor Clip, and a bare header would not be clipped
@@ -4305,6 +4327,7 @@ fn declare_table(
         head.SetVerticalScrollMode(ScrollMode::Disabled)?;
         head.SetVerticalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
         head.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+        head.SetMargin(table_edge_margin())?;
         head.SetContent(&header)?;
         let band = Grid::new()?;
         // NO RowSpacing: a row's own bottom margin carries the gap, so
@@ -5705,6 +5728,8 @@ fn table_stamp(id: u64, table: &mut WinTable) -> windows_core::Result<()> {
     stamp(&table.header.ColumnDefinitions()?)?;
     for row in &table.rows {
         row.SetColumnSpacing(TABLE_COL_GAP)?;
+        let own = row.Padding()?.Top;
+        row.SetPadding(Thickness { Left: own + TABLE_CARD_PAD, Top: own, Right: own + TABLE_CARD_PAD, Bottom: own })?;
         stamp(&row.ColumnDefinitions()?)?;
     }
     if trace_enabled() {
@@ -22890,6 +22915,19 @@ fn input_scope(name: InputScopeNameValue) -> windows_core::Result<InputScope> {
     Ok(scope)
 }
 
+/// The stamped row a `row` target names inside a declared table, with its Grid.
+#[cfg(feature = "harness")]
+fn table_row_grid(core: &CoreState, target: crate::harness::Target) -> Option<(WidgetId, Grid)> {
+    let id = WidgetId(target_widget_id(core, target)?);
+    if !in_declared_table(core, id) {
+        return None;
+    }
+    match core.widgets.get(&id) {
+        Some(NativeWidget::Row(grid)) => Some((id, grid.clone())),
+        _ => None,
+    }
+}
+
 #[cfg(feature = "harness")]
 fn target_widget_id(core: &CoreState, target: crate::harness::Target) -> Option<u64> {
     let ids = registry_ids(core, target.kind);
@@ -25885,12 +25923,15 @@ impl crate::harness::Stage for WinUiStage {
             let mut min_end = f64::MAX;
             let mut max_end = f64::NEG_INFINITY;
             for line in &lines {
+                // The tracks start at the line's CONTENT box: a declared
+                // table's row and header carry the card's interior as their
+                // own side padding (table_row_padding, M19).
                 let origin = f64::from(
                     line.cast::<UIElement>()?
                         .TransformToVisual(&surface)?
                         .TransformPoint(Point { X: 0.0, Y: 0.0 })?
                         .X,
-                );
+                ) + line.Padding()?.Left;
                 // THIS LINE'S OWN RESOLVED TRACKS, never the header's: a
                 // row that arrived after the last `table_stamp` still
                 // carries the container defaults, and that is exactly the
@@ -26963,6 +27004,86 @@ impl crate::harness::Stage for WinUiStage {
                     asked.round() as i64,
                     (top - pad.Top).round() as i64
                 )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn row_inset(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some((id, grid)) = table_row_grid(core, t) else {
+                return Ok("<not a declared table's row>".to_owned());
+            };
+            let Some(frame) = skin::frame_of(id) else {
+                return Ok("<not an activatable row: no selection surface>".to_owned());
+            };
+            frame.UpdateLayout()?;
+            let width = frame.ActualWidth()?;
+            let (mut lead, mut trail) = (f64::INFINITY, f64::NEG_INFINITY);
+            let children = grid.Children()?;
+            for at in 0..children.Size()? {
+                let cell: FrameworkElement = children.GetAt(at)?.cast()?;
+                let x = f64::from(
+                    cell.TransformToVisual(&frame)?
+                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
+                        .X,
+                );
+                lead = lead.min(x);
+                trail = trail.max(x + cell.ActualWidth()?);
+            }
+            if !lead.is_finite() {
+                return Ok("no cells".to_owned());
+            }
+            let trail_in = width - trail;
+            Ok(if lead + 0.5 >= TABLE_CARD_PAD && trail_in + 0.5 >= TABLE_CARD_PAD {
+                String::new()
+            } else {
+                format!(
+                    "reads {}/{} (the fill 0..{}, the cells {}..{}), wanted at least {} each side",
+                    lead.round() as i64,
+                    trail_in.round() as i64,
+                    width.round() as i64,
+                    lead.round() as i64,
+                    trail.round() as i64,
+                    TABLE_CARD_PAD
+                )
+            })
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    fn row_centered(&self, t: crate::harness::Target) -> String {
+        Self::on_ui_read(move |core| {
+            let Some((_, grid)) = table_row_grid(core, t) else {
+                return Ok("<not a declared table's row>".to_owned());
+            };
+            grid.UpdateLayout()?;
+            let mid = grid.ActualHeight()? / 2.0;
+            let mut worst: Option<(u32, f64, f64, f64)> = None;
+            let children = grid.Children()?;
+            for at in 0..children.Size()? {
+                let cell: FrameworkElement = children.GetAt(at)?.cast()?;
+                let y = f64::from(
+                    cell.TransformToVisual(&grid)?
+                        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?
+                        .Y,
+                );
+                let h = cell.ActualHeight()?;
+                let off = y + h / 2.0 - mid;
+                if worst.is_none_or(|w| off.abs() > w.1.abs()) {
+                    worst = Some((at, off, y, y + h));
+                }
+            }
+            Ok(match worst {
+                Some((i, off, top, bottom)) if off.abs() > 2.0 => format!(
+                    "reads cell {i} off by {} (the cell {}..{}, the row 0..{})",
+                    off.round() as i64,
+                    top.round() as i64,
+                    bottom.round() as i64,
+                    (mid * 2.0).round() as i64
+                ),
+                None => "no cells".to_owned(),
+                _ => String::new(),
             })
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

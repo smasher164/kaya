@@ -18499,3 +18499,22 @@ The wayland legs float both windows centred and have the same race; their
 driver reads no window under the pointer.
 
 FIXED the same day: dragwitness-leg.py's run() parks the witness in the output's far corner, once it is ready and mapped, BEFORE kaya starts, then moves it beside kaya as before (check-verbs' dragbegin_routes holds the order, its cut watched red); dndwitness's four linux legs went green 12 of 12.
+
+## The overlay panel that hugged its text (measured 2026-10-21)
+
+The music app's artist panel (`kaya.column(inset=12, filled=OVERLAY)`) drew
+on GTK as a dark band 2 px from its heading with the caption running to its
+edge, while the same panel read 12 on the other four. The inset was there:
+measured in the lane's container with PyGObject (a GtkBox with `.osd` and
+`.kaya-inset12`, kaya's `border: 12px solid transparent` from an
+APPLICATION-priority provider), the box's bounds were 32 for an 8 px label,
+so the border won over libadwaita's `.osd { border: none }` (a provider's
+priority outranks the theme rule's specificity). What was missing was the
+PAINT: the same `.osd` rule sets `background-clip: padding-box`, so the panel's
+fill stops at the padding edge and the border, which is where kaya puts the
+inset, stays unpainted. `.kaya-filled.osd { background-clip: border-box; }`
+in TINT_CSS puts the fill under the inset; tools/lib/skin_gtk.py holds the
+rule, its cut watched red. A container's inset is a border on GTK (gtk.rs's
+set_container_inset, docs/traps.md's "A GTK table card is paint"), so any
+theme class that clips its background to the padding box hides the inset the
+same way; `.card` does not.

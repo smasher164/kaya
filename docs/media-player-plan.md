@@ -866,6 +866,72 @@ them and the lines span the row: the iOS lane drops music_dock's
 `expect_hugs column@dock_lines` for that leg (tools/lib/lanes/ios.py), which
 holds on every other lane.
 
+### M19: The spacing pass (RULED 2026-10-21)
+
+The maintainer, 2026-10-21, on the dock height's review page: "On iOS, in the
+table containing a song list, the grey highlight on a row, notice how the left
+side of the grey is hugging the "1" with zero space? I have a feeling that
+there is a lack of padding there, and perhaps other places too. Perhaps do a
+pass over UI spacing on this app."
+
+The pass recaptured every screen on every lane in both appearances (the audit
+and the before and after captures are the session's, published on the review
+page) and found four classes, each decided in a backend's lowering, none
+in the app's numbers:
+
+- A SELECTED TABLE ROW'S FILL HUGGED ITS CELLS. The iOS synthesized tier
+  placed the row's ground at the cells' box, 16 pt inside the card; GTK
+  zeroed the row's padding and let the card carry the 12 px, so the
+  `:selected` fill started at the first digit; WinUI's row grid carried no
+  padding under the card's 12 dip interior; Compose's ground reached 8 dp past
+  the cells (M16 (8)) and stopped 8 dp short of the segment. Each platform's
+  own list pads its selected surface by its cell padding (UIKit's layout
+  margin and Material's list item at 16, libadwaita's boxed-list row and
+  Fluent's ListViewItem at 12), so each arm now draws the surface across the
+  card's interior and keeps the cells where they were: SwiftUI places the
+  ground `kayaTableCardInsetX` outside the layout's box on both sides and the
+  card clips its corners; GTK takes the head, body and divider out to the
+  card's stroke with a negative margin and puts the 12 px back as padding on
+  the header, the content box and every row (the trap "A GTK table card is
+  paint, never box" is why the cells may not move); WinUI does the same with
+  the host, head and rule and `table_row_padding`; Compose's `groundOut` is
+  the whole interior. The mac's native NSTableView draws AppKit's own inset
+  selection and is untouched.
+- A TABLE'S CELLS SAT AT THE ROW'S TOP on both phones ("4" at the top edge
+  of a 40 pt art row), while GTK, WinUI and AppKit centre theirs. Both
+  synthesized layouts centre every cell on its row now.
+- THE ARTIST PAGE'S OVERLAY PANEL HUGGED ITS TEXT ON GTK: the inset's
+  transparent border was applied, but libadwaita's `.osd` rule clips the
+  background to the padding box (docs/traps.md, the overlay panel that hugged
+  its text), so `.kaya-filled.osd` paints its background to the border box.
+- A SEARCH SHELF'S CARDS TAKE THEIR TITLES' WIDTH on all five, since a
+  sideways shelf's column hugs its content and a label never wraps on its
+  own. NOT FIXED: `max_width` is legal on images and sliders only
+  (crates/kaya/src/scene.rs, check_prop), so the app cannot bound a card's
+  label, and a collection cannot be a grid (M12); the cards' titles take
+  `max_lines=2` (M16 (2)) and the width is left to the maintainer, since
+  bounding a label or a container is a core prop. The Home cards' titles take
+  two lines too.
+
+Two verbs read the first two classes in every shared table scene, since no
+existing reader could see either (every table observable answers identically
+with the fill flush or the cells at the top): `expect_row_inset <row>` passes
+when the row's selection surface clears its first and last cells by at least
+the backend's own cell padding (AppKit's own on the native tier, where any
+clearance is the platform's), and `expect_row_centered <row>` when every
+cell's centre is within two units of the row's. tools/scenes/music_header.steps,
+music_artist.steps and tracks.steps read both after the selection; the
+readers and the arms are held by tools/lib/skin_routes.py, skin_compose.py,
+skin_gtk.py and skin_winui.py in check-verbs, each cut watched red.
+
+Left to the maintainer, since the platforms disagree or the number is the
+app's: the search shelf's card widths above; the plain-role artist link under the album title sits 17 px (GTK's
+text-button padding), 12 dp (Material's text button) and 11 px (Fluent's
+subtle button) right of the title on the three backends whose plain button
+carries padding, while SwiftUI's plain style has none; the sidebar's heading
+at the sidebar's inset beside rows whose text sits 10-12 further in; and the
+album header's 24 against the page's 16.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

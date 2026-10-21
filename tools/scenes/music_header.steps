@@ -29,6 +29,10 @@ expect_checked checkbox@favorite on
 expect_pref music.favorites "201715"
 click button@play_album
 expect_selected row@track[1860160] on
+# The selected row's fill clears its cells by the platform's own cell padding
+# and every cell sits on the row's centre (M19).
+expect_row_inset row@track[1860160]
+expect_row_centered row@track[1860160]
 expect label@dock_title "Seven Chimes"
 expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860160] accent
