@@ -76,6 +76,11 @@ def step(name, argv, log, *, env=ENV, cwd=ROOT, echo=None):
                 print(f"check-abort: {name}: {line}")
 
 
+# A whole-binding swiftc compile: 11-20 s quiet, 53-60 s under a matrix
+# (docs/traps.md, the host out of memory under a matrix).
+COMPILE_BOUND_S = 300
+
+
 def probe_run(argv, timeout=10, env=None):
     try:
         return subprocess.run(argv, cwd=ROOT, capture_output=True,
@@ -418,7 +423,7 @@ with scratch_dir("check-abort-") as tmp:
             negative_main.write_text(g.doctor(f"Swift async compile {name}", async_compile_source,
                                              re.escape(before), after), encoding="utf-8")
             got = probe_run(executor_compile + executor_sources + [
-                str(negative_main), "-o", str(negative_dir / "probe")], timeout=60)
+                str(negative_main), "-o", str(negative_dir / "probe")], timeout=COMPILE_BOUND_S)
             if got.returncode == 0 or expected not in got.stderr:
                 g.refuse(f"Swift async compile {name} was not refused by {expected}: {got.stderr}")
             print(f"check-abort: Swift async compile {name} refused by {expected}")

@@ -18372,3 +18372,30 @@ id, at the launcher's symlinked path) as another app's: three respawns, then
 `refusing to check in as that app`, and cards-java died at launch on the mac.
 The claim now runs inside the guard, so it runs once, before the check-in.
 cards-java on the mac is the leg that sees it.
+
+## The host out of memory under a matrix (measured 2026-10-20)
+
+Matrix 21 at e9efcfda ran about twice as long on every lane (3644 s against
+1965 s) and three lanes reported "0 legs": android and iOS were killed by
+validate-all's walls (2400 s, 2700 s), and linux by validate-linux's own
+`timeout 1800`, which leaves no leg lines because the pool prints each leg at
+its block's end (the lane now says so). Nothing in the code had slowed. The
+mac guests idle at 0% CPU with no harness (eleven measured), the same legs run
+by hand on a quiet host finish faster than matrix 20's, and two FILTERED
+matrices of the same ten scenes, twenty minutes apart on the same tree, took
+648 s and 806 s with every lane's leg sum 1.5x apart. The windows lane's legs
+ran 4-5x slower while the other lanes ran and at normal speed after they had
+ended. The host was out of memory: the compressor held 86 GB in 22 GB, swap
+11.6 of 13.3 GB was used, free memory sat at 50-850 MB through a filtered
+matrix with 180k-740k compressions per 10 s, and the summed footprints (top's
+MEM) came to about 82 GB on a 64 GB host: the Windows VM 16 GB, the five
+emulators 7.7-10 GB each (5.9 GB each fresh from their snapshot, 9 GB for the
+tablet; each AVD declares 2 GB), Docker's VM 7.8 GB, and fseventsd 8.5 GB with
+about 16 hours of accumulated CPU at near 100% of a core. Restarting the
+emulators alone did not help (the next filtered matrix was the slower one).
+lane-health had printed CPU shares only, so every slow-lane sentence pointed
+at the VMs' CPU and missed the memory; its host reading now carries a memory
+clause (free, compressor, a 1 s sample of page-ins, compressions and
+swap-outs, swap used, the largest footprints), held by check-flightrec LH17-19.
+check-abort's whole-binding swiftc compile probe had a 60 s bound and took
+53-60 s under that matrix (11-20 s quiet); it is 300 s now.

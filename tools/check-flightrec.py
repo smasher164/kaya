@@ -2342,6 +2342,9 @@ def lane_health_checks(src, echo=False):
     if "WIN_RUNTIMES" not in run or size >= 8000:
         found.append(f"{LANE_HEALTH}: the windows reading's command is {size} characters "
                      f"(cmd.exe refuses past 8191) or names no runtimes")
+    if "sentence += \"; \" + memory_line(" not in py_block(src[LANE_HEALTH], "host_line"):
+        found.append(f"{LANE_HEALTH}: host_line no longer reads the host's memory "
+                     f"(docs/traps.md, the host out of memory under a matrix)")
     if echo:
         print(f"check-flightrec: lane health: {len(scope['drive']())} branches driven, "
               f"windows command {size} characters")
@@ -3232,6 +3235,15 @@ for label, rel, pattern, repl, want, check in (
         ("LH15 Defender exclusions no longer read", LANE_HEALTH,
          r"try\{\$f=Get-MpPreference;", "try{$f=$null;", "lost its Defender exclusions",
          lane_health_checks),
+        ("LH17 the host's memory no longer read", LANE_HEALTH,
+         r'    sentence \+= "; " \+ memory_line\(parse_ps\(ps_text\)\)\n', "",
+         "no longer reads the host's memory", lane_health_checks),
+        ("LH18 the compressor's size read off the pages it occupies", LANE_HEALTH,
+         r"b\.get\('Pages stored in compressor', 0\)", "b.get('Pages occupied by compressor', 0)",
+         "branch `memory pressure` did not print", lane_health_checks),
+        ("LH19 the sample's page-ins read off one reading", LANE_HEALTH,
+         r"b\.get\(k, 0\) - a\.get\(k, 0\)", "b.get(k, 0)",
+         "branch `memory sample` did not print", lane_health_checks),
         ("LH16 a windows reading past cmd.exe's line", LANE_HEALTH,
          r'^(\"took=\"\+\$w\.ElapsedMilliseconds\n)', "\\1" + "#" + "x" * 2600 + "\n",
          "cmd.exe refuses", lane_health_checks)):
@@ -3385,6 +3397,6 @@ for verb, _ in GTK_MEDIA_NOTES:
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(234 + (5 if DRIVES else 0))
+gate.negatives_ran(237 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

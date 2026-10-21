@@ -139,6 +139,70 @@ def thermal_sentence(text, problem):
     return "thermal (pmset -g therm): " + "; ".join(said)
 
 
+MEMORY_SAMPLE_S = 1.0
+UNITS = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
+
+
+def parse_vm_stat(text):
+    m = re.search(r"page size of (\d+) bytes", text or "")
+    if not m:
+        return None
+    counts = {k.strip().strip('"'): int(v) for k, v in
+              re.findall(r'^([^:\n]+):\s+(\d+)\.?\s*$', text, re.M)}
+    counts["page size"] = int(m.group(1))
+    return counts
+
+
+def gb(n):
+    return f"{n / (1 << 30):.1f} GB"
+
+
+def footprints(top_text, rows, n=5):
+    names = {r["pid"]: r["name"] for r in rows}
+    found = []
+    for pid, size, unit in re.findall(r"^\s*(\d+)\s+([\d.]+)([BKMGT])[+-]?\s*$",
+                                      top_text or "", re.M):
+        found.append((float(size) * UNITS[unit], names.get(int(pid), f"pid {pid}")))
+    found.sort(key=lambda f: -f[0])
+    return ", ".join(f"{name} {gb(size)}" for size, name in found[:n])
+
+
+def memory_sentence(vm_a, vm_b, vm_problem, interval, swap_text, swap_problem,
+                    top_text, top_problem, rows):
+    """The host's memory (docs/traps.md, the host out of memory under a matrix)."""
+    said = []
+    a, b = parse_vm_stat(vm_a), parse_vm_stat(vm_b)
+    if vm_problem or not a or not b:
+        said.append(f"vm_stat unreadable ({vm_problem or 'no page size in its output'})")
+    else:
+        page = b["page size"]
+        said.append(f"{gb(b.get('Pages free', 0) * page)} free, compressor "
+                    f"{gb(b.get('Pages stored in compressor', 0) * page)} held in "
+                    f"{gb(b.get('Pages occupied by compressor', 0) * page)}")
+        moved = {k: b.get(k, 0) - a.get(k, 0) for k in ("Pageins", "Compressions", "Swapouts")}
+        said.append(f"over a {interval:.0f}s sample {moved['Pageins']} page-ins, "
+                    f"{moved['Compressions']} compressions, {moved['Swapouts']} swap-outs")
+    m = re.search(r"total = ([\d.]+)M\s+used = ([\d.]+)M", swap_text or "")
+    if swap_problem or not m:
+        said.append(f"swap unreadable ({swap_problem or 'vm.swapusage said ' + repr((swap_text or '').strip())})")
+    else:
+        said.append(f"swap {float(m.group(2)) / 1024:.1f} of {float(m.group(1)) / 1024:.1f} GB used")
+    listed = None if top_problem else footprints(top_text, rows)
+    said.append(f"largest footprints (top's mem): {listed}" if listed
+                else f"footprints unreadable ({top_problem or 'top listed no pid and size'})")
+    return "memory: " + "; ".join(said)
+
+
+def memory_line(rows):
+    vm_a, problem_a = _run(["vm_stat"])
+    time.sleep(MEMORY_SAMPLE_S)
+    vm_b, problem_b = _run(["vm_stat"])
+    swap_text, swap_problem = _run(["sysctl", "-n", "vm.swapusage"])
+    top_text, top_problem = _run(["top", "-l", "1", "-o", "mem", "-n", "8", "-stats", "pid,mem"])
+    return memory_sentence(vm_a, vm_b, problem_a or problem_b, MEMORY_SAMPLE_S, swap_text,
+                           swap_problem, top_text, top_problem, rows)
+
+
 def host_line():
     t0 = time.monotonic()
     ps_text, ps_problem = host_ps_text()
@@ -146,6 +210,7 @@ def host_line():
     sentence = host_sentence(ps_text, ps_problem, os.getloadavg(), boot_text,
                              boot_problem, time.time(), os.cpu_count())
     sentence += "; " + thermal_sentence(*_run(["pmset", "-g", "therm"]))
+    sentence += "; " + memory_line(parse_ps(ps_text))
     return sentence, int((time.monotonic() - t0) * 1000)
 
 
@@ -1189,6 +1254,31 @@ PS = """    1     0 05-10:00:00   9:00.00   0.0 /sbin/launchd
   201   200 1:59:00   0:01.00   0.0 /usr/libexec/backboardd
   300     1 10:00   0:05.00  95.0 /usr/bin/qemu-system-aarch64
 """
+VM_A = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                     9000.
+Pages stored in compressor:                  5600000.
+Pages occupied by compressor:                1400000.
+Compressions:                                  20000.
+Pageins:                                        1000.
+Swapouts:                                          3.
+"""
+VM_B = """Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                     2963.
+Pages stored in compressor:                  5653794.
+Pages occupied by compressor:                1424209.
+Compressions:                                 200000.
+Pageins:                                       14000.
+Swapouts:                                         10.
+"""
+SWAP = "total = 13312.00M  used = 11597.06M  free = 1714.94M  (encrypted)\n"
+TOP_MEM = """Processes: 900 total
+PhysMem: 63G used (8G wired, 22G compressor), 100M unused.
+
+PID    MEM
+300    16G
+101    8496M+
+100    512M-
+"""
 ARGS = """  100 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/AAAA/data/var/run/launchd_bootstrap.plist
   200 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/BBBB/data/var/run/launchd_bootstrap.plist
 """
@@ -1340,6 +1430,24 @@ def drive():
                   [thermal_sentence("", "pmset exited 1: x")]))
     cases.append(("thermal silent", "thermal state unreadable (pmset -g therm printed nothing)",
                   [thermal_sentence("\n", None)]))
+    rows = parse_ps(PS)
+    mem = memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, TOP_MEM, None, rows)
+    for label, want in (
+            ("memory pressure", "memory: 0.0 GB free, compressor 86.3 GB held in 21.7 GB"),
+            ("memory sample", "over a 1s sample 13000 page-ins, 180000 compressions, 7 swap-outs"),
+            ("memory swap", "swap 11.3 of 13.0 GB used"),
+            ("memory footprints", "largest footprints (top's mem): qemu-system-aarch64 16.0 GB, "
+             "searchd 8.3 GB, launchd_sim 0.5 GB")):
+        cases.append((label, want, [mem]))
+    cases.append(("memory unreadable", "memory: vm_stat unreadable (vm_stat exited 1: x); swap "
+                  "unreadable (sysctl exited 1: y); footprints unreadable (top did not answer",
+                  [memory_sentence("", "", "vm_stat exited 1: x", 1.0, "", "sysctl exited 1: y",
+                                   "", "top did not answer within 30s", rows)]))
+    cases.append(("memory garbled", "vm_stat unreadable (no page size in its output); swap "
+                  "unreadable (vm.swapusage said 'x'); footprints unreadable (top listed no pid "
+                  "and size)", [memory_sentence("x", "x", None, 1.0, "x", None, "x", None, rows)]))
+    cases.append(("memory unnamed pid", "largest footprints (top's mem): pid 999 2.0 GB",
+                  [memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, "999 2048M+\n", None, rows)]))
     ios = ios_sentences(PS, ARGS, ["AAAA", "BBBB", "CCCC"])
     cases.append(("simulator", "simulator AAAA: up 1h00m (its launchd_sim), 2 processes; "
                   "busiest now: searchd 40%; most CPU since boot: searchd 30s, kaya 2s", ios))

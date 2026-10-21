@@ -63,7 +63,8 @@ cargo_registry.mkdir(parents=True, exist_ok=True)
 
 # Hard ceiling on a suite that never returns. Generous: a cold
 # container compiles everything from scratch.
-rc = run(["timeout", "1800", "docker", "run", "--rm",
+CONTAINER_TIMEOUT_S = 1800
+rc = run(["timeout", str(CONTAINER_TIMEOUT_S), "docker", "run", "--rm",
           "-v", f"{ROOT}:/work",
           "-v", f"{flightrec_home}:/flightrec-state/kaya",
           "-v", f"{cargo_registry}:/root/.cargo/registry",
@@ -78,5 +79,9 @@ rc = run(["timeout", "1800", "docker", "run", "--rm",
           ]).returncode
 print(f"TIMING container-suites {int(time.monotonic() - t0)}s",
       flush=True)
+if rc == 124:
+    print(f"validate-linux: WALL — the container was killed at its {CONTAINER_TIMEOUT_S}s "
+          f"timeout, so the legs that finished printed nothing (the pool prints each leg's "
+          f"lines at its block's end) and this log counts 0 legs", flush=True)
 lane_health.linux_report("linux", "end", "kaya-linux")
 sys.exit(rc)
