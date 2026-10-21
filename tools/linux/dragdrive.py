@@ -37,6 +37,8 @@ Runs INSIDE the container under the leg environment (GDK_BACKEND and the
 session variables of one pool slot); no prelude, like the other in-container
 python here.
 """
+import ctypes
+import ctypes.util
 import json
 import os
 import subprocess
@@ -246,6 +248,71 @@ def click_main(argv, press=True):
     return 0
 
 
+# XQueryPointer's mask bit for the left button (X.h's Button1Mask).
+BUTTON1_MASK = 1 << 8
+
+
+def x11_pointer():
+    """(child, x, y, mask) off XQueryPointer on the root: the top-level window
+    under the pointer by geometry, whoever holds a grab, and the buttons the
+    server holds down. `xdotool getmouselocation` cannot serve: it answers
+    WINDOW=0 over a GTK toplevel when no window manager has set WM_STATE
+    (measured 2026-10-21 under the lane's bare Xvfb)."""
+    lib = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+    lib.XOpenDisplay.restype = ctypes.c_void_p
+    lib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    lib.XDefaultRootWindow.restype = ctypes.c_ulong
+    lib.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+    lib.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    ulong_p, int_p = ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int)
+    lib.XQueryPointer.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ulong_p, ulong_p,
+                                  int_p, int_p, int_p, int_p,
+                                  ctypes.POINTER(ctypes.c_uint)]
+    display = lib.XOpenDisplay(None)
+    if not display:
+        raise DragDriveError("XOpenDisplay failed, so nothing says which window "
+                             "the pointer is over")
+    try:
+        root = lib.XDefaultRootWindow(display)
+        r_root, child = ctypes.c_ulong(), ctypes.c_ulong()
+        rx, ry, wx, wy = (ctypes.c_int() for _ in range(4))
+        mask = ctypes.c_uint()
+        same = lib.XQueryPointer(display, root, ctypes.byref(r_root),
+                                 ctypes.byref(child), ctypes.byref(rx), ctypes.byref(ry),
+                                 ctypes.byref(wx), ctypes.byref(wy), ctypes.byref(mask))
+        if not same:
+            raise DragDriveError("XQueryPointer says the pointer is on another screen")
+        return child.value, rx.value, ry.value, mask.value
+    finally:
+        lib.XCloseDisplay(display)
+
+
+def x11_window_words(child, pid):
+    """Who owns the top-level window `child`, in xdotool's words."""
+    if child == 0:
+        return "over no window but the root"
+    owner = subprocess.run(["xdotool", "getwindowpid", str(child)], capture_output=True,
+                           text=True, encoding="utf-8", check=False)
+    name = subprocess.run(["xdotool", "getwindowname", str(child)], capture_output=True,
+                          text=True, encoding="utf-8", check=False).stdout.strip()
+    if owner.returncode != 0:
+        return (f"over window {child:#x} {name!r}, whose pid xdotool cannot read "
+                f"({(owner.stderr.strip() or 'no stderr')[:120]})")
+    found = owner.stdout.strip()
+    whose = "this guest's" if found == str(pid) else f"NOT this guest's (pid {pid})"
+    return f"over window {child:#x} {name!r} of pid {found}, {whose}"
+
+
+def x11_reading(pid, when):
+    """One sentence: the window under the pointer and button 1's state."""
+    try:
+        child, x, y, mask = x11_pointer()
+    except (OSError, DragDriveError) as e:
+        return f"{when}: no pointer reading ({e})"
+    button = "down" if mask & BUTTON1_MASK else "up"
+    return f"{when} at ({x}, {y}) {x11_window_words(child, pid)}, button 1 {button}"
+
+
 def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
           phase="all"):
     """Press at one widget point, walk to another, release. The screen
@@ -255,6 +322,15 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
     origin = screen_origin(proto, pid, transform)
     start = (int(origin[0] + start_in_window[0]), int(origin[1] + start_in_window[1]))
     end = (int(origin[0] + end_in_window[0]), int(origin[1] + end_in_window[1]))
+    # WHICH CLIENT THE PRESS AND THE RELEASE REACHED (docs/traps.md, the
+    # witness window over kaya's at the press): with no window manager every
+    # toplevel maps at the origin, so a press aimed at kaya's pixels can land
+    # on another client's window and kaya then never sees a drag at all.
+    readings = []
+    if proto == "x11" and phase in ("all", "press"):
+        subprocess.run([injector, "mousemove", str(start[0]), str(start[1])],
+                       capture_output=True, check=False)
+        readings.append(x11_reading(pid, "before the press"))
     out = subprocess.run(injector_argv(proto, injector, start, end, phase,
                                        os.environ.get(BEGIN_FLAG_VAR),
                                        os.environ.get(TOOK_FLAG_VAR)),
@@ -267,7 +343,10 @@ def drive(proto, pid, transform, start_in_window, end_in_window, injector=None,
     # The injector's own reading of EACH gate ("waited Nms" / "expired") rides
     # the caller's line, so a release that beat the drag-begin, or beat the
     # destination's own answer, is named.
-    gate = out.stdout.strip().splitlines()
+    if proto == "x11":
+        readings.append(x11_reading(pid, {"press": "held", "release": "released",
+                                          "all": "released"}[phase]))
+    gate = out.stdout.strip().splitlines() + readings
     return origin, start, end, "; ".join(line.strip() for line in gate)
 
 

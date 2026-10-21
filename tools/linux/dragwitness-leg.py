@@ -202,6 +202,16 @@ def place(proto, pid, at):
                    check=False)
 
 
+def park_witness(proto, witness, witness_said):
+    """The witness in the screen's far corner BEFORE kaya starts: kaya's
+    scene runs its instrument drag at once, and a witness still mapped over
+    kaya's window takes that press (docs/traps.md, the witness window over
+    kaya's at the press)."""
+    witness_said.wait_for("ready", READY_DEADLINE_S, "the witness")
+    _, _, ww, wh = wait_for_window(proto, witness.pid, "the witness")
+    place(proto, witness.pid, (SCREEN[0] - ww - GAP, SCREEN[1] - wh - GAP))
+
+
 def witness_origin(proto, pid, transform):
     """The witness's CONTENT origin on screen. sway reports the xdg window
     geometry, which IS the content; the x11 toplevel is the SURFACE, and the
@@ -260,13 +270,20 @@ def run(proto, direction, kaya_cmd):
          "--text", WITNESS_TEXT, "--file", str(offered)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         encoding="utf-8", start_new_session=True)
+    witness_said = Pump(witness.stdout)
+    try:
+        park_witness(proto, witness, witness_said)
+    except DragDriveError:
+        for line in witness_said.lines:
+            out(f"witness said: {line}")
+        stop(witness, "the witness", group=True)
+        raise
     env = dict(os.environ)
     env["KAYA_SELFTEST"] = "dnd"
     env["KAYA_SCENES_DIR"] = str(scenes)
     kaya = subprocess.Popen(kaya_cmd, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8")
-    witness_said = Pump(witness.stdout)
     kaya_said = Pump(kaya.stdout)
     try:
         drive(proto, direction, witness, witness_said, kaya, kaya_said)

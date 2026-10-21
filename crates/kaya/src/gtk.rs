@@ -12798,6 +12798,116 @@ struct DropSide {
 #[cfg(feature = "harness")]
 static DROP_SIDE: std::sync::Mutex<Option<DropSide>> = std::sync::Mutex::new(None);
 
+/// WHAT THIS PROCESS'S OWN WINDOWS AND DRAG SOURCES SAW during ONE gesture of
+/// the `drag` verb, ARMED BY THE VERB like DropSide. A drag that never began
+/// has five causes this tells apart: the press reached another client
+/// (press 0; the driver's line names the window it did reach), no source's
+/// gesture claimed it, the walk never passed the threshold (no prepare),
+/// prepare offered nothing, or GDK refused the drag after prepare (no
+/// drag-begin). docs/traps.md, the witness window over kaya's at the press.
+#[cfg(feature = "harness")]
+#[derive(Default)]
+struct SourceSide {
+    press: u32,
+    first_press: Option<(f64, f64)>,
+    motion: u32,
+    release: u32,
+    gesture_begin: u32,
+    gesture_end: u32,
+    gesture_cancel: u32,
+    prepare: u32,
+    provided: u32,
+}
+
+#[cfg(feature = "harness")]
+static SOURCE_SIDE: std::sync::Mutex<Option<SourceSide>> = std::sync::Mutex::new(None);
+
+#[cfg(feature = "harness")]
+fn note_source_side(f: impl FnOnce(&mut SourceSide)) {
+    let Ok(mut side) = SOURCE_SIDE.lock() else { return };
+    if let Some(side) = side.as_mut() {
+        f(side);
+    }
+}
+
+#[cfg(feature = "harness")]
+thread_local! {
+    static SOURCE_WATCHED: RefCell<Vec<glib::WeakRef<gtk4::Window>>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// The raw event stream of every window of this process, in the capture
+/// phase, counted only while the verb has SOURCE_SIDE armed.
+#[cfg(feature = "harness")]
+fn watch_source_side(core: &CoreState) {
+    let windows: Vec<gtk4::Window> =
+        std::iter::once(core.window.clone()).chain(core.aux_windows.values().cloned()).collect();
+    for window in windows {
+        let seen = SOURCE_WATCHED.with(|w| {
+            let mut w = w.borrow_mut();
+            w.retain(|weak| weak.upgrade().is_some());
+            let seen = w.iter().any(|weak| weak.upgrade().as_ref() == Some(&window));
+            if !seen {
+                w.push(window.downgrade());
+            }
+            seen
+        });
+        if seen {
+            continue;
+        }
+        let raw = gtk4::EventControllerLegacy::new();
+        raw.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        raw.connect_event(|_, event| {
+            let kind = event.event_type();
+            note_source_side(|side| match kind {
+                gdk::EventType::ButtonPress => {
+                    side.press += 1;
+                    if side.first_press.is_none() {
+                        side.first_press = event.position();
+                    }
+                }
+                gdk::EventType::MotionNotify => side.motion += 1,
+                gdk::EventType::ButtonRelease => side.release += 1,
+                _ => {}
+            });
+            glib::Propagation::Proceed
+        });
+        window.add_controller(raw);
+    }
+}
+
+/// One drag source's own signals, counted into SOURCE_SIDE.
+#[cfg(feature = "harness")]
+fn watch_drag_source(source: &gtk4::DragSource) {
+    use gtk4::prelude::GestureExt as _;
+    source.connect_begin(|_, _| note_source_side(|s| s.gesture_begin += 1));
+    source.connect_end(|_, _| note_source_side(|s| s.gesture_end += 1));
+    source.connect_cancel(|_, _| note_source_side(|s| s.gesture_cancel += 1));
+}
+
+/// SOURCE_SIDE, disarmed, in one sentence of counts.
+#[cfg(feature = "harness")]
+fn source_side_words() -> String {
+    let side = SOURCE_SIDE.lock().ok().and_then(|mut s| s.take()).unwrap_or_default();
+    let at = match side.first_press {
+        Some((x, y)) => format!(" (the first at {x:.0},{y:.0} in its surface)"),
+        None => String::new(),
+    };
+    format!(
+        "this process's windows saw press {press}{at} motion {motion} release {release}; \
+         drag-source gestures began {gb} ended {ge} cancelled {gc}; prepare ran {prepare}, \
+         offered content {provided}",
+        press = side.press,
+        motion = side.motion,
+        release = side.release,
+        gb = side.gesture_begin,
+        ge = side.gesture_end,
+        gc = side.gesture_cancel,
+        prepare = side.prepare,
+        provided = side.provided,
+    )
+}
+
 /// Record one drop-side event, if the verb is watching this gesture.
 #[cfg(feature = "harness")]
 fn note_drop_side(f: impl FnOnce(&mut DropSide)) {
@@ -12853,6 +12963,15 @@ fn report_drop_side(aimed: &str, gated: bool) -> String {
              before the compositor has an accepted offer and the drop is lost with no \
              sign anywhere (docs/deferred.md's dnd wayland WATCH)",
             side.enter + side.motion
+        );
+    }
+    if side.drop > 0 && side.began.is_empty() {
+        kaya_diag!(
+            "KAYA_DIAG dragdrive: A DROP REACHED A TARGET FROM A DRAG THIS PROCESS NEVER \
+             BEGAN: aimed {aimed}, drop {drop}, delivered {delivered}, offered {offer}",
+            drop = side.drop,
+            delivered = side.delivered,
+            offer = side.offer.as_deref().unwrap_or("<no drop arm read one>"),
         );
     }
     if side.drop > 0 || side.last_yes == Some(false) {
@@ -13267,8 +13386,16 @@ fn install_drag_source(core: &CoreState, id: WidgetId) {
     source.set_actions(drag_actions(operations));
     source.connect_prepare(move |_source, _x, _y| {
         let providers = clip_providers(&clip);
-        (!providers.is_empty()).then(|| union_provider(providers))
+        let offered = (!providers.is_empty()).then(|| union_provider(providers));
+        #[cfg(feature = "harness")]
+        note_source_side(|s| {
+            s.prepare += 1;
+            s.provided += u32::from(offered.is_some());
+        });
+        offered
     });
+    #[cfg(feature = "harness")]
+    watch_drag_source(&source);
     // GDK reports the action it settled on; a cancelled drag reports none,
     // and the flag makes the refused case say so whatever the toolkit left
     // in `selected_action`.
@@ -13452,7 +13579,11 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
     source.set_actions(gdk::DragAction::MOVE);
     let prepare_hub = hub.clone();
     let prepare_rows = rows.clone();
+    #[cfg(feature = "harness")]
+    watch_drag_source(&source);
     source.connect_prepare(move |_source, x, y| {
+        #[cfg(feature = "harness")]
+        note_source_side(|s| s.prepare += 1);
         let row = row_under(&prepare_rows, x, y)?;
         let tag = prepare_hub.identity_of(&row)?;
         let keys = path_keys(&tag_path(&tag)?)?;
@@ -13461,6 +13592,8 @@ fn install_reorder(core: &CoreState, container: WidgetId) {
             tag,
             drag: None,
         });
+        #[cfg(feature = "harness")]
+        note_source_side(|s| s.provided += 1);
         Some(gdk::ContentProvider::for_bytes(
             KAYA_ROW_MIME,
             &glib::Bytes::from_owned(keys.into_bytes()),
@@ -23646,6 +23779,8 @@ impl crate::harness::Stage for GtkStage {
             armed: Some(std::time::Instant::now()),
             ..DropSide::default()
         });
+        Self::on_main(watch_source_side);
+        *SOURCE_SIDE.lock().unwrap() = Some(SourceSide::default());
         if proto != "x11" {
             let out = run(None);
             *DRAG_BEGIN_FLAG.lock().unwrap() = None;
@@ -23653,10 +23788,12 @@ impl crate::harness::Stage for GtkStage {
             for flag in [&begin_flag, &took_flag].into_iter().flatten() {
                 let _ = std::fs::remove_file(flag);
             }
+            let words = source_side_words();
+            crate::vtrace::note("drag", format_args!("{words}"));
             if !DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) {
                 eprintln!(
                     "KAYA_DIAG dragdrive: no drag began before the wayland release — \
-                     the injector's own wait line above says how long it held"
+                     the injector's own wait line above says how long it held; {words}"
                 );
             }
             let gate = report_drop_side(&aimed, true);
@@ -23677,11 +23814,13 @@ impl crate::harness::Stage for GtkStage {
         {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+        let words = source_side_words();
+        crate::vtrace::note("drag", format_args!("{words}"));
         if DRAG_BEGAN.load(std::sync::atomic::Ordering::SeqCst) {
             eprintln!("KAYA_DIAG dragdrive: drag began {}ms after the press", started.elapsed().as_millis());
         } else {
             eprintln!(
-                "KAYA_DIAG dragdrive: no drag began within {}ms of the press — releasing anyway",
+                "KAYA_DIAG dragdrive: no drag began within {}ms of the press — releasing anyway; {words}",
                 wait.as_millis()
             );
         }

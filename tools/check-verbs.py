@@ -5924,6 +5924,8 @@ from skin_routes import run as check_skin_routes
 check_skin_routes(g)
 from band_routes import run as check_band_routes
 check_band_routes(g)
+from dragbegin_routes import run as check_dragbegin_routes
+check_dragbegin_routes(g)
 
 # The SELF-TEST fail() calls below the drain at "EVERY SELF-TEST FAILURE
 # BELOW THE FIRST DRAIN" reach the exit here.
@@ -5978,4 +5980,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the content type's one table, its platform read and its answers "
           f"+ the reveal's one door, its platform read and its refusals "
           f"+ the iOS screen read (one pixel of a BMP, each ask's own answer) "
+          f"+ a linux drag that never began naming who got the press "
           f"+ spec hash against 2 interpreters")

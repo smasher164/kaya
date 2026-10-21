@@ -15848,8 +15848,9 @@ protocol's pooled block, after chat-go. dndwitness-in-x11 then failed 2 of
 chat-go and dndwitness), both times `dragdrive: no drag began within 5000ms
 of the press` on the in-app drag, on a host 80% idle; the same filter with
 the legs in their own place passed 6 of 6, and the kept matrix logs show
-the leg green in every run. What the earlier legs leave on the display is
-not measured. The deferral was reverted.
+the leg green in every run. The deferral was reverted. The cause was
+measured later and is not the earlier legs (this file, the witness window
+over kaya's at the press).
 
 ## The android pool's suite drains (measured 2026-10-08)
 
@@ -18462,3 +18463,39 @@ only the three quoted refusals read not green. check-flightrec's VR clauses
 refuse a bare test anywhere under tools/ (VR1-VR6). The `ACT 1 OK` `in`
 tests that start act two, and guest-side probe.cmd's findstr, are outside
 the clause: act two's own verdict decides those legs.
+
+## The witness window over kaya's at the press (measured 2026-10-21)
+
+Matrix run 20261021T074426Z, `dndwitness-out-x11`: the instrument step
+`drag label#0 to label#3` printed `no drag began within 5000ms of the press`
+with the main loop idle, and the bundle said nothing more. Its fail-shot did:
+label#4 read `files target got witness.txt witness bytes (copy)`, and the
+witness said `handed over copy`, a drag of its OWN. The x11 pool has no
+window manager, so both toplevels map at the origin with the witness on top,
+and tools/linux/dragwitness-leg.py moves the witness clear only after its
+`ready` line; the harness runs the scene meanwhile, so a press aimed at
+kaya's label#0 can land on the witness's source label (24,24 to 336,84), the
+witness begins a drag, the wrapper moves it away mid-hold, and the release
+drops the witness's file on kaya's files target. Reproduced by moving the
+placed witness back over kaya before the press and away after it: the same
+three lines, the same fail-shot. An unperturbed run of the leg read
+`before the press ... over window 'dragwitness' ..., NOT this guest's` and
+`held ... over window 'dnd' ..., this guest's`: the wrapper's move landed in
+the injector's 200 ms before its mousedown, so the race is live on green
+runs too. dndwitness-in-x11's 2-of-13 sightings above are the same window.
+
+The bundle now names it. tools/linux/dragdrive.py reads XQueryPointer on the
+root before the x11 press and after each phase and says whose window is
+under the pointer (`xdotool getmouselocation` answers WINDOW=0 over a GTK
+toplevel when no window manager has set WM_STATE, measured); the drag verb
+prints what this process's windows and drag sources counted (raw press,
+motion and release in the capture phase, the source gesture's begin, end and
+cancel, prepare and whether it offered content), into both no-drag sentences
+and the verb trace; and report_drop_side names a drop from a drag this
+process never began. A forced red with prepare offering nothing read `press
+1 ... drag-source gestures began 1 ... prepare ran 5, offered content 0`.
+Held by tools/lib/dragbegin_routes.py in check-verbs, seven cuts watched.
+The wayland legs float both windows centred and have the same race; their
+driver reads no window under the pointer.
+
+FIXED the same day: dragwitness-leg.py's run() parks the witness in the output's far corner, once it is ready and mapped, BEFORE kaya starts, then moves it beside kaya as before (check-verbs' dragbegin_routes holds the order, its cut watched red); dndwitness's four linux legs went green 12 of 12.
