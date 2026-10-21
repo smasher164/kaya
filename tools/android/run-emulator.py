@@ -17,6 +17,7 @@ dev_shell_or_die()
 
 import atexit
 import contextlib
+import datetime
 import hashlib
 import os
 import re
@@ -637,17 +638,51 @@ def live_instance_current(serial, avd):
 
 
 READERS = []
+# docs/traps.md, the host out of memory under a matrix: each device's real
+# footprint just after its cold boot, which admission compares against.
+FOOTPRINT_STATE = ROOT / "target/android-emulator-footprints.json"
+
+
+def footprint_now(serial):
+    args_text, ps_problem = lane_health.host_args_text()
+    pid = None if ps_problem else lane_health.emulator_pids(args_text).get(
+        lane_health.serial_port(serial))
+    text, problem = lane_health.footprint_text(pid) if pid else ("", None)
+    return pid, ps_problem, text, problem
+
+
+def memory_admits(serial, avd):
+    state, state_problem = lane_health.emulator_state_load(FOOTPRINT_STATE)
+    restart, sentence = lane_health.emulator_admission(serial, avd, *footprint_now(serial),
+                                                       state, state_problem)
+    lane_health.say("android", "admission", sentence)
+    return not restart
+
+
+def record_footprint_baseline(serial, avd):
+    state, state_problem = lane_health.emulator_state_load(FOOTPRINT_STATE)
+    if state_problem:
+        lane_health.say("android", "admission", f"emulator {serial}: the baseline state was "
+                        f"unreadable ({state_problem}); starting it afresh")
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sentence = lane_health.emulator_baseline(serial, avd, *footprint_now(serial), state, now)
+    problem = lane_health.emulator_state_save(FOOTPRINT_STATE, state)
+    lane_health.say("android", "admission",
+                    sentence + (f"; the state could not be written ({problem})" if problem else
+                                f", in {FOOTPRINT_STATE.relative_to(ROOT)}"
+                                if serial in state else ""))
 
 
 def launch_reader(port, expected_avd):
     serial = f"emulator-{port}"
     if live_instance_current(serial, expected_avd):
         grpc, why = emulator_capture.discovery(serial)
-        if grpc is not None:
+        if grpc is not None and memory_admits(serial, expected_avd):
             return True
-        # Started before the capture legs' gRPC endpoint was part of the
-        # launch: the instance is current in everything but that.
-        print(f"run-emulator: {serial} has no gRPC endpoint ({why}); restarting it")
+        if grpc is None:
+            # Started before the capture legs' gRPC endpoint was part of the
+            # launch: the instance is current in everything but that.
+            print(f"run-emulator: {serial} has no gRPC endpoint ({why}); restarting it")
         if not stop_avd_instance(serial, expected_avd):
             return False
     if device_present(serial):
@@ -708,6 +743,7 @@ def finish_reader(port, expected_avd, proc):
         print(f"run-emulator: {serial} did not retain its emulator "
               f"identity", file=sys.stderr)
         return False
+    record_footprint_baseline(serial, expected_avd)
     return True
 
 

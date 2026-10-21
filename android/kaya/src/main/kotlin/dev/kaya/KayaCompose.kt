@@ -15296,7 +15296,9 @@ object KayaCompose {
         }
         // A recorded leg must outlive its last sample time — see
         // harness.rs's record_linger; same contract, same constant.
-        if (System.getenv("KAYA_RECORD") != null || System.getenv("KAYA_HARNESS_GATE") != null) {
+        if (!System.getenv("KAYA_RECORD").isNullOrEmpty() ||
+            !System.getenv("KAYA_HARNESS_GATE").isNullOrEmpty()
+        ) {
             Thread.sleep(750)
         }
         // ACT ONE'S VERDICT IS ITS OWN LINE (docs/tasks-s9-plan.md R6),

@@ -18,6 +18,8 @@ import subprocess
 import tempfile
 import time
 
+from lanes.linux import target_mounts
+
 
 def checked(stage, command, **kwargs):
     print(f"shot-gtk: {stage}: {shlex.join(command)}", flush=True)
@@ -106,7 +108,7 @@ def photograph(args, out, script):
             try:
                 result = subprocess.run(
                     ["timeout", "300", "docker", "run", "--rm", "--init",
-                     "-v", f"{ROOT}:/work", "-v", f"{scratch}:/capture", *env,
+                     "-v", f"{ROOT}:/work", *target_mounts(ROOT), "-v", f"{scratch}:/capture", *env,
                      "-w", "/work", "kaya-linux", "xvfb-run", "-a", "python3",
                      "/work/tools/linux/shot-gtk.py", args.scene, "/capture/crop.png",
                      "--in-container", "--settle-seconds", str(args.settle_seconds),

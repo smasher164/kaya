@@ -61,3 +61,18 @@ def quiet_legs(run_suites):
                                run_suites, re.M):
             out.update(f"{stem}-{proto}" for proto in protos)
     return out
+
+
+# THE CONTAINER'S CARGO TARGET IS A DOCKER VOLUME (docs/traps.md, the host
+# out of memory under a matrix): written through the bind mount, 36.5 GB of
+# build output landed in the host's tree and fed fseventsd. Only the
+# recordings, which the host reads, stay on the bind mount; run-suites.sh
+# refuses a target that is not a volume of its own.
+TARGET_VOLUME = "kaya-linux-target"
+
+
+def target_mounts(root):
+    recordings = root / "target-linux/recordings"
+    recordings.mkdir(parents=True, exist_ok=True)
+    return ["-v", f"{TARGET_VOLUME}:/work/target-linux",
+            "-v", f"{recordings}:/work/target-linux/recordings"]

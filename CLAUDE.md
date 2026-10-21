@@ -1064,8 +1064,17 @@ in docs/deferred.md.
    so a guest given a dead app's pid became that app; a lane binary whose
    record names another bundle id, not held since the start, is an
    IDENTITY ADOPTED refusal (the fix is crates/kaya/src/ls_identity.rs,
-   check-app-identity's C16 its static half); five cuts watched.
-   Two hundred and thirty-nine watched negatives, counts printed),
+   check-app-identity's C16 its static half); five cuts watched. AND THE
+   HOST'S MEMORY IS READ BY WHAT HOLDS IT since 2026-10-20 (docs/traps.md,
+   the host out of memory under a matrix): each VM beside top's figure
+   carries `footprint -p`'s own, fseventsd over 500 MB is named with its
+   restart, the windows guest's commit peak and the linux container's
+   memory.peak reach the lane's readings, and the android lane restarts at
+   admission a device more than 1.5 GB over its fresh baseline, printing
+   the decision; fourteen cuts watched. An EMPTY KAYA_RECORD is unset in
+   all three harnesses' recording linger (validate-linux passes it empty and
+   every linux leg slept 750 ms); three cuts watched.
+   Two hundred and fifty-six watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

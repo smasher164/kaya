@@ -2319,6 +2319,52 @@ def census_ios_park(src):
     return found
 
 
+def census_emulator_memory(src):
+    """docs/traps.md, the host out of memory under a matrix: a warm android
+    device is admitted only past its footprint check, a cold boot records
+    the baseline, and the decision is printed; and the linux container's
+    cgroup reading reaches the lane's end."""
+    found = []
+    emu = src[ANDROID]
+    if "if grpc is not None and memory_admits(serial, expected_avd):\n            return True" \
+            not in py_block(emu, "launch_reader"):
+        found.append(f"{ANDROID}: launch_reader admits a warm device without its footprint check")
+    finish = py_block(emu, "finish_reader")
+    if "record_footprint_baseline(serial, expected_avd)\n    return True" not in finish:
+        found.append(f"{ANDROID}: finish_reader records no footprint baseline after a cold boot")
+    admits = py_block(emu, "memory_admits")
+    if not re.search(r"lane_health\.emulator_admission\(.*\n(?:.*\n)*? +lane_health\.say\("
+                     r"\"android\", \"admission\", sentence\)\n +return not restart", admits):
+        found.append(f"{ANDROID}: memory_admits no longer prints its decision before acting on it")
+    host = src[LINUX_HOST]
+    if '"-v", f"{readings}:/lane-readings",' not in host \
+            or 'lane_health.linux_report("linux", "end", "kaya-linux", readings / "memory.txt")' \
+            not in host:
+        found.append(f"{LINUX_HOST}: the container's memory reading no longer reaches the lane's "
+                     f"end (the /lane-readings mount or the end reading's path)")
+    suites = src[LINUX]
+    traps = re.findall(r"^trap '([^']*)' EXIT$", suites, re.M)
+    if not traps or "container_memory_record" not in traps[-1] \
+            or "/sys/fs/cgroup/memory.peak" not in suites:
+        found.append(f"{LINUX}: the last EXIT trap no longer writes the container's memory.peak")
+    return found
+
+
+LINGER_READS = {
+    HARNESS: 'v.is_some_and(|v| !v.is_empty())',
+    SWIFTUI: '!(ProcessInfo.processInfo.environment["KAYA_RECORD"] ?? "").isEmpty',
+    COMPOSE: '!System.getenv("KAYA_RECORD").isNullOrEmpty()',
+}
+
+
+def census_linger(src):
+    """An empty KAYA_RECORD is unset in all three harnesses: validate-linux
+    passes `-e KAYA_RECORD=` and every linux leg slept 750 ms at its exit
+    (docs/traps.md, the host out of memory under a matrix)."""
+    return [f"{rel}: the recording linger reads an EMPTY KAYA_RECORD as set (wanted `{want}`)"
+            for rel, want in LINGER_READS.items() if want not in src[rel]]
+
+
 def lane_health_checks(src, echo=False):
     scope = {"__name__": "lane_health_shadow"}
     exec(compile(src[LANE_HEALTH], LANE_HEALTH, "exec"), scope)
@@ -2342,6 +2388,25 @@ def lane_health_checks(src, echo=False):
     if "WIN_RUNTIMES" not in run or size >= 8000:
         found.append(f"{LANE_HEALTH}: the windows reading's command is {size} characters "
                      f"(cmd.exe refuses past 8191) or names no runtimes")
+    mem_cmd = len(scope["windows_memory_command"]())
+    if mem_cmd >= 8000:
+        found.append(f"{LANE_HEALTH}: the windows memory reading's command is {mem_cmd} "
+                     f"characters (cmd.exe refuses past 8191)")
+    for needle, what in (("Win32_OperatingSystem", "commit charge and limit"),
+                         ("GetPerformanceInfo", "commit peak since boot")):
+        if needle not in scope["WINDOWS_MEMORY_SCRIPT"]:
+            found.append(f"{LANE_HEALTH}: the windows memory reading lost its {what} (`{needle}`)")
+    if "windows_memory_command()" not in py_block(src[LANE_HEALTH], "windows_report"):
+        found.append(f"{LANE_HEALTH}: windows_report no longer reads the guest's commit peak")
+    line = py_block(src[LANE_HEALTH], "memory_line")
+    for needle, what in (("hypervisor_pids(top_text, rows)", "the VMs' own footprints"),
+                         ("rows, vm_reads)", "the VMs' footprints into the sentence"),
+                         ("fseventsd_sentence(rows, fse_text, fse_problem)", "fseventsd")):
+        if needle not in line:
+            found.append(f"{LANE_HEALTH}: memory_line no longer reads {what} (docs/traps.md, "
+                         f"the host out of memory under a matrix)")
+    if "emulator_host_sentence(" not in py_block(src[LANE_HEALTH], "android_report"):
+        found.append(f"{LANE_HEALTH}: android_report no longer reads each emulator's footprint")
     if "sentence += \"; \" + memory_line(" not in py_block(src[LANE_HEALTH], "host_line"):
         found.append(f"{LANE_HEALTH}: host_line no longer reads the host's memory "
                      f"(docs/traps.md, the host out of memory under a matrix)")
@@ -2443,6 +2508,10 @@ for line in census_pass_path(REAL):
     gate.finding(line, at="pass path")
 for line in census_lane_health(REAL):
     gate.finding(line, at="lane health")
+for line in census_linger(REAL):
+    gate.finding(line, at="recording linger")
+for line in census_emulator_memory(REAL):
+    gate.finding(line, at="emulator and container memory")
 for line in census_ios_park(REAL):
     gate.finding(line, at="iOS park account")
 for line in lane_health_checks(REAL, echo=True):
@@ -3244,6 +3313,58 @@ for label, rel, pattern, repl, want, check in (
         ("LH19 the sample's page-ins read off one reading", LANE_HEALTH,
          r"b\.get\(k, 0\) - a\.get\(k, 0\)", "b.get(k, 0)",
          "branch `memory sample` did not print", lane_health_checks),
+        ("EM1 a warm device admitted without its footprint check", ANDROID,
+         r"if grpc is not None and memory_admits\(serial, expected_avd\):",
+         "if grpc is not None:", "without its footprint check", census_emulator_memory),
+        ("EM2 a cold boot recording no baseline", ANDROID,
+         r"^    record_footprint_baseline\(serial, expected_avd\)\n", "",
+         "records no footprint baseline", census_emulator_memory),
+        ("EM3 the admission decision unprinted", ANDROID,
+         r'^    lane_health\.say\("android", "admission", sentence\)\n(    return not restart)',
+         r"\1", "no longer prints its decision", census_emulator_memory),
+        ("EM4 the container's reading never mounted", LINUX_HOST,
+         r'^ +"-v", f"\{readings\}:/lane-readings",\n', "",
+         "no longer reaches the lane's end", census_emulator_memory),
+        ("EM5 the last EXIT trap without the container's reading", LINUX,
+         r'; container_memory_record\' EXIT$', "' EXIT", "memory.peak", census_emulator_memory),
+        ("RL1 the core's linger back on a bare presence test", HARNESS,
+         r"\.is_some_and\(\|v\| !v\.is_empty\(\)\)", ".is_some()", "reads an EMPTY KAYA_RECORD",
+         census_linger),
+        ("RL2 the SwiftUI linger back on a bare presence test", SWIFTUI,
+         r'!\(ProcessInfo\.processInfo\.environment\["KAYA_RECORD"\] \?\? ""\)\.isEmpty',
+         'ProcessInfo.processInfo.environment["KAYA_RECORD"] != nil', "reads an EMPTY KAYA_RECORD",
+         census_linger),
+        ("RL3 the Compose linger back on a bare presence test", COMPOSE,
+         r'!System\.getenv\("KAYA_RECORD"\)\.isNullOrEmpty\(\)',
+         'System.getenv("KAYA_RECORD") != null', "reads an EMPTY KAYA_RECORD", census_linger),
+        ("LH20 a device past its bound kept", LANE_HEALTH,
+         r"if over > EMU_GROWTH_BOUND:", "if False:", "branch `admission restart` did not print",
+         lane_health_checks),
+        ("LH21 an unreadable footprint restarting the device", LANE_HEALTH,
+         r'return False, \(f"\{head\} footprint -p \{pid\} unreadable "',
+         'return True, (f"{head} footprint -p {pid} unreadable "',
+         "branch `admission decisions` did not print", lane_health_checks),
+        ("LH22 the real figure read off phys_footprint", LANE_HEALTH,
+         r'^FOOTPRINT = re\.compile\(r"\\bFootprint: ', 'FOOTPRINT = re.compile(r"phys_footprint: ',
+         "branch `VM footprint beside top's` did not print", lane_health_checks),
+        ("LH23 a runaway fseventsd within the bound", LANE_HEALTH,
+         r"if size <= FSEVENTSD_BOUND:", "if True:", "branch `fseventsd over` did not print",
+         lane_health_checks),
+        ("LH24 fseventsd no longer read", LANE_HEALTH,
+         r' \+ "; " \+ fseventsd_sentence\(rows, fse_text, fse_problem\)', "",
+         "memory_line no longer reads fseventsd", lane_health_checks),
+        ("LH25 the guest's commit peak no longer read", LANE_HEALTH,
+         r"\[\*ssh_argv, windows_memory_command\(\)\],", '[*ssh_argv, "x"],',
+         "no longer reads the guest's commit peak", lane_health_checks),
+        ("LH26 a commit peak near the limit not flagged", LANE_HEALTH,
+         r"if limit and peak >= COMMIT_NEAR \* limit else", "if False else",
+         "branch `guest commit near` did not print", lane_health_checks),
+        ("LH27 a container OOM kill read as none", LANE_HEALTH,
+         r'if oom\.isdigit\(\) and oom != "0" else', 'if False else',
+         "branch `container OOM` did not print", lane_health_checks),
+        ("LH28 an emulator's own footprint no longer read", LANE_HEALTH,
+         r"say\(lane, when, emulator_host_sentence\(serial, pid, text, problem\)\)", "pass",
+         "android_report no longer reads each emulator's footprint", lane_health_checks),
         ("LH16 a windows reading past cmd.exe's line", LANE_HEALTH,
          r'^(\"took=\"\+\$w\.ElapsedMilliseconds\n)', "\\1" + "#" + "x" * 2600 + "\n",
          "cmd.exe refuses", lane_health_checks)):
@@ -3397,6 +3518,6 @@ for verb, _ in GTK_MEDIA_NOTES:
                        want=2 if verb == "player_command" else 1)
     gate.negative(label, lambda: census_gtk_media_ring(changed), want=f"({verb})")
 
-gate.negatives_ran(237 + (5 if DRIVES else 0))
+gate.negatives_ran(254 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

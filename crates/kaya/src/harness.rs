@@ -5120,11 +5120,16 @@ fn gate_wait() {
 /// the covering-frame rule a teardown frame (docs/traps.md). A no-op
 /// without a recorder, and the pre-flight failures skip it.
 fn record_linger() {
-    if std::env::var_os("KAYA_RECORD").is_some()
-        || std::env::var_os("KAYA_HARNESS_GATE").is_some()
-    {
+    if lingers(std::env::var_os("KAYA_RECORD"), std::env::var_os("KAYA_HARNESS_GATE")) {
         std::thread::sleep(Duration::from_millis(750));
     }
+}
+
+/// An EMPTY variable is unset, as the runners' `${VAR:-}` read it:
+/// tools/validate-linux.py passes `-e KAYA_RECORD=` on every run, and every
+/// linux leg slept 750 ms (docs/traps.md, the host out of memory under a matrix).
+fn lingers(record: Option<std::ffi::OsString>, gate: Option<std::ffi::OsString>) -> bool {
+    [record, gate].into_iter().any(|v| v.is_some_and(|v| !v.is_empty()))
 }
 
 /// `expect_ink` compares WITHIN ±1 PER CHANNEL (ruled 2026-08-26,
@@ -8903,6 +8908,17 @@ pub fn resolve(index: isize, len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_empty_record_variable_does_not_linger() {
+        use super::lingers;
+        let set = || Some(std::ffi::OsString::from("1"));
+        let empty = || Some(std::ffi::OsString::new());
+        assert!(!lingers(None, None));
+        assert!(!lingers(empty(), empty()));
+        assert!(lingers(set(), None));
+        assert!(lingers(empty(), set()));
+    }
+
     /// A ceiling command that writes more than a pipe holds still exits
     /// and is read whole (docs/traps.md, the wedged media_feed leg).
     #[cfg(unix)]

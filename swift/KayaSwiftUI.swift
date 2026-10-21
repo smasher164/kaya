@@ -15143,8 +15143,8 @@ private func kayaRunScript(_ script: String) {
     }
     // A recorded leg must outlive its last sample time — see
     // harness.rs's record_linger; same contract, same constant.
-    if ProcessInfo.processInfo.environment["KAYA_RECORD"] != nil
-        || ProcessInfo.processInfo.environment["KAYA_HARNESS_GATE"] != nil
+    if !(ProcessInfo.processInfo.environment["KAYA_RECORD"] ?? "").isEmpty
+        || !(ProcessInfo.processInfo.environment["KAYA_HARNESS_GATE"] ?? "").isEmpty
     {
         Thread.sleep(forTimeInterval: 0.75)
     }

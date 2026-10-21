@@ -18399,3 +18399,25 @@ clause (free, compressor, a 1 s sample of page-ins, compressions and
 swap-outs, swap used, the largest footprints), held by check-flightrec LH17-19.
 check-abort's whole-binding swiftc compile probe had a 60 s bound and took
 53-60 s under that matrix (11-20 s quiet); it is 300 s now.
+The automatic half (2026-10-20): top's mem is phys_footprint, which for a
+Hypervisor.framework guest may charge its RAM twice (the Windows VM 16.0 GB
+in top, 7.7 GB by `footprint -p`; a phone 5.5 against 3.1 GB), so the host
+reading prints `footprint -p` beside every VM, and each emulator's at the
+android lane's start and end. The emulators' host heap grows per leg under
+`-gpu swiftshader_indirect` and never shrinks: the android lane records each
+device's real footprint after its cold boot from snapshot
+(target/android-emulator-footprints.json) and restarts at admission any
+device more than 1.5 GB over it (measured fresh: 2.9-3.0 GB a phone). A
+fseventsd over 500 MB is named with its fix, `sudo kill -TERM $(pgrep -x
+fseventsd)` (a healthy one is 10-40 MB and a runaway one never recovers);
+the Windows guest's commit peak since boot (5.0 GB of an 8.5 GB limit on
+2026-10-20) and the linux container's cgroup memory.peak are in the lane
+readings, so the VM sizes can be chosen from a number. The linux
+container's cargo target is a docker volume (tools/lib/lanes/linux.py's
+target_mounts), not the bind mount it wrote 36.5 GB through; run-suites.sh
+refuses a target that is the bind mount, and check-gates holds the mounts. Measuring
+that move found a second cost: validate-linux passes `-e KAYA_RECORD=`
+(empty) on every run and the harness's recording linger tested presence, so
+every linux leg slept 750 ms at its exit (86 filtered legs: 25 s of pool
+against 17 s). The three harnesses now read an empty variable as unset, as
+the runners' `${VAR:-}` does (check-flightrec RL1-RL3).

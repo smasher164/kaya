@@ -15,8 +15,12 @@ dev_shell_or_die()
 # docs/runner-conversion-plan.md §6).
 
 import os
+import shutil
 import subprocess
+import tempfile
 import time
+
+from lanes.linux import target_mounts
 
 
 def run(argv, **kw):
@@ -64,8 +68,11 @@ cargo_registry.mkdir(parents=True, exist_ok=True)
 # Hard ceiling on a suite that never returns. Generous: a cold
 # container compiles everything from scratch.
 CONTAINER_TIMEOUT_S = 1800
+readings = pathlib.Path(tempfile.mkdtemp(prefix="kaya-linux-readings-"))
 rc = run(["timeout", str(CONTAINER_TIMEOUT_S), "docker", "run", "--rm",
           "-v", f"{ROOT}:/work",
+          *target_mounts(ROOT),
+          "-v", f"{readings}:/lane-readings",
           "-v", f"{flightrec_home}:/flightrec-state/kaya",
           "-v", f"{cargo_registry}:/root/.cargo/registry",
           "-e", "XDG_STATE_HOME=/flightrec-state",
@@ -83,5 +90,6 @@ if rc == 124:
     print(f"validate-linux: WALL — the container was killed at its {CONTAINER_TIMEOUT_S}s "
           f"timeout, so the legs that finished printed nothing (the pool prints each leg's "
           f"lines at its block's end) and this log counts 0 legs", flush=True)
-lane_health.linux_report("linux", "end", "kaya-linux")
+lane_health.linux_report("linux", "end", "kaya-linux", readings / "memory.txt")
+shutil.rmtree(readings, ignore_errors=True)
 sys.exit(rc)

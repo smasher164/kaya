@@ -1622,13 +1622,71 @@ for label, rel, pattern, repl in (
         else:
             print(f"check-gates: self-test {label[:3]} refused: {verdict[:90]}")
 
+# THE LINUX CONTAINER'S CARGO TARGET IS A DOCKER VOLUME (docs/traps.md, the
+# host out of memory under a matrix): every container that builds into
+# /work/target-linux mounts tools/lib/lanes/linux.py's volume there, and
+# run-suites.sh refuses a target that is the bind mount before it builds.
+LINUX_TARGET_FILES = ("tools/validate-linux.py", "tools/check-gtk.py", "tools/linux/shot-gtk.py")
+LINUX_TARGET_VOLUME = 'TARGET_VOLUME = "kaya-linux-target"'
+LINUX_TARGET_MOUNT = '"-v", f"{TARGET_VOLUME}:/work/target-linux",'
+LINUX_TARGET_WALL = ('if ! mountpoint -q "$CARGO_TARGET_DIR" \\\n'
+                     '        || [ "$(stat -f -c %T "$CARGO_TARGET_DIR")" = '
+                     '"$(stat -f -c %T /work)" ]; then')
+
+
+def linux_target_problem(texts):
+    lib = texts["tools/lib/lanes/linux.py"]
+    if LINUX_TARGET_VOLUME not in lib or LINUX_TARGET_MOUNT not in lib:
+        return ("tools/lib/lanes/linux.py must mount the named volume kaya-linux-target at "
+                "/work/target-linux (target_mounts), not a host directory")
+    for rel in LINUX_TARGET_FILES:
+        code = "\n".join(code_lines(texts[rel]))
+        binds, mounts = code.count('f"{ROOT}:/work"'), code.count("*target_mounts(ROOT)")
+        if binds == 0 or mounts != binds or "from lanes.linux import target_mounts" not in code:
+            return (f"{rel} mounts the tree at /work {binds} time(s) and the target volume "
+                    f"{mounts} time(s); every such container builds into /work/target-linux, "
+                    f"so each must pass *target_mounts(ROOT)")
+    suites = texts["tools/linux/run-suites.sh"]
+    wall = suites.find(LINUX_TARGET_WALL)
+    build = suites.find("cargo build")
+    if wall < 0 or not 0 <= wall < build or "exit 1" not in suites[wall:wall + 600]:
+        return ("tools/linux/run-suites.sh must refuse, before its first cargo build, a "
+                "/work/target-linux that is not a volume of its own")
+    return None
+
+
+_lt = {rel: (root / rel).read_text(encoding="utf-8") for rel in
+       (*LINUX_TARGET_FILES, "tools/lib/lanes/linux.py", "tools/linux/run-suites.sh")}
+problem = linux_target_problem(_lt)
+if problem is not None:
+    fail(problem)
+for label, rel, pattern, repl in (
+        ("NT1 the lane's container without the volume", "tools/validate-linux.py",
+         r"^ +\*target_mounts\(ROOT\),\n", ""),
+        ("NT2 the volume swapped for the host's directory", "tools/lib/lanes/linux.py",
+         r'"-v", f"\{TARGET_VOLUME\}:/work/target-linux",',
+         '"-v", f"{root}/target-linux:/work/target-linux",'),
+        ("NT3 the in-container refusal cut", "tools/linux/run-suites.sh",
+         r'^if ! mountpoint -q "\$CARGO_TARGET_DIR" \\\n', 'if false \\\n'),
+        ("NT4 check-gtk's container on the bind mount", "tools/check-gtk.py",
+         r" \*target_mounts\(ROOT\),", "")):
+    texts = dict(_lt)
+    texts[rel], n = re.subn(pattern, repl, texts[rel], count=1, flags=re.M)
+    print(f"check-gates: self-test {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test {label[:3]} did not apply — the clause is not reading the real file")
+    elif (verdict := linux_target_problem(texts)) is None:
+        fail(f"self-test {label[:3]}: the doctored copy passed")
+    else:
+        print(f"check-gates: self-test {label[:3]} refused: {verdict[:90]}")
+
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
           f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
           "niced sweep delayed behind Android in a cargo target of its own, four-phone "
           "Android pool, three-sim iOS pool, "
           "five lanes each ending with their verdict and journaling every leg, "
-          "one matrix filter read by all five)")
+          "one matrix filter read by all five, the linux target in its volume)")
 else:
     print("check-gates: FINDINGS ABOVE", file=sys.stderr)
 sys.exit(status)

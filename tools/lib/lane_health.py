@@ -9,6 +9,7 @@ carried; a reading that failed says what came back instead.
 
 import base64
 import datetime
+import json
 import os
 import pathlib
 import re
@@ -157,18 +158,88 @@ def gb(n):
     return f"{n / (1 << 30):.1f} GB"
 
 
-def footprints(top_text, rows, n=5):
+TOP_ROW = re.compile(r"^\s*(\d+)\s+([\d.]+)([BKMGT])[+-]?\s*$", re.M)
+# A Hypervisor.framework guest's RAM may be charged to its process twice by
+# phys_footprint, which is top's mem (docs/traps.md, the host out of memory
+# under a matrix), so these carry `footprint -p`'s own figure beside it.
+HYPERVISOR = re.compile(r"^(?:QEMULauncher|qemu-system-\S+|com\.apple\.Virtualization\.VirtualMachine)$")
+FOOTPRINT = re.compile(r"\bFootprint: ([\d.]+) ([KMGT]?B)\b")
+PHYS_FOOTPRINT = re.compile(r"\bphys_footprint: ([\d.]+) ([KMGT]?B)\b")
+
+
+def _size(m):
+    return float(m.group(1)) * UNITS[m.group(2)[0]]
+
+
+def footprint_reading(text):
+    """(footprint's own figure, phys_footprint or None) in bytes, or None."""
+    real = FOOTPRINT.search(text or "")
+    if not real:
+        return None
+    phys = PHYS_FOOTPRINT.search(text)
+    return _size(real), (_size(phys) if phys else None)
+
+
+def footprint_text(pid):
+    return _run(["footprint", "-p", str(pid), "--noCategories"], timeout=20)
+
+
+def footprint_clause(text, problem):
+    got = None if problem else footprint_reading(text)
+    if got:
+        return f"footprint -p {gb(got[0])}"
+    return f"footprint -p unreadable ({problem or 'it printed no Footprint: line'})"
+
+
+def top_rows(top_text):
+    return [(int(pid), float(size) * UNITS[unit])
+            for pid, size, unit in TOP_ROW.findall(top_text or "")]
+
+
+def hypervisor_pids(top_text, rows, n=5):
     names = {r["pid"]: r["name"] for r in rows}
-    found = []
-    for pid, size, unit in re.findall(r"^\s*(\d+)\s+([\d.]+)([BKMGT])[+-]?\s*$",
-                                      top_text or "", re.M):
-        found.append((float(size) * UNITS[unit], names.get(int(pid), f"pid {pid}")))
-    found.sort(key=lambda f: -f[0])
-    return ", ".join(f"{name} {gb(size)}" for size, name in found[:n])
+    top = sorted(top_rows(top_text), key=lambda f: -f[1])[:n]
+    return [pid for pid, _ in top if HYPERVISOR.match(names.get(pid, ""))]
+
+
+def footprints(top_text, rows, n=5, vm_reads=None):
+    names = {r["pid"]: r["name"] for r in rows}
+    found = sorted(top_rows(top_text), key=lambda f: -f[1])[:n]
+    out = []
+    for pid, size in found:
+        name = names.get(pid, f"pid {pid}")
+        item = f"{name} {gb(size)}"
+        if HYPERVISOR.match(name):
+            item += (f" ({footprint_clause(*vm_reads[pid])})" if vm_reads and pid in vm_reads
+                     else " (footprint -p not read)")
+        out.append(item)
+    return ", ".join(out)
+
+
+FSEVENTSD_BOUND = 500 << 20
+
+
+def fseventsd_sentence(rows, top_text, problem):
+    """docs/traps.md, the host out of memory under a matrix: a runaway
+    fseventsd never shrinks by itself."""
+    pids = [r["pid"] for r in rows if r["name"] == "fseventsd"]
+    if not pids:
+        return "fseventsd: not in the host's process table"
+    sizes = dict(top_rows(top_text)) if not problem else {}
+    if pids[0] not in sizes:
+        return (f"fseventsd (pid {pids[0]}): size unreadable "
+                f"({problem or 'top listed no size for its pid'})")
+    size = sizes[pids[0]]
+    head = f"fseventsd {gb(size)} (top's mem; footprint -p needs root for it)"
+    if size <= FSEVENTSD_BOUND:
+        return f"{head}, within the {FSEVENTSD_BOUND >> 20} MB bound"
+    return (f"{head} — FSEVENTSD OVER {FSEVENTSD_BOUND >> 20} MB: a healthy one is 10-40 MB "
+            f"and a runaway one never shrinks by itself (docs/traps.md, the host out of memory "
+            f"under a matrix); restart it: sudo kill -TERM $(pgrep -x fseventsd)")
 
 
 def memory_sentence(vm_a, vm_b, vm_problem, interval, swap_text, swap_problem,
-                    top_text, top_problem, rows):
+                    top_text, top_problem, rows, vm_reads=None):
     """The host's memory (docs/traps.md, the host out of memory under a matrix)."""
     said = []
     a, b = parse_vm_stat(vm_a), parse_vm_stat(vm_b)
@@ -187,8 +258,9 @@ def memory_sentence(vm_a, vm_b, vm_problem, interval, swap_text, swap_problem,
         said.append(f"swap unreadable ({swap_problem or 'vm.swapusage said ' + repr((swap_text or '').strip())})")
     else:
         said.append(f"swap {float(m.group(2)) / 1024:.1f} of {float(m.group(1)) / 1024:.1f} GB used")
-    listed = None if top_problem else footprints(top_text, rows)
-    said.append(f"largest footprints (top's mem): {listed}" if listed
+    listed = None if top_problem else footprints(top_text, rows, vm_reads=vm_reads)
+    said.append(f"largest footprints (top's mem, which is phys_footprint; a VM's own "
+                f"`footprint -p` figure beside it): {listed}" if listed
                 else f"footprints unreadable ({top_problem or 'top listed no pid and size'})")
     return "memory: " + "; ".join(said)
 
@@ -199,8 +271,14 @@ def memory_line(rows):
     vm_b, problem_b = _run(["vm_stat"])
     swap_text, swap_problem = _run(["sysctl", "-n", "vm.swapusage"])
     top_text, top_problem = _run(["top", "-l", "1", "-o", "mem", "-n", "8", "-stats", "pid,mem"])
-    return memory_sentence(vm_a, vm_b, problem_a or problem_b, MEMORY_SAMPLE_S, swap_text,
-                           swap_problem, top_text, top_problem, rows)
+    vm_reads = {pid: footprint_text(pid)
+                for pid in ([] if top_problem else hypervisor_pids(top_text, rows))}
+    sentence = memory_sentence(vm_a, vm_b, problem_a or problem_b, MEMORY_SAMPLE_S, swap_text,
+                               swap_problem, top_text, top_problem, rows, vm_reads)
+    fse = [r["pid"] for r in rows if r["name"] == "fseventsd"]
+    fse_text, fse_problem = (_run(["top", "-l", "1", "-pid", str(fse[0]), "-stats", "pid,mem"])
+                             if fse else ("", None))
+    return sentence + "; " + fseventsd_sentence(rows, fse_text, fse_problem)
 
 
 def host_line():
@@ -303,10 +381,145 @@ def android_sentence(serial, text, problem):
             f"most CPU since boot: {', '.join(since[:3]) or 'ps listed none'}")
 
 
+def serial_port(serial):
+    m = re.fullmatch(r"emulator-(\d+)", serial)
+    return int(m.group(1)) if m else None
+
+
+def emulator_pids(args_text):
+    """{console port: pid} of the emulators' qemu processes, off `ps -Ao pid=,command=`."""
+    out = {}
+    for line in (args_text or "").splitlines():
+        parts = line.split(None, 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue
+        exe = parts[1].split(None, 1)[0]
+        m = re.search(r"\s-port (\d+)(?:\s|$)", parts[1])
+        if pathlib.PurePosixPath(exe).name.startswith("qemu-system-") and m:
+            out[int(m.group(1))] = int(parts[0])
+    return out
+
+
+def emulator_host_sentence(serial, pid, text, problem):
+    if pid is None:
+        return (f"emulator {serial} host process: "
+                + (f"unreadable ({problem})" if problem else
+                   f"no qemu-system process names port {serial_port(serial)} in the host's "
+                   f"process table"))
+    got = None if problem else footprint_reading(text)
+    if not got:
+        return (f"emulator {serial} host process (pid {pid}): footprint unreadable "
+                f"({problem or 'footprint -p printed no Footprint: line'})")
+    real, phys = got
+    return (f"emulator {serial} host process (pid {pid}): footprint -p {gb(real)}, top's mem "
+            f"(phys_footprint) {gb(phys) if phys is not None else 'not printed'}")
+
+
+# The emulator's host heap grows per leg under -gpu swiftshader_indirect and
+# never shrinks; only the process's lifetime bounds it (docs/traps.md, the
+# host out of memory under a matrix).
+EMU_GROWTH_BOUND = 1536 << 20
+
+
+def emulator_state_load(path):
+    """(state, problem): {serial: {pid, avd, baseline, at}} as the lane wrote it."""
+    try:
+        text = pathlib.Path(path).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return {}, None
+    except OSError as error:
+        return {}, f"{path}: {error.strerror}"
+    try:
+        state = json.loads(text)
+    except ValueError as error:
+        return {}, f"{path} is not JSON ({error})"
+    if not isinstance(state, dict):
+        return {}, f"{path} holds a {type(state).__name__}, not an object"
+    return {k: v for k, v in state.items() if isinstance(v, dict)}, None
+
+
+def emulator_state_save(path, state):
+    path = pathlib.Path(path)
+    try:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(state, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError as error:
+        return f"{path}: {error.strerror}"
+    return None
+
+
+def emulator_reference(serial, avd, pid, state):
+    """(baseline bytes, where it came from) or (None, None): this process's
+    own fresh reading, else the newest fresh reading of a device of its AVD."""
+    own = state.get(serial)
+    if own and own.get("pid") == pid and own.get("avd") == avd:
+        return own.get("baseline"), f"its fresh baseline (recorded {own.get('at', '?')})"
+    kin = [(v.get("at", ""), k, v) for k, v in state.items()
+           if v.get("avd") == avd and isinstance(v.get("baseline"), (int, float))]
+    if not kin:
+        return None, None
+    at, other, v = max(kin)
+    return v["baseline"], (f"the newest fresh baseline of a {avd} device ({other}, pid "
+                           f"{v.get('pid')}, recorded {at}), since this process (pid {pid}) "
+                           f"has none of its own")
+
+
+def emulator_admission(serial, avd, pid, ps_problem, text, problem, state, state_problem):
+    """(restart, sentence): restart a device whose real footprint is more
+    than EMU_GROWTH_BOUND over its fresh baseline; keep it on any reading
+    that could not be made."""
+    head = f"emulator {serial} memory at admission:"
+    bound = f"{EMU_GROWTH_BOUND / (1 << 30):.1f} GB"
+    if pid is None:
+        why = (f"the host's process table unreadable ({ps_problem})" if ps_problem else
+               f"no qemu-system process names port {serial_port(serial)}")
+        return False, f"{head} {why}; keeping it, unmeasured"
+    got = None if problem else footprint_reading(text)
+    if not got:
+        return False, (f"{head} footprint -p {pid} unreadable "
+                       f"({problem or 'it printed no Footprint: line'}); keeping it, unmeasured")
+    real = got[0]
+    if state_problem:
+        return False, (f"{head} footprint -p {gb(real)} (pid {pid}), but the baseline state is "
+                       f"unreadable ({state_problem}); keeping it")
+    ref, where = emulator_reference(serial, avd, pid, state)
+    if ref is None:
+        return False, (f"{head} footprint -p {gb(real)} (pid {pid}), and no fresh baseline of a "
+                       f"{avd} device is recorded; keeping it (its next cold boot records one)")
+    over = real - ref
+    said = (f"{head} footprint -p {gb(real)} (pid {pid}) against {gb(ref)}, {where}: "
+            f"{gb(over) if over >= 0 else '-' + gb(-over)} over it")
+    if over > EMU_GROWTH_BOUND:
+        return True, f"{said}, past the {bound} bound: RESTARTING it from its snapshot"
+    return False, f"{said}, within the {bound} bound: keeping it"
+
+
+def emulator_baseline(serial, avd, pid, ps_problem, text, problem, state, now):
+    """The sentence; a reading that could be made is written into `state`."""
+    head = f"emulator {serial} memory after its cold boot from snapshot:"
+    if pid is None:
+        why = (f"the host's process table unreadable ({ps_problem})" if ps_problem else
+               f"no qemu-system process names port {serial_port(serial)}")
+        return f"{head} {why}; no baseline recorded"
+    got = None if problem else footprint_reading(text)
+    if not got:
+        return (f"{head} footprint -p {pid} unreadable "
+                f"({problem or 'it printed no Footprint: line'}); no baseline recorded")
+    state[serial] = {"pid": pid, "avd": avd, "baseline": int(got[0]), "at": now}
+    return f"{head} fresh baseline footprint -p {gb(got[0])} (pid {pid}, {avd})"
+
+
 def android_report(lane, when, serials):
     t0 = time.monotonic()
     host, _ = host_line()
     say(lane, when, host)
+    args_text, args_problem = host_args_text()
+    pids = {} if args_problem else emulator_pids(args_text)
+    for serial in serials:
+        pid = pids.get(serial_port(serial))
+        text, problem = footprint_text(pid) if pid else ("", args_problem)
+        say(lane, when, emulator_host_sentence(serial, pid, text, problem))
     got = {}
 
     def read(serial):
@@ -399,7 +612,33 @@ def docker_sentence(events, problem, since=None):
             + " — the VM moved under this lane")
 
 
-def linux_report(lane, when, image):
+def container_memory_sentence(text, problem):
+    """The lane container's own cgroup v2 account, written by run-suites.sh's
+    EXIT trap (docs/traps.md, the host out of memory under a matrix)."""
+    if problem:
+        return (f"container memory: no reading ({problem}) — the container ended before "
+                f"its EXIT trap ran, or was killed")
+    keys = {}
+    for line in (text or "").splitlines():
+        key, eq, value = line.partition("=")
+        if eq:
+            keys[key.strip()] = value.strip()
+    said = []
+    for key, what in (("peak", "peak"), ("current", "at the end")):
+        value = keys.get(key, "")
+        said.append(f"{what} {gb(int(value))}" if value.isdigit() else
+                    f"{what} unreadable ({key}={value!r})")
+    limit = keys.get("max", "")
+    said.append("no limit of its own (memory.max is max)" if limit == "max" else
+                f"limit {gb(int(limit))}" if limit.isdigit() else
+                f"limit unreadable (max={limit!r})")
+    oom = keys.get("oom_kill", "")
+    said.append(f"{oom} OOM KILLS" if oom.isdigit() and oom != "0" else
+                "no OOM kill" if oom == "0" else f"OOM kills unreadable (oom_kill={oom!r})")
+    return "container memory (cgroup v2): " + ", ".join(said)
+
+
+def linux_report(lane, when, image, container_memory=None):
     t0 = time.monotonic()
     host, _ = host_line()
     say(lane, when, host)
@@ -414,6 +653,12 @@ def linux_report(lane, when, image):
         log, log_problem = "", f"{DOCKER_LOG}: {error.strerror}"
     since = _LINUX_START.get(lane) if when == "end" else None
     say(lane, when, docker_sentence(docker_events(log), log_problem, since))
+    if container_memory is not None:
+        try:
+            text, problem = pathlib.Path(container_memory).read_text(encoding="utf-8"), None
+        except OSError as error:
+            text, problem = "", f"{container_memory}: {error.strerror}"
+        say(lane, when, container_memory_sentence(text, problem))
     if when == "start":
         _LINUX_START[lane] = now
     say(lane, when, f"the reading took {int((time.monotonic() - t0) * 1000)} ms")
@@ -844,6 +1089,56 @@ foreach($r in @(RUNTIMES)){$n,$q=$r;if(-not $q){$c=Get-Command $n -ErrorAction S
 """
 
 
+# Its own command: appended to the reading above it would pass cmd.exe's 8191.
+WINDOWS_MEMORY_SCRIPT = r"""$ErrorActionPreference='Stop'
+try{$o=Get-CimInstance Win32_OperatingSystem;"commit.os="+$o.TotalVirtualMemorySize+"|"+$o.FreeVirtualMemory+"|"+$o.TotalVisibleMemorySize+"|"+$o.FreePhysicalMemory}catch{"commit.error="+($_.Exception.Message -replace '\s+',' ')}
+try{Add-Type 'using System;using System.Runtime.InteropServices;public struct KP{public uint c;public UIntPtr t,l,p,a,b,d,e,f,g,s;public uint h,i,j;}public class KG{[DllImport("psapi")]public static extern bool GetPerformanceInfo(out KP p,uint c);}';$p=New-Object KP;if(-not [KG]::GetPerformanceInfo([ref]$p,[Runtime.InteropServices.Marshal]::SizeOf($p))){throw 'GetPerformanceInfo returned false'};$s=[uint64]$p.s;"commit.pi="+([uint64]$p.t*$s)+"|"+([uint64]$p.p*$s)+"|"+([uint64]$p.l*$s)}catch{"commit.pierror="+($_.Exception.Message -replace '\s+',' ')}
+"""
+COMMIT_NEAR = 0.9
+
+
+def windows_memory_command():
+    encoded = base64.b64encode(WINDOWS_MEMORY_SCRIPT.encode("utf-16-le")).decode()
+    return f"powershell -NoProfile -NonInteractive -EncodedCommand {encoded}"
+
+
+def windows_memory_sentence(text, problem):
+    """The guest's commit charge now and its peak since boot, which is what
+    the VM's memory setting has to cover (docs/traps.md, the host out of
+    memory under a matrix)."""
+    keys = {}
+    for line in (text or "").splitlines():
+        key, eq, value = line.partition("=")
+        if eq:
+            keys[key.strip()] = value.strip()
+    if not keys:
+        return f"guest memory reading failed: {problem or 'the guest printed nothing'}"
+    said = []
+    if "commit.error" in keys:
+        said.append(f"Win32_OperatingSystem unreadable: {keys['commit.error']}")
+    else:
+        try:
+            limit_kb, free_kb, phys_kb, phys_free_kb = (
+                int(x) for x in keys.get("commit.os", "").split("|"))
+            said.append(f"commit now {gb((limit_kb - free_kb) << 10)} of a {gb(limit_kb << 10)} "
+                        f"limit, {gb(phys_free_kb << 10)} of {gb(phys_kb << 10)} physical free "
+                        f"(Win32_OperatingSystem)")
+        except ValueError:
+            said.append(f"Win32_OperatingSystem unreadable (commit.os={keys.get('commit.os', '')!r})")
+    if "commit.pierror" in keys:
+        said.append(f"commit peak unreadable: {keys['commit.pierror']}")
+    else:
+        try:
+            total, peak, limit = (int(x) for x in keys.get("commit.pi", "").split("|"))
+            near = (f" — WITHIN {1 - COMMIT_NEAR:.0%} OF THE LIMIT, so a smaller VM memory "
+                    f"setting would page" if limit and peak >= COMMIT_NEAR * limit else "")
+            said.append(f"commit PEAK SINCE BOOT {gb(peak)} against a {gb(limit)} limit, "
+                        f"{gb(total)} now (GetPerformanceInfo){near}")
+        except ValueError:
+            said.append(f"commit peak unreadable (commit.pi={keys.get('commit.pi', '')!r})")
+    return "guest memory: " + "; ".join(said)
+
+
 def windows_script(runtimes):
     """`runtimes` is (name, path-or-empty); an empty path is resolved on the
     guest's PATH the way a launcher's bare `python` is."""
@@ -1099,6 +1394,8 @@ def windows_report(lane, when, ssh_argv, runtimes):
     text, problem = _run([*ssh_argv, windows_command(runtimes)], timeout=60)
     for sentence in windows_sentences(text, problem):
         say(lane, when, sentence)
+    say(lane, when, windows_memory_sentence(*_run([*ssh_argv, windows_memory_command()],
+                                                  timeout=60)))
     say(lane, when, f"the reading took {int((time.monotonic() - t0) * 1000)} ms from the host")
 
 
@@ -1283,6 +1580,53 @@ ARGS = """  100 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/AAA
   200 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/BBBB/data/var/run/launchd_bootstrap.plist
 """
 
+FP_QEMU = """======================================================================
+QEMULauncher [5151]: 64-bit    Footprint: 7886 MB (16384 bytes per page)
+======================================================================
+
+Auxiliary data:
+    phys_footprint: 16 GB
+    phys_footprint_peak: 16 GB
+"""
+FP_EMU = """qemu-system-aarch64-headless [54362]: 64-bit    Footprint: 3122 MB (16384 bytes per page)
+    phys_footprint: 5613 MB
+"""
+FSE_PS = "  345     1 30-05:00:00 17:00:00.00   0.0 /System/Library/fseventsd\n"
+EMU_ARGS = """54362 /nix/store/x-emulator/qemu/darwin-aarch64/qemu-system-aarch64-headless -avd kaya -read-only -port 5554 -grpc 8554
+54388 /nix/store/x-emulator/qemu/darwin-aarch64/qemu-system-aarch64-headless -avd kaya-tablet -port 5562
+ 3950 python3 -c print('qemu-system-aarch64-headless -port 5556')
+ 5151 /Applications/UTM.app/QEMULauncher /x/qemu-aarch64-softmmu -m 8192
+"""
+WIN_MEM = "#< CLIXML\ncommit.os=8903424|5054740|8379136|4242532\ncommit.pi=3949969408|5364740096|9117106176\n"
+CONTAINER_MEM = f"peak={3435973836}\ncurrent={429496729}\nmax=max\noom_kill=0\n"
+
+
+def _fp(mb):
+    return f"qemu-system-aarch64-headless [1]: 64-bit    Footprint: {mb} MB (16384 bytes per page)\n"
+
+
+def _state_probe(state):
+    import tempfile
+    scratch = pathlib.Path(tempfile.mkdtemp(prefix="kaya-lane-health-"))
+    try:
+        path = scratch / "s.json"
+        problem = emulator_state_save(path, state)
+        back = emulator_state_load(path)
+        missing = emulator_state_load(scratch / "none.json")
+        path.write_text("{", encoding="utf-8")
+        corrupt = emulator_state_load(path)[1] or ""
+        path.write_text("[1]", encoding="utf-8")
+        listed = emulator_state_load(path)[1] or ""
+    finally:
+        for f in scratch.iterdir():
+            f.unlink()
+        scratch.rmdir()
+    corrupt = "is not JSON" if "is not JSON" in corrupt else repr(corrupt)
+    listed = "holds a list" if "holds a list" in listed else repr(listed)
+    return (f"round trip {problem is None and back == (state, None)}; missing {missing}; "
+            f"corrupt {corrupt}; list {listed}")
+
+
 ANDROID_GOOD = """17329.00 65026.75
 ==ps
     TIME+ NAME
@@ -1436,8 +1780,9 @@ def drive():
             ("memory pressure", "memory: 0.0 GB free, compressor 86.3 GB held in 21.7 GB"),
             ("memory sample", "over a 1s sample 13000 page-ins, 180000 compressions, 7 swap-outs"),
             ("memory swap", "swap 11.3 of 13.0 GB used"),
-            ("memory footprints", "largest footprints (top's mem): qemu-system-aarch64 16.0 GB, "
-             "searchd 8.3 GB, launchd_sim 0.5 GB")):
+            ("memory footprints", "largest footprints (top's mem, which is phys_footprint; a "
+             "VM's own `footprint -p` figure beside it): qemu-system-aarch64 16.0 GB (footprint -p "
+             "not read), searchd 8.3 GB, launchd_sim 0.5 GB")):
         cases.append((label, want, [mem]))
     cases.append(("memory unreadable", "memory: vm_stat unreadable (vm_stat exited 1: x); swap "
                   "unreadable (sysctl exited 1: y); footprints unreadable (top did not answer",
@@ -1446,8 +1791,144 @@ def drive():
     cases.append(("memory garbled", "vm_stat unreadable (no page size in its output); swap "
                   "unreadable (vm.swapusage said 'x'); footprints unreadable (top listed no pid "
                   "and size)", [memory_sentence("x", "x", None, 1.0, "x", None, "x", None, rows)]))
-    cases.append(("memory unnamed pid", "largest footprints (top's mem): pid 999 2.0 GB",
+    cases.append(("memory unnamed pid", "beside it): pid 999 2.0 GB",
                   [memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, "999 2048M+\n", None, rows)]))
+    cases.append(("VM footprint beside top's", "qemu-system-aarch64 16.0 GB (footprint -p 7.7 GB), "
+                  "searchd 8.3 GB", [memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, TOP_MEM,
+                                                     None, rows, {300: (FP_QEMU, None)})]))
+    cases.append(("VM footprint unreadable", "qemu-system-aarch64 16.0 GB (footprint -p unreadable "
+                  "(footprint exited 66: no pid))",
+                  [memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, TOP_MEM, None, rows,
+                                   {300: ("", "footprint exited 66: no pid")})]))
+    cases.append(("VM footprint garbled", "(footprint -p unreadable (it printed no Footprint: line))",
+                  [memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, TOP_MEM, None, rows,
+                                   {300: ("x\n", None)})]))
+    cases.append(("VMs picked off the listing", "[300]", [repr(hypervisor_pids(TOP_MEM, rows))]))
+    fse_rows = parse_ps(PS + FSE_PS)
+    cases.append(("fseventsd over", "fseventsd 8.8 GB (top's mem; footprint -p needs root for it) — "
+                  "FSEVENTSD OVER 500 MB: a healthy one is 10-40 MB and a runaway one never shrinks "
+                  "by itself (docs/traps.md, the host out of memory under a matrix); restart it: "
+                  "sudo kill -TERM $(pgrep -x fseventsd)",
+                  [fseventsd_sentence(fse_rows, "PID  MEM\n345  9053M\n", None)]))
+    cases.append(("fseventsd within", "fseventsd 0.0 GB (top's mem; footprint -p needs root for it), "
+                  "within the 500 MB bound",
+                  [fseventsd_sentence(fse_rows, "PID  MEM\n345  25M\n", None)]))
+    cases.append(("fseventsd at the bound", "within the 500 MB bound",
+                  [fseventsd_sentence(fse_rows, "345 500M\n", None)]))
+    cases.append(("fseventsd absent", "fseventsd: not in the host's process table",
+                  [fseventsd_sentence(rows, "", None)]))
+    cases.append(("fseventsd unreadable", "fseventsd (pid 345): size unreadable (top exited 1: x)",
+                  [fseventsd_sentence(fse_rows, "", "top exited 1: x")]))
+    cases.append(("fseventsd unlisted", "fseventsd (pid 345): size unreadable (top listed no size "
+                  "for its pid)", [fseventsd_sentence(fse_rows, "PID MEM\n346 9G\n", None)]))
+    pids = emulator_pids(EMU_ARGS)
+    cases.append(("emulator pids", "{5554: 54362, 5562: 54388}", [repr(pids)]))
+    cases.append(("emulator host footprint", "emulator emulator-5554 host process (pid 54362): "
+                  "footprint -p 3.0 GB, top's mem (phys_footprint) 5.5 GB",
+                  [emulator_host_sentence("emulator-5554", 54362, FP_EMU, None)]))
+    cases.append(("emulator host no process", "emulator emulator-5556 host process: no qemu-system "
+                  "process names port 5556 in the host's process table",
+                  [emulator_host_sentence("emulator-5556", None, "", None)]))
+    cases.append(("emulator host ps failed", "emulator emulator-5556 host process: unreadable (ps "
+                  "exited 1: x)", [emulator_host_sentence("emulator-5556", None, "", "ps exited 1: x")]))
+    cases.append(("emulator host unreadable", "emulator emulator-5554 host process (pid 54362): "
+                  "footprint unreadable (footprint exited 66: y)",
+                  [emulator_host_sentence("emulator-5554", 54362, "", "footprint exited 66: y")]))
+    state = {"emulator-5554": {"pid": 54362, "avd": "kaya", "baseline": 3123 << 20,
+                               "at": "2026-10-20T20:00:00Z"}}
+    adm = {
+        "restart": emulator_admission("emulator-5554", "kaya", 54362, None, _fp(5000), None,
+                                      state, None),
+        "keep": emulator_admission("emulator-5554", "kaya", 54362, None, _fp(3500), None,
+                                   state, None),
+        "unreadable": emulator_admission("emulator-5554", "kaya", 54362, None, "",
+                                         "footprint exited 66: z", state, None),
+        "garbled": emulator_admission("emulator-5554", "kaya", 54362, None, "x", None, state, None),
+        "no process": emulator_admission("emulator-5554", "kaya", None, None, "", None, state, None),
+        "no ps": emulator_admission("emulator-5554", "kaya", None, "ps exited 1: w", "", None,
+                                    state, None),
+        "borrowed": emulator_admission("emulator-5556", "kaya", 1111, None, _fp(4600), None,
+                                       state, None),
+        "no baseline": emulator_admission("emulator-5562", "kaya-tablet", 54388, None, _fp(9000),
+                                          None, state, None),
+        "bad state": emulator_admission("emulator-5554", "kaya", 54362, None, _fp(9000), None, {},
+                                        "s.json is not JSON (x)"),
+    }
+    for label, want in (
+            ("restart", "emulator emulator-5554 memory at admission: footprint -p 4.9 GB (pid 54362) "
+             "against 3.0 GB, its fresh baseline (recorded 2026-10-20T20:00:00Z): 1.8 GB over it, "
+             "past the 1.5 GB bound: RESTARTING it from its snapshot"),
+            ("keep", "footprint -p 3.4 GB (pid 54362) against 3.0 GB, its fresh baseline (recorded "
+             "2026-10-20T20:00:00Z): 0.4 GB over it, within the 1.5 GB bound: keeping it"),
+            ("unreadable", "footprint -p 54362 unreadable (footprint exited 66: z); keeping it, "
+             "unmeasured"),
+            ("garbled", "unreadable (it printed no Footprint: line); keeping it, unmeasured"),
+            ("no process", "emulator emulator-5554 memory at admission: no qemu-system process names "
+             "port 5554; keeping it, unmeasured"),
+            ("no ps", "the host's process table unreadable (ps exited 1: w); keeping it, unmeasured"),
+            ("borrowed", "against 3.0 GB, the newest fresh baseline of a kaya device (emulator-5554, "
+             "pid 54362, recorded 2026-10-20T20:00:00Z), since this process (pid 1111) has none of "
+             "its own: 1.4 GB over it, within the 1.5 GB bound: keeping it"),
+            ("no baseline", "footprint -p 8.8 GB (pid 54388), and no fresh baseline of a kaya-tablet "
+             "device is recorded; keeping it (its next cold boot records one)"),
+            ("bad state", "but the baseline state is unreadable (s.json is not JSON (x)); keeping it")):
+        cases.append((f"admission {label}", want, [adm[label][1]]))
+    cases.append(("admission decisions", "restart True keep False unreadable False garbled False "
+                  "no process False no ps False borrowed False no baseline False bad state False",
+                  [" ".join(f"{k} {v[0]}" for k, v in adm.items())]))
+    cases.append(("admission borrowed over", "1.6 GB over it, past the 1.5 GB bound: RESTARTING",
+                  [emulator_admission("emulator-5556", "kaya", 1111, None, _fp(4790), None,
+                                      state, None)[1]]))
+    fresh = {}
+    cases.append(("baseline recorded", "emulator emulator-5558 memory after its cold boot from "
+                  "snapshot: fresh baseline footprint -p 3.0 GB (pid 77, kaya)",
+                  [emulator_baseline("emulator-5558", "kaya", 77, None, FP_EMU, None, fresh,
+                                     "2026-10-20T21:00:00Z")]))
+    cases.append(("baseline written", "{'emulator-5558': {'pid': 77, 'avd': 'kaya', 'baseline': "
+                  f"{3122 << 20}, 'at': '2026-10-20T21:00:00Z'}}}}", [repr(fresh)]))
+    kept = {}
+    cases.append(("baseline unreadable", "footprint -p 77 unreadable (footprint exited 66: q); no "
+                  "baseline recorded", [emulator_baseline("emulator-5558", "kaya", 77, None, "",
+                                                          "footprint exited 66: q", kept, "t")]))
+    cases.append(("baseline no process", "no qemu-system process names port 5558; no baseline "
+                  "recorded", [emulator_baseline("emulator-5558", "kaya", None, None, "", None,
+                                                 kept, "t")]))
+    cases.append(("baseline unreadable writes nothing", "{}", [repr(kept)]))
+    cases.append(("state round trip and refusals", "round trip True; missing ({}, None); corrupt "
+                  "is not JSON; list holds a list", [_state_probe(fresh)]))
+    wm = windows_memory_sentence(WIN_MEM, None)
+    cases.append(("guest commit now", "guest memory: commit now 3.7 GB of a 8.5 GB limit, 4.0 GB "
+                  "of 8.0 GB physical free (Win32_OperatingSystem)", [wm]))
+    cases.append(("guest commit peak", "commit PEAK SINCE BOOT 5.0 GB against a 8.5 GB limit, "
+                  "3.7 GB now (GetPerformanceInfo)", [wm]))
+    cases.append(("guest commit not near", "(GetPerformanceInfo)|END", [wm + "|END"]))
+    cases.append(("guest commit near", "commit PEAK SINCE BOOT 8.3 GB against a 8.5 GB limit, 3.7 "
+                  "GB now (GetPerformanceInfo) — WITHIN 10% OF THE LIMIT, so a smaller VM memory "
+                  "setting would page", [windows_memory_sentence(
+                      "commit.pi=3949969408|8900000000|9117106176\n", None)]))
+    cases.append(("guest commit errors", "guest memory: Win32_OperatingSystem unreadable: Access "
+                  "denied; commit peak unreadable: Cannot add type",
+                  [windows_memory_sentence("commit.error=Access denied\n"
+                                           "commit.pierror=Cannot add type\n", None)]))
+    cases.append(("guest commit garbled", "Win32_OperatingSystem unreadable (commit.os='1|2'); "
+                  "commit peak unreadable (commit.pi='x')",
+                  [windows_memory_sentence("commit.os=1|2\ncommit.pi=x\n", None)]))
+    cases.append(("guest commit failed", "guest memory reading failed: ssh exited 255: refused",
+                  [windows_memory_sentence("", "ssh exited 255: refused")]))
+    cases.append(("guest commit silent", "guest memory reading failed: the guest printed nothing",
+                  [windows_memory_sentence("#< CLIXML\n", None)]))
+    cases.append(("container memory", "container memory (cgroup v2): peak 3.2 GB, at the end 0.4 "
+                  "GB, no limit of its own (memory.max is max), no OOM kill",
+                  [container_memory_sentence(CONTAINER_MEM, None)]))
+    cases.append(("container OOM", "peak 3.2 GB, at the end 0.4 GB, limit 6.0 GB, 2 OOM KILLS",
+                  [container_memory_sentence(CONTAINER_MEM.replace("max=max", f"max={6 << 30}")
+                                             .replace("oom_kill=0", "oom_kill=2"), None)]))
+    cases.append(("container garbled", "peak unreadable (peak='cat: x'), at the end unreadable "
+                  "(current=''), limit unreadable (max=''), OOM kills unreadable (oom_kill='unread')",
+                  [container_memory_sentence("peak=cat: x\noom_kill=unread\n", None)]))
+    cases.append(("container no reading", "container memory: no reading (/r/memory.txt: No such "
+                  "file or directory) — the container ended before its EXIT trap ran, or was killed",
+                  [container_memory_sentence("", "/r/memory.txt: No such file or directory")]))
     ios = ios_sentences(PS, ARGS, ["AAAA", "BBBB", "CCCC"])
     cases.append(("simulator", "simulator AAAA: up 1h00m (its launchd_sim), 2 processes; "
                   "busiest now: searchd 40%; most CPU since boot: searchd 30s, kaya 2s", ios))

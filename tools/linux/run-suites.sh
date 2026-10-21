@@ -12,7 +12,35 @@ if [ ! -d /work ]; then
     exit 1
 fi
 cd /work || exit 1
+# The container's own memory account, written for lane_health at any exit
+# (tools/validate-linux.py mounts /lane-readings; docs/traps.md, the host
+# out of memory under a matrix).
+container_memory_record() {
+    [ -d /lane-readings ] || return 0
+    local k v oom=unread
+    while read -r k v; do
+        if [ "$k" = oom_kill ]; then oom="$v"; fi
+    done </sys/fs/cgroup/memory.events
+    {
+        echo "peak=$(cat /sys/fs/cgroup/memory.peak 2>&1)"
+        echo "current=$(cat /sys/fs/cgroup/memory.current 2>&1)"
+        echo "max=$(cat /sys/fs/cgroup/memory.max 2>&1)"
+        echo "oom_kill=$oom"
+    } >/lane-readings/memory.txt
+}
+trap container_memory_record EXIT
 export CARGO_TARGET_DIR=/work/target-linux
+# THE TARGET IS A DOCKER VOLUME, NOT THE BIND MOUNT: written through /work it
+# lands in the host's tree and feeds fseventsd (docs/traps.md, the host out of
+# memory under a matrix). check-gates holds the mount in validate-linux.
+if ! mountpoint -q "$CARGO_TARGET_DIR" \
+        || [ "$(stat -f -c %T "$CARGO_TARGET_DIR")" = "$(stat -f -c %T /work)" ]; then
+    echo "run-suites: $CARGO_TARGET_DIR is not a volume of its own (filesystem" \
+        "$(stat -f -c %T "$CARGO_TARGET_DIR"), the bind mount's is $(stat -f -c %T /work)), so every" \
+        "build output is written into the host's tree; tools/validate-linux.py mounts" \
+        "the kaya-linux-target volume there (tools/lib/lanes/linux.py's target_mounts)" >&2
+    exit 1
+fi
 # The image carries no crates: unmounted, every core build fetches the index and
 # every dependency again (docs/traps.md, the linux lane's core build downloaded
 # its dependencies every run).
@@ -396,7 +424,7 @@ if ! KAYA_QUIET_SCENES=" $(python3 tools/linux/scene-mods.py --quiet) "; then
 fi
 # A lane that dies mid-run is exactly when the journal matters, and this
 # runner has no other EXIT trap to share.
-trap 'flightrec_flush; focus_ring_stop; media_server_stop; rm -rf "$FLIGHTREC_SCRATCH"' EXIT
+trap 'flightrec_flush; focus_ring_stop; media_server_stop; rm -rf "$FLIGHTREC_SCRATCH"; container_memory_record' EXIT
 
 # THE FOCUS RING (tools/linux/focus-ring.py; docs/deferred.md's wayland
 # clipboard seed entry). One sampler for the lane, writing ONE ring per

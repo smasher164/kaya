@@ -14,6 +14,8 @@ dev_shell_or_die()
 
 import subprocess
 
+from lanes.linux import target_mounts
+
 # Line-buffered stdout: the docker run writes to the same fd, and
 # block-buffered prints would land AFTER output they preceded.
 sys.stdout.reconfigure(line_buffering=True)
@@ -507,7 +509,7 @@ PY
 """
 
 run = subprocess.run(
-    ["docker", "run", "--rm", "-v", f"{ROOT}:/work", "kaya-linux",
+    ["docker", "run", "--rm", "-v", f"{ROOT}:/work", *target_mounts(ROOT), "kaya-linux",
      "bash", "-c", CONTAINER], check=False)
 if run.returncode == 0:
     print("check-gtk: OK")
