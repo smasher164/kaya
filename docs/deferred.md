@@ -61,6 +61,21 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
+## DEFER — a phone mini player's main button drawn as a plain glyph (docs/media-player-plan.md M17, M18; 2026-10-21)
+KEY: prominent symbol button, KayaSymbolButton, roleProminent, dock play button, plain glyph, accent circle
+
+A `prominent` icon-only button is drawn as a filled accent circle (SwiftUI's
+KayaSymbolButton, the composer send's look from Messages; Material's filled
+icon button on Compose). In the phone docks that differs from both platforms'
+music apps, whose mini players show play as a plain glyph (Apple Music,
+YouTube Music, Spotify). Considered 2026-10-21: (A) a prominent icon button in
+a phone dock draws as a plain primary-colour glyph, the dock rules' shape
+(M17, M18); (B) on iOS a prominent button showing play or pause draws plain
+everywhere, as Apple's media apps do, which would also cover the full player
+but keys a lowering on a glyph. The maintainer kept the circle for now ("it
+looks good now"). Trigger: a later visual review of the phone docks, or a
+second media app.
+
 ## DEFER — controls bound to a player (docs/media-player-plan.md M17; 2026-10-21)
 KEY: player-bound controls, slider player, play button player, show_play_state, show_position, seek_to
 
