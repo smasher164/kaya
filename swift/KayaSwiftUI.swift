@@ -12771,6 +12771,24 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("dock player reads \(got), wanted \(want)")
                 }
+            case "expect_dock_height":
+                let want = parts.count > 1 ? Double(parts[1]) : nil
+                func near(_ got: String) -> Bool {
+                    guard let want, let g = got.split(separator: " ").first.flatMap({ Double($0) }) else { return false }
+                    return abs(g - want) <= 1
+                }
+                var got = DispatchQueue.main.sync { kayaDockHeightRead() }
+                let deadline = Date().addingTimeInterval(5)
+                while !near(got) && Date() < deadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    got = DispatchQueue.main.sync { kayaDockHeightRead() }
+                }
+                let wanted = parts.count > 1 ? String(parts[1]) : ""
+                if near(got) {
+                    observed.append("dock height \(wanted)")
+                } else {
+                    failures.append("dock height reads \(got), wanted \(wanted)")
+                }
             case "expect_dock_line":
                 let want = parts.count > 1 ? String(parts[1]) : ""
                 let got = "none (the SwiftUI dock draws no progress line; docs/media-player-plan.md M17)"
@@ -20398,6 +20416,38 @@ struct KayaComposerSurface: ViewModifier {
     }
 }
 
+/// iOS's phone dock (docs/media-player-plan.md M18): the largest picture it
+/// shows, nil outside it, where containers pad their sides only.
+private struct KayaPhoneDockArtKey: EnvironmentKey {
+    static let defaultValue: CGFloat? = nil
+}
+
+extension EnvironmentValues {
+    var kayaPhoneDockArt: CGFloat? {
+        get { self[KayaPhoneDockArtKey.self] }
+        set { self[KayaPhoneDockArtKey.self] = newValue }
+    }
+}
+
+func kayaDockClamp(_ box: CGSize, _ cap: CGFloat?) -> CGSize {
+    guard let cap, box.width > 0, box.height > 0 else { return box }
+    let scale = min(1, cap / box.width, cap / box.height)
+    return CGSize(width: box.width * scale, height: box.height * scale)
+}
+
+struct KayaInsetPadding: ViewModifier {
+    let node: KayaNode
+    @Environment(\.kayaPhoneDockArt) private var phoneDock
+
+    func body(content: Content) -> some View {
+        if phoneDock != nil {
+            content.padding(.horizontal, node.insetSet ? node.inset : 0)
+        } else {
+            content.padding(kayaFilledInset(node))
+        }
+    }
+}
+
 /// An image's bounded size (docs/photo-attach-plan.md §2): scaled down to fit
 /// inside both bounds with its shape kept, never up; nil when unbounded.
 func kayaImageFit(natural: CGSize, node: KayaNode) -> CGSize? {
@@ -22383,6 +22433,11 @@ func kayaCellText(_ node: KayaNode) -> String? {
     return false
 }
 
+/// The accessory's art and the space above and below it, Apple Music's mini
+/// player (docs/media-player-plan.md M18).
+let kayaPhoneDockArt: CGFloat = 32
+let kayaPhoneDockPadY: CGFloat = 8
+
 #if os(iOS)
     /// The Music app's mini player above the tab bar (Y8), iOS 26 and later.
     struct KayaTabAccessory: ViewModifier {
@@ -22393,7 +22448,9 @@ func kayaCellText(_ node: KayaNode) -> String? {
             if #available(iOS 26, *), let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock) {
                 content.tabViewBottomAccessory {
                     KayaRender(node: dock, isRoot: true)
-                        .padding(.horizontal, 12)
+                        .environment(\.kayaPhoneDockArt, kayaPhoneDockArt)
+                        .padding(.vertical, kayaPhoneDockPadY)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(
                             GeometryReader { geo in
                                 Color.clear
@@ -22509,6 +22566,16 @@ var kayaToastDrawnLayer: [UInt64: UInt64?] = [:]
         return "released (dock \(dock) names player \(player), which this backend no longer holds)"
     }
     return "bound (dock \(dock) shows player \(player))"
+}
+
+/// expect_dock_height's read (M18): the dock's frame, which on iOS's tab
+/// accessory is the capsule the platform gives it.
+@MainActor func kayaDockHeightRead() -> String {
+    guard let frame = kayaDockFrame, frame.height > 1 else {
+        return "unread (dock frame \(kayaDockFrame.map(String.init(describing:)) ?? "none"))"
+    }
+    let host = kayaDockIsAccessory(0) ? "the tab bar's accessory" : "the window's dock inset"
+    return String(format: "%.1f", frame.height) + " (\(host) at \(kayaRectText(frame)))"
 }
 
 @MainActor func kayaDockRead() -> String {
@@ -24686,9 +24753,10 @@ let kayaFailedGlyph: CGFloat = 20
 /// records itself as it appears, so the harness reads what was drawn.
 private struct KayaImageBox: View {
     let node: KayaNode
+    @Environment(\.kayaPhoneDockArt) private var dockArt
 
     var body: some View {
-        let box = CGSize(width: node.maxWidth, height: node.maxHeight)
+        let box = kayaDockClamp(CGSize(width: node.maxWidth, height: node.maxHeight), dockArt)
         Group {
             if node.phase == imagePhaseFailed || (node.image == nil && node.imageFailed) {
                 KayaImageLook(node: node, word: "failed") {
@@ -24739,8 +24807,10 @@ private struct KayaImageLook<Glyph: View>: View {
     let node: KayaNode
     let word: String
     @ViewBuilder let glyph: () -> Glyph
+    @Environment(\.kayaPhoneDockArt) private var dockArt
 
     var body: some View {
+        let box = kayaDockClamp(CGSize(width: node.maxWidth, height: node.maxHeight), dockArt)
         let fill = Rectangle()
             #if os(macOS)
                 .fill(.quaternary)
@@ -24748,7 +24818,7 @@ private struct KayaImageLook<Glyph: View>: View {
                 .fill(Color(uiColor: .quaternarySystemFill))
             #endif
         let look = fill
-            .frame(width: node.maxWidth, height: node.maxHeight)
+            .frame(width: box.width, height: box.height)
             .overlay { glyph() }
             .onAppear { kayaImageAppeared(node, word) }
             .onDisappear { kayaImageGone(node, word) }
@@ -25475,6 +25545,7 @@ struct KayaRender: View {
     /// Grouped section header/footer dress (KayaGroupedSections.kayaBare).
     @Environment(\.kayaGroupedSectionText) private var kayaGroupedSectionText
     @Environment(\.kayaGroupedButtonRow) private var kayaGroupedButtonRow
+    @Environment(\.kayaPhoneDockArt) private var kayaPhoneDockArt
 
     var body: some View {
         #if os(iOS)
@@ -25696,7 +25767,7 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .background(KayaInsetReader(id: node.id, outer: false))
-            .padding(kayaFilledInset(node))
+            .modifier(KayaInsetPadding(node: node))
             .background(KayaInsetReader(id: node.id, outer: true))
             .modifier(KayaFilledSurface(tint: kayaShownFill(node)))
             .modifier(KayaGroundSurface(node: node))
@@ -26241,7 +26312,9 @@ struct KayaRender: View {
                     .modifier(KayaImageShape(shape: node.shape))
                     .background(KayaSkinFrameReader(id: node.id))
             } else if let image = node.image {
-                let fit = kayaImageFit(natural: image.size, node: node)
+                let fit = kayaPhoneDockArt == nil
+                    ? kayaImageFit(natural: image.size, node: node)
+                    : kayaDockClamp(kayaImageFit(natural: image.size, node: node) ?? image.size, kayaPhoneDockArt)
                 Group {
                     #if os(macOS)
                         if let fit {
@@ -26263,7 +26336,7 @@ struct KayaRender: View {
                 .onAppear { kayaImageAppeared(node, "shown") }
                 .onDisappear { kayaImageGone(node, "shown") }
             } else if let natural = node.imagePendingNatural {
-                let room = kayaImageFit(natural: natural, node: node) ?? natural
+                let room = kayaDockClamp(kayaImageFit(natural: natural, node: node) ?? natural, kayaPhoneDockArt)
                 Color.clear.frame(width: room.width, height: room.height)
                     .background(KayaLabelFrameReader(id: node.id))
                     .onAppear { kayaImageAppeared(node, "empty") }

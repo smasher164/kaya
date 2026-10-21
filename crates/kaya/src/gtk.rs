@@ -24639,6 +24639,9 @@ impl crate::harness::Stage for GtkStage {
     fn dock_line_read(&self) -> String {
         "none (the GTK dock draws no progress line; docs/media-player-plan.md M17)".to_owned()
     }
+    fn dock_height_read(&self) -> String {
+        "unread (the GTK dock takes its content's height and is not read; docs/media-player-plan.md M18)".to_owned()
+    }
     fn dock_player_read(&self) -> String {
         Self::on_main(move |core| {
             let Some(dock) = core.skin.docks.iter().find(|(_, w)| **w == 0).map(|(d, _)| *d) else {

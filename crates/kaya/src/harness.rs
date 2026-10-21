@@ -551,6 +551,10 @@ pub enum Step {
     /// edge: `none`, or the fraction it shows within DOCK_LINE_TOLERANCE
     /// (docs/media-player-plan.md M17; read on the phones' lanes only).
     ExpectDockLine(String),
+    /// `expect_dock_height <points>`: the height of the primary window's dock
+    /// bar, less any system inset and progress line under it, within a point
+    /// (docs/media-player-plan.md M18; read on the phones' lanes only).
+    ExpectDockHeight(f64),
     /// How many LINES a row's children sit on — the runs of children
     /// whose cross-axis boxes overlap (docs/layout-knobs-plan.md §2, the
     /// `wrap` observation).
@@ -1280,7 +1284,8 @@ impl Step {
             | Step::Frame(..)
             | Step::ExpectDock(_)
             | Step::ExpectDockPlayer(_)
-            | Step::ExpectDockLine(_) => Vec::new(),
+            | Step::ExpectDockLine(_)
+            | Step::ExpectDockHeight(_) => Vec::new(),
         }
     }
 
@@ -1362,7 +1367,8 @@ impl Step {
             | Step::ExpectTint { .. }
             | Step::ExpectDock { .. }
             | Step::ExpectDockPlayer { .. }
-            | Step::ExpectDockLine { .. } => true,
+            | Step::ExpectDockLine { .. }
+            | Step::ExpectDockHeight { .. } => true,
             Step::ExpectLines { .. } => true,
             Step::ExpectAligned { .. } => true,
             Step::ExpectAxis { .. } => true,
@@ -2087,6 +2093,10 @@ pub trait Stage: Send + 'static {
     /// `none` when no progress line is drawn at the primary window's dock,
     /// else the fraction the drawn line shows, then what was read.
     fn dock_line_read(&self) -> String;
+    /// The primary window's dock bar's height in points, less any system
+    /// inset and progress line under it, then what was read; else a sentence
+    /// saying why it was not read.
+    fn dock_height_read(&self) -> String;
     /// The container's cross-axis placement, CLASSIFIED from geometry after
     /// forcing pending layout: "start", "center", "end", "stretch", or
     /// "baseline" when the coincidence holds for every child (within two
@@ -3140,6 +3150,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_dock_line takes none or a fraction 0..1, got {word:?}"));
                 }
                 Step::ExpectDockLine(word.to_owned())
+            }
+            "expect_dock_height" => {
+                let word = rest.trim();
+                match word.parse::<f64>() {
+                    Ok(n) if n > 0.0 => Step::ExpectDockHeight(n),
+                    _ => return Err(format!("expect_dock_height takes a height in points, got {word:?}")),
+                }
             }
             "expect_not_taller" => {
                 let (first, second) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7215,6 +7232,13 @@ fn run_with_log(
                     Err(format!("dock line reads {got}, wanted {want}"))
                 }
             })),
+            Step::ExpectDockHeight(want) => Some(poll(|| {
+                let got = stage.dock_height_read();
+                match got.split(' ').next().unwrap_or("").parse::<f64>() {
+                    Ok(h) if (h - want).abs() <= 1.0 => Ok(format!("dock height {want}")),
+                    _ => Err(format!("dock height reads {got}, wanted {want}")),
+                }
+            })),
             Step::ExpectHeightFits(t) => Some(poll(|| {
                 let off = stage.height_fits(*t);
                 if off.is_empty() {
@@ -10571,6 +10595,9 @@ mod tests {
         fn dock_line_read(&self) -> String {
             "none".into()
         }
+        fn dock_height_read(&self) -> String {
+            "64".into()
+        }
         fn cross_mode(&self, _: Target) -> String {
             "center".into()
         }
@@ -11658,6 +11685,9 @@ mod tests {
             fn dock_line_read(&self) -> String {
                 String::new()
             }
+            fn dock_height_read(&self) -> String {
+                String::new()
+            }
             fn cross_mode(&self, _: Target) -> String {
                 "start".into()
             }
@@ -12176,6 +12206,9 @@ mod tests {
                 String::new()
             }
             fn dock_line_read(&self) -> String {
+                String::new()
+            }
+            fn dock_height_read(&self) -> String {
                 String::new()
             }
             fn cross_mode(&self, _: Target) -> String {
@@ -13428,6 +13461,8 @@ mod cells_even_tests {
         assert!(matches!(parse("expect_gap label@above label@below 8").expect("parses").as_slice(), [Step::ExpectGap(_, _, g)] if *g == 8.0));
         assert!(parse("expect_gap label@above 8").is_err());
         assert!(parse("expect_width slider@capped wide").is_err());
+        assert!(matches!(parse("expect_dock_height 64").expect("parses").as_slice(), [Step::ExpectDockHeight(h)] if *h == 64.0));
+        assert!(parse("expect_dock_height tall").is_err());
         assert!(matches!(
             parse("expect_ground_color column@header \"light 673946 dark 3B2128\"").expect("parses").as_slice(),
             [Step::ExpectGroundColor(_, 0x673946, 0x3B2128)]

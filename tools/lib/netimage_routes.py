@@ -94,7 +94,7 @@ CALLS = [
     (SWIFT, "an unboxed image takes its header's size while it decodes (N9's 2026-10-13 amendment: an unboxed image laid out at 0x0 until its pixels land moves everything after it)",
      "node.imagePending = true\n node.imagePendingNatural = kayaImageBoxed(node) ? nil : kayaHeaderNatural(data)"),
     (SWIFT, "the reserved size is laid out",
-     "} else if let natural = node.imagePendingNatural {\n let room = kayaImageFit(natural: natural, node: node) ?? natural\n Color.clear.frame(width: room.width, height: room.height)"),
+     "} else if let natural = node.imagePendingNatural {\n let room = kayaDockClamp(kayaImageFit(natural: natural, node: node) ?? natural, kayaPhoneDockArt)\n Color.clear.frame(width: room.width, height: room.height)"),
     (SWIFT, "a bled image takes the reserved size too",
      "if node.bleed, let natural = node.image?.size ?? node.imagePendingNatural {"),
     (SWIFT, "an installed picture ends the reserved size", "node.imagePending = false\n node.imagePendingNatural = nil"),

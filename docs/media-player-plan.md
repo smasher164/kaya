@@ -824,6 +824,48 @@ complaint was the player and the navigation bar reading as one surface. The
 maintainer chose to move the same line to the bottom edge, where it is both
 the division and the progress.
 
+### M18: The phone docks' height (RULED 2026-10-21)
+
+The maintainer, 2026-10-21, on the dock line's review page: "The player bar
+itself looks way too thick [on Android]. The top and bottom padding look
+excessive compared to the size of the album art and title inside. On the
+flipside, the iOS player bar has zero padding around the album art and it
+looks way too thin." Asked to match the platforms' own music apps.
+
+Measured before: Android's dock was 104 dp, the 48 dp art with 28 dp above
+and below, of which 16 was the app's `dock_bar` inset and 12 kaya's default
+inset for an activatable container (the `dock_open` row, which sets none), so
+its press surface does not run flush. iOS 26's tab accessory is a capsule the
+platform holds at 48 pt whatever its content asks; the same content overflowed
+it, so the 48 pt art filled it edge to edge, 38 pt in from its left end (the
+accessory's own 12, the app's 16 and the default 10).
+
+The app may not ask which platform it runs on, so the dock's vertical rhythm
+is each phone backend's, the way the line is (M17): inside a phone dock a
+container pads its sides only, by its own inset or none (kaya's default inset
+for an activatable or filled container is not taken there), and the bar sets
+the space above and below. Android pads the bar 8 dp above and below its
+content, the progress line under that, so the bar is 64 dp with the 48 dp art
+centred (YouTube Music's mini player is about 64 dp; Spotify's 56 dp with 40 dp
+art). iOS's accessory pads 8 pt above and below, adds no side padding of its
+own, and caps a picture at 32 pt (Apple Music's mini player); the app's 48 is a
+maximum, so the art shrinks. Its corners stay kaya's rounded shape: a corner
+concentric with the 48 pt capsule at an 8 pt inset is a 16 pt radius, which on
+32 pt art is a circle, where Apple Music's art is a rounded square, and
+`expect_shape image@dock_art rounded` is a shared step. The art sits 16 from
+the bar's leading edge on both phones, the app's inset. The desktops (mac, GTK,
+WinUI) and iOS's dock without a tab bar are unchanged.
+
+`expect_dock_height` reads the bar's height less any system inset and
+progress line in the phone lanes' music_dock extras (64 on Android, 48 on iOS,
+beside `expect_image_size image@dock_art` at 48x48 and 32x32); GTK and WinUI
+answer that they do not read it. tools/lib/skin_compose.py and
+tools/lib/skin_routes.py hold the two arms. On iOS's accessory the two lines
+(about 36 pt) stand taller than the 32 pt art, so the row centres the art on
+them and the lines span the row: the iOS lane drops music_dock's
+`expect_hugs column@dock_lines` for that leg (tools/lib/lanes/ios.py), which
+holds on every other lane.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

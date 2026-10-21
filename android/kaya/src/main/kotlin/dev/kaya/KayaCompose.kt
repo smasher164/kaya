@@ -268,6 +268,7 @@ import androidx.compose.material3.adaptive.layout.calculateThreePaneScaffoldValu
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -896,6 +897,16 @@ val KAYA_FOLLOW_SLACK = 22.dp
 /** A filled container's inset when the app set none (docs/tints-plan.md §3). */
 const val KAYA_FILLED_DEFAULT_INSET = 12.0
 
+/** docs/media-player-plan.md M18: a container in the phone dock pads its
+ * sides only, by its own inset or none, and the bar sets the vertical rhythm. */
+@Composable
+fun kayaInsetPadding(node: KayaNode): Modifier {
+    if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (if (node.insetSet) node.inset else 0.0).dp)
+    return Modifier.padding(kayaFilledInset(node).dp)
+}
+
+val LocalKayaPhoneDock = staticCompositionLocalOf { false }
+
 fun kayaFilledInset(node: KayaNode): Double =
     if (node.insetSet) node.inset
     else if (node.role == KayaCompose.ROLE_COMPOSER) KAYA_COMPOSER_INSET
@@ -1330,9 +1341,10 @@ internal fun KayaDockBar(consumesBottom: Boolean) {
     ) {
         Box(
             Modifier.windowInsetsPadding(edges)
-                .padding(KayaSceneModel.windowInset.dp),
+                .padding(horizontal = KayaSceneModel.windowInset.dp)
+                .padding(top = KAYA_DOCK_PAD_Y, bottom = KAYA_DOCK_PAD_Y + if (KayaSceneModel.dockPlayer != 0L) KAYA_DOCK_LINE else 0.dp),
         ) {
-            KayaRender(root)
+            CompositionLocalProvider(LocalKayaPhoneDock provides true) { KayaRender(root) }
         }
         KayaDockLine(Modifier.align(Alignment.BottomStart).windowInsetsPadding(edges.only(WindowInsetsSides.Bottom)))
     }
@@ -1345,6 +1357,11 @@ internal fun KayaDockBar(consumesBottom: Boolean) {
         }
     }
 }
+
+/** The dock bar's padding above and below its content, and the progress line
+ * under it (docs/media-player-plan.md M18, M17). */
+val KAYA_DOCK_PAD_Y = 8.dp
+val KAYA_DOCK_LINE = 2.dp
 
 /** What expect_dock_line reads: the line's laid-out frame and the fraction it
  * last drew, null while no line is composed. */
@@ -1385,7 +1402,7 @@ private fun KayaDockLine(modifier: Modifier) {
             f
         },
         modifier = modifier.fillMaxWidth()
-            .height(2.dp)
+            .height(KAYA_DOCK_LINE)
             .clearAndSetSemantics { }
             .onGloballyPositioned { kayaDockLineFrame = it.boundsInWindow() },
         color = MaterialTheme.colorScheme.primary,
@@ -8830,6 +8847,17 @@ object KayaCompose {
         else String.format(java.util.Locale.ROOT, "%.3f (%s)", drawn, detail)
     }
 
+    /** expect_dock_height's read (M18): the dock's frame less the system inset
+     * and the progress line under its bar, in dp. */
+    private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
+        val dock = kayaDockFrame ?: return@onUi "unread (no dock frame is laid out)"
+        val density = activity.resources.displayMetrics.density
+        val line = kayaDockLineFrame?.height ?: 0f
+        val bar = (dock.height - kayaDockFootInset - line) / density
+        String.format(java.util.Locale.ROOT, "%.1f (dock %s, foot inset %.0fpx, line %.0fpx, density %.2f)",
+            bar, kayaRectText(dock), kayaDockFootInset, line, density)
+    }
+
     /** expect_dock's read (§5.4): the dock's laid-out frame spans the window
      * at its foot (above the section bar where there is one) and the surface
      * above it ends where it begins. */
@@ -14500,6 +14528,21 @@ object KayaCompose {
                         if (got.substringBefore(' ') == want) observed.add("dock player $want")
                         else failures.add("dock player reads $got, wanted $want")
                     }
+                    "expect_dock_height" -> {
+                        val want = parts.getOrElse(1) { "" }.toDoubleOrNull()
+                        val near = { got: String ->
+                            val g = got.substringBefore(' ').toDoubleOrNull()
+                            want != null && g != null && Math.abs(want - g) <= 1.0
+                        }
+                        var got = kayaDockHeightRead(activity)
+                        val deadline = System.nanoTime() + 5_000_000_000L
+                        while (!near(got) && System.nanoTime() < deadline) {
+                            Thread.sleep(100)
+                            got = kayaDockHeightRead(activity)
+                        }
+                        if (near(got)) observed.add("dock height ${parts.getOrElse(1) { "" }}")
+                        else failures.add("dock height reads $got, wanted ${parts.getOrElse(1) { "" }}")
+                    }
                     "expect_dock_line" -> {
                         val want = parts.getOrElse(1) { "" }
                         val near = { got: String ->
@@ -18720,7 +18763,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).then(formGroup).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).then(formGroup).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
@@ -18787,7 +18830,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()
@@ -18819,7 +18862,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.then(kayaFilledSurface(node)).padding(kayaFilledInset(node).dp).onGloballyPositioned {
+                }.then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()

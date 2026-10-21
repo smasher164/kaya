@@ -1758,7 +1758,7 @@ def scene_script_cut(scene, cut, keep, extra):
 
 
 
-def scene_script_drop(scene, drops, keep):
+def scene_script_drop(scene, drops, keep, prefix=None):
     """DROP NAMED STEPS, not a suffix — for steps out of reach on this
     host while everything AFTER them is expressible. `drops` is a
     sequence of (verb, target) pairs, EACH matching exactly one step: a
@@ -1766,7 +1766,8 @@ def scene_script_drop(scene, drops, keep):
     either side of the second act and a tail cut would take the whole
     second act with it (docs/tasks-s4-plan.md §4). The same two guards
     the cut carries: a drop that matches no step is STALE, and the `keep`
-    verbs name the assertions the drop may not take with it."""
+    verbs name the assertions the drop may not take with it. A leg that
+    also cuts drops from the cut's `prefix`."""
     path = ROOT / f"tools/scenes/{scene}.steps"
     keeps = keep.split()
     named = ", ".join(f"`{verb} {target}`" for verb, target in drops)
@@ -1775,8 +1776,8 @@ def scene_script_drop(scene, drops, keep):
             f"`keep` verb — say which assertions this drop may not take "
             f"with it, or the leg can be trimmed until it asserts "
             f"nothing")
-    lines = [" ".join(line.split()) for line in
-             path.read_text(encoding="utf-8").splitlines()
+    text = path.read_text(encoding="utf-8") if prefix is None else prefix
+    lines = [" ".join(line.split()) for line in text.splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
     cut_at = set()
     for verb, target in drops:
@@ -2017,10 +2018,6 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     run in-process at all; both meet the guest through files in the
     app's own data container (docs/traps.md). Started per leg and
     killed with it."""
-    if cut and drops:
-        print(f"run-sim: {name} asks for both a cut at `{cut}` and a "
-              f"drop of {drops} — pick one", file=log)
-        return False
     installed_at = time.time()
     run(["xcrun", "simctl", "install", udid, str(app)],
         stdout=log, stderr=log)
@@ -2037,6 +2034,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     rec_start(name, slot)
     if cut:
         script = scene_script_cut(scene, cut, keep, extra)
+        if drops:
+            script = scene_script_drop(scene, drops, keep, script)
     elif drops:
         script = scene_script_drop(scene, drops, keep)
     else:

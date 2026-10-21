@@ -26759,6 +26759,9 @@ impl crate::harness::Stage for WinUiStage {
     fn dock_line_read(&self) -> String {
         "none (the WinUI dock draws no progress line; docs/media-player-plan.md M17)".to_owned()
     }
+    fn dock_height_read(&self) -> String {
+        "unread (the WinUI dock takes its content's height and is not read; docs/media-player-plan.md M18)".to_owned()
+    }
     fn dock_player_read(&self) -> String {
         Self::on_ui_read(skin::read::dock_player).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
