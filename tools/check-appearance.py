@@ -789,7 +789,8 @@ g.negative(
     "L4b a second GSettings construction in the GTK backend",
     lambda: census(without(
         GTK, r"crate::fmt::gnome_clock_format\(\)\.is_some_and",
-        'gio::Settings::new("org.gnome.desktop.interface").string("clock-format").as_str() == "12h" || crate::fmt::gnome_clock_format().is_some_and',
+        'gio::Settings::new("org.gnome.desktop.interface").string("clock-format")'
+        '.as_str() == "12h" || crate::fmt::gnome_clock_format().is_some_and',
         "L4b")),
     want="a GSettings construction in `locale_is_12_hour`",
 )
