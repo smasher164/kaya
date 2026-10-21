@@ -61,6 +61,21 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
+## DEFER — a line count that reads differently per platform (docs/media-player-plan.md M20; 2026-10-21)
+KEY: max_lines per platform, card title lines, text size per platform, found_album_name, line count
+
+An app's `max_lines` is one number on every platform, but the platforms' body
+text is not one size: iOS's 17 pt against Android's 14 sp and the desktops'
+13-15. At the music app's 120-point search cards, a two-line cap cut both
+"David Amber and Friends, Vol. 1" and "Vol. 2 Instrumentals" to "David Amber
+and Friends,…" on iOS only, so the two cards read the same there; the other
+four showed the volume. The app raised its card titles to three lines
+(guests/python/music.py found_strip), which is the app's own fix. A kaya-level
+answer was not chosen: for example a line count each backend scales by its
+text size, or a title role whose lines each platform decides. Trigger: a
+second place where one line count reads well on some platforms and loses the
+distinguishing words on others.
+
 ## DEFER — a phone mini player's main button drawn as a plain glyph (docs/media-player-plan.md M17, M18; 2026-10-21)
 KEY: prominent symbol button, KayaSymbolButton, roleProminent, dock play button, plain glyph, accent circle
 
