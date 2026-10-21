@@ -17,6 +17,9 @@ expect_fill column@artist_panel overlay
 expect_shape image@artist_avatar circle
 expect_ax label@artist_name "heading/Kellee Maize"
 expect label@artist_about "2 albums · 4 songs, 1 min 20 sec"
+# The panel grows to its caption; a backend that kept the heading's width
+# wraps it (M20 (3)).
+expect_text_lines label@artist_about 1 whole
 # The header's picture is the 600 px one the snapshot holds (M16 (25)).
 expect image@artist_avatar "600x600"
 expect_inset 0

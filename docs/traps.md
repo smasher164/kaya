@@ -18539,3 +18539,21 @@ for the length of a scheduled report and schedule_window_report refuses while
 it is, so the first form of this fix was a no-op and six legs stayed red
 (gtk.rs's window_report, held by tools/lib/skin_gtk.py with a cut); the row class also lands as a row joins
 the table's content box, so no row is measured without it.
+
+## The WinUI panel that wrapped its caption (measured 2026-10-21)
+
+The artist page's overlay panel on Windows wrapped "2 albums · 4 songs, 1 min
+20 sec" onto two lines while the other four backends grew the panel to the
+caption (docs/media-player-plan.md M20 (3)). The panel is a column under a
+row, and a WinUI row gives each fixed child a star column CAPPED AT THE
+NATURAL WIDTH `measured_widths` read when the row was indexed
+(crates/kaya/src/winui/mod.rs's reindex). The caption is bound, so its text
+arrived after the row was indexed, when the column's natural was the
+heading's width; the text arms re-marked only the label's own PARENT row
+(`mark_row_for_remeasure`), and the panel column is not a row, so the row
+above it kept the cap and the caption wrapped inside it. A grown text now
+marks every horizontal row above it, through any plain column or row, until
+a table or a non-container (tools/lib/skin_winui.py holds the climb with a
+cut). The read is `expect_text_lines label@artist_about 1 whole` in
+tools/scenes/music_artist.steps, two lines on the lane with the climb cut.
+

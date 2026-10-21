@@ -3801,17 +3801,27 @@ fn fold_extent(id: u64) -> f64 {
 /// the table's stamped tracks (table_stamp): a reindex there replaced them
 /// and the portfolio's rows fell out of alignment (matrix, 2026-09-24).
 /// ONE BODY, both text arms — the label's alone is how the button's went
-/// missing.
+/// missing. EVERY ROW ABOVE, not the parent alone (docs/traps.md, the WinUI
+/// panel that wrapped its caption): a row caps a child COLUMN's track at the
+/// natural it measured, so a text that grew inside that column is stale two
+/// levels up, and the climb stops only at a table or a non-container.
 fn mark_row_for_remeasure(core: &mut CoreState, id: WidgetId) {
-    if let Some(parent) = core.child_order.parent_of(id)
-        && matches!(core.widgets.get(&parent), Some(NativeWidget::Row(_)))
-        && !effective_vertical(core, parent)
-        && !core
+    let mut child = id;
+    while let Some(parent) = core.child_order.parent_of(child) {
+        if core
             .child_order
             .parent_of(parent)
             .is_some_and(|table| TABLES.with_borrow(|t| t.contains_key(&table.0)))
-    {
-        core.child_order.mark(parent);
+            || TABLES.with_borrow(|t| t.contains_key(&parent.0))
+        {
+            return;
+        }
+        match core.widgets.get(&parent) {
+            Some(NativeWidget::Row(_)) if !effective_vertical(core, parent) => core.child_order.mark(parent),
+            Some(NativeWidget::Column(_) | NativeWidget::Row(_)) => {}
+            _ => return,
+        }
+        child = parent;
     }
 }
 

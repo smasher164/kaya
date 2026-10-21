@@ -122,6 +122,10 @@ READS = [
       "let filled = skin::read::gap(sample, fill) < skin::read::gap(sample, ground);", "if marked && filled {"]),
 ]
 CALLS = [
+    ("a grown text re-measures every row above it (M20 (3))",
+     "match core.widgets.get(&parent) {\n"
+     "Some(NativeWidget::Row(_)) if !effective_vertical(core, parent) => core.child_order.mark(parent),\n"
+     "Some(NativeWidget::Column(_) | NativeWidget::Row(_)) => {}\n_ => return,\n}\nchild = parent;"),
     ("the plain button's caption on the text column (M20)",
      "button.SetStyle(&theme_resource::<Style>(\"SubtleButtonStyle\")?)?;\n"
      "let padding = button.Padding()?;\nbutton.SetPadding(Thickness { Left: 0.0, Right: 0.0, ..padding })?;"),
@@ -222,6 +226,8 @@ def findings(text):
 
 
 CUTS = [
+    ("WinUI: only the parent row re-measured (M20 (3))", r"(_ => return,\n\s+\}\n)(\s+)child = parent;\n", r"\1\2return;\n",
+     "a grown text re-measures every row above it (M20 (3)) no longer holds"),
     ("WinUI: the plain button's padding kept (M20)",
      r"\n\s+let padding = button\.Padding\(\)\?;\n\s+button\.SetPadding\(Thickness \{ Left: 0\.0, Right: 0\.0, \.\.padding \}\)\?;", "",
      "the plain button's caption on the text column (M20) no longer holds"),
