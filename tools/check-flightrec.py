@@ -2078,7 +2078,7 @@ def absent_tool_checks(src):
     return []
 
 
-LIVE_FAIL = ("python3", "-c", "import time, sys; time.sleep(5); sys.exit(1)")
+LIVE_FAIL = ("python3", "-c", "import time, sys; time.sleep(12); sys.exit(1)")
 UNREACHED = "never reached section"
 
 
@@ -2146,10 +2146,12 @@ def mac_drive_checks(drive):
                         f"{tail}"]
     bundle = manifests[0].parent
     sampler = bundle / "sampler.txt"
-    if not sampler.is_file() or not re.search(
-            r"guest_pid=\d+", sampler.read_text(encoding="utf-8")):
+    read = sampler.read_text(encoding="utf-8") if sampler.is_file() else ""
+    if not re.search(r"guest_pid=\d+", read):
+        lines = " | ".join(read.strip().splitlines()[-6:]) or "no sampler.txt"
         found.append("mac drive: the sampler never resolved the guest's pid "
-                     "while it lived, so a hang's shot and sample would skip")
+                     "while it lived, so a hang's shot and sample would skip "
+                     f"(sampler.txt: {lines})")
     listed = {line.split()[0] for line in
               manifests[0].read_text(encoding="utf-8").splitlines() if line.split()}
     missing = [s for s in declared(REAL)["mac"] if s not in listed]

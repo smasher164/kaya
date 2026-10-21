@@ -47,6 +47,13 @@ LOCALE_WRITERS = {
 LOCALE_WRITE = re.compile(
     r"setlocale\s*\(\s*(?:libc::)?LC_\w+\s*,\s*(?![\s]|(?:std::)?ptr::null\(\))")
 
+# ONE GSETTINGS DOOR, THE DEFAULT VFS FIRST (docs/traps.md, the GIO
+# lock-order deadlock): a GSettings construction off the main thread
+# held GIO's module lock waiting on the VFS's one-time init that GTK's
+# init owned, and the leg hung at its 180 s ceiling.
+GSETTINGS = re.compile(r"\bgio::(?:Settings::new|SettingsSchemaSource::default)\s*\(")
+GSETTINGS_DOOR = (FMT, "gnome_clock_format")
+
 # One dark leg per lane: the runner, the spelling that wires it, and the
 # lane's own name for the leg. A runner missing from this table is a lane
 # whose dark arm nobody asserts.
@@ -480,6 +487,36 @@ def census(src):
                     f"before the app thread; a later write races every locale read"
                 )
 
+    # --- L4. One GSettings door, which takes the default VFS first. ------
+    for path, text in code.items():
+        if not path.startswith("crates/kaya/src/"):
+            continue
+        for hit in GSETTINGS.finditer(text):
+            fns = re.findall(r"\bfn\s+(\w+)", text[:hit.start()])
+            where = fns[-1] if fns else "<top level>"
+            if (path, where) != GSETTINGS_DOOR:
+                line = text.count("\n", 0, hit.start()) + 1
+                out.append(
+                    f"{path}:{line}: a GSettings construction in `{where}` — the "
+                    f"core's one door is fmt.rs's gnome_clock_format, which takes "
+                    f"the default VFS first; another can deadlock GTK's init"
+                )
+    door_path, door_fn = GSETTINGS_DOOR
+    fmt = code[door_path]
+    start = fmt.find(f"fn {door_fn}(")
+    end = fmt.find("\n    fn ", start + 1) if start >= 0 else -1
+    body = fmt[start:end] if start >= 0 and end > start else ""
+    vfs = body.find("gio::Vfs::default()")
+    first = GSETTINGS.search(body)
+    if not body or not first:
+        out.append(f"{door_path}: no `{door_fn}` constructing GSettings — clause L4 is blind")
+    elif vfs < 0 or vfs > first.start():
+        out.append(
+            f"{door_path}: {door_fn} reaches GSettings without gio::Vfs::default() "
+            f"before it — off the main thread it then holds GIO's module lock "
+            f"waiting on the VFS init GTK's init owns, and both threads stop"
+        )
+
     # --- L3. The catalog refuses a locale read off the knob's language. ---
     l10n = code[L10N]
     start = l10n.find("pub fn catalog(")
@@ -743,7 +780,20 @@ g.negative(
         "None::<String>", "L3")),
     want="without knob_disagreement first",
 )
-g.negatives_ran(31)
+g.negative(
+    "L4a the GSettings door without its VFS first",
+    lambda: census(without(FMT, r"let _ = gio::Vfs::default\(\);", "", "L4a")),
+    want="without gio::Vfs::default() before it",
+)
+g.negative(
+    "L4b a second GSettings construction in the GTK backend",
+    lambda: census(without(
+        GTK, r"crate::fmt::gnome_clock_format\(\)\.is_some_and",
+        'gio::Settings::new("org.gnome.desktop.interface").string("clock-format").as_str() == "12h" || crate::fmt::gnome_clock_format().is_some_and',
+        "L4b")),
+    want="a GSettings construction in `locale_is_12_hour`",
+)
+g.negatives_ran(33)
 
 # ---- The real census. --------------------------------------------------
 for line in census(src):

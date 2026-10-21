@@ -18421,3 +18421,22 @@ that move found a second cost: validate-linux passes `-e KAYA_RECORD=`
 every linux leg slept 750 ms at its exit (86 filtered legs: 25 s of pool
 against 17 s). The three harnesses now read an empty variable as unset, as
 the runners' `${VAR:-}` does (check-flightrec RL1-RL3).
+
+## The GIO lock-order deadlock (measured 2026-10-21)
+
+`format-java-wayland` hung at its 180 s ceiling with no step entered. The
+leg-ceiling stacks showed two threads stopped for good: the main thread in
+`kaya_run` → GTK init → `gtk_css_provider_load_named` → `g_vfs_get_default`,
+owning the VFS's `g_once` and waiting on GIO's module-loading mutex; and a
+JVM thread in `kaya_catalog` → `fmt::locale` → `twenty_four_hours` →
+`gio::Settings::new` → the dconf backend's init, holding that mutex and
+waiting on the same `g_once`. GIO takes the two in opposite orders on those
+two paths, so any GSettings construction racing GTK's init off the main
+thread can deadlock; it needs a guest that formats a time before the first
+frame on another thread, which only the Java format guest did. The core's
+one GSettings door, `fmt::gnome_clock_format`, now calls
+`gio::Vfs::default()` first, so both paths take the VFS init before the
+module lock (check-appearance L4, with negatives for the missing VFS call
+and for a second GSettings site). Upstream has the same class: GLib's
+`_g_io_module_get_default` lock and glib#541 (dconf's worker against a
+class_init).

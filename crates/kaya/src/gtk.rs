@@ -2979,23 +2979,9 @@ fn date_button_label(packed: i64) -> String {
 }
 
 /// Does the user's desktop show a 12-hour clock? GNOME's own answer, and
-/// the one GTK apps read (docs/datetime-plan.md P5). SCHEMA-GUARDED:
-/// `g_settings_new` on a schema that is not installed ABORTS the process,
-/// and the validation container has no GNOME session at all.
+/// the one GTK apps read (docs/datetime-plan.md P5).
 fn locale_is_12_hour() -> bool {
-    let Some(source) = gio::SettingsSchemaSource::default() else {
-        return false;
-    };
-    let Some(schema) = source.lookup("org.gnome.desktop.interface", true) else {
-        return false;
-    };
-    if !schema.has_key("clock-format") {
-        return false;
-    }
-    gio::Settings::new("org.gnome.desktop.interface")
-        .string("clock-format")
-        .as_str()
-        == "12h"
+    crate::fmt::gnome_clock_format().is_some_and(|format| format == "12h")
 }
 
 /// The hour the SPINS say, 0..=23 on both clocks: a 12-hour desk's spin

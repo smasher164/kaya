@@ -901,6 +901,9 @@ mod platform {
 /// GNOME's `clock-format` when the schema is installed, else the locale's
 /// `T_FMT`.
 #[cfg(target_os = "linux")]
+pub(crate) use platform::gnome_clock_format;
+
+#[cfg(target_os = "linux")]
 mod platform {
     use super::{Date, Direction, HourCycle, Length, LocaleInfo, NumberOptions, Time};
     use std::ffi::{c_char, c_int, c_long, CStr, CString};
@@ -995,18 +998,27 @@ mod platform {
         strftime(pattern, &tm)
     }
 
-    fn twenty_four_hours() -> bool {
-        // GNOME's own setting when its schema is installed (the lane image
-        // carries it); otherwise the locale's own clock.
+    /// GNOME's `clock-format`, or None without its schema (`g_settings_new`
+    /// on a missing schema aborts). The one GSettings door in the core:
+    /// the default VFS first (docs/traps.md, the GIO lock-order deadlock;
+    /// check-appearance L4).
+    pub(crate) fn gnome_clock_format() -> Option<String> {
         use gtk4::gio;
         use gtk4::gio::prelude::SettingsExt;
-        if let Some(source) = gio::SettingsSchemaSource::default() {
-            if source.lookup("org.gnome.desktop.interface", true).is_some() {
-                let settings = gio::Settings::new("org.gnome.desktop.interface");
-                return settings.string("clock-format").as_str() == "24h";
-            }
+        let _ = gio::Vfs::default();
+        let source = gio::SettingsSchemaSource::default()?;
+        let schema = source.lookup("org.gnome.desktop.interface", true)?;
+        if !schema.has_key("clock-format") {
+            return None;
         }
-        !info(T_FMT).contains("%p") && !info(T_FMT).contains("%r")
+        Some(gio::Settings::new("org.gnome.desktop.interface").string("clock-format").to_string())
+    }
+
+    fn twenty_four_hours() -> bool {
+        match gnome_clock_format() {
+            Some(format) => format == "24h",
+            None => !info(T_FMT).contains("%p") && !info(T_FMT).contains("%r"),
+        }
     }
 
     pub(super) fn time(t: Time, length: Length) -> String {
