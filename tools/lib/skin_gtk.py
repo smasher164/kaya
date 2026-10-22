@@ -52,6 +52,9 @@ DOORS = [
      ["load_kaya_css(&core.skin.css, \"grounds\", &css, &core.css_error);",
       "widget.update_property(&[gtk4::accessible::Property::Label(&words.join(\", \"))]);",
       "let holds = skin::holds_widget_below(root);", "root.set_visible(holds);"], []),
+    # docs/traps.md, the GTK row padding read as a laid-out row.
+    ("a row's laid-out height", "fn row_laid_out_height(row: &gtk4::Widget) -> f64 {",
+     ["if !children.is_empty() && children.iter().all(|c| c.allocation().height() <= 0) {\nreturn 0.0;\n}"], []),
     ("the wayland pointer's hold", "fn hold_wayland_pointer(located: &str) {",
      ["libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);", '.args(["set", x, y, "sleep", "600000"])',
       "let _ = old.kill();"], []),
@@ -140,6 +143,8 @@ CALLS = [
     ("the park follows a moved measurement (M19 G)",
      "scene.rows_measured(id, band.first, &heights);\n});\nif anchor.get().is_some() {\nlet pending = pending.clone();\n"
      "glib::idle_add_local_once(move || schedule_window_report(&pending, id));\n}"),
+    ("the drive loop reads a row's height through its content, never its padding (M19 G)",
+     ".map(|w| (f64::from(w.allocation().y()), row_laid_out_height(&w)))"),
     ("a row joining a table wears the row class as it joins (M19 G)",
      "Some(content) => {\nchild_widget.add_css_class(TABLE_ROW_CLASS);\ncontent.append(&child_widget)\n}"),
     # The overlay panel's fill under kaya's inset border: libadwaita's `.osd`
@@ -267,6 +272,12 @@ CUTS = [
     ("GTK: the park left on the stale pitch after a moved measurement (M19 G)",
      r"\n\s+if anchor\.get\(\)\.is_some\(\) \{\n\s+let pending = pending\.clone\(\);\n\s+glib::idle_add_local_once\(move \|\| schedule_window_report\(&pending, id\)\);\n\s+\}", "",
      "the park follows a moved measurement (M19 G) no longer holds"),
+    ("GTK: the drive loop reading a padded row's own box as laid out (M19 G)",
+     r"row_laid_out_height\(&w\)", "f64::from(w.allocation().height())",
+     "the drive loop reads a row's height through its content, never its padding (M19 G) no longer holds"),
+    ("GTK: a row with nothing laid out inside it read as its padding (M19 G)",
+     r"(children\.iter\(\)\.all\(\|c\| c\.allocation\(\)\.height\(\) <= 0\) \{\n\s+)return 0\.0;",
+     r"\1let _ = 0.0;", "a row's laid-out height lacks if !children.is_empty()"),
     ("GTK: a joining row left without its class until the next reflow (M19 G)",
      r"Some\(content\) => \{\n\s+child_widget\.add_css_class\(TABLE_ROW_CLASS\);\n\s+content\.append\(&child_widget\)\n\s+\}",
      "Some(content) => content.append(&child_widget),", "a row joining a table wears the row class as it joins (M19 G) no longer holds"),

@@ -5137,6 +5137,10 @@ def ios_give_up(driver, runsim):
     if not m or "enabled=\\(save.isEnabled)" not in m.group(1):
         bad.append("tools/ios/xcuidrive/KayaDrive.swift: a savepress reading no "
                    "longer says whether Save was enabled when it was pressed")
+    if not m or "a.alerts.firstMatch" not in m.group(1) or "with an alert, " not in m.group(1):
+        bad.append("tools/ios/xcuidrive/KayaDrive.swift: savepress no longer reads the "
+                   "picker's alert, which hides the sheet and reads as a save (docs/traps.md, "
+                   "the save sheet's alert read as gone)")
     if not re.search(r"device_capture\([^\n]*\n[^\n]*launched_at\)\n\s+"
                      r"driver_shot\(drive_dir, name, log\)",
                      runsim):
@@ -5164,6 +5168,8 @@ for label, pattern, repl, src, which, want in (
          DRIVER_SRC, "driver", "savepress gives up without"),
         ("the enabled reading", r'enabled=\\\(save\.isEnabled\)', "",
          DRIVER_SRC, "driver", "whether Save was enabled"),
+        ("the picker's alert unread", r"a\.alerts\.firstMatch", "a.sheets.firstMatch",
+         DRIVER_SRC, "driver", "picker's alert"),
         ("the driver's shot adopted", r"\n\s+driver_shot\(drive_dir, name, log\)\n", "\n",
          RUNSIM_SRC, "runsim", "adopts the driver's own screenshot"),
         ("the picker service's log",
@@ -5176,6 +5182,30 @@ for label, pattern, repl, src, which, want in (
     args = (doc, RUNSIM_SRC) if which == "driver" else (DRIVER_SRC, doc)
     if hits != 1 or not any(want in b for b in ios_give_up(*args)):
         selftest_fail(f"the iOS give-up negative ({label}) did not fire")
+
+# A FAILED SAVE PRESS SAYS WHAT THE EXPORT'S STAGING HELD (docs/traps.md, the
+# save sheet's alert read as gone): the picker's copy said its source did not
+# exist, and only the app can read its own tmp.
+def ios_save_staging(swiftui):
+    m = re.search(r"func kayaSimdriveSaveDrive\(cancel: Bool\) -> String\? \{(.*?)\n    \}",
+                  swiftui, re.S)
+    if not m or "contentsOfDirectory(atPath: staging)" not in m.group(1) \
+            or "the export's staging" not in m.group(1):
+        return ["swift/KayaSwiftUI.swift: a failed savepress no longer notes what the "
+                "export's staging directory held"]
+    return []
+
+
+SWIFTUI_SRC = read_rel("swift/KayaSwiftUI.swift")
+out = ios_save_staging(SWIFTUI_SRC)
+if out:
+    print("\n".join(out), file=sys.stderr)
+    status = 1
+doc, hits = sub_count(r"contentsOfDirectory\(atPath: staging\)",
+                      "contentsOfDirectory(atPath: \"/\")", SWIFTUI_SRC)
+print(f"check-steps: iOS save staging negative: {hits} substitution(s)")
+if hits != 1 or not ios_save_staging(doc):
+    selftest_fail("the iOS save staging negative did not fire")
 
 # THE PICKER'S COMMITS WAIT FOR THE DEVICE'S FILE PROVIDER (docs/traps.md, the
 # iOS save press): a LocalStorage Spotlight purge left Save disabled for 44 s in

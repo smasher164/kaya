@@ -5697,10 +5697,7 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         .filter(|w| {
             !w.has_css_class(TABLE_SPACER_CLASS) && !w.has_css_class(KAYA_FOLDED_CLASS)
         })
-        .map(|w| {
-            let allocation = w.allocation();
-            (f64::from(allocation.y()), f64::from(allocation.height()))
-        })
+        .map(|w| (f64::from(w.allocation().y()), row_laid_out_height(&w)))
         .collect();
 
     // THE VERIFY HALF (§2.2), reported only where this tier's extent
@@ -5852,6 +5849,18 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         set_table_scrolling(&body, grown || band.extent > f64::from(TABLE_MAX_CONTENT));
     }
     (first, total)
+}
+
+/// A row's height for the drive loop, 0 until something inside it has been
+/// laid out: the row's own padding is not a measurement (docs/traps.md, the
+/// GTK row padding read as a laid-out row).
+fn row_laid_out_height(row: &gtk4::Widget) -> f64 {
+    use gtk4::prelude::WidgetExt;
+    let children = children_of(row);
+    if !children.is_empty() && children.iter().all(|c| c.allocation().height() <= 0) {
+        return 0.0;
+    }
+    f64::from(row.allocation().height())
 }
 
 /// A TABLE HUGS WHAT IT HOLDS (docs/deferred.md's viewport-floor entry).

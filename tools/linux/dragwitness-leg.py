@@ -49,7 +49,7 @@ import threading
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from dragdrive import DragDriveError, default_injector, injector_argv
+from dragdrive import DragDriveError, default_injector, injector_argv, x11_reading
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
 import verdict as verdict_reader  # noqa: E402
 
@@ -109,8 +109,10 @@ class Pump:
 # --- the two windows -------------------------------------------------
 
 def x11_window_of(pid):
-    """(id, (x, y, w, h)) of a pid's largest X window, or None."""
-    ids = subprocess.run(["xdotool", "search", "--pid", str(pid)],
+    """(id, (x, y, w, h)) of a pid's largest MAPPED X window, or None: a 1x1
+    window carries the pid before the toplevel maps (docs/traps.md, the witness
+    placed beside kaya's unmapped window)."""
+    ids = subprocess.run(["xdotool", "search", "--onlyvisible", "--pid", str(pid)],
                          capture_output=True, text=True, encoding="utf-8",
                          check=False).stdout.split()
     best = None
@@ -183,6 +185,20 @@ def clear_of(kaya_box, witness_box):
     raise DragDriveError(
         f"a {SCREEN[0]}x{SCREEN[1]} output has no room beside kaya's "
         f"{kaya_box} for the witness's {witness_box}")
+
+
+def overlapping(kaya_box, witness_box):
+    """The refusal when the placed witness still covers kaya's window, since a
+    press aimed at either then reaches whichever is on top; None when clear."""
+    if kaya_box is None or witness_box is None:
+        return (f"a window went away after the witness was placed: kaya's {kaya_box}, "
+                f"the witness's {witness_box}")
+    kx, ky, kw, kh = kaya_box
+    wx, wy, ww, wh = witness_box
+    if kx < wx + ww and wx < kx + kw and ky < wy + wh and wy < ky + kh:
+        return (f"the witness's window {witness_box} overlaps kaya's {kaya_box} after "
+                f"it was placed beside it, so the leg's press would reach whichever is on top")
+    return None
 
 
 def place(proto, pid, at):
@@ -313,6 +329,9 @@ def drive(proto, direction, witness, witness_said, kaya, kaya_said):
     origin = witness_origin(proto, witness.pid, transform)
     out(f"{proto}: kaya's window {kaya_box}, the witness's content at "
         f"{origin} (its own shadow {transform})")
+    overlap = overlapping(window_box(proto, kaya.pid), window_box(proto, witness.pid))
+    if overlap:
+        raise DragDriveError(overlap)
 
     # kaya's own instrument, waited for rather than raced.
     diag = kaya_said.wait_for("KAYA_DIAG dragdrive", READY_DEADLINE_S,
@@ -351,6 +370,13 @@ def drive(proto, direction, witness, witness_said, kaya, kaya_said):
     else:
         start, end = centre(rects["source"]), kaya_files
     out(f"pressing {start}, releasing {end}")
+    if proto == "x11":
+        source, target = (kaya, witness) if direction == "out" else (witness, kaya)
+        for at, owner, when in ((end, target, "the leg's own release point"),
+                                (start, source, "the leg's own press")):
+            subprocess.run([default_injector(proto), "mousemove", str(at[0]), str(at[1])],
+                           capture_output=True, check=False)
+            out(x11_reading(owner.pid, when))
     gesture = subprocess.run(
         injector_argv(proto, default_injector(proto), start, end),
         capture_output=True, text=True, encoding="utf-8", check=False)

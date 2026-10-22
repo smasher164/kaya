@@ -45,6 +45,22 @@ def findings(src):
     if park < 0 or launch < 0 or park > launch:
         out.append(f"drag begin: {WITNESS_LEG}'s run() starts kaya before it parks the "
                    f"witness, so the witness can sit over kaya's window at the instrument press")
+    legsrc = src[WITNESS_LEG]
+    if '"--onlyvisible", "--pid"' not in py_fn(legsrc, "x11_window_of"):
+        out.append(f"drag begin: {WITNESS_LEG}'s x11_window_of takes an unmapped window, "
+                   f"so a 1x1 window of kaya's places the witness over kaya (docs/traps.md, the "
+                   f"witness placed beside kaya's unmapped window)")
+    legdrive = py_fn(legsrc, "drive")
+    placed = legdrive.find("place(proto, witness.pid, clear_of(kaya_box, box))")
+    refused = legdrive.find("raise DragDriveError(overlap)")
+    gesture = legdrive.find("injector_argv(proto, default_injector(proto), start, end)")
+    if placed < 0 or refused < placed or gesture < refused:
+        out.append(f"drag begin: {WITNESS_LEG}'s drive() no longer refuses a witness still "
+                   f"over kaya's window between placing it and the gesture")
+    if ("the leg's own release point" not in legdrive or "the leg's own press" not in legdrive
+            or "out(x11_reading(owner.pid, when))" not in legdrive):
+        out.append(f"drag begin: {WITNESS_LEG}'s drive() no longer says whose window is under "
+                   f"its own press and release points")
     drive = py_fn(d, "drive")
     if 'readings.append(x11_reading(pid, "before the press"))' not in drive:
         out.append(f"drag begin: {DRAGDRIVE}'s drive() no longer reads the window under "
@@ -88,6 +104,14 @@ CUTS = [
     ("the witness parked after kaya starts", WITNESS_LEG,
      r"^    try:\n        park_witness\(proto, witness, witness_said\)\n",
      "    try:\n        pass\n", "starts kaya before it parks the witness"),
+    ("the witness placed beside an unmapped window", WITNESS_LEG,
+     r'"--onlyvisible", "--pid"', '"--pid"', "takes an unmapped window"),
+    ("the overlapping witness not refused", WITNESS_LEG,
+     r"^    if overlap:\n        raise DragDriveError\(overlap\)\n", "",
+     "no longer refuses a witness still over kaya's window"),
+    ("the leg's own points unread", WITNESS_LEG,
+     r"out\(x11_reading\(owner\.pid, when\)\)", "pass",
+     "whose window is under its own press and release points"),
     ("the press's window unread", DRAGDRIVE,
      r'^ +readings\.append\(x11_reading\(pid, "before the press"\)\)\n', "",
      "before the x11 press"),
@@ -110,7 +134,7 @@ CUTS = [
 
 def run(g):
     src = {rel: (ROOT / rel).read_text(encoding="utf-8") for rel in (DRAGDRIVE, GTK, WITNESS_LEG)}
-    g.counted("drag-begin record clauses held", list(range(12)), floor=12)
+    g.counted("drag-begin record clauses held", list(range(15)), floor=15)
     for line in findings(src):
         g.finding(line)
     for label, rel, pattern, repl, want in CUTS:

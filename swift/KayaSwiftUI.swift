@@ -4419,6 +4419,12 @@ func kayaPresentSaveDialog(
     func kayaSimdriveSaveDrive(cancel: Bool) -> String? {
         let verb = cancel ? "savecancel" : "savepress"
         let (ok, lines) = KayaSimdrive.ask(verb)
+        // docs/traps.md, the save sheet's alert read as gone.
+        if !ok, !cancel, let staging = kayaLiveSaveStaging {
+            let held = (try? FileManager.default.contentsOfDirectory(atPath: staging))
+                .map { $0.isEmpty ? "nothing" : $0.joined(separator: ", ") } ?? "no such directory"
+            kayaPickerNote("savepress failed; the export's staging \(staging) holds \(held)")
+        }
         return ok ? nil : (lines.first ?? "simdrive refused \(verb) without saying why")
     }
 

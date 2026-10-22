@@ -18676,3 +18676,78 @@ presentation-role GtkBox named kaya-grid-filler in each empty column of the
 first row, removed at every reflow; grid_columns and grid_cell_frames skip
 them. GUARD: that expect_same_width in tools/scenes/music_home.steps, on every
 lane; with the filler's attach cut it read the shipped sentence on linux.
+
+## The GTK row padding read as a laid-out row (measured 2026-10-22)
+
+The full matrix at 318642df failed all 18 linux netimage legs at
+`expect label@released "released: none"`, before anything had scrolled. The
+leg log: the table's first window_report read `laid_out=true page=0.0
+average=18.0 rows=128`. window_report counted a row as laid out once its
+allocation had a height, and since the table row's vertical padding (M19 G,
+5 px above and below) a row GTK had allocated before its cells were sized
+was 10 px tall, not 0. So the drive loop measured every realized row at a
+pitch of 18 (10 plus the 8 px gap), derived 11 rows a page, realized 22
+and started their art fetches; the next pass measured the real 58 px pitch,
+the band shrank to 18 rows, and the four rows torn down while loading
+reported `released: some`. With the padding cut back to 0 the same leg
+passed: its first report read `laid_out=false`, so the band waited and its
+first measurement was the real 48 px pitch. The early 18 px pitch was also
+behind the stale-pitch park above. The two measurements kept disagreeing
+after a scroll (extent 6400 against 6800), and with that entry's idle
+re-park they made a report loop: about 10,000 window_report lines in one leg,
+and on js-x11 `kaya occurrence ring full`. window_report now reads each row
+through row_laid_out_height, which answers 0 while none of the row's children
+has a height. GUARD: tools/lib/skin_gtk.py holds the helper and its call (two
+cuts watched red in check-verbs); at run time the call cut back to the row's
+own allocation made netimage-rust-x11 read the shipped sentence again.
+
+## The witness placed beside kaya's unmapped window (measured 2026-10-22)
+
+The full matrix at 318642df: `dndwitness-out-x11` read `label#5 reads "drag
+ended none", wanted "drag ended copy"`. The bundle's leg log said
+`x11: kaya's window (0, 0, 1, 1), the witness's content at (41, 0)`:
+dragwitness-leg.py's wait_for_window took the largest X window carrying
+kaya's pid, and when it asked, that was a 1x1 window, before kaya's toplevel
+had mapped. clear_of then put the witness 40 px right of a 1-px window, over
+kaya's real 540x330 one. With no window manager the window that maps later is
+on top, so kaya covered the witness's drop target, and the leg's release at
+(221, 138) dropped kaya's text on kaya itself: the drag ended `none` and the
+witness took nothing. The bundle did not say where the leg's own press and
+release went, only the planned points. x11_window_of now searches
+`--onlyvisible`; drive() refuses a witness still overlapping kaya's window
+after placing it, naming both boxes; and on x11 it prints whose window is
+under its release point and its press before the gesture, through
+dragdrive.py's XQueryPointer reading. A forced red (the witness placed one
+pixel right of kaya's origin) read "the witness's window (1, 0, 360, 200)
+overlaps kaya's (0, 0, 540, 330)", and with that refusal cut too, "the leg's
+own release point at (181, 138) over window 0xa00005 'dnd' of pid 4767, NOT
+this guest's (pid 4703)". Not a change from that day: the wait has taken any
+window since the leg was written, and kaya mapping late is a race. GUARD:
+tools/lib/dragbegin_routes.py in check-verbs holds the search, the refusal's
+order and the two readings, three cuts watched red.
+
+## The save sheet's alert read as gone (measured 2026-10-22)
+
+The full matrix at 318642df: iOS `editor-go` read `label#0 reads "new file",
+wanted "saved, 15 bytes"` after a `file_save` the driver called a success
+(`press 1: Save offered enabled=true hittable=true at 323,92 keyboards 1->0
+sheet gone`). The driver's own picture showed the picker still up under an
+alert, "The file doesn't exist. The file "untitled" couldn't be copied ...",
+and the picker's process logged `Copy Operation failed: ...
+NSFileProviderErrorDomain Code=-1005 ... NonExistentItemIdentifier=did=42890`
+for the staged export `tmp/kaya-save-export-1/untitled`, 0.1 s after its
+DOCCopyOperation started. The LocalStorage indexer had read idle 7.2 s before
+the press (errors 34) and no purge is in the system slice, so this is not the
+purge of "the iOS save press" above, and the bundle could not say whether the
+staged file was there at the copy. Two holes: the alert takes the picker's
+surfaces out of XCUITest's snapshot as a menu does, so three absent reads
+counted as the sheet going; and nothing read the staging directory. savepress
+now reads `a.alerts` after each press and fails naming the alert's words, and
+the interpreter notes what the export's staging held when savepress fails. A
+forced red (the staged file deleted as the sheet finished presenting) read
+`savepress failed; the export's staging .../tmp/kaya-save-export-1 holds
+nothing` and `file_save : the save dialog answered press 1 with an alert, "The
+file "untitled" couldn't be opened because you don't have permission to view
+it." ...`. NOT REPRODUCED otherwise: editor, save and filedialog on iOS, 7 of 7.
+GUARD: check-steps' ios_give_up holds the alert read and ios_save_staging the
+note, one cut each watched red.

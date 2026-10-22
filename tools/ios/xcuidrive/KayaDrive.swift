@@ -843,6 +843,7 @@ final class KayaDrive: XCTestCase {
             }
             var presses = 0, offered = 0
             var gone = false
+            var alerted: String?
             var readings: [String] = []
             while presses < 6 && !gone && Date() < deadline {
                 presses += 1
@@ -883,9 +884,18 @@ final class KayaDrive: XCTestCase {
                     + (gone ? "" : " field \(field.exists ? "\"\((field.value as? String) ?? "")\"" : "absent")")
                 note(reading)
                 readings.append(reading)
+                // docs/traps.md, the save sheet's alert read as gone.
+                let alert = a.alerts.firstMatch
+                if alert.exists {
+                    let words = alert.staticTexts.allElementsBoundByIndex.map { "\"\($0.label)\"" }
+                    alerted = "the save dialog answered press \(presses) with an alert, "
+                        + "\(words.joined(separator: " ")), which hides the sheet from this driver's reads"
+                    break
+                }
             }
-            if !gone {
+            if !gone || alerted != nil {
                 failShot(a, "savepress")
+                if let alerted { return (false, "\(alerted); \(readings.joined(separator: "; "))") }
                 return (false, "the save dialog was still up after \(presses) presses of Save: Save was in the strip for \(offered) of them; it now offers \(strip(a).map { $0.0 }); \(readings.joined(separator: "; "))")
             }
             return (true, "saved in \(presses) press(es)")
