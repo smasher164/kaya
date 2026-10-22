@@ -8596,6 +8596,32 @@ mod skin {
         pub fn frame(&self, widget: &gtk4::Widget) -> Option<gtk4::graphene::Rect> {
             widget.compute_bounds(&self.content)
         }
+
+        /// The capture as `at` reads it, every pixel over the window's ground
+        /// (docs/traps.md, the dark fail-shot with no page and no words).
+        pub fn flattened(&self) -> gtk4::gdk::Texture {
+            use gtk4::prelude::Cast;
+            let (w, h) = (self.width.max(0) as usize, self.height.max(0) as usize);
+            let ground = self.ground.map(|c| (c * 255.0).round().clamp(0.0, 255.0));
+            let mut rgb = Vec::with_capacity(w * h * 3);
+            for y in 0..h {
+                for x in 0..w {
+                    let p = &self.rgba[y * self.stride + x * 4..][..4];
+                    let alpha = f64::from(p[3]) / 255.0;
+                    for i in 0..3 {
+                        rgb.push((f64::from(p[i]) + ground[i] * (1.0 - alpha)).round().clamp(0.0, 255.0) as u8);
+                    }
+                }
+            }
+            gtk4::gdk::MemoryTexture::new(
+                self.width,
+                self.height,
+                gtk4::gdk::MemoryFormat::R8g8b8,
+                &gtk4::glib::Bytes::from_owned(rgb),
+                w * 3,
+            )
+            .upcast()
+        }
     }
 
     /// The named colour `name` resolved in `widget`'s style context now.
@@ -24586,8 +24612,12 @@ impl crate::harness::Stage for GtkStage {
                 Err(why) => return format!("NOT WRITTEN ({}): {why}", out.display()),
             };
             let (w, h) = (shot.texture.width(), shot.texture.height());
-            match shot.texture.save_to_png(&out) {
-                Ok(()) => format!("this process's window content rendered offscreen, {w}x{h} -> {}", out.display()),
+            match shot.flattened().save_to_png(&out) {
+                Ok(()) => format!(
+                    "this process's window content rendered offscreen over the window's ground {}, {w}x{h} -> {}",
+                    skin::hex(shot.ground),
+                    out.display()
+                ),
                 Err(e) => format!("NOT WRITTEN ({}): {e}", out.display()),
             }
         })

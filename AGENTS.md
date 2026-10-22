@@ -1025,6 +1025,9 @@ in docs/deferred.md.
    every failed linux step logs where its CPU went (the main loop's schedstat,
    the cpu pressure, a nap's oversleep, since this VM reports no steal time;
    docs/traps.md, the VM off every CPU for longer than a cue); five cuts watched.
+   The picture is composited over the window's ground, since the window, not
+   its child, draws that ground and a dark leg's page and words were
+   transparent (docs/traps.md, the dark fail-shot); two cuts watched.
    AND A SLOW LANE SAYS WHY since 2026-10-14 (docs/traps.md, the windows
    lane slowed by a rebooted VM's Defender): every lane prints
    tools/lib/lane_health.py's readings at its start and before its verdict
@@ -1078,7 +1081,7 @@ in docs/deferred.md.
    leg's picture without its keyboard): KayaFailShot reads the IME inset off
    the window and hatches that band, named, over the picture, since the IME's
    window is another process's and PixelCopy cannot read it; two cuts watched.
-   Two hundred and sixty-two watched negatives, counts printed),
+   Two hundred and sixty-four watched negatives, counts printed),
    `tools/check-diagnostics.py` (a why-not may not print a sentence it
    cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
    is read as a diagnostic by that name alone; one answer, or an answer

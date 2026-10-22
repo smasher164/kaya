@@ -17233,6 +17233,21 @@ picture of an empty desktop. GTK's failure_picture renders the window content
 offscreen at the first failed step to `<leg>-failshot.png` beside the verb
 trace, adopted as `fail-shot`. GUARD: check-flightrec FS1-FS2.
 
+The dark fail-shot with no page and no words (measured 2026-10-21): under
+KAYA_APPEARANCE=dark that picture showed the sidebar and the images on a white
+page, with no header, no card grounds and no labels. skin::shot_of snapshots
+`window.child()`, and the window ground (window_bg_color) is drawn by the
+GtkWindow itself, so every pixel where the page shows that ground is alpha 0 in
+the texture (a dark card's ground read (255,255,255,20)). The readers never saw
+it, since Shot::at composites each pixel over window_bg_color, but the picture
+was saved as the raw texture and a viewer draws alpha 0 as white: in light the
+page is FAFAFB and passed for right, in dark the white labels vanished on it.
+Measured against an X11 grab of the same step (music_home and tasks, light and
+dark): 67.5% and 77.7% of the dark pictures' pixels differed by more than 8/255,
+0.0% in light; after, 0.0% in all four. failure_picture saves Shot::flattened,
+every pixel over the ground as `at` reads it, and names that ground. GUARD:
+check-flightrec FS3-FS4.
+
 ## The nested generator relinked the sweep's libkaya (measured 2026-10-17)
 
 The matrix at 42cd6c24 passed 64/64 gates and refused its verdict because the

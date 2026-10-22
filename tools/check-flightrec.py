@@ -1462,6 +1462,15 @@ def census_gtk_failshot(src):
     picture = rust_fn(src[GTK_RS], "fn failure_picture(&self) -> String")
     if 'crate::vtrace::sibling("failshot.png")' not in picture or "save_to_png(" not in picture:
         found.append("gtk.rs: failure_picture no longer writes failshot.png beside the verb trace")
+    # docs/traps.md, the dark fail-shot with no page and no words.
+    if "shot.flattened().save_to_png(" not in picture or "skin::hex(shot.ground)" not in picture:
+        found.append("gtk.rs: failure_picture saves the capture without the window's ground "
+                     "under it, so a dark leg's page, header and labels are transparent in the "
+                     "picture")
+    flat = rust_fn(src[GTK_RS], "pub fn flattened(&self) -> gtk4::gdk::Texture")
+    if "ground[i] * (1.0 - alpha)" not in flat or "MemoryFormat::R8g8b8," not in flat:
+        found.append("gtk.rs: Shot::flattened no longer composites every pixel over the window's "
+                     "ground into an opaque picture")
     if not re.search(r'flightrec_adopt_shot "\$bundle" fail-shot \\\n'
                      r'\s+"\$LEGS_DIR/\$name-failshot\.png"',
                      src[LINUX]):
@@ -3603,7 +3612,13 @@ for label, rel, pattern, repl, want, check in (
          "failshot.png", census_gtk_failshot),
         ("FS2 the linux collect adopting no fail-shot", LINUX,
          r'flightrec_adopt_shot "\$bundle" fail-shot', 'flightrec_adopt_shot "$bundle" other-shot',
-         "no fail-shot section", census_gtk_failshot)):
+         "no fail-shot section", census_gtk_failshot),
+        ("FS3 the GTK failed-step picture saved without its ground", GTK_RS,
+         r"shot\.flattened\(\)\.save_to_png\(", "shot.texture.save_to_png(",
+         "without the window's ground", census_gtk_failshot),
+        ("FS4 the flattened picture composited over nothing", GTK_RS,
+         r"\+ ground\[i\] \* \(1\.0 - alpha\)\)\.round\(\)", "+ 0.0 * (1.0 - alpha)).round()",
+         "no longer composites", census_gtk_failshot)):
     changed = doctored(rel, pattern, repl, label)
     gate.negative(label, lambda: check(changed), want=want)
 
@@ -3640,6 +3655,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(262 + (5 if DRIVES else 0))
+gate.negatives_ran(264 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
