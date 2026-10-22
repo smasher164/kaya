@@ -18641,3 +18641,21 @@ GUARD: tools/check-window-memory.py clause G (the block cut and driven over a re
 window, three cuts watched), tools/lib/resize_shape.py in check-verbs (eleven cuts);
 by hand, the centre moved under the menu bar and the role renamed, each read back
 from its bundle.
+
+## The GTK auto grid's missing columns (measured 2026-10-21)
+
+docs/layout-knobs-plan.md §3 gives an auto grid floor((width + gap) / (min +
+gap)) columns, each an equal share of the width. GTK's reflow_grid turned
+column homogeneity on and attached the children row-major at that count, but a
+homogeneous GtkGrid shares the width only among the lines that hold a child:
+an empty line gets no size and no spacing. So in the music Home pane (count 5
+at ~790 pt) the Jazz and Electronic shelves' two cards each took half the pane
+and the Rock shelf's one card all of it, where the mac, Windows and Compose
+drew one fifth each (`expect_same_width column@card_149020 column@card_201715`
+read 782 wide against 383 on x11, 789 against 387 on wayland). Compose's Layout
+takes `share` from the count, not the children, so it never had this. An auto
+grid with fewer children than columns now attaches an empty, untargetable
+presentation-role GtkBox named kaya-grid-filler in each empty column of the
+first row, removed at every reflow; grid_columns and grid_cell_frames skip
+them. GUARD: that expect_same_width in tools/scenes/music_home.steps, on every
+lane; with the filler's attach cut it read the shipped sentence on linux.

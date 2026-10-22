@@ -9913,6 +9913,9 @@ const SIDEBAR_CLASS: &str = "navigation-sidebar";
 /// The names kaya's own sidebar row parts wear, so every read finds its part
 /// by name rather than by position inside the row.
 const SECTION_TITLE_NAME: &str = "kaya-section-title";
+/// An auto grid's empty column (docs/traps.md, the GTK auto grid's missing
+/// columns); the geometry readers skip it.
+const GRID_FILLER_NAME: &str = "kaya-grid-filler";
 const SECTION_SYMBOL_NAME: &str = "kaya-section-symbol";
 const SECTION_BADGE_NAME: &str = "kaya-section-badge";
 
@@ -10198,6 +10201,13 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
             grid.remove(child);
         }
     }
+    let mut seated = grid.first_child();
+    while let Some(c) = seated {
+        seated = c.next_sibling();
+        if c.widget_name() == GRID_FILLER_NAME {
+            grid.remove(&c);
+        }
+    }
     for (i, child) in children.iter().enumerate() {
         let i = i as i32;
         // A container fills its cell both ways, a card taking its column and
@@ -10210,6 +10220,18 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
             child.set_valign(gtk4::Align::Center);
         }
         grid.attach(child, i % cols, i / cols, 1, 1);
+    }
+    // docs/traps.md, the GTK auto grid's missing columns.
+    if auto && !children.is_empty() {
+        for col in children.len() as i32..cols {
+            let filler = gtk4::Box::builder()
+                .name(GRID_FILLER_NAME)
+                .accessible_role(gtk4::AccessibleRole::Presentation)
+                .can_target(false)
+                .can_focus(false)
+                .build();
+            grid.attach(&filler, col, 0, 1, 1);
+        }
     }
 }
 
@@ -26393,8 +26415,10 @@ impl crate::harness::Stage for GtkStage {
             let mut frames = Vec::new();
             let mut child = grid.first_child();
             while let Some(c) = child {
-                let a = c.allocation();
-                frames.push((f64::from(a.x()), f64::from(a.y()), f64::from(a.width()), f64::from(a.height())));
+                if c.widget_name() != GRID_FILLER_NAME {
+                    let a = c.allocation();
+                    frames.push((f64::from(a.x()), f64::from(a.y()), f64::from(a.width()), f64::from(a.height())));
+                }
                 child = c.next_sibling();
             }
             Ok(frames)
@@ -26413,7 +26437,9 @@ impl crate::harness::Stage for GtkStage {
             let mut edges: Vec<i32> = Vec::new();
             let mut child = grid.first_child();
             while let Some(c) = child {
-                edges.push(c.allocation().x());
+                if c.widget_name() != GRID_FILLER_NAME {
+                    edges.push(c.allocation().x());
+                }
                 child = c.next_sibling();
             }
             if edges.is_empty() {

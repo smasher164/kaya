@@ -19,6 +19,9 @@ expect_ax column@card_201715 "button/Through The Olive Branches, Pierce Murphy"
 expect_fill column@card_201715 neutral
 # Every card in a row takes the row's tallest card's height (M21).
 expect_same_height column@card_201715 column@card_581719
+# A shelf with fewer cards than columns keeps each card one column wide
+# (docs/layout-knobs-plan.md §3): the Rock shelf's one card against Jazz's.
+expect_same_width column@card_149020 column@card_201715
 expect_no_clipping
 # The desktops: the pointer, the sidebar's Home and library, and the panes.
 hover column@card_581719
