@@ -1158,10 +1158,14 @@ the first frame drawn at the new size, not setContentSize, so a `choose`
 262 ms after `resize_window` answered the menu bar twice under a matrix
 and no scene can force it. The interpreter's `// MARK: - The window
 server's hit shape` block is cut and compiled with
-tools/checks/swiftui-resize-shape.swift over a REAL window whose draw
-takes 300 ms: inside the resize's own block the server still leaves a
-corner the growth brought in to the window beneath, the resize verb's
-wait returns once the shape covers it (walking the z-order down through
+tools/checks/swiftui-resize-shape.swift over a REAL window whose first
+draw at the new size the probe holds (the view runs the main run loop
+inside its draw until the probe has read the server, since a 300 ms draw
+raced the read: the cut that never reads the server passed 8 of 12 runs,
+docs/traps.md): inside the resize's own block the server still leaves a
+corner the growth brought in to the window beneath, while the frame is
+held the wait expires naming that holder, the resize verb's wait returns
+once the released frame covers it (walking the z-order down through
 other applications' windows, since a leg passes with the host's
 browser in front), a shrink waits nothing, the expiry names each
 corner's holder, and a main-thread caller is refused; three cuts

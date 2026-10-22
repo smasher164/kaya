@@ -65,6 +65,16 @@ corners a 120x80 -> 240x160 growth brought in: slow draw 326, 329, 329 ms; plain
 13 ms. The gate asserts no duration, only the order (not covered inside the resize's own
 main-thread block, covered after the wait).
 
+That slow draw was a race (docs/traps.md, the hit test that outran the resize): the
+draw ran straight after the resize's block and ahead of the probe thread's next
+main-thread block, so the wait always started after it. Instrumented, 6 runs: the
+draw at the new size started 10-16 ms after the resize and ended at 311-318 ms, the
+wait started at 319-327 ms, and the cut wait's read at 320-327 ms found the shape
+already covered. With autodisplay off and `setFrame(display: false)` nothing drew and
+the shape still covered the corner within 800 ms. The probe holds the draw now:
+held, the wait expired at 300 ms with all 3 corners under the windows beneath and
+the server agreeing; released, it covered them in 10-13 ms.
+
 ## The leg's own line
 
 tools/run-leg.py music_search python, first build: `resize shape: 3000 ms after the resize the

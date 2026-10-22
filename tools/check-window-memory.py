@@ -41,9 +41,10 @@ dev_shell_or_die()
 #      an app shortcut on F11, so a dress that took the key first is green.
 #   G  RUNTIME, macOS only: the `// MARK: - The window server's hit shape`
 #      block, cut and compiled with tools/checks/swiftui-resize-shape.swift
-#      over a REAL window whose draw takes 300 ms — the server hands a corner
-#      the growth brought in to the window beneath until the first frame at
-#      the new size is up, the resize verb's wait returns once it is ours,
+#      over a REAL window whose first draw at the new size the probe holds —
+#      the server hands a corner the growth brought in to the window beneath
+#      while it is held, the resize verb's wait expires naming that holder
+#      and returns once the released frame makes the corner ours,
 #      and every sentence of the wait is printed (docs/traps.md, the hit test
 #      that outran the resize). Three cuts watched.
 
@@ -771,7 +772,8 @@ for name, label, pattern, repl, want in FS_NEGATIVES:
 # hit-tests follows the first frame drawn at the new size, so a `choose` 262 ms
 # after `resize_window` answered the menu bar twice under a matrix and no
 # scene can force it. The probe's window is real, since nothing in the
-# process stands in for the server's shape; its draw takes 300 ms.
+# process stands in for the server's shape; its first draw at the new size
+# is held until the probe has read the server.
 RS_PROBE = "tools/checks/swiftui-resize-shape.swift"
 RS_START = "    // MARK: - The window server's hit shape"
 RS_END = "\n#endif\n\n// MARK: - The choice controls, read off the platform"
@@ -793,7 +795,8 @@ RS_NEGATIVES = [
      "a wait that never reads the server",
      r"let hit = read\(corner\)",
      "let hit = (ours: true, above: [String]())",
-     "after the wait the server's shape of this window covers that corner"),
+     "while the frame at the new size is held undrawn the wait expires naming each "
+     "corner's holder"),
     ("rs-old-corners",
      "the old frame's corners polled instead of the ones the resize brought in",
      r"\]\.filter \{ !before\.contains\(\$0\) \}",

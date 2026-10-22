@@ -18642,6 +18642,23 @@ window, three cuts watched), tools/lib/resize_shape.py in check-verbs (eleven cu
 by hand, the centre moved under the menu bar and the role renamed, each read back
 from its bundle.
 
+The probe's first shape, a content view whose draw slept 300 ms, was a race, and
+the cut wait that never reads the server passed it 8 times in 12 (it reddened a
+gate sweep on 2026-10-21). After the resize's main-thread block returns, the main
+thread draws the new frame at once, before the probe thread's next
+`DispatchQueue.main.sync`, so every wait, real or cut, started after the 300 ms
+draw had ended, and the commit carrying it reached the server 0-8 ms either side of
+the probe's read. The shape follows that commit: with no draw pending at all
+(`setFrame(display: false)`, autodisplay off) it still covered the corner, and
+`isAutodisplay = false` does not stop the draw `setContentSize` asks for. The probe
+now HOLDS its first draw at the new size, running the main run loop in default mode
+inside `draw(_:)` so the probe's main-thread reads are answered while no commit can
+be sent; held, the real wait expires at its 0.3 s bound naming each corner's holder
+and the server agrees, released, the shape covers in about 10 ms. The cut wait is
+refused there every time (20 of 20 standalone, and in 20 of 20 gate runs). The
+interpreter's own wait needed no change: it reads the server on every poll, so it
+cannot return before the shape covers the corners.
+
 ## The GTK auto grid's missing columns (measured 2026-10-21)
 
 docs/layout-knobs-plan.md §3 gives an auto grid floor((width + gap) / (min +

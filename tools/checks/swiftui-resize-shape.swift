@@ -4,17 +4,25 @@
 // REAL and reaches the window server, because the shape the server hit-tests
 // is the thing measured and nothing in the process can stand in for it; it
 // is small and sits under the menu bar's right end, where no lane's guest is
-// placed, since the gate sweep runs beside the mac lane. The premise is read
-// inside the resize's own main-thread block, where no frame at the new size
-// can have been drawn yet; the content view's 300 ms draw is what the shape
-// then follows (326-329 ms to cover the corners against 13-16 ms with a plain
-// view, docs/measurements/window-server-shape-2026-10-21.md).
+// placed, since the gate sweep runs beside the mac lane. The content view
+// holds its first draw at the new size, running the main run loop inside it,
+// until the probe has read the server (docs/traps.md, the hit test that outran
+// the resize, which says why a slow draw was a race).
 
 import AppKit
 
-final class KayaSlowView: NSView {
+nonisolated(unsafe) var kayaDrawHeld = false
+
+final class KayaHeldView: NSView {
     override func draw(_ rect: NSRect) {
-        Thread.sleep(forTimeInterval: 0.3)
+        let start = Date()
+        while kayaDrawHeld {
+            if Date().timeIntervalSince(start) > 10 {
+                print("swiftui-resize-shape: FAIL — the held draw was never released")
+                exit(1)
+            }
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.002))
+        }
         NSColor.systemBlue.setFill()
         rect.fill()
     }
@@ -48,18 +56,19 @@ enum KayaResizeShapeProbe {
                 width: small.width, height: small.height),
             styleMask: [.titled, .resizable], backing: .buffered, defer: false)
         window.title = "kaya resize-shape probe"
-        window.contentView = KayaSlowView()
+        window.contentView = KayaHeldView()
         window.orderFrontRegardless()
 
         Thread.detachNewThread {
             Thread.sleep(forTimeInterval: 0.5)
             let number = DispatchQueue.main.sync { window.windowNumber }
-            // 1. The premise, read inside the resize's own main-thread block so
-            //    no run-loop turn can draw a frame first: the server still hands
-            //    a corner the growth brought in to whatever lies beneath.
+            // 1. The premise, read inside the resize's own main-thread block,
+            //    with the frame at the new size held undrawn: the server still
+            //    hands a corner the growth brought in to whatever lies beneath.
             let (before, point, early, earlyBounds): (NSRect, NSPoint, (ours: Bool, above: [String]), String) =
                 DispatchQueue.main.sync {
                     let was = window.frame
+                    kayaDrawHeld = true
                     window.setContentSize(big)
                     let now = window.frame
                     let corner = NSPoint(x: now.maxX - 8, y: now.minY + 8)
@@ -71,7 +80,17 @@ enum KayaResizeShapeProbe {
             expect("right after the resize the window server's shape of this window leaves out a "
                 + "corner the resize brought in", !early.ours, "\(early.above)")
 
-            // 2. The wait, off the main thread, returns once the shape moved.
+            // 2. While the frame stays held the wait, reading the real server,
+            //    expires naming what sits over each corner; the server agrees.
+            let held = kayaAwaitResizeShape(window, before: before, bound: 0.3)
+            print("  " + held)
+            let still = DispatchQueue.main.sync { kayaServerHolds(window, point) }
+            expect("while the frame at the new size is held undrawn the wait expires naming each "
+                + "corner's holder", held.contains("still leaves out 3 of 3 corner(s) the resize "
+                    + "brought in: (") && !still.ours, held)
+            DispatchQueue.main.async { kayaDrawHeld = false }
+
+            // 3. Released, the wait returns once the shape moved.
             let waited = kayaAwaitResizeShape(window, before: before)
             print("  " + waited)
             let late = DispatchQueue.main.sync { kayaServerHolds(window, point) }
@@ -84,7 +103,7 @@ enum KayaResizeShapeProbe {
             expect("the server names a pid for the top window at the corner",
                 top.owner.contains("(pid "), top.owner)
 
-            // 3. A shrink brings no corner in.
+            // 4. A shrink brings no corner in.
             let shrunk = DispatchQueue.main.sync { () -> NSRect in
                 let was = window.frame
                 window.setContentSize(small)
@@ -95,7 +114,7 @@ enum KayaResizeShapeProbe {
             expect("a shrink brings no corner in and waits nothing",
                 shrink.contains("brought no content corner outside"), shrink)
 
-            // 4. Past the bound the sentence names each corner's holder.
+            // 5. Past the bound the sentence names each corner's holder.
             let grown = DispatchQueue.main.sync { () -> NSRect in
                 let was = window.frame
                 window.setContentSize(big)
@@ -112,13 +131,13 @@ enum KayaResizeShapeProbe {
                 expired)
             _ = kayaAwaitResizeShape(window, before: grown)
 
-            // 5. Asked on the main thread it refuses in a sentence.
+            // 6. Asked on the main thread it refuses in a sentence.
             let refused = DispatchQueue.main.sync { kayaAwaitResizeShape(window, before: grown) }
             print("  " + refused)
             expect("asked on the main thread it refuses rather than waits",
                 refused.contains("asked on the main thread"), refused)
 
-            // 6. A point no window holds.
+            // 7. A point no window holds.
             let nowhere = DispatchQueue.main.sync {
                 kayaServerHit(NSPoint(x: screen.frame.maxX + 5000, y: screen.frame.maxY + 5000))
             }
