@@ -8,7 +8,7 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 dev_shell_or_die()
 
 # detekt's unused family over every hand-written Kotlin source; the
-# compiler cannot serve here (CLAUDE.md's gate list; docs/traps.md:
+# compiler cannot serve here (docs/gates.md; docs/traps.md:
 # detekt's UnusedImports has no type resolution). tools/detekt.yml is the
 # WHOLE config, not an overlay on
 # detekt's defaults.

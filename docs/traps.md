@@ -8576,8 +8576,8 @@ controls on a light page: screencapped on emulator-5554, the window
 stayed #FAFAFA in BOTH appearances while the primary role moved
 #6750A4 -> #D0BCFF. The fix is kaya's own DayNight theme through the
 `-night` resource qualifier
-(android/kaya/src/main/res/values{,-night}/themes.xml); CLAUDE.md's
-check-appearance paragraph and docs/styling-plan.md D1 hold the rule,
+(android/kaya/src/main/res/values{,-night}/themes.xml); docs/gates.md's
+check-appearance section and docs/styling-plan.md D1 hold the rule,
 and this entry holds the measurement.
 
 ## The Compose highlight witness composites what it expects, and aims in surface space (2026-08-10)
@@ -13250,7 +13250,7 @@ session's check-gtk-adw.log). The shipped-code notes go through
 `sheet_note` and `clip_note`, which compile to nothing without the
 harness, and tools/linux/run-suites.sh runs the plain lib check beside its
 harness build, which is the path the matrix cannot skip. RUN check-gtk
-AFTER ANY gtk.rs CHANGE, as CLAUDE.md's gate list says; a green sweep does
+AFTER ANY gtk.rs CHANGE, as CLAUDE.md's rung 2 says; a green sweep does
 not include it.
 
 ## An AdwDialog over a plain GtkWindow is a toplevel of its own, and the x11 lane's Esc went to the primary (measured 2026-09-21)

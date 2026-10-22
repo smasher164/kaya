@@ -7,8 +7,8 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The GTK compile check check-targets.py cannot do (CLAUDE.md's gate
-# list): gtk-sys needs the distro's pkg-config world, so the Linux
+# The GTK compile check check-targets.py cannot do (docs/gates.md):
+# gtk-sys needs the distro's pkg-config world, so the Linux
 # backend builds nowhere but the container. It never skips — a gate that
 # quietly passes when docker is down reads as "GTK is fine".
 

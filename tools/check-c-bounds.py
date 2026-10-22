@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # THE C FLOOR REFUSES PAST ITS CAP RATHER THAN SMASHING PAST IT (ruled
-# 2026-08-26; DESIGN.md, Binding conventions; CLAUDE.md's gate list;
+# 2026-08-26; DESIGN.md, Binding conventions; docs/gates.md;
 # docs/deferred.md, java-record-ceiling). NOTHING ELSE CAN SEE IT:
 # every in-tree guest sizes its buffers correctly, so the wire bytes are
 # identical either way. TWO MODES, THE GUARD PAGE PRIMARY: walled()

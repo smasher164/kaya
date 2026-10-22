@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES (DESIGN.md, Binding
-# conventions; CLAUDE.md's gate list): scene.rs keeps `widgets` and
+# conventions; docs/gates.md): scene.rs keeps `widgets` and
 # `template_nodes` as separate maps, so a C guest that re-collides them
 # renders correctly and ships, and no lane can see it.
 #

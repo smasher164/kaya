@@ -8,7 +8,7 @@ from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # KAYA RASTERIZES, BACKENDS BLIT — the architecture's one rule
-# (docs/canvas-plan.md §1.1, ruling 1; CLAUDE.md's gate list), in the
+# (docs/canvas-plan.md §1.1, ruling 1; docs/gates.md), in the
 # three places NO SCENE CAN FAIL.
 # 1. Outside crates/kaya/src/canvas.rs no backend may consult a draw op,
 #    paint role, fill rule, align or baseline: an interpreted op draws

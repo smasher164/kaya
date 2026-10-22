@@ -8,7 +8,7 @@ from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
 dev_shell_or_die()
 
 # Every tracked path matches the filesystem's case exactly: macOS is
-# case-insensitive, Linux is not (CLAUDE.md's gate list).
+# case-insensitive, Linux is not (docs/gates.md).
 
 import os
 import subprocess

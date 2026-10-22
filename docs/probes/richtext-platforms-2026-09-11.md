@@ -815,7 +815,7 @@ their own reduction — the same divergence shape as the offset policies.
   `SpanStyle.fontWeight` inside an editable field is undocumented.
 
 **[INFERENCE]** kaya's existing rule applies unchanged: the AX word set
-is closed and pinned by `tools/check-verbs.py` (CLAUDE.md, "THE AX WORD
+is closed and pinned by `tools/check-verbs.py` (docs/gates.md, "THE AX WORD
 SET IS CLOSED since 2026-09-07"), so any rich-text a11y assertion must
 first mint words all three harnesses can answer — and four of the five
 platforms above expose *different* attribute names for the same trait.

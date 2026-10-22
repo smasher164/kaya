@@ -317,7 +317,7 @@ https://learn.microsoft.com/en-us/windows/win32/medfound/source-reader
 **(iii) Composite onto a surface.** Blend N frames with per-clip transform/opacity, draw titles
 and overlays. On kaya this maps onto the canvas the library already has — but only if the decoded
 frame can reach it. Today kaya's canvas is CPU-rasterized by the core and blitted by the backend
-(`docs/canvas-plan.md` §1.1, per CLAUDE.md's check-canvas-blit description). A 4K frame at 30fps
+(`docs/canvas-plan.md` §1.1, per docs/gates.md's check-canvas-blit section). A 4K frame at 30fps
 through a CPU raster path is 1 GB/s of memcpy before any compositing. That is the collision
 point between this feature and the existing canvas architecture, and it is worth naming early.
 

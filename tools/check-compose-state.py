@@ -10,7 +10,7 @@ dev_shell_or_die()
 # A KayaSceneModel field a composable DRAWS FROM must be composition
 # state: a plain field is read once, at the first composition, and the
 # surface never moves again — no compile error, and no scene sees it
-# (CLAUDE.md's gate list; docs/deferred.md, "The CLASS behind the stale
+# (docs/gates.md; docs/deferred.md, "The CLASS behind the stale
 # title bar has no gate").
 
 import re

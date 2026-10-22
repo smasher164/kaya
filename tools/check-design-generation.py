@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # THE MAC LANE RUNS BOTH macOS DESIGN GENERATIONS, and both halves must
 # stay populated — either could empty out with no diff in this repo
-# (CLAUDE.md's gate list; docs/deferred.md's standing constraint: never
+# (docs/gates.md; docs/deferred.md's standing constraint: never
 # bump the flake SDK without leaving a compat leg). The Mach-O is parsed
 # by hand because `vtool`/`otool` are xcrun shims that cannot find their
 # tool here.

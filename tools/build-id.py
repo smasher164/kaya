@@ -62,7 +62,7 @@ GATES = {
     "check-python": [],
     "check-mirror": ["CLAUDE.md", "AGENTS.md"],
     # AGENTS.md is declared unread, per the over-approximate rule.
-    "check-gates": ["CLAUDE.md", "AGENTS.md"],
+    "check-gates": ["CLAUDE.md", "AGENTS.md", "docs/gates.md"],
     "check-ledger": ["docs"],
     # bindings/ and go.mod: the go-android clause cross-builds a fixture
     # against bindings/go through a filesystem replace.

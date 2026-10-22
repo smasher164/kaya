@@ -10,7 +10,7 @@ from packaging import identity as app_identity
 dev_shell_or_die()
 
 
-# The JNI registration gate (CLAUDE.md's gate list: JNI fails at attach
+# The JNI registration gate (docs/gates.md: JNI fails at attach
 # for a registered native the class lacks, while a declared-and-
 # unregistered one throws only at FIRST USE).
 # Name-level on purpose: a signature mismatch DOES fail at attach; the

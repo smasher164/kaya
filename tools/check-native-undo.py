@@ -7,7 +7,7 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# The two native-tier guards no scene can fail (CLAUDE.md's gate list).
+# The two native-tier guards no scene can fail (docs/gates.md).
 # What it does NOT pin: a call that is present but disabled satisfies
 # clause 3, and no text gate can do better — what it pins is that the arm
 # and the clear are one unit.
@@ -191,8 +191,8 @@ def line(text, at):
     return text.count("\n", 0, at) + 1
 
 
-# THE APP-OWNED UNDO'S LEVER (docs/rich-text-plan.md §14; CLAUDE.md's gate
-# list): the `own_undo` apply arm names the platform's measured off switch,
+# THE APP-OWNED UNDO'S LEVER (docs/rich-text-plan.md §14;
+# docs/gates.md): the `own_undo` apply arm names the platform's measured off switch,
 # and the undo performer DECLINES the App route so the role item's own
 # activation reaches the app. The scene's owned textarea never asks the
 # native stack, so neither half is visible to any lane.

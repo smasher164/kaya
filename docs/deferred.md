@@ -9385,7 +9385,7 @@ re-declaration are censused (tools/tpl-surfaces.py TABLE_POINTS;
 check-sugar-surface's live-zone clauses; docs/tables-plan.md:550
 "BREADTH CLOSED 2026-08-24"). Two residuals outlive the strike in
 their own homes: the physical-device size-class question is in
-docs/traps.md and CLAUDE.md's check-table-tier paragraph; the WinUI
+docs/traps.md and docs/gates.md's check-table-tier section; the WinUI
 resize hook's reason lives at its site (winui/mod.rs's LayoutUpdated
 comment — the entry's "width stamp" detail was stale; idempotency is
 `table.stamped == table.rows` plus the dirty flag today).
@@ -15994,7 +15994,7 @@ was the LIGHT one, with the drawing's hash and shape green a step earlier.
 The same leg alone, in the whole swift suite: PASS (3s), `run-sim: ALL
 PASS`. The other four lanes were green on that tree, and the leg had
 passed in every matrix that day. This is the 2026-08-27 class the other way
-round (CLAUDE.md's check-appearance paragraph: the window-scope trait read,
+round (docs/gates.md's check-appearance section: the window-scope trait read,
 `kayaCanvasAppearance` on the window's own traitCollection): either the
 presentation report carried light because the window's override had not
 applied when the first raster was cut under load, or the read happened on a

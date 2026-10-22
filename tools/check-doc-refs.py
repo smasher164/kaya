@@ -8,8 +8,7 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 
-# A PATH THE DOCS NAME MUST BE A PATH THE TREE HAS (CLAUDE.md's gate
-# list).
+# A PATH THE DOCS NAME MUST BE A PATH THE TREE HAS (docs/gates.md).
 #
 # With no argument, every tracked .md in the tree; `--also PATH` scans
 # one more file BESIDE that set — THE TEST SEAM, so the watched

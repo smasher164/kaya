@@ -1,0 +1,2223 @@
+# The fast gates
+
+Each gate's description and history, moved verbatim from CLAUDE.md's
+validation ladder on 2026-10-21. CLAUDE.md's rung 2 is this file's
+index, and tools/check-gates.py holds the two to one census: a gate
+missing from either is a finding.
+
+## How the sweep runs
+
+Fast gates. `tools/gates.py` runs ALL of them and is the only thing
+that should. IT RUNS RUNG 1 FIRST, in that same build phase and for a
+mechanical reason: `cargo test` relinks the host libkaya and NO GATE
+MAY (the sweep refuses a verdict if that library moves under it), while
+BUILD is the library's one writer. Nothing automatic ran rung 1 before
+2026-09-24 — the windows lane runs the core's tests on the GUEST
+filtered to `capi::picked_tests`, and the mac suite is a command
+someone types — so the spec round trip and the window-report guard sat
+RED on main across four commits while every matrix read ALL PASS.
+`tools/unit-suite.py` is the step: the rung's own command, a refusal
+for a FAILED binary, for a suite that never built, for a nonzero exit
+under green lines, and for a COLLAPSE below a floor of 600, which is
+the `harness` feature's wall — without the feature the harness tests
+vanish rather than fail. Four watched negatives over doctored
+transcripts, the count printed. ONCE A MATRIX since 2026-10-06:
+validate-all's own --build runs it, keys its inputs (build-id's
+`unit-suite` set) and hands the key to the sweep, which skips its run
+only while the key still holds (check-gates holds both halves).
+transcripts, the count printed. It builds libkaya and the SwiftUI
+interpreter FIRST — a
+gate cannot verify an artifact the run has not built yet, and one
+that tried read the PREVIOUS run's dylib and called it stale, which
+was true and useless — and then runs every gate below and REFUSES A
+VERDICT unless the number that ran equals the number it declared. A
+sweep that under-runs and still prints green is measured, not
+hypothetical: a hand-rolled loop over a shell variable ran 1 of 24
+gates and reported a clean run. There is deliberately no subset flag,
+because a flag that runs part of the list and still prints a verdict
+is that same defect with an interface; to run one gate, run that gate
+— each is standalone. `tools/check-gates.py` holds this prose list,
+gates.py's list and validate-mac's delegation to ONE census and fails
+naming both sides of any disagreement; the three had already drifted
+by four gates the day it landed. What each gate is for:
+
+## tools/gen-header.py, tools/gen-bindings.py, tools/gen-guests.py
+
+`tools/gen-header.py --check`, `tools/gen-bindings.py --check`,
+`tools/gen-guests.py --check` (compares what the generators produce
+against the WORKING TREE and puts every byte back — snapshot,
+regenerate, diff, restore, and a refusal if the restore left the tree
+changed. It used to regenerate in place and diff against git, which
+silently reverted any hand-edit to a generated file and then called
+the tree clean)
+
+## tools/check-steps.py
+
+`tools/check-steps.py` (also requires the shared save scene's three
+missing-handle cases, with three counted removal negatives; and every
+script's `expect_title` on its primary window beside the core's wall,
+which refuses a primary mounted untitled under the harness, since an
+untitled window shows the executable's name (docs/traps.md, the untitled
+primary); one script and three wall cuts watched)
+
+## tools/check-shell.py
+
+`tools/check-shell.py`
+
+## tools/check-python.py
+
+`tools/check-python.py` (check-shell's opposite number, and the
+gate the 2026-08-27 ruling asked for: the gate BODIES are python
+now, imported against tools/lib/kaya_gate.py — never a launcher,
+so every gate stays standalone-runnable. That retires the `$?`
+class and puts eleven rules in its place, each mapping to a defect
+this repo has already been bitten by ONE SURFACE OVER: no
+swallowed exception (a caught-and-dropped one is the new false
+green), no shell=True or os.system (the sed/awk rule's
+descendant — a filename with a space must not become two words),
+an explicit `encoding="utf-8"` on every text read and write (the
+javac -encoding trap, which bites hardest on the Windows guest),
+NO LITERAL-ZERO EXIT (a gate leaves by falling off the end or
+through its verdict; `sys.exit(0)` in the middle is the false-PASS
+class with a keyword), every `walk()` paired with a
+`counted(..., floor=)`, `re.subn` only through the prelude's
+count-printing `doctor()`, the five-line import header held
+BYTE-IDENTICAL (check-mirror's job description, on the lines that
+replace SIX drifted copies of the dev-shell preamble — one of
+which printed ONE sentence for BOTH causes), and `ast.parse` over
+every body, which has no analogue today: a SyntaxError in a
+rarely-taken heredoc branch was invisible until that branch ran,
+and COMMAND HYGIENE FOLLOWING THE COMMAND INTO PYTHON — cargo
+--locked, javac -encoding, no sed/awk, ffmpeg -nostdin, read
+from argv lists AND from embedded shell in strings, because the
+conversion moved twelve such invocations out of check-shell's
+*.sh population where they were policed by nothing (audit
+2026-08-31), AND A SCRIPT A BODY NAMES EXISTS, with no `.sh` name
+composed at run time — the shim removal's own guard: the word sweep
+that renamed 1,405 citations could not see an f-string appending
+`.sh` to a gate's name, and three lanes died at their first step on
+the matrix that followed (2026-09-02); a self-test's deliberate fake
+is exempt by name with its reason, and held to still being named
+and still absent. Rules 1, 2 and 4 come off `ruff` for free, which
+is why ruff joined the flake. A GATE IS ITS `.py` FILE, run
+directly — executable, python shebang, the dev-shell check inside —
+so `tools/check-steps.py` is the whole invocation; the two-line
+`.sh` shims that bridged the docs' citations through the conversion
+went on 2026-09-02, every citation renamed with them. AND RUFF'S F FAMILY OVER THE UNCONVERTED POPULATION since 2026-09-17 —
+undefined and unused names in every tools/**/*.py the eleven rules do
+not reach, because `re` used and never imported in the recorder's host
+half passed this gate and died on the Windows failure path; one planted
+undefined name is its watched negative. AND AN UNQUOTED CMD-IF WITH
+BRACKETS SINCE 2026-10-03: sent over ssh its brackets are split and it
+exits 1 whatever is true (docs/traps.md, the WinUI self-view colour
+entry's second half); one watched negative. It also runs
+the prelude's OWN negatives — the fingerprint against the real
+shell pipeline, both dev-shell sentences, a perturbation that
+applied nothing, the census floor, scratch surviving nothing —
+because the file every converted gate imports must prove its
+refusals somewhere nobody can skip. Eighteen watched negatives,
+counts printed, red demanded on every run)
+
+## tools/check-mirror.py
+
+`tools/check-mirror.py` (CLAUDE.md and AGENTS.md are true mirrors
+modulo the line-3 comment — they drifted once, silently, for two
+milestones)
+
+## tools/check-gates.py
+
+`tools/check-gates.py` (the drift sibling of the above, one file over:
+the gates this paragraph names, the gates gates.py runs and the ones
+validate-mac reaches must be one list. Its census clause is the part
+that bites — every gate script on disk is either in the sweep or in
+gates.py's EXCLUDED table WITH A REASON — and it is what would have
+caught the four gates this paragraph was missing while the lane ran
+them. It also pins validate-all's launch order: ALL FIVE platform lanes
+start together before the runner waits for Android's recorded lane pid;
+the one gate sweep starts at niceness 10 after it exits, FOUR GATES WIDE
+since 2026-09-07, while any longer lanes continue. IN A CARGO TARGET OF
+ITS OWN SINCE 2026-10-16 (CARGO_TARGET_DIR=target/gate-sweep,
+host_lib.SWEEP_TARGET): the mac guests load the lanes' libkaya by path,
+a gate's cargo build relinked it once and seven legs died in dyld, so
+from 2026-09-21 the sweep waited for the mac lane too, and that wait was
+up to 360s of the matrix wall whenever the maintainer was at the host
+(docs/measurements/lane-ceilings-2026-10-16.md). gates.py refuses a
+matrix sweep anywhere else, watches the lanes' copy as well as its own,
+and the sweep and the mac lane each still refuse a verdict if that
+library's identity moved under them; the rust-scoped probe builds
+nothing (docs/traps.md, the sweep-relinked-libkaya entry). Launched
+at t0 beside the lanes instead, four wide and niced, it cost every lane
+150-200s and every ceiling for a 116s gain
+(docs/measurements/gate-sweep-2026-09-07.md). It holds the runner and environment probe to the
+same four-phone pool; its self-tests watch lane count, pool width,
+concurrent platform launch, pid provenance, the sweep's own target (its
+launch, SWEEP_TARGET, gates.py's refusal and both identity watches, five
+cuts), single-sweep shape and niceness red. gates.py's BUILD ends with
+tools/prune-objects.py and validate-mac runs it after its cargo build
+(docs/traps.md, the stale split-debuginfo objects), two cuts watched. AND THE HAND RUN AND THE LANE LAUNCH A LEG THROUGH ONE
+WIRING since 2026-09-18: tools/run-leg.py and validate-mac's pool both
+run their leg through the MacRecorder method that wraps it in the
+pool's `timeout 120` (also the sampler's pid anchor) and samples it,
+the method found BY ITS BODY so a rename moves both callers, neither
+runner spelling its own launch; and the hand run opens a recorder,
+collects through mac_leg and flushes, because a red found by hand had
+no bundle to read at all — the rung-4 rule with nothing behind it on
+the inner loop. Four more watched negatives, counts printed. The hand
+runner's relaunch branch is executed against six exit/marker cases;
+four counted cuts refuse a missing marker check, missing exit check,
+false-green verdict and refusal absent from the recorder's leg log.
+The matrix's log-retention helper runs against eight filesystem cases:
+default and explicit destinations, directory failures at both copies,
+and missing source logs. Four counted negatives hold both printed paths,
+the OS error and the archived bytes. AND THE WALLS SINCE 2026-10-20
+(tools/lib/walls.py): gates.py kills a gate past max(1200s, 10x its
+WEIGHT), validate-all kills a lane's process group past max(2400s, 2x
+its ceiling) or 300s after its own verdict line, and deploy-win bounds
+every ssh call and joins its leg workers through a 1200s wall that names
+where a stuck worker's thread is; each wall is run against a hung
+stand-in on every run. A host sleep fires none of them, since monotonic
+time stops with the Mac, and is named before the verdict instead
+(docs/traps.md, the matrix that slept 22 hours on battery))
+
+## tools/check-ledger.py
+
+`tools/check-ledger.py` (docs/deferred.md may not disagree with
+itself: an UNSTRUCK headline over an entry that records a terminal
+resolution, or a STRUCK one with no resolution note. Two entries
+headlined "GAP — … cannot / is not implemented" carried "COMPLETE …
+matrix ALL PASS" in their own bodies for three weeks, and a survey
+that read the headlines reported a solved problem as the largest open
+item. The discriminator is calibrated, not guessed — this ledger
+spells LANDED, FIXED and CLOSED at SLICE scope routinely, so COMPLETE
+is the only whole-entry word available and the gate says out loud
+what that means it cannot see. Takes a path argument, which is how it
+was calibrated against the stale revision)
+
+## tools/check-doc-refs.py
+
+`tools/check-doc-refs.py` (the other half: every path-shaped
+reference in every tracked .md must exist. Globs are resolved and
+must match something, brace groups are expanded member by member, and
+a `<placeholder>` names a family rather than a file. A sentence that
+must name what the tree no longer has says so ONE way — struck,
+quoted inside a fenced block, or marked `(gone)` — `(built)` marks a
+path only the build writes, held to being gitignored — and the exemption
+counts are printed on every run, with a refusal if they ever
+outnumber the checks)
+
+## tools/check-case.py
+
+`tools/check-case.py` (every tracked path matches the filesystem's
+case exactly. macOS is case-insensitive and Linux is not, so a Haskell
+guest created as `Background.hs` against a cabal stanza reading
+`background.hs` built locally, went green on mac, and would have died
+on the lane furthest from the change, after a full matrix)
+
+## tools/check-targets.py
+
+`tools/check-targets.py` (cross-compiles every cfg'd backend, in BOTH
+feature configurations — it once reported "windows OK" while the
+windows lane failed to build the WinUI accessibility read, which
+only the harness config compiles. LINUX IS ITS HOLE, since gtk-sys
+needs the distro's pkg-config world, so it also text-checks that every
+backend's Stage impl names every required trait method: a trait method
+missed in gtk.rs alone used to survive every fast gate and die in the
+matrix)
+
+## tools/check-sugar-surface.py
+
+`tools/check-sugar-surface.py` (every widget kind has a constructor
+in all 9 bindings IN BOTH CONSTRUCTION ZONES, AND every window prop
+has a sugar spelling in all 9 — the generic floor spells a prop
+without the sugar noticing, which is how Python shipped unable to
+declare `list_detail` at all.
+THE SECOND ZONE JOINED 2026-08-10 and is the half that had never been
+checked: the LIVE zone is what an app builds in its build closure,
+the TEMPLATE zone is the prototype inside a collection stamped once
+per row, and they are different surfaces handing out different
+handles. The template zone had 3 kinds where the live zone had 14, so
+kaya's own text editor spelled its find bar's text field
+`row.Widget(kaya.KindEntry)` and the undo scene did the same in seven
+languages — the floor, which is the C guests' tier and not an app's.
+That sweep is `tools/tpl-surfaces.py`, a python census rather than
+seven more greps, and the reason is forced: three bindings namespace
+the template zone by SCOPE rather than by name (Rust's `Tpl` methods
+are `pub fn entry` exactly like `Tx`'s; OCaml's live in `module Tpl =
+struct`), so a line-oriented pattern would be satisfied by the LIVE
+constructor and report a zone it never read. It also holds a zone's
+several surfaces level with each other — Rust's `Row` is a second
+façade onto `Tpl` and forwarded six methods while ten kinds were
+missing — and it REFUSES A VERDICT from a reader that found
+implausibly few constructors, because a census that reads nothing
+agrees with everything.
+IT CENSUSES PROPS TOO, since 2026-08-17, and a new template prop is
+spelled in its PROP_MEMBERS table rather than in sixteen more grep
+lines: the props are read out of each zone's OWN BLOCK, which is the
+thing a pattern cannot do when a binding spells its live and template
+setters identically (OCaml's `set_grow (Widget id)` against
+`set_grow (Node id)` — a name-keyed clause was measured passing with
+the template setter deleted). Three façades are held level by it now,
+Rust's `Row`, Java's `RowSurface` and C#'s GENERATED `<Rec>Row`; the
+two that are not (Go's, which EMBEDS the zone so the compiler holds
+it, and Swift's, which forwards no prop setter at all and is a slice
+of its own) are named in the file's exemption list, on the record
+rather than merely absent.
+AND IT READS SWIFT'S GENERATED SURFACE FOR ONE THING SINCE 2026-09-18,
+the DISCARD ATTRIBUTE (docs/deferred.md, the idiom entry): `KayaTpl`
+marks every widget-handle constructor `@discardableResult` and
+`KayaAppTx.each` marks the For, so a generated `<Rec>Row` /
+`<Sum><Case>Arm` forward that drops it is spelled `_ =` at every guest
+site keeping no handle — 18 such sites before it — and NO COMPILER PASS
+CAN SAY SO, since an unused result is a warning and the guest passes
+carry no -warnings-as-errors. Every declaration returning
+`KayaNodeHandle` or `KayaWidget` in `guests/swift/*+Kaya.swift` must
+carry it, read as SIGNATURES rather than lines (the emitter spells a
+constructor on one line or across five), with the count printed and a
+verdict refused below the floor; tools/kaya-swift-gen is what gets
+fixed when it fires. Four cuts watched in check-sugar-surface — a row
+member, a sum arm's, the eliminator's, and the whole generated set
+hidden so the reader must refuse — counts printed.
+AND THE CAPABILITY SURFACE SINCE 2026-08-19, in three clauses: the
+`capabilities` QUERY in all nine, one NAMED BOOLEAN per bit
+(`aux_windows` and its casings) in all nine, and the bit NUMBER
+against the core's own — five bindings have no header to read
+`KAYA_CAP_AUX_WINDOWS` out of and write the number themselves, which
+is the file-modes trap one surface over, and the three that DO read
+the core's constant (Rust, Go's cgo, Swift's bridging header) are
+checked for still naming it rather than quietly becoming copiers.
+AND THE TABLE SURFACE SINCE 2026-08-21, `columns` and `on_sort` in
+all nine: a table is not a KIND but a For with a header, so neither
+the constructor sweep nor the window-prop sweep can see it while the
+wire records reach every binding through the generator whether or
+not a guest can spell either. The handler rides the declaration
+wherever the binding's own click does — Python's `on_sort` is a
+KEYWORD on `columns`, OCaml's a labelled argument, Go's and Rust's a
+chained call — and is app-registered in the registry family (C#,
+Java, Swift, Haskell), which is why the eight patterns are written
+out rather than derived from one casing rule.
+AND THE ROW'S OWN FIELDS SINCE 2026-08-25, which is what a table
+inside a row template is FOR: the record-schema constructor must
+stand in the TEMPLATE zone (the only scope a nested collection may be
+declared in) and narrowing the handle to one stamped copy must KEEP
+the element type, or every record mutation is out of reach and the
+rows stay scalar. Both points, all eight, out of the block that owns
+them — six bindings spell the typed narrowing exactly as the untyped
+one and are told apart only by the receiver's type. Fourteen watched
+census reds beside the Haskell four, each a shape that COMPILES and
+lies.
+AND THE SIZE-POLICY SURFACE SINCE 2026-08-28, which is neither a KIND
+nor a WINDOW PROP and so was invisible to both sweeps above while TX
+47 and occurrences 20/21 reached all eight bindings through the
+generator: `fixed`, `on_draw` and `on_tick` in every binding's own
+handler idiom (chained on five, keyword arguments on Python's
+`canvas`, labelled on OCaml's, a Build action plus two App-registered
+handlers on Haskell's), `scale` with NO spelling anywhere because it
+is what a canvas that declares nothing gets, and the TEMPLATE ZONE
+REFUSED — by type where the zone has its own handle, and in one
+BYTE-FROZEN SENTENCE, compared FLATTENED, in the two whose single
+handle serves both zones. Sixteen watched census reds plus the
+sentence's own.
+AND THE ROLE VOCABULARY SINCE 2026-09-05: every role's NAME in all
+nine bindings (Go's is its wire constant, so its row reads the
+generated file). The sugar sweep above sees only the two roles that
+have constructors, so `plain` (docs/tasks-plan.md R6) would have
+shipped with the number in nine wire files and the name in two. Nine
+patterns per role, one watched negative — a role that exists nowhere
+must fire all nine.
+AND THE TIMECODE SURFACE SINCE 2026-10-04: both door functions
+in all nine, format selection in both zones, and each overload in the
+bindings whose constructors have several value sources
+(tools/lib/timecode_surface.py). check-verbs holds the native routes
+through the core and the drop-frame arithmetic's three watched cuts
+(tools/lib/timecode_routes.py; docs/number-field-plan.md §10).
+AND THE NETWORK IMAGE SURFACE SINCE 2026-10-13
+(tools/lib/netimage_surface.py; docs/network-images-plan.md N2, N7, N8,
+N12): the phase type, `phase` in both zones, the conditional write, the
+two realization handlers, the helper and the six default fetches, 75 rows
+read out of each binding's own file, every fake name fired and every row
+renamed in a copy and watched red, a withheld helper row and an empty
+reader refused; tpl-surfaces holds `phase` in the template prop census.
+AND THE RICH TEXT SURFACE SINCE 2026-09-11, which neither half of
+this gate could see: `rich` is a WIDGET prop and the prop census
+reads WINDOW props and TEMPLATE props only, so nothing would have
+demanded the other eight bindings' rich sugar while TX 55-57 and
+occurrences 29/30 reached every one of them through the generator —
+the table's shape one prop family over. Fourteen parts in all nine,
+read out of each binding's own file: the `rich` spelling on a
+textarea in the LIVE zone (chained on Rust, Go and Java, an argument
+on C#'s and Swift's constructors, a keyword, labelled argument or
+option on Python's, OCaml's and JS's), the five types (Block,
+Document, Run, Edit, Format), `on_edit` and `on_format` where the
+binding's own click handler is registered (app-registered in the
+registry family, on the textarea's own declaration in Python and JS),
+the five writes — set_document, apply_edit, format, unformat,
+set_block, which are NOT one spelling: `set_block` is `format` under
+the `block` attribute and `unformat` the same TX with no value, so a
+binding shipping `format` alone leaves an app hand-writing kaya's
+attribute names — and the mirror read `document(widget)`, which is
+the half R1 exists for, since an app that never wants deltas reads
+one Document. FOUR BINDINGS DO NOT USE KAYA'S OWN WORD and one table
+says so rather than loosening a row: Go's `Run` is that package's
+entry point, OCaml's `format` is the language's printf type, C#'s
+`Block` is taken by its Document's painter, and the three curly
+bindings name the run record after the wire's own `TextRun`. TWO
+NEGATIVE SHAPES: five fake-name censuses, each of which must fire in
+all nine, and a RENAME-IN-A-COPY per part per binding — every match
+of the clause's own pattern with the name inside it mangled, the
+census re-run through the same reader, exactly one finding demanded
+and the file re-read from disk afterwards — which GROWS BY ITSELF,
+since a binding still missing a part is already red and takes its
+negative the moment its arm lands (112 the day it landed, the counts
+printed per part). The reader carries its own floor: a rust column of
+ZERO refuses a verdict, because Rust is the reference the patterns
+were calibrated against and a census that reads nothing agrees with
+everything.
+AND GO'S HANDLERS LIVE ON THE HANDLE SINCE 2026-09-24 (docs/deferred.md,
+the Go handler-family entry): every registrar that names a widget or a
+stamped node is a chained method ON it, so a second handler reads like the
+first, and a `func (a *App) On…` taking a Widget or a Node is a finding —
+the app's own notification activation, which names no widget, exempt by
+name and held to still existing. Census printed, one watched negative.
+AND THE WIRE STOPS AT THE BINDING BOUNDARY SINCE 2026-09-16 (the idiom
+survey's naive-port test, DESIGN.md's Binding conventions): no
+hand-written guest names a wire constructor or constant — `VStr`,
+`Str "…"`, `Value::Str`, `KayaWire.`, `wire.` — in any of the nine,
+the generated record surfaces read out of tools/gen-guests.py's own
+GENERATED list, a check or bench that packs the wire on purpose exempt
+by name and held to a file that still exists, a floor of forty guests
+per language. Nine watched negatives, planted 1 / blank 0, counts
+printed; the clause was red by 122 findings on the tree it was written
+against, which is the shipped state it exists to refuse.
+AND THE ALIAS HALF SINCE 2026-09-17, which the review of the pass found
+the first half blind to: a wire constant RE-EXPORTED under the binding's
+own name (`kaya.SECTIONS_BAR = wire.SECTIONS_PRESENTATION_BAR`, Go's
+untyped constant block, OCaml's `let alert_cancel = Kaya_wire.…`) reached
+roughly sixty guest sites while the census read zero — so the binding
+side refuses any such re-export of a vocabulary (four planted negatives)
+and the guest side refuses the alias names, the C header's
+`KAYA_FILE_MODE_*` family and a magic-integer alert compare
+(`choice == 1`), the guest plants being those real shapes now.
+AND A BODY RETURNS ITS VALUE SINCE 2026-09-17 (DESIGN.md's Binding
+conventions, the ruling that ended six spellings of one smuggle): one row
+per binding that had the problem holds the value-returning shape of its
+body-taking constructors — JS's `column<T = void>`, Swift's `column<R>`,
+C#'s `T Column<T>`, Rust's `into_parts` on the container ref, Java's
+`Built<R>`, OCaml's `when_` answering its pair — each cut from a copy and
+watched named, six negatives, counts printed.
+AND A STAMPED HANDLER RECEIVES ITS ROW SINCE 2026-09-17 (DESIGN.md's
+Binding conventions, the R2 ruling): the row-handle clause reads JS's
+and Python's own row-handle BLOCK — the Proxy's `set` trap and
+`Row.__setattr__` — for the one line where a field assignment leaves
+through the collection's own `patch`, because a handle that grew a
+plain property instead reads back what it was given, patches nothing,
+and no scene can tell, since none reads a row's field back after
+writing it; the cut is watched named on every run, counts printed.
+AND A CONTEXT CATALOG'S ITEMS RECEIVE THAT ROW HOWEVER DEEP THE MENU
+NESTS, SINCE 2026-09-18 (docs/deferred.md, R2 gap (b)): two clauses per
+binding, since neither point is visible to any scene — no guest declares
+a `menu(...)` inside a catalog, and a handler handed BARE KEYS where it
+should have had a row still runs. The seat chain carries the catalog
+(a nested menu seats its items on the parent ITEM, so the parent's own
+entry is inherited at seat time), and the row lookup is told WHICH ID
+SPACE the occurrence's id lives in — menu items are counted apart from
+widgets and nodes, so a bare id looked up in the node table first
+answers a menu item with a stamped node's collection, measured raising
+out of the python checks file. JS was the shipped half of that: its one
+writer sat in a `_register` branch `MenuItem` can never reach, so every
+catalog item there took bare keys while Python's took the row. Four cuts
+watched named, counts printed.
+AND THE SWIFT KIND ROW READS ONE ZONE SINCE 2026-09-18: Swift spells its
+live and template zones in ONE FILE with ONE name, so the file-wide
+pattern was satisfied by `KayaTpl`'s copy — `row`, `scroll`, `grid` and
+`labeled` had NO live match at all under it, since X3 gave the live
+containers a generic parameter, and passed entirely on the template
+zone. The row reads `final class KayaAppTx`'s own block and admits the
+generic arm; a zone it cannot LOCATE is a finding naming the anchor. The
+other eight rows stay file-wide on purpose — their two zones are
+separate files, receivers or namespaces, which is why tpl-surfaces
+exists. Nine cuts watched, each showing the reader it replaces still
+green on the same copy.
+AND THE FORMATTER DOOR AND THE CATALOG SINCE 2026-09-23
+(docs/compliance-plan.md §1.4): neither a KIND nor a WINDOW PROP nor a
+wire record, the door is a C API family every binding reaches through
+the header whether or not a guest can spell one call of it, so a binding
+shipping without its percent or its weekday date stays green on every
+scene it runs. Twelve parts in all nine — the seven formatters, locale,
+direction, text_scale, catalog and tr — read out of each binding's own
+file with the identifier inside the pattern, three spellings that are
+not kaya's word on the record (Go's `LayoutDirection`, since a Go
+function and type cannot share a name; Swift's `KayaNumberSpec` and
+`KayaArg`, since the C header holds `KayaNumberOptions` and `KayaTrArg`;
+Java's and Swift's statics on `KayaApp`), and OCaml's string argument
+spelled `` `Text `` because `` `Str `` is the wire's own constructor and
+the boundary clause above refused it. Twenty-seven fake-stem negatives,
+counts printed.
+AND THE NUMBER FIELD SINCE 2026-09-28 (docs/number-field-plan.md §7):
+`number_field` in both zones with `min`, `max`, `step` and `on_commit`
+where each binding spells the slider's, all nine; fake-name negatives,
+counts printed.
+AND A PICKED MEDIA SOURCE RIDES AS ITS HANDLE SINCE 2026-09-30
+(docs/media-plan.md §7b): a binding sending the picked file's local path
+leaves a phone's player idle without a word, so each of the nine picked
+source rows holds the handle and the shipped local-path form is put back
+per binding and watched red, nine negatives.
+AND `axis` ON A SCROLL SINCE 2026-09-28 (docs/hscroll-plan.md §1): the
+direction a scroll runs, spelled where each binding's scroll options
+live in all nine, the one word everywhere (Haskell's paint roles are
+prefixed, `PaintAxis`, to free it); fake-name and rename-in-a-copy
+negatives, counts printed.
+AND THE MEDIA SURFACE SINCE 2026-09-30 (docs/media-plan.md §3, §5,
+§7b): the player, its sources, readings and handlers, `video` in both
+zones with a row's player field, visibility in both zones, the track,
+caption and cue surface, the session and `can_play`, 161 rows across all
+nine, each read out of the binding's own files, beside a part census (nine
+bindings by fifteen parts) whose withheld row is a finding. Fake-name and
+rename-in-a-copy negatives on every row, counts printed.
+AND THE COLOUR PICKER SINCE 2026-09-28 (docs/color-picker-plan.md §7):
+`color_picker` in both zones with `alpha`, `on_color` where each binding
+spells the date picker's handler, and each binding's own `Color` value
+with its hex constructor and hex reading, all nine; fake-name negatives
+firing every row, counts printed.
+AND THE RANGE SINCE 2026-09-29 (docs/range-plan.md §7): `range` in both
+zones with its props, thumb labels bound from a row field, `on_change` and
+`on_commit` where each binding spells the slider's, and `axis` on a slider
+in all nine; fake-name negatives firing every row, counts printed.
+AND THE VIDEO VIEW'S ASPECT SINCE 2026-10-03 (docs/media-plan.md §3):
+the live zone, a live view at run time, the template zone and each
+binding's own packer, width high and height low, in all nine; fake-name
+and rename-in-a-copy negatives on every row, and each packer with its
+halves swapped watched red, since a swapped packer compiles and sends
+9:16 for 16:9.
+AND THE MEDIA READER AND THE CANVAS'S IMAGE OP SINCE 2026-10-02
+(docs/media-plan.md §8 rulings 3 and 4): each binding's hand-written
+surface calling the reader's seven generated record writers and naming
+the `image` draw op, Rust the reference row, green in all nine since the
+breadth slice, a fake-name census firing every row, counts printed.
+AND THE CAPTURE SINCE 2026-10-02 (docs/capture-plan.md §2-§4): each
+binding's hand-written surface calling the capture's six generated
+record writers, naming the video view's `capture` prop and registering
+the frame and sample callbacks (kaya_capture_on_frame,
+kaya_capture_on_samples; Java's rows read KayaRing.captureOnFrame and
+captureOnSamples, its JNI pair), Rust the reference row, green in all
+nine since the breadth slice, a fake-name census firing every row,
+counts printed.
+AND THE SKIN SINCE 2026-10-16 (docs/styling-pass-plan.md Y2-Y8, Y10;
+tools/lib/skin_surface.py): both grounds, an image's shape, a label's
+tint, `selected` and `on_activate` in both zones in each family's own
+spelling (Go's on the handle), the dock in the window construct, the
+binding's dispatch of `activated`, image_dominant and the Tint
+none/overlay and Shape vocabularies, 168 rows across all nine with Rust
+the reference, a fake-name census firing every row, a rename in a copy
+per row and a withheld row refused; tpl-surfaces holds the six template
+props in every zone's own block (prop probes d8-d15 watched red),
+counts printed; `on_select` beside `on_activate` in both zones since
+2026-10-18, docs/styling-pass-plan.md Y4's amendment, nine rows watched red)
+
+## tools/check-universal-props.py
+
+`tools/check-universal-props.py` (the lowering-side sibling: every
+backend applies the universal a11y props to every kind — Compose
+per-arm, SwiftUI's one wrapper unbypassed, GTK/WinUI's apply arm
+still keyed on the prop alone. Android drag completion belongs to the stable
+scene root, with captured source identity and native-event session identity;
+eight counted cuts hold that ownership through source removal and row restamps;
+and the WinUI clipping reader's own two halves since 2026-09-24 — a button's
+caption against the room its padding leaves, and a REFUSAL when the reader
+saw none of the window's labels and buttons presented, which is how three
+buttons drawn with their words cut passed that verb on its first poll — with
+the cell coming back for a measure when the platform says its template
+arrived, since a control with none answers its content's width and no chrome;
+and since 2026-09-29 every Compose Slider and RangeSlider thumb slot takes
+KayaSliderThumb, which carries no semantics modifier, because Material's
+own thumb moves the slider's name off the node TalkBack focuses — seven
+watched negatives, the first the shipped state (docs/traps.md))
+
+## tools/check-roles.py
+
+`tools/check-roles.py` (the role vocabulary reaches every backend:
+`MENU_ROLES` is one line, it is not in the spec hash, and adding an
+entry regenerates nothing — so before this gate a role could ship with
+the root accepting it and all four backends ignoring it. RED BY DESIGN
+across a fan-out; the role joins the vocabulary first and the arms
+follow)
+
+## tools/check-native-undo.py
+
+`tools/check-native-undo.py` (the two native-tier undo guards that NO
+shared scene can fail — both sit inside a SECOND consecutive native
+walk, which the routing makes unreachable, and each was broken with
+the lane watched staying green. The scene cannot be fixed to reach
+them, so static pairing is the only wall available.
+AND THE APP-OWNED UNDO'S LEVER SINCE 2026-09-14 (docs/rich-text-plan.md
+§14): each arm's `own_undo` handling names its platform's measured off
+switch — `allowsUndo` keyed on the flag, `disableUndoRegistration`,
+`set_enable_undo`, `SetUndoLimit(0)` — and its undo performer declines
+the App route so the role item's own activation reaches the app. The
+scene's owned textarea never asks the native stack, so a lever
+forgotten leaves a divergent stack no lane can see (the JabRef class,
+docs/undo-plan.md A7); watched negatives per arm, counts printed)
+
+## tools/check-slider-commit.py
+
+`tools/check-slider-commit.py` (A SLIDER COMMITS ONCE PER GESTURE, and
+no lane can see whether it does. `set_value` is the only slider drive
+any scene has and it is one finished gesture by construction, so a
+backend that published `value_committed` on EVERY movement of a real
+drag passes tools/scenes/sliders.steps byte for byte — measured
+2026-09-04, when the WinUI arm's first draft did exactly that and the
+whole windows lane stayed green. A drag is pixels and a pointer; the
+shared scenes have neither, so this is the native-undo pair's shape
+one feature over. The rule, one sentence per backend: the
+per-movement event carries the LIVE value and is final only when no
+pointer is driving, and the gesture's own end publishes the committed
+one. On WinUI that end is `PointerCaptureLost` and nothing else — the
+Slider marks its own PointerPressed AND PointerReleased handled, and
+`UIElement.AddHandler`'s handled-events-too registration is out of
+reach because a WinRT delegate is no `IInspectable` (all three
+measured, docs/slider-plan.md §6) — so the drag/keyboard split is
+`GetKeyState(VK_LBUTTON)`, the twin of the SwiftUI arm's
+`NSApp.currentEvent`. THE TABLE GROWS BY ITSELF: a backend still
+refusing the two props through `depth_stub("sliders")` has no arm to
+hold, and the moment its stub goes the gate demands a row naming that
+backend's own two events — which happened twice the same day: the GTK
+row (value-changed settles only while no pointer button is down; the
+capture-phase ButtonRelease arm commits) and the Compose row
+(onValueChange with final = false, onValueChangeFinished with true)
+joined at the breadth merge, and the landed-arm negative now perturbs
+the TABLE, a census run with a row withheld. Ten watched negatives,
+counts printed — per backend the per-movement commit, the missing end
+and an end that is not final, WinUI's pointer read renamed away, and
+the withheld row. AND THE COLOUR PICKER SINCE 2026-09-28
+(docs/color-picker-plan.md §4.1): `set_color` is one settled choice, so
+the SwiftUI arm's every commit is held inside a door, the mac panel's
+gesture closed by a `.default`-mode perform, iOS's noncontinuous select,
+and one emit behind the held-colour check; six more watched negatives.
+THE OTHER FOUR ARMS JOINED AT THE BREADTH MERGE the same day, each read
+out of its own file: GTK's notify::rgba outside the quiet guard, WinUI's
+Flyout.Closed, Compose's sheet dismissal or Done (never a slider's or the
+hex field's onValueChange), and on every arm but AppKit's the opaque
+picker's alpha forced to FF by the arm, since GTK, WinUI, Compose and
+UIKit each hold a translucent colour on an opaque control (measured,
+plan §4). Twenty-one more watched negatives, counts printed.
+AND THE RANGE SINCE 2026-09-29 (docs/range-plan.md §3): every value path
+of both thumbs through the core's one clamp with its write-back and
+`range_committed` once per gesture, on all five arms; the STACKED arms
+(SwiftUI on both platforms, GTK, WinUI) route a press by GEOMETRY, the
+midpoint split and a tie by press side, and name no z-order API in the
+arm, since z-order swapping was the most reported failure in the survey;
+and every committed pair reaches `Scene::user_range_committed` before it
+is sent, every drain emptying the queued ones first (rule 11: the core's
+pair follows the user). Counts printed, each clause's negatives watched)
+
+## tools/check-submit.py
+
+`tools/check-submit.py` (SUBMITTED PUBLISHES THROUGH THE GESTURE'S DOOR
+ALONE (docs/submit-plan.md S1-S4, S6): an entry's or search field's
+Return and a submitting textarea's Return or Send key, and no scene can
+see an emit that moved — tools/scenes/submit.steps drives `press return`
+and reads the label, so an emit on the text-change path or the apply arm
+(a programmatic write echoing as a submit, the S3 class), a textarea
+emit no longer dominated by `submits`, a Shift+Return arm cut out or a
+handled Return that still inserts all pass it byte for byte, since the
+scene never types Shift+Return, never writes a focused field from the
+app and reads no keyboard's label. Per backend the doors are read out of
+their own blocks (SwiftUI's `.onSubmit`, the mac `doCommandBy` and iOS
+`shouldChangeTextIn` arms with the phone key keyed on the prop; GTK's
+`activate` on both single-line kinds and a CAPTURE-phase key controller
+on the textarea; WinUI's one `submit_on_enter` KeyDown door, gated on
+the textarea's own id and ungated on the two single-line arms; Compose's
+keyboard action with Send and the `onPreviewKeyEvent` Enter arm), and
+every emit call in the file must sit inside one of them. AND THE NUMBER
+FIELD'S COMMIT SINCE 2026-09-28 (docs/number-field-plan.md §7): its
+value_committed rides Return, focus loss and a step alone — the SwiftUI
+arm's commit and step paths called only from those doors, never from the
+text binding or a harness verb, one emit and only on a moved value — on
+all four backends since the breadth (GTK's activate, focus leaving for
+another widget and the stepper around value-changed; WinUI's
+ValueChanged door; Compose's keyboard action, hardware Return and focus
+loss). 55 watched negatives, counts printed)
+
+## tools/check-scroll-to.py
+
+`tools/check-scroll-to.py` (THE APP'S SCROLL LANDS INSTANTLY, HOLDS
+UNTIL LAYOUT AND SHARES THE TIERS' PARK (docs/scroll-to-plan.md S4, S6,
+§3): tools/scenes/scrollto.steps asserts where a row lands and its
+expects retry, so an arm that glides there over a second passes it as
+an instant one does, and an arm that dropped the pre-layout hold still
+passes on a backend that lays out before the batch returns. Per backend
+it reads the command's one arm — SwiftUI's proxy scroll outside
+withAnimation and its pending set drained at the proxy's registration,
+GTK's adjustment `changed` hold and its `set_value`, WinUI's `Loaded`
+hold and the animation-free ChangeView, Compose's `scrollTo` (never the
+animated form) behind a frame-by-frame wait for the placement — the
+harness verb's park on the two widget backends being the SAME
+`park_table_row` the command calls, and every `expect_scrolled_to`
+reading the layout's own geometry rather than the request, and a held
+request on GTK and WinUI landing only while it is still its container's
+latest. AND A SIDEWAYS SCROLL'S NATIVE SWITCH since 2026-09-28
+(docs/hscroll-plan.md §3): no scene sees a backend that keeps the vertical
+switch, since GTK's vertical-only policy widened the window to the strip
+and every verb still passed, and a shared scene may not read a window's
+size; one cut per backend. 19 watched negatives, counts printed)
+
+## tools/check-search.py
+
+`tools/check-search.py` (THE SEARCH FIELD CLEARS ONE WAY AND SAYS WHAT
+IT IS (docs/search-plan.md S5, S7). Clearing is one act: the field's
+affordance, Escape on a desktop and the harness's clear_search empty
+the text through ONE path and reach the app as text_changed("") with
+the focus kept — and no scene can see an Escape arm that stopped
+clearing, because the shared scene drives clear_search, which takes
+the affordance's door or Escape's on each backend; nor a verb that
+started writing the text itself and stopped exercising the key's
+path. Each backend also gives its reader the identity its platform
+has (AXSearchField and the isSearchField trait, GTK's SEARCH_BOX,
+Compose's prompt as the field's name) while the shared verdict stays
+`field`, so a dropped identity reads like a kept one. GTK is held to
+`changed` rather than the 150 ms `search-changed` (S6). The table
+grows by itself, check-slider-commit's shape: a backend whose
+`depth_stub("search")` goes must take a row. Eight watched negatives,
+counts printed)
+
+## tools/check-exclusive.py
+
+`tools/check-exclusive.py` (THE MATRIX-WIDE EXCLUSIVE TOKEN IS WIRED WHERE IT
+CANNOT BE FORGOTTEN (tools/lib/exclusive.py, the third robustness pass,
+2026-09-06): the legs that drive a platform's own input, dialog, drag
+or clipboard machinery from outside the process fail only under a
+matrix and pass alone — twenty-four such legs across the five lanes on
+that day's ledger — and each lane already ran them alone inside its
+own pool while nothing isolated them from the other four. One
+directory lock in the state home every lane writes to, which the
+container already mounts: a lane asks the token at its ONE leg funnel
+before starting any leg, and holds it, its pool emptied, around the
+legs in its `EXCLUSIVE` set. A runner that stopped asking would flake
+again and no lane could see it, so the gate reads each funnel by name
+for the wait and the hold, holds every EXCLUSIVE name to a leg its lane
+runs, holds the python and shell spellings to ONE set of sentences,
+and holds validate-all to handing the directory, the container launch
+to naming its path, and the sweep to yielding.
+AND A NOTIFICATION LEG NEVER RUNS IN THE POOL THE FUNNEL DRAINS, since
+2026-09-18: the funnel JOINS every leg started before the exclusive one
+in its block, so a notification delivered there is in flight exactly
+when the typing leg foregrounds — and the shell's notification host
+window comes up ~2s later and holds the foreground for 30s and more
+(docs/deferred.md, the phantom notification window; eight reds on
+`notes_rust`). The notification scenes are read OUT OF THE SCENE
+SCRIPTS (tools/lib/lanes/win.py's `notification_legs`, pointer_scenes'
+own reason), never a hand list, and the clause refuses one before an
+exclusive leg in its own block or anywhere in the block that one opens.
+AND THE MAC FUNNEL WAITS FOR AN IDLE HOST, since 2026-09-18: the token
+holds the other four lanes off an input-driving leg and nothing held
+off the HUMAN at the keyboard — matrix #38's `save-java-swiftui` died
+at `file_choose` with every press swallowed while the maintainer's
+browser was frontmost, and AX reported success for all three
+(docs/deferred.md, the swallowed-press entry). The mac lane's
+`EXCLUSIVE` is every leg whose scene script runs a verb in
+tools/lib/lanes/mac.py's `HOST_VERBS` — the file panel's presses, the
+Now Playing session, and the takeover verbs below — DERIVED from the
+scripts, never a hand list (the hand list of four panel scenes had
+missed chat's `file_choose`), and the funnel reads HIDIdleTime BEFORE the token, waiting bounded for
+twenty seconds of neither key nor pointer, then reads it once more
+INSIDE the hold without sleeping, releasing the token to wait again if
+the human came back. A wait that expires RUNS THE LEG ANYWAY and says
+so, so a red then reads as the host's; on a quiet host the wait is
+skipped and the everyday matrix pays nothing. NO WAIT ON A HUMAN EVER
+SITS INSIDE THE TOKEN since 2026-10-07 (a RULE CHANGE: until then the
+gate demanded the wait inside the hold, and the matrix of that day held
+every other lane 230-270s on two fullscreen legs that were then NOT
+RUN, docs/traps.md, the idle waits held the token): the wait itself
+refuses while this process holds the token, and the gate runs
+idle_admit against a doubled clock and refuses a sleep under its hold.
+The gate holds the order in lane.idle_admit, the three numbers as literals that fit the mac ceiling (a threshold
+under the bound, a bound under the budget, a budget under half the
+ceiling), each sentence still saying what it measured, the self-test
+door `KAYA_HID_IDLE_NS_OVERRIDE` to its ONE reader across every
+tools/ script, and a red mac leg's verdict line naming the frontmost
+application AT THE MOMENT OF THE RED (one reader with the bundle's
+window census, tools/lib/flightrec_lane.py's `mac_frontmost`).
+AND A LEG THAT TAKES THE HOST'S DISPLAY OR KEYBOARD NEVER RUNS WHILE THE
+MAINTAINER IS ACTIVE (his ruling, 2026-09-28, for fullscreen; his
+2026-10-14 for the keyboard, after the emoji leg activated the guest and
+took his typing): a scene running a `takeover` verb — fullscreen, the
+emoji palette, open_link — makes `TAKEOVER_LEGS`, which never wait in
+their queue position: a busy reading DEFERS the leg to the lane's end,
+where every deferred leg shares ONE 120s bound for 120s idle and on
+expiry or an unreadable clock is reported NOT RUN instead of run; the
+funnel and tools/run-leg.py both honour the refusal, and the deferral,
+the shared bound and the refusal are RUN against a doubled clock. The
+gate censuses the interpreter's foreground-taking calls
+(`FOREGROUND_CALLS`: NSApp.activate, orderFrontCharacterPalette,
+toggleFullScreen, NSWorkspace.shared.open) at their counts, each to the
+takeover verb that reaches it, and holds every harness key to
+`kayaHarnessSend`, so the leg log's `host key:` line counts only keys the
+host's keyboard sent (docs/traps.md, the emoji leg took the maintainer's
+keystrokes). AND THE WINDOWS LANE REFUSES A DISPLAY ITS
+LEGS DO NOT ASSUME since 2026-10-03 (docs/traps.md, the UTM entry): the
+desktop warm-up reads `Screen.AllScreens` in the interactive session and
+deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly
+one 1280x800 screen, naming what it read and `DisplaySwitch.exe
+/internal`; run here against four readings. AND THE MEDIA SERVER'S ONE
+PREDICATE SINCE 2026-10-13 (tools/lib/netimage_server_routes.py): every
+lane starts the server through `media_server.serves(scene)`, never its own
+`startswith("media_")`, so the netimage_http legs get the server the media
+legs do, and the server's covers, `/status/<code>/` and image types are
+held. Fifty watched negatives, counts printed)
+
+## tools/check-flightrec.py
+
+`tools/check-flightrec.py` (A RED LEG'S BUNDLE NAMES ITS CAUSE ON
+EVERY LANE, or says what it measured instead (the maintainer's
+2026-09-16 ruling): the bundle shape is ONE declaration —
+tools/lib/flightrec_lane.py's `SECTIONS` for the four python lanes,
+tools/lib/flightrec.sh's `FLIGHTREC_SECTIONS_LINUX` for the container
+— every lane owes a reader the leg's own log, the verb trace and A
+PICTURE of what the user would have seen, every declared section is
+REACHED by that lane's own collect (a section nothing writes is
+marked by finish() and then looks exactly like one the platform could
+not answer, which is the lie this pass came from), a `.skip` file has
+ONE writer per half and never an empty sentence (the windows notes
+bundle of 2026-09-16 carried a zero-byte shot marker and its reader
+could not tell "no picture was possible" from "nobody tried"), each
+lane closes with finish() rather than a bare report, and THE PICTURES
+ARE TAKEN WHERE THE DEVICE IS STILL THE LEG'S — the phones hand their
+device back to the pool and the linux lane REBOOTS the leg's display,
+both before the bundle is built, so a capture moved into drain()
+photographs another leg's scene or an empty desktop and still
+produces a plausible PNG. Beside them the windows verb-trace file,
+held across the three places that name it (check-steps' launcher
+line, the recorder's pull, deploy-win's pre-leg delete), AND THE
+TOAST-MOMENT SECTION SINCE 2026-09-17, which exists because FIVE
+windows bundles in three days named the toast's CLASS and never its
+SENDER (docs/deferred.md's notes_rust toast entry): the guest's own
+foreground wait copies the notification database — with its WAL, where
+the newest row lives, and it is the only record that names the AUMID
+and the toast's own text — and grabs the desktop the first moment it
+sees a banner, and those two files ride the verb trace's rule across
+their own three places (winui/mod.rs's capture through
+vtrace::sibling, the recorder's pull, deploy-win's pre-leg delete).
+A declared section's writer must also be REACHED: a method nobody
+calls names the section in the source and still leaves every bundle
+carrying finish()'s marker for it. AND ONE CLOCK UNDER THAT MARKER
+SINCE 2026-09-17: neither the guest sampler's ring stamp nor the
+host's read of it may use `Get-Date -UFormat %s`, which on Windows
+PowerShell 5.1 answers LOCAL time as though it were UTC — the two
+ends agreed with each other, so nothing looked wrong until that clock
+met the notification database's own FILETIMEs and every row of the
+last seven hours read `ARRIVED INSIDE THIS LEG` (docs/traps.md,
+docs/deferred.md's notes_rust toast entry). No lane can fail it,
+because a marker that is too wide marks MORE rows and never fewer.
+AND THE LINUX FOCUS RING SINCE 2026-09-18, the section a wayland
+clipboard red needs and no bundle had: the `desktop` section is the
+sway tree at COLLECT, with the guest already gone, so who held the
+SEAT while the leg ran — the channel a wayland client is handed a data
+offer through — was unrecorded, and matrix #38's expiry could not be
+attributed (docs/deferred.md's wayland clipboard seed entry).
+tools/linux/focus-ring.py samples ONE RING PER SESSION (a headless
+sway per wayland slot, an Xvfb per x11 display, since every leg claims
+a session of its own), writing a line only when its reading moves; the
+gate holds the sampler's own file names against the names the collect
+cuts — the windows verb-trace rule one lane over — plus the sampler
+being STARTED by the runner, STOPPED by its EXIT trap, and its own
+self-test run before the first leg. AND THE HAND RUN'S OWN BUNDLE SINCE
+2026-09-18: tools/run-leg.py collects through the SAME MacRecorder the
+lane does, so the mac row's sections are a hand red's sections too —
+and the sections adopted out of the leg's SCRATCH (the sampler's
+lines, its `sample`, the verb trace) are held to the launch wiring
+that fills it, since a hand run launching its own guest keeps the
+bundle and loses exactly those. The iOS binary-stamp section reads the
+main executable and interpreter before launch: the Swift executor slice's
+SDKROOT regression stamped SDK 16.0 despite an explicit 26.5 SDK, and the
+original bundle carried no stamp. All three worker paths and adoption
+are held by four cuts. Android's system-events and anr-history sections
+joined on 2026-09-20: the 400-line tail missed an ANR dialog taking
+clipboard focus, and its stack lived only in Android's DropBox. Both
+captures run on the failure path before the device returns to the pool.
+ANR history is package-filtered and explicitly historical, never a claim
+that an old report belongs to this leg. Eight capture, adoption and
+renderer mutations hold it. Mac's power-history adds six counted negatives
+for collection, rendering, sleep/wake selection, newest retention, read
+status and historical attribution. A forced red retained the sleep that
+outlasted the sampler's two-second counter. iOS recording's actual image
+and film probes run over synthetic media: four more mutations refuse an
+invalid ffprobe log level, hidden command failure, guessed brightness and
+a discarded first frame. Recording recovery stops drivers before its service
+reset, then launches and joins the whole pool; three executed branch cuts
+hold that lifecycle. Android's recording duration probe checks ffprobe's exit
+and numeric output, preserves its diagnostic and refuses a failed pull before
+reading any old film; recording-only failures collect the same recorder sections
+as scene failures. Six counted cuts hold those paths, with a forced-red bundle
+read back. Windows recording is serial because guest title changes discard the
+tile suffix its capturer reads; its own transcript is retained beside extraction
+diagnostics naming the requested slot and frame range. Three more cuts hold
+serialization and diagnostic retention. Android's system timeline also retains
+native drag/drop and Kaya's matching events: three renderer cuts hold that
+history, because a missing Kaya callback does not prove Android sent no end.
+AND A MISSING PID NEVER PHOTOGRAPHS THE FRONTMOST WINDOW, since
+2026-09-28: the mac window list read a pid of "None" as no filter and
+shot_pid took the first window it listed, the maintainer's terminal
+(docs/traps.md). Both halves refuse, the real binary is asked about
+"None" on every mac run, and two cuts are watched. AND THE WHOLE
+DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST since 2026-09-28 (the
+maintainer's screen is his while he is at it): shot_desktop is run
+against a doubled idle clock, two cuts watched.
+AND A RED ANDROID LEG'S PICTURE IS THE APP'S OWN since 2026-10-12: the
+screencap after the verdict was the launcher's, since the process leaves
+about 300ms after it; KayaFailShot copies the window before the verdict
+is published and the runner adopts it as `shot`, the screencap as
+`desktop-shot` (docs/traps.md); four cuts watched.
+AND AN iOS RED CARRIES WHAT XCTEST COUNTS since 2026-10-13: the harness
+prints +[XCTAnimationsIdleNotifier isAnimationInProgress] and a ledger of the
+same UIViewAnimationState callbacks at the ceiling and 15 s into a driver
+request, and the runner keeps testmanagerd's, the runner's and
+runningboardd's account plus any crash report by pid (docs/traps.md, the
+animations-idle wait); fourteen cuts watched.
+AND A RED BUNDLE OUTLIVES ITS RUN since 2026-10-13: the journal keeps the
+newest 20 runs and a pruned run's red bundles move to flightrec/red/ for
+90 days under a 2 GB bound, oldest first (the 2026-10-12 XCTest hang's
+bundle was pruned before anyone needed it). The real pruner runs dry and
+then for real over a synthetic home; eight cuts watched.
+AND A RED iOS LEG'S PICTURE IS THE APP'S OWN since 2026-10-14: `simctl
+launch --console-pty` returns at exit, so the runner's screenshot was
+SpringBoard's; KayaFailShot draws the app's windows before the verdict is
+published, the runner pulls it out of the container as `shot` and files
+the device's screen as `desktop-shot` (docs/traps.md); seven cuts watched.
+AND A RED LINUX LEG'S PICTURE IS THE GUEST'S OWN since 2026-10-17: GTK
+renders its window offscreen at the first failed step to
+`<leg>-failshot.png` beside the verb trace, adopted as `fail-shot`, and
+every failed linux step logs where its CPU went (the main loop's schedstat,
+the cpu pressure, a nap's oversleep, since this VM reports no steal time;
+docs/traps.md, the VM off every CPU for longer than a cue); five cuts watched.
+The picture is composited over the window's ground, since the window, not
+its child, draws that ground and a dark leg's page and words were
+transparent (docs/traps.md, the dark fail-shot); two cuts watched.
+AND A SLOW LANE SAYS WHY since 2026-10-14 (docs/traps.md, the windows
+lane slowed by a rebooted VM's Defender): every lane prints
+tools/lib/lane_health.py's readings at its start and before its verdict
+(the host's load and busiest processes, and since 2026-10-20 its memory:
+free, the compressor, a 1s paging sample, swap and the largest
+footprints (docs/traps.md, the host out of memory under a matrix);
+the windows guest's boot, a 2s
+CPU sample, Defender's scan state and exclusions of the lane's runtimes;
+each simulator's and emulator's uptime and busiest processes; the docker
+VM's), and validate-all compares each lane's shared legs against the
+newest earlier run in target/validate-lanes/runs, naming the largest
+movers when the sum moves over 25% or the lane runs over its ceiling.
+Every sentence is driven from a doctored transcript on each run; nineteen
+cuts watched. AND THE iOS PARK'S OWN ACCOUNT (docs/deferred.md, the iOS
+varied-python entry): the synthesized tier writes its aim, each pass of a
+park, the landing, a cancel or re-park and expect_window's refused reading
+into the verb trace, with the rows above the target drawn against the
+core's extents; five cuts watched. AND A STALE .NET NATIVE IMAGE IS
+DRAINED BEFORE ANY LEG since 2026-10-14 (docs/traps.md, the stale .NET
+native images): after a .NET Framework update PowerShell's own assemblies
+sit StatusPending, every PowerShell start JIT-compiles them, and every
+windows leg starts one. deploy-win's native-image phase, after vm-ready
+and before the start reading, counts them in each framework's `ngen
+display`, drains a pending queue with executeQueuedItems and refuses,
+naming the command, if any stay; the windows reading adds one PowerShell
+start's CPU and the counts. Nine cuts watched. AND AN APP THAT APPEARS
+ON THE MAC HOST NAMES ITSELF since 2026-10-14 (docs/traps.md, the Preview
+a Go guest's checkin relaunched): the mac lane reads lsappinfo at its
+start, after every leg and at its end, and prints one sentence per GUI
+application that appeared (pid, launch time, the legs running that
+second, lsappinfo's parent, what runningboardd, talagentd,
+launchservicesd and WindowServer logged around the launch, its windows
+when first seen), its own apps excluded only by the launch lines
+lane_health.LANE_APPS holds the lane to; nine cuts watched. AND A LANE
+PROCESS REGISTERED AS ANOTHER APP FAILS THE LANE since 2026-10-16:
+LaunchServices matches a check-in to whatever record sits at the pid,
+so a guest given a dead app's pid became that app; a lane binary whose
+record names another bundle id, not held since the start, is an
+IDENTITY ADOPTED refusal (the fix is crates/kaya/src/ls_identity.rs,
+check-app-identity's C16 its static half); five cuts watched. AND THE
+HOST'S MEMORY IS READ BY WHAT HOLDS IT since 2026-10-20 (docs/traps.md,
+the host out of memory under a matrix): each VM beside top's figure
+carries `footprint -p`'s own, fseventsd over 500 MB is named with its
+restart, the windows guest's commit peak and the linux container's
+memory.peak reach the lane's readings, and the android lane restarts at
+admission a device more than 1.5 GB over its fresh baseline, printing
+the decision; fourteen cuts watched. An EMPTY KAYA_RECORD is unset in
+all three harnesses' recording linger (validate-linux passes it empty and
+every linux leg slept 750 ms); three cuts watched. AND A RED ANDROID LEG'S
+PICTURE MARKS ITS KEYBOARD since 2026-10-21 (docs/traps.md, the android red
+leg's picture without its keyboard): KayaFailShot reads the IME inset off
+the window and hatches that band, named, over the picture, since the IME's
+window is another process's and PixelCopy cannot read it; two cuts watched.
+Two hundred and sixty-four watched negatives, counts printed)
+
+## tools/check-diagnostics.py
+
+`tools/check-diagnostics.py` (a why-not may not print a sentence it
+cannot NOT print. Any function named `*WhyNot`/`*why_not`/`*Reason`
+is read as a diagnostic by that name alone; one answer, or an answer
+after the early-out that interpolates nothing, is a sentence the
+reader will believe for every cause it does not name — which is what
+`kayaOpenPanelWhyNot` did for months, twice sending someone after
+macOS activation rules. Its self-test splices the pre-fix body back
+in from git and requires the red)
+
+`tools/check-diagnostics.py` (a why-not may not print a sentence it
+cannot have measured — see invariant 3. The shape it can see is a
+failure path with ONE answer, or an answer that interpolates nothing:
+such a sentence is printed for every cause it does not name, and it is
+believed)
+
+## tools/check-harness-ceiling.py
+
+`tools/check-harness-ceiling.py` (THE HARNESS LOSES LEGIBLY: every
+step is entered with a CEILING, and once a verdict is published the
+process leaves within the GRACE whether or not the platform's exit
+path runs — one rule, all three harnesses. AND THE FIRST STEP'S CLOCK
+STARTS AT THE MOUNT, since 2026-09-06: each runner waits for the
+scene's root to be mounted before its first step, armed on the
+watchdog under one literal and ending in ONE sentence when no root
+ever comes — the android `varied-python` leg's first step had timed
+out at 5s on a starved host with every later step green, twice in
+three matrices; the wait's own print (`scene ready after Nms`) is the
+push-to-apply gap that class needed measured. A step's retry deadline is
+read only AFTER the step returns and every step blocks in a hop to
+the platform's UI thread with no timeout of its own, so a saturated
+app printed NOTHING, no verdict and no timeout sentence, until
+something outside killed it (measured on four platforms 2026-08-24,
+docs/measurements/choke-*-2026-08-24.txt; on the mac lane that
+something is `timeout 120`, a KILL that takes the log with it). NO
+SCENE CAN FAIL THIS — the wedge would have to happen on every
+platform at once and would then measure nothing else — so, like the
+native-undo pair, a gate is the only wall available. The static
+clause holds the two numbers equal in all three, the arm INSIDE the
+script runner carrying the step itself (a fixed string names every
+step the same), the publish over the exit hop, and ONE sentence
+compared FLATTENED, since Rust's line continuations and the
+interpreters' `+` splices spell that text three ways. The macOS
+clause is check-empty-child's shape: the interpreter's OWN watchdog,
+cut out of KayaSwiftUI.swift by the gate and compiled with
+tools/checks/swiftui-wedge.swift, run against a REAL wedged main
+thread — with a ceiling that can never expire watched reporting the
+silence.
+AND THE WINDOWS FOREGROUND DANCE SINCE 2026-09-18, the same rule one
+platform over on the one wait no scene can reach: the shell's
+notification host window holds the foreground against
+SetForegroundWindow, ESC and the ALT release alike, and the wait used
+to sleep its whole 30s before it even danced (docs/deferred.md, the
+phantom notification window). The clause holds the dance INSIDE the
+wait, both loops bounded by a literal, the reading taken and written
+with `vtrace::line` (the ring never reaches disk on the panic this path
+ends in), and `take_foreground`'s own route — AttachThreadInput
+ATTACHED AND DETACHED around SetForegroundWindow/BringWindowToTop/
+SetFocus, since a thread left attached shares the holder's keyboard
+state for the life of the process — with the 100ms settle that tells a
+window which yields from one that takes the foreground straight back.
+AND THE LAST RESORT, which is the ONLY route measured taking the
+foreground back from that window: eleven were driven against it on the
+lane's VM while it held the foreground — SetForegroundWindow,
+AttachThreadInput (REFUSED outright, answering 0), SwitchToThisWindow,
+ShowWindow's minimize and hide, WM_CLOSE, HWND_BOTTOM,
+LockSetForegroundWindow, AllowSetForegroundWindow and
+SPI_SETFOREGROUNDLOCKTIMEOUT — and the foreground did not move for any of
+them, so the wait's expiry ENDS THE NOTIFICATION HOST'S PROCESS, which
+hands it over at once and which Windows restarts on demand
+(docs/traps.md's toast moment has named that route since 2026-09-17). The
+class-and-title guard is half that rule and the gate reads it: without
+`foreground_toast()` in front of the OpenProcess this ends whatever
+happens to hold the foreground. Eight more watched negatives, eighteen
+clauses counted. The Rust half's runtime proof is in the unit suite instead,
+where a wedged MockStage read leaves a child process under its own
+verdict)
+
+## tools/check-empty-child.py
+
+`tools/check-empty-child.py` (ONE NODE IS ONE WIDGET, even when its
+content will not decode. The widget backends have that by
+construction — GTK keeps the GtkPicture and clears the paintable,
+WinUI keeps the Image and leaves Source unset — while a declarative
+backend that renders nothing takes the node OUT OF THE TREE, and
+every layout above it that counts children positionally then reads
+the wrong one. SwiftUI answered a failed decode with `EmptyView()`
+and `KayaCell` indexed `subviews[0]`: an undecodable image in a flex
+cell was a SIGTRAP during layout, on a position no scene has, so it
+survived every lane for months. Its macOS clause is a RUNTIME
+negative — the interpreter's own source compiled with
+tools/checks/swiftui-empty-child.swift and run, four byte shapes plus
+an unknown kind through the real KayaFlex/KayaCell; the static
+clauses hold all four backends' image arms present-and-empty and
+panic-free. AND THE NETWORK IMAGE'S LOOKS AND ITS LATE PICTURE SINCE
+2026-10-13 (docs/network-images-plan.md N4, N9): a boxed image loading,
+failed and undecodable is one view in its box, and a decode overtaken by
+a cache hit for other bytes is dropped by its generation, the gate
+recompiling the interpreter with that check cut and demanding the probe's
+own failure on every run — the probe's first run found the cache's lookup
+keyed on a size its store never wrote)
+
+## tools/check-pane-ladder.py
+
+`tools/check-pane-ladder.py` (the macOS pane ladder, live: macOS has
+no compact mode to defer to, so kaya's own arithmetic decides how
+many of a three-pane window's columns fit — and the MIDDLE rung is
+observable nowhere else, because the platforms legitimately disagree
+at every width inside check-steps' panes band, so no shared scene may
+sample it. The static clause refuses any column MINIMUM declared to
+SwiftUI — a declared minimum becomes the WINDOW's floor, collapse can
+never fire, and resize_window silently no-ops, all measured
+(docs/multicolumn-plan.md MECHANICS AMENDMENTS). The runtime clause
+is check-empty-child's shape: the interpreter's own source compiled
+with tools/checks/swiftui-pane-ladder.swift and run — the rung
+arithmetic including content+detail < 600, which is what keeps the
+bare expect_panes invariant true at every regular width, the
+edge-triggered command rule the sidebar toggle depends on, and the
+REAL NSSplitView walked 1400 -> 700 -> 1400 counting visible
+columns)
+
+## tools/check-table-tier.py
+
+`tools/check-table-tier.py` (the table's TIER ROUTING, which no device
+can assert: decision 5 took the size class out of every table
+observable, so the native and the synthesized tier present identical
+bytes and a leg cannot name the one that drew it. The proof used to be
+a one-arm perturbation with the other device's leg watched staying
+green, redone by hand whenever the routing moved (docs/traps.md). The
+rule is a pure function of width and availability now, so the static
+clause holds KayaTableSurface as the split's ONLY caller and the rule
+free of `#if` and of the environment — a rule compiled per platform
+cannot be driven on the mac at all — and reads the two one-line arms of
+`widthClass`, the environment's single reading, the iOS one most of all
+because it is the line no host that runs this gate executes. The
+runtime clause is
+check-pane-ladder's shape: the interpreter's own source compiled with
+tools/checks/swiftui-table-tier.swift and run, the whole truth table
+(mac native, iOS compact synthesized at ANY availability, iOS regular
+native only at or above TableColumnForEach's floor) plus a REAL
+KayaTableSurface in an NSWindow with the NSTableView the native tier
+is made of found in its view tree. The same probe holds the geometry
+half too: viewport, cells and assigned track share the current table
+generation; every batch, native resize and USER-ROUTE MODEL WRITE
+(`kayaUserWrite`) invalidates it before acting; and a generation-keyed
+reporter republishes even after a same-size resize. The generation is
+the STORED epoch and the static clause refuses a walk in it — the
+recursive subtree hash it replaces was 41% of the mac main thread at
+100k rows and caused the 37% of observation bookkeeping beside it
+(docs/measurements/choke-macos-2026-08-24.txt), so a model-derived
+generation is a measured defect, not a style. Beside it a census: every
+assignment to the interpreter's own `text`/`checked`/`value` is inside
+kayaApply, inside a kayaUserWrite block, or in an EXEMPT table with a
+reason that must still match a real site. The watched shadows remove
+each link separately. What no gate holds is whether a PHYSICAL device
+reports the size class the simulator did. ITS TWELVE PROBES BUILD AND
+RUN FOUR AT A TIME since 2026-10-17 (the prelude's `in_parallel`, which
+raises a worker's failure: kaya_gate's selftest F11), judged in
+declaration order; two made-up pool answers, a probe that did not build
+and a negative that passed, are watched red
+(docs/measurements/gate-sweep-2026-10-17.md))
+
+## tools/check-window-memory.py
+
+`tools/check-window-memory.py` (THE MACOS WINDOW MEMORY, which no scene
+can see: `taskspersist.steps` asserts ONE size on ONE window and stays
+green with the by-value rule inverted, with the clamp gone, with a
+malformed stored line taken at face value and with the opt-out ignored.
+GTK and WinUI each hold that rule in a unit test (gtk::frame_tests,
+winui::tests::window_memory_parses_clamps_and_opts_out) and the mac had
+none. The static clause holds the SAVE to the toolkit's own queue —
+`DispatchQueue.main.async`, never a timer and never a run-loop idle
+observer, because a save on a clock LOSES the value: the process leaves
+through `_exit` with the trailing write unrun (measured on the linux
+lane 2026-09-09, docs/traps.md) — deduplicated twice over, once per
+run-loop turn and once against what the store already holds; and it
+holds the RESTORE to the accessor's own register(), the window's
+materialization, after the declaration it beats and with
+`display: false`, since anywhere later is after the first frame. The
+runtime clause is check-pane-ladder's shape one file over: the
+interpreter's own `// MARK: - Window memory` block is CUT OUT by the
+gate and compiled with tools/checks/swiftui-window-memory.swift, so
+nothing is factored out of the interpreter and there is no second copy
+of the rule to drift — the probe supplies doubles for the five names
+the block reaches outside itself, and its store COUNTS its writes,
+which is the only thing that tells one coalesced save from three. It
+drives the six by-value cases (no memory takes every write; a restored
+window's first size is its declaration and is refused; the same
+declaration again is still the declaration; a declaration still
+ARRIVING one prop at a time holds the memory; the first DIFFERENT size
+applies and ends the memory on BOTH axes; per window, never
+process-wide), both frame spellings and six malformed lines answering
+nil, the clamp against a REAL NSScreen (inside, off every screen,
+partly on, bigger than the screen), the save's one-write-per-turn
+coalescing and its dedup, the restore, and `remember_frame(false)`
+saving and restoring nothing. 19 watched negatives, counts printed —
+five doctoring the static census, fourteen recompiling a doctored copy
+of the cut and demanding the probe's OWN sentence back, since a half of
+the probe nobody has seen go red is a sentence nobody has seen print.
+AND THE RUST BACKENDS' FULLSCREEN CALLSITES SINCE 2026-09-28 (clause
+D, docs/fullscreen-plan.md §2, §3): GTK and WinUI save no frame while a
+window fills its screen, and their F11 dress runs after the app's own
+chord — no scene declares an app shortcut on F11, so a dress that took
+the key first is green everywhere; five watched negatives.
+AND THE WINDOW SERVER'S HIT SHAPE SINCE 2026-10-21 (clause G,
+docs/traps.md, the hit test that outran the resize): the shape the
+server hit-tests, which AppKit's accessibility hit test reads, follows
+the first frame drawn at the new size, not setContentSize, so a `choose`
+262 ms after `resize_window` answered the menu bar twice under a matrix
+and no scene can force it. The interpreter's `// MARK: - The window
+server's hit shape` block is cut and compiled with
+tools/checks/swiftui-resize-shape.swift over a REAL window whose draw
+takes 300 ms: inside the resize's own block the server still leaves a
+corner the growth brought in to the window beneath, the resize verb's
+wait returns once the shape covers it (walking the z-order down through
+other applications' windows, since a leg passes with the host's
+browser in front), a shrink waits nothing, the expiry names each
+corner's holder, and a main-thread caller is refused; three cuts
+watched. check-verbs holds the resize arm's call, the choice refusal's
+server reading and the walk (tools/lib/resize_shape.py, eleven cuts))
+
+## tools/check-canvas-blit.py
+
+`tools/check-canvas-blit.py` (KAYA RASTERIZES, BACKENDS BLIT — the
+canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
+three places NO SCENE CAN FAIL. A backend that interpreted a draw op
+would draw THE SAME PICTURE, because the hash is taken of the core's
+raster and expect_ink samples pixels that would still match — so the
+lowering design the plan killed could reintroduce itself one arm at a
+time with every lane green. The rule is held statically: the two
+widget backends may not name the op vocabulary at all, and the two
+interpreters, which carry private copies of the numbers, may name one
+only at its definition and in the one list that keeps the compiler
+from calling them unused. Beside it the PIXEL FORMAT each backend
+declares, by name — GTK's R8g8b8a8Premultiplied and Android's
+ARGB_8888 are the core's premultiplied RGBA8 layout verbatim (tiny-skia's
+and vello_cpu's alike, which is why the swap touched no blit arm),
+SwiftUI says so with
+premultipliedLast|byteOrder32Big, and WinUI is the ONE arm that
+swizzles — because the scene catches a channel swap only at a probe
+point whose colour is ASYMMETRIC, and a scene sampling greys would
+pass a red-blue swap on five lanes. And the SCALE: every lane runs at
+1.0 or at a scale its platform states exactly, so a backend that read
+the ROUNDED scale, or reported none at all, is invisible to all of
+them — which is GTK's own trap, since gtk_widget_get_scale_factor
+"returns the next higher integer value" under fractional scaling.
+Eleven watched negatives on doctored copies, counts printed; two of them
+caught the gate's own first draft, whose comment-stripping shifted
+every line number and whose block reader stopped at the first bracket
+it found rather than the one at the block's indent).
+AND THE CANONICAL RASTER'S SETTINGS SINCE 2026-09-10, the vello_cpu
+swap (docs/canvas-gpu-plan.md G2): the hash the scenes freeze is taken
+at `CANONICAL_SETTINGS`, the scalar SIMD level and one thread, while
+the screen raster runs the host's own level — a raster that quietly
+moved the hash onto `Level::new()` goes green on five aarch64 lanes
+and red on the first x86_64 one, months later, and no scene can tell
+the two apart. The clause reads canvas.rs comment-stripped: the pinned
+constant's two fields, `probe()` passing it, `rasterize()` passing the
+screen settings, and the u8 pipeline alone (no `OptimizeQuality`,
+whose f32 arithmetic is where an FMA contraction could differ between
+microarchitectures; docs/measurements/canvas-vello-determinism-2026-09-10.txt
+measured the u8 pipeline byte-exact across scalar, NEON and AVX2 and
+across ISAs), and since 2026-09-11 the SCREEN raster's threads BY
+SIZE (`screen_threads(pixels)` over `SCREEN_THREADS_ABOVE`, the
+measured crossover on a kept context) — a screen raster hard-coded
+back to one thread is green on every lane and puts a phone's heavy
+frame over budget. Six more watched negatives, counts printed.
+AND THE IMAGE OP SINCE 2026-10-02 (docs/media-plan.md §8 ruling 3): the
+`image` op is in the vocabulary no backend may consult, since the core
+rasterizes it like every other op, and the reader's frame conversion is
+held to the premultiplied RGBA8 the core keeps — straight alpha or BGRA
+read identically on the opaque greys a scene probes. Two more watched
+negatives. GtkContentFit's two exemptions are the video view's module
+and the image ground's `set_ground` (docs/styling-pass-plan.md Y3),
+each refused by name once gone, each cut watched)
+
+## tools/check-appearance.py
+
+`tools/check-appearance.py` (THE APPEARANCE OVERRIDE IS INERT UNLESS
+ASKED FOR, AND HONEST WHEN IT IS. `KAYA_APPEARANCE=light|dark` makes ONE
+PROCESS adopt an appearance through each platform's own supported
+override — NSApp.appearance, overrideUserInterfaceStyle, libadwaita's
+forced colour scheme, FrameworkElement.RequestedTheme, and on Android
+the window background plus LocalConfiguration's night bits — so the
+dark half of
+`expect_ink`'s frozen string is a leg on a light desk instead of a whole
+lane re-run with the machine's own setting flipped. NEITHER HALF IS
+VISIBLE TO ANY LANE: an override installed with the variable UNSET would
+move every leg to a default that is light, which is what every lane host
+already is, and a backend that reported the VARIABLE instead of reading
+its toolkit back would make the dark leg self-fulfilling — passing with
+the window still light, which is the exact bug the dark leg exists to
+catch. So the guard must DOMINATE each install site rather than merely
+share its file, and no reporter may derive its mode from the variable.
+Patterns are call-shaped and read comment-stripped code, and a guard
+must dominate its call IN THE SAME FUNCTION BODY: two of its own
+negatives first passed because the night-mode call and
+`kayaAppearanceOverride()` are named in the PROSE beside their calls,
+and a pure character window later called a real guard absent.
+ANDROID IS THE ONE PLATFORM THAT NEEDS TWO INSTALLS, and the gate
+demands both plus the absence of the mechanism they replaced:
+`UiModeManager.setApplicationNightMode` moves the app's resource
+configuration, which RELAUNCHES the activity — `onCreate` then runs
+twice in ONE process, which is how that call cost the dark leg three
+deaths at ~63s with no verdict, measured on the android lane
+2026-08-27. The second mount survives now (KayaCompose.mount is
+re-entrant, and the android lane's `remount-*` legs hold it), but a
+knob that relaunches the window to say one word about the appearance
+still rebuilds every leg's surface. So Compose sets the window
+background out of the SAME
+`-night` theme the system would have picked, and provides
+`LocalConfiguration` with the night bits forced; either half alone is
+the measured half-dark app D1 exists to have fixed.
+AND THE READ'S SCOPE MUST MATCH THE OVERRIDE'S, which is the iOS
+clause and the rule the other three obey for free: macOS overrides
+`NSApp.appearance` and reads `NSApp.effectiveAppearance`, both APP
+scope, so they cannot drift — while iOS overrides per WINDOW and
+`kayaCanvasAppearance` read `UITraitCollection.current`, a
+process-ambient value UIKit defines only inside a trait callback or a
+view update. That function runs on the HARNESS THREAD with no view in
+hand, so it reported the SYSTEM's light while the raster used the
+window's dark: `ink light 16181C/2B3B4F`, stable across a boot rather
+than flickering, green for many runs and then red twice (ios lane,
+2026-08-27). It reads the window's own `traitCollection` now, which is
+still a toolkit read-back. The gate refuses `.current` inside that one
+function and demands the window read; the file's two OTHER ambient
+reads are deliberately untouched and audited, since `kayaBrandTint`
+and `kayaPlatformFont` are reached only from view bodies where
+`.current` is exactly what SwiftUI set.
+AND THE APP'S OWN CHOICE SINCE 2026-09-07 (docs/tasks-s2b-plan.md): the
+`appearance` window prop is applied process-wide, so every install
+site is dominated by ONE asked function per backend — the prop first,
+the knob second, nothing third, and nothing puts the platform's default
+back — the asked function is held to falling through to the knob for
+the system choice, and the `expect_appearance` readers are held to the
+toolkit, never the prop or the knob.
+AND THE TWO COMPLIANCE KNOBS SINCE 2026-09-23 (docs/compliance-plan.md
+§2.1, §2.2), the appearance's twins with the same two failure shapes:
+`KAYA_TEXT_SCALE` installed with the variable unset moves every leg to
+a scale that is 1.0, which every lane already is, and a read-back that
+echoed the knob would pass the tasksbig leg with every label still at
+17pt. So each install site is dominated by its asked function (iOS's
+trait override, GTK's xft dpi, Compose's `KayaCompliance` with its
+forced Configuration, Density and LocalLayoutDirection under one inert
+clause; WinUI has no per-process text size and REFUSES the knob naming
+R5) and the `expect_text_scale`, `expect_direction` and `expect_locale`
+readers on every backend may not name the knob, its asked function or
+the door's own latch — WinUI's read the window ground's Language and
+FlowDirection back, which the ground wears from the process locale
+since a FrameworkElement's Language defaults to en-US whatever the
+user's is. AND THE C LOCALE HAS ONE WRITER SINCE 2026-10-18: GTK's own
+setlocale is disabled before its init and the core writes the locale only
+in fmt.rs's two install functions, since glibc frees the name a concurrent
+read returns and a Rust guest's catalog then loaded English under the
+German knob; catalog() refuses a locale read off the knob's language
+(docs/traps.md, the catalog that read English). Thirty-one watched
+negatives, counts printed. The runtime halves are
+the legs: `canvas-*` is the unset proof and `canvasdark-*` the set
+proof, on all five lanes, the tasks scene's Dark-then-System round trip,
+and the `format*` legs under three locales)
+
+## tools/check-abort.py
+
+`tools/check-abort.py` (uniform abort
+semantics, all languages, IN NINE CONCURRENT PARTS since 2026-10-17:
+each section is guarded `if part("<name>"):`, the parent runs
+`--part <name>` children four at a time and refuses a verdict unless
+every part exited 0 after printing its end line, and unless the guarded
+names are exactly PARTS, since a misspelt guard skips its section; four
+watched negatives (docs/measurements/gate-sweep-2026-10-17.md). AND THE IDIOM PASS'S COMPILE-TIME WALLS
+SINCE 2026-09-16: the OCaml fixtures under bindings/ocaml/checks/negatives
+(a bool into a string signal, a string where Menu_role.t is taken, a
+bare value where a key is) must each fail to compile on the one line
+their finding names, and the Haskell KayaValue probe's four cases must
+each be refused by the class itself, never by a syntax error — both
+run here because a negative nobody runs is a guard nobody walks into.
+C# ASYNC DIALOGS SINCE 2026-09-20: the four scope cases, all five
+result forms, request rollback, callbacks and thread boundaries run
+through AbortCheck; eleven counted mutations hold the raw continuation
+boundary, scope rollback, honest reporter, deferred completion, live
+slots, invalid-request cleanup and synchronous Build refusal. check-sugar-surface holds the
+five signatures and context/install/drain/wake wiring with nine counted
+cuts and an empty-reader refusal. docs/async-dialogs-plan.md is the
+approved explicit-transaction contract. SWIFT ASYNC DIALOGS use the existing
+actor executor: fifteen headless cases cover results, cancellation, scoped
+rollback, callback cleanup, concurrent overlap and transaction boundaries.
+Ten counted runtime mutations and three compile negatives hold the task
+observer, live slots, retirement, cleanup, rollback and actor/scope walls;
+check-sugar-surface holds twelve API and occurrence-wiring clauses, each cut
+and watched red, plus an empty-reader refusal. JAVA ASYNC DIALOGS run through
+the real binding and JNI transport: five future and callback forms, scope
+rollback, final-stage observation, cleanup and thread boundaries, plus a
+parked occurrence loop awakened by a foreign-thread failure. Fourteen counted
+runtime mutations and four callback/future compile refusals hold those paths;
+check-sugar-surface holds fifteen API and occurrence-wiring clauses, each cut
+and watched red, plus an empty-reader refusal. RUST SCOPED TRANSACTIONS
+add twenty compiler cases through tools/checks/rust-scoped.py: private begin,
+scoped borrows, task ownership and callback/future types, fourteen refusals
+and six accepted controls. Thirteen task tests run through check-abort with
+a census and four measured reports: initial panic, resumed panic inside and
+outside a scope, and a returned error. The surface gate holds all five
+async tiers and the four callback-only carve-outs with counted cuts,
+AND THE CARVE-OUT'S SUGAR SINCE 2026-09-21: OCaml's five dialogs answer
+a transparent `'a ask` bound by `let*`, Haskell's five `ask*` live in
+`Ask = ReaderT App (ContT () IO)` with `build` and `runAsk`, and neither
+may name Lwt, Eio, an effect handler, forkIO or an MVar, since a runtime
+under the sugar's name is what the carve-out forbids; five watched cuts.
+app.rs unit tests hold occurrence-loop reentry before posts or events,
+including a manually polled nested future, and depth cleanup on every exit.
+THE ROW IMAGE HELPERS SINCE 2026-10-13 (docs/network-images-plan.md N7,
+N12): C#'s and Swift's checks drive the conditional write's two drops
+through the mirror, a foreign thread's write refused, and the helper's
+coalescing, cap, release and cancellation, five watched cuts each; the Go,
+Java, Python, JS, OCaml and Haskell twins run in their own test files)
+
+## tools/check-tx-liveness.py
+
+`tools/check-tx-liveness.py` (a transaction is usable only inside
+the build or handler that made it, on the app thread — the HANDLE
+bindings refuse a closed one at a single write chokepoint, the
+AMBIENT ones have no handle to invalidate and check the thread
+instead. The failure it guards is SILENT: a write through an
+already-submitted transaction vanishes with no error, which Go
+shipped for months because its check lived on two chains and not on
+the hundred other callsites.
+CLOSED WAS NEVER THE WHOLE RULE, and until 2026-08-21 this gate
+asked the handle bindings for that half alone: a transaction still
+OPEN, written from a thread the handler spawned, passed every
+clause, and a background Build opening one of its own reached no
+chokepoint at all — both race the app thread's model in silence. So
+Go, Java, C# and Swift (the HANDLE bindings) now check the thread
+at that same chokepoint AND at the build entry, printing the same
+error sentence the ambient bindings (Python, OCaml, Haskell) do, and
+the gate's wrong-thread census reads the four bodies rather than
+grepping the name — `alive()` is also the ASSET handle's liveness
+check in Java and Swift and comes FIRST in both files. Four
+self-tests perturb copies, counts printed, red demanded on every
+run)
+
+## tools/check-verbs.py
+
+`tools/check-verbs.py` (every harness verb
+and wire constant present in BOTH interpreter backends — plus the
+spec hash pinned against bindings/c/kaya_wire.h, the
+byte-compared-verdict rule, the vtable rule, and the
+stamped-observation rule.
+Caption clock, publication, callback and native-read diagnostics are
+held by tools/lib/caption_routes.py (27 routes, 33 watched negatives;
+docs/traps.md, GTK caption reads need the player clock and publication
+timeline).
+The network image arms are held by tools/lib/netimage_routes.py and one
+module per widget backend (netimage_gtk, netimage_winui,
+netimage_compose): each decode inside its one off-main door, its late
+result dropped by generation, the cache keyed on the content id and the
+decode size and emptied under memory pressure, the failed glyph from the
+symbol table, `expect_image_phase` reading what was drawn, and every band
+report sending the core's asks (docs/network-images-plan.md N8-N15); 72
+SwiftUI clauses and 73 cuts across the four arms, each watched red, and a
+backend's row withheld refused.
+The skin arms are held by tools/lib/skin_routes.py and one module per
+widget backend (skin_gtk, skin_winui, skin_compose): each gradient's two
+stops from a token and the core's clamped data colour, never a literal
+brush (WinUI's through {ThemeResource}, High Contrast flat), the hover and
+selected surfaces from the platform's tokens (the mac's quaternary fill
+the one named exception), `overlay` the platform's material, the shape on
+the picture and on its loading and failed looks, the dock's ground to the
+edge, and every skin reader answering from pixels or the tree, never the
+node (docs/styling-pass-plan.md §3, §5); and since 2026-10-17 a TABLE
+ROW's activation and selection on every tier (the mac NSTableView's own
+doubleAction, Return and selection, a user's click refused as app state,
+the harness's click sent through that doubleAction; the iOS, Compose and
+WinUI rows' grounds and readers; docs/traps.md, the table row nobody
+rendered); 199 SwiftUI, Compose, WinUI and core clauses and the arms' 20,
+31 and 21 cuts, each watched red, and a backend's row withheld refused.
+THE CANVAS VOCABULARIES JOINED 2026-08-26, and they are the reason
+the constant sweep now reads a TYPE as well as a prefix: draw_op,
+paint, fill_rule, text_align and text_baseline ride the op stream as
+i64, so twenty-one hand-copied numbers in two interpreters sat
+outside every gate — check-symbol-parity is symbol-only and this
+sweep's alternation named neither the prefixes nor the width. It
+refuses a reader that finds fewer than twenty-one, because a census
+that reads nothing agrees with everything.
+AND THE INK TOLERANCE, ruled 2026-08-26: `expect_ink` compares within
+±1 PER CHANNEL because a macOS window's backing store carries the
+DISPLAY's profile and reads the core's D2E3F7 back as D2E2F7 while
+Android reports the core's own bytes, so no one frozen string can
+exact-match both (docs/canvas-plan.md §7.2, docs/traps.md). Three
+harnesses hand-write that number and this PINS ALL THREE AT THE RULED
+VALUE rather than merely holding them equal — copies drifting APART
+would eventually redden a lane, while copies drifting TOGETHER makes
+every ink assertion quieter with nothing anywhere slower or redder.
+A second clause refuses a tolerance nothing calls. Four watched
+negatives, counts printed.
+AND THE AX SPELLING, ruled QUOTED 2026-08-27: an observation IS the
+byte-compared verdict text, and `expect_ax` was recorded two ways —
+harness.rs (`{want:?}`, Rust Debug) and Compose quoted it, SwiftUI
+left it bare, so the one verdict nothing compared across platforms
+was the accessibility one. NO LANE CAN SEE IT: every runner greps the
+verdict for `KAYA_SELFTEST: OK` and never diffs its text, so the
+spellings sat green for months. The census reads each emitter out of
+its OWN ARM in all three harnesses and flattens every interpolation
+to `<v>`, since three languages spell interpolation three ways; it
+holds the observation AND the `wanted` failure sentence, and covers
+`expect_ax_hint`, which carried the identical divergence. An arm it
+cannot read is a finding that names it, never a skip — anchoring on
+`Step::ExpectAx(` alone matches harness.rs's PARSER first and finds
+ZERO observations there. Five watched negatives, counts printed.
+AND AN ACTION RETURNS ONCE THE APP HAS ANSWERED IT, since 2026-09-06:
+the fifteen action arms (click, choose, header_click, toggle,
+set_value in three runners) each call their runner's quiet-wait before
+and answer-wait after, read out of their own blocks, six watched
+negatives — the Compose runner had stated the rule and kept it for one
+verb, and the other two runners for none, so an expect's clock could
+start with the answer still in flight (the sort-click class). Ten
+more action verbs are outside the rule and named on the ledger.
+AND THE METRICS CLASS CHANNEL, ruled 2026-08-31 (adaptive-layout
+D8): iOS is the one platform whose size class the platform itself
+decides, and the only route it reaches the core is
+KayaWindowMetricsReporter's kaya_window_metrics report — NO lane
+can see that read, because the simulator pool is phones, where
+deriving from the width answers compact exactly as the platform
+does. The reporter's block is held to the shape (environment read,
+both classes mapped, every report passing the DERIVED class, a
+re-report on class change, the mac arm answering NONE alone) and
+wire.rs's 600-point boundary is PINNED at the ruled value, since
+the scenes hold it only to (560, 900]. Six watched negatives,
+counts printed, plus the wiring itself watched red once on the
+real file.
+AND THE ROLE AND ALIGN FAMILIES SINCE 2026-09-05: the constant
+sweep's alternation names them now, with a floor of five roles,
+because the `plain` role reached both interpreters by hand with
+no gate reading either copy — the sweep had been holding six
+families and the two that change with a ruling were not among
+them.
+AND THE WAYLAND CLIPBOARD SEED TAKES THE SEAT'S FOCUS BEFORE IT
+SPAWNS THE WRITER since 2026-09-18 (docs/deferred.md's wayland
+clipboard seed entry): on wayland a client is handed a data offer only
+while its surface holds the seat's keyboard focus, so a seed against a
+window that lost it waits five seconds for an offer that cannot come —
+0/5 legs before and 5/5 after, measured with a second client on the
+leg's own session. NO LANE CAN SEE THE RULE GO, because every wayland
+session this lane boots holds exactly one window and the focus is the
+guest's anyway; the class shows only when something takes the seat.
+AND THE READING MAY NOT COME FROM INSIDE THE PROCESS:
+`gtk_window_is_active` is false for every step of a GREEN wayland leg
+and `present()` was measured losing (sway denies the self-activation
+token), so the
+compositor is asked — `swaymsg '[pid=…] focus'` — and ITS OWN ANSWER is
+what the seed's sentence carries, since `[pid=<nothing>] focus` answers
+`success: false` while the exit status alone would report a grant that
+never happened. AND THE COPY VERB ASKS TOO, since 2026-09-18 (that
+entry's STILL OPEN half): TAKING the selection needs an input serial,
+and the harness earns one with a wtype F24 tap the compositor delivers
+TO WHOEVER HOLDS THE FOCUS — so a copy made while another surface holds
+the seat is dropped SILENTLY, gdk goes on believing this process owns
+the board, every `expect_clipboard` then reads "" for fifteen seconds,
+and a later seed expires EVEN WITH ITS OWN GRANT because the process it
+seeds never made its copy. ONE request and ONE parse serve both sides
+(`clipboard_focus(what)`, the only body in gtk.rs that may name the
+compositor's command) and the copy's answer rides the COPY's own
+verb-trace record, so a red with green seeds and failed copies names
+the seat instead of pointing at the seed. ONCE PER COPY, not once per
+scene: the request sits at `prime_if_clipboard_scene`, the per-action
+funnel click, shortcut and menu_activate all pass, because the seat can
+be taken between two copies of one leg. Eight links, one spelling of
+the request, three copying verbs held to the funnel, two refusal
+sentences each interpolating something it MEASURED (the caller's own
+name does not count), eleven watched negatives.
+AND THE AX WORD SET IS CLOSED since 2026-09-07: harness.rs's ROLES is
+the vocabulary a shared scene may assert, and the two interpreters
+mint their words from their own platform readers, so a word one
+interpreter answers and ROLES lacks cannot be asserted on GTK or
+WinUI, and a word tools/scenes asserts must be answered by all three
+— the tasks scene asserted `switch/` on every lane while ROLES lacked
+it, which GTK and WinUI would have read as a parse refusal. The
+census reads each reader's own body plus Compose's KayaAxKind
+stamps, with floors on every set; four watched negatives, counts
+printed.
+AND A PLATFORM-STARTED LAUNCH SINCE 2026-09-27 (docs/traps.md, the cold
+notification reply): the SwiftUI interpreter asks notification
+authorization only while undecided, since from provisional the request
+waits on a prompt that never comes, and its pump starts from both app
+delegates' did-finish-launching as well as the primary root, since a
+launch for a reply opens no window. No lane can see either; six watched
+negatives, counts printed.
+AND THE MEDIA ARMS SINCE 2026-09-30 (docs/media-plan.md §3, §5): the
+interpreter names no AVPlayerView, AVPlayerViewController, VideoPlayer or
+AVKit, since each would still show the picture every media leg reads while
+keeping keys, controls or a Now Playing session of its own; every player
+report goes through kayaPlayerReport, which follows the session; the
+publish sets macOS's playbackState before it can return; and
+expect_video_ink's tolerance is the measured 2 in both harnesses that
+read a video view. AND NO IN-PROCESS SCREEN CAPTURE SINCE 2026-10-14:
+replayd keys a ScreenCaptureKit client on its executable path, so two
+node guests cut each other off in a loop, and the ink read is
+screencapture(1) alone; the session_send helper sends with
+MediaRemote's reply and waits for it, since perl's exit took the
+asynchronous send with it (docs/traps.md). Three watched negatives. AND ON EVERY BACKEND SINCE THE BREADTH: no platform
+view with controls of its own (GtkVideo and GtkMediaFile, a
+MediaPlayerElement with transport controls, media3's PlayerView), every
+report through the arm's one door that then sets the platform's playback
+state (MPRIS PlaybackStatus, the SMTC's, the media3 session's), no reason
+word decided in an arm, and each arm's decodability check (a
+missing-plugin message, SupportInfo.DecoderStatus, a Tracks group with no
+supported track); GTK's ink tolerance pinned at its measured 4, the iOS
+playback category before play, and the Compose arms' constants and verbs
+in the census. Five, seven, seven, eight and five watched negatives,
+counts printed. AND THE ANDROID VIDEO READ SINCE 2026-09-30 (docs/traps.md,
+the media feed entry): Compose's expect_video_ink passed on media3's
+first-frame report while every feed row was black on screen, so it asks
+the runner for the device's own screencap and compares that within the
+emulator's measured 14, the report kept as its diagnostic line; the
+video renderer never moves a decoder between surfaces, the black rows'
+cause; and a player with no picture composes no SurfaceView. Five
+watched negatives, counts printed. AND THE READER'S ARM SINCE 2026-10-02
+(docs/media-plan.md §8 ruling 4), what media_reader cannot see: the test
+clip has one keyframe, so the nearest keyframe and the one at or before
+answer alike, and AVFoundation's default is the nearest — the arm is held
+to tolerance-after zero; the bound restarted at every answer; a stop that
+cancels the generator and the PCM reader; and every report on the main
+thread. Four watched negatives, counts printed. AND ON THE OTHER THREE
+ARMS SINCE THE BREADTH: GTK's keyframe seek SNAP_BEFORE and its picture
+time through the segment, WinUI's seeks and times moved by the edit list
+Media Foundation ignores, Compose's keyframe taken from the sync samples,
+each arm's one report door, and ONE site per backend reporting a missing
+track, so its reason, `no_track`, is one line (docs/media-plan.md §8
+ruling 4). Five more watched negatives, counts printed.
+AND THE GTK DOWNLOAD DRAIN SINCE 2026-10-07 (docs/traps.md, GStreamer
+1.28.7 drains an HLS download context on the thread that stops the
+pipeline): every GTK stop below PAUSED, the reader's stops and the
+players released at exit run inside soup_drain::scope, whose guard
+pushes the download context only there and pops it when the stop
+returns. Ten watched negatives, counts printed.
+AND THE CAPTURE WALL SINCE 2026-10-02 (docs/capture-plan.md §7): a
+lane's guest inherits its terminal's camera and microphone grant, so a
+leg reaching a real device opens the maintainer's camera with no prompt,
+and no scene can tell: the synthetic devices are what the scenes assert.
+Every name that reaches a real device (AVCaptureDevice, its session,
+inputs, outputs and preview layer, requestAccess, authorizationStatus)
+lives inside `enum KayaRealCapture`, each of its static entry points
+begins with `kayaCaptureWall(`, which is fatal under KAYA_SELFTEST, its
+source has only a private init, and every route into the type from
+outside sits behind `kayaCaptureUnderHarness` in its function. Five
+watched negatives, counts printed. ONE CLAUSE PER BACKEND SINCE THE
+BREADTH (2026-10-03), the same rule wherever the lane's device sits in
+the platform's own path: GTK's every capture source made in
+gtk/capture.rs's `open_devices`, which passes both devices through
+`wall(` first, each naming its PipeWire node with node.dont-fallback;
+WinUI's MediaCapture, its settings, InitializeWithSettingsAsync and the
+device ids named only in winui/capture.rs's `open_devices`, behind
+`wall(`, since the VM's Line In is the host's own input; Compose's every
+CameraX and AudioRecord name inside `internal object KayaRealCapture`,
+each entry walled, fatal unless the device is the emulator's, and the
+runner launching every emulator through the refusal of host audio and
+webcams. Every wall is fatal under KAYA_SELFTEST over the core's
+synthetic table. AND THE EMULATOR'S TONE STARTS ONLY ONCE THE APP
+RECORDS (docs/traps.md): an injectAudio stream into an input nobody
+records, or one asked for before the input's first read returns,
+crashes the emulator, so the arm asks for the tone only after that first
+read and the runner's one stream start is keyed on the arm's request.
+Watched negatives on every clause, counts printed. AND A SELF-VIEW'S
+NATURAL SIZE SINCE 2026-10-03 (docs/capture-plan.md §3): half its
+frames' as they stand upright, 320x240 with no camera and no minimum,
+from `crate::capture::self_view_natural` on all five arms through the
+box rule's C and JNI self-view doors; Compose had shipped a fixed 320x180 and GTK the frames'
+full size with every capture leg green. AND EVERY VIDEO VIEW, PLAYER OR
+SELF-VIEW, KEEPS ITS ASPECT AS IT SHRINKS (docs/media-plan.md §3): its
+height follows its width, where every arm had kept the full natural
+height and letterboxed the picture inside it; and Android's box is the
+upright picture's, its preview cropped to the frames' field of view
+(docs/traps.md, the Android self-view's shape); and GTK's flowing row
+is height-for-width, since left to the default it measured one line and
+the capture guests' second line of buttons sat under the self-view.
+Twenty-two watched negatives, counts printed. AND THE APP'S ASPECT
+SINCE 2026-10-03 (docs/media-plan.md §3, the ruling): the box is
+`crate::media::video_view_box` on all five arms through its C, host and
+JNI doors, each arm keeps the PICTURE's size for placing the picture
+(Compose's player scale, Android's frames-shaped preview placed by
+`fit`), and both interpreters read `expect_video_box` off the laid-out
+view and `expect_video_corner` four points in; the capture scene sees
+one aspect and two fits on a self-view only, so a backend that reads the
+prop and sizes the box from the picture anyway is a negative here. AND
+THE BOX'S WIDTH IS THE PICTURE'S LONGER SIDE AT ITS NATURAL SCALE SINCE
+2026-10-04, so a rotated phone camera's 16:9 tile is the desktops' 320
+wide rather than the upright picture's 180: the doors carry the
+self-view's frames and rotation, never its fitted size, and the scene
+reads the box's size (`"320x180"`) in all three harnesses, each held to
+comparing both sides. Twenty-eight watched negatives and a fake-name
+census, counts printed)
+
+## tools/check-file-modes.py
+
+`tools/check-file-modes.py` (the file-mode NUMBERS agree with the
+spec's wherever they are written down. `kaya_open_picked` takes an
+integer, crates/kaya/src/spec.rs decides what it means, and five
+hand-written sites decode it: protocol.rs's `picked_mode_code` sends
+it on, the SwiftUI interpreter picks POSIX flags out of bare literals
+(`case 1: flags = O_WRONLY | O_CREAT | O_TRUNC`), and the C# and
+Python bindings pick a FileAccess and an fdopen spelling the same
+way. Renumber the enum and every GENERATED surface moves while those
+literals stay: the guest asks to READ, the backend opens
+O_WRONLY|O_TRUNC, and the file the user picked is emptied with no
+error anywhere. The clause it replaces lived in check-steps and could
+not have caught that — it hard-coded 0/1/2 in the gate. The census is
+the half that survives a new site: every file that redeems a picked
+file is in one of two tables, and the pass-through table's claim is
+itself checked, by refusing any bare mode number in those files)
+
+## tools/check-app-identity.py
+
+`tools/check-app-identity.py` (ONE declared identity, and every
+hand-written copy of it agrees. guests/assets/identity.toml names the
+app and names its mark; a BUILD reads it (the APK's mipmap and
+`android:icon`/`android:label`, the iOS bundle's icon and
+`CFBundleDisplayName`) and the RUNNING APP reads the same file's
+bytes onto the wire (the macOS Dock, the Windows taskbar and caption,
+an X11 window). Five routes reading five different files is how one
+mark on five platforms breaks quietly — the launcher shows last
+month's icon, the running window shows this month's, and every test
+still passes. The clause with teeth is the one nothing else could
+have: the byte-frozen `expect_app_icon "E01B24/33D17A/1C71D8/F6D32D"`
+in tools/scenes is DECODED against the mark's actual pixels, so
+swapping the asset without moving the expectation fails here instead
+of on five lanes at once. Beside it: every file naming
+`KAYA_ICON_FILE` takes its default from the declaration, every
+identity guest declares the declared name, any app-icon resource
+anywhere in the tree is byte-identical to the declared mark, and a
+tools/ packaging step reads the manifest rather than retyping the
+path — the .cmd launchers excepted, because cmd.exe cannot read TOML.
+BUILD OUTPUT IS DELIBERATELY OUT OF ITS WALK: the bytes actually
+written into an artifact are checked by the packaging step itself,
+which is the path nobody can avoid, and a gate that reads a build
+directory has a red that the last watched negative can manufacture)
+
+## tools/check-assets.py
+
+`tools/check-assets.py` (ONE ASSET ROOT, ONE RESOLVER, and every
+lane carrying all of it. `asset(name)` moved the "where are the
+bytes and what do I say when they are not there" rule out of eight
+guests into crates/kaya/src/assets.rs, and that is only true while
+nothing else resolves an asset for itself — so this refuses any file
+outside the core that spells a `guests/assets/...` path or reads an
+asset environment variable, with an EXEMPT table whose every entry
+carries a reason and must name a file that still exists. Beside it:
+every family under the root has a README saying what the files are,
+where they came from, their licence and how to regenerate them (an
+honest "nobody knows" counts, silence does not — the opaque MRT index
+filed under tools/ is the file that failed this and the reason the
+survey found anything); the root's listing is printed with its count
+and REFUSES A VERDICT below a floor, because a census that reads two
+files agrees with everything; each of the five lanes either stages the
+root as a UNIT or says at the site why it needs nothing, and a lane
+caught copying one FILE under the root is the shape this convention
+replaced; and every staging lane verifies what arrived BY HASH, since
+a size check passes the same-length corruption a half-written push
+produces. AND TWO CLAUSES ABOUT THE ARTIFACTS: the census
+tools/scenes/assets.steps freezes must equal the root's own listing —
+that scene is the only run-time observation that a lane staged the
+WHOLE root, and it means adding an asset reddens five lanes, so the
+gate turns that into ONE red naming the .steps file before any lane
+runs — and the APK's asset prefix is one string in the three files
+that spell it (the Kotlin reader, the gradle copy, the emulator
+runner), because Android is the one platform whose packaged assets are
+not files and therefore the one with a packaging layout of its own.
+THE PACKAGED BYTES THEMSELVES ARE CHECKED WHERE THEY ARE PACKAGED,
+by `apk_assets_verify` right after the assemble that wrote them, in
+both directions: a missing entry, and an EXTRA one, which is the half
+the census actually catches.
+AND THE LEDGER NETS TO THE BOOK since 2026-08-26: the portfolio's two
+screens claim the same positions, so guests/assets/market/transactions.csv (built)
+is GENERATED to net to guests/python/portfolio.py's BOOK — per account
+and per ticker, buys minus sells, dividends carrying no quantity — the
+generator reads that book by ast and refuses to write a file that does
+not tie. This clause holds the ARTIFACT ON DISK to the same book,
+derives the scene's `label@net` lines from it, and refuses any net line
+whose money the dashboard does not also say: a tie-out asserted on one
+screen ties nothing (invariant 3, docs/portfolio-plan.md §6).
+Watched negatives doctor a shadow of the
+real tree with the substitution count printed)
+
+## tools/check-staging.py
+
+`tools/check-staging.py` (a wired leg's artifact is in the staging
+derivation its own runner declares: a mac `$RUST_GUESTS` reference
+outside SCENES/DEPTH_SCENES, a windows suite with no launcher or a
+launcher naming an exe no list builds, a leg whose scene script or
+python guest file is gone — each named with the list to extend. The
+measured instance: the windowed-rust mac leg was wired hand-queued
+and absent from the derivation, and the miss cost a full matrix to
+learn what this census says in seconds. Launchers are the artifact
+truth on windows — listdetail runs split.exe, two scenes one guest)
+
+## tools/check-c-ids.py
+
+`tools/check-c-ids.py` (ONE ID SPACE FOR WIDGETS AND TEMPLATE NODES,
+on the one tier with no allocator to hold it. Every binding mints
+both from one monotone counter; the eight template-declaring C
+guests hand-author their numbers, and crates/kaya/src/scene.rs keeps
+`widgets` and `template_nodes` as SEPARATE MAPS on purpose — so a
+collision is legal at the core, renders correctly and ships. All
+eight overlapped until 2026-08-25 with every lane green, which is
+why the gate's first negative is that shipped state itself: the
+eight guests one revision before the renumber, all refused. It reads
+the CALLS, never the `W_`/`N_` names — comments and string literals
+are blanked, then create_widget / create_for / create_when /
+template_end are walked in source order against a template-nesting
+depth, which is scene.rs's own division of the two maps. A
+name-keyed census would refuse guests/c/feed.c and
+guests/c/reorder.c today: their N_POSTS and N_ITEMS are row COUNTS
+whose numbers collide with real widget ids. An id it cannot fold to
+a number is a finding naming the site, never a skip)
+
+## tools/check-c-bounds.py
+
+`tools/check-c-bounds.py` (THE C FLOOR REFUSES PAST ITS CAP INSTEAD OF
+SMASHING PAST IT (ruled 2026-08-26). `KayaTx` was `{buf, len}` — a Go
+slice header missing its third field — and every packer wrote through
+the bare pointer, so a long string was an unchecked memcpy into the
+caller's array. The seven sugar bindings all encode into a growable
+buffer, so C was the one surface where overflow was undefined
+behaviour rather than an error (docs/deferred.md's
+java-record-ceiling entry, which recorded it and left the ruling
+open). NOTHING ELSE CAN SEE IT: every in-tree guest sizes its buffers
+correctly, so the wire bytes are identical either way and no scene,
+lane or capture is any different — the unchecked memcpy shipped from
+milestone 0 under green lanes. TWO MODES, THE WALL PRIMARY:
+tools/checks/c-tx-cap.c mmaps exactly cap writable bytes with the next
+byte unmapped, so a one-byte overrun is a FAULT and not a redzone
+heuristic, and with no runtime in it the linux lane runs it unchanged.
+ADDRESSANITIZER IS THE COMPANION SINCE 2026-08-27, on the shape a wall
+cannot take — a plain malloc, whose next byte is another allocation,
+which is what a guest's buffer is. It asks for flake.nix's
+`kaya-asan-clang` BY NAME, because every nixpkgs clang below 22 has an
+ASan that hangs before main here and the shell's own would spend the
+whole ceiling saying nothing (docs/traps.md); a host without it runs
+the primary alone and PRINTS the skip, which self-test N5 cuts out of
+the gate and makes print on every run. Its build turns the wrapper's
+hardening OFF: `fortify` preempts ASan, and the same overrun then dies
+of a mute SIGTRAP or is not seen at all, so a companion wired naively
+would have been green and blind. The negative is the SHIPPED
+BUG: the same probe built against ee7bc41's pre-cap header, which must
+die of a signal in both walled modes where this one prints a sentence,
+and be a REPORTED heap-buffer-overflow in both heap modes. Beside
+that: a brace-depth parser holding every write through `tx->buf`
+inside a `kaya_wire_fits()` (a line pattern cannot — kaya_wire_begin's
+guard is two lines up), the refusal's TWO branches each naming both
+sizes (the kind is read back out of the record header, so the branch
+where even those 8 bytes were past cap has no kind to name and says
+so), and guests/c/Makefile's `-Werror=missing-field-initializers`,
+which is the wall on the path nobody can avoid: `KayaTx tx = {buf, 0}`
+still COMPILES against a three-field struct, reads cap 0 and refuses
+every record at run time, so the build is made to fail naming `cap`.
+AND NO OUTPUT BYTE MOVED, proven rather than asserted: the probe's
+repertoire — begin/end, u32, u64, pad, values, variant_schemas and a
+value of all five tags, which is everything a guest emits — is
+hexdumped under both headers and compared, 432 bytes identical.
+Four watched negatives, counts printed, each pointed at the mode its
+packer actually runs off the end in)
+
+## tools/check-stubs.py
+
+`tools/check-stubs.py` (no runner wires a scene's legs while its
+backend still stubs the feature — depth-slice stubs compile, so
+only this cross-check sees the combination. A DEPTH STUB IS A CALL,
+`depth_stub("<scene>")` / `depthStub` / `kayaDepthStub(_:on:)`, never
+a sentence: as a free-form string the convention went four milestones
+unwritten by any backend, so the gate could only ever pass, and a
+companion check now fails any backend that refuses in its own words.
+check-steps reads the same call from the other side and stops
+demanding those legs, so between them the two state one rule: a
+scene's legs are wired on a runner IF AND ONLY IF that runner's
+backend has the feature. The Swift declaration names its platform,
+because that one file serves mac AND iOS)
+
+## tools/check-compose.py
+
+`tools/check-compose.py` (KayaCompose.kt actually compiles — the
+swift-typecheck sibling; the emulator must never be the first
+compiler to see the Kotlin layer)
+
+## tools/check-detekt.py
+
+`tools/check-detekt.py` (dead code in the Kotlin sources; the
+COMPILER cannot serve here — K2 moved the UNUSED_* diagnostics into
+IDE inspections (KT-69698), so a computed-and-never-applied local
+compiles clean, which is how a dead lowering once shipped a false
+green)
+
+## tools/check-compose-state.py
+
+`tools/check-compose-state.py` (a KayaSceneModel field a composable
+DRAWS FROM must be composition state: Compose recomposes on a
+`mutableStateOf` it read and never on a plain field, so `windowTitle`
+shipped plain for a milestone with the bar composing once and only a
+film caught it — the scenes read the task label, the other surface.
+Reads each `KayaSceneModel.<field>` inside every `@Composable fun`
+body, comments and strings blanked positionally first (a bare-word
+census reported `rows` and `labels` off prose and KayaNode locals),
+writes excluded (a composable STAMPING a field for the harness is not
+a draw read), against the model's own declarations; the six plain
+fields a composable may read are EXEMPT by name with a reason and
+must each still be read somewhere, since a stale exemption is the
+next stale audit — and the one ordering four of them lean on, the
+alert fields written BEFORE `alertId` in APPLY_PRESENT_ALERT, is read
+and held rather than assumed. AND SINCE 2026-09-15 THE RUN TABLE'S
+GENERATION: every `richRuns` write bumps `richSeq` in the same body,
+because both displays re-derive from the generation and a table written
+without its bump leaves the picture stale while `expect_runs`, which
+reads the table, stays green (docs/rich-text-plan.md §17). Five watched
+negatives, counts printed, the first of them the shipped defect itself)
+
+## tools/check-jni.py
+
+`tools/check-jni.py` (every native a Kotlin or Java class declares is
+in a registration list. JNI's own check runs one way only: it fails
+loudly at attach for a registered native the class lacks, but a
+declared-and-unregistered one just waits, and the UnsatisfiedLinkError
+fires at FIRST USE — which is how `KayaRing.openPicked` sat in the
+desktop-only list for months, under a comment promising it was
+shared. AND BOTH ANDROID ATTACH PATHS RUN BOTH LISTS since 2026-09-30:
+the Rust tier registered KayaPresent alone, so its first `copy_asset`
+died of UnsatisfiedLinkError with the native in a list all along
+(docs/traps.md); one negative, watched red)
+
+## tools/check-build-id.py
+
+`tools/check-build-id.py` (the stale-artifact guard is live: each of
+the three compiled artifacts — libkaya, the SwiftUI interpreter, the
+Compose interpreter — carries the id of the sources it came from,
+the verifier rejects one carrying any other, and every lane verifies
+what it runs or ships before it runs or ships it. The GTK hand capture
+also executes 16 controlled failure/success cases and 10 counted
+mutations: checked stages, fresh output, no publication on failure,
+and guest cleanup)
+
+## tools/check-pins.py
+
+`tools/check-pins.py` (every dependency resolved over the network
+names an exact version — gradle, nuget, SwiftPM, and the container's
+opam index, none of which has a lockfile the way cargo and nix do;
+the SwiftPM clause is the one whose false green cost a debugging
+round, see docs/traps.md.
+AND THE NETWORK IMAGES GUESTS' CLIENT SINCE 2026-10-13: `ureq` at one
+exact release and under [dev-dependencies] alone, since the binding
+carries no HTTP client (docs/network-images-plan.md N1, N12); two watched
+negatives. The OCaml and Haskell guests' clients the same way:
+cohttp-lwt-unix, conduit-lwt-unix and lwt_ssl, http-client-tls,
+http-client and http-types, each at one version in flake.nix's pins, the
+linux image's opam and apt lines and guests/haskell/cabal.project (which
+reaches no Hackage), and no binding naming a client; twelve watched
+negatives.
+AND THE WINDOWS DOOR SINCE 2026-08-26, which is a curl and therefore
+invisible to the other four: tools/fetch-winappsdk.sh pulls five
+Windows App SDK packages out of nuget's flat container, and the
+.csproj clause cannot reach it because the three .csproj files in the
+tree are guest-side and tooling, not the backend. A curl names BYTES
+as well as a version, so that script records each package's sha256
+beside its version and checks it on every run INCLUDING the cached
+path — the cache is the half a version pin cannot speak for, the
+lesson deploy-win's version-keyed go check learned one machine over.
+The gate holds the shape (a literal version, a 64-hex hash, the
+verification unreachable-around) and then CUTS verify_sha256 out of
+the script and runs it against wrong bytes, since static text saying
+a hash is compared is not the comparison refusing. Eight watched
+negatives on doctored copies, counts printed; one of them found its
+own first draft doctoring the dev-shell fingerprint instead of the
+verifier, so an ambiguous pattern is a failed test too. A second
+tools/ script curling the same flat container is refused BY NAME,
+because reading one file by name is how this hole existed.
+AND THE JAVA LANGUAGE LEVEL SINCE 2026-09-17, which is a version pin
+with no version written anywhere: a `javac` with no `--release`
+compiles at whatever the javac on PATH defaults to, so the day a lane's
+JDK moves that lane changes LANGUAGE in silence and every other gate
+stays green — the Go pin's fiction with nothing to read back
+(docs/traps.md). Six javac sites state `--release 21` (the fast gate,
+the annotation processor, the abort exerciser, and the mac, linux and
+Windows-guest builds), twenty-two gradle modules state it again as
+`JavaVersion.VERSION_21` and `jvmTarget = "21"` — read out of EVERY
+occurrence, because a module with sourceCompatibility 17 beside
+targetCompatibility 21 satisfies a membership test and compiles at 17 —
+and the five android/ modules are held at `compileSdk = 36`, since
+pattern matching for switch needs java.lang.runtime.SwitchBootstraps on
+the compile classpath and android-35's android.jar has none (measured;
+D8 desugars the typeSwitch for minSdk 26, so the APKs still run on the
+API-35 image the lane boots). A javac invoked anywhere else in tools/
+is a finding naming the site, with the four files that merely NAME
+javac exempt by name and held to still naming it. The linux image's own
+JDK rides the same clause: Temurin 21 BY VERSION AND BY BYTES, the
+sha256 compared before the unpack and `javac -version` read back after
+it, because `default-jdk-headless` — what that layer used to install —
+follows the base image's default-java and would move the level on a
+base bump with nothing red. Fifteen watched negatives, counts printed.
+AND THE SWIFT PACKAGE SINCE 2026-09-18, in two clauses. THE FIRST IS
+THE POPULATION: bindings/swift is a package target now (Package.swift,
+`.swiftLanguageMode(.v6)`), and of the three builds that compile it two
+are PYTHON (tools/lib/lanes/mac.py, tools/ios/run-sim.py) while the
+`--disable-automatic-resolution` clause read `tools/**/*.sh` alone — so
+every new invocation was policed by nothing. It reads both languages
+now, a python argv list and embedded shell alike, with a docstring
+saying what `swift build` does excluded by name because prose is not a
+command. THE SECOND IS THE LANGUAGE MODE: the package declares Swift 6
+in its manifest and every guest compile goes through kaya_swift_guestc,
+the only tools/ body that may pass -swift-version. Both guest check
+passes compile through SIL, not merely -typecheck: the latter missed
+three data-race refusals and two compiler crashes in the executor slice.
+The interpreter remains in Swift 5. check-pins holds all compiler routes
+and watches a missing wrapper, a check stopping before SIL, and an
+interpreter switched to Swift 6 fail. The Swift 6 guest entry is
+KayaApp.run { app in ... }, whose body and state belong to KayaAppActor;
+the old instance run is refused by the compiler. check-abort exercises
+the real executor and occurrence loop headlessly, including suspension,
+wake, thread identity, post rollback and the retained-transaction refusal,
+with counted cuts of the drain, wake and executor identity watched red.
+The iOS staging path also refuses an executable whose SDK stamp disagrees
+with the selected SDK's SDKSettings.json; a real compile and a counted
+SDKROOT cut prove that refusal in check-pins.
+See docs/measurements/swift-executor-2026-09-18.md. The WAIVER LEDGER
+still names all four nonisolated(unsafe) sites and permits unchecked
+Sendable only on the locked executor queue. New and stale waivers are
+findings, with watched negatives and substitution counts)
+
+## tools/check-design-generation.py
+
+`tools/check-design-generation.py` (BOTH macOS design generations stay
+on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
+flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the
+vendor-built hosts — python3, dotnet, the zulu JVM — hold the compat
+side, which is where the Button measurement bug class lives and which
+nobody chose. It measures COMPILES rather than artifacts (two probes
+built on the spot, three hosts resolved off PATH the way the lane
+resolves them) and refuses a verdict unless all five stamps were read)
+
+## tools/check-symbols.py
+
+`tools/check-symbols.py` (every SF name in the mac interpreter's
+symbol table exists in Apple's own availability plist at or below
+kaya's floor — an SF Symbols 6 rename resolves on every machine the
+project has and renders BLANK on the floor, so NO scene can see it;
+its self-test perturbs doc.on.doc to the macOS-15 rename out of the
+real file, count printed, and demands the refusal on every run)
+
+## tools/check-symbol-parity.py
+
+`tools/check-symbol-parity.py` (its sibling: ONE symbol vocabulary,
+SIX files. wire::SYMBOLS owns the (value, name) set and is not in
+the spec hash; GTK and WinUI name the wire constants so the compiler
+holds their values and the gate holds coverage, while Swift, Compose
+and the C floor copy the NUMBERS by hand — check-file-modes' trap
+one surface over — so there it holds value, name and coverage all
+three. Five self-tests perturb the real files in memory, counts
+printed, red demanded on every run — the fifth (a drifted C-floor
+number) added 2026-08-31 when the python conversion's probing found
+that clause had never been watched firing)
+
+## tools/check-accent.py
+
+`tools/check-accent.py` (the Windows accent near-no-op has a fast
+wall: Fluent fills read six DERIVED stops, never bare
+SystemAccentColor, so writing the bare key moves the text-selection
+highlight and nothing else and no lane can see it — this holds the
+emitted markup to exactly the six stops, self-tested both directions
+on every run; winui::tests' brand test is its rendered-output sibling
+on the windows guest's unit phase)
+
+## tools/check-table-card.py
+
+`tools/check-table-card.py` (A TABLE BOUNDS ITS OWN EXTENT — one
+semantics, four spellings (ruled 2026-08-25). The mac's NATIVE tier
+has it from the widget and is out of the rule; GTK and WinUI each draw
+a flat card; the iOS SYNTHESIZED tier draws the INSET-GROUPED one —
+the Settings look, where the grouped ground behind the card is the
+whole boundary and there is no stroke at all — and COMPOSE draws
+Android's own answer to that same sentence, the SEGMENTED GROUPED
+CONTAINER: a header segment, androidx's 2dp gap, one container for
+every body row, corners BY POSITION (ListTokens.ContainerShape = 16dp
+at the group's true ends, ItemContainerExpressiveShape = 4dp at the
+boundary), and no stroke either, since nothing in the grouped idiom
+draws one. NO SCENE CAN FAIL
+THIS: the card is pixels, and every table
+observable — expect_columns, expect_rows, expect_column_edges,
+expect_window — answers identically with it gone, which is how all
+three shipped a table's OPENING grammar and never its close, running
+the last row into the label under it. So it holds three things a
+capture would otherwise be the only witness to: the card is THERE,
+it is FLAT (no shadow, no blur, no elevation — and on the two grouped
+tiers no stroke either) and its colours are the
+platform's own tokens rather than literals. The flatness clause reads
+the card's OWN BLOCK with comments stripped — all four files
+legitimately name shadows elsewhere, and a comment saying the card
+carries no elevation is the rule written down rather than a breach.
+AND WHICH LAYER WEARS IT, which is the clause a capture bought: the
+iOS card is CONTENT, inside the scroll clip, so it ends with the last
+row and scrolls with a tall table. Painted as the viewport's
+background — the first implementation — a three-row grown table ran
+white to the bottom of the phone, and no observable moved. So the
+face is read INSIDE the clip's block and the ground outside it, and
+both of a grown table's viewport writers are held to the cells' box,
+since the interior scrolls inside that clip. COMPOSE HAS THE SAME
+CLAUSE, in the shape its toolkit forces: no modifier there can draw
+two separated shapes, so the segments are laid-out CHILDREN of the
+table's own Layout — which already sizes itself to the whole extent —
+and the gate holds the two invariants that buys, that they are the
+LAST TWO children (every index in the measure block counts from the
+end) and the FIRST TWO PLACED (placement order is draw order, and a
+segment placed after the rows paints over them). Nothing on that
+modifier chain may paint or pad.
+AND WHERE IT MAY NOT REACH: the mac. The card is the synthesized
+tier's alone (a count in the file AND inside that tier's own block)
+and its numbers are zero on macOS, since the edge instrument subtracts
+what they say the card spends — a card wrapped around KayaNativeTable
+and a macOS arm that draws are each watched being refused.
+AND ON COMPOSE, NO HEADER RULE INSIDE A SEGMENT (ruled
+2026-08-26): the grouped idiom's separator IS the 2dp gap, and a
+HorizontalDivider under the header drew a second one nine pixels
+away and of a different width. Read out of the table's own content
+lambda, so the file's menu separators and the other three backends'
+native hairlines are untouched.
+AND THE HEADER STAYS PINNED WHILE THE ROWS SCROLL since 2026-10-14
+(docs/tables-plan.md, the vertical ruling): eleven clauses hold each phone
+arm's pin, its drawing order, the ground under the pinned segment and the
+position recorders inside the pin, and `expect_header_shown` is its scene
+step. 67 watched negatives, counts printed, red demanded on every run)
+
+## tools/check-keyed.py
+
+`tools/check-keyed.py` (the gate cache is honest: a change inside a
+gate's input set re-runs it, a change outside does NOT, a FAILED gate
+is never cached, KAYA_FAST unset consults nothing but RECORDS its
+passes, the gates that read a built artifact carry the artifact's
+REAL BYTES in their key (build-id.py's ARTIFACT_GATES; ratified
+2026-08-20 — sources alone cannot vouch for target/), and
+check-build-id alone is never keyed, because caching the staleness
+gate's answer is the defect it exists to find)
+
+## tools/swift-typecheck.sh
+
+`tools/swift-typecheck.sh` (the guests, the Swift bindings AND the
+SwiftUI interpreter — a gate named after a layer it does not
+compile has burned someone here; docs/traps.md)
+
+## tools/java-typecheck.py
+
+`tools/java-typecheck.py` (the binding and every java guest compile —
+AND, since 2026-08-26, the one clause in that file that is RUN: a
+record LARGER THAN THE ENCODER'S FIRST BUFFER encodes and reads back.
+Java's encoder was a fixed `ByteBuffer.allocate(4096)`, which capped
+EVERY record at 4064 characters of text or 252 wire values — the only
+binding of the eight that could not grow, and invisible to every gate
+because the ceiling is a THROW and no scene builds a big record. Its
+negative removes the growth from a COPY, prints the substitution count
+and demands BufferOverflowException by name; six refusal branches,
+all six watched firing, docs/deferred.md's java-record-ceiling entry)
+
+## tools/check-ambient-tx.py
+
+`tools/check-ambient-tx.py` (no guest opens a transaction inside a
+handler — the binding already did, and a guest that opens its own is
+CAMOUFLAGE: five of them hid a real Python defect behind green
+scenes for months)
+
+## tools/check-go-env.py
+
+`tools/check-go-env.py` (a Go guest reads the HOST's environment
+through kaya.Env, never Go's copy of it: in a c-shared library — the
+Android artifact — os.Getenv is EMPTY FOREVER while C's getenv reads
+the live one, and the failure is silent because an empty
+KAYA_SELFTEST is not an unknown scene name, it is the default arm.
+A parser rather than a grep, because every file the rule protects
+documents the rule)
+
+## tools/check-wheel.py
+
+`tools/check-wheel.py`
+
+## bindings/python/kaya_app_checks.py
+
+`python3 bindings/python/kaya_app_checks.py`
+
+## tools/js-typecheck.py
+
+`tools/js-typecheck.py` (strict tsc over the JS binding and every
+JS guest — the compiler the guests never otherwise meet, since node
+strips their types and checks nothing; it also writes the workspace
+link the guests import through, and prints the census it compiled)
+
+## bindings/js/kaya_app_checks.ts
+
+`node bindings/js/kaya_app_checks.ts` (the JS surface's negatives,
+the python checks' twin, run in a worker because importing the
+binding on the main thread surrenders it to kaya_run;
+docs/js-plan.md §5)
+
+## tools/go-typecheck.py
+
+`tools/go-typecheck.py` (`go vet` over the one Go module — the
+binding, every Go guest, the generator — the java and JS gates' Go
+twin, which did not exist until 2026-09-04: a scene row duplicated in
+guests/go/cmd/scenes.go compiled in no gate, every lane's guest build
+died on it, and a whole matrix was spent learning what `go vet` says
+in seconds. Its negative doctors a COPY of the module with the shipped
+defect itself and demands the duplicate-key refusal, count printed)
+
+## tools/py-typecheck.py
+
+`tools/py-typecheck.py` (pyright over the python binding and every
+python guest — js-typecheck's opposite number one binding over, and
+the checker a python guest never otherwise meets, since python runs
+whatever it is handed and `kaya.button("Add", on_clik=...)` was found
+by a lane, minutes in. Two projects, both configs under
+bindings/python because pyright IGNORES an absolute path in a config's
+`include` array and says so while analysing nothing: the binding at
+`standard`, STRICT being out of reach for an honest reason — it asks
+for `Any` on the very parameters this dynamic surface's isinstance
+walls exist to check, and 166 of its 362 findings are the binding
+reading its own privates across one module — and the guests at
+`standard` with the binding on `extraPaths`, which is the mac lane's
+own PYTHONPATH. Beside them `--verifytypes kaya --ignoreexternal`,
+whose completeness over the EXPORTED symbols is held to a FLOOR of
+100% printed on every run: a hint that goes missing reads as Unknown
+to a guest's checker and refuses nothing, and no other gate can see
+it. THE GUEST DIAGNOSTICS THAT ARE NOT ABOUT KAYA ride an EXEMPT
+table naming file, rule, COUNT and reason — a new one of the same rule
+in the same file moves the count and is a finding, and so is one that
+has gone away — because a rule turned off is a disabled gate with an
+interface. Two watched negatives, counts printed: a guest copy with
+`on_clik=` refused by name, and a binding copy with one public
+parameter annotation removed scoring 99.9% against the floor.
+PYTHONPATH IS PINNED AT THE TREE BEING READ in both, which is what the
+second negative bought: the dev shell exports the repo's own
+bindings/python and pyright resolves `import kaya` through it, so the
+first shadow run scored the REAL binding and came back 100% with the
+doctoring in hand — the completeness reader now REFUSES any score
+whose package root is not the tree it was asked about)
+
+## tools/check-l10n.py
+
+`tools/check-l10n.py` (THE CATALOG'S COVERAGE, docs/compliance-plan.md
+§2.4: every message a guest names exists in its app's default catalog,
+every catalog the app ships has the default's messages with the same
+arguments, and every catalog parses as far as a brace count can see.
+NO SCENE CAN FAIL THIS — a leg runs under one locale and visits the
+screens its script visits, so a key the Arabic file lacks is a panic on
+the one lane that runs that locale and that screen, and the everyday
+matrix runs neither. THE LOOKUP HAS NINE SPELLINGS AND ONE FLOOR SHAPE
+SINCE 2026-09-23 (docs/compliance-plan.md §1.4): Rust's `tr!(`, Python's
+and JS's `kaya.tr(`, Go's `kaya.Tr(`, C#'s `Kaya.Tr(`, Java's and Swift's
+`KayaApp.tr(`, OCaml's and Haskell's bare `tr "`, and on the C floor the
+`tr_ask` literal the guest hands kaya_tr, each read out of its own guest
+tree — ROOTED under guests/<lang>, since a bare `guests/ocaml/*.ml` also
+read dune's `_build/…/*.pp.ml` preprocessor output, which is not UTF-8.
+Fourteen watched negatives, counts printed: a key missing from one
+locale, an argument a translation dropped, an unbalanced brace, the
+default locale's file gone, and a guest asking for a key no catalog has
+ONCE PER LANGUAGE, so a pattern that reads nothing in some binding is a
+failed test)
+
+## tools/check-winui-bindings.py
+
+`tools/check-winui-bindings.py` (crates/kaya/src/winui/bindings.rs is
+GENERATED by tools/winui-bindgen from the Windows App SDK metadata, and
+nothing held the two together until 2026-09-11 — a filter line added and
+never regenerated was invisible to every gate. The generator's own
+`--check` regenerates into a scratch file and compares; the gate runs it
+and, once more, against a copy one word away, watched red on every run)
+
+## tools/check-gtk.py
+
+One gate sits outside the sweep because it needs docker — gates.py
+carries it in EXCLUDED, with that reason, so it is excluded on the
+record rather than merely absent:
+`tools/check-gtk.py` compile-checks the GTK backend, which
+check-targets structurally cannot (gtk-sys needs the distro's
+pkg-config world). Run it after any gtk.rs change — a green
+check-targets does NOT mean every backend compiles.

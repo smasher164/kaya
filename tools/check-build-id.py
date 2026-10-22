@@ -7,8 +7,8 @@ from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 
 dev_shell_or_die()
 
-# The gate for the stale-artifact guard (tools/build-id.py; CLAUDE.md's
-# gate list). The verify call is one somebody has to write, so a new
+# The gate for the stale-artifact guard (tools/build-id.py;
+# docs/gates.md). The verify call is one somebody has to write, so a new
 # lane starts out unguarded — hence the explicit lane list in clause 2.
 
 import subprocess

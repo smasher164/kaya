@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # THE HARNESS LOSES LEGIBLY: every step is entered with a CEILING, and a
 # published verdict leaves within the EXIT GRACE whether or not the
-# platform's exit path runs (CLAUDE.md's gate list; the four-platform
+# platform's exit path runs (docs/gates.md; the four-platform
 # measurement is docs/measurements/choke-*-2026-08-24.txt). NO SCENE CAN
 # FAIL THIS — a wedge would have to happen on every platform at once.
 #   A  STATIC, all three harnesses: the same two numbers, an arm inside

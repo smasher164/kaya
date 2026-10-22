@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # THE ASSET ROOT'S DRIFT GATE (docs/assets-plan.md A6, gates 2 and 3;
-# CLAUDE.md's gate list). `asset(name)` holds one rule in one Rust
+# docs/gates.md). `asset(name)` holds one rule in one Rust
 # module, true only while nothing else resolves an asset and every lane
 # carries the WHOLE root — neither checkable by the core.
 #

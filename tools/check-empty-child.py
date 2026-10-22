@@ -8,7 +8,7 @@ from kaya_gate import ROOT, TARGET, Gate, dev_shell_or_die, scratch_dir
 dev_shell_or_die()
 
 # ONE NODE IS ONE WIDGET EVEN WHEN ITS CONTENT WILL NOT DECODE, and no
-# layout indexes an unchecked child (CLAUDE.md's gate list;
+# layout indexes an unchecked child (docs/gates.md;
 # docs/deferred.md, "swiftui, KayaCell, Layout, subviews").
 #   A  RUNTIME, macOS only — the probe compiled INTO the interpreter's
 #      own module; SKIPPED AND SAID SO on any other host, since B and C

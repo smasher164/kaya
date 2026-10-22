@@ -8,8 +8,8 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 # A TABLE BOUNDS ITS OWN EXTENT — one semantics, four spellings
-# (docs/deferred.md's table-card entry, ruled 2026-08-25; CLAUDE.md's
-# gate list has the four). NO SCENE CAN FAIL THIS: the card is pixels,
+# (docs/deferred.md's table-card entry, ruled 2026-08-25;
+# docs/gates.md has the four). NO SCENE CAN FAIL THIS: the card is pixels,
 # and every table observable answers the same with it gone. So a gate
 # holds the three things a capture would otherwise witness — the card is
 # THERE, it is FLAT, and its colours are platform tokens — plus the mac,

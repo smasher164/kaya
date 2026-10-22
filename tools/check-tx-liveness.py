@@ -7,8 +7,8 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# THE TRANSACTION-LIVENESS GATE: one rule, all nine tiers (CLAUDE.md's
-# gate list). A transaction is valid ONLY inside the build or handler
+# THE TRANSACTION-LIVENESS GATE: one rule, all nine tiers (docs/gates.md).
+# A transaction is valid ONLY inside the build or handler
 # that created it, on the app thread; a background thread may call only
 # the post. HANDLE bindings refuse a stale handle at ONE chokepoint and
 # check the THREAD there and at the build entry; AMBIENT ones have no

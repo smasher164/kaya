@@ -50,7 +50,7 @@ ones, `swift/KayaSwiftUI.swift:11` and `KayaCompose.kt:1235`). Measured:
 `6f997756`, the `plain` commit, moved it `0x07f8f30026825b06` →
 `0x80fb73fecaaf397f`.
 
-CLAUDE.md's sentence "`MENU_ROLES` is one line, it is not in the spec
+docs/gates.md's sentence "`MENU_ROLES` is one line, it is not in the spec
 hash" is about a DIFFERENT vocabulary — `crates/kaya/src/scene.rs:1100-1101`,
 the menu GESTURE roles (`settings, cut, copy, paste, undo, redo`), a
 `Str` on `MPROP_ROLE=8`. `tools/check-roles.py` guards only that one and

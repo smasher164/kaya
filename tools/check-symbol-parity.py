@@ -7,7 +7,7 @@ from kaya_gate import Gate, dev_shell_or_die
 
 dev_shell_or_die()
 
-# ONE SYMBOL VOCABULARY, SIX FILES (CLAUDE.md's gate list). `wire::SYMBOLS`
+# ONE SYMBOL VOCABULARY, SIX FILES (docs/gates.md). `wire::SYMBOLS`
 # is not in the spec hash and adding a concept regenerates nothing, so a
 # concept added to five of the six fails nowhere at build time and renders
 # as a missing glyph on the sixth platform only. GTK and WinUI NAME the

@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # ONE DECLARATION, TWO READERS, AND NOTHING BETWEEN THEM THAT CAN DRIFT
-# (docs/app-identity-plan.md ruling 4; CLAUDE.md's gate list). The byte
+# (docs/app-identity-plan.md ruling 4; docs/gates.md). The byte
 # comparison itself lives in each packaging step, on the path nobody can
 # avoid; this gate is the STATIC half, and it reaches platforms whose
 # packaging step does not exist yet.

@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # A GO GUEST READS THE HOST'S ENVIRONMENT, NEVER GO'S COPY OF IT
-# (CLAUDE.md's gate list, docs/go-mobile-plan.md D2). BOTH roots are
+# (docs/gates.md, docs/go-mobile-plan.md D2). BOTH roots are
 # scanned: guests/go is where the defect would be written, bindings/go
 # is where whoever "fixes" kaya.Env would write it again.
 #

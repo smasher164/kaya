@@ -11,7 +11,8 @@ dev_shell_or_die()
 # THE THREE LISTS OF GATES MUST BE ONE LIST: what tools/gates.py RUNS,
 # what tools/validate-mac.py runs BY DELEGATION and not by copy, and
 # what CLAUDE.md documents — rung 2, the list a session with no context
-# reads and believes. Plus the CENSUS clause (every gate script ON DISK
+# reads and believes, plus docs/gates.md holding a section per gate.
+# Plus the CENSUS clause (every gate script ON DISK
 # is in the list or in gates.py's EXCLUDED table WITH A REASON; nothing
 # else in the tree can see a gate nobody runs) and the matrix launch
 # (five lanes queued together, the niced sweep after Android exits in a
@@ -71,6 +72,23 @@ def rung2(text):
 
 def documented(block):
     return set(TOKEN.findall(block))
+
+
+def sectioned(text):
+    """The gates docs/gates.md has a `## ` section for."""
+    heads = [ln for ln in text.splitlines() if ln.startswith("## ")]
+    return set(TOKEN.findall("\n".join(heads)))
+
+
+def section_lines(known, secs):
+    out = []
+    for script in sorted(set(known) - secs):
+        out.append(f"{script} is in tools/gates.py's list but has no `## {script}` "
+                   f"section in docs/gates.md — give it one")
+    for script in sorted(secs - set(known)):
+        out.append(f"docs/gates.md has a section for {script}, which is in no "
+                   f"list in tools/gates.py — remove the section or add the gate")
+    return out
 
 
 def script_of(cmd):
@@ -504,6 +522,7 @@ GATES = listing["gates"]
 EXCLUDED = listing["excluded"]
 
 claude_text = (root / "CLAUDE.md").read_text(encoding="utf-8")
+gates_doc_text = (root / "docs" / "gates.md").read_text(encoding="utf-8")
 mac_text = (root / "tools" / "validate-mac.py").read_text(encoding="utf-8")
 lane_texts = {rel: (root / rel).read_text(encoding="utf-8")
               for rel in LANE_RUNNERS}
@@ -818,6 +837,19 @@ else:
         if victim not in only_doc:
             fail(f"self-test N2: {victim} was dropped from the list and the "
                  f"comparison did not report it")
+
+    # N2g — a gate's section cut out of docs/gates.md must be reported.
+    doctored, n = re.subn(rf"^## [^\n]*{re.escape(victim)}[^\n]*$",
+                          "## (cut by self-test)", gates_doc_text, flags=re.M)
+    print(f"check-gates: self-test N2g removed {victim}'s section from "
+          f"docs/gates.md, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test N2g applied {n} substitution(s) — docs/gates.md has no "
+             f"one heading for {victim}, so the section scan is not reading it")
+    elif not any(victim in ln and "no `##" in ln
+                 for ln in section_lines(known, sectioned(doctored))):
+        fail(f"self-test N2g: {victim}'s section was cut and the scan did not "
+             f"report it")
 
 # N2b — the mac lane's sweep put BACK inside the matrix branch, which is
 # the shipped state that cost the ceiling twice. The perturbation moves
@@ -1139,7 +1171,9 @@ for line in drift_lines(only_listed, only_doc):
 if only_listed or only_doc:
     fail("the three lists must be one list — add the gate to tools/gates.py's "
          "GATES (or its EXCLUDED table, with a reason) and name it in rung 2 "
-         "of BOTH CLAUDE.md and AGENTS.md")
+         "of BOTH CLAUDE.md and AGENTS.md, with a section in docs/gates.md")
+for line in section_lines(known, sectioned(gates_doc_text)):
+    fail(line)
 
 for script in census(on_disk, listed_scripts, EXCLUDED):
     fail(f"{script} exists but is in no list — tools/gates.py neither runs it "
@@ -1682,7 +1716,8 @@ for label, rel, pattern, repl in (
 
 if status == 0:
     print(f"check-gates: OK ({len(GATES)} gates in one list, "
-          f"{len(EXCLUDED)} excluded with a reason, five concurrent platform lanes, "
+          f"{len(EXCLUDED)} excluded with a reason, a docs/gates.md section each, "
+          "five concurrent platform lanes, "
           "niced sweep delayed behind Android in a cargo target of its own, four-phone "
           "Android pool, three-sim iOS pool, "
           "five lanes each ending with their verdict and journaling every leg, "

@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # THE CONVERTED WORLD'S RULES — check-shell's opposite number. Eleven
 # rules over every gate body that opens with the prelude header, plus ruff
-# and the prelude's own negatives; CLAUDE.md's validation-ladder paragraph
+# and the prelude's own negatives; docs/gates.md's check-python section
 # lists each rule with the defect it maps to (ruled 2026-08-27,
 # docs/deferred.md). Each is numbered where it is enforced in census().
 

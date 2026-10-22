@@ -11,7 +11,7 @@ dev_shell_or_die()
 
 
 # THE APPEARANCE OVERRIDE IS INERT UNLESS ASKED FOR, AND HONEST WHEN IT
-# IS (CLAUDE.md's gate list;
+# IS (docs/gates.md;
 # docs/measurements/canvas-palette-look-2026-08-27.txt, whose
 # `-AppleInterfaceStyle Dark` attempt is what this replaces).
 #   A. INERT WHEN UNSET: every install site sits behind a reader that

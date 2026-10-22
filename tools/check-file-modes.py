@@ -8,7 +8,7 @@ from kaya_gate import ROOT, Gate, dev_shell_or_die
 dev_shell_or_die()
 
 # A FILE MODE IS A NUMBER THAT CROSSES THREE ABIs, AND THE SPEC OWNS IT
-# (CLAUDE.md's gate list; docs/save-plan.md D3). The gate reads the
+# (docs/gates.md; docs/save-plan.md D3). The gate reads the
 # numbers OUT OF THE SPEC and carries only the SEMANTICS; the numbers
 # are never written down here:
 #

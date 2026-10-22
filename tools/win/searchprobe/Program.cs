@@ -9,7 +9,7 @@
 // own clear button is reachable (template part + Invoke pattern), whether a
 // plain KeyDown handler — the only registration a Rust WinRT delegate can
 // make, since AddHandler's handled-events-too overload wants an IInspectable
-// (CLAUDE.md, the slider row) — ever sees Escape, and what PlaceholderText
+// (docs/gates.md, check-slider-commit) — ever sees Escape, and what PlaceholderText
 // reads back as.
 //
 // Real keys, not property writes: the flyout question is about USER input,

@@ -7,7 +7,7 @@ from kaya_gate import ROOT, dev_shell_or_die
 
 dev_shell_or_die()
 
-# The sugar-surface guard (CLAUDE.md's gate list). Kinds come from the
+# The sugar-surface guard (docs/gates.md). Kinds come from the
 # GENERATED python wire file, so the list tracks the spec by
 # construction; matching is prefix-loose so a language's flavor counts,
 # and C is exempt as the function floor. BOTH DIRECTIONS: everything

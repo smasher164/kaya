@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # Fluent fills read the six DERIVED accent stops, never bare
 # SystemAccentColor, and no lane can see the bare key's near-no-op
-# (CLAUDE.md's gate list; microsoft-ui-xaml#6394, and the measurement
+# (docs/gates.md; microsoft-ui-xaml#6394, and the measurement
 # with the crossed-stops table is on winui/mod.rs's brand_dictionary).
 # THE ELEMENT MARKER IS THE DISCRIMINATOR: prose and the module's own
 # unit test both spell the bare key, so only EMITTED `<Color x:Key="...`

@@ -8,7 +8,7 @@ from kaya_gate import ROOT, dev_shell_or_die
 dev_shell_or_die()
 
 # A handler is already a transaction and a guest must never open one
-# itself (CLAUDE.md's gate list). PYTHON AND JS ONLY: the handle
+# itself (docs/gates.md). PYTHON AND JS ONLY: the handle
 # bindings pass the transaction in, Haskell opens one by idiom, and
 # OCaml has no reliable textual discriminator (`build app` is itself
 # indented and appears twice at two depths in menus.ml, both

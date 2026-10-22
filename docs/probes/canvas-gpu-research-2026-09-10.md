@@ -113,11 +113,11 @@ Dependency versions (`crates/kaya/Cargo.toml:27-31`, confirmed in
 - `expect_ink` compares **within ±1 per channel** because a macOS
   window's backing store carries the display's colour profile — ruled
   2026-08-26, pinned in all three harnesses by `tools/check-verbs.py`
-  (CLAUDE.md's check-verbs paragraph; `docs/canvas-plan.md:7.2`).
+  (docs/gates.md's check-verbs section; `docs/canvas-plan.md:7.2`).
 - `tools/check-canvas-blit.py` holds "KAYA RASTERIZES, BACKENDS BLIT" as
   a *static* rule: the two widget backends may not name the op vocabulary
   at all, and the interpreters may name an op constant only at its
-  definition (CLAUDE.md, check-canvas-blit paragraph). **[inference]** A
+  definition (docs/gates.md, check-canvas-blit paragraph). **[inference]** A
   GPU display path does not violate that gate as written — the gate
   forbids backends *interpreting ops*, not backends receiving a texture —
   but the gate would need a new clause about who owns the device.
@@ -905,8 +905,8 @@ from the screen's.
   (`docs/canvas-plan.md:1289-1296`).
 - `expect_ink` — samples the **backend's rendered surface** at probe
   points, **±1 per channel**, ruled 2026-08-26 because a macOS window's
-  backing store carries the display's colour profile (CLAUDE.md's
-  check-verbs paragraph; `docs/canvas-plan.md` §7.2).
+  backing store carries the display's colour profile (docs/gates.md's
+  check-verbs section; `docs/canvas-plan.md` §7.2).
 
 ### The rule that already covers this, and it is in the tree
 
@@ -1126,7 +1126,7 @@ requirement (§3's table). Order by cost-to-prove:
    `ANativeWindow_fromSurface`, `RawWindowHandle::AndroidNdk`. **The
    measurement first:** surface lifecycle under the lane's `remount-*`
    legs — Compose's mount is re-entrant by design
-   (CLAUDE.md's check-appearance paragraph) and a wgpu surface that
+   (docs/gates.md's check-appearance section) and a wgpu surface that
    outlives its `SurfaceView` is a crash, not a red leg.
 5. **GTK4 — L on its own, and the route is decided by one measurement.**
    Take option (ii): ask GDK for the context

@@ -9,7 +9,7 @@ dev_shell_or_die()
 
 # An SF Symbols 6 rename (`doc.on.doc` -> `document.on.document`) needs
 # macOS 15 / iOS 18 and renders BLANK below that, with no build error and
-# nothing a scene can see (measured 2026-08-16; CLAUDE.md's gate list).
+# nothing a scene can see (measured 2026-08-16; docs/gates.md).
 # The only thing that can answer is Apple's own availability data, which
 # ships on every mac: every SF name in kaya's table must carry a year
 # whose macOS release is <= 13.0 and whose iOS release is <= 16.0, since

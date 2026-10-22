@@ -488,7 +488,7 @@ could only mean nothing. Every binding's template surface refuses it by type
 where the zone has its own handle, as the canvas's size policy does.
 
 Why: invariant 2's sweep with no carve-out, and the size-policy surface is
-the precedent for a prop legal in one zone (CLAUDE.md, check-sugar-surface).
+the precedent for a prop legal in one zone (docs/gates.md, check-sugar-surface).
 
 ### A17 — Landscape chat with the keyboard up: the composer and the keyboard cover the thread (RULED 2026-10-11)
 

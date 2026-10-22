@@ -4032,8 +4032,8 @@ object KayaCompose {
     internal var appearanceOverride: String? = null
 
     /**
-     * `KAYA_APPEARANCE=light|dark` (CLAUDE.md's check-appearance
-     * paragraph). UNSET RECORDS NOTHING; a value that is neither word
+     * `KAYA_APPEARANCE=light|dark` (docs/gates.md's
+     * check-appearance section). UNSET RECORDS NOTHING; a value that is neither word
      * dies here. It only answers the KNOB half — what is finally
      * installed is [appearanceAsked], which the app's own choice wins.
      */
