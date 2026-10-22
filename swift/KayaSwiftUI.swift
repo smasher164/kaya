@@ -14154,6 +14154,35 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     observed.append("\(parts[1]) and \(parts[2]) same width")
                 }
+            case "expect_same_height":
+                // harness.rs's ExpectSameHeight, the same sentences (M21).
+                guard parts.count == 3 else {
+                    failures.append("expect_same_height wants two targets: \(line)")
+                    break
+                }
+                func heightVerdict() -> String? {
+                    let (a, b) = DispatchQueue.main.sync { (kayaFrameHeightRead(parts[1]), kayaFrameHeightRead(parts[2])) }
+                    switch (a, b) {
+                    case (nil, _): return "no such target \(parts[1])"
+                    case (_, nil): return "no such target \(parts[2])"
+                    case (.some(nil), _): return "\(parts[1]) frame unread: <no laid-out frame>"
+                    case (_, .some(nil)): return "\(parts[2]) frame unread: <no laid-out frame>"
+                    case let (h??, k??):
+                        if abs(h - k) <= 1 { return nil }
+                        return "\(parts[1]) \(Int(h.rounded())) tall, \(parts[2]) \(Int(k.rounded())) tall, wanted the same height"
+                    }
+                }
+                var heightWhy = heightVerdict()
+                let heightDeadline = Date().addingTimeInterval(5)
+                while Date() < heightDeadline, heightWhy != nil {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    heightWhy = heightVerdict()
+                }
+                if let why = heightWhy {
+                    failures.append(why)
+                } else {
+                    observed.append("\(parts[1]) and \(parts[2]) same height")
+                }
             case "expect_hugs":
                 // The same read, wanted SHORT (harness.rs Step::ExpectHugs,
                 // the `fill = false` opt-out): a reader that could not read is
@@ -15495,6 +15524,20 @@ var kayaMacButtons: [UInt64: NSButton] = [:]
         return .some(nil)
     }
     return .some(Double(frame.width))
+}
+
+/// expect_same_height's read: a column's, row's or label's laid-out height;
+/// nil for no such target, .some(nil) while nothing is laid out (M21).
+@MainActor func kayaFrameHeightRead(_ spec: Substring) -> Double?? {
+    if let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) {
+        guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id) else { return .some(nil) }
+        return .some(Double(frame.height))
+    }
+    guard let node = kayaTarget(spec, "label", kayaScene.labels) else { return nil }
+    guard let frame = kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }) else {
+        return .some(nil)
+    }
+    return .some(Double(frame.height))
 }
 
 /// expect_text_aligned's read: the left edge, in the window's space, of a

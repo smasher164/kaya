@@ -8994,6 +8994,21 @@ private fun kayaFrameWidthRead(activity: ComponentActivity, spec: String): Doubl
     return rect.width / density
 }
 
+/** expect_same_height's read: a column's or row's outer box height or a label's
+ * text height in dp, null for no such target, NaN while nothing is laid out
+ * (M21). */
+private fun kayaFrameHeightRead(activity: ComponentActivity, spec: String): Double? {
+    val density = activity.resources.displayMetrics.density.toDouble()
+    val container = target(spec, "column", KayaSceneModel.columns) ?: target(spec, "row", KayaSceneModel.rows)
+    if (container != null) {
+        val outer = kayaInsetOuter[container.id] ?: return Double.NaN
+        return outer.second / density
+    }
+    val node = target(spec, "label", KayaSceneModel.labels) ?: return null
+    val rect = kayaOverlapRects[node.id] ?: kayaTextRects[node.id] ?: return Double.NaN
+    return rect.height / density
+}
+
 private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activity) {
         val dock = kayaDockFrame ?: return@onUi "unread (no dock frame is laid out)"
         val density = activity.resources.displayMetrics.density
@@ -14872,6 +14887,33 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             why?.let { failures.add(it) } ?: observed.add("${parts[1]} and ${parts[2]} same width")
                         }
                     }
+                    "expect_same_height" -> {
+                        // harness.rs's ExpectSameHeight, the same sentences (M21).
+                        if (parts.size != 3) {
+                            failures.add("expect_same_height wants two targets: $line")
+                        } else {
+                            fun verdict(): String? {
+                                val h = onUi(activity) { kayaFrameHeightRead(activity, parts[1]) }
+                                val k = onUi(activity) { kayaFrameHeightRead(activity, parts[2]) }
+                                return when {
+                                    h == null -> "no such target ${parts[1]}"
+                                    k == null -> "no such target ${parts[2]}"
+                                    h.isNaN() -> "${parts[1]} frame unread: <no laid-out frame>"
+                                    k.isNaN() -> "${parts[2]} frame unread: <no laid-out frame>"
+                                    kotlin.math.abs(h - k) <= 1 -> null
+                                    else -> "${parts[1]} ${Math.round(h)} tall, ${parts[2]} ${Math.round(k)} tall, " +
+                                        "wanted the same height"
+                                }
+                            }
+                            var why = verdict()
+                            val heightDeadline = System.currentTimeMillis() + 5000
+                            while (why != null && System.currentTimeMillis() < heightDeadline) {
+                                Thread.sleep(100)
+                                why = verdict()
+                            }
+                            why?.let { failures.add(it) } ?: observed.add("${parts[1]} and ${parts[2]} same height")
+                        }
+                    }
                     "expect_hugs" -> {
                         // The same read, wanted SHORT (harness.rs
                         // Step::ExpectHugs, the `fill = false` opt-out): a
@@ -18530,8 +18572,13 @@ private fun kayaHugCross(
     flexVertical: Boolean?,
     flexStretch: Boolean,
 ): Modifier {
-    val crossVertical = node.kind == KayaCompose.KIND_ROW
-    if (!crossVertical && node.kind != KayaCompose.KIND_COLUMN) return Modifier
+    if (node.kind != KayaCompose.KIND_ROW && node.kind != KayaCompose.KIND_COLUMN) return Modifier
+    // The axis prop, not the kind, is the arrangement truth
+    // (docs/adaptive-layout-plan.md D1): a For's host is a column kind laid
+    // out sideways, and read by kind it was never pinned, so its stamped
+    // cards' fillMaxHeight resolved against nothing (M21).
+    val crossVertical =
+        (node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 0L
     // A For's stamped rows span it (docs/tasks-plan.md §4, R7).
     if (!crossVertical && kayaStampsRows(node)) return Modifier
     val pinned =

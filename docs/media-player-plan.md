@@ -959,6 +959,48 @@ instead of growing to fit it is a bug in that backend's flex widths, fixed;
 (4) the album header keeps its 24 inset; (5) the sidebar's "Your Library"
 heading stays at the sidebar's inset.
 
+### M21: Cards in a row are the same height (RULED 2026-10-21)
+
+After M20 (2) gave the search shelf's titles three lines, the two David Amber
+cards read as different heights (Vol. 2's title takes one more line than
+Vol. 1's). The maintainer: "no uneven cards". The rule: every card in one row
+takes the row's tallest card's height, with the card's ground reaching the
+bottom and its content top-aligned.
+
+Where it belongs: two backends, no app change. The rule is already kaya's, the
+2026-08-22 breadth ruling (docs/layout-knobs-plan.md §1, DESIGN.md Layout): a
+nested crossing container spans its parent's breadth under every align mode,
+so a column stamped into a sideways row is the row's height, and the Home and
+artist grids were even on all five since a grid cell spans and `card()` fills
+it. Read from the pictures' pixels rather than by eye (the eye called the mac
+and Windows uneven; both grounds end on one row there), only GTK and Compose
+drew the shelf uneven, one class of bug on both: a For's host is lowered as a
+column kind and the app's `axis` lays it sideways (docs/adaptive-layout-plan.md
+D1, the axis is the arrangement truth), and each arm's cross placement read
+the KIND. GTK wrote its axis key (container_vertical) only at creation, so
+crosses_container read the stamped column as a column in a column and the
+Align arms and add_child keyed halign on the kind; the Prop::Axis arm writes
+the key now and the two Align arms and add_child read it. Compose's
+kayaHugCross keyed `crossVertical` on KIND_ROW, so the sideways host was never
+pinned to `height(IntrinsicSize.Min)` and the cards' fillMaxHeight resolved
+against the horizontal scroll's unbounded height; it reads the axis now.
+tools/lib/skin_gtk.py and skin_compose.py hold both arms with a cut each
+watched red in check-verbs. An app's `align("stretch")` on the shelf's
+container was tried first and changed no backend's picture, so it is not
+written: a declaration of the default misleads the next reader.
+
+Read by `expect_same_height <a> <b>` (two columns', rows' or labels' laid-out
+heights within a point): GTK's and WinUI's window_frame, Compose's
+kayaInsetOuter, and on SwiftUI the skin anchor's view (the drawn box, outside
+the filled surface) before kayaNodeFrames, since a flex child's node frame is
+its TRACK, the row's full height whatever the card drew, and read first it
+passes two uneven cards. music_search.steps and both phone search tails read
+it on the two album cards, music_home.steps on the Jazz row's two cards and
+music_artist.steps on Kellee Maize's two albums, each pair of different
+content heights on at least one lane; the verb read "227 tall, 208 tall" on
+GTK and "216 tall, 200 tall" on Compose before the fixes. check-verbs holds
+the verb in all three harnesses.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

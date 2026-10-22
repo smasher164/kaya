@@ -117,6 +117,8 @@ READS = [
 ]
 MODEL = r"node\.shape\b|node\.labelTint\b|node\.selected\b|node\.activatable\b|node\.selectedDeclared\b"
 CALLS = [
+    ("the hug pin follows the container's axis, not its kind (M21)",
+     "val crossVertical =\n(node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 0L"),
     ("the plain button's label on the text column (M20)",
      "modifier = kayaPlainTrim().then(boxFill).then(a11y).then(buttonRect),"),
     ("the plain trim gives both sides back (M20)",
@@ -208,6 +210,10 @@ def findings(text):
 
 
 CUTS = [
+    ("Compose: the hug pin back on the kind (M21)",
+     r"val crossVertical =\n\s+\(node\.axis \?: if \(node\.kind == KayaCompose\.KIND_COLUMN\) 1L else 0L\) == 0L",
+     "val crossVertical = node.kind == KayaCompose.KIND_ROW",
+     "the hug pin follows the container's axis, not its kind (M21) no longer holds"),
     ("Compose: the plain button's padding kept (M20)", r"modifier = kayaPlainTrim\(\)\.then\(boxFill\)",
      "modifier = boxFill", "the plain button's label on the text column (M20) no longer holds"),
     ("Compose: the dock's line not drawn", r"KayaDockLine\(Modifier\.align\(Alignment\.BottomStart\)\.windowInsetsPadding\(edges\.only\(WindowInsetsSides\.Bottom\)\)\)", "Unit",

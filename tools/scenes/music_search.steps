@@ -28,6 +28,8 @@ expect label@found_album_name[149020] "David Amber and Friends, Vol. 1"
 expect label@found_album_name[154466] "David Amber and Friends, Vol. 2 Instrumentals"
 expect_text_lines label@found_album_name[154466] 3 whole
 expect_same_width column@found_album[154466] column@found_artist[476280]
+# Every card in a row takes the row's tallest card's height (M21).
+expect_same_height column@found_album[154466] column@found_album[149020]
 expect label@found_artist_name[476280] "David Amber"
 expect label@found_track_name[1243462] "Gnarly (feat. Devyn Rush)"
 expect label@found_track_time[1243462] "0:20"

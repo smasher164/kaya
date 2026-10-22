@@ -104,6 +104,11 @@ READS = [
 MODEL = (r"image_shape\(|IMAGE_SHAPE_KEY|has_css_class|css_classes\(\)|state_flags\(|LABEL_TINT_CLASSES|"
          r"SHAPE_CLASSES|ACTIVATABLE_CLASS|skin\.activations")
 CALLS = [
+    ("a container's cross placement follows its axis, not its kind (M21)",
+     "set_container_vertical(container.upcast_ref::<gtk4::Widget>(), mode == 1);"),
+    ("the align arm reads the container's axis (M21)", "let vertical = container_vertical(&container).unwrap_or(true);"),
+    ("a joining child reads its container's axis (M21)",
+     "NativeWidget::Column(c) => apply_cross_align(\n&child_widget,\ncontainer_vertical(c.clone().upcast_ref::<gtk4::Widget>()).unwrap_or(true),"),
     ("the plain button's label on the text column (M20)",
      "button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }"),
     ("the plain role wears the class the rule keys on (M20)", "if role == 5 {\nbutton.add_css_class(PLAIN_CLASS);\n}"),
@@ -221,6 +226,12 @@ def findings(text):
 
 
 CUTS = [
+    ("GTK: the axis arm leaves the cross placement on the kind (M21)",
+     r"\n\s+set_container_vertical\(container\.upcast_ref::<gtk4::Widget>\(\), mode == 1\);", "",
+     "a container's cross placement follows its axis, not its kind (M21) no longer holds"),
+    ("GTK: the align arm back on the kind (M21)",
+     r"let vertical = container_vertical\(&container\)\.unwrap_or\(true\);", "let vertical = true;",
+     "the align arm reads the container's axis (M21) no longer holds"),
     ("GTK: the plain button's padding kept (M20)",
      r"button\.text-button\.kaya-plain \{ margin-left: -17px; margin-right: -17px; \}\n", "",
      "the plain button's label on the text column (M20) no longer holds"),

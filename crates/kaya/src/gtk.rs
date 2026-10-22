@@ -17792,6 +17792,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     // (docs/hscroll-plan.md).
                     use gtk4::prelude::{OrientableExt, WidgetExt};
                     let container = container.clone();
+                    // The axis is the arrangement truth for the cross
+                    // placement too (docs/adaptive-layout-plan.md D1): a For's
+                    // host is a column kind laid out sideways, and keyed on
+                    // the kind its stretch set the children's HALIGN (M21).
+                    set_container_vertical(container.upcast_ref::<gtk4::Widget>(), mode == 1);
                     let orientation = if mode == 1 {
                         gtk4::Orientation::Vertical
                     } else {
@@ -17807,9 +17812,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     use gtk4::prelude::WidgetExt;
                     let container = container.clone().upcast::<gtk4::Widget>();
                     set_container_align(&container, mode);
+                    let vertical = container_vertical(&container).unwrap_or(true);
                     let mut child = container.first_child();
                     while let Some(widget) = child {
-                        apply_cross_align(&widget, true, mode);
+                        apply_cross_align(&widget, vertical, mode);
                         child = widget.next_sibling();
                     }
                 }
@@ -17817,9 +17823,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     use gtk4::prelude::WidgetExt;
                     let container = container.clone().upcast::<gtk4::Widget>();
                     set_container_align(&container, mode);
+                    let vertical = container_vertical(&container).unwrap_or(false);
                     let mut child = container.first_child();
                     while let Some(widget) = child {
-                        apply_cross_align(&widget, false, mode);
+                        apply_cross_align(&widget, vertical, mode);
                         child = widget.next_sibling();
                     }
                 }
@@ -18074,12 +18081,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             match core.widgets.get(&parent).expect("scene validated the id") {
                 NativeWidget::Column(c) => apply_cross_align(
                     &child_widget,
-                    true,
+                    container_vertical(c.clone().upcast_ref::<gtk4::Widget>()).unwrap_or(true),
                     container_align(c.clone().upcast_ref::<gtk4::Widget>()),
                 ),
                 NativeWidget::Row(c) => apply_cross_align(
                     &child_widget,
-                    false,
+                    container_vertical(c.clone().upcast_ref::<gtk4::Widget>()).unwrap_or(false),
                     container_align(c.clone().upcast_ref::<gtk4::Widget>()),
                 ),
                 _ => {}

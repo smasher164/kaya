@@ -40,6 +40,8 @@ expect_grid_columns grid@artist_shelf 2
 expect_image_phase image@artist_art_139585 shown
 expect_shape image@artist_art_139585 rounded
 expect_ax column@artist_card_139585 "button/The Remixes (2015), Kellee Maize"
+# Every card in a row takes the row's tallest card's height (M21).
+expect_same_height column@artist_card_139585 column@artist_card_116452
 expect_no_clipping
 expect_title "Kellee Maize"
 expect_columns column@top_tracks "#|Title|Album|Time"
