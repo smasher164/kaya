@@ -370,6 +370,9 @@ tools/lib/lanes/mac.py's `DARK_LEGS`).
 
 ### M6: Three panes on the desktops, sections and the dock on the phones (RULED 2026-10-17)
 
+AMENDED 2026-10-20 by M16 (12), "no third pane for now": the desktops are a
+sidebar and a content stack, and the full player is the dock alone there.
+
 RECOMMEND §1's shape: `panes` with a sidebar, a content stack and a Now
 Playing pane on the desktops (the pane ladder collapses the third pane first
 on a narrow window, docs/multicolumn-plan.md); sections Home, Search and
@@ -1052,7 +1055,7 @@ the verb in all three harnesses.
    The app's queue (M11) answers next and previous from the dock and through
    the session, declared with the album cover's bytes (M7); `expect_symbol`
    reads a button's glyph on each platform. The desktops' third pane is not
-   built yet.
+   built, by the maintainer's choice in M16 (12), "no third pane for now".
    Search and the toasts (2026-10-19, music_search.steps): a Search row in
    the desktops' sidebar and a Search section on the phones; the platform
    search field asks the catalogue's three searches (albums and artists by
