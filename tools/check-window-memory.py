@@ -39,6 +39,13 @@ dev_shell_or_die()
 #      crates/kaya/src/fullscreen.rs's unit tests. No scene reads either
 #      half: the save skip saves nothing a leg asserts, and no scene declares
 #      an app shortcut on F11, so a dress that took the key first is green.
+#   G  RUNTIME, macOS only: the `// MARK: - The window server's hit shape`
+#      block, cut and compiled with tools/checks/swiftui-resize-shape.swift
+#      over a REAL window whose draw takes 300 ms — the server hands a corner
+#      the growth brought in to the window beneath until the first frame at
+#      the new size is up, the resize verb's wait returns once it is ours,
+#      and every sentence of the wait is printed (docs/traps.md, the hit test
+#      that outran the resize). Three cuts watched.
 
 import os
 import platform
@@ -750,6 +757,58 @@ FS_NEGATIVES = [
 for name, label, pattern, repl, want in FS_NEGATIVES:
     doctored = gate.doctor(f"the {name} perturbation", fs_cut, pattern, repl)
     bad_rc, bad_out = drive(name, doctored, FS_PROBE)
+    if bad_rc == 0:
+        bad_out = bad_out + [f"(the probe exited 0: {label} passed)"]
+    negatives += 1
+    if gate.negative(label, lambda lines=bad_out: lines, want=want):
+        print(f"check-window-memory: self-test — {label} was refused ({want})")
+    else:
+        for line in bad_out:
+            print(f"  {line}", file=sys.stderr)
+
+# --- Clause G: the window server's hit shape after a resize ---------------
+# (docs/traps.md, the hit test that outran the resize): the shape the server
+# hit-tests follows the first frame drawn at the new size, so a `choose` 262 ms
+# after `resize_window` answered the menu bar twice under a matrix and no
+# scene can force it. The probe's window is real, since nothing in the
+# process stands in for the server's shape; its draw takes 300 ms.
+RS_PROBE = "tools/checks/swiftui-resize-shape.swift"
+RS_START = "    // MARK: - The window server's hit shape"
+RS_END = "\n#endif\n\n// MARK: - The choice controls, read off the platform"
+if RS_START not in real or RS_END not in real or real.index(RS_START) > real.index(RS_END):
+    gate.refuse(f"the resize-shape block is not where this gate cuts it "
+                f"({RS_START!r} before the choice controls' MARK)")
+rs_cut = real[real.index(RS_START):real.index(RS_END)]
+gate.counted("lines of the resize-shape block read", len(rs_cut.splitlines()), floor=60)
+rc, out = drive("resize-shape", rs_cut, RS_PROBE)
+for line in out:
+    print(f"  {line}")
+if rc != 0:
+    gate.finding(f"FAIL — the resize-shape probe exited {rc}; the lines above "
+                 f"name the decision that did not hold.")
+    gate.verdict()
+
+RS_NEGATIVES = [
+    ("rs-unread",
+     "a wait that never reads the server",
+     r"let hit = read\(corner\)",
+     "let hit = (ours: true, above: [String]())",
+     "after the wait the server's shape of this window covers that corner"),
+    ("rs-old-corners",
+     "the old frame's corners polled instead of the ones the resize brought in",
+     r"\]\.filter \{ !before\.contains\(\$0\) \}",
+     "].filter { before.contains($0) }",
+     "a shrink brings no corner in and waits nothing"),
+    ("rs-unnamed",
+     "a holder the server lists left unnamed",
+     r"for w in listed where \(w\[kCGWindowNumber as String\] as\? Int\) == number "
+     r"\{\n            return KayaServerHit\(",
+     "for w in listed where false {\n            return KayaServerHit(",
+     "the server names a pid for the top window at the corner"),
+]
+for name, label, pattern, repl, want in RS_NEGATIVES:
+    doctored = gate.doctor(f"the {name} perturbation", rs_cut, pattern, repl)
+    bad_rc, bad_out = drive(name, doctored, RS_PROBE)
     if bad_rc == 0:
         bad_out = bad_out + [f"(the probe exited 0: {label} passed)"]
     negatives += 1

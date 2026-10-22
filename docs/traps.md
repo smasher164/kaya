@@ -18589,3 +18589,40 @@ shelf's cards past its right edge are, and a label clipped there is not a
 clipped label. A hand capture meant to compare against a lane's picture must
 raise the lane's keyboard too (`ime set dev.kaya.cliphelper/.HelperIme`, and
 `ime reset` after), or it compares a different screen.
+
+## The hit test that outran the resize (measured 2026-10-21)
+
+Twice under a matrix, mac `music_search-python` failed at `choose segmented@chips 1`,
+262 ms after `resize_window 1100x720` (from 560x600): `AXUIElementCopyElementAtPosition`
+on the app's element answered the AXMenuBar, frame (0,0,1728,33), for the control's
+centre (1280.5, 427) while the tree held the radio group there, and the step after
+it read the segments through the same hit test and found them. The choose is an
+action verb, asked once; the "60 s" the notes reported was the four expect retries
+behind it. The centre is 126 pt past the old 560-wide frame's right edge.
+
+Measured with a probe that resizes through `DispatchQueue.main.sync` as the harness
+does (docs/measurements/window-server-shape-2026-10-21.md): the shape the window
+server hit-tests, what `NSWindow.windowNumber(at:belowWindowWithWindowNumber:)` and
+therefore `-[NSApplication accessibilityHitTest:]` consult, follows the FIRST FRAME
+DRAWN AT THE NEW SIZE, not `setContentSize`; `kCGWindowBounds` moves at once and is
+the wrong thing to wait on. A plain view's shape caught up in 13-17 ms, a view whose
+draw takes 300 ms in 326-329 ms. A point inside the new frame and outside the old
+one belongs to no window of the app until then, and AppKit's fallback is the menu
+bar (a probe with no main menu gets kAXErrorNotImplemented instead). The music search
+screen relaying out 24 columns with images at 1100 wide under a five-lane matrix with
+the maintainer's browser rendering a review page is where 262 ms was not enough.
+
+Two further readings, both from the leg's own diag line: the guest's window sat
+BEHIND the maintainer's browser and every choose passed, so AppKit's hit test reads
+the app's own windows' shapes and the cross-app top window is not the reading; the
+reader walks the z-order down (`below:` the window above) until it reaches this
+window or none. The resize verb now waits, off the main thread, for the server's
+shape to cover each content corner the resize brought in (bounded 3 s, the diag
+`resize shape:` line saying how long, or what still sat over each corner), and the
+choice reader's refusal names which element was asked, the hit's pid, whether the
+server's shape of this window covers the centre and what sits above it, AppKit's
+frame against the server's bounds, activation, the frontmost app and the screen.
+GUARD: tools/check-window-memory.py clause G (the block cut and driven over a real
+window, three cuts watched), tools/lib/resize_shape.py in check-verbs (eleven cuts);
+by hand, the centre moved under the menu bar and the role renamed, each read back
+from its bundle.

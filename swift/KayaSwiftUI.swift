@@ -14723,11 +14723,17 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 #if os(macOS)
-                    DispatchQueue.main.sync {
-                        if let window = kayaNSWindows[0] {
-                            kayaSetWindowContentSize(
-                                window, NSSize(width: rw, height: rh))
-                        }
+                    let resized: (NSWindow, NSRect)? = DispatchQueue.main.sync {
+                        guard let window = kayaNSWindows[0] else { return nil }
+                        let before = window.frame
+                        kayaSetWindowContentSize(window, NSSize(width: rw, height: rh))
+                        return (window, before)
+                    }
+                    // The hit test a later verb asks reads the window server's
+                    // shape, which follows the first frame drawn at the new size
+                    // (docs/traps.md, the hit test that outran the resize).
+                    if let (window, before) = resized {
+                        kayaDiag(kayaAwaitResizeShape(window, before: before))
                     }
                 #else
                     // Phone and tablet hosts do not command window size — the
@@ -29128,6 +29134,134 @@ func kayaOutOfReach(_ index: Int) -> String {
     "the target is out of reach inside collapsed expander#\(index); expand it first (docs/expander-plan.md K5)"
 }
 
+#if os(macOS)
+    // MARK: - The window server's hit shape (docs/traps.md, the hit test that outran the resize)
+
+    /// What the window server would hand a click at `point` (screen
+    /// coordinates, bottom-left origin): the reading `-[NSApplication
+    /// accessibilityHitTest:]` makes. Never kCGWindowBounds, which moves with
+    /// setContentSize while this shape moves with the first frame drawn at the
+    /// new size (tools/check-window-memory.py clause G).
+    struct KayaServerHit {
+        let number: Int
+        let owner: String
+    }
+
+    func kayaServerBoundsText(_ w: [String: Any]) -> String {
+        guard let b = w[kCGWindowBounds as String] as? [String: Any],
+            let x = b["X"] as? Double, let y = b["Y"] as? Double,
+            let width = b["Width"] as? Double, let height = b["Height"] as? Double
+        else { return "?" }
+        return "\(Int(x)),\(Int(y)),\(Int(width)),\(Int(height))"
+    }
+
+    func kayaServerHit(_ point: NSPoint, below: Int = 0) -> KayaServerHit {
+        let number = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: below)
+        if number <= 0 { return KayaServerHit(number: number, owner: "no window") }
+        let listed =
+            CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        for w in listed where (w[kCGWindowNumber as String] as? Int) == number {
+            return KayaServerHit(
+                number: number,
+                owner: "window \(number) of \(w[kCGWindowOwnerName as String] as? String ?? "?") "
+                    + "(pid \(w[kCGWindowOwnerPID as String] as? Int ?? -1), "
+                    + "layer \(w[kCGWindowLayer as String] as? Int ?? -1), "
+                    + "bounds \(kayaServerBoundsText(w)))")
+        }
+        return KayaServerHit(number: number, owner: "window \(number), not in the on-screen list")
+    }
+
+    /// The server's bounds for the window (top-left origin), on any Space.
+    func kayaServerBounds(_ number: Int) -> String {
+        let listed =
+            CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        for w in listed where (w[kCGWindowNumber as String] as? Int) == number {
+            return kayaServerBoundsText(w)
+        }
+        return "unlisted"
+    }
+
+    /// Whether the server's shape of `window` covers `point`, walking the
+    /// z-order down through the windows above it (which may be other
+    /// applications': AppKit's accessibility hit test reads the app's own
+    /// windows' shapes, measured with the host's browser in front), and the
+    /// owners it passed on the way.
+    func kayaServerHolds(_ window: NSWindow, _ point: NSPoint) -> (ours: Bool, above: [String]) {
+        var above: [String] = []
+        var below = 0
+        for _ in 0..<32 {
+            let hit = kayaServerHit(point, below: below)
+            if hit.number <= 0 { return (false, above) }
+            if hit.number == window.windowNumber { return (true, above) }
+            above.append(hit.owner)
+            below = hit.number
+        }
+        return (false, above)
+    }
+
+    /// `after`'s corners, inset 8pt, that lie outside `before`: the points a
+    /// hit test could ask about that the old shape never covered.
+    func kayaResizeNewCorners(before: NSRect, after: NSRect) -> [NSPoint] {
+        let inner = after.insetBy(dx: 8, dy: 8)
+        return [
+            NSPoint(x: inner.minX, y: inner.minY), NSPoint(x: inner.maxX, y: inner.minY),
+            NSPoint(x: inner.minX, y: inner.maxY), NSPoint(x: inner.maxX, y: inner.maxY),
+        ].filter { !before.contains($0) }
+    }
+
+    /// Off the main thread, which has to turn to draw the frame the shape
+    /// follows: waits up to `bound` for the window server to hand `window`
+    /// every corner the resize brought in, and says what it measured.
+    func kayaAwaitResizeShape(
+        _ window: NSWindow, before: NSRect, bound: TimeInterval = 3.0,
+        holds: ((NSPoint) -> (ours: Bool, above: [String]))? = nil
+    ) -> String {
+        if Thread.isMainThread {
+            return "resize shape: not awaited, asked on the main thread, which has to turn for the "
+                + "window server's shape to move"
+        }
+        let read = holds ?? { kayaServerHolds(window, $0) }
+        let after = DispatchQueue.main.sync { window.frame }
+        let number = DispatchQueue.main.sync { window.windowNumber }
+        let corners = kayaResizeNewCorners(before: before, after: after)
+        if corners.isEmpty {
+            return "resize shape: \(Int(after.width))x\(Int(after.height)) brought no content corner "
+                + "outside \(Int(before.width))x\(Int(before.height)), nothing to await"
+        }
+        let start = Date()
+        var outside: [String] = []
+        var above = 0
+        repeat {
+            (outside, above) = DispatchQueue.main.sync {
+                var most = 0
+                let missing = corners.compactMap { corner -> String? in
+                    let hit = read(corner)
+                    most = max(most, hit.above.count)
+                    return hit.ours
+                        ? nil
+                        : "(\(Int(corner.x)),\(Int(corner.y))) under "
+                            + (hit.above.isEmpty ? "no window" : hit.above.joined(separator: " over "))
+                }
+                return (missing, most)
+            }
+            if outside.isEmpty {
+                return "resize shape: the window server's shape of window \(number) covered all "
+                    + "\(corners.count) corner(s) the resize brought in after "
+                    + "\(Int(Date().timeIntervalSince(start) * 1000)) ms, "
+                    + "with up to \(above) window(s) of other applications above it there"
+            }
+            Thread.sleep(forTimeInterval: 0.002)
+        } while Date().timeIntervalSince(start) < bound
+        return "resize shape: \(Int(bound * 1000)) ms after the resize the window server's shape of "
+            + "window \(number) still leaves out \(outside.count) of \(corners.count) corner(s) the "
+            + "resize brought in: " + outside.joined(separator: ", ")
+            + "; AppKit's frame \(after) bottom-left origin, the server's bounds "
+            + "\(kayaServerBounds(number)) top-left origin"
+    }
+#endif
+
 // MARK: - The choice controls, read off the platform (docs/segmented-plan.md G10)
 
 /// docs/segmented-plan.md §3, G3; the platform's control measured in §7.
@@ -29286,13 +29420,33 @@ enum KayaChoiceRead {
             for kid in kayaAxCopy(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { gather(kid, depth + 1) }
         }
         gather(app, 0)
+        var hitPid: pid_t = 0
+        AXUIElementGetPid(hit, &hitPid)
+        let serverAt = kayaServerHolds(window, NSPoint(x: rect.midX, y: rect.midY))
+        let frame = window.frame
+        let frameTopLeft = CGRect(
+            x: frame.minX, y: primary.frame.maxY - frame.maxY, width: frame.width, height: frame.height)
+        let front = NSWorkspace.shared.frontmostApplication
         return .unread(
             "the element at the control's centre sits in no radio group or pop-up button ("
                 + chain.joined(separator: " < ") + "); the hit's frame "
                 + (kayaAxFrame(hit).map { "\($0)" } ?? "<unpublished>") + " and the centre \(centre), top-left origin; "
                 + "the tree holds \(holders.count) radio group(s) or pop-up(s) containing that centre"
                 + (holders.isEmpty ? "" : " (" + holders.joined(separator: ", ") + ")")
-                + "; \(shown.count) of \(anchors.count) rendering(s) in a visible window")
+                + "; \(shown.count) of \(anchors.count) rendering(s) in a visible window"
+                + "; asked of this application's element (pid \(getpid())), the hit belongs to pid \(hitPid)"
+                + "; the window server's shape of this window (number \(window.windowNumber)) "
+                + (serverAt.ours ? "covers" : "does not cover") + " the centre, "
+                + (serverAt.above.isEmpty
+                    ? "with no window above it there"
+                    : "under \(serverAt.above.count) window(s) there: "
+                        + serverAt.above.joined(separator: " over "))
+                + "; AppKit holds the window's frame at \(frameTopLeft) and the server its bounds at "
+                + "\(kayaServerBounds(window.windowNumber)), top-left origin"
+                + "; app active \(NSApp.isActive), frontmost "
+                + "\(front?.localizedName ?? "<none>") (pid \(front?.processIdentifier ?? -1))"
+                + "; the window's screen \(window.screen.map { "\($0.frame)" } ?? "<none>") "
+                + "against the flip reference \(primary.frame)")
     }
 
 #else

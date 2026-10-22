@@ -1029,8 +1029,7 @@ static_negative(
 
 static_negative(
     "no-resize-invalidation",
-    r"kayaSetWindowContentSize\(\n                                "
-    r"window, NSSize\(width: rw, height: rh\)\)",
+    r"kayaSetWindowContentSize\(window, NSSize\(width: rw, height: rh\)\)",
     "window.setContentSize(NSSize(width: rw, height: rh))",
     "the resize harness bypassed the invalidating helper",
     'func kayaRunScript > case "resize_window"',

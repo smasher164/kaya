@@ -2450,6 +2450,8 @@ def answer_wait(harness_src=None, swift_src=None, kotlin_src=None):
 
 
 answer_out, answer_read = answer_wait()
+from resize_shape import run as check_resize_shape
+resize_shape_status = check_resize_shape(g, swift_action_arm)
 g.counted("action arms read across the three runners", answer_read,
           floor=len(ACTION_VERBS) * len(ANSWER_RUNNERS))
 for line in answer_out:
@@ -5942,7 +5944,8 @@ if (clip_status or window_status or ink_status or ax_status
         or notify_retire_status
         or pump_status or immersive_status or kind_status
         or range_status or media_status or timeout_status or frame_status
-        or capture_status or capture_gtk_status or capture_compose_status):
+        or capture_status or capture_gtk_status or capture_compose_status
+        or resize_shape_status):
     raise SystemExit(1)
 g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"({len(canvas_rows)} of them the canvas vocabularies) + "
@@ -5981,4 +5984,5 @@ g.verdict(f"{len(verbs)} verbs, {len(rows)} constants "
           f"+ the reveal's one door, its platform read and its refusals "
           f"+ the iOS screen read (one pixel of a BMP, each ask's own answer) "
           f"+ a linux drag that never began naming who got the press "
+          f"+ the resize verb's shape wait and the choice refusal's server reading "
           f"+ spec hash against 2 interpreters")

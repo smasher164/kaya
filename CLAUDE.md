@@ -1265,7 +1265,23 @@ in docs/deferred.md.
    D, docs/fullscreen-plan.md §2, §3): GTK and WinUI save no frame while a
    window fills its screen, and their F11 dress runs after the app's own
    chord — no scene declares an app shortcut on F11, so a dress that took
-   the key first is green everywhere; five watched negatives),
+   the key first is green everywhere; five watched negatives.
+   AND THE WINDOW SERVER'S HIT SHAPE SINCE 2026-10-21 (clause G,
+   docs/traps.md, the hit test that outran the resize): the shape the
+   server hit-tests, which AppKit's accessibility hit test reads, follows
+   the first frame drawn at the new size, not setContentSize, so a `choose`
+   262 ms after `resize_window` answered the menu bar twice under a matrix
+   and no scene can force it. The interpreter's `// MARK: - The window
+   server's hit shape` block is cut and compiled with
+   tools/checks/swiftui-resize-shape.swift over a REAL window whose draw
+   takes 300 ms: inside the resize's own block the server still leaves a
+   corner the growth brought in to the window beneath, the resize verb's
+   wait returns once the shape covers it (walking the z-order down through
+   other applications' windows, since a leg passes with the host's
+   browser in front), a shrink waits nothing, the expiry names each
+   corner's holder, and a main-thread caller is refused; three cuts
+   watched. check-verbs holds the resize arm's call, the choice refusal's
+   server reading and the walk (tools/lib/resize_shape.py, eleven cuts)),
    `tools/check-canvas-blit.py` (KAYA RASTERIZES, BACKENDS BLIT — the
    canvas architecture's one rule (docs/canvas-plan.md §1.1), in the
    three places NO SCENE CAN FAIL. A backend that interpreted a draw op
