@@ -22763,6 +22763,21 @@ let kayaPhoneDockArt: CGFloat = 32
 let kayaPhoneDockPadY: CGFloat = 8
 
 #if os(iOS)
+    /// docs/media-player-plan.md M22 (4).
+    struct KayaAccessoryHost: UIViewControllerRepresentable {
+        let content: AnyView
+
+        func makeUIViewController(context: Context) -> UIHostingController<AnyView> {
+            let host = UIHostingController(rootView: content)
+            host.view.backgroundColor = .clear
+            return host
+        }
+
+        func updateUIViewController(_ host: UIHostingController<AnyView>, context: Context) {
+            host.rootView = content
+        }
+    }
+
     /// The Music app's mini player above the tab bar (Y8), iOS 26 and later.
     struct KayaTabAccessory: ViewModifier {
         let windowId: UInt64
@@ -22771,17 +22786,18 @@ let kayaPhoneDockPadY: CGFloat = 8
         func body(content: Content) -> some View {
             if #available(iOS 26, *), let dock = scene.windows[windowId]?.dock, kayaHoldsWidget(dock) {
                 content.tabViewBottomAccessory {
-                    KayaRender(node: dock, isRoot: true)
-                        .environment(\.kayaPhoneDockArt, kayaPhoneDockArt)
-                        .padding(.vertical, kayaPhoneDockPadY)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear
-                                    .onAppear { kayaDockFrame = geo.frame(in: .global) }
-                                    .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
-                                    .onDisappear { kayaDockFrame = nil }
-                            })
+                    KayaAccessoryHost(content: AnyView(
+                        KayaRender(node: dock, isRoot: true)
+                            .environment(\.kayaPhoneDockArt, kayaPhoneDockArt)
+                            .padding(.vertical, kayaPhoneDockPadY)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear
+                                        .onAppear { kayaDockFrame = geo.frame(in: .global) }
+                                        .onChange(of: geo.frame(in: .global)) { _, frame in kayaDockFrame = frame }
+                                        .onDisappear { kayaDockFrame = nil }
+                                })))
                 }
             } else {
                 content

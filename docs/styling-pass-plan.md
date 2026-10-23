@@ -599,6 +599,10 @@ platform's bar surface or the iOS 26 accessory.
 Refused: a dock per pane or per section; a top dock (the toolbar and the menu
 promotion are the top); a dock that pushes or presents on its own.
 
+AMENDED 2026-10-23 (docs/media-player-plan.md M22 (4)): the iOS 26 accessory's
+content is hosted through its own UIHostingController, so its text and
+symbols flip light and dark with the glass as the tab bar's do.
+
 ### Y9: The harness reads every one of these off the screen or the tree, never the model (RULED 2026-10-15)
 
 RECOMMEND the readings §5 lists, each against the platform's resolved token

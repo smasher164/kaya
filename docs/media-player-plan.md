@@ -1077,6 +1077,26 @@ app as a bare python3 process. IOS: the lane's pyhost bundle names itself
 reading (tools/lib/lanes/mac.py DROPS, ios.py's music_dock drop) until the
 music app runs as its own bundle under (6).
 
+(4) "I think maybe the "In Tune / Kellee Maize" on the dock should account
+for the background. How does ios's glass look handle this?" Apple's answer
+(HIG Color, "Liquid Glass color"): on small elements like tab bars the glass
+flips between light and dark with the content under it, and text and symbols
+in the default monochrome styles flip with it; the soft scroll edge effect
+fades content under the bars. kaya's labels already use the default and
+hierarchical styles. What differed: SwiftUI's own `tabViewBottomAccessory`
+content does not follow the flip (Apple's forums, thread 810401,
+FB21365706: a plain `Text` in the accessory stays light while the tab bar
+beside it turns dark; the same accessory in UIKit's UITabAccessory follows
+it, which is what Apple Music does). On the artist page in light the dock's
+"In Tune" drew white on the light glass while the tab bar's labels drew dark.
+The accessory's content now sits in a UIHostingController of its own, whose
+environment follows the UIKit view the accessory flips: the same capture
+draws "In Tune", "Kellee Maize" and the next symbol dark in light and light
+in dark, beside the tab bar's. The broken track row under the Search tab bar
+is the glass's lens over a row, the same as Health's Summary under its tab
+bar on the same simulator; hiding the edge effect on that page changed
+nothing, so nothing there was changed.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on
