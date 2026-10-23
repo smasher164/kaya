@@ -313,10 +313,12 @@ fn overlay_style() -> windows_core::Result<Style> {
 
 const ITEM_FRAME_NAME: &str = "kayaItemFrame";
 
-/// Y4's WinUI selected surface, ListView's own: `ListViewItemBackgroundSelected`
-/// under the container and the accent pill at its leading edge, 3x16 as
-/// ListViewItemPresenter draws it. ItemContainer's own selection is a ring,
-/// which the item's resources clear (the 2026-10-17 preview).
+/// Y4's WinUI selected surface for a row, ListView's own:
+/// `ListViewItemBackgroundSelected` under the container and the accent pill at
+/// its leading edge, 3x16 as ListViewItemPresenter draws it; the row's
+/// ItemContainer ring is cleared, since it drew over a label's first letter (the
+/// 2026-10-17 preview). A card keeps ItemContainer's own ring, the grid's
+/// selection, around its inset content (docs/media-player-plan.md M22 (5)).
 const ITEM_FRAME_XAML: &str = "<Grid xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
      Name=\"kayaItemFrame\">\
      <Border Visibility=\"Collapsed\" Background=\"{ThemeResource ListViewItemBackgroundSelected}\" \
@@ -342,15 +344,9 @@ fn paint_selected(id: WidgetId) -> windows_core::Result<()> {
     let Some(frame) = frame else { return Ok(()) };
     let vis = |shown: bool| if shown { Visibility::Visible } else { Visibility::Collapsed };
     let children = frame.Children()?;
-    children.GetAt(0)?.SetVisibility(vis(on))?;
-    children.GetAt(2)?.SetVisibility(vis(on && !table))?;
-    // A filled card's own fill sat over the selected fill and hid it: the
-    // selected surface takes the fill's place, its shape and stroke kept.
-    if fill != 0 {
-        if let Ok(card) = windows_core::Interface::cast::<Grid>(&children.GetAt(1)?) {
-            card.SetStyle(&if on { tinted_style(fill, "SubtleFillColorTransparentBrush")? } else { filled_style(fill)? })?;
-        }
-    }
+    let card = fill != 0 && !table;
+    children.GetAt(0)?.SetVisibility(vis(on && !card))?;
+    children.GetAt(2)?.SetVisibility(vis(on && !table && !card))?;
     Ok(())
 }
 
@@ -371,6 +367,11 @@ pub(super) fn seat_in_table(id: WidgetId, in_table: bool) -> windows_core::Resul
         }
     });
     paint_selected(id)
+}
+
+/// Whether a selected container wears the card's ring rather than the row's pill.
+pub(super) fn is_card(id: u64) -> bool {
+    SKIN.with_borrow(|s| s.host_fills.get(&id).is_some_and(|f| *f != 0) && !s.table_rows.contains(&id))
 }
 
 /// Whether a container is a declared table's row, which wears no pill.
@@ -452,11 +453,6 @@ fn wrap(core: &mut CoreState, id: WidgetId) -> windows_core::Result<()> {
         Ok(())
     }))?;
     host.SetIsSelected(SKIN.with_borrow(|s| s.selected.get(&id.0).copied().unwrap_or(false)))?;
-    let clear = theme_resource::<Brush>("SubtleFillColorTransparentBrush")?;
-    let resources = host.Resources()?;
-    for key in ITEM_RING_KEYS {
-        resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;
-    }
     let frame: Grid = XamlReader::Load(&HSTRING::from(ITEM_FRAME_XAML))?.cast()?;
     reseat_element(core, id, &inner, &host.cast()?)?;
     let pill = frame.Children()?.GetAt(1)?;
@@ -502,6 +498,8 @@ fn round_host(core: &CoreState, id: WidgetId, host: &ItemContainer) -> windows_c
         Some(&tint) => {
             host.SetCornerRadius(theme_resource::<IReference<CornerRadius>>("OverlayCornerRadius")?.Value()?)?;
             SKIN.with_borrow_mut(|s| s.host_fills.insert(id.0, tint));
+            let _ = paint_selected(id);
+            return Ok(());
         }
         // An unfilled child draws nothing where it has no content, so the
         // pointer would pass through it to the item: the transparent token
@@ -512,6 +510,11 @@ fn round_host(core: &CoreState, id: WidgetId, host: &ItemContainer) -> windows_c
             }
             SKIN.with_borrow_mut(|s| s.host_fills.insert(id.0, 0));
         }
+    }
+    let clear = theme_resource::<Brush>("SubtleFillColorTransparentBrush")?;
+    let resources = host.Resources()?;
+    for key in ITEM_RING_KEYS {
+        resources.Insert(&PropertyValue::CreateString(&HSTRING::from(key))?, &clear)?;
     }
     Ok(())
 }

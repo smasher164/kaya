@@ -26961,6 +26961,33 @@ impl crate::harness::Stage for WinUiStage {
                     // nowhere along the top or the trailing edge, which is
                     // where ItemContainer's own ring would also be accent.
                     let is_pill = |x: f64, y: f64| shot.at(x, y).is_some_and(|c| skin::read::gap(c, pill) <= 0.12);
+                    // A SELECTED CARD is ItemContainer's own ring, accent on all
+                    // four edges, with no pill inside it; a row is the pill's
+                    // (docs/media-player-plan.md M22 (5)).
+                    let ring = resolve("ItemContainerSelectionVisualBackground")?;
+                    let ring = [ring[0] / 255.0, ring[1] / 255.0, ring[2] / 255.0];
+                    let is_ring = |x: f64, y: f64| shot.at(x, y).is_some_and(|c| skin::read::gap(c, ring) <= 0.12);
+                    let edges = [(fx + fw / 2.0, fy + 0.5), (fx + fw - 0.5, fy + fh / 2.0), (fx + fw / 2.0, fy + fh - 0.5), (fx + 0.5, fy + fh / 4.0)];
+                    let ringed = edges.iter().all(|&(x, y)| is_ring(x, y));
+                    let card = id.is_some_and(|id| skin::is_card(id.0));
+                    let inside = shot.at(fx + 2.5, fy + fh / 2.0).map_or("<off the print>".to_owned(), skin::read::hex);
+                    let pill_in_ring = is_pill(fx + 2.5, fy + fh / 2.0);
+                    let theme = if dark { "dark" } else { "light" };
+                    if ringed {
+                        return Ok(if card && !pill_in_ring {
+                            format!("selected (the ring {} on all four edges, {inside} inside it at the leading edge, no pill, {theme})", skin::read::hex(ring))
+                        } else {
+                            format!(
+                                "misdrawn (the ring {} on all four edges of a {}, {inside} inside it at the leading edge{}, {theme})",
+                                skin::read::hex(ring),
+                                if card { "card" } else { "row" },
+                                if pill_in_ring { ", the pill's" } else { "" }
+                            )
+                        });
+                    }
+                    if card && is_pill(fx + 1.5, fy + fh / 2.0) && !is_pill(fx + 1.5, fy + 1.5) {
+                        return Ok(format!("misdrawn (a card wearing the row's pill at its leading edge and no ring, {theme})"));
+                    }
                     if let Some(lead) = shot.at(fx + 1.5, fy + fh / 2.0) {
                         let sample = got.map(|v| v / 255.0);
                         let ground = bare.map(|v| v / 255.0);

@@ -447,6 +447,10 @@ tree carries the selected state. Selection is the APP's, as sort is: the
 where it wants it; kaya never toggles it, so a single-selection list and a
 multi-selection grid are the same vocabulary.
 
+AMENDED 2026-10-23 (docs/media-player-plan.md M22 (5), "Yes."): on WinUI a
+selected CARD (a filled activatable container) wears ItemContainer's own
+accent ring and no pill; a selected row keeps ListView's fill and pill.
+
 On the macOS native table tier (an `NSTableView`), `on_activate` on the row
 template is the table's own double-click action and `selected` is the table's
 own selection, bound both ways; kaya paints nothing over a native row.

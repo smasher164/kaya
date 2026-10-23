@@ -1097,6 +1097,19 @@ is the glass's lens over a row, the same as Health's Summary under its tab
 bar on the same simulator; hiding the edge effect on that page changed
 nothing, so nothing there was changed.
 
+(5) Asked "should a selected card go back to WinUI's accent ring, with rows
+keeping the pill?", the maintainer: "Yes." A selected card on WinUI is
+ItemContainer's own selection, the accent ring (2 px of
+ItemContainerSelectionVisualBackground and its 1 px inner border) around the
+item, which sits on the card's edge, outside its 12 px inset; it wears no
+pill and no ListView fill, and keeps its own card fill. A selected row keeps
+ListView's fill and the 3x16 pill, its ring keys cleared as before (the ring
+drew over a row label's first letter, the 2026-10-17 preview). The backend
+tells them apart by what the app built: a filled activatable container is a
+card, an unfilled one or a declared table's row is a row. expect_fill reads
+a selected card as the ring on all four edges with no pill inside it, and
+names a card with the pill, or a row with the ring, `misdrawn`.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on
