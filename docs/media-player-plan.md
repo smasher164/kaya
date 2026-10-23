@@ -1033,6 +1033,14 @@ hover, sampled D4D4D4 against its resting D9D9D9: a lightness step of 2.0
 ...)" on the mac and "F9F9F9 against FFFFFF ... 2.1" on GTK. A hovered bare
 row on the mac now draws the colour a resting card draws.
 
+(2) "The back button background color should be consistent. I guess it
+should be flat everywhere?" The app already draws one flat header button on
+GTK; the grey on Linux's Search was the lane's own pointer, parked by the x11
+typing verb on the back button (docs/traps.md, the x11 key verbs' parked
+pointer). The mac draws the same flat back on Search and on the album; WinUI
+draws its one back button, the same on both screens, with the control's own
+ground and stroke.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

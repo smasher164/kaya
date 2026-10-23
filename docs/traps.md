@@ -18751,3 +18751,17 @@ file "untitled" couldn't be opened because you don't have permission to view
 it." ...`. NOT REPRODUCED otherwise: editor, save and filedialog on iOS, 7 of 7.
 GUARD: check-steps' ios_give_up holds the alert read and ios_save_staging the
 note, one cut each watched red.
+
+## The x11 key verbs' parked pointer hovered the header's back (measured 2026-10-23)
+
+The final review's Linux Search screen showed its header back button on a
+grey ground where the album's was flat. Both are the same GtkButton (classes
+`image-button`, the header's start box); on Search it carried StateFlags
+PRELIGHT, libadwaita's flat-button hover (header 250 to 236 light, 34 to 50
+dark). `type`, `press` and the platform-key verbs parked the lane's pointer
+at X (40,40) of the window before focusing it (the POINTERROOT entry above),
+which is on the back button whenever one is shown, and Search is the only
+captured screen that types. The verbs now park at a point the window's own
+pick says holds no button or activatable container (gtk.rs x11_rest_point),
+and refuse naming what they found when there is none.
+

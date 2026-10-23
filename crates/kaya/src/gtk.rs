@@ -20516,9 +20516,10 @@ fn send_platform_key(keysym: &str, verb: &'static str, x11_window: Option<u64>) 
         });
         let mut args: Vec<String> = Vec::new();
         if !window.is_empty() {
+            let (x, y) = GtkStage::x11_rest_point(&window);
             args.extend([
                 "mousemove".to_owned(), "--window".to_owned(), window.clone(),
-                "40".to_owned(), "40".to_owned(), "windowfocus".to_owned(), window,
+                x.to_string(), y.to_string(), "windowfocus".to_owned(), window,
             ]);
         }
         args.extend(["key".to_owned(), keysym.to_owned()]);
@@ -21156,6 +21157,43 @@ mod toast_ear {
 
 #[cfg(feature = "harness")]
 impl GtkStage {
+    /// Where the x11 key verbs park the lane's pointer in X window `xid`: a
+    /// point no button or activatable container holds, so the parked pointer
+    /// hovers nothing the leg draws (docs/media-player-plan.md M22 (2)).
+    fn x11_rest_point(xid: &str) -> (i32, i32) {
+        let xid: Option<u64> = xid.parse().ok();
+        Self::on_main(move |core| {
+            use gtk4::prelude::{Cast, GtkWindowExt, NativeExt, WidgetExt};
+            let window = gtk4::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk4::Window>().ok())
+                .find(|w| {
+                    w.surface()
+                        .and_then(|s| s.downcast::<gdk4_x11::X11Surface>().ok())
+                        .is_some_and(|s| Some(s.xid() as u64) == xid)
+                })
+                .unwrap_or_else(|| core.window.clone());
+            let (w, h) = (f64::from(window.width()), f64::from(window.height()));
+            let (sx, sy) = window.surface_transform();
+            let mut seen = Vec::new();
+            for (x, y) in [(w / 2.0, 4.0), (w / 2.0, h - 4.0), (4.0, h / 2.0), (w - 4.0, h / 2.0)] {
+                let picked = window.pick(x, y, gtk4::PickFlags::DEFAULT);
+                let control = std::iter::successors(picked.clone(), |p| p.parent()).find(|p| {
+                    p.is::<gtk4::Button>() || p.has_css_class(ACTIVATABLE_CLASS) || p.has_css_class("activatable")
+                });
+                match control {
+                    None => return ((x + sx).round() as i32, (y + sy).round() as i32),
+                    Some(c) => seen.push(format!("({x:.0},{y:.0}) is on a {}", c.type_().name())),
+                }
+            }
+            panic!(
+                "kaya: the x11 pointer has no point of window {:?} to rest on that holds no control: {}",
+                window.title().unwrap_or_default(),
+                seen.join(", ")
+            )
+        })
+    }
+
     /// One key through the injector `type_text` uses, at whatever holds the
     /// focus, with no caret move (docs/reveal-plan.md V10).
     fn press_key(key: &str) {
@@ -21174,8 +21212,9 @@ impl GtkStage {
             let window = found.split_whitespace().next().unwrap_or("").to_owned();
             let mut args: Vec<String> = Vec::new();
             if !window.is_empty() {
-                args.extend(["mousemove", "--window", &window, "40", "40", "windowfocus", &window]
-                    .iter().map(|a| (*a).to_owned()));
+                let (x, y) = Self::x11_rest_point(&window);
+                args.extend(["mousemove".to_owned(), "--window".to_owned(), window.clone(), x.to_string(), y.to_string(),
+                             "windowfocus".to_owned(), window.clone()]);
             }
             args.extend(["key".to_owned(), key.to_owned()]);
             ("xdotool", args)
@@ -23209,9 +23248,10 @@ impl crate::harness::Stage for GtkStage {
                 let mut args: Vec<String> = if window_arg.is_empty() {
                     vec!["key".to_owned(), "ctrl+End".to_owned()]
                 } else {
+                    let (x, y) = Self::x11_rest_point(&window_arg);
                     vec![
                         "mousemove".to_owned(), "--window".to_owned(), window_arg.clone(),
-                        "40".to_owned(), "40".to_owned(), "windowfocus".to_owned(),
+                        x.to_string(), y.to_string(), "windowfocus".to_owned(),
                         window_arg.clone(), "key".to_owned(), "ctrl+End".to_owned(),
                     ]
                 };
