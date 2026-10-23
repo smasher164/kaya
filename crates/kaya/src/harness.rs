@@ -1548,6 +1548,35 @@ pub const VIDEO_INK_NONE: &str = "none";
 pub(crate) const FILL_READINGS: &[&str] =
     &["accent", "success", "warning", "critical", "neutral", "overlay", "hovered", "selected", "none"];
 
+/// The least CIELAB lightness step a hover may make over the ground it rests
+/// on (docs/media-player-plan.md M22 (1)): WinUI's PointerOver, the visible
+/// reference, measured 3.1 on a light card; the faint hovers it replaced, 2.1.
+pub(crate) const HOVER_MIN_LIGHTNESS: f64 = 3.0;
+
+/// CIELAB L* of an sRGB colour given 0-255 per channel.
+pub(crate) fn lightness(c: [f64; 3]) -> f64 {
+    let lin = |v: f64| {
+        let v = v / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    let y = 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+    if y > 216.0 / 24389.0 { 116.0 * y.cbrt() - 16.0 } else { y * 24389.0 / 27.0 }
+}
+
+/// expect_fill's hover floor: None when `sample` stands HOVER_MIN_LIGHTNESS
+/// or more from `resting`, else the reading that refuses it.
+pub(crate) fn faint_hover(sample: [f64; 3], resting: [f64; 3]) -> Option<String> {
+    let step = (lightness(sample) - lightness(resting)).abs();
+    let hex = |c: [f64; 3]| format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8);
+    (step < HOVER_MIN_LIGHTNESS).then(|| {
+        format!(
+            "faint (a hover, sampled {} against its resting {}: a lightness step of {step:.1}, under the {HOVER_MIN_LIGHTNESS:.1} a hover must show)",
+            hex(sample),
+            hex(resting)
+        )
+    })
+}
+
 /// A reading whose first word is the verdict and whose rest is what the
 /// reader measured, held to the wanted word.
 fn word_reading(got: &str, want: &str, what: impl Fn() -> String) -> Result<String, String> {
@@ -12654,6 +12683,14 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 0, "{verdict}");
         assert!(verdict.contains("column#0 spans its breadth"), "{verdict}");
+    }
+
+    #[test]
+    fn a_hover_under_the_floor_reads_faint() {
+        let faint = faint_hover([213.0, 215.0, 215.0], [219.0, 221.0, 221.0]).expect("the old mac hover is faint");
+        assert!(faint.starts_with("faint "), "{faint}");
+        assert!(faint_hover([244.0; 3], [253.0; 3]).is_none(), "WinUI's PointerOver is the visible reference");
+        assert!((lightness([255.0; 3]) - 100.0).abs() < 0.01 && lightness([0.0; 3]).abs() < 0.01);
     }
 
     #[test]

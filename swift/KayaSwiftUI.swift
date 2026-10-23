@@ -21850,10 +21850,11 @@ let kayaSelectionTakesText: Bool = {
     #endif
 }
 
-/// The mac's hover layer (Y4, the maintainer's ruling: the quaternary fill).
+/// The mac's hover layer: the card's own fill laid once more
+/// (docs/media-player-plan.md M22 (1)).
 @MainActor func kayaHoverFill() -> Color {
     #if os(macOS)
-        if #available(macOS 14, *) { return Color(nsColor: .quaternarySystemFill) }
+        if #available(macOS 14, *) { return Color(nsColor: .secondarySystemFill) }
         return Color(nsColor: .quaternaryLabelColor)
     #else
         return Color(uiColor: .quaternarySystemFill)
@@ -21971,7 +21972,7 @@ struct KayaLabelTint: ViewModifier {
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(neutral))]
         let hover: NSColor
-        if #available(macOS 14, *) { hover = .quaternarySystemFill } else { hover = .quaternaryLabelColor }
+        if #available(macOS 14, *) { hover = .secondarySystemFill } else { hover = .quaternaryLabelColor }
         let skin = (hover: rgba(hover), neutral: rgba(neutral), selected: rgba(.selectedContentBackgroundColor))
     #else
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
@@ -22024,9 +22025,9 @@ struct KayaLabelTint: ViewModifier {
     func layered(_ top: [Double], _ under: [Double]) -> [Double] {
         (0..<3).map { top[$0] * top[3] + under[$0] * (1 - top[3]) }
     }
-    let skinned = [("hovered", layered(skin.hover, Array(ground.prefix(3)))),
-                   ("hovered", layered(skin.hover, over(skin.neutral))),
-                   ("selected", over(skin.selected))]
+    let resting = [(layered(skin.hover, Array(ground.prefix(3))), Array(ground.prefix(3))),
+                   (layered(skin.hover, over(skin.neutral)), over(skin.neutral))]
+    let skinned = [("hovered", resting[0].0), ("hovered", resting[1].0), ("selected", over(skin.selected))]
     let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))]
         + others.map { ($0.0, over($0.1)) } + skinned
     func hex(_ c: [Double]) -> String {
@@ -22062,8 +22063,29 @@ struct KayaLabelTint: ViewModifier {
                 + "\(kayaHex(art)) at \(String(format: "%.3f", theirs)))"
         }
     }
+    if ranked[0].0 == "hovered", let under = resting.first(where: { $0.0 == ranked[0].1 })?.1,
+        let faint = kayaFaintHover(px, under)
+    {
+        return faint
+    }
     return "\(ranked[0].0) (sampled \(got) at \(probeAt); "
         + ranked.prefix(3).map { "\($0.0) \(hex($0.1))" }.joined(separator: ", ") + ")"
+}
+
+/// The core's HOVER_MIN_LIGHTNESS (crates/kaya/src/harness.rs faint_hover).
+let kayaHoverMinLightness = 3.0
+
+/// The core's faint_hover, on 0-1 channels.
+func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
+    func lightness(_ c: [Double]) -> Double {
+        let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
+        let y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+        return y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+    }
+    let step = abs(lightness(sample) - lightness(resting))
+    guard step < kayaHoverMinLightness else { return nil }
+    return "faint (a hover, sampled \(kayaHex(sample)) against its resting \(kayaHex(resting)): a lightness step of "
+        + String(format: "%.1f", step) + ", under the " + String(format: "%.1f", kayaHoverMinLightness) + " a hover must show)"
 }
 
 /// The window's own pixels for the skin's readers (docs/styling-pass-plan.md

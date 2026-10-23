@@ -115,6 +115,7 @@ READS = [
      ["table_row_grid(core, t)", "if off.abs() > 2.0 => format!("]),
     ("expect_fill's skin readings", "fn fill_tint(&self, t: crate::harness::Target) -> String {",
      ['layered("ItemContainerPointerOverBackground", bare)?', 'layered("ItemContainerPointerOverBackground", card)?',
+      '.and_then(|(_, under)| crate::harness::faint_hover(got, *under))',
       "1.05 / (own + 0.05) >= 4.5 && own < theirs / 2.0", "skin::read::picture_at(pictured,",
       'resolve("ListViewItemSelectionIndicatorBrush")?', 'layered("ListViewItemBackgroundSelected", bare)?',
       "let pilled = is_pill(fx + 1.5, fy + fh / 2.0)\n&& !is_pill(fx + 1.5, fy + 1.5)\n&& !is_pill(fx + fw - 1.5, fy + fh / 2.0);",

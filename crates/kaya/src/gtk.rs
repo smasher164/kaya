@@ -8481,14 +8481,16 @@ button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
 
 /// THE SKIN (docs/styling-pass-plan.md §3's GTK row): grounds, image shapes,
 /// activatable containers, label tints and the dock, every colour libadwaita's
-/// own. The hover, press and selected layers are libadwaita 1.9's own rules
-/// for `.card.activatable` and `row.activatable` / `row:selected`, which a
-/// GtkBox matches only through these classes (docs/styling-pass-plan.md §7).
+/// own. The hover and press layers are libadwaita's `$hover_color` and
+/// `$active_color` on cards and rows alike (docs/media-player-plan.md M22 (1));
+/// the selected layer is its `row:selected` (docs/styling-pass-plan.md §7).
 const SKIN_CSS: &str = "\
 .kaya-shape-rounded { border-radius: 12px; }
 .kaya-shape-circle { border-radius: 9999px; }
-.kaya-activatable:not(.card):hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }
-.kaya-activatable:not(.card):active { background-color: color-mix(in srgb, currentColor 8%, transparent); }
+.kaya-activatable:not(.card):hover { background-color: color-mix(in srgb, currentColor 7%, transparent); }
+.kaya-activatable:not(.card):active { background-color: color-mix(in srgb, currentColor 16%, transparent); }
+.kaya-activatable.card:hover { background-image: image(color-mix(in srgb, currentColor 7%, transparent)); }
+.kaya-activatable.card:active { background-image: image(color-mix(in srgb, currentColor 16%, transparent)); }
 .kaya-activatable:not(.card):selected { background-color: color-mix(in srgb, var(--accent-bg-color) 25%, transparent); }
 .kaya-activatable.card:selected { background-image: image(color-mix(in srgb, var(--accent-bg-color) 25%, transparent)); }
 .kaya-filled label.accent, .kaya-filled label.success, .kaya-filled label.warning, .kaya-filled label.error { color: inherit; }
@@ -9564,8 +9566,8 @@ fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl
     core.skin.dirty = true;
 }
 
-/// Y4: the container takes a click as a whole. libadwaita paints the hover
-/// and press (`.card.activatable`, or the row rules SKIN_CSS carries), the
+/// Y4: the container takes a click as a whole. SKIN_CSS paints the hover
+/// and press in libadwaita's own colours, the
 /// tree says button, and the press, Return and Space all go through one door.
 /// A widget already in a live tree has a realized accessible context, whose
 /// role GTK refuses to change (Gtk-CRITICAL "already has an accessible role";
@@ -24944,8 +24946,9 @@ impl crate::harness::Stage for GtkStage {
             let bare = [ground[0], ground[1], ground[2]];
             let on_card = skin::over(card, bare);
             let layer = |c: [f64; 4], k: f64, under: [f64; 3]| skin::over([c[0], c[1], c[2], k * c[3]], under).map(|v| v * 255.0);
-            candidates.push(("hovered", layer(fg, 0.04, bare)));
-            candidates.push(("hovered", layer(card_fg, 0.03, on_card)));
+            let resting = [(layer(fg, 0.07, bare), bare.map(|v| v * 255.0)), (layer(card_fg, 0.07, on_card), on_card.map(|v| v * 255.0))];
+            candidates.push(("hovered", resting[0].0));
+            candidates.push(("hovered", resting[1].0));
             candidates.push(("selected", layer(accent_bg, 0.25, bare)));
             candidates.push(("selected", layer(accent_bg, 0.25, on_card)));
             let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - got[i]).powi(2)).sum::<f64>();
@@ -24999,6 +25002,13 @@ impl crate::harness::Stage for GtkStage {
                     break;
                 }
                 holder = w.parent();
+            }
+            if candidates[0].0 == "hovered" {
+                if let Some((_, under)) = resting.iter().find(|(h, _)| *h == candidates[0].1) {
+                    if let Some(faint) = crate::harness::faint_hover(got, *under) {
+                        return faint;
+                    }
+                }
             }
             format!(
                 "{} (sampled {} at ({},{}); {}{behind_note})",

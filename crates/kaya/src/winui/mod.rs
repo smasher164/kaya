@@ -26907,8 +26907,12 @@ impl crate::harness::Stage for WinUiStage {
             };
             let bare = [ground[0], ground[1], ground[2]];
             let card = candidates.iter().find(|(n, _)| *n == "neutral").map_or(bare, |(_, c)| *c);
-            candidates.push(("hovered", layered("ItemContainerPointerOverBackground", bare)?));
-            candidates.push(("hovered", layered("ItemContainerPointerOverBackground", card)?));
+            let resting = [
+                (layered("ItemContainerPointerOverBackground", bare)?, bare),
+                (layered("ItemContainerPointerOverBackground", card)?, card),
+            ];
+            candidates.push(("hovered", resting[0].0));
+            candidates.push(("hovered", resting[1].0));
             let dist = |c: &[f64; 3]| (0..3).map(|k| (c[k] - got[k]).powi(2)).sum::<f64>();
             candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
             let hex = |c: &[f64; 3]| {
@@ -26976,6 +26980,15 @@ impl crate::harness::Stage for WinUiStage {
                             ));
                         }
                     }
+                }
+            }
+            if candidates[0].0 == "hovered" {
+                if let Some(faint) = resting
+                    .iter()
+                    .find(|(h, _)| *h == candidates[0].1)
+                    .and_then(|(_, under)| crate::harness::faint_hover(got, *under))
+                {
+                    return Ok(faint);
                 }
             }
             Ok(format!(

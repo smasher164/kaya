@@ -87,7 +87,8 @@ READS = [
       # the toast over the dock).
       "scrolled |= x != w && x.is::<gtk4::ScrolledWindow>();", "if !shown || scrolled {"]),
     ("expect_fill's skin readings", "fn fill_tint(&self, t: crate::harness::Target) -> String {",
-     ['("hovered", layer(fg, 0.04, bare))', '("hovered", layer(card_fg, 0.03, on_card))',
+     ['let resting = [(layer(fg, 0.07, bare), bare.map(|v| v * 255.0)), (layer(card_fg, 0.07, on_card), on_card.map(|v| v * 255.0))];',
+      'crate::harness::faint_hover(got, *under)',
       '("selected", layer(accent_bg, 0.25, bare))', "skin::picture_at(",
       "lm < SKIN_OVERLAY_DARKEST && lm < lt / 2.0"]),
     # docs/media-player-plan.md M19: a declared table row's `:selected` fill
@@ -124,7 +125,9 @@ CALLS = [
      'load_kaya_css(&ground_css, "grounds", &skin::ground_css(&grounds.borrow(), manager.is_dark()), &error);'),
     ("the overlay is libadwaita's panel over media", '"kaya-tint-critical", "card", "osd"];'),
     ("the skin's rules are libadwaita's own row and card values",
-     ".kaya-activatable:not(.card):hover { background-color: color-mix(in srgb, currentColor 4%, transparent); }"),
+     ".kaya-activatable:not(.card):hover { background-color: color-mix(in srgb, currentColor 7%, transparent); }"),
+    ("a card's hover is libadwaita's $hover_color, not its faint card layer (M22 (1))",
+     ".kaya-activatable.card:hover { background-image: image(color-mix(in srgb, currentColor 7%, transparent)); }"),
     ("the selected surface is libadwaita's selected row",
      ".kaya-activatable:not(.card):selected { background-color: color-mix(in srgb, var(--accent-bg-color) 25%, "
      "transparent); }"),
@@ -285,7 +288,7 @@ CUTS = [
      "a table row keeps libadwaita's vertical room (M19 G) no longer holds"),
     ("GTK: expect_row_centered passing an off-centre cell (M19)", r"if off\.abs\(\) > 2\.0 => format!\(", "if off.abs() > 200.0 => format!(",
      "expect_row_centered's reader lacks"),
-    ("GTK: the hover layer kaya's grey", r"currentColor 4%, transparent\); \}", "#ededed); }",
+    ("GTK: the hover layer kaya's grey", r"currentColor 7%, transparent\); \}\n\.kaya-activatable:not", "#ededed); }\n.kaya-activatable:not",
      "SKIN_CSS names a colour of kaya's own"),
     ("GTK: the selected surface kaya's own", r"var\(--accent-bg-color\) 25%, transparent\); \}\n\.kaya-activatable\.card",
      "#3584e4 25%, transparent); }\n.kaya-activatable.card", "SKIN_CSS names a colour of kaya's own"),

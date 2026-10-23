@@ -424,6 +424,11 @@ where AppKit has no tile-hover idiom, RECOMMEND the quaternary fill
 the container, which is what Safari's start-page tiles do, and the
 maintainer's visual ruling (§8). The phones show no hover and the pointer on
 an iPad takes `.hoverEffect(.highlight)`, the platform's.
+AMENDED 2026-10-23 (docs/media-player-plan.md M22 (1), "The faint colors
+should be fixed for hover"): the mac's hover is `secondarySystemFill` over
+the container, and GTK's is libadwaita's `$hover_color` / `$active_color`
+(7% / 16%) on cards as on rows; a hover must stand 3.0 or more in CIELAB
+lightness from its resting ground, which `expect_fill ... hovered` reads.
 
 Beside it a `selected` Bool prop, legal on an activatable row or column only
 (refused without `on_activate`, the silent-no-op rule docs/tints-plan.md §3

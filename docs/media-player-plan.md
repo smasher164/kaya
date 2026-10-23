@@ -1004,6 +1004,35 @@ content heights on at least one lane; the verb read "227 tall, 208 tall" on
 GTK and "216 tall, 200 tall" on Compose before the fixes. check-verbs holds
 the verb in all three harnesses.
 
+### M22: The final review's fixes (RULED 2026-10-23)
+
+The maintainer's rulings on the final review's pictures, each built as its
+own change.
+
+(1) "The faint colors should be fixed for hover." Measured off the review's
+pictures as a CIELAB lightness step between a hovered card's ground and a
+resting one: WinUI's PointerOver, the reference for visible, 3.1 (253 to
+244); the mac's quaternarySystemFill over the card's secondarySystemFill,
+2.1 (219 to 213); GTK's libadwaita `.card.activatable` hover (3% of the
+card's foreground), 2.1 (255 to 249, the window's own ground). The mac now
+lays `secondarySystemFill` over the hovered container, the card's own fill
+laid once more (AppKit has no hovered-surface colour; the system fills are
+its ladder of grounds, and the next step up from a card is a second layer of
+the same one): 219 to 202 light, 61 to 76 dark. GTK takes libadwaita's own
+`$hover_color` and `$active_color` (7% and 16% of currentColor, what it
+paints on a hovered and pressed activatable row and a flat button,
+_colors.scss) on cards as on rows: 255 to 241 light, 51 to 65 dark. WinUI is
+untouched. Compose keeps Material's 8% onSurface hover layer, which a phone
+draws only under a mouse; the lanes' phones have no pointer and cut at the
+first hover. The floor is `expect_fill ... hovered` itself: a reading whose
+nearest surface is the hover answers `faint` when it stands less than 3.0
+in lightness from the resting ground under it (crates/kaya/src/harness.rs
+HOVER_MIN_LIGHTNESS and faint_hover, copied into the SwiftUI and Compose
+readers and held equal by check-verbs); the old colours read "faint (a
+hover, sampled D4D4D4 against its resting D9D9D9: a lightness step of 2.0
+...)" on the mac and "F9F9F9 against FFFFFF ... 2.1" on GTK. A hovered bare
+row on the mac now draws the colour a resting card draws.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

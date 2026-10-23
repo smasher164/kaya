@@ -112,7 +112,7 @@ READS = [
     ("expect_dock's content half", "private fun kayaDockContentFault(dock: androidx.compose.ui.geometry.Rect): String? {",
      ["KayaSceneModel.root", "kayaNodeFrames[n.id]", "kayaNodeVisible[n.id]", "f.bottom > dock.top + 1"]),
     ("expect_fill's skin reading", "private fun kayaFillRead(activity: ComponentActivity, spec: String): String {",
-     ["\"hovered\" to overOn(skin.hover, rgb(ground))", "\"selected\" to over(skin.selected)",
+     ["overOn(skin.hover, rgb(ground)) to rgb(ground)", "kayaFaintHover(got, under)?.let { return it }", "\"selected\" to over(skin.selected)",
       "kayaContrast(sample, kayaRgb(skin.overlayText)) >= 4.5", "art != null && legible && mine < kayaLum(art) / 2", "KayaSceneModel.nodes[holder]?.ground != GROUND_IMAGE"]),
 ]
 MODEL = r"node\.shape\b|node\.labelTint\b|node\.selected\b|node\.activatable\b|node\.selectedDeclared\b"

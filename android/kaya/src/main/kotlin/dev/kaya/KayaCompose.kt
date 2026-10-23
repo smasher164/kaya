@@ -968,6 +968,9 @@ const val KAYA_OVERLAY_SCRIM = 0.6f
  * hover, held here for the reader's expectation only. */
 const val KAYA_HOVER_LAYER = 0.08f
 
+/** The core's HOVER_MIN_LIGHTNESS (crates/kaya/src/harness.rs). */
+const val KAYA_HOVER_MIN_LIGHTNESS = 3.0
+
 /** The fill itself, at Material's medium shape, and the box expect_fill crops. */
 @Composable
 fun kayaFilledSurface(node: KayaNode): Modifier {
@@ -8424,9 +8427,13 @@ object KayaCompose {
             val f = rgb(c)
             return IntArray(3) { Math.round(f[it] * a + under[it] * (1 - a)).toInt() }
         }
+        val resting = if (skin == null) emptyList() else listOf(
+            overOn(skin.hover, rgb(ground)) to rgb(ground),
+            overOn(skin.hover, over(skin.neutral)) to over(skin.neutral),
+        )
         val skinned = if (skin == null) emptyList() else listOf(
-            "hovered" to overOn(skin.hover, rgb(ground)),
-            "hovered" to overOn(skin.hover, over(skin.neutral)),
+            "hovered" to resting[0].first,
+            "hovered" to resting[1].first,
             "selected" to over(skin.selected),
         )
         val candidates = listOf("none" to rgb(ground)) + names.zip(fills.map { over(it) }) + skinned
@@ -8451,8 +8458,26 @@ object KayaCompose {
         fun dist(c: IntArray) = (0..2).sumOf { (c[it] - got[it]) * (c[it] - got[it]) }
         val ranked = candidates.sortedBy { dist(it.second) }
         fun hex(c: IntArray) = String.format("%02X%02X%02X", c[0], c[1], c[2])
+        if (ranked[0].first == "hovered") {
+            val under = resting.firstOrNull { it.first.contentEquals(ranked[0].second) }?.second
+            kayaFaintHover(got, under)?.let { return it }
+        }
         return "${ranked[0].first} (sampled ${hex(got)} at ($x,$y); " +
             ranked.take(3).joinToString(", ") { "${it.first} ${hex(it.second)}" } + ")"
+    }
+
+    /** The core's HOVER_MIN_LIGHTNESS and faint_hover (crates/kaya/src/harness.rs). */
+    private fun kayaFaintHover(sample: IntArray, resting: IntArray?): String? {
+        if (resting == null) return null
+        fun lightness(c: IntArray): Double {
+            val l = c.map { val v = it / 255.0; if (v <= 0.04045) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4) }
+            val y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+            return if (y > 216.0 / 24389.0) 116 * Math.cbrt(y) - 16 else y * 24389.0 / 27.0
+        }
+        val step = Math.abs(lightness(sample) - lightness(resting))
+        if (step >= KAYA_HOVER_MIN_LIGHTNESS) return null
+        return String.format("faint (a hover, sampled %02X%02X%02X against its resting %02X%02X%02X: a lightness step of %.1f, under the %.1f a hover must show)",
+            sample[0], sample[1], sample[2], resting[0], resting[1], resting[2], step, KAYA_HOVER_MIN_LIGHTNESS)
     }
 
     /** A skin reading polled for 5 s until its first word is the wanted one:

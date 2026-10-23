@@ -69,7 +69,7 @@ DOORS = [
      ["Color(nsColor: .selectedContentBackgroundColor)", "Color(nsColor: .alternateSelectedControlTextColor)",
       "Color(uiColor: .systemGray4)"], ["Color(red:", "Color(uiColor: .systemFill)"]),
     ("the mac hover layer", "func kayaHoverFill() -> Color {",
-     ["Color(nsColor: .quaternarySystemFill)", "Color(nsColor: .quaternaryLabelColor)"], ["Color(red:", ".opacity("]),
+     ["Color(nsColor: .secondarySystemFill)", "Color(nsColor: .quaternaryLabelColor)"], ["Color(red:", ".opacity(", "nsColor: .quaternarySystemFill"]),
     ("the overlay panel", "struct KayaFilledSurface: ViewModifier {",
      ["Rectangle().fill(.regularMaterial)", "Color.black.opacity(kayaOverlayScrim)", ".environment(\\.colorScheme, .dark)"],
      []),
@@ -171,7 +171,8 @@ READS = [
       "shot.at(CGPoint(x: box.minX - 4, y: box.midY))", "shot.at(CGPoint(x: box.minX - 4, y: box.minY + 1))",
       "shot.at(CGPoint(x: box.minX - 4, y: box.minY + 6))", "art(c1, under1), art(c6, under6), art(centre, under)"]),
     ("expect_fill's overlay reading", "func kayaFillRead(_ node: KayaNode) -> String {",
-     ["kayaPictureAt(pictured,", "1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2"]),
+     ["kayaPictureAt(pictured,", "1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2",
+      "let faint = kayaFaintHover(px, under)", "if #available(macOS 14, *) { hover = .secondarySystemFill }"]),
     ("expect_tint's reader", "func kayaLabelTintRead(_ node: KayaNode) -> String {",
      ["kayaWindowPixels()", "kayaAnchoredFrame(node.id)", "shot.text", "tone(.systemGreen)"]),
     ("the platform's frame for a skinned node", "func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {",
@@ -455,6 +456,13 @@ def run(g):
     g.counted("skin backends still stubbed", len(still), floor=0)
     for line in findings(sources):
         g.finding(line)
+    # docs/media-player-plan.md M22 (1): one hover floor, copied into each interpreter.
+    floors = {HARNESS: r"pub(?:\(crate\))? const HOVER_MIN_LIGHTNESS: f64 = ([\d.]+);", SWIFT: r"let kayaHoverMinLightness = ([\d.]+)\n",
+              COMPOSE: r"const val KAYA_HOVER_MIN_LIGHTNESS = ([\d.]+)\n"}
+    read = {rel: re.search(pat, sources.get(rel) or (ROOT / rel).read_text(encoding="utf-8")) for rel, pat in floors.items()}
+    values = {rel: float(m.group(1)) if m else None for rel, m in read.items()}
+    if None in values.values() or len(set(values.values())) != 1:
+        g.finding(f"the hover floor differs or is missing: {values}")
     cuts = [
         ("a picture-topped root left with its large title (M16 (27))", SWIFT,
          r"content\.navigationBarTitleDisplayMode\(\.inline\)\n(\s+)\} else \{\n(\s+)content\n(\s+)\}\n(\s+)#else",
