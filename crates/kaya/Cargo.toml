@@ -147,6 +147,11 @@ windows = { version = "0.62", features = [
     # is where Windows looks for an unpackaged app's name and icon, and
     # without it the shell draws no toast for the app.
     "Win32_System_Registry",
+    # The unpackaged identity's Start-menu shortcut, which is where the shell
+    # resolves an app id to a name (docs/media-player-plan.md M22 (3)), and
+    # IShellLinkW::GetPath's find-data parameter, to read its target back.
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_Storage_FileSystem",
     # THE CLOSED-APP CLICK'S ONE DOOR (docs/tasks-s9-plan.md R4):
     # INotificationActivationCallback is what a toast's launch arguments
     # reach once the posting process is gone.

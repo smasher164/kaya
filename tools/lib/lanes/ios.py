@@ -363,7 +363,10 @@ MODS = {
     # The accessory's lines stand taller than its 32 pt art, so the art centres
     # on them and the lines span the row (docs/media-player-plan.md M18).
     ("python", "music_dock"): {"cut": "click button@play_pause",
-                               "drop": ("expect_hugs", "column@dock_lines"),
+                               # The lane's pyhost bundle carries no display name until the
+                               # music app has its own identity (docs/media-player-plan.md M22 (6)).
+                               "drop": (("expect_hugs", "column@dock_lines"),
+                                        ("expect_now_playing_app", '"Aurora')),
                                "keep": "session_send expect_now_playing expect_dock",
                                "extra": MUSIC_DOCK_PHONE_TAIL},
     ("python", "portfolio"): {

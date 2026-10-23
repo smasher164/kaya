@@ -25818,6 +25818,10 @@ impl crate::harness::Stage for GtkStage {
         gtk_media::now_playing_art()
     }
 
+    fn now_playing_app(&self) -> String {
+        gtk_media::now_playing_app()
+    }
+
     fn player_open(&self, n: usize) -> Result<bool, String> {
         Self::on_main(move |_| gtk_media::player_open(n))
     }
@@ -30805,7 +30809,14 @@ mod gtk_media {
                 .as_ref()
                 .and_then(|a| gtk4::prelude::ApplicationExt::application_id(a).map(|s| s.to_string()))
                 .unwrap_or_else(|| "dev.kaya.App".to_owned());
-            let identity = core.identity_name.clone().unwrap_or_else(|| app_id.clone());
+            // MPRIS's Identity is the name shown to users; the declaration's
+            // (docs/media-player-plan.md M22 (3)), whether or not the app has
+            // sent it yet.
+            let identity = core
+                .identity_name
+                .clone()
+                .or_else(|| crate::scene::declared_identity().ok().map(|d| d.name))
+                .unwrap_or_else(|| app_id.clone());
             glib::MainContext::default().spawn_local(async move {
                 let player = match build_mpris(&app_id, &identity).await {
                     Ok(p) => Rc::new(p),
@@ -31225,6 +31236,29 @@ mod gtk_media {
                 None => format!("<mpris:artUrl {url}: {} bytes that are not a PNG or JPEG>", bytes.len()),
             },
             Err(why) => format!("<mpris:artUrl {url} is unreadable: {why}>"),
+        }
+    }
+
+    /// The player's `Identity` read back over the bus, the name a shell's card
+    /// gives the player (MPRIS 2.2, org.mpris.MediaPlayer2).
+    #[cfg(feature = "harness")]
+    pub(super) fn now_playing_app() -> String {
+        let name = match own_mpris_name() {
+            Ok(name) => name,
+            Err(why) => return format!("<no MPRIS name of this process: {why}>"),
+        };
+        match dbus_send(&[
+            &format!("--dest={name}"),
+            "/org/mpris/MediaPlayer2",
+            "org.freedesktop.DBus.Properties.Get",
+            "string:org.mpris.MediaPlayer2",
+            "string:Identity",
+        ]) {
+            Ok(said) => said
+                .lines()
+                .find_map(|l| l.split_once('"').and_then(|(_, rest)| rest.rsplit_once('"')).map(|(s, _)| s.to_owned()))
+                .unwrap_or_else(|| format!("<Identity unreadable in {said:?}>")),
+            Err(why) => format!("<Identity unreadable: {why}>"),
         }
     }
 

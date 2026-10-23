@@ -1041,6 +1041,42 @@ pointer). The mac draws the same flat back on Search and on the album; WinUI
 draws its one back button, the same on both screens, with the control's own
 ground and stroke.
 
+(3) "Should be fixed. I guess the app should have a registered display name.
+Probably done using whatever name is listed in the toml." and "Shouldn't the
+player name be the user-facing name instead of the reverse dns name?" The
+system's media panels now name the app by the identity's `name`, read by
+`expect_now_playing_app "<name>"`, the name the system resolves the session
+it holds as Now Playing to. WINDOWS: the session's SourceAppUserModelId was
+the declared id with HKCU's AppUserModelId\<id> DisplayName written, and the
+flyout still said "Unknown app"; the shell resolves an unpackaged app id
+through a Start-menu shortcut carrying System.AppUserModel.ID (the
+appids page, https://learn.microsoft.com/en-us/windows/win32/shell/appids,
+"Where to Assign an AppUserModelID"). The unpackaged registration now also
+writes `<name>.lnk` in the user's Start menu Programs folder, targeting this
+exe with its arguments and carrying the id, and removes a shortcut of the
+same id under an older name; the flyout then reads "Aurora Notes"
+(captured). The read is the session's id as an item of the shell's Apps
+folder (`shell:AppsFolder\<id>`), the list the Start menu names apps from;
+AppInfo.GetFromAppUserModelId answers "Element not found" for an unpackaged
+id even with the shortcut. A packaged app's name is its manifest's
+DisplayName. LINUX: the MPRIS player was built before the app sent an
+identity and fell back to the application id; Identity is now the
+identity's `name` (MPRIS 2.2: "A friendly name to identify the media
+player to users"), DesktopEntry the reverse-DNS id (the .desktop file's
+basename), and the bus name stays org.mpris.MediaPlayer2.<id>, with
+`.instance<pid>` when that is taken, the spec's own rule for a second
+instance (a unique, valid D-Bus name, since the id is reverse-DNS).
+ANDROID: the system's controller names the APK's package, whose label is
+the identity's name; the reading passes. MACOS: MediaRemote names the
+lane's music app by its executable, "python3.14", with no display name
+(measured with MRNowPlayingClientGetDisplayName, which answers null), and
+Control Center's Now Playing module draws no app name; a bundle's
+CFBundleDisplayName is what the system has, and the lane runs the music
+app as a bare python3 process. IOS: the lane's pyhost bundle names itself
+"pyhost"; the identity block is opt-in per bundle. Both lanes drop the
+reading (tools/lib/lanes/mac.py DROPS, ios.py's music_dock drop) until the
+music app runs as its own bundle under (6).
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

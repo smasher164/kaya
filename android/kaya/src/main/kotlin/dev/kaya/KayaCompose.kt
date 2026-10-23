@@ -12061,6 +12061,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         if (got == want) observed.add("now playing $want")
                         else failures.add("now playing $got, wanted $want")
                     }
+                    "expect_now_playing_app" -> {
+                        val want = quoted(parts.subList(1, parts.size))
+                        val got = onUi(activity) { KayaMediaSession.nowPlayingApp(activity) }
+                        if (got == want) observed.add("now playing app ${kayaDebugQuoted(want)}")
+                        else failures.add("now playing app ${kayaDebugQuoted(got)}, wanted ${kayaDebugQuoted(want)}")
+                    }
                     "expect_now_playing_art" -> {
                         val want = parts[1]
                         val got = onUi(activity) { KayaMediaSession.nowPlayingArt(activity) }

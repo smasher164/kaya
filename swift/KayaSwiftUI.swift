@@ -13097,6 +13097,14 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("now playing art \(got), wanted \(want)")
                 }
+            case "expect_now_playing_app":
+                let want = kayaQuoted(Array(parts[1...]))
+                let got = kayaNowPlayingApp()
+                if got == want {
+                    observed.append("now playing app \(want.debugDescription)")
+                } else {
+                    failures.append("now playing app \(got.debugDescription), wanted \(want.debugDescription)")
+                }
             case "expect_display_awake":
                 let want = parts[1] == "yes"
                 let got = kayaDisplayAwake()
@@ -37329,6 +37337,44 @@ func kayaNowPlaying() -> String {
         #endif
         return "\(title.debugDescription) \(state)"
     }
+}
+
+/// expect_now_playing_app's read (docs/media-player-plan.md M22 (3)): on the
+/// mac the name LaunchServices gives the process MediaRemote names as Now
+/// Playing; on iOS the bundle's display name, the one the system gives the app.
+func kayaNowPlayingApp() -> String {
+    #if os(macOS)
+        guard let lib = ProcessInfo.processInfo.environment["KAYA_MEDIAREMOTE_LIB"],
+            FileManager.default.fileExists(atPath: lib)
+        else { return "<no KAYA_MEDIAREMOTE_LIB: the lane sets it for the legs that take the host's Now Playing>" }
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        proc.arguments = [
+            "-e",
+            "use DynaLoader; my $l=DynaLoader::dl_load_file($ARGV[0],0) or die DynaLoader::dl_error(); "
+                + "my $s=DynaLoader::dl_find_symbol($l,'kaya_mediaremote_run') or die 'no symbol'; "
+                + "DynaLoader::dl_install_xsub('main::run',$s); run();",
+            lib,
+        ]
+        proc.environment = ["KAYA_MR_ACTION": "pid"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = pipe
+        do { try proc.run() } catch { return "<could not start /usr/bin/perl: \(error)>" }
+        proc.waitUntilExit()
+        let said = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = said.range(of: "now playing pid "),
+            let pid = Int32(said[range.upperBound...].prefix { $0.isNumber || $0 == "-" })
+        else { return "<MediaRemote named no Now Playing pid: \(said)>" }
+        guard pid == getpid() else { return "<the system's Now Playing is pid \(pid), not this process \(getpid()): \(said)>" }
+        return DispatchQueue.main.sync { NSRunningApplication(processIdentifier: pid)?.localizedName }
+            ?? "<LaunchServices names no app for pid \(pid)>"
+    #else
+        let info = Bundle.main.localizedInfoDictionary ?? Bundle.main.infoDictionary ?? [:]
+        return (info["CFBundleDisplayName"] as? String) ?? (info["CFBundleName"] as? String)
+            ?? "<the bundle declares no display name>"
+    #endif
 }
 
 /// expect_video_ink's tolerance per channel, harness.rs's VIDEO_INK_TOLERANCE.

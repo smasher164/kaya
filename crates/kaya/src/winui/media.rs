@@ -2777,6 +2777,37 @@ pub(super) mod stage {
         .unwrap_or_else(|e| format!("<the session manager: {}>", e.message()))
     }
 
+    /// The name the shell resolves the system's session for this process to:
+    /// its SourceAppUserModelId as an item of the shell's Apps folder, the
+    /// list the Start menu and the media flyout name apps from
+    /// (docs/media-player-plan.md M22 (3)).
+    pub(crate) fn now_playing_app(aumid: String) -> String {
+        in_mta(move || {
+            use windows::Win32::UI::Shell::{FOLDERID_AppsFolder, IShellItem, SHCreateItemInKnownFolder, KF_FLAG_DEFAULT, SIGDN_NORMALDISPLAY};
+            let session = match system_session(aumid)? {
+                Ok(session) => session,
+                Err(why) => return Ok(format!("<{why}>")),
+            };
+            let source = session.SourceAppUserModelId()?.to_string();
+            let wide: Vec<u16> = source.encode_utf16().chain(std::iter::once(0)).collect();
+            let item: windows_core::Result<IShellItem> = unsafe {
+                SHCreateItemInKnownFolder(&FOLDERID_AppsFolder, KF_FLAG_DEFAULT, windows_core::PCWSTR(wide.as_ptr()))
+            };
+            Ok(match item {
+                Ok(item) => match unsafe { item.GetDisplayName(SIGDN_NORMALDISPLAY) } {
+                    Ok(name) => {
+                        let read = unsafe { name.to_string() }.unwrap_or_default();
+                        unsafe { windows::Win32::System::Com::CoTaskMemFree(Some(name.0 as *const _)) };
+                        read
+                    }
+                    Err(e) => format!("<the Apps folder's item {source:?} has no display name: {}>", e.message()),
+                },
+                Err(e) => format!("<the shell's Apps folder holds no app with the session's app id {source:?}: {}>", e.message()),
+            })
+        })
+        .unwrap_or_else(|e| format!("<the session manager: {}>", e.message()))
+    }
+
     /// session_send (docs/media-plan.md §5): the command goes to the SYSTEM's
     /// session manager, which delivers it to this process's SMTC as a media
     /// key or the flyout's button would; refused unless the system names this

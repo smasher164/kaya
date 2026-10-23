@@ -972,6 +972,20 @@ internal object KayaMediaSession {
         return "${kayaDebugQuoted(t)} $state"
     }
 
+    /** expect_now_playing_app's read (docs/media-player-plan.md M22 (3)): the
+     * label of the package the system's controller names for this session, the
+     * name the media notification gives the app. */
+    fun nowPlayingApp(context: Context): String {
+        val token = session?.platformToken ?: return "<no session>"
+        val pkg = android.media.session.MediaController(context, token).packageName
+        return try {
+            val pm = context.packageManager
+            pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+        } catch (e: android.content.pm.PackageManager.NameNotFoundException) {
+            "<no app labelled for $pkg>"
+        }
+    }
+
     /** expect_now_playing_art's read: the picture the SYSTEM holds for this
      * session through the same controller, harness.rs's art_reading
      * (`RRGGBB WxH`) or `none`. */

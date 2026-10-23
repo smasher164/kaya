@@ -713,6 +713,10 @@ pub enum Step {
     /// (docs/media-player-plan.md M7). A colour, not a size: Android's
     /// system copy of a 600 px cover is 300 px (measured 2026-10-17).
     ExpectNowPlayingArt(String),
+    /// `expect_now_playing_app "Aurora Notes"`: the name the system gives the
+    /// app whose session it holds as Now Playing (docs/media-player-plan.md
+    /// M22 (3)), read where each platform resolves it.
+    ExpectNowPlayingApp(String),
     /// `expect_display_awake yes`: whether this process holds the
     /// platform's keep-the-display-awake assertion (§2 rule 5).
     ExpectDisplayAwake(bool),
@@ -1268,6 +1272,7 @@ impl Step {
             | Step::SessionSend(..)
             | Step::ExpectNowPlaying(..)
             | Step::ExpectNowPlayingArt(..)
+            | Step::ExpectNowPlayingApp(..)
             | Step::ExpectDisplayAwake(..)
             | Step::ExpectPlayerOpen(..)
             | Step::PickEmoji(..)
@@ -1451,6 +1456,7 @@ impl Step {
             Step::SessionSend(..) => false,
             Step::ExpectNowPlaying(..) => true,
             Step::ExpectNowPlayingArt(..) => true,
+            Step::ExpectNowPlayingApp(..) => true,
             Step::ExpectDisplayAwake(..) => true,
             Step::ExpectPlayerOpen(..) => true,
             Step::PickEmoji { .. } => false,
@@ -2291,6 +2297,9 @@ pub trait Stage: Send + 'static {
     /// what the platform said beside it; anything else says why it could not
     /// be read.
     fn now_playing_art(&self) -> String;
+    /// The name the system gives the app whose session it holds as Now
+    /// Playing, or why it could not be read.
+    fn now_playing_app(&self) -> String;
     /// Whether this process holds the display-awake assertion.
     fn display_awake(&self) -> bool;
     /// Whether the platform's player `n`-th by id holds an item, or why
@@ -3743,6 +3752,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 }
                 Step::ExpectNowPlayingArt(want.to_owned())
             }
+            "expect_now_playing_app" => Step::ExpectNowPlayingApp(parse_string(rest.trim())?),
             "expect_display_awake" => {
                 let word = rest.trim();
                 if word != "yes" && word != "no" {
@@ -6398,6 +6408,14 @@ fn run_with_log(
                     Ok(format!("now playing art {want}"))
                 } else {
                     Err(format!("now playing art {got}, wanted {want}"))
+                }
+            })),
+            Step::ExpectNowPlayingApp(want) => Some(poll(|| {
+                let got = stage.now_playing_app();
+                if got == *want {
+                    Ok(format!("now playing app {want:?}"))
+                } else {
+                    Err(format!("now playing app {got:?}, wanted {want:?}"))
                 }
             })),
             Step::ExpectDisplayAwake(want) => Some(poll(|| {
@@ -9721,6 +9739,10 @@ mod tests {
             parse("expect_now_playing_art none").unwrap().as_slice(),
             [Step::ExpectNowPlayingArt(w)] if w == "none"
         ));
+        assert!(matches!(
+            parse("expect_now_playing_app \"Aurora Notes\"").unwrap().as_slice(),
+            [Step::ExpectNowPlayingApp(n)] if n == "Aurora Notes"
+        ));
         assert!(parse("expect_now_playing_art big").is_err());
         assert!(parse("expect_now_playing_art 600x600").is_err());
         assert!(matches!(
@@ -10633,6 +10655,9 @@ mod tests {
         }
         fn now_playing_art(&self) -> String {
             "none".into()
+        }
+        fn now_playing_app(&self) -> String {
+            String::new()
         }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())
@@ -11974,6 +11999,9 @@ mod tests {
         fn now_playing_art(&self) -> String {
             "none".into()
         }
+        fn now_playing_app(&self) -> String {
+            String::new()
+        }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())
         }
@@ -12505,6 +12533,9 @@ mod tests {
         }
         fn now_playing_art(&self) -> String {
             "none".into()
+        }
+        fn now_playing_app(&self) -> String {
+            String::new()
         }
         fn player_open(&self, _: usize) -> Result<bool, String> {
             Err("a mock stage holds no player".into())

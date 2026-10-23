@@ -27810,6 +27810,10 @@ impl crate::harness::Stage for WinUiStage {
         media::stage::now_playing(declared_app_id().unwrap_or_default())
     }
 
+    fn now_playing_app(&self) -> String {
+        media::stage::now_playing_app(declared_app_id().unwrap_or_default())
+    }
+
     fn now_playing_art(&self) -> String {
         let system = media::stage::now_playing_art(declared_app_id().unwrap_or_default());
         let here = Self::on_ui(|core| Ok(media::stage::session_here(core)));
@@ -31767,13 +31771,112 @@ fn hkcu_write_strings(key: &str, values: &[(&str, &str)]) -> Result<bool, String
 /// said this — the second launch of an app is a no-op.
 fn register_unpackaged_identity(declaration: &crate::scene::Declaration) -> Result<bool, String> {
     let icon = mark_under_local_app_data(&declaration.id, &declaration.icon)?;
-    hkcu_write_strings(
+    let keyed = hkcu_write_strings(
         &aumid_key_path(&declaration.id),
         &[
             ("DisplayName", declaration.name.as_str()),
             ("IconUri", &icon.to_string_lossy()),
         ],
-    )
+    )?;
+    Ok(start_menu_shortcut(declaration)? | keyed)
+}
+
+/// The Start-menu shortcut carrying the declared app id in
+/// System.AppUserModel.ID: the shell resolves an unpackaged process's app id
+/// to a name through it, and the media flyout named the app "Unknown app"
+/// with the registry key alone (docs/media-player-plan.md M22 (3)). Written
+/// only when the shortcut there does not already say this.
+fn start_menu_shortcut(declaration: &crate::scene::Declaration) -> Result<bool, String> {
+    use windows::Win32::Foundation::PROPERTYKEY;
+    use windows::Win32::System::Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0};
+    use windows::Win32::System::Com::{CoCreateInstance, CoTaskMemAlloc, CoTaskMemFree, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ};
+    use windows::Win32::System::Variant::VT_LPWSTR;
+    use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
+    use windows::Win32::UI::Shell::{FOLDERID_Programs, IShellLinkW, SHGetKnownFolderPath, ShellLink, KNOWN_FOLDER_FLAG};
+    use windows_core::Interface;
+    const APP_USER_MODEL_ID: PROPERTYKEY =
+        PROPERTYKEY { fmtid: windows_core::GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
+    let why = |what: &str, e: windows_core::Error| format!("the Start-menu shortcut: {what}: {}", e.message());
+    let programs = unsafe { SHGetKnownFolderPath(&FOLDERID_Programs, KNOWN_FOLDER_FLAG(0), None) }
+        .map_err(|e| why("no Programs folder", e))?;
+    let dir = unsafe { programs.to_string() }.unwrap_or_default();
+    unsafe { CoTaskMemFree(Some(programs.0 as *const _)) };
+    let file_name: String =
+        declaration.name.chars().map(|c| if "\\/:*?\"<>|".contains(c) { '_' } else { c }).collect();
+    let path = std::path::PathBuf::from(dir).join(format!("{file_name}.lnk"));
+    let exe = std::env::current_exe().map_err(|e| format!("the Start-menu shortcut: no path for this exe: {e}"))?;
+    let exe = exe.to_string_lossy().into_owned();
+    let path_w = wide_z(&path.to_string_lossy());
+    let fresh = || -> windows_core::Result<IShellLinkW> { unsafe { CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER) } };
+    // A shortcut of this app id under another name is the old name's: the
+    // Start menu lists a shortcut by its file name.
+    let read = |lnk: &std::path::Path| -> windows_core::Result<(String, String)> {
+        let link = fresh()?;
+        unsafe {
+            link.cast::<IPersistFile>()?.Load(windows_core::PCWSTR(wide_z(&lnk.to_string_lossy()).as_ptr()), STGM_READ)?;
+            let mut target = [0u16; 1024];
+            link.GetPath(&mut target, std::ptr::null_mut(), 0)?;
+            let target = String::from_utf16_lossy(&target[..target.iter().position(|u| *u == 0).unwrap_or(0)]);
+            let id = windows_core::BSTR::try_from(&link.cast::<IPropertyStore>()?.GetValue(&APP_USER_MODEL_ID)?)?;
+            Ok((target, id.to_string()))
+        }
+    };
+    let mut current = false;
+    let mut removed = false;
+    let listed = std::fs::read_dir(path.parent().unwrap_or(&path)).map_err(|e| format!("the Start menu's Programs folder: {e}"))?;
+    for entry in listed.flatten() {
+        let lnk = entry.path();
+        if lnk.extension().is_none_or(|e| !e.eq_ignore_ascii_case("lnk")) {
+            continue;
+        }
+        let Ok((target, id)) = read(&lnk) else { continue };
+        if id != declaration.id {
+            continue;
+        }
+        if lnk == path {
+            current = target.eq_ignore_ascii_case(&exe);
+        } else {
+            std::fs::remove_file(&lnk).map_err(|e| format!("the Start-menu shortcut {} of an old name: {e}", lnk.display()))?;
+            removed = true;
+        }
+    }
+    if current {
+        return Ok(removed);
+    }
+    let args: Vec<String> = std::env::args()
+        .skip(1)
+        .map(|a| if a.contains(' ') { format!("\"{a}\"") } else { a })
+        .collect();
+    let link = fresh().map_err(|e| why("no ShellLink", e))?;
+    unsafe {
+        let wrote = (|| -> windows_core::Result<()> {
+            link.SetPath(windows_core::PCWSTR(wide_z(&exe).as_ptr()))?;
+            link.SetArguments(windows_core::PCWSTR(wide_z(&args.join(" ")).as_ptr()))?;
+            let id = wide_z(&declaration.id);
+            let copy = CoTaskMemAlloc(id.len() * 2) as *mut u16;
+            if copy.is_null() {
+                return Err(windows_core::Error::from_hresult(windows_core::HRESULT(0x8007_000Eu32 as i32)));
+            }
+            std::ptr::copy_nonoverlapping(id.as_ptr(), copy, id.len());
+            let value = PROPVARIANT {
+                Anonymous: PROPVARIANT_0 {
+                    Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                        vt: VT_LPWSTR,
+                        wReserved1: 0,
+                        wReserved2: 0,
+                        wReserved3: 0,
+                        Anonymous: PROPVARIANT_0_0_0 { pwszVal: windows_core::PWSTR(copy) },
+                    }),
+                },
+            };
+            let store = link.cast::<IPropertyStore>()?;
+            store.SetValue(&APP_USER_MODEL_ID, &value)?;
+            store.Commit()?;
+            link.cast::<IPersistFile>()?.Save(windows_core::PCWSTR(path_w.as_ptr()), true)
+        })();
+        wrote.map_err(|e| why(&format!("{} could not be written", path.display()), e))?;
+    }
+    Ok(true)
 }
 
 /// ON THE APARTMENT: can this process post, and take the declared identity
@@ -33575,6 +33678,12 @@ mod tests {
 
         let wrote = register_unpackaged_identity(&declaration).expect("the registration");
         assert!(wrote, "the first registration writes the key");
+        let programs = std::path::PathBuf::from(std::env::var("APPDATA").expect("APPDATA"))
+            .join("Microsoft\\Windows\\Start Menu\\Programs");
+        assert!(
+            programs.join("Aurora Notes Unit Test.lnk").is_file(),
+            "the Start menu carries a shortcut under the declared name (docs/media-player-plan.md M22 (3))"
+        );
         assert_eq!(
             hkcu_string(&key, "DisplayName").as_deref(),
             Some("Aurora Notes Unit Test"),
@@ -33611,7 +33720,12 @@ mod tests {
             hkcu_string(&key, "DisplayName").as_deref(),
             Some("Aurora Notes Renamed")
         );
+        assert!(
+            programs.join("Aurora Notes Renamed.lnk").is_file() && !programs.join("Aurora Notes Unit Test.lnk").exists(),
+            "a renamed app's shortcut replaces the old name's"
+        );
 
+        let _ = std::fs::remove_file(programs.join("Aurora Notes Renamed.lnk"));
         reg_delete_tree(&key);
         if let Ok(base) = std::env::var("LOCALAPPDATA") {
             let _ = std::fs::remove_dir_all(std::path::Path::new(&base).join("kaya").join(id));

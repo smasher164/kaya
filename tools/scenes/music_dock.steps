@@ -25,6 +25,9 @@ expect_ax button@play_pause "button/Pause"
 expect_ax button@next "button/Next"
 expect_now_playing "In Tune" playing
 expect_now_playing_art 4CC0BF
+# The system's media panels name the app by the identity's display name
+# (docs/media-player-plan.md M22 (3)).
+expect_now_playing_app "Aurora Notes"
 session_send pause
 expect_ax button@play_pause "button/Play"
 expect_now_playing "In Tune" paused

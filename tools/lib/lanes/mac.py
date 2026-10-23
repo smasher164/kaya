@@ -117,6 +117,13 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
 # (docs/reveal-plan.md V10).
 CUTS = {"reveal": {"cut": "press tab", "keep": "expect_unmasked expect_masked"}}
 
+# THE STEPS THIS LANE DROPS, in tools/lib/scene_cut.py's drop grammar (the Linux
+# lane's MODS): the music legs run as a bare python3 process, which MediaRemote
+# names "python3.14", until the music app runs as its own bundle
+# (docs/media-player-plan.md M22 (3), (6)).
+DROPS = {"music_dock": ((('expect_now_playing_app "Aurora Notes"',), "expect_now_playing expect_now_playing_art",
+                         "the lane's music app is a bare python3 process, which carries no display name"),)}
+
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
 # size, so a knob that scales one is refused there (docs/compliance-plan.md
@@ -563,6 +570,7 @@ HOST_VERBS = {
     "session_send": ("session", "takes the host's Now Playing"),
     "expect_now_playing": ("session", "takes the host's Now Playing"),
     "expect_now_playing_art": ("session", "takes the host's Now Playing"),
+    "expect_now_playing_app": ("session", "takes the host's Now Playing"),
     "pick_emoji": ("takeover", "activates the guest under the emoji palette, "
                                "taking the host's keyboard"),
     "open_link": ("takeover", "activates the guest through LaunchServices, "
@@ -1359,8 +1367,12 @@ def scene_cut_lines(root, scene):
     if scene in CUTS:
         cut = CUTS[scene]
         return scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="mac")
-    return [line for line in path.read_text(encoding="utf-8").splitlines()
-            if not line.startswith("#")], []
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines()
+             if not line.startswith("#")]
+    if scene in DROPS:
+        kept, taken = scene_cut.drop_blocks([" ".join(line.split()) for line in lines], DROPS[scene])
+        return kept, [line for _, gone in taken for line in gone]
+    return lines, []
 
 
 MEDIA_URL = f"http://{media_server.HOST}:{media_server.PORT}"
