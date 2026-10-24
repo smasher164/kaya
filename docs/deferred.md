@@ -61,7 +61,7 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
-## BUILD — the mac app's interaction latency: a click's highlight waits for the next screen, and the per-node readers cost half of it (measured 2026-10-24)
+## ~~BUILD — the mac app's interaction latency: a click's highlight waits for the next screen, and the per-node readers cost half of it (measured 2026-10-24)~~ LANDED 2026-10-24: 1(a), an activatable row or column shows the platform's pressed look from the pointer going down (SwiftUI a Button whose ButtonStyle draws systemFill while pressed, 4 to 12 ms to the frame on the sidebar's rows; GTK's :active, which a held press had lost at the double-click timeout and now keeps; WinUI's ItemContainer Pressed state; Compose's ripple), read by cards' pointer_down and expect_fill pressed on the three desktops; 2(b) then 2(a), the readers built only under the harness bar a table's track, a pending scroll_to_row's rows and iOS, read through one GeometryReader tap since onGeometryChange missed a label's growth (docs/traps.md, the mac app's interaction latency): the shipped app's clicks at the readers-off numbers and no hitch in the sidebar hide. Compose's and WinUI's readers are measured under the DEFER below.
 KEY: interaction latency, sluggish, highlight, pressed state, KayaSkinFrameReader, KayaTrackReader, KayaCellReader, KayaInsetReader, KayaBoxReader, KayaLabelFrameReader, kayaHarnessActive, onGeometryChange, toggleSidebar, hitch
 
 The maintainer, using Aurora Music by hand: a click on Home or Search takes a
@@ -107,7 +107,22 @@ ships now and moves little; what is left is two design questions.
    mac app's interaction latency); iOS takes the same readers. Compose's
    onGloballyPositioned readers and WinUI's LayoutUpdated hooks (twelve, on
    images, grids, scrolls and flowing rows; no per-node reader) are not yet
-   measured. 1(a) is open.
+   measured.
+
+## DEFER — Compose's per-node readers and WinUI's LayoutUpdated hooks, unmeasured (the mac interaction latency's sweep; 2026-10-24)
+KEY: onGloballyPositioned, LayoutUpdated, kayaHarnessActive, KayaGeometryTap, per-node reader, interaction latency
+
+The mac's readers cost half a click until they were built only under the
+harness (docs/traps.md, the mac app's interaction latency). Compose carries
+about fifty onGloballyPositioned readers, several per container
+(KayaCompose.kt), in every app; WinUI has no per-node reader but twelve
+LayoutUpdated subscriptions (images, grids, scrolls, flowing rows), and
+LayoutUpdated fires for every layout pass of the window. Neither was
+measured: the measure is a press to the frame that shows its look, with the
+readers in and compiled out, on the emulator and the VM; the gate is
+tools/lib/skin_routes.py's harness-only wall, given each arm's records.
+Trigger: a slow interaction reported on either, or the next pass at
+interaction latency.
 
 ## DEFER — the iPhone Duo: kaya's adaptive layouts on a phone that folds open (the maintainer, 2026-10-23)
 KEY: iPhone Duo, foldable, hinge, reserved region, ReservedRegion, reservedRegions, vertical bar, toolbarVerticalEdge, ArrangementView, UIArrangementViewController, fold, unfold, inner display, outer display, Device Hub, Xcode 27.1

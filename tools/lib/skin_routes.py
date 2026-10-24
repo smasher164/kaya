@@ -61,10 +61,18 @@ DOORS = [
     ("the image's clip", "struct KayaImageShape: ViewModifier {",
      ["content.clipShape(Circle())", "RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)"], []),
     ("the activatable container", "struct KayaActivatable: ViewModifier {",
-     [".onTapGesture { KayaHost.emitPress(node) }", ".accessibilityAction { KayaHost.emitPress(node) }",
+     ["Button { KayaHost.emitPress(node) } label: {", ".buttonStyle(KayaActivatableStyle(node: node, hovering: hovering))",
       ".accessibilityAddTraits(node.selected ? [.isButton, .isSelected] : .isButton)", ".onHover { inside in",
-      "shape.fill(kayaHoverFill())", "shape.fill(kayaSelectedPair().fill)", ".hoverEffect(.highlight)"],
+      ".hoverEffect(.highlight)"],
+     ["Color(red:", "Color(white:", "Color.gray", ".opacity(", ".onTapGesture"]),
+    # docs/deferred.md, the mac interaction latency 1(a): the pressed look from
+    # the pointer going down, in the platform's own fill.
+    ("the activatable container's look", "struct KayaActivatableStyle: ButtonStyle {",
+     ["if configuration.isPressed {", "shape.fill(kayaPressedFill())", "shape.fill(kayaHoverFill())",
+      "shape.fill(kayaSelectedPair().fill)"],
      ["Color(red:", "Color(white:", "Color.gray", ".opacity("]),
+    ("the pressed fill", "@MainActor func kayaPressedFill() -> Color {",
+     ["Color(nsColor: .systemFill)", "Color(uiColor: .systemFill)"], ["Color(red:", "Color(white:", "Color.gray"]),
     ("the selected surface", "func kayaSelectedPair() -> (fill: Color, fore: Color) {",
      ["Color(nsColor: .selectedContentBackgroundColor)", "Color(nsColor: .alternateSelectedControlTextColor)",
       "Color(uiColor: .systemGray4)"], ["Color(red:", "Color(uiColor: .systemFill)"]),
@@ -403,8 +411,8 @@ def behind_findings(swift):
     return out
 
 
-# The per-node geometry readers read through onGeometryChange and never build a
-# GeometryReader (docs/traps.md, the mac app's interaction latency).
+# The per-node geometry readers read through the one tap, .kayaGeometry
+# (docs/traps.md, the mac app's interaction latency).
 READERS = ("KayaTrackReader", "KayaCellReader", "KayaInsetReader", "KayaBoxReader", "KayaLabelFrameReader",
            "KayaSkinFrameReader")
 
@@ -427,11 +435,11 @@ def reader_findings(swift):
         if len(found) != 1:
             out.append(f"skin: {name} is defined as a ViewModifier {len(found)} times in {SWIFT}, wanted once")
             continue
-        if "GeometryReader" in found[0]:
-            out.append(f"skin: {name} builds a GeometryReader, a view and a body per node in every app; "
-                       f"read through .onGeometryChange")
-        if ".onGeometryChange(" not in found[0]:
-            out.append(f"skin: {name} reads no .onGeometryChange")
+        if ".onGeometryChange(" in found[0] or "GeometryReader" in found[0]:
+            out.append(f"skin: {name} reads its geometry outside .kayaGeometry, the one tap "
+                       f"(onGeometryChange missed a label's growth for 30 s)")
+        if ".kayaGeometry(" not in found[0]:
+            out.append(f"skin: {name} reads no .kayaGeometry")
         if re.search(r"\.background\(\s*%s\(" % name, swift):
             out.append(f"skin: {name} is attached with .background, a view behind every node; attach it with .modifier")
     for name in HARNESS_ONLY_READERS:
@@ -518,10 +526,10 @@ def run(g):
     if None in values.values() or len(set(values.values())) != 1:
         g.finding(f"the hover floor differs or is missing: {values}")
     cuts = [
-        ("a reader back on a GeometryReader", SWIFT,
-         r"content\.onGeometryChange\(for: CGSize\.self\) \{ \$0\.size \} action: \{ record\(\$0\) \}",
-         "content.background(GeometryReader { geo in Color.clear.onChange(of: geo.size) { _, s in record(s) } })",
-         "KayaInsetReader builds a GeometryReader"),
+        ("a reader on onGeometryChange", SWIFT,
+         r"content\.kayaGeometry\(\{ \$0\.size \}\) \{ record\(\$0\) \}",
+         "content.onGeometryChange(for: CGSize.self) { $0.size } action: { record($0) }",
+         "KayaInsetReader reads its geometry outside .kayaGeometry"),
         ("a reader attached behind its node", SWIFT, r"\.modifier\(KayaLabelFrameReader\(id: node\.id\)\)",
          ".background(KayaLabelFrameReader(id: node.id))", "KayaLabelFrameReader is attached with .background", 10),
         ("a label reader built in a shipped app", SWIFT,
@@ -546,9 +554,9 @@ def run(g):
          r"KayaAccessoryHost\(content: AnyView\(\n(\s+)KayaRender\(node: dock, isRoot: true\)",
          r"AnyView(\n\1KayaRender(node: dock, isRoot: true)", "the phone dock's accessory lacks KayaAccessoryHost"),
         ("the hover layer kaya's grey", SWIFT, r"shape\.fill\(kayaHoverFill\(\)\)", "shape.fill(Color.gray.opacity(0.1))",
-         "the activatable container lacks shape.fill(kayaHoverFill())"),
+         "the activatable container's look lacks shape.fill(kayaHoverFill())"),
         ("the selected surface kaya's own", SWIFT, r"shape\.fill\(kayaSelectedPair\(\)\.fill\)",
-         "shape.fill(Color(red: 0, green: 0.4, blue: 0.9))", "the activatable container lacks shape.fill(kayaSelectedPair().fill)"),
+         "shape.fill(Color(red: 0, green: 0.4, blue: 0.9))", "the activatable container's look lacks shape.fill(kayaSelectedPair().fill)"),
         ("an activatable container no button to the tree", SWIFT,
          r"\.accessibilityAddTraits\(node\.selected \? \[\.isButton, \.isSelected\] : \.isButton\)",
          ".accessibilityAddTraits([])", "the activatable container lacks .accessibilityAddTraits("),
@@ -713,8 +721,12 @@ def run(g):
          "a press tells the pick before the activation"),
         ("a press re-telling a selected row's pick", SWIFT, r"if !node\.selected \{ emitSelectionChanged",
          "if true { emitSelectionChanged", "the press door lacks if !node.selected"),
-        ("a container's tap around the press door", SWIFT, r"\.onTapGesture \{ KayaHost\.emitPress\(node\) \}",
-         ".onTapGesture { KayaHost.emitActivated(node.tag) }", "the activatable container lacks .onTapGesture"),
+        ("a container's button around the press door", SWIFT, r"Button \{ KayaHost\.emitPress\(node\) \} label: \{",
+         "Button { KayaHost.emitActivated(node.tag) } label: {", "the activatable container lacks Button { KayaHost.emitPress(node) }"),
+        ("the pressed look cut", SWIFT, r"if configuration\.isPressed \{", "if false {",
+         "the activatable container's look lacks if configuration.isPressed"),
+        ("the pressed fill kaya's grey", SWIFT, r"Color\(nsColor: \.systemFill\)", "Color.gray",
+         "the pressed fill lacks Color(nsColor: .systemFill)"),
         ("a key at the native table sent elsewhere", SWIFT,
          r"return kayaSendNamedKey\(String\(parts\[1\]\), to: window\)", "return false",
          "a key at a native table holding the keyboard goes to it"),

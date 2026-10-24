@@ -23460,6 +23460,10 @@ fn drag_file_plan(
     })
 }
 
+/// Whether pointer_down holds the primary button down.
+#[cfg(feature = "harness")]
+static POINTER_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 #[cfg(feature = "harness")]
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
@@ -26838,6 +26842,50 @@ impl crate::harness::Stage for WinUiStage {
             }
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
+    }
+    fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
+        if POINTER_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err("an earlier pointer_down still holds the button".to_owned());
+        }
+        Self::foreground_guest("pointer_down");
+        let aim = Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, t) else { return Ok(None) };
+            Ok(widget_screen_rect(core, id))
+        });
+        let Ok(Some((x, y, w, h))) = aim else {
+            POINTER_HELD.store(false, std::sync::atomic::Ordering::SeqCst);
+            return Err(format!("no laid-out box ({aim:?})"));
+        };
+        let (cx, cy) = ((x + w / 2.0) as i32, (y + h / 2.0) as i32);
+        eprintln!("kaya: winui pointer_down {t:?} at ({cx},{cy})");
+        const MOVE: u32 = 0x0001;
+        const LEFTDOWN: u32 = 0x0002;
+        const ABSOLUTE: u32 = 0x8000;
+        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+        unsafe {
+            mouse_event(
+                MOVE | ABSOLUTE,
+                ((i64::from(cx) * 65535) / width) as u32,
+                ((i64::from(cy) * 65535) / height) as u32,
+                0,
+                0,
+            );
+            SetCursorPos(cx, cy);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(60));
+        unsafe { mouse_event(LEFTDOWN, 0, 0, 0, 0) };
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        Ok(())
+    }
+    fn pointer_up(&self) -> Result<(), String> {
+        if !POINTER_HELD.swap(false, std::sync::atomic::Ordering::SeqCst) {
+            return Err("no pointer_down holds the button".to_owned());
+        }
+        const LEFTUP: u32 = 0x0004;
+        unsafe { mouse_event(LEFTUP, 0, 0, 0, 0) };
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        Ok(())
     }
     fn ground_top(&self, t: crate::harness::Target) -> Result<(u32, bool), String> {
         Self::on_ui_read(move |core| skin::read::ground_top(core, t)).unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))

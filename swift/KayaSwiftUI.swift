@@ -12816,6 +12816,12 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("dock reads \(got), wanted \(want)")
                 }
+            case "pointer_down":
+                // docs/deferred.md, the mac interaction latency 1(a).
+                kayaAwaitQuiet()
+                if let why = DispatchQueue.main.sync(execute: { kayaPointerDown(parts[1]) }) { failures.append(why) }
+            case "pointer_up":
+                if let why = DispatchQueue.main.sync(execute: { kayaPointerUp() }) { failures.append(why) }
             case "hover":
                 // The platform's own hover route (docs/styling-pass-plan.md §5):
                 // a mouse-moved event over the target through the window, in
@@ -15396,7 +15402,7 @@ private struct KayaTrackReader: ViewModifier {
     func body(content: Content) -> some View {
         if kayaHarnessActive || tableGeneration != nil || kayaShippedFrameReaders {
             content
-                .onGeometryChange(for: KayaGeometry.self) { KayaGeometry($0) } action: { g in
+                .kayaGeometry({ KayaGeometry($0) }) { g in
                     last.seen = g
                     record(g.size, g.frame)
                 }
@@ -15421,6 +15427,31 @@ private struct KayaTrackReader: ViewModifier {
             kayaTableTrackSizes[id] = KayaTableTrackObservation(
                 generation: tableGeneration, size: size)
         }
+    }
+}
+
+/// A GeometryReader behind the node, reporting `value` when it appears and on
+/// every change: onGeometryChange missed a label's growth for 30 s
+/// (docs/traps.md, the mac app's interaction latency).
+struct KayaGeometryTap<Value: Equatable>: View {
+    let value: (GeometryProxy) -> Value
+    let action: (Value) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            let seen = value(geo)
+            Color.clear
+                .onAppear { action(seen) }
+                .onChange(of: seen) { _, now in action(now) }
+        }
+    }
+}
+
+extension View {
+    func kayaGeometry<Value: Equatable>(
+        _ value: @escaping (GeometryProxy) -> Value, _ action: @escaping (Value) -> Void
+    ) -> some View {
+        background(KayaGeometryTap(value: value, action: action))
     }
 }
 
@@ -15616,7 +15647,7 @@ private struct KayaLabelFrameReader: ViewModifier {
     func body(content: Content) -> some View {
         if kayaHarnessActive {
             content
-                .onGeometryChange(for: KayaGeometry.self) { KayaGeometry($0) } action: { g in
+                .kayaGeometry({ KayaGeometry($0) }) { g in
                     kayaLabelFrames[id] = g.size
                     kayaLabelWindowFrames[id, default: [:]][token] = g.frame
                 }
@@ -15683,9 +15714,9 @@ private struct KayaCellReader: ViewModifier {
 
     private func readers(_ content: Content) -> some View {
         content
-            .onGeometryChange(for: Frames.self) {
+            .kayaGeometry({
                 Frames(local: $0.frame(in: .named("kaya-box-\(parent)")), global: $0.frame(in: .global))
-            } action: { f in
+            }) { f in
                 record(f.local, f.global)
             }
             .onDisappear { kayaCellRecords.retire(id, token) }
@@ -15721,7 +15752,7 @@ private struct KayaInsetReader: ViewModifier {
 
     func body(content: Content) -> some View {
         if kayaHarnessActive {
-            content.onGeometryChange(for: CGSize.self) { $0.size } action: { record($0) }
+            content.kayaGeometry({ $0.size }) { record($0) }
         } else {
             content
         }
@@ -15748,7 +15779,7 @@ private struct KayaBoxReader: ViewModifier {
     func body(content: Content) -> some View {
         if kayaHarnessActive {
             content
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                .kayaGeometry({ $0.size }) { size in
                     last.size = size
                     record(size)
                 }
@@ -21925,31 +21956,56 @@ struct KayaActivatable: ViewModifier {
         if !node.activatable {
             content
         } else {
-            let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
-            content
-                .foregroundStyle(node.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
-                .environment(\.kayaInFill, node.selected && kayaSelectionTakesText || node.filled != 0)
-                .background {
-                    if node.selected { shape.fill(kayaSelectedPair().fill) }
+            Button { KayaHost.emitPress(node) } label: {
+                content
+                    .foregroundStyle(node.selected ? AnyShapeStyle(kayaSelectedPair().fore) : AnyShapeStyle(.primary))
+                    .environment(\.kayaInFill, node.selected && kayaSelectionTakesText || node.filled != 0)
+            }
+            .buttonStyle(KayaActivatableStyle(node: node, hovering: hovering))
+            #if os(macOS)
+                .onHover { inside in
+                    hovering = inside
+                    if inside { kayaHovered.insert(node.id) } else { kayaHovered.remove(node.id) }
                 }
-                .overlay {
-                    if hovering && !node.selected { shape.fill(kayaHoverFill()).allowsHitTesting(false) }
-                }
-                .contentShape(shape)
-                .onTapGesture { KayaHost.emitPress(node) }
-                #if os(macOS)
-                    .onHover { inside in
-                        hovering = inside
-                        if inside { kayaHovered.insert(node.id) } else { kayaHovered.remove(node.id) }
-                    }
-                #else
-                    .hoverEffect(.highlight)
-                #endif
-                .accessibilityElement(children: .combine)
-                .accessibilityAddTraits(node.selected ? [.isButton, .isSelected] : .isButton)
-                .accessibilityAction { KayaHost.emitPress(node) }
+            #else
+                .hoverEffect(.highlight)
+            #endif
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(node.selected ? [.isButton, .isSelected] : .isButton)
         }
     }
+}
+
+/// The platform's pressed look from the pointer going down, ahead of the
+/// app's answer (docs/deferred.md, the mac interaction latency, 1(a)).
+struct KayaActivatableStyle: ButtonStyle {
+    let node: KayaNode
+    let hovering: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
+        configuration.label
+            .background {
+                if node.selected { shape.fill(kayaSelectedPair().fill) }
+            }
+            .overlay {
+                if configuration.isPressed {
+                    shape.fill(kayaPressedFill()).allowsHitTesting(false)
+                } else if hovering && !node.selected {
+                    shape.fill(kayaHoverFill()).allowsHitTesting(false)
+                }
+            }
+            .contentShape(shape)
+    }
+}
+
+@MainActor func kayaPressedFill() -> Color {
+    #if os(macOS)
+        if #available(macOS 14, *) { return Color(nsColor: .systemFill) }
+        return Color(nsColor: .tertiaryLabelColor)
+    #else
+        return Color(uiColor: .systemFill)
+    #endif
 }
 
 /// A label's standalone tint (Y7), yielding to a fill's foreground.
@@ -22024,7 +22080,10 @@ struct KayaLabelTint: ViewModifier {
                       ("critical", rgba(.systemRed)), ("neutral", rgba(neutral))]
         let hover: NSColor
         if #available(macOS 14, *) { hover = .secondarySystemFill } else { hover = .quaternaryLabelColor }
-        let skin = (hover: rgba(hover), neutral: rgba(neutral), selected: rgba(.selectedContentBackgroundColor))
+        let pressed: NSColor
+        if #available(macOS 14, *) { pressed = .systemFill } else { pressed = .tertiaryLabelColor }
+        let skin = (hover: rgba(hover), neutral: rgba(neutral), selected: rgba(.selectedContentBackgroundColor),
+                    pressed: rgba(pressed))
     #else
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
             .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return "<no key window>" }
@@ -22043,7 +22102,8 @@ struct KayaLabelTint: ViewModifier {
         var accent = rgba(.tintColor)
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(.secondarySystemFill))]
-        let skin = (hover: rgba(.quaternarySystemFill), neutral: rgba(.secondarySystemFill), selected: rgba(.systemGray4))
+        let skin = (hover: rgba(.quaternarySystemFill), neutral: rgba(.secondarySystemFill), selected: rgba(.systemGray4),
+                    pressed: rgba(.systemFill))
     #endif
     if let brand = kayaScene.brand {
         let rgb = dark ? brand[6] : brand[1]
@@ -22078,7 +22138,9 @@ struct KayaLabelTint: ViewModifier {
     }
     let resting = [(layered(skin.hover, Array(ground.prefix(3))), Array(ground.prefix(3))),
                    (layered(skin.hover, over(skin.neutral)), over(skin.neutral))]
-    let skinned = [("hovered", resting[0].0), ("hovered", resting[1].0), ("selected", over(skin.selected))]
+    let skinned = [("hovered", resting[0].0), ("hovered", resting[1].0), ("selected", over(skin.selected)),
+                   ("pressed", layered(skin.pressed, Array(ground.prefix(3)))),
+                   ("pressed", layered(skin.pressed, over(skin.neutral)))]
     let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))]
         + others.map { ($0.0, over($0.1)) } + skinned
     func hex(_ c: [Double]) -> String {
@@ -22304,7 +22366,7 @@ struct KayaSkinFrameReader: ViewModifier {
         if kayaHarnessActive {
             content
                 .background(KayaSkinFrameHolder(id: id))
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                .kayaGeometry({ $0.size }) { size in
                     if insetOuter { kayaInsetOuter[id] = size }
                 }
         } else {
@@ -22747,6 +22809,54 @@ func kayaCellText(_ node: KayaNode) -> String? {
 /// tracking areas take moves, which is how SwiftUI's hosting view hears the
 /// pointer. The verdict is the platform's own `.onHover` callback firing, never
 /// kaya's model. Nil when it fired, else what was tried.
+#if os(macOS)
+    @MainActor var kayaPointerHeld: (window: NSWindow, at: CGPoint)?
+
+    @MainActor func kayaMouseButtonEvent(_ type: NSEvent.EventType, _ at: CGPoint, _ window: NSWindow) -> NSEvent? {
+        NSEvent.mouseEvent(
+            with: type, location: at, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+            pressure: type == .leftMouseDown ? 1 : 0)
+    }
+#endif
+
+/// pointer_down's route: a mouse-down at the target's centre through its
+/// window, which a SwiftUI Button takes where onTapGesture never did
+/// (docs/traps.md, the mac app's interaction latency).
+@MainActor func kayaPointerDown(_ spec: Substring) -> String? {
+    guard let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) else {
+        return "no such target \(spec)"
+    }
+    #if os(macOS)
+        guard kayaPointerHeld == nil else { return "pointer_down \(spec): an earlier pointer_down still holds the pointer" }
+        guard let frame = kayaSkinFrame(node) else { return "\(spec) has no laid-out frame to press" }
+        guard let window = kayaNSWindows[0] ?? NSApp.windows.first(where: { $0.isVisible }),
+            let content = window.contentView
+        else { return "no window to press in" }
+        let local = CGPoint(x: frame.midX, y: frame.midY)
+        let at = content.convert(
+            content.isFlipped ? local : CGPoint(x: local.x, y: content.bounds.height - local.y), to: nil)
+        guard let down = kayaMouseButtonEvent(.leftMouseDown, at, window) else { return "no mouse-down event could be made" }
+        window.sendEvent(down)
+        kayaPointerHeld = (window, at)
+        return nil
+    #else
+        return "pointer_down \(spec): an iPhone has no pointer to press with"
+    #endif
+}
+
+@MainActor func kayaPointerUp() -> String? {
+    #if os(macOS)
+        guard let held = kayaPointerHeld else { return "pointer_up: no pointer_down holds the pointer" }
+        kayaPointerHeld = nil
+        guard let up = kayaMouseButtonEvent(.leftMouseUp, held.at, held.window) else { return "no mouse-up event could be made" }
+        held.window.sendEvent(up)
+        return nil
+    #else
+        return "pointer_up: an iPhone has no pointer to release"
+    #endif
+}
+
 @MainActor func kayaHoverTarget(_ spec: Substring) -> String? {
     guard let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) else {
         return "no such target \(spec)"

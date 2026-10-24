@@ -18863,8 +18863,10 @@ needed: a Swift string literal of 15 bytes or fewer is an immediate small
 string that no byte scan finds, so the interpreter's marker is longer; and a
 `#[no_mangle]` static is dropped from an executable that links the core
 unless it is `#[used]` (KAYA_BUILD_ID_MARKER is absent from every Rust
-example binary for that reason). The highlight is an open item
-(docs/deferred.md, the mac interaction latency).
+example binary for that reason). The highlight's answer is a pressed look
+from the pointer going down (docs/deferred.md, the mac interaction latency,
+1(a)): 4 to 12 ms to its frame on the sidebar's rows, while the selection
+still rides the screen's commit.
 
 The readers, ruled 2(b) then 2(a) (measured 2026-10-24, the same probe,
 -Onone interpreter and debug core, configurations interleaved, medians of 18
@@ -18892,7 +18894,58 @@ clicks and 9 hides; Search / Home press to frame, hide hitches):
   cell readers of a container with a scroll_to_row pending (its drain), and
   on iOS every track and cell reader, whose moves re-aim the keyboard pan.
 
+ONGEOMETRYCHANGE MISSES CHANGES (measured the same day, once 1(a)'s Buttons
+were in): music_artist-python dark went red 4 runs in 8 with
+column@artist_panel read 104.5 pt wide and label@artist_about 46.5 pt, the
+size of its "Loading…" text, while the skin's platform anchor read 181.5 and
+157.5 the whole time; the label's onGeometryChange recorded the 46.5 at its
+appear and then no action for 30 s after the text grew, until the page
+scrolled at the leg's end. The readers now read through one tap,
+`.kayaGeometry` (KayaGeometryTap: a GeometryReader behind the node, onAppear
+and onChange of the value), 8 runs in 8 green; 2(a) keeps it out of the
+shipped mac app, which measured 112 / 75 ms with the -O interpreter (readers
+compiled out 97 / 71) and no hitch. tools/lib/skin_routes.py refuses a reader
+on onGeometryChange or a GeometryReader of its own.
+
 A synthesized mouse-down through `window.sendEvent` DOES reach a SwiftUI
 Button with a custom ButtonStyle (`isPressed` true, the action on the
 mouse-up), where it never reaches onTapGesture (a standalone probe app,
 2026-10-24).
+
+## The GTK pressed look dropped under a held press (measured 2026-10-24)
+
+An activatable container's pressed look on GTK is libadwaita's `:active`
+rule (16% of the foreground), and GTK sets `:active` on the widget itself
+while the button is down. kaya's GestureClick also unset ACTIVE in its
+`stopped` handler, which GtkGestureClick emits when the double-click timeout
+passes WITH THE BUTTON STILL DOWN, so a held press lost its look about half a
+second in: cards' `pointer_down` read `pressed` at once and `hovered` after a
+`settle 700`, on x11 and wayland. `stopped` now leaves ACTIVE while the
+gesture is still active; the release clears it (docs/deferred.md, the mac
+interaction latency, 1(a)).
+
+## The sidebar toggle's slow hover is the compat design generation (measured 2026-10-24)
+
+The maintainer saw the "Hide" sidebar button grey in late in Aurora Music.
+Measured with a real pointer on an idle host (a probe app made frontmost,
+the pointer warped and a HID mouse-moved posted, the toolbar's pixels read
+each display-link frame): a plain SwiftUI WindowGroup app with a
+NavigationSplitView shows the toggle's hover 3 to 11 ms after the pointer
+arrives; the same binary re-stamped with SDK 14.4 (`vtool
+-set-build-version macos 14.0 14.4`) shows it 509 to 516 ms after; Aurora
+under the python host (SDK 14.4) 509 to 516 ms. The compat generation
+draws the toggle as an AppKit button (`SwiftUIAppKitButton`, an
+NSButtonCell tracking area) that waits half a second; the modern one draws
+it in SwiftUI. The host's SDK stamp chooses (the design generation entry
+above); kaya's code plays no part.
+
+## WinUI's pressed card unreadable (measured 2026-10-24)
+
+cards' `pointer_down column@card2` then `expect_fill pressed` read "pressed"
+on the VM (sampled F5F5F5; candidates pressed F6F6F6, ground F3F3F3) with
+the harness's mouse-down cut out of pointer_down, so the reading was the
+PointerOver fill: ItemContainer's Pressed and PointerOver fills sit within
+a lightness step of each other on a card. The pressed look there is
+ItemContainer's own template, which kaya does not draw; the windows lane
+cuts cards at pointer_down (tools/lib/lanes/win.py MODS) and expect_fill
+offers no `pressed` on WinUI.

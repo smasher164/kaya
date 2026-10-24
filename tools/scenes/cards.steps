@@ -37,3 +37,11 @@ expect_gap label@status label@end 16
 hover column@card2
 expect_fill column@card2 hovered
 expect_fill column@card1 neutral
+# docs/deferred.md, the mac interaction latency 1(a): the pressed look from the
+# pointer going down, before the app answers on the release.
+pointer_down column@card2
+settle 700
+expect_fill column@card2 pressed
+expect label@status "opened: Release Radar"
+pointer_up
+expect label@status "opened: Daily Mix 2"

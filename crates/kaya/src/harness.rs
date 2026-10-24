@@ -551,6 +551,12 @@ pub enum Step {
     ExpectFill(Target, String),
     /// The pointer over a target, by the platform's own hover route (Y9).
     Hover(Target),
+    /// The pointer's button down over a target and held, by the platform's
+    /// own route, so a step can read the pressed look before the app's answer
+    /// (docs/deferred.md, the mac interaction latency, 1(a)).
+    PointerDown(Target),
+    /// The held button released where pointer_down pressed it.
+    PointerUp,
     /// A container's ground read off its pixels: `gradient`, `image` or
     /// `none` (docs/styling-pass-plan.md §5.1).
     ExpectGround(Target, String),
@@ -1133,6 +1139,7 @@ impl Step {
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
             | Step::Hover(t)
+            | Step::PointerDown(t)
             | Step::ExpectGround(t, _)
             | Step::ExpectGroundReach(t, _)
             | Step::ExpectShape(t, _)
@@ -1303,6 +1310,7 @@ impl Step {
             | Step::ExpectSystemBars(_)
             | Step::ExpectToastAnnounced(..)
             | Step::ToastAction
+            | Step::PointerUp
             | Step::ToastClose
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
@@ -1532,6 +1540,7 @@ impl Step {
             Step::ExpectEdit { .. } => true,
             Step::Press { .. } => false,
             Step::Hover(_) => false,
+            Step::PointerDown(_) | Step::PointerUp => false,
         }
     }
 }
@@ -1552,7 +1561,7 @@ pub const VIDEO_INK_NONE: &str = "none";
 /// How far right of a video view's box `Stage::video_ground` reads, in points.
 /// What `expect_fill` may say (docs/tints-plan.md §4, docs/styling-pass-plan.md Y9).
 pub(crate) const FILL_READINGS: &[&str] =
-    &["accent", "success", "warning", "critical", "neutral", "overlay", "hovered", "selected", "none"];
+    &["accent", "success", "warning", "critical", "neutral", "overlay", "hovered", "selected", "pressed", "none"];
 
 /// The least CIELAB lightness step a hover may make over the ground it rests
 /// on (docs/media-player-plan.md M22 (1)): WinUI's PointerOver, the visible
@@ -2148,6 +2157,11 @@ pub trait Stage: Send + 'static {
     /// Put the pointer over the target by the platform's own hover route
     /// (docs/styling-pass-plan.md §5): a desktop verb, cut on the phones.
     fn hover(&self, target: Target);
+    /// Press the pointer's primary button over the target's centre by the
+    /// platform's own route and hold it; a desktop verb, cut on the phones.
+    fn pointer_down(&self, target: Target) -> Result<(), String>;
+    /// Release the button pointer_down holds, where it pressed.
+    fn pointer_up(&self) -> Result<(), String>;
     /// A container's ground off its pixels (§5.1): `gradient` when the
     /// probe 4 units in at the top is the clamped stop and the one 4 units in
     /// at the bottom the window ground and the midpoint holds 4.5:1 against
@@ -3187,6 +3201,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectFill(parse_target(target.trim())?, tint.to_owned())
             }
             "hover" => Step::Hover(parse_target(rest)?),
+            "pointer_down" => Step::PointerDown(parse_target(rest)?),
+            "pointer_up" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("pointer_up takes no argument: {line:?}"));
+                }
+                Step::PointerUp
+            }
             "expect_ground" | "expect_shape" | "expect_tint" => {
                 let (target, word) = rest
                     .split_once(char::is_whitespace)
@@ -7355,6 +7376,19 @@ fn run_with_log(
                 vtrace::note("hover", format_args!("<- stage.hover {}", target_spec(t)));
                 None
             }
+            Step::PointerDown(t) => {
+                await_quiet();
+                vtrace::note("pointer_down", format_args!("-> stage.pointer_down {}", target_spec(t)));
+                let held = stage.pointer_down(*t);
+                vtrace::note("pointer_down", format_args!("<- stage.pointer_down {held:?}"));
+                held.err().map(|why| Err(format!("pointer_down {}: {why}", target_spec(t))))
+            }
+            Step::PointerUp => {
+                vtrace::note("pointer_up", format_args!("-> stage.pointer_up"));
+                let released = stage.pointer_up();
+                vtrace::note("pointer_up", format_args!("<- stage.pointer_up {released:?}"));
+                released.err().map(|why| Err(format!("pointer_up: {why}")))
+            }
             Step::ExpectGround(t, want) => Some(poll(|| {
                 word_reading(&stage.ground_read(*t), want, || format!("{} ground", target_spec(t)))
             })),
@@ -10802,6 +10836,12 @@ mod tests {
             if t.index == 0 { "accent".into() } else { "none".into() }
         }
         fn hover(&self, _: Target) {}
+        fn pointer_down(&self, _: Target) -> Result<(), String> {
+            Ok(())
+        }
+        fn pointer_up(&self) -> Result<(), String> {
+            Ok(())
+        }
         fn ground_read(&self, t: Target) -> String {
             if t.index == 0 { "gradient".into() } else { "none".into() }
         }
@@ -11901,6 +11941,12 @@ mod tests {
                 String::new()
             }
             fn hover(&self, _: Target) {}
+            fn pointer_down(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
+            fn pointer_up(&self) -> Result<(), String> {
+                Ok(())
+            }
             fn ground_read(&self, _: Target) -> String {
                 String::new()
             }
@@ -12436,6 +12482,12 @@ mod tests {
                 String::new()
             }
             fn hover(&self, _: Target) {}
+            fn pointer_down(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
+            fn pointer_up(&self) -> Result<(), String> {
+                Ok(())
+            }
             fn ground_read(&self, _: Target) -> String {
                 String::new()
             }

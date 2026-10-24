@@ -211,7 +211,7 @@ MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 # slot 0 (deploy-win's `_release_slot` sorts the free list), so the rule is
 # simply: a pointer leg is never pooled. tools/deploy-win.py refuses the
 # roster and tools/check-steps.py holds it.
-POINTER_VERBS = ("drag", "drag_file", "hover")
+POINTER_VERBS = ("drag", "drag_file", "hover", "pointer_down", "pointer_up")
 
 
 def pointer_scenes(scenes_dir):
@@ -1015,6 +1015,10 @@ def wired_scenes():
 # has no selection of its own to move.
 MODS = {
     "tracks": {"cut": "press down", "keep": "expect_tint expect_rows"},
+    # docs/traps.md, WinUI's pressed card unreadable: its Pressed fill and its
+    # PointerOver fill sit a lightness step apart on a card, so a read cannot
+    # tell the two; the pressed look is ItemContainer's own template.
+    "cards": {"cut": "pointer_down", "keep": "expect_selected expect_ax"},
 }
 
 

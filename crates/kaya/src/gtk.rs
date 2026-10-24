@@ -9651,7 +9651,11 @@ fn set_activatable(core: &mut CoreState, id: u64, widget: &gtk4::Widget, on: boo
     }
     {
         let weak = widget.downgrade();
-        press.connect_stopped(move |_| {
+        // docs/traps.md, the GTK pressed look dropped under a held press.
+        press.connect_stopped(move |gesture| {
+            if gesture.is_active() {
+                return;
+            }
             if let Some(w) = weak.upgrade() {
                 w.unset_state_flags(gtk4::StateFlags::ACTIVE);
             }
@@ -9866,12 +9870,11 @@ const SKIN_OVERLAY_DARKEST: f64 = 0.08;
 #[cfg(feature = "harness")]
 fn hold_wayland_pointer(located: &str) {
     use std::os::unix::process::CommandExt;
-    static HELD: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
     let mut words = located.split_whitespace();
     let (Some(x), Some(y), Some(injector)) = (words.next(), words.next(), words.next()) else {
         panic!("kaya: hover: dragdrive.py located nothing: {located:?}")
     };
-    let mut held = HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut held = WAYLAND_POINTER_HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(mut old) = held.take() {
         let _ = old.kill();
         let _ = old.wait();
@@ -9893,6 +9896,32 @@ fn hold_wayland_pointer(located: &str) {
     *held = Some(child);
     std::thread::sleep(std::time::Duration::from_millis(200));
 }
+
+#[cfg(feature = "harness")]
+static WAYLAND_POINTER_HELD: std::sync::Mutex<Option<std::process::Child>> = std::sync::Mutex::new(None);
+
+/// The injector `hover` left holding the wayland pointer, let go.
+#[cfg(feature = "harness")]
+fn release_wayland_pointer() {
+    let mut held = WAYLAND_POINTER_HELD.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(mut old) = held.take() {
+        let _ = old.kill();
+        let _ = old.wait();
+    }
+}
+
+/// A button pointer_down holds: the wayland injector waiting on its release
+/// file, or none on x11, whose server holds the button itself.
+#[cfg(feature = "harness")]
+struct PointerPress {
+    child: Option<std::process::Child>,
+    release: std::path::PathBuf,
+    at: (String, String),
+    injector: String,
+}
+
+#[cfg(feature = "harness")]
+static POINTER_PRESS: std::sync::Mutex<Option<PointerPress>> = std::sync::Mutex::new(None);
 
 /// The picture an image ground DREW, its own decoded texture (never the bytes
 /// decoded again).
@@ -24572,6 +24601,123 @@ impl crate::harness::Stage for GtkStage {
         );
         Self::await_frames(2);
     }
+    fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
+        use std::os::unix::process::CommandExt;
+        let driver = std::env::var(DRAG_DRIVER_VAR)
+            .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py"))?;
+        if POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).is_some() {
+            return Err("an earlier pointer_down still holds the button".to_owned());
+        }
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            let widget = skin_layout_widget(core, t)?;
+            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
+            let b = widget.compute_bounds(&window)?;
+            Some((
+                f64::from(b.x()) + f64::from(b.width()) / 2.0,
+                f64::from(b.y()) + f64::from(b.height()) / 2.0,
+                gtk4::prelude::NativeExt::surface_transform(&window),
+            ))
+        });
+        let (x, y, transform) = point.ok_or_else(|| "no laid-out widget in a window".to_owned())?;
+        let wayland = linux_wayland_session();
+        let proto = if wayland { "wayland" } else { "x11" };
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args(["locate", proto])
+            .arg(std::process::id().to_string())
+            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
+            .output()
+            .map_err(|e| format!("{driver} could not be run: {e}"))?;
+        let located = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+        if !out.status.success() {
+            return Err(format!("{driver} located nothing ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+        }
+        let mut words = located.split_whitespace();
+        let (Some(sx), Some(sy), Some(injector)) = (words.next(), words.next(), words.next()) else {
+            return Err(format!("{driver} located nothing: {located:?}"));
+        };
+        let (sx, sy, injector) = (sx.to_owned(), sy.to_owned(), injector.to_owned());
+        let release = std::env::temp_dir().join(format!("kaya-pointer-up-{}", std::process::id()));
+        let _ = std::fs::remove_file(&release);
+        let child = if wayland {
+            release_wayland_pointer();
+            let mut command = std::process::Command::new(&injector);
+            command
+                .args(["set", &sx, &sy, "sleep", "150", "press", "left"])
+                .arg("wait")
+                .arg(&release)
+                .args(["20000", "release", "left", "sleep", "100"])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit());
+            // SAFETY: prctl is async-signal-safe and touches only the child.
+            unsafe {
+                command.pre_exec(|| {
+                    libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL);
+                    Ok(())
+                });
+            }
+            Some(command.spawn().map_err(|e| format!("{injector} could not be run: {e}"))?)
+        } else {
+            let out = std::process::Command::new(&injector)
+                .args(["mousemove", &sx, &sy, "sleep", "0.15", "mousedown", "1"])
+                .output()
+                .map_err(|e| format!("{injector} could not be run: {e}"))?;
+            if !out.status.success() {
+                return Err(format!("{injector} mousedown failed ({}): {}", out.status, String::from_utf8_lossy(&out.stderr).trim()));
+            }
+            None
+        };
+        crate::vtrace::note(
+            "pointer_down",
+            format_args!("{} at ({x}, {y}) -> screen ({sx}, {sy}) on {proto}", crate::harness::target_spec(&t)),
+        );
+        *POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some(PointerPress { child, release, at: (sx, sy), injector });
+        std::thread::sleep(std::time::Duration::from_millis(if wayland { 300 } else { 100 }));
+        Self::await_frames(2);
+        Ok(())
+    }
+    fn pointer_up(&self) -> Result<(), String> {
+        let Some(press) = POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else {
+            return Err("no pointer_down holds the button".to_owned());
+        };
+        match press.child {
+            Some(mut child) => {
+                std::fs::write(&press.release, b"")
+                    .map_err(|e| format!("the release file {} could not be written: {e}", press.release.display()))?;
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(_)) => break,
+                        Ok(None) if std::time::Instant::now() < deadline => {
+                            std::thread::sleep(std::time::Duration::from_millis(20));
+                        }
+                        _ => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            let _ = std::fs::remove_file(&press.release);
+                            return Err(format!("{} did not release within 5 s", press.injector));
+                        }
+                    }
+                }
+                let _ = std::fs::remove_file(&press.release);
+                hold_wayland_pointer(&format!("{} {} {}", press.at.0, press.at.1, press.injector));
+            }
+            None => {
+                let out = std::process::Command::new(&press.injector)
+                    .args(["mouseup", "1"])
+                    .output()
+                    .map_err(|e| format!("{} could not be run: {e}", press.injector))?;
+                if !out.status.success() {
+                    return Err(format!("{} mouseup failed ({})", press.injector, out.status));
+                }
+            }
+        }
+        Self::await_frames(2);
+        Ok(())
+    }
     fn ground_top(&self, t: crate::harness::Target) -> Result<(u32, bool), String> {
         Self::on_main(move |core| {
             let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
@@ -24964,6 +25110,8 @@ impl crate::harness::Stage for GtkStage {
             let resting = [(layer(fg, 0.07, bare), bare.map(|v| v * 255.0)), (layer(card_fg, 0.07, on_card), on_card.map(|v| v * 255.0))];
             candidates.push(("hovered", resting[0].0));
             candidates.push(("hovered", resting[1].0));
+            candidates.push(("pressed", layer(fg, 0.16, bare)));
+            candidates.push(("pressed", layer(card_fg, 0.16, on_card)));
             candidates.push(("selected", layer(accent_bg, 0.25, bare)));
             candidates.push(("selected", layer(accent_bg, 0.25, on_card)));
             let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - got[i]).powi(2)).sum::<f64>();
