@@ -1095,7 +1095,7 @@ draws "In Tune", "Kellee Maize" and the next symbol dark in light and light
 in dark, beside the tab bar's. The broken track row under the Search tab bar
 is the glass's lens over a row, the same as Health's Summary under its tab
 bar on the same simulator; hiding the edge effect on that page changed
-nothing, so nothing there was changed.
+nothing, so nothing there was changed then (M23 (1) took it up).
 
 (5) Asked "should a selected card go back to WinUI's accent ring, with rows
 keeping the pill?", the maintainer: "Yes." A selected card on WinUI is
@@ -1136,6 +1136,37 @@ name. The phones' python host also runs portfolio and varied, which ride in
 the music app's package there. `expect_now_playing_app "Aurora Music"` in
 music_dock reads the name on all five lanes, and (3)'s two lane drops are
 gone. check-app-identity's C17 holds each app's routes to its own file.
+
+### M23: The final review's second round (RULED 2026-10-23)
+
+(1) "You should still keep working on it. Just because ios apps have the
+issue currently, doesn't mean we should as well." After M22 (4) two things
+remained on the phone: the dock's artist line read faint over light art
+(4.56:1 in light, 3.61:1 in dark, its secondary ink against the glass right
+behind it, which had taken the art's teal), and a track row under the
+Search tab bar read as broken text. The Search pictures until then were
+taken with the search field focused: the in-process shot leaves the
+keyboard's window out (docs/traps.md, the iOS shot without the keyboard),
+and the bottom edge effect sat at the keyboard's top, 65 pt above the tab
+bar. With the keyboard down the soft edge effect fades the rows below the
+bar, and the row under the glass still reads as mirrored, broken text: the
+glass's lens refracts it at its rim, as Health's Summary does. Of the
+remedies weighed, a bottom content margin changes nothing at rest (the
+adjusted inset already lets the last row clear the bar), safeAreaBar is for
+a bar of the app's own and backgroundExtensionEffect for an image under a
+sidebar. The phone's tab bar now takes the HARD bottom edge,
+`scrollEdgeEffectStyle(.hard, for: .bottom)` (KayaTabBarEdge, iOS 26): the
+content under the bars blurs into a nearly opaque band of the page's ground
+(Apple's "a linear, nearly opaque boundary between pinned controls and
+scrolling content") while the bars keep their glass. It is the HIG's own
+case for the more opaque separation ("text that appears outside of
+controls", Scroll views, Scroll edge effects), which the dock's title and
+artist are, and DTS's answer for the accessory (forums thread 810401). The
+trade-off: nothing is seen through the bars any more, where Apple's own
+apps keep the soft edge and the lensed text. The top edge stays automatic.
+The artist line keeps the caption's hierarchical secondary style; over the
+page's ground it reads 4.74:1 in light (secondary on white, as every list
+subtitle) and 6.76:1 in dark, the title 20.2:1 and 15.1:1.
 
 ## §6: Build order
 

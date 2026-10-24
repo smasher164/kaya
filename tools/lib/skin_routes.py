@@ -76,6 +76,9 @@ DOORS = [
     ("the accessory's host", "struct KayaAccessoryHost: UIViewControllerRepresentable {",
      ["UIHostingController(rootView: content)", "host.view.backgroundColor = .clear", "host.rootView = content"],
      ["overrideUserInterfaceStyle", "colorScheme"]),
+    # docs/media-player-plan.md M23 (1).
+    ("the phone tab bar's bottom edge", "struct KayaTabBarEdge: ViewModifier {",
+     ["content.scrollEdgeEffectStyle(.hard, for: .bottom)"], []),
     ("the mac hover layer", "func kayaHoverFill() -> Color {",
      ["Color(nsColor: .secondarySystemFill)", "Color(nsColor: .quaternaryLabelColor)"], ["Color(red:", ".opacity(", "nsColor: .quaternarySystemFill"]),
     ("the overlay panel", "struct KayaFilledSurface: ViewModifier {",
@@ -220,6 +223,8 @@ READS = [
       "trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque())", "kayaHovered.contains(node.id)"]),
 ]
 CALLS = [
+    (SWIFT, "the phone tab bar's hard bottom edge (M23 (1))",
+     ".modifier(KayaTabAccessory(windowId: windowId))\n.modifier(KayaTabBarEdge())"),
     (SWIFT, "a stacked root whose top is a picture takes the inline title (M16 (27))",
      ".navigationTitle(kayaWindowCaption(windowId))\n.modifier(KayaPictureTopTitle(root: scene.windows[windowId]?.root))"),
     (SWIFT, "the primary root whose top is a picture takes the inline title (M16 (27))",
@@ -487,6 +492,12 @@ def run(g):
         ("the accessory's content hosted by SwiftUI itself (M22 (4))", SWIFT,
          r"KayaAccessoryHost\(content: AnyView\(\n(\s+)KayaRender\(node: dock, isRoot: true\)",
          r"AnyView(\n\1KayaRender(node: dock, isRoot: true)", "the phone dock's accessory lacks KayaAccessoryHost"),
+        ("the tab bar's bottom edge left automatic (M23 (1))", SWIFT,
+         r"content\.scrollEdgeEffectStyle\(\.hard, for: \.bottom\)", "content.scrollEdgeEffectStyle(.automatic, for: .bottom)",
+         "the phone tab bar's bottom edge lacks content.scrollEdgeEffectStyle(.hard, for: .bottom)"),
+        ("the tab bar's bottom edge never applied (M23 (1))", SWIFT,
+         r"\n\s+\.modifier\(KayaTabBarEdge\(\)\)", "",
+         "the phone tab bar's hard bottom edge (M23 (1)) no longer holds"),
         ("the hover layer kaya's grey", SWIFT, r"shape\.fill\(kayaHoverFill\(\)\)", "shape.fill(Color.gray.opacity(0.1))",
          "the activatable container lacks shape.fill(kayaHoverFill())"),
         ("the selected surface kaya's own", SWIFT, r"shape\.fill\(kayaSelectedPair\(\)\.fill\)",

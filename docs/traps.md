@@ -18777,3 +18777,12 @@ main looper itself when called from any other thread, so every arm reads the
 registries where they are written. check-verbs holds the hop (a cut is
 watched red there).
 
+## The iOS shot without the keyboard (measured 2026-10-23)
+
+The flight recorder's iOS `shot` is the interpreter's render of its own
+window, which leaves the keyboard's window out. A Search capture taken with
+the field focused showed the tab bar over sharp, lensed rows, while the page's
+scroll view reported a bottom inset of 335 pt (the keyboard) and its bottom
+scroll edge effect sat at 541.8 to 664 pt, above the tab bar: on the device
+the keyboard covers that bar. A picture of what sits under the tab bar is
+taken with the keyboard down (docs/media-player-plan.md M23 (1)).
