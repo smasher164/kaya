@@ -61,6 +61,51 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
+## DEFER — the iPhone Duo: kaya's adaptive layouts on a phone that folds open (the maintainer, 2026-10-23)
+KEY: iPhone Duo, foldable, hinge, reserved region, ReservedRegion, reservedRegions, vertical bar, toolbarVerticalEdge, ArrangementView, UIArrangementViewController, fold, unfold, inner display, outer display, Device Hub, Xcode 27.1
+
+The maintainer: "we'll eventually want kaya to gracefully handle iphone duo
+(the new iphone). It has some unique challenges around adaptive layouts."
+Apple's first foldable (announced 2026-09-09, shipping 2026-10-23) opens like
+a passport: a 5.4-inch outer display and a 7.6-inch inner one
+(https://www.apple.com/newsroom/2026/09/apple-unveils-iphone-duo/). What
+Apple told developers (the Group Lab summary,
+https://developer.apple.com/forums/thread/847644), and where each point
+meets kaya:
+
+- The outer display is a compact phone; the inner one reports REGULAR width
+  and height, like an iPad. Folding and unfolding is a trait change, not a
+  new scene: the process, text input, scroll position and playback stay.
+  kaya's adaptive lowering already keys on the window's size class, never
+  the device (docs/adaptive-layout-plan.md), so the split view, sidebar and
+  tab fold should follow; what nobody has measured is a size-class change
+  WHILE the app runs on a phone (the fold's continuity: selection, the
+  pushed screen, a scroll anchor, a sheet that is open).
+- Safe areas are asymmetric, and the hinge, camera and Dynamic Island are
+  "reserved regions" (SwiftUI `ReservedRegion`, `GeometryProxy`'s
+  `reservedRegions(kind:options:layoutDirectionBehavior:)`) that the safe
+  area alone does not cover; touches on custom UI over one may be dropped.
+  docs/safe-area-plan.md assumes the safe area is the whole answer, and a
+  bled canvas (A3, the DEFER on the safe area as a reading above) would draw
+  across the hinge.
+- Bars can stand vertically on the outer display (`toolbarVerticalEdge`).
+  The standard containers adapt by themselves; a tab item needs a title AND
+  a symbol to be shown in a vertical bar. kaya's custom pieces are the
+  question: the tab accessory (KayaAccessoryHost since 2e4e3127;
+  `UITabAccessory.Environment` reads regular or inline), the mini player's
+  dock, the sheets (inner-display sheets are centred; `presentationPlacement`).
+- Apps built with the iOS 26 SDK run letterboxed at an iPhone size; full
+  edge to edge takes the iOS 27.1 SDK, and testing poses takes Xcode 27.1's
+  Device Hub. New in 27.1: `ArrangementView` for layouts that split across
+  the hinge, multiple windows and Split View on the inner display.
+- The summary contradicts itself on whether the inner display honours an
+  app's orientation lock; measure on a device.
+
+Trigger: the lane's Xcode and SDK reach 27.1 (a kaya-sim-duo device in the
+pool, folded and unfolded legs of the adaptive scenes). The first slice is a
+plan: which kaya surfaces adapt for free, which need the reserved regions,
+and the fold-while-running legs.
+
 ## DEFER — a line count that reads differently per platform (docs/media-player-plan.md M20; 2026-10-21)
 KEY: max_lines per platform, card title lines, text size per platform, found_album_name, line count
 
