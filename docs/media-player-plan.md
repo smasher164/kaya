@@ -1154,43 +1154,20 @@ glass's lens refracts it at its rim, as Health's Summary does. Of the
 remedies weighed, a bottom content margin changes nothing at rest (the
 adjusted inset already lets the last row clear the bar), safeAreaBar is for
 a bar of the app's own and backgroundExtensionEffect for an image under a
-sidebar. The phone's tab bar now takes the HARD bottom edge,
-`scrollEdgeEffectStyle(.hard, for: .bottom)` (KayaTabBarEdge, iOS 26): the
-content under the bars blurs into a nearly opaque band of the page's ground
-(Apple's "a linear, nearly opaque boundary between pinned controls and
-scrolling content") while the bars keep their glass. It is the HIG's own
-case for the more opaque separation ("text that appears outside of
-controls", Scroll views, Scroll edge effects), which the dock's title and
-artist are, and DTS's answer for the accessory (forums thread 810401). The
-trade-off: nothing is seen through the bars any more, where Apple's own
-apps keep the soft edge and the lensed text. The top edge stays automatic.
-The artist line keeps the caption's hierarchical secondary style; over the
-page's ground it reads 4.74:1 in light (secondary on white, as every list
-subtitle) and 6.76:1 in dark, the title 20.2:1 and 15.1:1.
-
-(2) "Windows should probably be flat as well where, unless you think it's
-unidiomatic." Flat is WinUI's idiom: both of the platform's own back
-buttons are transparent at rest and take the subtle fill on hover and
-press. NavigationView's NavigationBackButtonNormalStyle
-(controls/dev/NavigationView/NavigationBackButton.xaml in
-microsoft-ui-xaml) wears NavigationViewBackButtonBackground, which is
-SubtleFillColorTransparentBrush, and SubtleFillColorSecondaryBrush and
-SubtleFillColorTertiaryBrush on PointerOver and Pressed; the TitleBar
-control's TitleBarBackButtonStyle the same three. Microsoft's guidance for
-a back button outside those controls is a Button with the title bar's
-style ("Navigation history and backwards navigation", Back button). A
-navigation entry's back button now wears NavigationBackButtonNormalStyle,
-looked up from the application's resources (its 40 by 36 size and 4,2
-margin come with it, which the title bar's style, stretched to a title
-bar's height, does not carry), with WinUI's own back glyph; its accessible
-name stays the arrow it had. The harness reads it before every `back` on
-the lane: the button's ground 3 DIP inside its edge against the bar beside
-it at rest (at most 0.5 in CIELAB lightness), and in its PointerOver
-state, set through VisualStateManager so no pointer moves (at least 1.0),
-each read again 100 ms apart until it holds, twenty times at most
-(docs/traps.md, the WinUI back button's state read before its frame).
-Measured: rest 0.0 (F3F3F3 and F9F9F9 bars), hover 8.4; the old button
-read FDFDFD against F9F9F9, 1.4.
+sidebar. The phone's tab bar took the HARD bottom edge for a day,
+`scrollEdgeEffectStyle(.hard, for: .bottom)`: the content under the bars
+blurred into a nearly opaque band while the bars kept their glass (the HIG's
+case for "text that appears outside of controls", DTS in forums thread
+810401), and the artist line read 4.74:1 in light and 6.76:1 in dark. It is
+REVERTED (2026-10-24), the maintainer: "I liked the artist page before where
+the glass was more translucent. I assumed what you'd fix was the font color,
+not the glass itself. In the before screenshot here, the font color actually
+looks good and the text is legible. I think earlier when I asked you to fix
+it, the font color was white, which made it hard to read over the white and
+teal background." So M22 (4)'s text that flips with the glass was the whole
+fix: the glass keeps the automatic soft edge, the art shows through the bars,
+and the dock's text is the system's adaptive label styles. Changing the glass
+itself to make text under it legible is not wanted.
 
 ## §6: Build order
 

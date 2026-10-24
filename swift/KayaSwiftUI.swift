@@ -22804,17 +22804,6 @@ let kayaPhoneDockPadY: CGFloat = 8
             }
         }
     }
-
-    /// docs/media-player-plan.md M23 (1).
-    struct KayaTabBarEdge: ViewModifier {
-        func body(content: Content) -> some View {
-            if #available(iOS 26, *) {
-                content.scrollEdgeEffectStyle(.hard, for: .bottom)
-            } else {
-                content
-            }
-        }
-    }
 #endif
 
 /// The window's dock under every pane (Y8): a bottom inset of the window's
@@ -34638,7 +34627,6 @@ struct KayaSectionsView: View {
             #else
                 tabBody(window)
                     .modifier(KayaTabAccessory(windowId: windowId))
-                    .modifier(KayaTabBarEdge())
                     .onAppear { kayaScene.windows[windowId]?.sectionsRendered = "bar" }
                     .tint(kayaBrandTint())
                     .font(kayaBrandFont())
