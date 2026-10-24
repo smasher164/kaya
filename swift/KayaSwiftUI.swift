@@ -12820,6 +12820,20 @@ private func kayaRunScript(_ script: String) {
                 // docs/deferred.md, the mac interaction latency 1(a).
                 kayaAwaitQuiet()
                 if let why = DispatchQueue.main.sync(execute: { kayaPointerDown(parts[1]) }) { failures.append(why) }
+            case "expect_back_help":
+                let (wantWindow, _, rest) = kayaWindowTarget(Array(parts[1...]))
+                let wantBack = kayaQuoted(Array(rest))
+                var gotBack = DispatchQueue.main.sync { kayaBackHelpRead(wantWindow) }
+                let backDeadline = Date().addingTimeInterval(5)
+                while gotBack != wantBack && Date() < backDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotBack = DispatchQueue.main.sync { kayaBackHelpRead(wantWindow) }
+                }
+                if gotBack == wantBack {
+                    observed.append("back help \"\(wantBack)\"")
+                } else {
+                    failures.append("back help \"\(gotBack)\", wanted \"\(wantBack)\"")
+                }
             case "pointer_up":
                 if let why = DispatchQueue.main.sync(execute: { kayaPointerUp() }) { failures.append(why) }
             case "hover":
@@ -22842,6 +22856,66 @@ func kayaCellText(_ node: KayaNode) -> String? {
         return nil
     #else
         return "pointer_down \(spec): an iPhone has no pointer to press with"
+    #endif
+}
+
+#if os(macOS)
+    /// SwiftUI's own toolbar chrome, its sidebar toggle and back button,
+    /// wears its label as its help, as AppKit's sidebar item does
+    /// (docs/deferred.md, the mac interaction latency, 3(b)).
+    let kayaChromeHelpItems: Set<String> = [
+        "com.apple.SwiftUI.navigationSplitView.toggleSidebar", "com.apple.SwiftUI.navigationStack.back",
+    ]
+    @MainActor var kayaChromeHelpWatches: [ObjectIdentifier: NSKeyValueObservation] = [:]
+
+    @MainActor func kayaWatchChromeHelp() {
+        NotificationCenter.default.addObserver(forName: NSToolbar.willAddItemNotification, object: nil, queue: .main) {
+            note in
+            guard let item = note.userInfo?["item"] as? NSToolbarItem else { return }
+            MainActor.assumeIsolated { kayaAdoptChromeHelp(item) }
+        }
+    }
+
+    @MainActor func kayaAdoptChromeHelp(_ item: NSToolbarItem) {
+        guard kayaChromeHelpItems.contains(item.itemIdentifier.rawValue) else { return }
+        if item.toolTip != item.label { item.toolTip = item.label }
+        kayaChromeHelpWatches[ObjectIdentifier(item)] = item.observe(\.label) { item, _ in
+            DispatchQueue.main.async { if item.toolTip != item.label { item.toolTip = item.label } }
+        }
+    }
+#endif
+
+/// expect_back_help's read: the AXHelp of the window toolbar's back button,
+/// what the platform hands its reader and shows on hover.
+@MainActor func kayaBackHelpRead(_ windowId: UInt64) -> String {
+    #if os(macOS)
+        guard let window = kayaNSWindows[windowId] ?? NSApp.windows.first(where: { $0.isVisible }) else {
+            return "<no window>"
+        }
+        guard let item = window.toolbar?.items.first(where: { $0.itemIdentifier.rawValue == "com.apple.SwiftUI.navigationStack.back" })
+        else { return "<no back button in the toolbar>" }
+        let app = AXUIElementCreateApplication(getpid())
+        AXUIElementSetMessagingTimeout(app, 2.0)
+        func attr(_ e: AXUIElement, _ a: String) -> CFTypeRef? {
+            var v: CFTypeRef?
+            AXUIElementCopyAttributeValue(e, a as CFString, &v)
+            return v
+        }
+        func find(_ e: AXUIElement, _ inToolbar: Bool, _ depth: Int) -> AXUIElement? {
+            let role = attr(e, kAXRoleAttribute as String) as? String
+            if inToolbar, role == kAXButtonRole as String, (attr(e, kAXDescriptionAttribute as String) as? String) == item.label {
+                return e
+            }
+            guard depth < 12 else { return nil }
+            for child in (attr(e, kAXChildrenAttribute as String) as? [AXUIElement]) ?? [] {
+                if let hit = find(child, inToolbar || role == kAXToolbarRole as String, depth + 1) { return hit }
+            }
+            return nil
+        }
+        guard let button = find(app, false, 0) else { return "<the back button \"\(item.label)\" is not in the accessibility tree>" }
+        return attr(button, kAXHelpAttribute as String) as? String ?? ""
+    #else
+        return "<an iPhone shows no help on its back button>"
     #endif
 }
 

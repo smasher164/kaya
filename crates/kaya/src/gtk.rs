@@ -7479,6 +7479,7 @@ fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
     use gtk4::prelude::{ButtonExt, ObjectExt, WidgetExt};
     let header = adw::HeaderBar::new();
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
+    back.set_tooltip_text(Some(&glib::dgettext(Some("libadwaita"), "Back")));
     back.set_visible(false);
     back.connect_clicked(move |_| {
         CORE.with_borrow_mut(|core| {
@@ -24678,6 +24679,12 @@ impl crate::harness::Stage for GtkStage {
         std::thread::sleep(std::time::Duration::from_millis(if wayland { 300 } else { 100 }));
         Self::await_frames(2);
         Ok(())
+    }
+    fn back_help(&self, window: u64) -> String {
+        Self::on_main(move |core| match core.back_buttons.get(&window) {
+            Some(back) => gtk4::prelude::WidgetExt::tooltip_text(back).map(|t| t.to_string()).unwrap_or_default(),
+            None => "<no back button in this window>".to_owned(),
+        })
     }
     fn pointer_up(&self) -> Result<(), String> {
         let Some(press) = POINTER_PRESS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() else {

@@ -313807,6 +313807,554 @@ pub mod Microsoft {
                 Restart: usize,
             }
         }
+        pub mod ApplicationModel {
+            pub mod Resources {
+                windows_core::imp::define_interface!(
+                    IResourceCandidate,
+                    IResourceCandidate_Vtbl,
+                    0x6c54bc0c_ef1e_57b8_b478_34fece737356
+                );
+                impl windows_core::RuntimeType for IResourceCandidate {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceCandidate_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub ValueAsString: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub ValueAsBytes: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u32,
+                        *mut *mut u8,
+                    )
+                        -> windows_core::HRESULT,
+                    Kind: usize,
+                    pub QualifierValues: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IResourceCandidateFactory,
+                    IResourceCandidateFactory_Vtbl,
+                    0xbb2b30f8_c19b_5f43_88d9_69ad728a32f4
+                );
+                impl windows_core::RuntimeType for IResourceCandidateFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceCandidateFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    CreateInstance: usize,
+                    pub CreateInstance2: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u32,
+                        *const u8,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IResourceManager,
+                    IResourceManager_Vtbl,
+                    0xac2291ef_81be_5c99_a0ae_bcee0180b8a8
+                );
+                impl windows_core::RuntimeType for IResourceManager {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                windows_core::imp::interface_hierarchy!(
+                    IResourceManager,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl IResourceManager {
+                    pub fn MainResourceMap(&self) -> windows_core::Result<ResourceMap> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MainResourceMap)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn RemoveResourceNotFound(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveResourceNotFound)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                }
+                impl windows_core::RuntimeName for IResourceManager {
+                    const NAME: &'static str =
+                        "Microsoft.Windows.ApplicationModel.Resources.IResourceManager";
+                }
+                pub trait IResourceManager_Impl: windows_core::IUnknownImpl {
+                    fn MainResourceMap(&self) -> windows_core::Result<ResourceMap>;
+                    fn RemoveResourceNotFound(&self, token: i64) -> windows_core::Result<()>;
+                }
+                impl IResourceManager_Vtbl {
+                    pub const fn new<Identity: IResourceManager_Impl, const OFFSET: isize>() -> Self
+                    {
+                        unsafe extern "system" fn MainResourceMap<
+                            Identity: IResourceManager_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            result__: *mut *mut core::ffi::c_void,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                match IResourceManager_Impl::MainResourceMap(this) {
+                                    Ok(ok__) => {
+                                        result__.write(core::mem::transmute_copy(&ok__));
+                                        core::mem::forget(ok__);
+                                        windows_core::HRESULT(0)
+                                    }
+                                    Err(err) => err.into(),
+                                }
+                            }
+                        }
+                        unsafe extern "system" fn RemoveResourceNotFound<
+                            Identity: IResourceManager_Impl,
+                            const OFFSET: isize,
+                        >(
+                            this: *mut core::ffi::c_void,
+                            token: i64,
+                        ) -> windows_core::HRESULT {
+                            unsafe {
+                                let this: &Identity = &*((this as *const *const ()).offset(OFFSET)
+                                    as *const Identity);
+                                IResourceManager_Impl::RemoveResourceNotFound(this, token).into()
+                            }
+                        }
+                        Self {
+                            base__: windows_core::IInspectable_Vtbl::new::<
+                                Identity,
+                                IResourceManager,
+                                OFFSET,
+                            >(),
+                            MainResourceMap: MainResourceMap::<Identity, OFFSET>,
+                            CreateResourceContext: 0,
+                            ResourceNotFound: 0,
+                            RemoveResourceNotFound: RemoveResourceNotFound::<Identity, OFFSET>,
+                        }
+                    }
+                    pub fn matches(iid: &windows_core::GUID) -> bool {
+                        iid == &<IResourceManager as windows_core::Interface>::IID
+                    }
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceManager_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub MainResourceMap: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    CreateResourceContext: usize,
+                    ResourceNotFound: usize,
+                    pub RemoveResourceNotFound: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        i64,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IResourceManager2,
+                    IResourceManager2_Vtbl,
+                    0x7ec10160_a154_5c42_8268_30e306b1f585
+                );
+                impl windows_core::RuntimeType for IResourceManager2 {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceManager2_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
+                    IResourceManagerFactory,
+                    IResourceManagerFactory_Vtbl,
+                    0xd6acf18f_458a_535b_a5c4_ac2dc4e49099
+                );
+                impl windows_core::RuntimeType for IResourceManagerFactory {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceManagerFactory_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub CreateInstance: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                }
+                windows_core::imp::define_interface!(
+                    IResourceMap,
+                    IResourceMap_Vtbl,
+                    0x4abbd9bc_df4e_5c7b_812c_7e7bb0c22377
+                );
+                impl windows_core::RuntimeType for IResourceMap {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IResourceMap_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                    pub ResourceCount: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut u32,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GetSubtree: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub TryGetSubtree: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    pub GetValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    GetValueWithContext: usize,
+                    pub GetValueByIndex: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        u32,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    GetValueByIndexWithContext: usize,
+                    pub TryGetValue: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut *mut core::ffi::c_void,
+                    )
+                        -> windows_core::HRESULT,
+                    TryGetValueWithContext: usize,
+                }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct ResourceCandidate(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    ResourceCandidate,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl ResourceCandidate {
+                    pub fn ValueAsString(&self) -> windows_core::Result<windows_core::HSTRING> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ValueAsString)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| core::mem::transmute(result__))
+                        }
+                    }
+                    pub fn ValueAsBytes(&self) -> windows_core::Result<windows_core::Array<u8>> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::MaybeUninit::zeroed();
+                            (windows_core::Interface::vtable(this).ValueAsBytes)(
+                                windows_core::Interface::as_raw(this),
+                                windows_core::Array::<u8>::set_abi_len(core::mem::transmute(
+                                    &mut result__,
+                                )),
+                                result__.as_mut_ptr() as *mut _ as _,
+                            )
+                            .map(|| result__.assume_init())
+                        }
+                    }
+                    pub fn QualifierValues(
+                        &self,
+                    ) -> windows_core::Result<
+                        windows_collections::IMapView<windows_core::HSTRING, windows_core::HSTRING>,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).QualifierValues)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn CreateInstance2(data: &[u8]) -> windows_core::Result<ResourceCandidate> {
+                        Self::IResourceCandidateFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance2)(
+                                windows_core::Interface::as_raw(this),
+                                data.len().try_into().unwrap(),
+                                data.as_ptr(),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IResourceCandidateFactory<
+                        R,
+                        F: FnOnce(&IResourceCandidateFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            ResourceCandidate,
+                            IResourceCandidateFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for ResourceCandidate {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IResourceCandidate>();
+                }
+                unsafe impl windows_core::Interface for ResourceCandidate {
+                    type Vtable = <IResourceCandidate as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IResourceCandidate as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for ResourceCandidate {
+                    const NAME: &'static str =
+                        "Microsoft.Windows.ApplicationModel.Resources.ResourceCandidate";
+                }
+                unsafe impl Send for ResourceCandidate {}
+                unsafe impl Sync for ResourceCandidate {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct ResourceManager(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    ResourceManager,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable,
+                    IResourceManager
+                );
+                impl ResourceManager {
+                    pub fn new() -> windows_core::Result<Self> {
+                        Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                    }
+                    fn IActivationFactory<
+                        R,
+                        F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            ResourceManager,
+                            windows_core::imp::IGenericFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                    pub fn MainResourceMap(&self) -> windows_core::Result<ResourceMap> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).MainResourceMap)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn RemoveResourceNotFound(&self, token: i64) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).RemoveResourceNotFound)(
+                                windows_core::Interface::as_raw(this),
+                                token,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn CreateInstance(
+                        filename: &windows_core::HSTRING,
+                    ) -> windows_core::Result<ResourceManager> {
+                        Self::IResourceManagerFactory(|this| unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).CreateInstance)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(filename),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        })
+                    }
+                    fn IResourceManagerFactory<
+                        R,
+                        F: FnOnce(&IResourceManagerFactory) -> windows_core::Result<R>,
+                    >(
+                        callback: F,
+                    ) -> windows_core::Result<R> {
+                        static SHARED: windows_core::imp::FactoryCache<
+                            ResourceManager,
+                            IResourceManagerFactory,
+                        > = windows_core::imp::FactoryCache::new();
+                        SHARED.call(callback)
+                    }
+                }
+                impl windows_core::RuntimeType for ResourceManager {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IResourceManager>();
+                }
+                unsafe impl windows_core::Interface for ResourceManager {
+                    type Vtable = <IResourceManager as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IResourceManager as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for ResourceManager {
+                    const NAME: &'static str =
+                        "Microsoft.Windows.ApplicationModel.Resources.ResourceManager";
+                }
+                unsafe impl Send for ResourceManager {}
+                unsafe impl Sync for ResourceManager {}
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct ResourceMap(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    ResourceMap,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl ResourceMap {
+                    pub fn ResourceCount(&self) -> windows_core::Result<u32> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).ResourceCount)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn GetSubtree(
+                        &self,
+                        reference: &windows_core::HSTRING,
+                    ) -> windows_core::Result<ResourceMap> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetSubtree)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(reference),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn TryGetSubtree(
+                        &self,
+                        reference: &windows_core::HSTRING,
+                    ) -> windows_core::Result<ResourceMap> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TryGetSubtree)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(reference),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn GetValue(
+                        &self,
+                        resource: &windows_core::HSTRING,
+                    ) -> windows_core::Result<ResourceCandidate> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetValue)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(resource),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn GetValueByIndex(
+                        &self,
+                        index: u32,
+                    ) -> windows_core::Result<
+                        windows_collections::IKeyValuePair<
+                            windows_core::HSTRING,
+                            ResourceCandidate,
+                        >,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).GetValueByIndex)(
+                                windows_core::Interface::as_raw(this),
+                                index,
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                    pub fn TryGetValue(
+                        &self,
+                        resource: &windows_core::HSTRING,
+                    ) -> windows_core::Result<ResourceCandidate> {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).TryGetValue)(
+                                windows_core::Interface::as_raw(this),
+                                core::mem::transmute_copy(resource),
+                                &mut result__,
+                            )
+                            .and_then(|| windows_core::Type::from_abi(result__))
+                        }
+                    }
+                }
+                impl windows_core::RuntimeType for ResourceMap {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<Self, IResourceMap>();
+                }
+                unsafe impl windows_core::Interface for ResourceMap {
+                    type Vtable = <IResourceMap as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID = <IResourceMap as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for ResourceMap {
+                    const NAME: &'static str =
+                        "Microsoft.Windows.ApplicationModel.Resources.ResourceMap";
+                }
+                unsafe impl Send for ResourceMap {}
+                unsafe impl Sync for ResourceMap {}
+            }
+        }
     }
 }
 pub mod Windows {

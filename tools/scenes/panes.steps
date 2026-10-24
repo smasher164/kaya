@@ -29,6 +29,9 @@ expect_entries 2
 expect_panes "regular/0,1,2"
 resize_window 360x600
 expect_panes "compact/2"
+# docs/deferred.md, the mac interaction latency 3(b): the back affordance
+# carries the platform's own help text.
+expect_back_help "Back"
 back
 expect_entries 1
 expect_panes "compact/1"

@@ -49,6 +49,7 @@ struct KayaApp: App {
 #if os(macOS)
 final class KayaAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
+        kayaWatchChromeHelp()
         // KAYA_ACTIVATE=1 makes the app REGULAR — EXPLICITLY, since an unbundled
         // binary with no policy set defaults to PROHIBITED (measured: policy=2,
         // no activation, a partly unpublished AX tree). The lanes never set it,

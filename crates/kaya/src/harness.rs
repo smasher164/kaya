@@ -557,6 +557,9 @@ pub enum Step {
     PointerDown(Target),
     /// The held button released where pointer_down pressed it.
     PointerUp,
+    /// The window's back affordance's help text as the platform offers it
+    /// (docs/deferred.md, the mac interaction latency, 3(b)).
+    ExpectBackHelp(Option<u64>, String),
     /// A container's ground read off its pixels: `gradient`, `image` or
     /// `none` (docs/styling-pass-plan.md §5.1).
     ExpectGround(Target, String),
@@ -1311,6 +1314,7 @@ impl Step {
             | Step::ExpectToastAnnounced(..)
             | Step::ToastAction
             | Step::PointerUp
+            | Step::ExpectBackHelp(..)
             | Step::ToastClose
             | Step::MenuActivate(..)
             | Step::ExpectMenu(..)
@@ -1541,6 +1545,7 @@ impl Step {
             Step::Press { .. } => false,
             Step::Hover(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
+            Step::ExpectBackHelp(..) => true,
         }
     }
 }
@@ -2162,6 +2167,9 @@ pub trait Stage: Send + 'static {
     fn pointer_down(&self, target: Target) -> Result<(), String>;
     /// Release the button pointer_down holds, where it pressed.
     fn pointer_up(&self) -> Result<(), String>;
+    /// The window's back affordance's help text as the platform shows it on
+    /// hover, read from the platform; `<...>` when there is none to read.
+    fn back_help(&self, window: u64) -> String;
     /// A container's ground off its pixels (§5.1): `gradient` when the
     /// probe 4 units in at the top is the clamped stop and the one 4 units in
     /// at the bottom the window ground and the midpoint holds 4.5:1 against
@@ -3202,6 +3210,10 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "hover" => Step::Hover(parse_target(rest)?),
             "pointer_down" => Step::PointerDown(parse_target(rest)?),
+            "expect_back_help" => {
+                let (window, rest) = parse_window_target(rest);
+                Step::ExpectBackHelp(window, parse_string(rest)?)
+            }
             "pointer_up" => {
                 if !rest.trim().is_empty() {
                     return Err(format!("pointer_up takes no argument: {line:?}"));
@@ -7383,6 +7395,14 @@ fn run_with_log(
                 vtrace::note("pointer_down", format_args!("<- stage.pointer_down {held:?}"));
                 held.err().map(|why| Err(format!("pointer_down {}: {why}", target_spec(t))))
             }
+            Step::ExpectBackHelp(window, want) => Some(poll(|| {
+                let got = stage.back_help(window.unwrap_or(0));
+                if &got == want {
+                    Ok(format!("back help \"{want}\""))
+                } else {
+                    Err(format!("back help \"{got}\", wanted \"{want}\""))
+                }
+            })),
             Step::PointerUp => {
                 vtrace::note("pointer_up", format_args!("-> stage.pointer_up"));
                 let released = stage.pointer_up();
@@ -10842,6 +10862,9 @@ mod tests {
         fn pointer_up(&self) -> Result<(), String> {
             Ok(())
         }
+        fn back_help(&self, _: u64) -> String {
+            String::new()
+        }
         fn ground_read(&self, t: Target) -> String {
             if t.index == 0 { "gradient".into() } else { "none".into() }
         }
@@ -11947,6 +11970,9 @@ mod tests {
             fn pointer_up(&self) -> Result<(), String> {
                 Ok(())
             }
+            fn back_help(&self, _: u64) -> String {
+                String::new()
+            }
             fn ground_read(&self, _: Target) -> String {
                 String::new()
             }
@@ -12487,6 +12513,9 @@ mod tests {
             }
             fn pointer_up(&self) -> Result<(), String> {
                 Ok(())
+            }
+            fn back_help(&self, _: u64) -> String {
+                String::new()
             }
             fn ground_read(&self, _: Target) -> String {
                 String::new()

@@ -14673,6 +14673,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     "hover" -> failures.add("hover ${parts[1]}: an Android phone has no pointer to hover with")
                     "pointer_down" -> failures.add("pointer_down ${parts[1]}: an Android phone has no pointer to press with")
                     "pointer_up" -> failures.add("pointer_up: an Android phone has no pointer to release")
+                    "expect_back_help" -> {
+                        val want = quoted(parts.drop(if (parts.getOrNull(1)?.startsWith("window#") == true) 2 else 1))
+                        val got = "<an Android phone shows no help on its back button>"
+                        if (got == want) observed.add("back help \"$want\"") else failures.add("back help \"$got\", wanted \"$want\"")
+                    }
                     // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
                     "expect_ground_color" -> {
                         // harness.rs's ExpectGroundColor, the same sentences and tolerance.

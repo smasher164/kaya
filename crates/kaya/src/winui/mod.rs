@@ -6187,6 +6187,10 @@ fn mount_entry(
     defs.Append(&fill)?;
     let back = Button::new()?;
     back.SetStyle(&back_button_style())?;
+    match back_tooltip() {
+        Ok(tip) => bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(&back, &PropertyValue::CreateString(&tip)?)?,
+        Err(e) => eprintln!("kaya: winui: NavigationView's back tooltip did not resolve ({e:?}); the back button carries none"),
+    }
     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(&back, &HSTRING::from("\u{2190}"))?;
     let host = core.nav_entries[&entry_id].window;
     let handler = RoutedEventHandler::new(move |_, _| {
@@ -6865,6 +6869,28 @@ fn shown_entry_back(core: &CoreState, window: u64) -> windows_core::Result<Optio
     };
     let shown: UIElement = back.cast()?;
     Ok((shown.Visibility()? == Visibility::Visible).then_some(back))
+}
+
+/// NavigationView's own back tooltip, localized by the Windows App SDK's
+/// resources (docs/deferred.md, the mac interaction latency, 3(b)).
+fn back_tooltip() -> windows_core::Result<HSTRING> {
+    use bindings::Microsoft::Windows::ApplicationModel::Resources::ResourceManager;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetModuleHandleW(name: *const u16) -> isize;
+        fn GetModuleFileNameW(module: isize, out: *mut u16, len: u32) -> u32;
+    }
+    let dll: Vec<u16> = "Microsoft.UI.Xaml.dll\0".encode_utf16().collect();
+    let module = unsafe { GetModuleHandleW(dll.as_ptr()) };
+    let mut path = vec![0u16; 1024];
+    let n = unsafe { GetModuleFileNameW(module, path.as_mut_ptr(), path.len() as u32) } as usize;
+    let path = String::from_utf16_lossy(&path[..n]);
+    let dir = path.rsplit_once('\\').map_or("", |(d, _)| d);
+    ResourceManager::CreateInstance(&HSTRING::from(format!("{dir}\\Microsoft.UI.Xaml.Controls.pri")))?
+        .MainResourceMap()?
+        .GetSubtree(&HSTRING::from("Microsoft.UI.Xaml/Resources"))?
+        .GetValue(&HSTRING::from("NavigationBackButtonToolTip"))?
+        .ValueAsString()
 }
 
 fn back_button_style() -> Style {
@@ -28487,6 +28513,18 @@ impl crate::harness::Stage for WinUiStage {
             let Some(id) = topmost_sheet(core) else { return Ok(()) };
             user_cancel_sheet(core, id)
         });
+    }
+    fn back_help(&self, window: u64) -> String {
+        Self::on_ui_read(move |core| {
+            let Some(back) = shown_entry_back(core, window)? else { return Ok("<no back button shown>".to_owned()) };
+            let tip = bindings::Microsoft::UI::Xaml::Controls::ToolTipService::GetToolTip(&back)?;
+            Ok(tip
+                .cast::<bindings::Windows::Foundation::IPropertyValue>()
+                .and_then(|v| v.GetString())
+                .map(|s| s.to_string())
+                .unwrap_or_default())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
     fn back_look(&self, window: u64) -> String {
         let state = move |name: &'static str| {
