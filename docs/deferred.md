@@ -61,6 +61,47 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
+## RULING — the mac app's interaction latency: a click's highlight waits for the next screen, and the per-node readers cost half of it (measured 2026-10-24)
+KEY: interaction latency, sluggish, highlight, pressed state, KayaSkinFrameReader, KayaTrackReader, KayaCellReader, KayaInsetReader, KayaBoxReader, KayaLabelFrameReader, kayaHarnessActive, onGeometryChange, toggleSidebar, hitch
+
+The maintainer, using Aurora Music by hand: a click on Home or Search takes a
+noticeable time to highlight, and hiding the sidebar is choppy. The numbers
+are in docs/traps.md (the mac app's interaction latency): the optimized build
+ships now and moves little; what is left is two design questions.
+
+1. THE HIGHLIGHT RIDES THE SCREEN'S COMMIT. The app's `selected` write lands
+   1 ms after the press, in the same transaction as the push or pop, and the
+   frame that shows it is the one that finished building the next screen
+   (80 to 230 ms on this host). Options:
+   (a) an activatable row or column draws a native pressed state from the
+       pointer going down, as AppKit's sidebar rows and every platform's
+       buttons do, and the app's selection follows with the screen; cheap,
+       and the same on every backend that has a pointer;
+   (b) the interpreter commits a transaction's prop writes a frame ahead of
+       its structural ones; this breaks "one transaction, one frame", which
+       every binding promises the same way (invariant 1);
+   (c) the sidebar becomes a native selection list that selects on its own
+       before the app answers, and the app's answer corrects it.
+2. THE READERS ARE IN THE SHIPPED APP. Six per-node geometry readers exist
+   for the harness's verbs and run in every app; together they are about
+   half a click and every hitch of the sidebar hide. Some records are also
+   read outside the harness (scroll_to_row's drain waits on kayaNodeFrames,
+   the table tier reads kayaTableTrackSizes). Options:
+   (a) build the readers only under kayaHarnessActive, keeping the ones a
+       shipped feature reads, with a wall that refuses a shipped path reading
+       a harness-only record; the lanes would then run a tree the app does
+       not ship (invisible backgrounds only);
+   (b) keep them in both and make them cheap: onGeometryChange (back-deployed
+       to macOS 13 and iOS 16) in place of GeometryReader plus onChange, no
+       per-frame global-origin callbacks (frames read at read time, as the
+       skin anchor already does), and NSView anchors only inside native
+       table cells; unmeasured;
+   (c) both.
+   Sweep: SwiftUI on macOS measured, iOS runs the same readers; Compose has
+   per-node onGloballyPositioned readers (a cheaper modifier, unmeasured);
+   GTK has none per node; WinUI hooks LayoutUpdated and SizeChanged in
+   winui/mod.rs, unmeasured. Trigger: the maintainer's ruling.
+
 ## DEFER — the iPhone Duo: kaya's adaptive layouts on a phone that folds open (the maintainer, 2026-10-23)
 KEY: iPhone Duo, foldable, hinge, reserved region, ReservedRegion, reservedRegions, vertical bar, toolbarVerticalEdge, ArrangementView, UIArrangementViewController, fold, unfold, inner display, outer display, Device Hub, Xcode 27.1
 

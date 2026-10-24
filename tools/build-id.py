@@ -311,7 +311,7 @@ def main(args):
     global root
     if not args:
         sys.exit("usage: build-id.py <component> | --gate NAME "
-                 "| --verify [--component NAME] FILE...")
+                 "| --verify [--component NAME] FILE... | --optimized FILE...")
 
     if args[0] == "--gate":
         if len(args) != 2 or args[1] not in GATES:
@@ -339,6 +339,9 @@ def main(args):
         for rel in ARTIFACT_GATES.get(args[1], []):
             print(rel)
         return 0
+
+    if args[0] == "--optimized":
+        return optimized(args[1:])
 
     if args[0] != "--verify":
         if args[0] not in COMPONENTS:
@@ -411,6 +414,43 @@ def main(args):
                     "not run, or failed with its exit status masked",
                     file=sys.stderr,
                 )
+    return status
+
+
+OPT_PREFIX = b"kaya-opt:"
+
+
+def optimized(names):
+    """Each file's opt-level markers (crates/kaya/build.rs for the core,
+    tools/swiftui/build-dylib.sh for the interpreter): every one must be
+    present and none "0"."""
+    if not names:
+        sys.exit("usage: build-id.py --optimized FILE...")
+    status = 0
+    for name in names:
+        p = pathlib.Path(name)
+        if not p.is_file():
+            print(f"build-id: {name}: MISSING", file=sys.stderr)
+            status = 1
+            continue
+        blob = p.read_bytes()
+        found, at = set(), 0
+        while (at := blob.find(OPT_PREFIX, at)) != -1:
+            found.add(blob[at + len(OPT_PREFIX): at + len(OPT_PREFIX) + 1]
+                      .decode("ascii", "replace"))
+            at += len(OPT_PREFIX)
+        if not found:
+            print(f"build-id: {name}: NO opt-level marker — built before "
+                  f"the marker existed, or by a build that does not stamp one",
+                  file=sys.stderr)
+            status = 1
+        elif "0" in found:
+            print(f"build-id: {name}: UNOPTIMIZED — carries opt-level(s) "
+                  f"{', '.join(sorted(found))}; build it with "
+                  f"tools/swiftui/build-dylib.sh --release (the interpreter "
+                  f"and the core) or cargo build --release",
+                  file=sys.stderr)
+            status = 1
     return status
 
 

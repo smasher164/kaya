@@ -47,6 +47,9 @@ fn main() {
         "kaya build.rs: build id must be 16 hex chars, got {id:?}"
     );
     println!("cargo::rustc-env=KAYA_BUILD_ID={id}");
+    let opt = std::env::var("OPT_LEVEL").expect("kaya build.rs: cargo sets OPT_LEVEL for every build script");
+    assert_eq!(opt.len(), 1, "kaya build.rs: capi.rs's KAYA_OPT_MARKER holds one opt-level character, got {opt:?}");
+    println!("cargo::rustc-env=KAYA_OPT_LEVEL={opt}");
 
     refuse_a_stale_generator(&root);
 }

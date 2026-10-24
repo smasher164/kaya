@@ -98,25 +98,48 @@ def info_plist(declared, executable, accessory):
 
 
 INTERPRETER = "target/swiftui/libkaya_swiftui.dylib"
+INTERPRETER_RELEASE = "target/swiftui-release/libkaya_swiftui.dylib"
+CORE_OPT_MARKER = b"kaya-opt:"
 
 
-def carry_interpreter(root, macos):
+def carry_interpreter(root, macos, shipped=False):
     """The SwiftUI interpreter beside the executable, where
     crates/kaya/src/swiftui_host.rs looks when no KAYA_SWIFTUI_LIB is set:
     a process the PLATFORM starts (a notification reply, a link, the Dock)
     inherits no environment (docs/traps.md, the cold notification reply
-    of 2026-09-27). Verified first, so a bundle never carries a stale one."""
-    lib = pathlib.Path(root) / INTERPRETER
+    of 2026-09-27). Verified first, so a bundle never carries a stale one,
+    and a shipped bundle never an unoptimized one (docs/traps.md, the mac
+    app's interaction latency)."""
+    rel = INTERPRETER_RELEASE if shipped else INTERPRETER
+    build = ("tools/swiftui/build-dylib.sh --release" if shipped
+             else "tools/swiftui/build-dylib.sh")
+    lib = pathlib.Path(root) / rel
     if not lib.is_file():
         raise SystemExit(
-            f"package mac: {INTERPRETER} does not exist, and a bundle "
+            f"package mac: {rel} does not exist, and a bundle "
             f"without it dies at launch whenever the platform starts it — "
-            f"build it with tools/swiftui/build-dylib.sh")
-    _run([str(pathlib.Path(root) / "tools/build-id.py"), "--verify",
-          "--component", "swiftui", str(lib)],
-         f"verifying {INTERPRETER} against this tree (stale: run "
-         f"tools/swiftui/build-dylib.sh)")
+            f"build it with {build}")
+    tool = str(pathlib.Path(root) / "tools/build-id.py")
+    _run([tool, "--verify", "--component", "swiftui", str(lib)],
+         f"verifying {rel} against this tree (stale: run {build})")
+    if shipped:
+        _run([tool, "--optimized", str(lib)],
+             f"refusing {rel} for a shipped bundle")
     shutil.copy2(lib, macos / lib.name)
+
+
+def refuse_unoptimized_core(root, executable):
+    """A shipped bundle's executable links the core (a Rust app does); one
+    that loads it at run time instead has no core this arm could carry."""
+    if CORE_OPT_MARKER not in pathlib.Path(executable).read_bytes():
+        raise SystemExit(
+            f"package mac: {executable} carries no kaya core (no "
+            f"kaya-opt marker), so it loads one at run time, and this "
+            f"arm carries no libkaya for it to load; a shipped bundle wraps "
+            f"a program that links the core, built with cargo build --release")
+    _run([str(pathlib.Path(root) / "tools/build-id.py"), "--optimized",
+          str(executable)],
+         f"refusing {executable}'s linked core for a shipped bundle")
 
 
 def entitlements_path(app):
@@ -140,7 +163,7 @@ def write_entitlements(declared, app):
 
 
 def bundle(root, executable, out_dir, *, stem=None, accessory=False,
-           register=True, manifest=None):
+           register=True, manifest=None, shipped=False):
     """Wrap `executable` in a .app under `out_dir` and return its path.
 
     A FRESH INODE EVERY TIME, or the kernel kills the guest at exec
@@ -149,16 +172,20 @@ def bundle(root, executable, out_dir, *, stem=None, accessory=False,
     is not, so the caller says which. `register` tells LaunchServices,
     without which the notification centre answers "Notifications are not
     allowed for this application" (measured 2026-09-08,
-    tools/mac/notifyprobe).
+    tools/mac/notifyprobe). `shipped` is tools/package.py's: the
+    interpreter and the linked core must be optimized builds, while the
+    lanes run the unoptimized pair.
     """
     declared = load(root, manifest) if manifest else load(root)
+    if shipped:
+        refuse_unoptimized_core(root, executable)
     name = stem or pathlib.Path(executable).name
     app = pathlib.Path(out_dir) / f"{name}.app"
     shutil.rmtree(app, ignore_errors=True)
     macos = app / "Contents/MacOS"
     macos.mkdir(parents=True)
     shutil.copy2(executable, macos / name)
-    carry_interpreter(root, macos)
+    carry_interpreter(root, macos, shipped)
     resources = app / "Contents/Resources"
     resources.mkdir()
     write_icns(declared.icon_path.read_bytes(),

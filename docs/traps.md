@@ -18813,3 +18813,49 @@ The app now fills its liked pages in a posted transaction of their own,
 outside the undo group (guests/python/music.py `show_likes`,
 docs/media-player-plan.md M24). The core's replay of a windowed For's
 deltas is left as it is (no fix in crates/ yet).
+
+## The mac app's interaction latency is not the debug build (measured 2026-10-24)
+
+Aurora Music on the mac felt slow to the maintainer: a sidebar row's
+highlight after a click, and a choppy sidebar hide. Measured in-process on
+my own instance (an M-series host, 120 Hz, a probe compiled into a scratch
+copy of the interpreter: display-link frames, main-thread busy stretches
+between the runloop's afterWaiting and beforeWaiting):
+
+- Press to the frame that carries the highlight, Search / Home: 210 / 166 ms
+  with the -Onone interpreter and the debug core, 195 / 160 ms with -O and
+  the release core. The `selected` write lands 1 ms after the press (the
+  Python round trip is fast); the time is ONE main-thread stretch before the
+  commit, because the highlight rides the same commit as the push or pop of
+  the screen, and SwiftUI updates and lays out that whole screen first.
+- The sidebar hide (NSSplitViewController.toggleSidebar): 15 hitches, 89 ms
+  of hitch time, -Onone/debug; 3 to 11 hitches, -O/release.
+- The per-node geometry readers are half of a click and all of the hide's
+  hitches. Every container carries KayaBoxReader, two KayaInsetReaders and
+  KayaSkinFrameReader (an NSViewRepresentable, one NSView per node), every
+  flex child a KayaCellReader and a KayaTrackReader (onChange of the global
+  origin, so a callback per node per animation frame), every label a
+  KayaLabelFrameReader, all of them in a shipped app. With all six compiled
+  to EmptyView: Search 230 -> 116 ms, Home 188 -> 82 ms, the hide 18 hitches
+  -> 0 and its longest busy stretch 123 -> 6 ms. No single reader carries
+  it; track and cell carry most of the hide.
+- A sample(1) of the stretch has almost nothing in kaya's code: SwiftUI's
+  graph update (DynamicPreferenceCombiner, ForEach diffing,
+  NavigationAuthority's destination walk) and NSHostingView.layout.
+- Hover fill on a card: 4 to 7 ms to the frame; a mouse move costs 0.4 ms of
+  main thread. A fresh scroll of Home showed no hitch in any build.
+- A synthesized click never reaches SwiftUI's onTapGesture: window.sendEvent
+  with an NSEvent made from a CGEvent, CGEventPostToPid and a direct
+  NSHostingView.mouseDown all left the tap unfired, so the probe pressed
+  through KayaHost.emitPress, as the harness does.
+
+What ships: `tools/swiftui/build-dylib.sh --release` builds the -O
+interpreter into target/swiftui-release and the release core, and
+tools/package.py mac refuses an interpreter or a linked core whose opt-level
+marker reads 0 (`tools/build-id.py --optimized`). Two things the markers
+needed: a Swift string literal of 15 bytes or fewer is an immediate small
+string that no byte scan finds, so the interpreter's marker is longer; and a
+`#[no_mangle]` static is dropped from an executable that links the core
+unless it is `#[used]` (KAYA_BUILD_ID_MARKER is absent from every Rust
+example binary for that reason). The readers and the highlight are open
+design questions (docs/deferred.md, the mac interaction latency).

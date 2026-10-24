@@ -75,7 +75,8 @@ def main(argv):
     out = out_dir(args)
 
     if args.platform == "mac":
-        app = mac.bundle(ROOT, args.exe, out, accessory=args.accessory)
+        app = mac.bundle(ROOT, args.exe, out, accessory=args.accessory,
+                         shipped=True)
         print(f"package mac: {app}")
     elif args.platform == "linux":
         exe = pathlib.Path(args.exe).resolve()

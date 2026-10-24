@@ -567,6 +567,23 @@ pub static KAYA_BUILD_ID_MARKER: [u8; 30] = {
     marker
 };
 
+/// The opt-level this core was compiled at, readable the same way:
+/// `tools/build-id.py --optimized FILE` (a shipped mac bundle refuses
+/// "kaya-opt:0", tools/lib/packaging/mac.py). `#[used]` keeps it in an
+/// executable that links the core, where nothing references it.
+#[unsafe(no_mangle)]
+#[used]
+pub static KAYA_OPT_MARKER: [u8; 10] = {
+    let src = concat!("kaya-opt:", env!("KAYA_OPT_LEVEL")).as_bytes();
+    let mut marker = [0u8; 10];
+    let mut i = 0;
+    while i < 10 {
+        marker[i] = src[i];
+        i += 1;
+    }
+    marker
+};
+
 /// Host capability bits, queryable any time. Platform-static per build:
 /// the phones' systems own surface geometry, so KAYA_CAP_AUX_WINDOWS is
 /// unset there and create_window is a deterministic scene error (DESIGN.md,
