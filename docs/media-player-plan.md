@@ -1169,6 +1169,41 @@ fix: the glass keeps the automatic soft edge, the art shows through the bars,
 and the dock's text is the system's adaptive label styles. Changing the glass
 itself to make text under it legible is not wanted.
 
+### M24: Liked Songs and the controls' help text (RULED 2026-10-24)
+
+The maintainer: "I don't know where the liked songs go. Like if I like a
+song, am I only able to know that by playing the song?" and "I don't see a
+tooltip for the hover state for anything either."
+
+(1) LIKED SONGS is the library's first entry, always present, with its count
+("2 songs"): Your Library in the desktops' sidebar, opened as a destination
+the way Search is, and the phones' Library section, where it opens as a page.
+The page is a playlist page: the album's header, its cover and wash the
+newest liked track's album's, "Liked Songs" in the heading role, the count
+and length, Play, then the track table, newest first, played from a row with
+the playing row tinted. The list is kept in the preferences store
+(`music.liked`) as JSON records holding each track's title, artist, album,
+album name, art address, stream address and length, so it draws without a
+catalogue call; a list kept before as ids alone is filled in from the
+catalogue's `tracks?id=` (the sampler answers it from its albums). The
+heart, its toast's Undo and the window's undo change the list and the count
+at once. The pages are filled in a transaction of their own, outside the
+like's undo group (docs/traps.md, an undo step's table delta replayed
+without the band). A heart on each liked row is DEFERRED: a table cell can
+draw a symbol only as a button or toggle, on every row alike, and showing it
+on the liked rows alone needs a per-row visibility kaya does not have.
+
+(2) HELP TEXT: every control the app draws as a symbol alone carries its
+action's name through `.help`, from the app's catalog (music.en.ftl's
+`help-*`): Play or Pause, Previous, Next, Shuffle, Repeat, Like or Remove
+from Liked Songs, Mute or Unmute, Volume, Favorite. The sidebar's hide
+button and the back button are the backends' chrome, not the app's, so
+their tooltips are each backend's to give.
+
+music_dock reads both on all five lanes: `expect_help` on the dock's and the
+full player's controls, and the Liked Songs block (like, the entry's count,
+the page's rows in order, unlike, the row gone, Undo, play from a row).
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

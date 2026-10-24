@@ -18799,3 +18799,17 @@ The print is of the last frame drawn, which lags the state change under
 load, so each of the two readings is re-asked, 100 ms apart, until it holds
 or twenty tries pass, and the refusal names the tries and GoToState's answer.
 
+
+## An undo step's table delta replayed without the band (measured 2026-10-24)
+
+music_dock-python on the mac panicked in debug libkaya with "a windowed For's
+realized set drifted from its band" (scene.rs `assert_bands_hold`), realized
+[989871, 989873] against the order [989873, 989871], at the toast's Undo. The
+like that was undone was a `kaya.undoable` transaction which also removed a
+row from the Liked Songs table, a `columns(...)` For and so windowed; the
+undo put the row back in the order without reconciling the band, and the
+app's own `on_undone` then inserted it a second time ("key already present").
+The app now fills its liked pages in a posted transaction of their own,
+outside the undo group (guests/python/music.py `show_likes`,
+docs/media-player-plan.md M24). The core's replay of a windowed For's
+deltas is left as it is (no fix in crates/ yet).

@@ -23,6 +23,10 @@ expect_shape image@dock_art rounded
 expect_hugs column@dock_lines
 expect_ax button@play_pause "button/Pause"
 expect_ax button@next "button/Next"
+# Every control drawn as a symbol alone carries its action's name as help
+# text, the desktops' tooltip (docs/media-player-plan.md M24).
+expect_help button@play_pause "Pause"
+expect_help button@next "Next"
 expect_now_playing "In Tune" playing
 expect_now_playing_art 4CC0BF
 # The system's media panels name the app by the identity's display name
@@ -70,6 +74,13 @@ expect label@elapsed "0:00"
 expect label@remaining "-0:20"
 # Shuffle is a toggle; repeat a toggle lit while on, whose symbol the app
 # swaps to repeat-one for "one" (M8, M16 (14)).
+expect_help button@play_pause "Play"
+expect_help button@previous "Previous"
+expect_help checkbox@shuffle "Shuffle"
+expect_help checkbox@repeat "Repeat"
+expect_help checkbox@like "Like"
+expect_help checkbox@mute "Mute"
+expect_help slider@volume "Volume"
 expect_ax checkbox@shuffle "toggle/Shuffle"
 expect_checked checkbox@shuffle off
 toggle checkbox@shuffle on
@@ -95,6 +106,7 @@ expect_symbol checkbox@repeat "repeat"
 expect_ax checkbox@like "toggle/Like"
 toggle checkbox@like on
 expect_checked checkbox@like on
+expect_help checkbox@like "Remove from Liked Songs"
 click button@next
 expect label@dock_title "Owl Time"
 expect_checked checkbox@like off
@@ -124,3 +136,37 @@ expect label@dock_title "Owl Time"
 expect label@elapsed "0:00"
 click button@previous
 expect label@dock_title "In Tune"
+# Liked Songs (docs/media-player-plan.md M24): the library's first entry with
+# its count, a playlist page of the liked tracks newest first, kept live as
+# the heart and the toast's Undo change the list.
+expect label@liked_count "1 song"
+click button@next
+expect label@dock_title "Owl Time"
+toggle checkbox@like on
+expect_toast "Added to Liked Songs|Undo"
+expect label@liked_count "2 songs"
+click row@go_liked
+expect_selected row@go_liked on
+expect_title "Liked Songs"
+expect_ax label@liked_title "heading/Liked Songs"
+expect label@liked_about "2 songs, 40 sec"
+expect_rows column@liked_tracks "1,Owl Time/Kellee Maize,Owl Time (2013),0:20|2,In Tune/Kellee Maize,Owl Time (2013),0:20"
+expect_tint label@liked_track_name[989873] accent
+expect_tint label@liked_track_name[989871] none
+toggle checkbox@like off
+expect_toast "Removed from Liked Songs|Undo"
+expect label@liked_count "1 song"
+expect_no_target row@liked_track[989873]
+expect_rows column@liked_tracks "1,In Tune/Kellee Maize,Owl Time (2013),0:20"
+toast_action
+expect_no_toast
+expect_checked checkbox@like on
+expect label@liked_count "2 songs"
+expect_rows column@liked_tracks "1,Owl Time/Kellee Maize,Owl Time (2013),0:20|2,In Tune/Kellee Maize,Owl Time (2013),0:20"
+double_click row@liked_track[989871]
+expect label@dock_title "In Tune"
+expect_tint label@liked_track_name[989871] accent
+expect_tint label@liked_track_name[989873] none
+click row@go_home
+expect_selected row@go_liked off
+expect_title "Home"

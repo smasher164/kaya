@@ -3,8 +3,9 @@ and Home (tools/scenes/music_home.steps), an album's track table that plays
 through kaya's player (tools/scenes/music_playlist.steps), and the album's
 gradient header (tools/scenes/music_header.steps), and the dock with the
 media session and the phones' full player (tools/scenes/music_dock.steps),
-the artist page (tools/scenes/music_artist.steps), and search with the
-toasts (tools/scenes/music_search.steps)."""
+the artist page (tools/scenes/music_artist.steps), search with the
+toasts (tools/scenes/music_search.steps), and Liked Songs and the controls'
+help text (tools/scenes/music_dock.steps)."""
 
 import html
 import json
@@ -17,6 +18,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import Any
 
 import kaya
 
@@ -57,6 +59,7 @@ CLIENT_ID_PREF = "jamendo.client_id"
 # (crates/kaya/src/prefs.rs), so no leg reads another's favourites.
 FAVORITES_PREF = "music.favorites"
 LIKED_PREF = "music.liked"
+LIKED_FIELDS = ("title", "artist", "album", "album_name", "art_url", "audio", "seconds")
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
 # A lane's leg takes the host's Now Playing only in the scene that reads it
@@ -130,6 +133,10 @@ class Sampler:
                 key += "?" + urllib.parse.urlencode(pairs, quote_via=urllib.parse.quote)
             if key in self.answers:
                 return json.dumps(self.answers[key]).encode("utf-8")
+            if endpoint == "tracks" and "id" in query:
+                return json.dumps({"headers": {"status": "success"},
+                                   "results": [t for t in self.tracks()
+                                               if t["id"] == query["id"]]}).encode("utf-8")
             term = query.get("search") or query.get("namesearch")
             if term is None:
                 raise OSError(f"the sampler holds no answer for {key}")
@@ -142,21 +149,25 @@ class Sampler:
                 return asset.bytes()
         raise OSError(f"the sampler holds nothing at {parts.path}")
 
+    def tracks(self):
+        for key, answer in self.answers.items():
+            if key.startswith("albums/tracks?"):
+                for album in answer["results"]:
+                    for track in album["tracks"]:
+                        yield {**track, "album_id": album["id"], "album_name": album["name"],
+                               "album_image": album["image"], "artist_id": album["artist_id"],
+                               "artist_name": album["artist_name"]}
+
     def search(self, endpoint, term):
         """A search the snapshot did not record, answered from what the
         sampler holds: a name holding the term, in Jamendo's answer shape."""
         found = {}
+        if endpoint == "tracks":
+            found = {track["id"]: track for track in self.tracks()}
         for key, answer in self.answers.items():
-            if key.startswith("albums/tracks?"):
+            if key.startswith("albums/tracks?") and endpoint == "albums":
                 for album in answer["results"]:
-                    if endpoint == "albums":
-                        found[album["id"]] = album
-                    for track in album["tracks"] if endpoint == "tracks" else ():
-                        found[track["id"]] = {**track, "album_id": album["id"],
-                                              "album_name": album["name"],
-                                              "album_image": album["image"],
-                                              "artist_id": album["artist_id"],
-                                              "artist_name": album["artist_name"]}
+                    found[album["id"]] = album
             elif key.startswith("artists?id=") and endpoint == "artists":
                 for artist in answer["results"]:
                     found[artist["id"]] = artist
@@ -282,12 +293,28 @@ def keep(key, ids):
     kaya.prefs().set(key, ",".join(sorted(ids)))
 
 
+def stored_likes() -> list[dict[str, Any]]:
+    """The liked tracks, newest first. A list kept before Liked Songs holds
+    only the tracks' ids, which the catalogue fills in (migrate_likes)."""
+    raw = kaya.prefs().get(LIKED_PREF, "")
+    if not raw.startswith("["):
+        return [{"id": k} for k in raw.split(",") if k]
+    try:
+        stored = json.loads(raw)
+    except ValueError:
+        return []
+    return [r for r in stored if isinstance(r, dict) and isinstance(r.get("id"), str)]
+
+
 favorites = kept(FAVORITES_PREF)
-liked = kept(LIKED_PREF)
+liked = [r for r in stored_likes() if all(f in r for f in LIKED_FIELDS)]
+liked_pending = [r["id"] for r in stored_likes() if not all(f in r for f in LIKED_FIELDS)]
+for record in liked:
+    songs[record["id"]] = {f: record[f] for f in LIKED_FIELDS}
 covers = {}
 fetching = set()
 dock_ready = {"built": False}
-home_state = {"shown": False, "search_asked": False}
+home_state = {"shown": False, "asked": None}
 live = {"play": [], "repeat": [], "sheet": False}
 entries = iter(range(FIRST_ALBUM_ENTRY, 1 << 32))
 
@@ -338,13 +365,15 @@ def go_home():
     show_library_selection(None)
     home_shown.set(True)
     search_shown.set(False)
+    liked_shown.set(False)
 
 
 def show_destination():
-    """The desktops' sidebar names Home, Search or the album on top."""
+    """The desktops' sidebar names Home, Search, Liked Songs or the album on top."""
     top = stacks.get(0, [])
     home_shown.set(not top)
     search_shown.set(len(top) == 1 and top[0]["kind"] == "search")
+    liked_shown.set(len(top) == 1 and top[0]["kind"] == "liked")
     show_library_selection(top[-1]["album"] if top and top[-1]["kind"] == "album" else None)
 
 
@@ -411,7 +440,7 @@ def album_body(album, page):
 def track_table(page, names, a11y="tracks", prefix="", grow: float | None = 1, timed=True):
     for track in page["tracks"].columns(*names, a11y_id=a11y, grow=grow):
         with kaya.row(selected=track.selected, on_select=on_pick,
-                      on_activate=on_play) as line:
+                      on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id(f"{prefix}track")
             kaya.label(bind=track.number)
             with kaya.row(spacing=8, align="center") as cell:
@@ -454,11 +483,11 @@ def header_content(album, page):
             with kaya.row(spacing=12, align="center"):
                 kaya.button("Play", on_click=lambda: play_album(page),
                             symbol=kaya.Symbol.PLAY) \
-                    .role(kaya.Role.PROMINENT).a11y_id("play_album")
+                    .role(kaya.Role.PROMINENT).help(kaya.tr("help-play")).a11y_id("play_album")
                 kaya.checkbox("Favorite", checked=page["liked"],
                               on_toggle=lambda on: set_favorite(album["id"], on)) \
                     .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
-                    .a11y_id("favorite")
+                    .help(kaya.tr("help-favorite")).a11y_id("favorite")
 
 
 def set_favorite(album_id, on):
@@ -591,7 +620,7 @@ def album_arrived(album, surface, entry, answer):
         key = t["id"]
         songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],
                       "artist": artist, "album": album["id"], "album_name": album["name"],
-                      "seconds": int(t["duration"])}
+                      "seconds": int(t["duration"]), "art_url": album["image"]}
         page["keys"].append(key)
         page["tracks"].insert(key, Track(
             number=str(t["position"]), title=songs[key]["title"], artist=artist,
@@ -615,9 +644,9 @@ def on_pick(row):
     select_track(row.key)
 
 
-def on_play(row):
-    select_track(row.key)
-    start_queue(pages_holding(row.key)[0]["keys"], row.key)
+def play_row(page, key):
+    select_track(key)
+    start_queue(page["keys"], key)
 
 
 def play_album(page):
@@ -657,7 +686,7 @@ def play_track(key, start):
         build_dock()
     dock_title.set(song["title"])
     dock_artist.set(song["artist"])
-    liked_now.set(key in liked)
+    show_liked_now()
     show_art()
     show_play_state(False)
     declare_session()
@@ -751,7 +780,11 @@ def set_shuffle(on):
 
 
 REPEAT_NEXT = {"off": "all", "all": "one", "one": "off"}
-REPEAT_NAME = {"off": "Repeat off", "all": "Repeat all", "one": "Repeat one"}
+
+
+def repeat_label():
+    return {"off": kaya.tr("repeat-off"), "all": kaya.tr("repeat-all"),
+            "one": kaya.tr("repeat-one")}[playback["repeat"]]
 
 
 def repeat_symbol():
@@ -763,7 +796,7 @@ def cycle_repeat(_on):
     the box's own bit is set back from the cycle."""
     playback["repeat"] = REPEAT_NEXT[playback["repeat"]]
     repeat_on.set(playback["repeat"] != "off")
-    repeat_name.set(REPEAT_NAME[playback["repeat"]])
+    repeat_name.set(repeat_label())
     for box in live["repeat"]:
         box.symbol(repeat_symbol())
 
@@ -774,38 +807,217 @@ def set_liked(on):
     if key is None:
         return
     kaya.undoable(f"{'Like' if on else 'Unlike'} {songs[key]['title']}")
-    apply_like(key, on)
-    like_steps.append((key, on))
+    at = apply_like(key, on, 0)
+    like_steps.append((key, on, at))
     redo_steps.clear()
     kaya.show_toast("Added to Liked Songs" if on else "Removed from Liked Songs",
                     action="Undo", undo=True)
 
 
-def apply_like(key, on):
-    if on:
-        liked.add(key)
-    else:
-        liked.discard(key)
-    keep(LIKED_PREF, liked)
-    liked_now.set(playback["key"] in liked)
+def liked_ids():
+    return [r["id"] for r in liked]
+
+
+def apply_like(key, on, at):
+    """Likes or unlikes a track at `at` in the list, newest first, and
+    answers where it stood, which an undone unlike puts it back at."""
+    ids = liked_ids()
+    if key in ids:
+        at = ids.index(key)
+        if not on:
+            del liked[at]
+    elif on:
+        liked.insert(min(at, len(liked)), {"id": key, **{f: songs[key][f] for f in LIKED_FIELDS}})
+    keep_likes()
+    show_likes()
+    return at
+
+
+def keep_likes():
+    kaya.prefs().set(LIKED_PREF, json.dumps(liked + [{"id": k} for k in liked_pending]))
+
+
+def show_liked_now():
+    on = playback["key"] in liked_ids()
+    liked_now.set(on)
+    like_help.set(kaya.tr("help-unlike") if on else kaya.tr("help-like"))
+
+
+def show_likes():
+    """The pages follow in a transaction of their own: an undo step restores
+    the collection deltas it holds (docs/undo-plan.md D4), and a page opened
+    or closed since would take them wrongly."""
+    liked_count.set(kaya.tr("songs", count=len(liked)))
+    show_liked_now()
+    app.post(fill_liked_pages)
+
+
+def fill_liked_pages():
+    for page in all_pages():
+        if page["kind"] == "liked":
+            fill_liked(page)
 
 
 def on_undone(_label, _delta):
     if like_steps:
-        key, on = like_steps.pop()
-        redo_steps.append((key, on))
-        apply_like(key, not on)
+        key, on, at = like_steps.pop()
+        redo_steps.append((key, on, at))
+        apply_like(key, not on, at)
 
 
 def on_redone(_label, _delta):
     if redo_steps:
-        key, on = redo_steps.pop()
-        like_steps.append((key, on))
-        apply_like(key, on)
+        key, on, at = redo_steps.pop()
+        like_steps.append((key, on, at))
+        apply_like(key, on, at)
+
+
+def migrate_likes(keys):
+    found = []
+    for key in keys:
+        try:
+            tracks = catalogue.get("tracks", id=key)
+        except (OSError, ValueError, KeyError) as e:
+            print(f"music: liked track {key} did not load: {e!r}", file=sys.stderr)
+            continue
+        for t in tracks[:1]:
+            found.append({"id": key, "title": html.unescape(t["name"]),
+                          "artist": html.unescape(t["artist_name"]), "album": t["album_id"],
+                          "album_name": html.unescape(t["album_name"]),
+                          "art_url": catalogue.address(t["album_image"]), "audio": t["audio"],
+                          "seconds": int(t["duration"])})
+    app.post(likes_migrated, found)
+
+
+def likes_migrated(found):
+    for record in found:
+        if record["id"] in liked_pending:
+            liked_pending.remove(record["id"])
+            if record["id"] not in liked_ids():
+                liked.append(record)
+                songs.setdefault(record["id"], {f: record[f] for f in LIKED_FIELDS})
+    keep_likes()
+    show_likes()
+
+
+def open_liked(surface):
+    """Liked Songs: a sidebar destination on the desktops, as Search is, and
+    a page of the Library section on the phones."""
+    if desktop:
+        if not home_state["shown"]:
+            home_state["asked"] = lambda: open_liked(surface)
+            return
+        top = stacks.get(0, [])
+        if len(top) == 1 and top[0]["kind"] == "liked":
+            return
+        for _ in stacks.pop(0, []):
+            kaya.pop_entry()
+        show_library_selection(None)
+        stack = stacks.setdefault(0, [])
+    else:
+        stack = open_page(surface, "liked", "liked")
+        if stack is None:
+            return
+    entry = next(entries)
+    page = {"kind": "liked", "id": "liked", "album": None, "entry": entry,
+            "surface": surface, "keys": [], "cover_album": None}
+    stack.append(page)
+    with app.push_entry(entry, title="Liked Songs", window=surface,
+                        on_popped=lambda: page_closed(surface, entry)):
+        page["about"] = kaya.signal("")
+        page["cover"] = kaya.signal(b"")
+        page["cover_phase"] = kaya.signal(kaya.ImagePhase.LOADING)
+        page["colour"] = kaya.signal(UNKNOWN_COLOUR)
+        page["tracks"] = kaya.collection(Track)
+        page["art"] = kaya.RowImages(app, page["tracks"], url="art_url", art="art",
+                                     phase="phase", fetch=catalogue.fetch)
+        liked_body(page)
+    fill_liked(page)
+    if desktop:
+        show_destination()
+
+
+def liked_body(page):
+    with kaya.column(spacing=0, align="stretch") as body:
+        body.a11y_id("liked")
+        with kaya.column(inset=24, ground_gradient=page["colour"]) as header:
+            header.a11y_id("liked_header")
+            with kaya.row(spacing=24, align="end") if desktop else \
+                    kaya.column(spacing=16, align="center"):
+                kaya.image(page["cover"], fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
+                           phase=page["cover_phase"]) \
+                    .max_width(HEADER_ART).max_height(HEADER_ART).a11y_id("liked_art")
+                with kaya.column(spacing=6, align="start"):
+                    kaya.heading("Liked Songs").a11y_id("liked_title")
+                    kaya.caption(bind=page["about"]).a11y_id("liked_about")
+                    kaya.button("Play", on_click=lambda: play_album(page),
+                                symbol=kaya.Symbol.PLAY) \
+                        .role(kaya.Role.PROMINENT).help(kaya.tr("help-play")) \
+                        .a11y_id("play_liked")
+        names = ("#", "Title", "Album", "Time") if desktop else ("#", "Title", "Time")
+        with kaya.column(inset=PAGE_INSET, grow=1, align="stretch") as margin:
+            margin.a11y_id("liked_margin")
+            track_table(page, names, a11y="liked_tracks", prefix="liked_")
+
+
+def fill_liked(page):
+    """The page's rows as a diff of the list, numbered newest first."""
+    keys = liked_ids()
+    for key in page["keys"]:
+        if key not in keys:
+            page["tracks"].remove(key)
+    for record in liked:
+        if record["id"] not in page["keys"]:
+            page["tracks"].insert(record["id"], Track(
+                number="", title=record["title"], artist=record["artist"],
+                album=record["album_name"],
+                duration=kaya.fmt.duration(int(record["seconds"]) * 1000),
+                art_url=record["art_url"], art=b"", phase=kaya.ImagePhase.LOADING,
+                tint=kaya.Tint.ACCENT if record["id"] == playback["key"] else kaya.Tint.NONE,
+                selected=False))
+    for number, key in enumerate(keys, start=1):
+        page["tracks"].move_to_end(key)
+        page["tracks"].patch(key, number=str(number))
+    page["keys"] = keys
+    page["about"].set(songs_line(len(liked), sum(int(r["seconds"]) for r in liked)) if liked
+                      else "Songs you like appear here.")
+    newest = liked[0] if liked else None
+    album = newest["album"] if newest else None
+    if album == page["cover_album"]:
+        return
+    page["cover_album"] = album
+    if newest is None:
+        page["cover"].set(b"")
+        page["cover_phase"].set(kaya.ImagePhase.LOADING)
+        page["colour"].set(UNKNOWN_COLOUR)
+        return
+    art_pool.submit(load_liked_cover, page, album, newest["art_url"], covers.get(album))
+
+
+def load_liked_cover(page, album, url, cover):
+    """The header's cover and wash are the newest liked track's album's."""
+    if cover is None:
+        try:
+            cover = catalogue.fetch(catalogue.address(url))
+        except OSError as e:
+            print(f"music: liked album {album}'s cover did not load: {e!r}", file=sys.stderr)
+    colour = header_colour(cover) if cover else None
+    app.post(liked_cover_arrived, page, album, cover, colour)
+
+
+def liked_cover_arrived(page, album, cover, colour):
+    if not page_open(page) or page["cover_album"] != album:
+        return
+    if cover is None:
+        page["cover_phase"].set(kaya.ImagePhase.FAILED)
+        return
+    page["cover"].set(cover)
+    page["cover_phase"].set(kaya.ImagePhase.SHOWN)
+    page["colour"].set(colour or UNKNOWN_COLOUR)
 
 
 def show_play_state(playing):
-    play_name.set("Pause" if playing else "Play")
+    play_name.set(kaya.tr("help-pause") if playing else kaya.tr("help-play"))
     for button in live["play"]:
         button.symbol(kaya.Symbol.PAUSE if playing else kaya.Symbol.PLAY)
 
@@ -870,22 +1082,27 @@ def transport(full):
         row.a11y_id("full_transport" if full else "transport")
         kaya.spacer()
         kaya.checkbox("Shuffle", checked=shuffle_on, on_toggle=set_shuffle) \
-            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.SHUFFLE).a11y_id("shuffle")
+            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.SHUFFLE) \
+            .help(kaya.tr("help-shuffle")).a11y_id("shuffle")
         kaya.button("Previous", on_click=skip_previous, symbol=kaya.Symbol.PREVIOUS) \
-            .a11y_id("previous")
+            .help(kaya.tr("help-previous")).a11y_id("previous")
         play_button(full)
-        kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
-            .a11y_id("full_next" if full else "next")
+        next_button("full_next" if full else "next")
         live["repeat"].append(
             kaya.checkbox("Repeat", checked=repeat_on, on_toggle=cycle_repeat)
             .role(kaya.Role.TOGGLE).symbol(repeat_symbol())
-            .a11y_label(repeat_name).a11y_id("repeat"))
+            .a11y_label(repeat_name).help(kaya.tr("help-repeat")).a11y_id("repeat"))
         kaya.spacer()
+
+
+def next_button(a11y):
+    kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
+        .help(kaya.tr("help-next")).a11y_id(a11y)
 
 
 def play_button(full):
     button = kaya.button("Play", on_click=toggle_play, symbol=kaya.Symbol.PLAY) \
-        .role(kaya.Role.PROMINENT).a11y_label(play_name) \
+        .role(kaya.Role.PROMINENT).a11y_label(play_name).help(play_name) \
         .a11y_id("full_play_pause" if full else "play_pause")
     live["play"].append(button)
     playing = player.state == kaya.PlayerState.PLAYING
@@ -908,6 +1125,7 @@ def set_volume(value):
 def set_muted(on):
     playback["muted"] = on
     muted_now.set(on)
+    mute_help.set(kaya.tr("help-unmute") if on else kaya.tr("help-mute"))
     player.set_muted(on or SILENT)
 
 
@@ -917,14 +1135,14 @@ def volume_zone():
         zone.a11y_id("dock_end")
         like_box()
         kaya.checkbox("Mute", checked=muted_now, on_toggle=set_muted) \
-            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.VOLUME).a11y_id("mute")
+            .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.VOLUME).help(mute_help).a11y_id("mute")
         kaya.slider(volume, min=0.0, max=1.0, on_change=set_volume, on_commit=set_volume,
-                    grow=1).a11y_label("Volume").a11y_id("volume")
+                    grow=1).a11y_label("Volume").help(kaya.tr("help-volume")).a11y_id("volume")
 
 
 def like_box():
     kaya.checkbox("Like", checked=liked_now, on_toggle=set_liked) \
-        .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE).a11y_id("like")
+        .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE).help(like_help).a11y_id("like")
 
 
 def build_dock():
@@ -952,8 +1170,7 @@ def build_dock():
                     opener.a11y_id("dock_open")
                     now_playing(grow=1)
                 play_button(full=False)
-                kaya.button("Next", on_click=skip_next, symbol=kaya.Symbol.NEXT) \
-                    .a11y_id("next")
+                next_button("next")
 
 
 def now_playing(grow):
@@ -1088,7 +1305,8 @@ def artist_arrived(surface, entry, answer):
         songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],
                       "artist": name, "album": t["album_id"],
                       "album_name": html.unescape(t["album_name"]),
-                      "seconds": int(t["duration"])}
+                      "seconds": int(t["duration"]),
+                      "art_url": catalogue.address(t["album_image"])}
         page["keys"].append(key)
         page["tracks"].insert(key, Track(
             number=str(rank), title=songs[key]["title"], artist=name,
@@ -1191,7 +1409,7 @@ def open_search():
     """The desktops' Search destination, the content pane's page above Home;
     asked before Home has arrived, it opens once Home is under it."""
     if not home_state["shown"]:
-        home_state["search_asked"] = True
+        home_state["asked"] = open_search
         return
     top = stacks.get(0, [])
     if len(top) == 1 and top[0]["kind"] == "search":
@@ -1259,7 +1477,7 @@ def search_body(page):
 def found_list(page):
     for track in page["tracks"].rows(a11y_id="found_tracks", align="stretch"):
         with kaya.row(spacing=12, align="center",
-                      on_activate=lambda row: play_found(page, row.key)) as line:
+                      on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id("found_track")
             kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                        phase=track.phase, on_needed=page["tracks_art"].needed,
@@ -1426,11 +1644,6 @@ def show_found(page):
         page["status"].set(f"No {chip.lower()} for “{query}”.")
 
 
-def play_found(page, key):
-    select_track(key)
-    start_queue(page["keys"], key)
-
-
 def connect_typed(text):
     connect_draft["text"] = text
 
@@ -1494,6 +1707,13 @@ def library_body():
                 destination.a11y_id("go_search")
                 kaya.label("Search")
         kaya.heading("Your Library")
+        with kaya.row(align="center", selected=liked_shown,
+                      on_activate=lambda: open_liked(0 if desktop else SECTION_LIBRARY)) as liked_entry:
+            liked_entry.a11y_id("go_liked")
+            with kaya.column(spacing=0) as lines:
+                lines.fill(False)
+                kaya.label("Liked Songs")
+                kaya.caption(bind=liked_count).a11y_id("liked_count")
         kaya.caption(bind=library_hint)
         for item in library:
             with kaya.row(align="center", selected=item.selected, on_activate=on_saved) as entry:
@@ -1514,8 +1734,8 @@ def home_arrived(shelves):
             home_body(shelves)
         home_state["shown"] = True
         home_shown.set(True)
-        if home_state["search_asked"]:
-            open_search()
+        if home_state["asked"]:
+            home_state["asked"]()
     else:
         with app.add_section(SECTION_HOME, title="Home", symbol=kaya.Symbol.HOME):
             home_body(shelves)
@@ -1556,14 +1776,18 @@ with app.window(title="Music", width=1100, height=720,
                                  fetch=catalogue.fetch)
     home_shown = kaya.signal(False)
     search_shown = kaya.signal(False)
+    liked_shown = kaya.signal(False)
+    liked_count = kaya.signal(kaya.tr("songs", count=len(liked)))
+    like_help = kaya.signal(kaya.tr("help-like"))
+    mute_help = kaya.signal(kaya.tr("help-mute"))
     dock_title = kaya.signal("")
     dock_artist = kaya.signal("")
     dock_art = kaya.signal(b"")
     dock_phase = kaya.signal(kaya.ImagePhase.LOADING)
     liked_now = kaya.signal(False)
     shuffle_on = kaya.signal(False)
-    play_name = kaya.signal("Play")
-    repeat_name = kaya.signal(REPEAT_NAME["off"])
+    play_name = kaya.signal(kaya.tr("help-play"))
+    repeat_name = kaya.signal(repeat_label())
     repeat_on = kaya.signal(False)
     position = kaya.signal(0.0)
     elapsed = kaya.signal(kaya.fmt.duration(0))
@@ -1577,5 +1801,7 @@ with app.window(title="Music", width=1100, height=720,
         library_body()
 
 threading.Thread(target=load_home, daemon=True).start()
+if liked_pending:
+    art_pool.submit(migrate_likes, list(liked_pending))
 
 sys.exit(app.run())
