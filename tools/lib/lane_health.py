@@ -140,6 +140,29 @@ def thermal_sentence(text, problem):
     return "thermal (pmset -g therm): " + "; ".join(said)
 
 
+# docs/traps.md, a throttled host halves every lane: pmset -g therm says
+# nothing on Apple silicon, so the pressure level is read beside it.
+PRESSURE_LEVELS = {0: "nominal", 1: "moderate", 2: "HEAVY", 3: "TRAPPING", 4: "SLEEPING"}
+
+
+def pressure_sentence(text, problem):
+    if problem:
+        return f"thermal pressure unreadable ({problem})"
+    words = (text or "").split()
+    if len(words) != 2 or not words[1].isdigit():
+        return f"thermal pressure unreadable (notifyutil said {(text or '').strip()!r})"
+    level = int(words[1])
+    name = PRESSURE_LEVELS.get(level, f"level {level}, not one of {sorted(PRESSURE_LEVELS)}")
+    said = f"thermal pressure (notifyutil): {name} ({level})"
+    if level >= 2:
+        said += " — THE HOST IS THROTTLED, so every lane runs slower at once"
+    return said
+
+
+def pressure_line():
+    return pressure_sentence(*_run(["notifyutil", "-g", "com.apple.system.thermalpressurelevel"]))
+
+
 MEMORY_SAMPLE_S = 1.0
 UNITS = {"B": 1, "K": 1 << 10, "M": 1 << 20, "G": 1 << 30, "T": 1 << 40}
 
@@ -288,6 +311,7 @@ def host_line():
     sentence = host_sentence(ps_text, ps_problem, os.getloadavg(), boot_text,
                              boot_problem, time.time(), os.cpu_count())
     sentence += "; " + thermal_sentence(*_run(["pmset", "-g", "therm"]))
+    sentence += "; " + pressure_line()
     sentence += "; " + memory_line(parse_ps(ps_text))
     return sentence, int((time.monotonic() - t0) * 1000)
 
@@ -1774,6 +1798,16 @@ def drive():
                   [thermal_sentence("", "pmset exited 1: x")]))
     cases.append(("thermal silent", "thermal state unreadable (pmset -g therm printed nothing)",
                   [thermal_sentence("\n", None)]))
+    cases.append(("pressure nominal", "thermal pressure (notifyutil): nominal (0)",
+                  [pressure_sentence("com.apple.system.thermalpressurelevel 0\n", None)]))
+    cases.append(("pressure heavy", "thermal pressure (notifyutil): HEAVY (2) — THE HOST IS "
+                  "THROTTLED", [pressure_sentence("com.apple.system.thermalpressurelevel 2\n", None)]))
+    cases.append(("pressure unknown", "level 9, not one of [0, 1, 2, 3, 4]",
+                  [pressure_sentence("com.apple.system.thermalpressurelevel 9\n", None)]))
+    cases.append(("pressure garbled", "thermal pressure unreadable (notifyutil said 'x')",
+                  [pressure_sentence("x\n", None)]))
+    cases.append(("pressure no notifyutil", "thermal pressure unreadable (notifyutil exited 1",
+                  [pressure_sentence("", "notifyutil exited 1: x")]))
     rows = parse_ps(PS)
     mem = memory_sentence(VM_A, VM_B, None, 1.0, SWAP, None, TOP_MEM, None, rows)
     for label, want in (

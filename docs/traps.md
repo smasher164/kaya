@@ -18949,3 +18949,25 @@ a lightness step of each other on a card. The pressed look there is
 ItemContainer's own template, which kaya does not draw; the windows lane
 cuts cards at pointer_down (tools/lib/lanes/win.py MODS) and expect_fill
 offers no `pressed` on WinUI.
+
+## A throttled host halves every lane (measured 2026-10-24)
+
+Two full matrices at 1e449de6 went red on four lanes with only timing faults
+(screencapture "no picture within 5 s", a media3 first frame never rendered,
+an iOS picker export that never finished), every lane 50 to 150% over its
+ceiling, load 250 to 500 on 18 cores, and the legs' sum about twice
+074427Z's (b16efcca, ALL PASS) on every lane alike, the Windows VM's
+included. The same 335 legs filtered passed. The code was not it: a mac
+leg's CPU time under the b16efcca interpreter and under HEAD's was the same
+within 8%. The cause was thermalmonitord: `mTPL = 2` (heavy) for 57 minutes
+of the hour the slowdown began and from 12:27 on without a break, against 0
+for nearly all of the good matrix's hours, and it stayed 2 with the host idle
+at load 3: the maintainer had covered the laptop with a blanket. `pmset -g therm` prints
+"No thermal warning level has been recorded" through all of it on Apple
+silicon, so the lane-health host line now carries
+`notifyutil -g com.apple.system.thermalpressurelevel` beside it, and the
+DURATION ANOMALY sentence names the level: a uniform slowdown with HEAVY
+there is the host, not the change. Read it with
+`log show --predicate 'process == "thermalmonitord" AND eventMessage BEGINSWITH "mTPL"'`
+for its history. Guard: tools/lib/lane_health.py's pressure_sentence, its
+five drive cases in check-flightrec.

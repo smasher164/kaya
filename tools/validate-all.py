@@ -599,7 +599,7 @@ if MODE == "parallel":
                   f"{now[2]:.1f} (1, 5, 15 min) now; top consumers: "
                   f"{top_consumers()} — a consumer there that is not "
                   f"a lane's process is the host, the pools are "
-                  f"expected.")
+                  f"expected; {lane_health.pressure_line()}.")
             if verdict == "PASS" and not keep_lane_log(name):
                 status = 1
             status = 1
