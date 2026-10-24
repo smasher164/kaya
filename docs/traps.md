@@ -18765,3 +18765,15 @@ captured screen that types. The verbs now park at a point the window's own
 pick says holds no button or activatable container (gtk.rs x11_rest_point),
 and refuse naming what they found when there is none.
 
+## The Compose target read off the UI thread (measured 2026-10-23)
+
+music_search-python on the Android lane died once with
+java.util.ConcurrentModificationException in KayaCompose.target, called from
+kayaWidgetTarget on the kaya-selftest thread (an `expect_ax` step): the
+selftest thread walked `KayaSceneModel.rows` while the UI thread was
+recomposing after `clear_search` and grew it. About thirty step arms resolved
+targets off the UI thread; the rerun passed. kayaWidgetTarget now hops to the
+main looper itself when called from any other thread, so every arm reads the
+registries where they are written. check-verbs holds the hop (a cut is
+watched red there).
+

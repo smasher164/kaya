@@ -9631,6 +9631,20 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
     }
 
     private fun kayaWidgetTarget(spec: String): KayaNode? {
+        // The registries are the UI thread's (docs/traps.md, the target read off the UI thread).
+        if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+            var found: KayaNode? = null
+            val done = java.util.concurrent.CountDownLatch(1)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                try {
+                    found = kayaWidgetTarget(spec)
+                } finally {
+                    done.countDown()
+                }
+            }
+            done.await()
+            return found
+        }
         val delimiter = spec.indexOfAny(charArrayOf('#', '@'))
         if (delimiter < 0) return null
         val kind = spec.substring(0, delimiter)

@@ -117,6 +117,9 @@ READS = [
 ]
 MODEL = r"node\.shape\b|node\.labelTint\b|node\.selected\b|node\.activatable\b|node\.selectedDeclared\b"
 CALLS = [
+    # docs/traps.md, the Compose target read off the UI thread.
+    ("a step resolves its target on the UI thread",
+     "private fun kayaWidgetTarget(spec: String): KayaNode? {\nif (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {"),
     ("the hug pin follows the container's axis, not its kind (M21)",
      "val crossVertical =\n(node.axis ?: if (node.kind == KayaCompose.KIND_COLUMN) 1L else 0L) == 0L"),
     ("the plain button's label on the text column (M20)",
@@ -210,6 +213,9 @@ def findings(text):
 
 
 CUTS = [
+    ("Compose: a target resolved on the step's own thread",
+     r"(private fun kayaWidgetTarget\(spec: String\): KayaNode\? \{\n(?:\s*//[^\n]*\n)?\s+if \()android\.os\.Looper\.myLooper\(\) != android\.os\.Looper\.getMainLooper\(\)",
+     r"\1false", "a step resolves its target on the UI thread no longer holds"),
     ("Compose: the hug pin back on the kind (M21)",
      r"val crossVertical =\n\s+\(node\.axis \?: if \(node\.kind == KayaCompose\.KIND_COLUMN\) 1L else 0L\) == 0L",
      "val crossVertical = node.kind == KayaCompose.KIND_ROW",
