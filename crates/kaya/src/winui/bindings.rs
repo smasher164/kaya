@@ -15469,6 +15469,107 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
+                IVisualStateManager,
+                IVisualStateManager_Vtbl,
+                0x342c8d32_ad61_5925_93d1_0c704df2a7d1
+            );
+            impl windows_core::RuntimeType for IVisualStateManager {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateManager_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+            }
+            windows_core::imp::define_interface!(
+                IVisualStateManagerFactory,
+                IVisualStateManagerFactory_Vtbl,
+                0x713daf82_92b3_58f2_8fc1_b0d9a2cad03c
+            );
+            impl windows_core::RuntimeType for IVisualStateManagerFactory {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateManagerFactory_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub CreateInstance: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
+                IVisualStateManagerOverrides,
+                IVisualStateManagerOverrides_Vtbl,
+                0xe3f8e9c9_9432_514c_923e_142cd8c82730
+            );
+            impl windows_core::RuntimeType for IVisualStateManagerOverrides {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateManagerOverrides_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                GoToStateCore: usize,
+            }
+            windows_core::imp::define_interface!(
+                IVisualStateManagerProtected,
+                IVisualStateManagerProtected_Vtbl,
+                0x0f008013_787f_5599_a5ad_0a10b988ed24
+            );
+            impl windows_core::RuntimeType for IVisualStateManagerProtected {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateManagerProtected_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                RaiseCurrentStateChanging: usize,
+                RaiseCurrentStateChanged: usize,
+            }
+            windows_core::imp::define_interface!(
+                IVisualStateManagerStatics,
+                IVisualStateManagerStatics_Vtbl,
+                0xa4d5147d_88c3_57ed_ad83_245df5f6b50d
+            );
+            impl windows_core::RuntimeType for IVisualStateManagerStatics {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateManagerStatics_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                GetVisualStateGroups: usize,
+                CustomVisualStateManagerProperty: usize,
+                pub GetCustomVisualStateManager: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub SetCustomVisualStateManager: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub GoToState: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    bool,
+                    *mut bool,
+                ) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
                 IWindow,
                 IWindow_Vtbl,
                 0x61f0ec79_5d52_56b5_86fb_40fa4af288b0
@@ -18692,6 +18793,133 @@ pub mod Microsoft {
                         b"enum(Microsoft.UI.Xaml.Visibility;i4)",
                     );
             }
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct VisualStateManager(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                VisualStateManager,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(VisualStateManager, DependencyObject);
+            impl VisualStateManager {
+                pub fn DispatcherQueue(
+                    &self,
+                ) -> windows_core::Result<super::Dispatching::DispatcherQueue> {
+                    let this = &windows_core::Interface::cast::<IDependencyObject>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DispatcherQueue)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn new() -> windows_core::Result<VisualStateManager> {
+                    Self::IVisualStateManagerFactory(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CreateInstance)(
+                            windows_core::Interface::as_raw(this),
+                            core::ptr::null_mut(),
+                            &mut core::ptr::null_mut(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn GetCustomVisualStateManager<P0>(
+                    obj: P0,
+                ) -> windows_core::Result<VisualStateManager>
+                where
+                    P0: windows_core::Param<FrameworkElement>,
+                {
+                    Self::IVisualStateManagerStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetCustomVisualStateManager)(
+                            windows_core::Interface::as_raw(this),
+                            obj.param().abi(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn SetCustomVisualStateManager<P0, P1>(
+                    obj: P0,
+                    value: P1,
+                ) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<FrameworkElement>,
+                    P1: windows_core::Param<VisualStateManager>,
+                {
+                    Self::IVisualStateManagerStatics(|this| unsafe {
+                        (windows_core::Interface::vtable(this).SetCustomVisualStateManager)(
+                            windows_core::Interface::as_raw(this),
+                            obj.param().abi(),
+                            value.param().abi(),
+                        )
+                        .ok()
+                    })
+                }
+                pub fn GoToState<P0>(
+                    control: P0,
+                    statename: &windows_core::HSTRING,
+                    usetransitions: bool,
+                ) -> windows_core::Result<bool>
+                where
+                    P0: windows_core::Param<Controls::Control>,
+                {
+                    Self::IVisualStateManagerStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GoToState)(
+                            windows_core::Interface::as_raw(this),
+                            control.param().abi(),
+                            core::mem::transmute_copy(statename),
+                            usetransitions,
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                fn IVisualStateManagerFactory<
+                    R,
+                    F: FnOnce(&IVisualStateManagerFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        VisualStateManager,
+                        IVisualStateManagerFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                fn IVisualStateManagerStatics<
+                    R,
+                    F: FnOnce(&IVisualStateManagerStatics) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        VisualStateManager,
+                        IVisualStateManagerStatics,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+            }
+            impl windows_core::RuntimeType for VisualStateManager {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IVisualStateManager>();
+            }
+            unsafe impl windows_core::Interface for VisualStateManager {
+                type Vtable = <IVisualStateManager as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID =
+                    <IVisualStateManager as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for VisualStateManager {
+                const NAME: &'static str = "Microsoft.UI.Xaml.VisualStateManager";
+            }
+            unsafe impl Send for VisualStateManager {}
+            unsafe impl Sync for VisualStateManager {}
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct Window(windows_core::IUnknown);

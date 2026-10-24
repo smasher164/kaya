@@ -2382,6 +2382,10 @@ pub trait Stage: Send + 'static {
     fn entry_count(&self, window: u64) -> usize;
     /// Drive the window's REAL back affordance.
     fn back(&self, window: u64);
+    /// docs/media-player-plan.md M23 (2).
+    fn back_look(&self, _window: u64) -> String {
+        String::new()
+    }
     /// The number of live sheets in the primary window's chain, read from
     /// the platform (the attached sheets, the open dialogs), never the
     /// model (docs/sheet-plan.md §4).
@@ -6509,10 +6513,15 @@ fn run_with_log(
                 // whether the stack popped (expect_entries) or the
                 // guest's back_requested reaction.
                 await_quiet();
-                let answered = crate::scene::answers();
-                stage.back(window.unwrap_or(0));
-                await_answer(answered);
-                None
+                let look = stage.back_look(window.unwrap_or(0));
+                if look.is_empty() {
+                    let answered = crate::scene::answers();
+                    stage.back(window.unwrap_or(0));
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(Err(format!("back: {look}")))
+                }
             }
             Step::DismissSheet => {
                 // The cancel path, an action: the observable is whether the

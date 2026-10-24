@@ -1039,7 +1039,7 @@ GTK; the grey on Linux's Search was the lane's own pointer, parked by the x11
 typing verb on the back button (docs/traps.md, the x11 key verbs' parked
 pointer). The mac draws the same flat back on Search and on the album; WinUI
 draws its one back button, the same on both screens, with the control's own
-ground and stroke.
+ground and stroke (made flat under M23 (2)).
 
 (3) "Should be fixed. I guess the app should have a registered display name.
 Probably done using whatever name is listed in the toml." and "Shouldn't the
@@ -1167,6 +1167,30 @@ apps keep the soft edge and the lensed text. The top edge stays automatic.
 The artist line keeps the caption's hierarchical secondary style; over the
 page's ground it reads 4.74:1 in light (secondary on white, as every list
 subtitle) and 6.76:1 in dark, the title 20.2:1 and 15.1:1.
+
+(2) "Windows should probably be flat as well where, unless you think it's
+unidiomatic." Flat is WinUI's idiom: both of the platform's own back
+buttons are transparent at rest and take the subtle fill on hover and
+press. NavigationView's NavigationBackButtonNormalStyle
+(controls/dev/NavigationView/NavigationBackButton.xaml in
+microsoft-ui-xaml) wears NavigationViewBackButtonBackground, which is
+SubtleFillColorTransparentBrush, and SubtleFillColorSecondaryBrush and
+SubtleFillColorTertiaryBrush on PointerOver and Pressed; the TitleBar
+control's TitleBarBackButtonStyle the same three. Microsoft's guidance for
+a back button outside those controls is a Button with the title bar's
+style ("Navigation history and backwards navigation", Back button). A
+navigation entry's back button now wears NavigationBackButtonNormalStyle,
+looked up from the application's resources (its 40 by 36 size and 4,2
+margin come with it, which the title bar's style, stretched to a title
+bar's height, does not carry), with WinUI's own back glyph; its accessible
+name stays the arrow it had. The harness reads it before every `back` on
+the lane: the button's ground 3 DIP inside its edge against the bar beside
+it at rest (at most 0.5 in CIELAB lightness), and in its PointerOver
+state, set through VisualStateManager so no pointer moves (at least 1.0),
+each read again 100 ms apart until it holds, twenty times at most
+(docs/traps.md, the WinUI back button's state read before its frame).
+Measured: rest 0.0 (F3F3F3 and F9F9F9 bars), hover 8.4; the old button
+read FDFDFD against F9F9F9, 1.4.
 
 ## §6: Build order
 

@@ -207,6 +207,8 @@ fn main() {
         "Microsoft.UI.Xaml.Controls.MenuFlyout".to_string(),
         "Microsoft.UI.Xaml.Controls.Primitives.FlyoutBase".to_string(),
         "Microsoft.UI.Xaml.Style".to_string(),
+        // The back button's hover read without the pointer (docs/media-player-plan.md M23 (2)).
+        "Microsoft.UI.Xaml.VisualStateManager".to_string(),
         "Microsoft.UI.Xaml.Controls.Orientation".to_string(),
         // Grid, not StackPanel, carries the row/column containers:
         // proportional `grow` needs star sizing and a StackPanel has no

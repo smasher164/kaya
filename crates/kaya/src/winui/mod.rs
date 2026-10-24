@@ -6186,9 +6186,8 @@ fn mount_entry(
     })?;
     defs.Append(&fill)?;
     let back = Button::new()?;
-    let caption = text_block()?;
-    caption.SetText(&HSTRING::from("\u{2190}"))?;
-    back.SetContent(&caption)?;
+    back.SetStyle(&back_button_style())?;
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(&back, &HSTRING::from("\u{2190}"))?;
     let host = core.nav_entries[&entry_id].window;
     let handler = RoutedEventHandler::new(move |_, _| {
         // Fires from the message loop, never under an apply borrow.
@@ -6842,6 +6841,44 @@ thread_local! {
 /// of the theme dictionary rather than written down here. A MISSING KEY IS
 /// FATAL: a guess would put the hover visual back across the icon with
 /// nothing to notice it.
+/// docs/media-player-plan.md M23 (2).
+const BACK_BUTTON_STYLE: &str = "NavigationBackButtonNormalStyle";
+
+#[cfg(feature = "harness")]
+const BACK_REST_MAX_LIGHTNESS: f64 = 0.5;
+#[cfg(feature = "harness")]
+const BACK_HOVER_MIN_LIGHTNESS: f64 = 1.0;
+
+#[cfg(feature = "harness")]
+fn shown_entry_back(core: &CoreState, window: u64) -> windows_core::Result<Option<Button>> {
+    if core.section_navs.contains_key(&window) {
+        return Ok(None);
+    }
+    let Some(back) = core
+        .nav_stacks
+        .get(&window)
+        .and_then(|s| s.last())
+        .and_then(|top| core.nav_entries.get(top))
+        .and_then(|e| e.back_button.clone())
+    else {
+        return Ok(None);
+    };
+    let shown: UIElement = back.cast()?;
+    Ok((shown.Visibility()? == Visibility::Visible).then_some(back))
+}
+
+fn back_button_style() -> Style {
+    require_control_resources("a navigation entry draws WinUI's back button");
+    theme_resource::<Style>(BACK_BUTTON_STYLE).unwrap_or_else(|e| {
+        panic!(
+            "kaya: winui: the application resource dictionary publishes no \
+             {BACK_BUTTON_STYLE} ({e:?}), NavigationView's own back button style, \
+             which a navigation entry's back button wears (docs/media-player-plan.md \
+             M23 (2)). The pinned Windows App SDK moved under this backend."
+        )
+    })
+}
+
 fn caption_command_button_box() -> windows_core::Result<f64> {
     APP.with_borrow(|app| {
         let app = app
@@ -28402,6 +28439,89 @@ impl crate::harness::Stage for WinUiStage {
             let Some(id) = topmost_sheet(core) else { return Ok(()) };
             user_cancel_sheet(core, id)
         });
+    }
+    fn back_look(&self, window: u64) -> String {
+        let state = move |name: &'static str| {
+            Self::on_ui_read(move |core| {
+                let Some(back) = shown_entry_back(core, window)? else { return Ok(None) };
+                let control: bindings::Microsoft::UI::Xaml::Controls::Control = back.cast()?;
+                bindings::Microsoft::UI::Xaml::VisualStateManager::GoToState(&control, &HSTRING::from(name), false)
+                    .map(Some)
+            })
+        };
+        let grab = move || {
+            Self::on_ui_read(move |core| {
+                let Some(back) = shown_entry_back(core, window)? else { return Ok(Err("the back button went".to_owned())) };
+                let at = element_placement(core, &back.cast::<FrameworkElement>()?)?;
+                let pad = ((3.0 * at.scale).round() as i32).max(2);
+                let width = at.w;
+                let wide = Placement { w: at.w + 3 * pad, ..at };
+                Ok(grab_canvas(&wide).map(|grab| {
+                    let row = grab.height as usize / 2;
+                    let px = |x: i32| {
+                        let i = (row * grab.width as usize + x as usize) * 4;
+                        [grab.pixels[i + 2], grab.pixels[i + 1], grab.pixels[i]].map(f64::from)
+                    };
+                    (px(width + 2 * pad), px(pad))
+                }))
+            })
+            .map_err(|e| e.message().to_string())
+            .and_then(|read| read)
+        };
+        let hex = |c: &[f64; 3]| format!("{:02X}{:02X}{:02X}", c[0] as u8, c[1] as u8, c[2] as u8);
+        let step = |a: &[f64; 3], b: &[f64; 3]| (crate::harness::lightness(*a) - crate::harness::lightness(*b)).abs();
+        // docs/traps.md, the WinUI back button's state read before its frame.
+        let read = |name: &'static str, holds: &dyn Fn(f64) -> bool| -> Result<(Option<bool>, usize, [f64; 3], [f64; 3]), String> {
+            let mut last = None;
+            for tries in 1..=20 {
+                let went = state(name).map_err(|e| e.message().to_string())?;
+                if went.is_none() {
+                    return Err("the back button went".to_owned());
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                let (bar, ground) = grab()?;
+                last = Some((went, tries, bar, ground));
+                if holds(step(&ground, &bar)) {
+                    break;
+                }
+            }
+            Ok(last.expect("twenty tries ran"))
+        };
+        match state("Normal") {
+            Ok(Some(_)) => {}
+            Ok(None) => return String::new(),
+            Err(e) => return format!("<unreadable: {e}>"),
+        }
+        let rest = read("Normal", &|d| d <= BACK_REST_MAX_LIGHTNESS);
+        let hover = read("PointerOver", &|d| d >= BACK_HOVER_MIN_LIGHTNESS);
+        let _ = state("Normal");
+        let ((_, rest_tries, bar, ground), (went, hover_tries, _, hovered)) = match (rest, hover) {
+            (Ok(rest), Ok(hover)) => (rest, hover),
+            (rest, hover) => return format!("<the back button could not be read: rest {rest:?}, hover {hover:?}>"),
+        };
+        let resting = step(&ground, &bar);
+        let hovering = step(&hovered, &bar);
+        eprintln!(
+            "kaya: winui back_look: bar {} ground {} ({resting:.1}, {rest_tries} tries) hovered {} ({hovering:.1}, \
+             {hover_tries} tries, GoToState answered {went:?})",
+            hex(&bar), hex(&ground), hex(&hovered)
+        );
+        if resting > BACK_REST_MAX_LIGHTNESS {
+            format!(
+                "the back button's resting ground {} stands {resting:.1} in lightness from the bar's {} beside it \
+                 after {rest_tries} reads, over the {BACK_REST_MAX_LIGHTNESS:.1} a flat button may",
+                hex(&ground), hex(&bar)
+            )
+        } else if hovering < BACK_HOVER_MIN_LIGHTNESS {
+            format!(
+                "the back button's PointerOver ground {} stands {hovering:.1} in lightness from the bar's {} after \
+                 {hover_tries} reads 100 ms apart (GoToState answered {went:?}), under the \
+                 {BACK_HOVER_MIN_LIGHTNESS:.1} its hover fill must show",
+                hex(&hovered), hex(&bar)
+            )
+        } else {
+            String::new()
+        }
     }
     fn back(&self, window: u64) {
         use bindings::Microsoft::UI::Xaml::Automation::Peers::{

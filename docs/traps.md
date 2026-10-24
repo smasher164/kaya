@@ -18786,3 +18786,16 @@ scroll view reported a bottom inset of 335 pt (the keyboard) and its bottom
 scroll edge effect sat at 541.8 to 664 pt, above the tab bar: on the device
 the keyboard covers that bar. A picture of what sits under the tab bar is
 taken with the keyboard down (docs/media-player-plan.md M23 (1)).
+
+## The WinUI back button's state read before its frame (measured 2026-10-24)
+
+The `back` verb's look reading on WinUI (docs/media-player-plan.md M23 (2))
+sets the back button's PointerOver state through VisualStateManager and
+prints the window. With one 200 ms wait it read the hovered ground equal to
+the bar (F3F3F3 against F3F3F3) once, in panes_csharp under a filtered
+matrix, right after the previous back had popped an entry and shown this
+one's button; 33 other readings that run showed the fill (8.4 in lightness).
+The print is of the last frame drawn, which lags the state change under
+load, so each of the two readings is re-asked, 100 ms apart, until it holds
+or twenty tries pass, and the refusal names the tries and GoToState's answer.
+
