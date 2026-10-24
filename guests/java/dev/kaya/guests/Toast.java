@@ -90,9 +90,11 @@ public final class Toast {
                                 .onResult((r, o) -> answer(r, last, count, "Saved in sheet", o)).show()).a11yId("sheet_save");
                     }));
                 });
-                for (var row : ToastItemKaya.rows(tx, items)) {
+                var table = ToastItemKaya.rows(tx, items);
+                for (var row : table) {
                     row.row(() -> row.label(row.title));
                 }
+                table.columns(new String[] {"Item"}, KayaApp.Sort.none());
             }));
 
             for (String title : new String[] {"Milk", "Eggs", "Bread"}) {

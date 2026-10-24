@@ -18809,10 +18809,16 @@ like that was undone was a `kaya.undoable` transaction which also removed a
 row from the Liked Songs table, a `columns(...)` For and so windowed; the
 undo put the row back in the order without reconciling the band, and the
 app's own `on_undone` then inserted it a second time ("key already present").
-The app now fills its liked pages in a posted transaction of their own,
-outside the undo group (guests/python/music.py `show_likes`,
-docs/media-player-plan.md M24). The core's replay of a windowed For's
-deltas is left as it is (no fix in crates/ yet).
+The cause was the core's: `restore_order`, which replays an undo step's
+order, wrote the order and moved the stamps without reconciling a windowed
+For's band. It now goes through `window_order_moved`, and `undo` and `redo`
+end with `assert_bands_hold` in debug, so a drift panics at the undo itself
+(scene.rs `an_undo_of_a_windowed_remove_restores_the_band`; the toast scene's
+list is a table for the same reason). The app keeps filling its liked pages
+in a posted transaction of their own, outside the undo group
+(guests/python/music.py `show_likes`, docs/media-player-plan.md M24): its
+`on_undone` re-derives the list itself, so pages inside the group would take
+the row twice, and a page closed since the step would be restored into.
 
 ## The mac app's interaction latency is not the debug build (measured 2026-10-24)
 

@@ -29,7 +29,9 @@ expect_no_toast
 expect label#1 "answers 3"
 expect label#0 "Second: action"
 
-# T4: the undo toast takes back ITS step through the core.
+# T4: the undo toast takes back ITS step through the core. The list is a
+# table, so the undo restores a windowed For's rows (docs/traps.md, an undo
+# step's table delta replayed without the band).
 click button#3
 expect label#3 "Eggs, Bread"
 expect_toast "Deleted Milk|Undo"

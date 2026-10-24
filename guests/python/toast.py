@@ -113,7 +113,7 @@ with app.window(title="toast", on_undone=on_undone):
         kaya.button("hold", on_click=on_hold)        # button#4
         kaya.button("dismiss", on_click=on_dismiss)  # button#5
         kaya.button("sheet", on_click=on_sheet)      # button#6
-        for item in items:
+        for item in items.columns("Item"):
             with kaya.row():
                 kaya.label(bind=item.title)
 

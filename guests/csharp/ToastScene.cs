@@ -96,8 +96,8 @@ static class ToastScene
                         return body;
                     }));
                 });
-                foreach (var row in items.Rows())
-                    row.Row(() => row.Label(row.Title));
+                var table = ItemKaya.Each(tx, items, row => row.Row(() => row.Label(row.Title)));
+                tx.Columns(table, new[] { "Item" }, Sort.None);
                 return root;
             }));
 

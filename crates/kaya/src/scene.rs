@@ -7303,6 +7303,8 @@ impl Scene {
         let occurrence = self.restore_episode_backwards(window, &mut out)?;
         out.extend(self.reconcile_toasts());
         self.lower_skin(&mut out);
+        #[cfg(debug_assertions)]
+        self.assert_bands_hold();
         Some((out, occurrence))
     }
 
@@ -7402,6 +7404,8 @@ impl Scene {
         self.ledgers.entry(window).or_default().done.push(back);
         out.extend(self.reconcile_toasts());
         self.lower_skin(&mut out);
+        #[cfg(debug_assertions)]
+        self.assert_bands_hold();
         Some((
             out,
             Occurrence::Redone {
@@ -7524,6 +7528,10 @@ impl Scene {
             Some(site) => site.container,
             None => return, // not rendered: the table alone is the state
         };
+        if self.windowed(id, path) {
+            self.window_order_moved(id, path, out);
+            return;
+        }
         let mut anchor: Option<WidgetId> = None;
         for key in keys.iter().rev() {
             let roots = match self.stamps.get(&(id, path.clone(), key.clone())) {
@@ -11196,7 +11204,7 @@ impl Scene {
 
     /// Every windowed site's realized set is the band's rows, in order, and
     /// each of them has a stamp. DEBUG ONLY, at the end of `Scene::apply` and
-    /// of `window_moved` — the two ways a band's membership can move.
+    /// of `window_moved` and `undo`/`redo` — the ways a band's membership can move.
     #[cfg(debug_assertions)]
     fn assert_bands_hold(&self) {
         for ((id, path), site) in &self.for_sites {
@@ -20756,6 +20764,25 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         ops.iter()
             .filter(|op| matches!(op, ApplyOp::MoveChild { .. }))
             .count()
+    }
+
+    /// docs/traps.md, an undo step's table delta replayed without the band.
+    #[test]
+    fn an_undo_of_a_windowed_remove_restores_the_band() {
+        let mut scene = rows_scene(6);
+        scene.window_moved(4, 0, 6);
+        assert_eq!(realized(&scene), vec![0, 1, 2, 3, 4, 5]);
+        scene.apply(vec![
+            TxOp::UndoGroup { window: DEFAULT_WINDOW, label: "unlike".into() },
+            TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: Value::I64(0) },
+        ]);
+        assert_eq!(realized(&scene), vec![1, 2, 3, 4, 5]);
+        scene.undo(DEFAULT_WINDOW).expect("one group to undo");
+        assert_eq!(realized(&scene), vec![0, 1, 2, 3, 4, 5]);
+        scene.redo(DEFAULT_WINDOW).expect("one group to redo");
+        assert_eq!(realized(&scene), vec![1, 2, 3, 4, 5]);
+        scene.apply(vec![row_insert(9)]);
+        assert_eq!(realized(&scene), vec![1, 2, 3, 4, 5, 9]);
     }
 
     // --- The seed (docs/deferred.md, the declares-windowing entry) -------

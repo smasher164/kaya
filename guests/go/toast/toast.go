@@ -107,7 +107,7 @@ func App() *kaya.App {
 					}).A11yID("sheet_save")
 				}))
 			})
-			for row := range ItemRows(tx, items).All() {
+			for row := range ItemRows(tx, items).Columns([]string{"Item"}, kaya.SortNone()).All() {
 				row.Row(func() {
 					row.Label(row.Title())
 				})

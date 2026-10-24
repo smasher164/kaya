@@ -82,7 +82,7 @@ const { last, count, undoneText, rows, items } = app.window({ title: "toast", on
     kaya.button("hold", { onClick: onHold }); // button#4
     kaya.button("dismiss", { onClick: onDismiss }); // button#5
     kaya.button("sheet", { onClick: onSheet }); // button#6
-    for (const item of items) {
+    for (const item of items.columns(["Item"])) {
       kaya.row(() => {
         kaya.label({ bind: item.title });
       });

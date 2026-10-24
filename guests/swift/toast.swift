@@ -97,11 +97,12 @@ KayaApp.run { app in
                 }
                 tx.mountIn(21, body)
             }
-            for row in items.rows {
+            let table = itemEach(tx, items) { row in
                 row.row {
                     row.label(row.title)
                 }
             }
+            tx.columns(table, ["Item"], .none)
             return root
         }
         tx.mount(root)

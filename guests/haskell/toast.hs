@@ -99,6 +99,8 @@ main = kayaMain $ \app -> do
         WOnUndone walked
       ]
 
+    (table, _) <- forEach (recordHandle items) $ rowOf [label (field @"title" @Item)]
+    columns table ["Item"] sortNone
     root <-
       column
         [ labelBound lastText,
@@ -112,7 +114,7 @@ main = kayaMain $ \app -> do
           buttonOn "hold" onHold,
           buttonOn "dismiss" onDismiss,
           buttonOn "sheet" onSheet,
-          each (recordHandle items) $ rowOf [label (field @"title" @Item)]
+          pure table
         ]
     mount root
 

@@ -74,7 +74,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 msgs.on_click(dismiss, Msg::Dismiss);
                 let sheet = tx.button("sheet").id(); // button#6
                 msgs.on_click(sheet, Msg::Sheet);
-                for mut row in items.rows(tx) {
+                for mut row in items.rows(tx).columns(&["Item"], kaya::Sort::none()) {
                     row.row(|t| {
                         t.label(Item::title());
                     });

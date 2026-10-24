@@ -95,6 +95,10 @@ let () =
           write rows (titles ()))
         ();
 
+      let table, _ =
+        for_each (record_handle items) (fun () -> Tpl.(row [ label ~bind_field:item_title ] ())) ()
+      in
+      columns table [ "Item" ] sort_none;
       let root =
         column
           [
@@ -109,8 +113,7 @@ let () =
             button ~text:"hold" ~on_click:on_hold (* button#4 *);
             button ~text:"dismiss" ~on_click:on_dismiss (* button#5 *);
             button ~text:"sheet" ~on_click:on_sheet (* button#6 *);
-            each (record_handle items) (fun () ->
-                Tpl.(row [ label ~bind_field:item_title ] ()));
+            w table;
           ]
           ()
       in

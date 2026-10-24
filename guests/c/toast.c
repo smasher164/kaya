@@ -109,6 +109,8 @@ static void build_scene(void) {
     kaya_tx_bind_text_element(&tx, N_TITLE, 0, F_TITLE);
     kaya_tx_add_child(&tx, N_ROW, N_TITLE);
     kaya_tx_template_end(&tx);
+    KayaVal titles[] = {kaya_str("Item")};
+    kaya_tx_set_column_headers(&tx, W_FOR_ITEMS, 0xFFFFFFFFu, 0, 1, 0, titles, 1);
 
     kaya_tx_add_child(&tx, W_COLUMN, W_LAST);
     kaya_tx_add_child(&tx, W_COLUMN, W_COUNT);
