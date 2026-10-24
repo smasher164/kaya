@@ -15386,20 +15386,24 @@ var kayaTableTrackSizes: [UInt64: KayaTableTrackObservation] = [:]
 /// The invisible frame each flex child rides in IS the track KayaFlex assigned.
 /// The reader records the frame's geometry — the layout rect, never the child's
 /// drawn size, which several controls inflate or hug.
-private struct KayaTrackReader: View {
+private struct KayaTrackReader: ViewModifier {
     let id: UInt64
     let vertical: Bool
     let tableGeneration: Int?
     @State private var token = UUID()
+    @State private var last = KayaLastGeometry()
 
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear { record(geo.size, geo.frame(in: .global)) }
-                .onChange(of: geo.size) { _, size in record(size, geo.frame(in: .global)) }
-                .onChange(of: geo.frame(in: .global).origin) { _, _ in record(geo.size, geo.frame(in: .global)) }
-                .task(id: tableGeneration) { record(geo.size, geo.frame(in: .global)) }
+    func body(content: Content) -> some View {
+        if kayaHarnessActive || tableGeneration != nil || kayaShippedFrameReaders {
+            content
+                .onGeometryChange(for: KayaGeometry.self) { KayaGeometry($0) } action: { g in
+                    last.seen = g
+                    record(g.size, g.frame)
+                }
+                .task(id: tableGeneration) { if let g = last.seen { record(g.size, g.frame) } }
                 .onDisappear { kayaTrackRecords.retire(id, token) }
+        } else {
+            content
         }
     }
 
@@ -15418,6 +15422,33 @@ private struct KayaTrackReader: View {
                 generation: tableGeneration, size: size)
         }
     }
+}
+
+struct KayaGeometry: Equatable {
+    let size: CGSize
+    let frame: CGRect
+    init(_ geo: GeometryProxy) {
+        size = geo.size
+        frame = geo.frame(in: .global)
+    }
+}
+
+/// Which readers a shipped app builds: docs/traps.md, the mac app's
+/// interaction latency; tools/lib/skin_routes.py holds them.
+let kayaShippedFrameReaders: Bool = {
+    #if os(macOS)
+        false
+    #else
+        true
+    #endif
+}()
+
+final class KayaLastGeometry {
+    var seen: KayaGeometry?
+}
+
+final class KayaLastSize {
+    var size: CGSize?
 }
 
 /// Every flex child's frame in the window's space, by node id — what
@@ -15579,21 +15610,19 @@ var kayaMacButtons: [UInt64: NSButton] = [:]
     return .some(left)
 }
 
-private struct KayaLabelFrameReader: View {
+private struct KayaLabelFrameReader: ViewModifier {
     let id: UInt64
     @State private var token = UUID()
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear {
-                    kayaLabelFrames[id] = geo.size
-                    kayaLabelWindowFrames[id, default: [:]][token] = geo.frame(in: .global)
+    func body(content: Content) -> some View {
+        if kayaHarnessActive {
+            content
+                .onGeometryChange(for: KayaGeometry.self) { KayaGeometry($0) } action: { g in
+                    kayaLabelFrames[id] = g.size
+                    kayaLabelWindowFrames[id, default: [:]][token] = g.frame
                 }
                 .onDisappear { kayaLabelWindowFrames[id]?[token] = nil }
-                .onChange(of: geo.size) { _, size in kayaLabelFrames[id] = size }
-                .onChange(of: geo.frame(in: .global)) { _, frame in
-                    kayaLabelWindowFrames[id, default: [:]][token] = frame
-                }
+        } else {
+            content
         }
     }
 }
@@ -15632,26 +15661,34 @@ var kayaDrawnExtents: [UInt64: Double] = [:]
 /// Records one child's cross rect in the enclosing container's named space, and
 /// the main-axis extent it drew at (the reader rides the CHILD, inside the
 /// track frame, so it sees the aligned box, not the track).
-private struct KayaCellReader: View {
+private struct KayaCellReader: ViewModifier {
     let id: UInt64
     let parent: UInt64
     let vertical: Bool
+    var scrolling = false
     @State private var token = UUID()
 
-    var body: some View {
-        GeometryReader { geo in
-            let frame = geo.frame(in: .named("kaya-box-\(parent)"))
-            // The window-space frame too, the flex path's KayaTrackReader
-            // record: a stamped row of a stacked For is what
-            // scroll_to_row's drain and expect_scrolled_to read
-            // (docs/scroll-to-plan.md S4, S7).
-            let global = geo.frame(in: .global)
-            Color.clear
-                .onAppear { record(frame, global) }
-                .onChange(of: frame) { _, f in record(f, geo.frame(in: .global)) }
-                .onChange(of: global.origin) { _, _ in record(frame, geo.frame(in: .global)) }
-                .onDisappear { kayaCellRecords.retire(id, token) }
+    private struct Frames: Equatable {
+        let local: CGRect
+        let global: CGRect
+    }
+
+    func body(content: Content) -> some View {
+        if kayaHarnessActive || scrolling || kayaShippedFrameReaders {
+            readers(content)
+        } else {
+            content
         }
+    }
+
+    private func readers(_ content: Content) -> some View {
+        content
+            .onGeometryChange(for: Frames.self) {
+                Frames(local: $0.frame(in: .named("kaya-box-\(parent)")), global: $0.frame(in: .global))
+            } action: { f in
+                record(f.local, f.global)
+            }
+            .onDisappear { kayaCellRecords.retire(id, token) }
     }
 
     private func record(_ frame: CGRect, _ global: CGRect) {
@@ -15678,15 +15715,15 @@ private struct KayaCellReader: View {
 @MainActor var kayaInsetInner: [UInt64: CGSize] = [:]
 @MainActor var kayaInsetOuter: [UInt64: CGSize] = [:]
 
-private struct KayaInsetReader: View {
+private struct KayaInsetReader: ViewModifier {
     let id: UInt64
     let outer: Bool
 
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear { record(geo.size) }
-                .onChange(of: geo.size) { _, size in record(size) }
+    func body(content: Content) -> some View {
+        if kayaHarnessActive {
+            content.onGeometryChange(for: CGSize.self) { $0.size } action: { record($0) }
+        } else {
+            content
         }
     }
 
@@ -15699,26 +15736,32 @@ private struct KayaInsetReader: View {
     }
 }
 
-private struct KayaBoxReader: View {
+private struct KayaBoxReader: ViewModifier {
     let id: UInt64
     let vertical: Bool
     /// A GROUPED FLOW'S CONTENT BOX IS ITS CARDS' INTERIOR (the grouped-screen
     /// rule): the section stream pads every run and form by the card inset,
     /// so a child spanning the interior spans the flow's content.
     var crossInset: Double = 0
+    @State private var last = KayaLastSize()
 
-    var body: some View {
-        GeometryReader { geo in
-            Color.clear
-                .onAppear { record(geo.size) }
-                .onChange(of: geo.size) { _, size in record(size) }
+    func body(content: Content) -> some View {
+        if kayaHarnessActive {
+            content
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    last.size = size
+                    record(size)
+                }
                 // An axis FLIP with a coincidentally equal box would
                 // otherwise leave the previous axis on record.
-                .onChange(of: vertical) { _, _ in record(geo.size) }
+                .onChange(of: vertical) { _, _ in if let size = last.size { record(size) } }
+        } else {
+            content
         }
     }
 
     private func record(_ size: CGSize) {
+        kayaInsetInner[id] = size
         kayaContainerExtents[id] = Double(vertical ? size.height : size.width)
         kayaContainerCross[id] = Double(vertical ? size.width : size.height) - crossInset
         // The axis the RENDER used, recorded only when the container
@@ -19471,7 +19514,7 @@ private struct KayaTableRowGround: View {
                 .fill(row.selected ? AnyShapeStyle(kayaSelectedPair().fill) : AnyShapeStyle(Color.clear))
                 .contentShape(Rectangle())
                 .onTapGesture { KayaHost.emitPress(row) }
-                .background(KayaSkinFrameReader(id: row.id))
+                .modifier(KayaSkinFrameReader(id: row.id))
                 .accessibilityElement()
                 .accessibilityLabel(kayaCellText(row) ?? "")
                 .accessibilityIdentifier(row.a11yId)
@@ -20544,7 +20587,7 @@ private struct KayaGroupedSections: View {
                         case .table(let table):
                             KayaRender(node: table, flexVertical: true, flexStretch: true)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .background(
+                                .modifier(
                                     KayaTrackReader(
                                         id: table.id, vertical: true,
                                         tableGeneration: kayaTableGeometryGeneration(table)))
@@ -20582,9 +20625,9 @@ private struct KayaGroupedSections: View {
     ) -> some View {
         if let margin {
             content()
-                .background(KayaInsetReader(id: margin.id, outer: false))
+                .modifier(KayaInsetReader(id: margin.id, outer: false))
                 .padding(margin.inset)
-                .background(KayaInsetReader(id: margin.id, outer: true))
+                .modifier(KayaInsetReader(id: margin.id, outer: true))
         } else {
             content()
                 .padding(.top, gap)
@@ -20614,7 +20657,7 @@ private struct KayaGroupedSections: View {
                     .frame(maxWidth: .infinity, alignment: .topLeading)
                     // The cross box, so expect_breadth and expect_aligned read
                     // a carded child as they read a flex one.
-                    .background(KayaCellReader(id: child.id, parent: flow.id, vertical: true))
+                    .modifier(KayaCellReader(id: child.id, parent: flow.id, vertical: true, scrolling: flow.scrollRowRequest != nil))
                     .padding(.vertical, kayaFoldSectionPadY)
                 if i < nodes.count - 1 {
                     Divider()
@@ -22252,12 +22295,31 @@ final class KayaWeakView {
     #endif
 }
 
-struct KayaSkinFrameReader: View {
+/// Built only under the harness (docs/traps.md, the mac app's interaction latency).
+struct KayaSkinFrameReader: ViewModifier {
+    let id: UInt64
+    var insetOuter = false
+
+    func body(content: Content) -> some View {
+        if kayaHarnessActive {
+            content
+                .background(KayaSkinFrameHolder(id: id))
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    if insetOuter { kayaInsetOuter[id] = size }
+                }
+        } else {
+            content
+        }
+    }
+}
+
+struct KayaSkinFrameHolder: View {
     let id: UInt64
     var body: some View {
         KayaSkinFrameAnchor(id: id).accessibilityHidden(true).allowsHitTesting(false)
     }
 }
+
 
 #if os(macOS)
     struct KayaSkinFrameAnchor: NSViewRepresentable {
@@ -25960,8 +26022,8 @@ struct KayaRender: View {
                 maxWidth: vertical && (child.fill ?? (node.align == alignStretch)) ? .infinity : nil,
                 maxHeight: !vertical && (child.fill ?? (node.align == alignStretch)) ? .infinity : nil,
                 alignment: .topLeading)
-            .background(
-                KayaCellReader(id: child.id, parent: node.id, vertical: vertical)
+            .modifier(
+                KayaCellReader(id: child.id, parent: node.id, vertical: vertical, scrolling: node.scrollRowRequest != nil)
             )
         }
     }
@@ -26004,8 +26066,8 @@ struct KayaRender: View {
                     KayaFlow(spacing: node.spacing) {
                         ForEach(node.laidOut) { child in
                             KayaRender(node: child, flexVertical: false)
-                                .background(
-                                    KayaCellReader(id: child.id, parent: node.id, vertical: false)
+                                .modifier(
+                                    KayaCellReader(id: child.id, parent: node.id, vertical: false, scrolling: node.scrollRowRequest != nil)
                                 )
                         }
                     }
@@ -26033,8 +26095,8 @@ struct KayaRender: View {
                                 KayaRender(node: child, flexVertical: true)
                                     .frame(maxWidth: .infinity, alignment: .topLeading)
                                     .padding(.vertical, kayaFoldSectionPadY)
-                                    .background(
-                                        KayaCellReader(id: child.id, parent: node.id, vertical: true)
+                                    .modifier(
+                                        KayaCellReader(id: child.id, parent: node.id, vertical: true, scrolling: node.scrollRowRequest != nil)
                                     )
                                 if i < node.laidOut.count - 1 {
                                     Divider()
@@ -26076,11 +26138,11 @@ struct KayaRender: View {
                                             : (child.fill ?? (node.align == alignStretch)))
                                             ? .infinity : nil,
                                         alignment: .topLeading)
-                                    .background(
-                                        KayaCellReader(id: child.id, parent: node.id, vertical: vertical)
+                                    .modifier(
+                                        KayaCellReader(id: child.id, parent: node.id, vertical: vertical, scrolling: node.scrollRowRequest != nil)
                                     )
                             }
-                            .background(
+                            .modifier(
                                 KayaTrackReader(
                                     id: child.id, vertical: vertical,
                                     tableGeneration: child.tableColumns.isEmpty
@@ -26104,17 +26166,15 @@ struct KayaRender: View {
                 maxHeight: gridCell || (vertical && boxCrosses) ? .infinity : nil,
                 alignment: .topLeading)
             .coordinateSpace(name: "kaya-box-\(node.id)")
-            .background(
+            .modifier(
                 KayaBoxReader(
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
-            .background(KayaInsetReader(id: node.id, outer: false))
             .modifier(KayaInsetPadding(node: node))
-            .background(KayaInsetReader(id: node.id, outer: true))
             .modifier(KayaFilledSurface(tint: kayaShownFill(node)))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
-            .background(KayaSkinFrameReader(id: node.id))
+            .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))
             .modifier(KayaComposerSurface(on: node.role == roleComposer))
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
@@ -26162,11 +26222,11 @@ struct KayaRender: View {
                     Color.clear.frame(width: 0, height: 0)
                 } else {
                     KayaSymbolButton(node: node)
-                        .background(KayaLabelFrameReader(id: node.id))
+                        .modifier(KayaLabelFrameReader(id: node.id))
                 }
             #else
                 KayaSymbolButton(node: node)
-                    .background(KayaLabelFrameReader(id: node.id))
+                    .modifier(KayaLabelFrameReader(id: node.id))
             #endif
         case kindButton:
             // The dressed floor. macOS bridges to NSButton: under a pre-26 SDK
@@ -26182,7 +26242,7 @@ struct KayaRender: View {
                         kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                         return d[.top]
                     }
-                    .background(KayaLabelFrameReader(id: node.id))
+                    .modifier(KayaLabelFrameReader(id: node.id))
             #else
                 // SwiftUI's own role vocabulary (docs/styling-plan.md D4):
                 // destructive rides Button(role:), prominence is the
@@ -26201,7 +26261,7 @@ struct KayaRender: View {
                     kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
                     return d[.top]
                 }
-                .background(KayaLabelFrameReader(id: node.id))
+                .modifier(KayaLabelFrameReader(id: node.id))
             #endif
         case kindLabel:
             // The heading role (docs/styling-plan.md D4) is BOTH facts at once:
@@ -26252,7 +26312,7 @@ struct KayaRender: View {
             .frame(
                 idealWidth: node.maxWidth > 0 ? node.maxWidth : nil,
                 maxWidth: node.maxWidth > 0 ? node.maxWidth : nil, alignment: .leading)
-            .background(KayaSkinFrameReader(id: node.id))
+            .modifier(KayaSkinFrameReader(id: node.id))
             .accessibilityAddTraits(
                 node.role == roleHeading ? .isHeader : [])
             .alignmentGuide(.top) { d in
@@ -26266,10 +26326,10 @@ struct KayaRender: View {
                 kayaLineHeights[node.id] = d.height - d[.lastTextBaseline] + d[.firstTextBaseline]
                 return d[.firstTextBaseline]
             }
-            .background(KayaLabelFrameReader(id: node.id))
+            .modifier(KayaLabelFrameReader(id: node.id))
         case kindCheckbox where node.role == roleToggle:
             KayaToggleButton(node: node)
-                .background(KayaLabelFrameReader(id: node.id))
+                .modifier(KayaLabelFrameReader(id: node.id))
         case kindCheckbox:
             // Uncontrolled toward the app, the entry's shape: the node
             // mirrors the box's state (SwiftUI needs the binding), and
@@ -26441,9 +26501,9 @@ struct KayaRender: View {
                 }
             }
             .coordinateSpace(name: "kaya-grid-\(node.id)")
-            .background(KayaInsetReader(id: node.id, outer: false))
+            .modifier(KayaInsetReader(id: node.id, outer: false))
             .padding(node.inset)
-            .background(KayaInsetReader(id: node.id, outer: true))
+            .modifier(KayaInsetReader(id: node.id, outer: true))
         case kindGrid:
             // The 2D layout contract: SwiftUI's own Grid — columns take their
             // natural width, aligned across rows. The node's children chunk
@@ -26478,9 +26538,9 @@ struct KayaRender: View {
                 }
             }
             .coordinateSpace(name: "kaya-grid-\(node.id)")
-            .background(KayaInsetReader(id: node.id, outer: false))
+            .modifier(KayaInsetReader(id: node.id, outer: false))
             .padding(node.inset)
-            .background(KayaInsetReader(id: node.id, outer: true))
+            .modifier(KayaInsetReader(id: node.id, outer: true))
         case kindRadio:
             // The choice contract in its inline presentation. The dressed floor
             // per platform: macOS renders the REAL radio group (Picker's
@@ -26652,12 +26712,12 @@ struct KayaRender: View {
                         }
                         .clipped()
                 }
-                .background(KayaLabelFrameReader(id: node.id))
+                .modifier(KayaLabelFrameReader(id: node.id))
             } else if kayaImageBoxed(node) {
                 KayaImageBox(node: node)
-                    .background(KayaLabelFrameReader(id: node.id))
+                    .modifier(KayaLabelFrameReader(id: node.id))
                     .modifier(KayaImageShape(shape: node.shape))
-                    .background(KayaSkinFrameReader(id: node.id))
+                    .modifier(KayaSkinFrameReader(id: node.id))
             } else if let image = node.image {
                 let fit = kayaPhoneDockArt == nil
                     ? kayaImageFit(natural: image.size, node: node)
@@ -26678,14 +26738,14 @@ struct KayaRender: View {
                     #endif
                 }
                 .modifier(KayaImageShape(shape: node.shape))
-                .background(KayaLabelFrameReader(id: node.id))
-                .background(KayaSkinFrameReader(id: node.id))
+                .modifier(KayaLabelFrameReader(id: node.id))
+                .modifier(KayaSkinFrameReader(id: node.id))
                 .onAppear { kayaImageAppeared(node, "shown") }
                 .onDisappear { kayaImageGone(node, "shown") }
             } else if let natural = node.imagePendingNatural {
                 let room = kayaDockClamp(kayaImageFit(natural: natural, node: node) ?? natural, kayaPhoneDockArt)
                 Color.clear.frame(width: room.width, height: room.height)
-                    .background(KayaLabelFrameReader(id: node.id))
+                    .modifier(KayaLabelFrameReader(id: node.id))
                     .onAppear { kayaImageAppeared(node, "empty") }
                     .onDisappear { kayaImageGone(node, "empty") }
             } else {

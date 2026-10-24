@@ -76,7 +76,7 @@ READS = [
 ]
 CALLS = [
     (SWIFT, "the boxed image takes its box in every phase", "} else if kayaImageBoxed(node) {\n KayaImageBox(node: node)"),
-    (SWIFT, "the box's frame is the harness's drawn box", "KayaImageBox(node: node)\n .background(KayaLabelFrameReader(id: node.id))"),
+    (SWIFT, "the box's frame is the harness's drawn box", "KayaImageBox(node: node)\n .modifier(KayaLabelFrameReader(id: node.id))"),
     (SWIFT, "a box change re-requests the decode",
      "if kayaScene.nodes[id]!.kind == kindImage {\n kayaScene.nodes[id]!.fitDeclared = true\n kayaRequestPicture(kayaScene.nodes[id]!)"),
     (SWIFT, "the pump's content ids reach the apply", "kayaBlobIds = ids\n kayaApply(batch, blobs)"),

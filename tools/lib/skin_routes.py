@@ -145,7 +145,7 @@ NATIVE_TABLE = [
     ("the synthesized table row's ground", "private struct KayaTableRowGround: View {",
      [".onTapGesture { KayaHost.emitPress(row) }", "kayaSelectedPair().fill",
       ".accessibilityIdentifier(row.a11yId)", ".accessibilityAddTraits(row.selected ? [.isButton, .isSelected] : .isButton)",
-      ".background(KayaSkinFrameReader(id: row.id))"], ["Color(red:", "Color.gray"]),
+      ".modifier(KayaSkinFrameReader(id: row.id))"], ["Color(red:", "Color.gray"]),
     ("a synthesized row's cells", "private struct KayaTableRowPress: ViewModifier {",
      [".onTapGesture { KayaHost.emitPress(row) }", "kayaSelectedPair().fore",
       ".environment(\\.kayaInFill, row.selected && kayaSelectionTakesText)"], []),
@@ -236,12 +236,12 @@ CALLS = [
      "node.kind == kindGrid && !node.children.isEmpty\n&& node.children.allSatisfy { $0.filled != 0 || $0.activatable }"),
     (SWIFT, "the container arm takes a click", ".modifier(KayaActivatable(node: node))"),
     (SWIFT, "the boxed image and its looks take the shape",
-     "KayaImageBox(node: node)\n.background(KayaLabelFrameReader(id: node.id))\n.modifier(KayaImageShape(shape: node.shape))"),
+     "KayaImageBox(node: node)\n.modifier(KayaLabelFrameReader(id: node.id))\n.modifier(KayaImageShape(shape: node.shape))"),
     (SWIFT, "the label arm wears its tint", ".modifier(KayaLabelTint(tint: node.labelTint))"),
     (SWIFT, "the primary window carries its dock", ".modifier(KayaDockHost(windowId: 0))"),
     (SWIFT, "the phone dock's rhythm (M18)", "let kayaPhoneDockArt: CGFloat = 32\nlet kayaPhoneDockPadY: CGFloat = 8"),
     (SWIFT, "a container pads through the phone dock's rule (M18)",
-     ".background(KayaInsetReader(id: node.id, outer: false))\n.modifier(KayaInsetPadding(node: node))"),
+     "crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))\n.modifier(KayaInsetPadding(node: node))"),
     (SWIFT, "an activatable container takes the filled inset",
      "(node.filled != 0 || node.activatable && !kayaInDeclaredTable(node)) && !node.insetSet"),
     (SWIFT, "iOS's neutral selection keeps a tinted label's colour",
@@ -396,10 +396,55 @@ def behind_findings(swift):
     used = {m.group(1) for m in PLATFORM_BEHIND.finditer(swift) if m.group(1) in reps}
     out = [f"skin: {name}, a platform view, sits behind a node with accessibility and hit testing on, so "
            f"macOS's hit test at a point can answer it instead of the control above it; wrap it the way "
-           f"KayaSkinFrameReader wraps KayaSkinFrameAnchor, or name it in tools/lib/skin_routes.py's "
+           f"KayaSkinFrameHolder wraps KayaSkinFrameAnchor, or name it in tools/lib/skin_routes.py's "
            f"BEHIND_EXEMPT with a reason" for name in sorted(used - set(BEHIND_EXEMPT))]
     out += [f"skin: BEHIND_EXEMPT names {name}, which no longer sits behind a node"
             for name in sorted(set(BEHIND_EXEMPT) - used)]
+    return out
+
+
+# The per-node geometry readers read through onGeometryChange and never build a
+# GeometryReader (docs/traps.md, the mac app's interaction latency).
+READERS = ("KayaTrackReader", "KayaCellReader", "KayaInsetReader", "KayaBoxReader", "KayaLabelFrameReader",
+           "KayaSkinFrameReader")
+
+# Built only under the harness, so a shipped path that read their records would
+# read nothing in an app (docs/traps.md, the mac app's interaction latency).
+HARNESS_ONLY_READERS = ("KayaInsetReader", "KayaBoxReader", "KayaLabelFrameReader", "KayaSkinFrameReader")
+HARNESS_ONLY_RECORDS = ("kayaLabelFrames", "kayaLabelWindowFrames", "kayaInsetInner", "kayaInsetOuter",
+                        "kayaContainerExtents", "kayaContainerCross", "kayaContainerAxis",
+                        "kayaSkinAnchors", "kayaAnchoredFrame", "kayaSkinFrame", "kayaCrossRects", "kayaDrawnExtents",
+                        "kayaMainExtents", "kayaTrackSizes")
+SHIPPED_PATHS = ("func kayaTryScrollRow(", "func kayaDrainRowScrolls(", "func kayaCurrentTableTrackWidth(",
+                 "func kayaFrameMoved(", "func kayaPanEvaluate(", "func kayaKeyboardMoved(", "func makeBody(configuration",
+                 "struct KayaActivatable: ViewModifier {")
+
+
+def reader_findings(swift):
+    out = []
+    for name in READERS:
+        found = blocks(swift, f"struct {name}: ViewModifier {{")
+        if len(found) != 1:
+            out.append(f"skin: {name} is defined as a ViewModifier {len(found)} times in {SWIFT}, wanted once")
+            continue
+        if "GeometryReader" in found[0]:
+            out.append(f"skin: {name} builds a GeometryReader, a view and a body per node in every app; "
+                       f"read through .onGeometryChange")
+        if ".onGeometryChange(" not in found[0]:
+            out.append(f"skin: {name} reads no .onGeometryChange")
+        if re.search(r"\.background\(\s*%s\(" % name, swift):
+            out.append(f"skin: {name} is attached with .background, a view behind every node; attach it with .modifier")
+    for name in HARNESS_ONLY_READERS:
+        found = blocks(swift, f"struct {name}: ViewModifier {{")
+        if found and not re.search(r"func body\(content: Content\) -> some View \{\s*if !?kayaHarnessActive", found[0]):
+            out.append(f"skin: {name} is built in a shipped app; its records are the harness's, so it reads only "
+                       f"under kayaHarnessActive")
+    for opener in SHIPPED_PATHS:
+        for body in blocks(swift, opener):
+            for record in HARNESS_ONLY_RECORDS:
+                if re.search(r"\b%s\b" % record, body):
+                    out.append(f"skin: {opener.split('(')[0]} reads {record}, a record only the harness builds; "
+                               f"a shipped app never has it")
     return out
 
 
@@ -412,6 +457,7 @@ def findings(sources, backends=None):
             out.extend(mod.findings(sources[source_key(rel, mod)]))
     swift = sources[SWIFT]
     out.extend(behind_findings(swift))
+    out.extend(reader_findings(swift))
     out.extend(native_table_findings(swift))
     out.extend(visible_findings(sources))
     for label, opener, needs, never in DOORS:
@@ -472,6 +518,18 @@ def run(g):
     if None in values.values() or len(set(values.values())) != 1:
         g.finding(f"the hover floor differs or is missing: {values}")
     cuts = [
+        ("a reader back on a GeometryReader", SWIFT,
+         r"content\.onGeometryChange\(for: CGSize\.self\) \{ \$0\.size \} action: \{ record\(\$0\) \}",
+         "content.background(GeometryReader { geo in Color.clear.onChange(of: geo.size) { _, s in record(s) } })",
+         "KayaInsetReader builds a GeometryReader"),
+        ("a reader attached behind its node", SWIFT, r"\.modifier\(KayaLabelFrameReader\(id: node\.id\)\)",
+         ".background(KayaLabelFrameReader(id: node.id))", "KayaLabelFrameReader is attached with .background", 10),
+        ("a label reader built in a shipped app", SWIFT,
+         r"(struct KayaLabelFrameReader: ViewModifier \{[^}]*?func body\(content: Content\) -> some View \{\n\s+)if kayaHarnessActive \{",
+         r"\1if true {", "KayaLabelFrameReader is built in a shipped app"),
+        ("a shipped scroll reading a harness-only record", SWIFT,
+         r"(func kayaTryScrollRow\(_ node: KayaNode\) \{\n)", r"\1    _ = kayaLabelFrames[node.id]\n",
+         "kayaTryScrollRow reads kayaLabelFrames"),
         ("a picture-topped root left with its large title (M16 (27))", SWIFT,
          r"content\.navigationBarTitleDisplayMode\(\.inline\)\n(\s+)\} else \{\n(\s+)content\n(\s+)\}\n(\s+)#else",
          "content\n\\1} else {\n\\2content\n\\3}\n\\4#else", "the inline title is iOS's own"),
@@ -498,7 +556,7 @@ def run(g):
          "the overlay panel lacks Rectangle().fill(.regularMaterial)"),
         ("the circle clip cut", SWIFT, r"content\.clipShape\(Circle\(\)\)", "content", "the image's clip lacks content.clipShape(Circle())"),
         ("the looks left unshaped", SWIFT,
-         r"(KayaImageBox\(node: node\)\n\s+\.background\(KayaLabelFrameReader\(id: node\.id\)\))\n(\s+)\.modifier\(KayaImageShape\(shape: node\.shape\)\)",
+         r"(KayaImageBox\(node: node\)\n\s+\.modifier\(KayaLabelFrameReader\(id: node\.id\)\))\n(\s+)\.modifier\(KayaImageShape\(shape: node\.shape\)\)",
          r"\1", "the boxed image and its looks take the shape"),
         ("a tinted label over its fill", SWIFT, r"if !inFill, let colour = kayaStandalone\(tint\) \{",
          "if let colour = kayaStandalone(tint) {", "a label's tint lacks"),
@@ -590,7 +648,7 @@ def run(g):
          r"KayaSkinFrameAnchor\(id: id\)\.accessibilityHidden\(true\)\.allowsHitTesting\(false\)",
          "KayaSkinFrameAnchor(id: id)", "hidden from accessibility and hit testing"),
         ("a bare platform anchor behind a container", SWIFT,
-         r"(\.modifier\(KayaActivatable\(node: node\)\)\n\s+)\.background\(KayaSkinFrameReader\(id: node\.id\)\)",
+         r"(\.modifier\(KayaActivatable\(node: node\)\)\n\s+)\.modifier\(KayaSkinFrameReader\(id: node\.id, insetOuter: true\)\)",
          r"\1.background(KayaSkinFrameAnchor(id: node.id))", "KayaSkinFrameAnchor, a platform view, sits behind a node"),
         ("an exemption that no longer sits behind a node", SWIFT,
          r"\.background\(KayaWindowAccessor\(windowId: (\w+)\)\)", r".onAppear { _ = \1 }",

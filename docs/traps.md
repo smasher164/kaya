@@ -18863,5 +18863,36 @@ needed: a Swift string literal of 15 bytes or fewer is an immediate small
 string that no byte scan finds, so the interpreter's marker is longer; and a
 `#[no_mangle]` static is dropped from an executable that links the core
 unless it is `#[used]` (KAYA_BUILD_ID_MARKER is absent from every Rust
-example binary for that reason). The readers and the highlight are open
-design questions (docs/deferred.md, the mac interaction latency).
+example binary for that reason). The highlight is an open item
+(docs/deferred.md, the mac interaction latency).
+
+The readers, ruled 2(b) then 2(a) (measured 2026-10-24, the same probe,
+-Onone interpreter and debug core, configurations interleaved, medians of 18
+clicks and 9 hides; Search / Home press to frame, hide hitches):
+
+- before: 204 / 171 ms, 10 hitches (60 ms); readers compiled out: 93 to 118 /
+  75 to 81 ms, none.
+- onGeometryChange in place of GeometryReader plus onChange, the readers
+  attached as modifiers rather than views behind the node, the skin's
+  platform anchor only inside a native table cell: 171 / 126 ms, 1 hitch
+  (9 ms). That last part did not hold: with the skin's frames recorded from
+  onGeometryChange's `.global` outside table cells, music_artist-python read
+  column@artist_panel as "filled success" (wanted overlay) and
+  label@artist_about as truncated, reproducibly, and green again with the
+  anchor back; the anchor is now built only under the harness, everywhere. The global-frame part of it costs nothing measurable (dropping
+  every global frame moved neither number); each reader class is 15 to 35
+  ms of a click, and folding the box and inner-inset readers and the
+  outer-inset and skin readers into one each changed nothing (168 / 120).
+- and the readers only the harness reads built only under the harness
+  (kayaHarnessActive): 106 / 56 ms, no hitch, in the shipped configuration
+  (readers compiled out, the same run: 113 / 78). With the -O interpreter
+  and the release core: 102 / 72 ms against 192 / 152 before and 102 / 78
+  compiled out; the hide 0 hitches against 3.
+  A shipped app keeps a table's track reader (the table tier's width), the
+  cell readers of a container with a scroll_to_row pending (its drain), and
+  on iOS every track and cell reader, whose moves re-aim the keyboard pan.
+
+A synthesized mouse-down through `window.sendEvent` DOES reach a SwiftUI
+Button with a custom ButtonStyle (`isPressed` true, the action on the
+mouse-up), where it never reaches onTapGesture (a standalone probe app,
+2026-10-24).

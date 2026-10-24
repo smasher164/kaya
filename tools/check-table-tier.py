@@ -306,9 +306,9 @@ def check(source_text, path=SWIFTUI):
                        f"a layout-only change.")
 
     track_reader = braced(text,
-                          r"private struct KayaTrackReader\s*:\s*View\b")
+                          r"private struct KayaTrackReader\s*:\s*ViewModifier\b")
     if track_reader is None:
-        bad.append(f"{path}: no `private struct KayaTrackReader: View` "
+        bad.append(f"{path}: no `private struct KayaTrackReader: ViewModifier` "
                    f"— the tagged table track and its same-size "
                    f"republish task moved outside this gate's view.")
     else:
@@ -1048,7 +1048,7 @@ static_negative(
     "unkeyed-table-track-task", r"\.task\(id: tableGeneration\)",
     ".task(id: 0)", "the table-track republish task keyed to a "
                     "constant",
-    "struct KayaTrackReader > var body",
+    "struct KayaTrackReader > func body",
     "must tag table tracks and republish",
     "a same-size invalidation unable to refresh its track")
 

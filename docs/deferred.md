@@ -61,7 +61,7 @@ eight bindings until the breadth writes them, so they join with the breadth
 rather than sitting red beside it. The generated wire files already carry the
 props, enums, records and the occurrence. Trigger: the breadth slice.
 
-## RULING — the mac app's interaction latency: a click's highlight waits for the next screen, and the per-node readers cost half of it (measured 2026-10-24)
+## BUILD — the mac app's interaction latency: a click's highlight waits for the next screen, and the per-node readers cost half of it (measured 2026-10-24)
 KEY: interaction latency, sluggish, highlight, pressed state, KayaSkinFrameReader, KayaTrackReader, KayaCellReader, KayaInsetReader, KayaBoxReader, KayaLabelFrameReader, kayaHarnessActive, onGeometryChange, toggleSidebar, hitch
 
 The maintainer, using Aurora Music by hand: a click on Home or Search takes a
@@ -100,7 +100,14 @@ ships now and moves little; what is left is two design questions.
    Sweep: SwiftUI on macOS measured, iOS runs the same readers; Compose has
    per-node onGloballyPositioned readers (a cheaper modifier, unmeasured);
    GTK has none per node; WinUI hooks LayoutUpdated and SizeChanged in
-   winui/mod.rs, unmeasured. Trigger: the maintainer's ruling.
+   winui/mod.rs, unmeasured. RULED 2026-10-24 (the maintainer: "im okay with
+   your recommendations"): 1(a), and 2(b) with 2(a) as well if 2(b) does not
+   come close to the readers-off numbers. 2 BUILT 2026-10-24: 2(b) alone
+   closed the hide but under half of a click, so 2(a) too (docs/traps.md, the
+   mac app's interaction latency); iOS takes the same readers. Compose's
+   onGloballyPositioned readers and WinUI's LayoutUpdated hooks (twelve, on
+   images, grids, scrolls and flowing rows; no per-node reader) are not yet
+   measured. 1(a) is open.
 
 ## DEFER — the iPhone Duo: kaya's adaptive layouts on a phone that folds open (the maintainer, 2026-10-23)
 KEY: iPhone Duo, foldable, hinge, reserved region, ReservedRegion, reservedRegions, vertical bar, toolbarVerticalEdge, ArrangementView, UIArrangementViewController, fold, unfold, inner display, outer display, Device Hub, Xcode 27.1

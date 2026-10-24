@@ -120,10 +120,10 @@ NATIVE = [
     # drops it; its records outlived it and expect_safe read a label 30 pt
     # past the window (docs/traps.md, the dropped copy's frames).
     (SWIFT, "SwiftUI's track reader retires a dropped copy's record",
-     ".task(id: tableGeneration) { record(geo.size, geo.frame(in: .global)) }\n"
+     ".task(id: tableGeneration) { if let g = last.seen { record(g.size, g.frame) } }\n"
      " .onDisappear { kayaTrackRecords.retire(id, token) }"),
     (SWIFT, "SwiftUI's cell reader retires a dropped copy's record",
-     ".onChange(of: global.origin) { _, _ in record(frame, geo.frame(in: .global)) }\n"
+     "record(f.local, f.global)\n }\n"
      " .onDisappear { kayaCellRecords.retire(id, token) }"),
     (SWIFT, "SwiftUI's retired record hands the node back to its newest survivor",
      "if newest, let survivor = list.last { survivor.apply() }"),
