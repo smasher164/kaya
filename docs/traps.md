@@ -18971,3 +18971,16 @@ there is the host, not the change. Read it with
 `log show --predicate 'process == "thermalmonitord" AND eventMessage BEGINSWITH "mTPL"'`
 for its history. Guard: tools/lib/lane_health.py's pressure_sentence, its
 five drive cases in check-flightrec.
+
+Resting the host first does not help while it stays covered. The third
+matrix (bc2d3124) started after 20 minutes of nominal readings and went to 2
+three minutes in, at load 45; load then peaked at 875. Mac, linux (its
+container killed at the 1800 s timeout), iOS and Android went red on timing
+alone (iOS and Android at their walls), with Windows and the sweep green. After it,
+coreaudiod ran at about 154% of a core on an idle host. `pmset -g
+assertions` listed 27 `iOSSimulatorAudioDevice-<pid>` contexts, each with
+audio-out on the built-in speaker, every pid dead and the contexts 14 to 41
+minutes old: the iOS lane's media legs, whose simulated apps died with their
+audio device context still open. None from the earlier matrices were left,
+so they do drain, but while they last they add heat. The lane-health line's
+"busiest now" already names coreaudiod.
