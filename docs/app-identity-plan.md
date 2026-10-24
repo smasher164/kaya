@@ -233,6 +233,20 @@ puts guards, which is on a path nobody can avoid: the packaging step
 itself refuses, and the gate in `tools/gates.py` is the backstop for
 platforms whose packaging step does not exist yet.
 
+### One file per app (AMENDED 2026-10-23)
+
+The maintainer gave the music app its own identity (docs/media-player-plan.md
+M22 (6)). The declaration is still a file and still read by both readers;
+there is one file per app. `guests/assets/identity.toml` is the default, and
+an app with its own identity has its own file under the asset root
+(`guests/assets/identities/music.toml`). A process takes the file the
+`KAYA_IDENTITY` environment variable names (an asset name; unset, the
+default), which is the typeface's pattern above: a default every guest knows
+and a `KAYA_*` override for a runner. tools/lib/packaging/identity.py's
+`APPS` names each app's file and `HOSTS` the phone host that carries it, and
+the builds and runners read them; tools/check-app-identity.py's C17 holds
+each app's routes to its own file.
+
 ### Which reader exists today, and which is later
 
 "Today" means the lanes already run this step, so wiring identity into

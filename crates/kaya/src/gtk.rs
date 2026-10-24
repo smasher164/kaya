@@ -18713,42 +18713,17 @@ fn scheduled_command(app: &str, id: u64) -> Vec<String> {
 
 /// The app's reverse-DNS id, out of the ONE declaration (N4): the
 /// GApplication id AND what the desktop remembers a notification under.
-/// Spelled in no guest and in no backend source — read from the asset root
-/// the core resolves, whose census lists `identity.toml`.
 pub(crate) fn app_identity_id() -> Option<String> {
-    static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
-    ID.get_or_init(|| {
-        let bytes = match crate::assets::read("identity.toml") {
-            Ok(bytes) => bytes,
-            Err(why) => {
-                kaya_diag!("KAYA_DIAG app identity: {why}");
-                return None;
-            }
-        };
-        let text = String::from_utf8_lossy(&bytes).into_owned();
-        for line in text.lines() {
-            let line = line.trim();
-            // TOML puts every top-level key ABOVE the first table, so the
-            // first `[section]` ends the search — `[launch]`'s own keys are
-            // not the app's id.
-            if line.starts_with('[') {
-                break;
-            }
-            let Some(rest) = line.strip_prefix("id") else { continue };
-            let Some(rest) = rest.trim_start().strip_prefix('=') else { continue };
-            let value = rest.trim().trim_matches('"');
-            if !value.is_empty() {
-                return Some(value.to_owned());
-            }
-        }
+    let id = crate::scene::declared_id();
+    if id.is_none() {
         kaya_diag!(
-            "KAYA_DIAG app identity: the manifest declares no top-level `id`, so this \
+            "KAYA_DIAG app identity: {} declares no top-level `id`, or cannot be read, so this \
              process has no name for the desktop to remember a notification under and \
-             none to register as its application id"
+             none to register as its application id",
+            crate::scene::identity_manifest()
         );
-        None
-    })
-    .clone()
+    }
+    id
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

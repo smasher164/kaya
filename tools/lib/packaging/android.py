@@ -63,7 +63,7 @@ LINK_DEFAULT_KEY = "id"
 LINK_SCHEME_PATTERN = "^" + identity.LINK_SCHEME.pattern + "$"
 
 
-def link_scheme(root):
+def link_scheme(root, manifest=None):
     """The URL scheme this APK's VIEW filter claims.
 
     ONE ANSWER for both sides again: android/build.gradle.kts computes
@@ -77,7 +77,7 @@ def link_scheme(root):
     # THROUGH THE SHARED READER, never a second parse of the manifest
     # (tools/check-app-identity.py C9): the override, the default and the
     # refusals are all identity.py's, resolved before this sees them.
-    return load(root).scheme
+    return (load(root, manifest) if manifest else load(root)).scheme
 
 
 def apk_entries(root):

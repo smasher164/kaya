@@ -1548,6 +1548,7 @@ with app.window(title="Music", width=1100, height=720,
                 panes=2 if desktop else None, inset=0,
                 sections_presentation=None if desktop else kaya.SectionsPresentation.BAR,
                 on_undone=on_undone, on_redone=on_redone):
+    kaya.app_identity()
     notice = kaya.signal("Browsing the bundled sampler.")
     library_hint = kaya.signal(library_caption())
     library = kaya.collection(Saved)

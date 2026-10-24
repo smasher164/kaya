@@ -1,0 +1,11 @@
+# The music app's identity (docs/media-player-plan.md M22 (6)): the shape and
+# the readers are guests/assets/identity.toml's; a process takes this file
+# when KAYA_IDENTITY names it (docs/app-identity-plan.md, one file per app).
+
+name = "Aurora Music"
+icon = "guests/assets/icons/kaya-mark.png"
+id = "dev.kaya.aurora.music"
+default_locale = "en"
+
+[launch]
+background = "#1C1C1E"

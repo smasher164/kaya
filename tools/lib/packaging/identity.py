@@ -21,6 +21,29 @@ import tomllib
 
 MANIFEST = "guests/assets/identity.toml"
 ASSET_ROOT = "guests/assets/"
+# ONE FILE PER APP (docs/media-player-plan.md M22 (6)): an app with an
+# identity of its own, by its guest's stem, and the file declaring it. Every
+# other guest is MANIFEST's. A process takes the file IDENTITY_VAR names
+# (crates/kaya/src/scene.rs `identity_manifest`), so a runner sets it from
+# here and a build reads the same file.
+APPS = {"music": "guests/assets/identities/music.toml"}
+IDENTITY_VAR = "KAYA_IDENTITY"
+# The phones' host packages that carry an app's own identity, and whose: the
+# python host is the music app's on both phone lanes (android/build.gradle.kts
+# kayaAppIdentities, tools/ios/run-sim.py's pyhost; check-app-identity C17).
+HOSTS = {"pyhost": "music"}
+
+
+def manifest_for(stem):
+    """The declaration a guest's app reads, repo-relative."""
+    return APPS.get(stem, MANIFEST)
+
+
+def env_for(stem):
+    """The runner's environment for a guest whose app has its own file:
+    the asset name the core resolves, or nothing for the default."""
+    rel = APPS.get(stem)
+    return {IDENTITY_VAR: rel[len(ASSET_ROOT):]} if rel else {}
 # Two or more dot-separated lowercase labels. Apple refuses a bundle
 # identifier outside that shape and GNOME attributes a notification to
 # nothing it does not recognise, so a flat id fails on two platforms and
@@ -81,11 +104,11 @@ class Identity:
                 f"scheme={self.scheme!r}, hosts={self.hosts!r})")
 
 
-def load(root):
+def load(root, manifest=MANIFEST):
     """The declaration in `root`'s tree, or Undeclared naming the file."""
     root = pathlib.Path(root)
-    path = root / MANIFEST
-    rel = MANIFEST
+    path = root / manifest
+    rel = manifest
     if not path.is_file():
         raise Undeclared(
             f"kaya: {rel} is missing — the app's identity is declared "

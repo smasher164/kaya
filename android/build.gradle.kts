@@ -27,8 +27,8 @@ data class KayaIdentity(
     val manifest: File,
 )
 
-fun kayaReadIdentity(repoRoot: File): KayaIdentity {
-    val manifest = File(repoRoot, "guests/assets/identity.toml")
+fun kayaReadIdentity(repoRoot: File, declared: String = "guests/assets/identity.toml"): KayaIdentity {
+    val manifest = File(repoRoot, declared)
     if (!manifest.isFile) {
         throw GradleException(
             "kaya: the app identity is declared in ${manifest.path} and that file is " +
@@ -145,6 +145,16 @@ fun kayaReadIdentity(repoRoot: File): KayaIdentity {
 val kayaIdentity = kayaReadIdentity(rootDir.parentFile)
 
 /**
+ * ONE FILE PER APP (docs/media-player-plan.md M22 (6)): a host module whose
+ * app declares its own identity, and that file. The python host is the music
+ * app's on this lane; tools/check-app-identity.py holds this table to
+ * tools/lib/packaging/identity.py's APPS.
+ */
+val kayaAppIdentities = mapOf(
+    "pyhost" to kayaReadIdentity(rootDir.parentFile, "guests/assets/identities/music.toml"),
+)
+
+/**
  * The asset root the APK carries, and the subdirectory of `assets/` it
  * carries it in (docs/assets-plan.md; docs/deferred.md on the `kaya/`
  * prefix). The prefix string is also in KayaAssets.kt's `ROOT` and in
@@ -234,12 +244,13 @@ subprojects {
         extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
             sourceSets.getByName("debug").manifest.srcFile(linksOverlay)
             sourceSets.getByName("release").manifest.srcFile(linksOverlay)
+            val identity = kayaAppIdentities[project.name] ?: kayaIdentity
             defaultConfig {
-                manifestPlaceholders["kayaAppLabel"] = kayaIdentity.name
+                manifestPlaceholders["kayaAppLabel"] = identity.name
                 // The app-link scheme every host manifest's VIEW filter
                 // claims (docs/app-links-plan.md §4; tools/check-jni.py's
                 // manifest census holds the four manifests to it).
-                manifestPlaceholders["kayaLinkScheme"] = kayaIdentity.linkScheme
+                manifestPlaceholders["kayaLinkScheme"] = identity.linkScheme
             }
             sourceSets.getByName("main").res.srcDir(generatedRes)
             sourceSets.getByName("main").assets.srcDir(generatedAssets)

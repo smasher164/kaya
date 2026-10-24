@@ -373,9 +373,13 @@ def make_bundle(name, bundle_id, executable_path, identity="", session=False,
     # The icon file name carries its extension in the bundle and NOT in
     # CFBundleIconFiles: iOS matches the entry by BASE NAME, which lets
     # one entry stand for the @2x/@3x family.
+    # `identity` is a guest's own declaration (packaging/identity.py APPS)
+    # when it names one, else the default's.
+    shown_name = (app_identity.load(ROOT, identity).name if identity.endswith(".toml")
+                  else IDENTITY_NAME)
     block = "" if not icon_base else (
         "<key>CFBundleDisplayName</key>\n"
-        f"    <string>{IDENTITY_NAME}</string>\n"
+        f"    <string>{shown_name}</string>\n"
         "    <key>CFBundleIcons</key>\n"
         "    <dict>\n"
         "        <key>CFBundlePrimaryIcon</key>\n"
@@ -2102,6 +2106,8 @@ def run_swiftui_on(udid, slot, app, bundle_id, name, selftest, scene,
     # The simulator shares the host's loopback (docs/media-plan.md §7a).
     if media_server.serves(scene):
         env["SIMCTL_CHILD_KAYA_MEDIA_URL"] = MEDIA_URL
+    for key, value in app_identity.env_for(lane.PYTHON_GUEST.get(selftest, selftest)).items():
+        env[f"SIMCTL_CHILD_{key}"] = value
     # THE VERB TRACE AND THE PANIC LOG, both RELATIVE names: the
     # interpreter resolves one under its Documents and the core the
     # other under $HOME/Documents — the same container directory —
@@ -3673,6 +3679,7 @@ if SUITE in ("python", "all"):
     run(["chmod", "-R", "u+w", str(pyhome)])
     app = with_dylib(make_bundle("pyhost", "dev.kaya.pyhost",
                                  BUNDLES / "pyhost-bin",
+                                 identity=app_identity.manifest_for(app_identity.HOSTS["pyhost"]),
                                  session=any(s in lane.SESSION_SCENES for s in lane.PYTHON_SCENES)))
     (app / "Frameworks").mkdir(exist_ok=True)
     (app / "app").mkdir(exist_ok=True)

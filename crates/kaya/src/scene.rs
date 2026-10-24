@@ -107,6 +107,20 @@ pub(crate) const CAPABILITIES: u64 = if cfg!(any(target_os = "ios", target_os = 
 /// registered as, and no guest spells any of the three.
 const IDENTITY_MANIFEST: &str = "identity.toml";
 
+/// The environment variable naming another app's declaration under the asset
+/// root (docs/app-identity-plan.md, one file per app; ruling 4's runner
+/// override): unset, the root's own identity.toml.
+pub(crate) const IDENTITY_VAR: &str = "KAYA_IDENTITY";
+
+/// The asset name of THIS process's declaration, read once.
+pub(crate) fn identity_manifest() -> String {
+    static NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAME.get_or_init(|| {
+        std::env::var(IDENTITY_VAR).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| IDENTITY_MANIFEST.to_owned())
+    })
+    .clone()
+}
+
 /// The asset root's own directory COMPONENT, not its path: the
 /// manifest's `icon` is repo-relative because the build reads it as a
 /// path before any program has started, and the asset name is what
@@ -165,10 +179,11 @@ fn asset_name_of(declared: &str) -> Option<&str> {
 /// (docs/tasks-s3-plan.md N4). `Err` carries the whole sentence, which
 /// names the file: the caller does not compose prose.
 pub(crate) fn declared_identity() -> Result<Declaration, String> {
-    let bytes = crate::assets::read(IDENTITY_MANIFEST)?;
+    let manifest = identity_manifest();
+    let bytes = crate::assets::read(&manifest)?;
     let text = String::from_utf8(bytes).map_err(|_| {
         format!(
-            "kaya: the asset \"{IDENTITY_MANIFEST}\" is not UTF-8, so the app's \
+            "kaya: the asset \"{manifest}\" is not UTF-8, so the app's \
              declaration cannot be read — it is `name`, `icon` and `id`, one \
              `key = \"value\"` line each (docs/app-identity-plan.md ruling 4)"
         )
@@ -176,7 +191,7 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
     let want = |key: &str| {
         manifest_value(&text, key).filter(|v| !v.is_empty()).ok_or_else(|| {
             format!(
-                "kaya: the asset \"{IDENTITY_MANIFEST}\" declares no `{key}` — an \
+                "kaya: the asset \"{manifest}\" declares no `{key}` — an \
                  app's identity is `name`, `icon` and `id` together, declared once \
                  in that file and spelled in no guest, and app_identity() has \
                  nothing to send without all three (docs/tasks-s3-plan.md N4)"
@@ -188,7 +203,7 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
     let id = want("id")?;
     let icon_name = asset_name_of(&icon_path).ok_or_else(|| {
         format!(
-            "kaya: the asset \"{IDENTITY_MANIFEST}\" declares icon \"{icon_path}\", \
+            "kaya: the asset \"{manifest}\" declares icon \"{icon_path}\", \
              which is not under an asset root — the build reads that path and this \
              reads the same picture as an asset, so a mark outside the root has no \
              asset name to open"
@@ -201,7 +216,7 @@ pub(crate) fn declared_identity() -> Result<Declaration, String> {
 /// The catalog's default locale (docs/compliance-plan.md §2.4): the
 /// manifest's `default_locale`, `en` when it declares none.
 pub(crate) fn declared_default_locale() -> String {
-    crate::assets::read(IDENTITY_MANIFEST)
+    crate::assets::read(&identity_manifest())
         .ok()
         .and_then(|bytes| String::from_utf8(bytes).ok())
         .and_then(|text| manifest_value(&text, "default_locale"))
@@ -249,7 +264,7 @@ pub(crate) fn declared_links() -> (Option<String>, Vec<String>) {
     static LINKS: std::sync::OnceLock<(Option<String>, Vec<String>)> = std::sync::OnceLock::new();
     LINKS
         .get_or_init(|| {
-            let Ok(bytes) = crate::assets::read(IDENTITY_MANIFEST) else {
+            let Ok(bytes) = crate::assets::read(&identity_manifest()) else {
                 return (None, Vec::new());
             };
             let Ok(text) = String::from_utf8(bytes) else { return (None, Vec::new()) };
@@ -278,7 +293,7 @@ pub(crate) fn declared_links() -> (Option<String>, Vec<String>) {
 pub(crate) fn declared_id() -> Option<String> {
     static ID: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     ID.get_or_init(|| {
-        let bytes = crate::assets::read(IDENTITY_MANIFEST).ok()?;
+        let bytes = crate::assets::read(&identity_manifest()).ok()?;
         let text = String::from_utf8(bytes).ok()?;
         manifest_value(&text, "id").filter(|v| !v.is_empty())
     })
@@ -4594,10 +4609,11 @@ impl Scene {
                         sent.name.is_empty() && sent.icon.is_none(),
                         "kaya: set_app_identity carries values ({:?}, icon {}) — the \
                          name and the mark come from the asset root's own \
-                         {IDENTITY_MANIFEST}, so the declaration takes no arguments \
+                         {}, so the declaration takes no arguments \
                          and its slots ride empty (docs/tasks-s3-plan.md N4)",
                         sent.name,
-                        if sent.icon.is_some() { "present" } else { "absent" }
+                        if sent.icon.is_some() { "present" } else { "absent" },
+                        identity_manifest()
                     );
                     // A NAME IS HALF THE DECLARATION AND THE MARK IS THE
                     // OTHER, so the reader refuses a manifest missing

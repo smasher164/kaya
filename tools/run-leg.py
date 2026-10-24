@@ -115,6 +115,9 @@ if lang == "rust":
     # inode and the bundled scenes' .app wrapper both live there.
     lane.stage_rust(ROOT, [stem])
 
+if lang == "python":
+    lane.stage_python(ROOT, [lane.guest_stem(scene)])
+
 argv = lane.leg_argv(scene, lang, lambda name: lane.hs_bin(ROOT, name))
 for _line in lane.scene_cut_lines(ROOT, scene)[1]:
     if _line.strip():

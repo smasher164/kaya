@@ -117,13 +117,6 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
 # (docs/reveal-plan.md V10).
 CUTS = {"reveal": {"cut": "press tab", "keep": "expect_unmasked expect_masked"}}
 
-# THE STEPS THIS LANE DROPS, in tools/lib/scene_cut.py's drop grammar (the Linux
-# lane's MODS): the music legs run as a bare python3 process, which MediaRemote
-# names "python3.14", until the music app runs as its own bundle
-# (docs/media-player-plan.md M22 (3), (6)).
-DROPS = {"music_dock": ((('expect_now_playing_app "Aurora Notes"',), "expect_now_playing expect_now_playing_art",
-                         "the lane's music app is a bare python3 process, which carries no display name"),)}
-
 # The scenes this lane DECLARES OFF, each with its reason, read by
 # tools/check-steps.py beside the phones' declarations: macOS has no text
 # size, so a knob that scales one is refused there (docs/compliance-plan.md
@@ -1036,6 +1029,40 @@ BUNDLED_GO_SCENES = {"chat"}
 GO_GUESTS = "target/go-guests"
 
 
+# THE PYTHON APPS THAT DECLARE AN IDENTITY OF THEIR OWN run as their bundle
+# (docs/media-player-plan.md M22 (6)): the system's Now Playing names a
+# process by its bundle's display name, and a bare python3 by "python3.14"
+# (measured, M22 (3)). The bundle's executable is a copy of the interpreter,
+# so the process's executable is inside it.
+PY_GUESTS = "target/py-guests"
+
+
+def py_bundled(stem):
+    from packaging import identity as app_identity
+    return stem in app_identity.APPS
+
+
+def stage_python(root, stems):
+    """Each bundled python app's .app, through the generator's mac arm with
+    the app's own declaration; a fresh python3 copy every time."""
+    from packaging import identity as app_identity
+    from packaging import mac as packaging_mac
+    # THE INTERPRETER ITSELF, not the dev shell's python3, which is nix's C
+    # wrapper that execs it: a copied wrapper would run the process from the
+    # store again, outside the bundle.
+    asked = subprocess.run(["python3", "-c", "import sys, sysconfig; print(sysconfig.get_config_var('BINDIR') "
+                            "+ '/python%d.%d' % sys.version_info[:2])"], capture_output=True, text=True)
+    python = asked.stdout.strip()
+    if asked.returncode != 0 or not pathlib.Path(python).is_file():
+        raise SystemExit(f"mac lane: python3 named no interpreter to wrap in the music app's bundle: {asked.stderr.strip()}")
+    staging = root / PY_GUESTS
+    staging.mkdir(parents=True, exist_ok=True)
+    for stem in stems:
+        if py_bundled(stem):
+            packaging_mac.bundle(root, pathlib.Path(python), staging, stem=stem,
+                                 accessory=True, manifest=app_identity.manifest_for(stem))
+
+
 def rust_guest_path(stem):
     """Where a staged rust guest's executable is: inside its .app for a
     bundled scene, bare otherwise."""
@@ -1330,6 +1357,8 @@ def leg_argv(scene, lang, hs_bin):
     if lang == "rust":
         return [rust_guest_path(stem)]
     if lang == "python":
+        if py_bundled(stem):
+            return [f"{PY_GUESTS}/{stem}.app/Contents/MacOS/{stem}", f"guests/python/{stem}.py"]
         return ["python3", f"guests/python/{stem}.py"]
     if lang == "js":
         return ["node", f"guests/js/{stem}.ts"]
@@ -1367,12 +1396,8 @@ def scene_cut_lines(root, scene):
     if scene in CUTS:
         cut = CUTS[scene]
         return scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="mac")
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines()
-             if not line.startswith("#")]
-    if scene in DROPS:
-        kept, taken = scene_cut.drop_blocks([" ".join(line.split()) for line in lines], DROPS[scene])
-        return kept, [line for _, gone in taken for line in gone]
-    return lines, []
+    return [line for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("#")], []
 
 
 MEDIA_URL = f"http://{media_server.HOST}:{media_server.PORT}"
@@ -1394,6 +1419,8 @@ def leg_env(root, scene, lang, appearance=""):
         env["KAYA_LOCALE"] = SCENE_LOCALE[scene]
     if scene in SCENE_CLOCK:
         env["KAYA_CLOCK"] = SCENE_CLOCK[scene]
+    from packaging import identity as app_identity
+    env.update(app_identity.env_for(guest_stem(scene)))
     if media_server.serves(scene):
         env["KAYA_MEDIA_URL"] = MEDIA_URL
         helper = media_server.mediaremote_lib(root)

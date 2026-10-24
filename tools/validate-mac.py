@@ -189,6 +189,7 @@ RUST_GUESTS.mkdir(parents=True)
 # bundled scenes get their .app wrapper here, AFTER the interpreter is
 # built: a bundle carries a verified copy (tools/lib/packaging/mac.py).
 lane.stage_rust(ROOT, [*lane.SCENES, *lane.DEPTH_SCENES])
+lane.stage_python(ROOT, sorted({lane.guest_stem(s) for s in [*lane.SCENES, *lane.DEPTH_SCENES]}))
 _staged = sum(1 for _ in RUST_GUESTS.iterdir()) + 1
 # The measurement above is ~10us an entry, so the cap guards against the
 # build directory, not against a scene more: 128 entries cost ~1ms.

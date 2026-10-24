@@ -529,7 +529,7 @@ def link_census(hosts, gradle):
         errs.append(f"{len(hosts)} host module(s) read, under the floor of "
                     f"{HOST_FLOOR} — a census that reads nothing agrees with "
                     f"everything")
-    if 'manifestPlaceholders["kayaLinkScheme"] = kayaIdentity.linkScheme' \
+    if 'manifestPlaceholders["kayaLinkScheme"] = identity.linkScheme' \
             not in gradle:
         errs.append("android/build.gradle.kts sets no kayaLinkScheme "
                     "placeholder from the declared identity, so the scheme "
@@ -657,7 +657,7 @@ for _label, _hosts_d, _gradle_d, _needle in (
               1), _gradle, "maps the KAYA_* extras itself"),
     ("the gradle placeholder gone", _hosts,
      _gradle.replace('manifestPlaceholders["kayaLinkScheme"] = '
-                     'kayaIdentity.linkScheme', ""), "no kayaLinkScheme"),
+                     'identity.linkScheme', ""), "no kayaLinkScheme"),
     ("a census that read one host", dict(list(_hosts.items())[:1]), _gradle,
      "under the floor"),
 ):

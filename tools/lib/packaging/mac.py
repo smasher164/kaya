@@ -140,7 +140,7 @@ def write_entitlements(declared, app):
 
 
 def bundle(root, executable, out_dir, *, stem=None, accessory=False,
-           register=True):
+           register=True, manifest=None):
     """Wrap `executable` in a .app under `out_dir` and return its path.
 
     A FRESH INODE EVERY TIME, or the kernel kills the guest at exec
@@ -151,7 +151,7 @@ def bundle(root, executable, out_dir, *, stem=None, accessory=False,
     allowed for this application" (measured 2026-09-08,
     tools/mac/notifyprobe).
     """
-    declared = load(root)
+    declared = load(root, manifest) if manifest else load(root)
     name = stem or pathlib.Path(executable).name
     app = pathlib.Path(out_dir) / f"{name}.app"
     shutil.rmtree(app, ignore_errors=True)

@@ -91,6 +91,7 @@ dev_shell_or_die()
 # The self-test runs the real checker over a shadow root of symlinks
 # (CLAUDE.md invariant 3: the wayland seat guard passed vacuously twice).
 
+import ast
 import importlib.util
 import os
 import re
@@ -643,6 +644,72 @@ def check(root):
                        f"the name half of the declaration would ship "
                        f"unobserved on every platform")
 
+    # ------------------------------------------------------------ C17
+    # ONE FILE PER APP (docs/media-player-plan.md M22 (6)): an app with an
+    # identity of its own declares it once, in the file
+    # tools/lib/packaging/identity.py's APPS names, and every route that
+    # starts that app names THAT file — the runners through KAYA_IDENTITY
+    # (the .cmd launchers and run-suites.sh literally, the rest through
+    # env_for), the APK build through its own table — and a scene reads its
+    # name back. Read out of the tree being checked, so a shadow can move it.
+    reader = (root / f"{PACKAGING_DIR}/identity.py").read_text(encoding="utf-8")
+    table = re.search(r"(?m)^APPS = (\{[^\n]*\})$", reader)
+    apps = ast.literal_eval(table.group(1)) if table else None
+    host_table = re.search(r"(?m)^HOSTS = (\{[^\n]*\})$", reader)
+    hosts = ast.literal_eval(host_table.group(1)) if host_table else {}
+    if not apps:
+        bad.append(f"{PACKAGING_DIR}/identity.py: no one-line `APPS = {{...}}` table — "
+                   f"C17 reads which apps declare their own identity there")
+        apps = {}
+    scene_text = "\n".join(p.read_text(encoding="utf-8") for p in sorted(scene_dir.glob("*.steps")))
+    suites = (root / "tools/linux/run-suites.sh").read_text(encoding="utf-8")
+    gradle = (root / "android/build.gradle.kts").read_text(encoding="utf-8")
+    for stem, rel in sorted(apps.items()):
+        asset = rel[len(ASSET_ROOT):] if rel.startswith(ASSET_ROOT) else None
+        try:
+            own = app_identity.load(root, rel)
+        except SystemExit as exc:
+            bad.append(f"{rel}: the {stem} app's declaration does not load: {exc}")
+            continue
+        if asset is None:
+            bad.append(f"{rel}: the {stem} app's declaration is not under {ASSET_ROOT}, so no "
+                       f"process can name it as an asset")
+            continue
+        for what, value, default in (("name", own.name, name), ("id", own.id, app_id)):
+            if value == default:
+                bad.append(f"{rel}: declares the default's {what} \"{value}\" — an app with a "
+                           f"file of its own is a different app to every platform")
+        guest = root / f"guests/python/{stem}.py"
+        if guest.is_file():
+            text = guest.read_text(encoding="utf-8")
+            if not re.search(DECLARATION_CALL[".py"], text):
+                bad.append(f"guests/python/{stem}.py: never CALLS the identity declaration, so "
+                           f"{rel} reaches the build and not the running app")
+            for what, value in (("name", own.name), ("id", own.id)):
+                if value in text:
+                    bad.append(f"guests/python/{stem}.py: spells the declared {what} "
+                               f"\"{value}\" — {rel} is the one place it is written")
+        if not re.search(r'expect_now_playing_app\s+"%s"' % re.escape(own.name), scene_text):
+            bad.append(f"tools/scenes: no scene reads the {stem} app's name \"{own.name}\" back "
+                       f"(expect_now_playing_app) — {rel}'s name would ship unobserved")
+        for cmd in sorted((root / CMD_LAUNCHERS).glob("*.cmd")):
+            body = cmd.read_text(encoding="utf-8")
+            if f"\\{stem}.py" in body and f"set KAYA_IDENTITY={asset}" not in body:
+                bad.append(f"{cmd.relative_to(root).as_posix()}: runs {stem}.py without "
+                           f"`set KAYA_IDENTITY={asset}`, so the process declares the default app")
+        for n, line in enumerate(suites.splitlines(), 1):
+            if re.match(r'\s+run "\$proto" ', line) and f"guests/python/{stem}.py" in "".join(
+                    suites.splitlines()[n - 1:n + 1]) and "KAYA_IDENTITY=" not in line:
+                bad.append(f"tools/linux/run-suites.sh:{n}: runs {stem}.py without KAYA_IDENTITY, "
+                           f"so the leg declares the default app")
+        if f'identity.env_for("{stem}")' not in suites:
+            bad.append(f"tools/linux/run-suites.sh: names the {stem} app's declaration without "
+                       f"asking {PACKAGING_DIR}/identity.py's env_for")
+        for host in [h for h, app in hosts.items() if app == stem]:
+            if f'"{host}" to kayaReadIdentity(rootDir.parentFile, "{rel}")' not in gradle:
+                bad.append(f"android/build.gradle.kts: the {host} APK, the {stem} app's host, does "
+                           f"not read {rel}, so its label is the default app's")
+
     # ------------------------------------------------------------- C5
     for f in tree_walk(root):
         rel = f.relative_to(root).as_posix()
@@ -811,7 +878,7 @@ def check(root):
             continue
         for f in tree_walk(base):
             rel = f.relative_to(root).as_posix()
-            if rel == MANIFEST or not f.is_file() or excluded(rel):
+            if rel == MANIFEST or rel in apps.values() or not f.is_file() or excluded(rel):
                 continue
             try:
                 text = f.read_text(encoding="utf-8")
@@ -1409,6 +1476,43 @@ g.negative("a guest opening an asset the manifest does not declare",
            lambda p=s: check(p),
            want="in the declared mark's own family but is not it")
 
+# --------------------------------------------------------------- C17 --
+# N17a — the music app renamed in its own file and nowhere else.
+s = fresh("apprenamed")
+doctor_shadow("the music app's rename", s, "guests/assets/identities/music.toml",
+              r'name = "Aurora Music"', 'name = "Borealis Music"')
+g.negative("an app's name no scene reads back", lambda p=s: check(p),
+           want="no scene reads the music app's name")
+
+# N17b — a Windows launcher that starts the music app as the default one.
+s = fresh("cmdunnamed")
+doctor_shadow("the launcher's identity cut", s, "tools/guest/run_music_dock_python.cmd",
+              r"set KAYA_IDENTITY=[^\r\n]*\r?\n", "")
+g.negative("a launcher starting an app with its own file as the default",
+           lambda p=s: check(p), want="without `set KAYA_IDENTITY=")
+
+# N17c — a Linux leg that does the same.
+s = fresh("suiteunnamed")
+doctor_shadow("the linux leg's identity cut", s, "tools/linux/run-suites.sh",
+              r'(run "\$proto" music_dock-python env )KAYA_IDENTITY="\$MUSIC_IDENTITY" ', r"\1")
+g.negative("a linux leg starting an app with its own file as the default",
+           lambda p=s: check(p), want="runs music.py without KAYA_IDENTITY")
+
+# N17d — the APK build reading the default file for the music app's host.
+s = fresh("gradledefault")
+doctor_shadow("the APK table's file cut", s, "android/build.gradle.kts",
+              r'kayaReadIdentity\(rootDir\.parentFile, "guests/assets/identities/music\.toml"\)',
+              "kayaReadIdentity(rootDir.parentFile)")
+g.negative("an APK build that labels the music app as the default",
+           lambda p=s: check(p), want="does not read guests/assets/identities/music.toml")
+
+# N17e — the music guest retyping its own name.
+s = fresh("musicretyped")
+doctor_shadow("the music guest's retyped name", s, "guests/python/music.py",
+              r"kaya\.app_identity\(\)", "kaya.app_identity()  # Aurora Music")
+g.negative("an app's guest that retypes its own declared name",
+           lambda p=s: check(p), want="spells the declared name")
+
 # --------------------------------------------------------------- C7 ---
 # N10 — a launch background nothing can turn into a colour.
 s = fresh("badcolour")
@@ -1651,7 +1755,7 @@ for _tag, _rel, _pat, _repl, _want in (
     doctor_shadow(f"the {_tag} cut", s, _rel, _pat, _repl)
     g.negative(f"C16 with the {_tag} cut", lambda p=s: check(p), want=_want)
 
-g.negatives_ran(45)
+g.negatives_ran(50)
 
 # The vacuity floor rule 5 asks for: the census below walks these six
 # roots, and a walk that found almost nothing agrees with everything.

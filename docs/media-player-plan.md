@@ -1110,6 +1110,33 @@ card, an unfilled one or a declared table's row is a row. expect_fill reads
 a selected card as the ring on all four edges with no pill inside it, and
 names a card with the pill, or a row with the ring, `misdrawn`.
 
+(6) Asked "should the music app get its own identity (its own name and
+icon) instead of sharing Aurora Notes? If so, what should it be called?",
+the maintainer: "Yes (Aurora Music)". The music app declares itself in its
+own file, guests/assets/identities/music.toml (name "Aurora Music", id
+dev.kaya.aurora.music, the shared kaya mark: only the name was ruled); the
+root's identity.toml stays every other app's. A process takes the file
+KAYA_IDENTITY names, an asset name under the root, read once in the core
+(crates/kaya/src/scene.rs `identity_manifest`), which is ruling 4's runner
+override (docs/app-identity-plan.md, one file per app). It is a process's
+setting and not a guest's call because the core reads the declaration
+before any guest call: the preference domain, GTK's application id, WinUI's
+registration and its Start-menu shortcut, the link scheme. The music guest
+now declares (`kaya.app_identity()`), which on the mac makes it a Dock app
+(ruling 2). tools/lib/packaging/identity.py's APPS and HOSTS tables say
+which apps have a file of their own and which phone host is whose; every
+route reads the file through them: the mac lane runs the music legs as the
+music app's bundle (packaging/mac.py, a copy of the interpreter as its
+executable, so MediaRemote names it by its CFBundleDisplayName rather than
+"python3.14"), the iOS python host bundle carries its CFBundleDisplayName,
+the python host APK its label and scheme (android/build.gradle.kts
+kayaAppIdentities), the Windows launchers and the Linux legs set
+KAYA_IDENTITY, and WinUI registers and shortcuts the music id under its
+name. The phones' python host also runs portfolio and varied, which ride in
+the music app's package there. `expect_now_playing_app "Aurora Music"` in
+music_dock reads the name on all five lanes, and (3)'s two lane drops are
+gone. check-app-identity's C17 holds each app's routes to its own file.
+
 ## §6: Build order
 
 1. The measurements §7 marks for the depth: Jamendo's extensionless MP3 on

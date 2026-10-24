@@ -17,6 +17,8 @@ set KAYA_MEDIA_URL=http://192.168.64.1:8768
 set XDG_STATE_HOME=C:\kaya\legs\music_dockdark_python\state
 rem -P: C:\kaya's select.py (the select scene) shadows the stdlib select
 rem urllib's sockets import (docs/traps.md, a flat guest directory on Windows).
+rem The music app's own declaration (tools/lib/packaging/identity.py APPS).
+set KAYA_IDENTITY=identities/music.toml
 set KAYA_SELFTEST=music_dock
 set KAYA_VERB_TRACE=C:\kaya\flightrec\music_dockdark_python-vtrace.txt
 python -P C:\kaya\music.py > C:\kaya\out_music_dockdark_python.txt 2>&1

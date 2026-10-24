@@ -4135,8 +4135,10 @@ def apk_link_verify(apk, package):
     tree = out_of([str(aapt2), "dump", "xmltree", str(apk),
                    "--file", "AndroidManifest.xml"],
                   stderr=subprocess.STDOUT)
-    want = packaging_android.link_scheme(ROOT)
-    hosts = app_identity.load(ROOT).hosts
+    module = pathlib.Path(apk).relative_to(ROOT / "android").parts[0]
+    manifest = app_identity.manifest_for(app_identity.HOSTS.get(module, ""))
+    want = packaging_android.link_scheme(ROOT, manifest)
+    hosts = app_identity.load(ROOT, manifest).hosts
     errs = link_declaration(tree, package, want, hosts)
     for e in errs:
         print(f"run-emulator: {apk}: {e}", file=sys.stderr)
@@ -4650,6 +4652,8 @@ def run_suite_legs(suite):
             extras += ["--es", "KAYA_CUTOUT", flags["cutout"]]
         if media_server.serves(scene):
             extras += ["--es", "KAYA_MEDIA_URL", MEDIA_URL]
+        for key, value in app_identity.env_for(lane.PYTHON_GUESTS.get(scene, scene)).items():
+            extras += ["--es", key, value]
         # THE VERB TRACE, a RELATIVE name the interpreter resolves under
         # the app's own files dir — the one place run-as can read back
         # (crates/kaya/src/vtrace.rs).

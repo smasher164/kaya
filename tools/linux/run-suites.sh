@@ -190,6 +190,13 @@ export KAYA_SCENES_DIR=/work/tools/scenes
 # name when this is unset, because a drag that silently does not happen
 # reads exactly like a refused drop.
 export KAYA_DRAG_DRIVER=/work/tools/linux/dragdrive.py
+# The music app's own declaration (docs/media-player-plan.md M22 (6)), named
+# by tools/lib/packaging/identity.py's per-app table.
+MUSIC_IDENTITY="$(python3 -c 'import sys; sys.path.insert(0, "tools/lib"); from packaging import identity; print(identity.env_for("music")[identity.IDENTITY_VAR])')"
+if [ -z "$MUSIC_IDENTITY" ]; then
+    echo "run-suites: tools/lib/packaging/identity.py named no declaration for the music app" >&2
+    exit 1
+fi
 
 LIB="$CARGO_TARGET_DIR/debug/libkaya.so"
 status=0
@@ -1748,24 +1755,24 @@ for proto in x11 wayland; do
     # THE MEDIA PLAYER DEMO (docs/media-player-plan.md M3): python alone by
     # design, against this lane's mirror; through a11y-leg.sh for the cards'
     # expect_ax and expect_selected, and hover moves the leg's own pointer.
-    run "$proto" music_home-python env KAYA_SELFTEST=music_home KAYA_LIB="$LIB" \
+    run "$proto" music_home-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_home KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_playlist-python env KAYA_SELFTEST=music_playlist KAYA_LIB="$LIB" \
+    run "$proto" music_playlist-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_playlist KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_header-python env KAYA_SELFTEST=music_header KAYA_LIB="$LIB" \
+    run "$proto" music_header-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_header KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_headerdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_header \
+    run "$proto" music_headerdark-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_APPEARANCE=dark KAYA_SELFTEST=music_header \
         KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_artist-python env KAYA_SELFTEST=music_artist KAYA_LIB="$LIB" \
+    run "$proto" music_artist-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_artist KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_artistdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_artist \
+    run "$proto" music_artistdark-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_APPEARANCE=dark KAYA_SELFTEST=music_artist \
         KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_search-python env KAYA_SELFTEST=music_search KAYA_LIB="$LIB" \
+    run "$proto" music_search-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_search KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     # The dock and the media session: MPRIS on the leg's own bus (media-leg.sh).
-    run "$proto" music_dock-python env KAYA_SELFTEST=music_dock KAYA_LIB="$LIB" \
+    run "$proto" music_dock-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_dock KAYA_LIB="$LIB" \
         tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_dockdark-python env KAYA_APPEARANCE=dark KAYA_SELFTEST=music_dock \
+    run "$proto" music_dockdark-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_APPEARANCE=dark KAYA_SELFTEST=music_dock \
         KAYA_LIB="$LIB" tools/linux/media-leg.sh tools/linux/a11y-leg.sh python3 guests/python/music.py
     # THE SKIN (docs/styling-pass-plan.md §5): grounds and cards read the
     # accessibility tree (expect_ax, expect_selected), so they run through
