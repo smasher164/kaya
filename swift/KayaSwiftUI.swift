@@ -5090,10 +5090,12 @@ var kayaTearingDown: Set<UInt64> = []
     /// AppKit's own frame autosave is keyed by the HOST binary's domain, so
     /// every app one python3 runs shares it (docs/traps.md, the host
     /// domain's window frame). Kaya's memory is the only one: answers how
-    /// many stale keys it dropped.
+    /// many stale keys it dropped. A split view's column widths are kept
+    /// the same way and dropped with them (docs/traps.md, the two-pane
+    /// sidebar fell to SwiftUI's floor).
     func kayaForgetAppKitFrames(_ store: UserDefaults) -> Int {
         let stale = store.dictionaryRepresentation().keys.filter {
-            $0.hasPrefix("NSWindow Frame ")
+            ($0.hasPrefix("NSWindow Frame ") || $0.hasPrefix("NSSplitView Subview Frames "))
                 && ($0.contains("KayaRoot") || $0.contains("KayaAuxRoot"))
         }
         for key in stale { store.removeObject(forKey: key) }
@@ -12035,14 +12037,17 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) to \(parts[2]) gap \(parts[3])")
                 }
             case "expect_width":
-                // harness.rs's ExpectWidth, the same sentences; a slider's drawn width.
+                // harness.rs's ExpectWidth, the same sentences; a slider's drawn width,
+                // a column's, row's or label's laid-out one (the sidebar's, docs/traps.md).
                 guard parts.count == 3, let wantWidth = Double(parts[2]) else {
                     failures.append("expect_width wants a target and a width in points: \(line)")
                     break
                 }
                 func readWidth() -> Double?? {
                     DispatchQueue.main.sync { () -> Double?? in
-                        guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else { return nil }
+                        guard let node = kayaTarget(parts[1], "slider", kayaScene.sliders) else {
+                            return kayaFrameWidthRead(parts[1])
+                        }
                         return .some(kayaDrawnWidths[node.id].map(Double.init))
                     }
                 }
@@ -12054,7 +12059,7 @@ private func kayaRunScript(_ script: String) {
                 }
                 switch gotWidth {
                 case nil: failures.append("no such target \(parts[1])")
-                case .some(nil): failures.append("\(parts[1]) width unread: <no drawn width recorded>")
+                case .some(nil): failures.append("\(parts[1]) width unread: <no laid-out frame>")
                 case let w??:
                     if abs(w - wantWidth) <= 1 {
                         observed.append("\(parts[1]) \(parts[2]) wide")
@@ -14063,7 +14068,8 @@ private func kayaRunScript(_ script: String) {
                 if got.split(separator: " ").first.map(String.init) == want {
                     observed.append("\(parts[1]) filled \(want)")
                 } else {
-                    failures.append("\(parts[1]) reads filled \(got), wanted \(want)")
+                    let pointer = DispatchQueue.main.sync { kayaAnyTarget(parts[1]).map(kayaHostPointerNote) ?? "" }
+                    failures.append("\(parts[1]) reads filled \(got), wanted \(want)\(pointer)")
                 }
             case "expect_not_taller":
                 // harness.rs Step::ExpectNotTaller: two targets, one
@@ -22073,6 +22079,24 @@ struct KayaLabelTint: ViewModifier {
     }
 }
 
+/// Where the HOST's own pointer rests against `node`, for a fill read that
+/// failed: a real pointer hovers what it rests on, and the lane leaves it
+/// wherever the person last put it (docs/traps.md, a mac card read hovered
+/// under the host's resting pointer).
+@MainActor func kayaHostPointerNote(_ node: KayaNode) -> String {
+    #if os(macOS)
+        guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id),
+            let window = NSApp.windows.first(where: { $0.isVisible }), let content = window.contentView
+        else { return "" }
+        let local = content.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        let at = CGPoint(x: local.x, y: content.isFlipped ? local.y : content.bounds.height - local.y)
+        let side = frame.contains(at) ? "over" : "outside"
+        return "; the host's pointer rests at (\(Int(at.x)), \(Int(at.y))) in the window, \(side) the target"
+    #else
+        return ""
+    #endif
+}
+
 /// expect_fill's read (docs/tints-plan.md §4): the pixel 4pt inside the
 /// container's RIGHT edge at mid-height, in the fill's padding band and
 /// clear of the rounded corners, classified against every
@@ -24508,6 +24532,23 @@ func kayaFirstLabel(_ node: KayaNode) -> KayaNode? {
     }
 }
 
+/// A wrapping label is never narrower than its longest word
+/// (docs/flex-shrink-plan.md §2.3; docs/traps.md, the two-pane sidebar fell
+/// to SwiftUI's floor). A capped label truncates instead and takes no floor.
+var kayaWordFloors: [String: CGFloat] = [:]
+
+@MainActor func kayaLabelWordFloor(_ node: KayaNode) -> CGFloat? {
+    guard node.maxLines == 0, !node.text.isEmpty else { return nil }
+    let font = kayaClippingFont(node)
+    let text = kayaClippingText(node)
+    let key = "\(font.fontName) \(font.pointSize) \(text)"
+    if let hit = kayaWordFloors[key] { return hit }
+    let floor = ceil(kayaLongestWord(text, font))
+    if kayaWordFloors.count > 4096 { kayaWordFloors.removeAll() }
+    kayaWordFloors[key] = floor
+    return floor
+}
+
 /// The widest whitespace-separated unit of `text` set in `font`: the
 /// min-content width a flex cell may not shrink below (docs/flex-shrink-plan.md §2).
 func kayaLongestWord(_ text: String, _ font: KayaPlatformFont) -> CGFloat {
@@ -26523,6 +26564,7 @@ struct KayaRender: View {
             // docs/media-player-plan.md M20 (2): the text wraps under its
             // widest width.
             .frame(
+                minWidth: kayaLabelWordFloor(node).map { node.maxWidth > 0 ? min($0, node.maxWidth) : $0 },
                 idealWidth: node.maxWidth > 0 ? node.maxWidth : nil,
                 maxWidth: node.maxWidth > 0 ? node.maxWidth : nil, alignment: .leading)
             .modifier(KayaSkinFrameReader(id: node.id))
@@ -31859,6 +31901,12 @@ let kayaPaneMinSidebar: Double = 200
 let kayaPaneMinContent: Double = 270
 let kayaPaneMinDetail: Double = 320
 
+/// protocol.rs's leading_pane_width, the same arithmetic (the ladder probe
+/// pins the two together).
+func kayaLeadingPaneWidth(_ total: Double) -> Double {
+    min(max(total * 0.25, 180), 280, total)
+}
+
 /// Which rung fits `width`: 3 when the window can hold all three of
 /// kaya's minimums, else 2. There is no 1 rung — one pane is the
 /// compact stack arm's territory (see the constants above).
@@ -31946,17 +31994,30 @@ func kayaPanesReading(_ windowId: UInt64) -> String {
 struct KayaSplitRoot: View {
     let windowId: UInt64
     @State private var scene = kayaScene
+    @State private var width: Double = 0
 
     var body: some View {
         NavigationSplitView {
             Group {
                 if let root = scene.windows[windowId]?.root {
                     KayaRender(node: root, isRoot: true)
+                } else {
+                    // A column with no view yet takes no width declaration, and
+                    // the split keeps the floor it opened at (docs/traps.md, the
+                    // two-pane sidebar fell to SwiftUI's floor).
+                    Color.clear
                 }
             }
             .padding(scene.windows[windowId]?.inset ?? 16)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(kayaWindowCaption(windowId))
+            #if os(macOS)
+                // docs/traps.md, the two-pane sidebar fell to SwiftUI's floor.
+                .navigationSplitViewColumnWidth(
+                    ideal: kayaLeadingPaneWidth(
+                        width > 0
+                            ? width : scene.windows[windowId]?.width ?? Double(kayaUndeclaredWindowSize.width)))
+            #endif
         } detail: {
             // The TOP of the stack is the detail, the entries above the first
             // in its own NavigationStack, so an entry that covers another in
@@ -31983,6 +32044,13 @@ struct KayaSplitRoot: View {
                     .navigationTitle(kayaWindowCaption(windowId))
             }
         }
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { width = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in width = w }
+            }
+        )
         .onAppear { record() }
         .onChange(of: scene.windows[windowId]?.entries.count ?? 0) { record() }
         // The brand rides every scene root (see KayaRoot's tint note).
@@ -32032,6 +32100,9 @@ struct KayaSplitRoot3: View {
             Group {
                 if let root = scene.windows[windowId]?.root {
                     KayaRender(node: root, isRoot: true)
+                } else {
+                    // KayaSplitRoot's reason: the width declaration needs a view.
+                    Color.clear
                 }
             }
             .padding(scene.windows[windowId]?.inset ?? 16)

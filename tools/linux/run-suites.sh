@@ -1759,10 +1759,15 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_playlist-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_playlist KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
-    run "$proto" music_header-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_header KAYA_LIB="$LIB" \
-        tools/linux/a11y-leg.sh python3 guests/python/music.py
+    # The sidebar's width on x11 is read against the content's (tools/lib/lanes/linux.py).
+    if ! music_header_script="$(python3 tools/linux/scene-mods.py --protocol "$proto" music_header)"; then
+        echo "run-suites: the music_header scene's $proto mods were refused (above)" >&2
+        exit 1
+    fi
+    run "$proto" music_header-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_header \
+        KAYA_SELFTEST_SCRIPT="$music_header_script" KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_headerdark-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_APPEARANCE=dark KAYA_SELFTEST=music_header \
-        KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
+        KAYA_SELFTEST_SCRIPT="$music_header_script" KAYA_LIB="$LIB" tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_artist-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_SELFTEST=music_artist KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh python3 guests/python/music.py
     run "$proto" music_artistdark-python env KAYA_IDENTITY="$MUSIC_IDENTITY" KAYA_APPEARANCE=dark KAYA_SELFTEST=music_artist \

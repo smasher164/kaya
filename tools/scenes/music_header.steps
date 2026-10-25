@@ -54,3 +54,9 @@ expect_pref music.favorites ""
 # A button the app gave no help shows its name as its tooltip on the
 # desktops (docs/tooltip-plan.md T6).
 expect_help button@album_artist "Pierce Murphy"
+# The desktops open the sidebar at the leading pane's width, a quarter of the
+# window, and a library title wraps between its words (docs/traps.md, the
+# two-pane sidebar fell to SwiftUI's floor).
+expect_image_phase image@saved_art[201715] shown
+expect_width column@library 275
+expect_no_clipping

@@ -72,7 +72,11 @@ any of them.
   passing the row's own proposed height through makes `KayaCell` echo a
   List's probe (0, then inf) and the row reports a one-line height for
   two lines of text (the same screen, "Book the flights" at 99pt, 20pt
-  tall for 41pt of text).
+  tall for 41pt of text). AND OUTSIDE KayaFlex (2026-10-25): a growerless
+  row is an HStack, which shrinks a Text below its longest word and lets
+  it break inside the word, so a wrapping label (no `max_lines`) carries
+  its longest word as its minimum width itself (`kayaLabelWordFloor`,
+  docs/traps.md, the two-pane sidebar fell to SwiftUI's floor).
 - **Compose**: the row arm's `Row` is `KayaFlexRow`, a `Layout` of its
   own (the grid arm's shape), reading each child's `maxIntrinsicWidth`
   (basis) and `minIntrinsicWidth` (min-content, a `Text`'s longest word)

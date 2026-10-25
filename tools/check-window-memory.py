@@ -695,9 +695,15 @@ RUNTIME_NEGATIVES = [
      "both of kaya's AppKit window frames are forgotten"),
     ("any-frame",
      "another app's frame forgotten with kaya's",
-     r'\$0\.hasPrefix\("NSWindow Frame "\)\n *&& ',
+     r'\(\$0\.hasPrefix\("NSWindow Frame "\) \|\| '
+     r'\$0\.hasPrefix\("NSSplitView Subview Frames "\)\)\n *&& ',
      "",
      "a frame that is not kaya's window's is kept"),
+    ("split-kept",
+     "a split view's column widths left in the host's domain",
+     r' \|\| \$0\.hasPrefix\("NSSplitView Subview Frames "\)',
+     "",
+     "both of kaya's split view column widths are forgotten"),
 ]
 
 for name, label, pattern, repl, want in RUNTIME_NEGATIVES:

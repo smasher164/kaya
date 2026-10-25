@@ -410,14 +410,22 @@ enum KayaWindowMemoryProbe {
             "NSWindow Frame SwiftUI.PresentedWindowContent<Swift.UInt64, "
                 + "Swift.Optional<main.KayaAuxRoot>>-2-AppWindow-1",
         ]
+        let splits = [
+            "NSSplitView Subview Frames main.KayaRoot-1-AppWindow-1, SidebarNavigationSplitView",
+            "NSSplitView Subview Frames SwiftUI.PresentedWindowContent<Swift.UInt64, "
+                + "Swift.Optional<main.KayaAuxRoot>>-2-AppWindow-1, SidebarNavigationSplitView",
+        ]
         let theirs = [
             "NSWindow Frame SomeOtherApp-1",
-            "NSSplitView Subview Frames main.KayaRoot-1-AppWindow-1, SidebarNavigationSplitView",
+            "NSSplitView Subview Frames SomeOtherApp-1, SidebarNavigationSplitView",
+            "NSToolbar Configuration main.KayaRoot-1-AppWindow-1",
         ]
-        for key in mine + theirs { host.set("20 325 420 640 0 0 1728 1084 ", forKey: key) }
+        for key in mine + splits + theirs { host.set("20 325 420 640 0 0 1728 1084 ", forKey: key) }
         let forgot = kayaForgetAppKitFrames(host)
         expect("both of kaya's AppKit window frames are forgotten",
-            forgot == 2 && mine.allSatisfy { host.object(forKey: $0) == nil })
+            mine.allSatisfy { host.object(forKey: $0) == nil })
+        expect("both of kaya's split view column widths are forgotten",
+            forgot == 4 && splits.allSatisfy { host.object(forKey: $0) == nil })
         expect("a frame that is not kaya's window's is kept",
             theirs.allSatisfy { host.object(forKey: $0) != nil })
         host.removePersistentDomain(forName: suite)

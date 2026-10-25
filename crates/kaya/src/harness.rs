@@ -968,7 +968,9 @@ pub enum Step {
     ExpectTextLines(Target, usize, bool),
     /// `expect_width <target> <points>`: the control's drawn width, never its
     /// track, within a point (docs/media-player-plan.md M16 (17), a slider's
-    /// `max_width`). Points are every toolkit's logical unit.
+    /// `max_width`), or a container's laid-out width (a sidebar's, docs/traps.md,
+    /// the two-pane sidebar fell to SwiftUI's floor). Points are every
+    /// toolkit's logical unit.
     ExpectWidth(Target, f64),
     /// `expect_gap <upper> <lower> <points>`: from the upper target's bottom
     /// edge to the lower one's top, within a point, which is how a hidden

@@ -367,7 +367,7 @@ WEIGHT = {
     "check-winui-bindings": 42, "check-empty-child": 39, "java-typecheck": 37,
     "check-assets": 31, "swift-typecheck": 31, "check-flightrec": 28,
     "check-exclusive": 26, "check-window-memory": 25, "check-canvas-blit": 19,
-    "check-pane-ladder": 17, "check-steps": 17, "check-harness-ceiling": 12,
+    "check-pane-ladder": 120, "check-steps": 17, "check-harness-ceiling": 12,
     "check-keyed": 8, "check-pins": 8, "check-submit": 7, "go-typecheck": 7,
 }
 

@@ -18,6 +18,13 @@ MODS = {
     # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
     # AMENDED 2026-10-17): GTK's table has no selection of its own to move.
     "tracks": {"cut": ("press down", "expect_tint expect_rows")},
+    # THE X11 WINDOW'S CONTENT IS 1090 FOR A 1100 REQUEST (docs/traps.md, the
+    # x11 lane's toplevel X window is BIGGER than its content): libadwaita's
+    # sidebar is a quarter of the content, 272 there and 275 on wayland.
+    "music_header": {"x11": {
+        "drop": ((("expect_width column@library 275",), "expect_no_clipping",
+                  "an x11 window's content is 1090 wide for its 1100 request"),),
+        "append": "expect_width column@library 272"}},
     # GNOME'S FULLSCREEN HEADER BAR (docs/fullscreen-plan.md §9): hidden over
     # the content, revealed at the top edge. No other lane has a bar to read,
     # so this lane appends the reading after the shared scene.

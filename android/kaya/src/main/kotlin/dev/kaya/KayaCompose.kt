@@ -13900,13 +13900,15 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     }
                     "expect_width" -> {
                         // harness.rs's ExpectWidth, the same sentences: the
-                        // slider's drawn width in dp.
+                        // slider's drawn width in dp, a column's, row's or
+                        // label's laid-out one.
                         val wantWidth = parts.getOrNull(2)?.toDoubleOrNull()
                         if (parts.size != 3 || wantWidth == null) {
                             failures.add("expect_width wants a target and a width in points: $line")
                         } else {
                             fun read(): Double? = onUi(activity) {
-                                val node = target(parts[1], "slider", KayaSceneModel.sliders) ?: return@onUi null
+                                val node = target(parts[1], "slider", KayaSceneModel.sliders)
+                                    ?: return@onUi kayaFrameWidthRead(activity, parts[1])?.let { if (it.isNaN()) -1.0 else it }
                                 val coords = kayaTravelCoords[node.id] ?: return@onUi -1.0
                                 coords.size.width / activity.resources.displayMetrics.density.toDouble()
                             }
@@ -13919,7 +13921,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             }
                             when {
                                 got == null -> failures.add("no such target ${parts[1]}")
-                                got < 0 -> failures.add("${parts[1]} width unread: <no laid-out slider>")
+                                got < 0 -> failures.add("${parts[1]} width unread: <no laid-out frame>")
                                 kotlin.math.abs(got - wantWidth) <= 1 -> observed.add("${parts[1]} ${parts[2]} wide")
                                 else -> failures.add("${parts[1]} ${Math.round(got)} wide, wanted ${parts[2]}")
                             }

@@ -4,7 +4,7 @@ with this lane's MODS cut and drops taken out and its appends added
 (tools/lib/lanes/linux.py), one step per line, for the leg's KAYA_SELFTEST_SCRIPT. Every dropped step is named on
 stderr; a refused drop exits 1 with the shared grammar's sentence.
 
-    tools/linux/scene-mods.py <scene>
+    tools/linux/scene-mods.py [--protocol x11|wayland] <scene>
     tools/linux/scene-mods.py --protocols <scene>
     tools/linux/scene-mods.py --quiet
 
@@ -37,15 +37,26 @@ def main(argv):
     if argv == ["--quiet"]:
         print(" ".join(sorted(lane.QUIET)))
         return 0
+    proto = None
+    if len(argv) == 3 and argv[0] == "--protocol" and argv[1] in ("x11", "wayland"):
+        proto, argv = argv[1], argv[2:]
     if len(argv) != 1:
-        print("usage: tools/linux/scene-mods.py [--protocols] <scene> | --quiet", file=sys.stderr)
+        print("usage: tools/linux/scene-mods.py [--protocols | --protocol x11|wayland] <scene> | --quiet",
+              file=sys.stderr)
         return 2
     scene = argv[0]
+    mods = dict(lane.MODS.get(scene, {}))
+    # A protocol's own table (an x11 window's content is not its request,
+    # docs/traps.md, the x11 lane's toplevel X window is BIGGER than its
+    # content) replaces the lane's drop and append on that protocol.
+    mods.update(mods.pop(proto, {}) if proto else {})
+    mods.pop("x11", None)
+    mods.pop("wayland", None)
     path = ROOT / f"tools/scenes/{scene}.steps"
     lines = [" ".join(line.split()) for line in
              path.read_text(encoding="utf-8").splitlines()
              if line.strip() and not line.lstrip().startswith("#")]
-    cut = lane.MODS.get(scene, {}).get("cut")
+    cut = mods.get("cut")
     if cut:
         try:
             prefix, _gone = scene_cut.scene_prefix(path, cut[0], cut[1], who="linux")
@@ -58,7 +69,7 @@ def main(argv):
         lines = lines[:kept]
     try:
         scene_cut.drop_block_selftest()
-        lines, taken = scene_cut.drop_blocks(lines, lane.MODS.get(scene, {}).get("drop", ()))
+        lines, taken = scene_cut.drop_blocks(lines, mods.get("drop", ()))
     except (ValueError, AssertionError) as e:
         print(f"scene-mods: {path}: {e}", file=sys.stderr)
         return 1
@@ -66,7 +77,7 @@ def main(argv):
         for line in gone:
             print(f"scene-mods: NOT RUN on this host ({why}): {line}", file=sys.stderr)
     appended = [" ".join(step.split()) for step in
-                lane.MODS.get(scene, {}).get("append", "").split(";") if step.strip()]
+                mods.get("append", "").split(";") if step.strip()]
     for line in appended:
         print(f"scene-mods: appended on this lane: {line}", file=sys.stderr)
     lines += appended

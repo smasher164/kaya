@@ -1066,7 +1066,17 @@ arithmetic including content+detail < 600, which is what keeps the
 bare expect_panes invariant true at every regular width, the
 edge-triggered command rule the sidebar toggle depends on, and the
 REAL NSSplitView walked 1400 -> 700 -> 1400 counting visible
-columns)
+columns. AND THE TWO-PANE SIDEBAR'S WIDTH SINCE 2026-10-25 (docs/traps.md,
+the two-pane sidebar fell to SwiftUI's floor): kayaLeadingPaneWidth held
+to protocol.rs's leading_pane_width on its four cases, a REAL
+KayaSplitRoot at 1100 whose root arrives after the split exists opening
+its sidebar at 275 (283 with the floating sidebar's 8) and coming back at
+that width after three hides, and a label offered 30 pt keeping its
+longest word. NG2 cuts the ideal width and NG3 leaves the sidebar column
+empty until its root (each read 148, SwiftUI's floor); NG4 cuts a
+wrapping label's word floor (29 pt against a 57 pt word). The music
+app's sidebar width on all three desktops is music_header's
+`expect_width column@library 275`)
 
 ## tools/check-table-tier.py
 
@@ -1142,8 +1152,12 @@ process-wide), both frame spellings and six malformed lines answering
 nil, the clamp against a REAL NSScreen (inside, off every screen,
 partly on, bigger than the screen), the save's one-write-per-turn
 coalescing and its dedup, the restore, and `remember_frame(false)`
-saving and restoring nothing. 19 watched negatives, counts printed —
-five doctoring the static census, fourteen recompiling a doctored copy
+saving and restoring nothing; and AppKit's own autosave forgotten at
+launch, the window frames and, since 2026-10-25, a split view's column
+widths (docs/traps.md, the two-pane sidebar fell to SwiftUI's floor), with
+another app's keys and a non-frame key naming KayaRoot kept. 20 watched
+negatives, counts printed — five doctoring the static census, fifteen
+recompiling a doctored copy
 of the cut and demanding the probe's OWN sentence back, since a half of
 the probe nobody has seen go red is a sentence nobody has seen print.
 AND THE RUST BACKENDS' FULLSCREEN CALLSITES SINCE 2026-09-28 (clause

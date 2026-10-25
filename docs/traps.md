@@ -84,7 +84,8 @@ grow to. Both WindowGroups now take `.defaultSize` from
 `unwrap_or((540, 330))`) and SwiftUI's own default height. RULED 2026-10-12
 (the maintainer, "go with your recommendations"): a mac window that declares
 no size opens at 540x450. `NSSplitView Subview Frames` (a sidebar's column
-widths) still autosave into the host's domain and are shared the same way.
+widths) autosave into the host's domain the same way and are forgotten with
+them since 2026-10-25 (the two-pane sidebar fell to SwiftUI's floor, below).
 tools/check-window-memory.py clause F (the forget, the cleared autosave name,
 both default sizes, the width held equal to GTK's and the height to 450) and
 its clause B case, seven watched cuts.
@@ -16941,6 +16942,11 @@ what the display's socket answers a bare X11 connection setup (or a wayland
 connect): absent, connect error, the server's REFUSED reason, an
 authentication request, or a connection accepted now. GUARDS:
 display_probe's unit test makes every branch print; check-flightrec LC6.
+SECOND SIGHTING 2026-10-25: split-csharp-x11 in a filtered matrix, display
+:104 again, the new sentence reading "the server accepts a connection now, so
+GTK's own open failed earlier and the display recovered"; and this time the
+dotnet guest did not exit after it but sat in pthread_cond_wait until the
+leg's 180 s ceiling (stacks in the bundle). The rerun passed.
 
 ## The Compose park cancelled by the scroll before it (measured 2026-10-14)
 
@@ -19064,4 +19070,61 @@ sees only global images). `process.execPath` is kaya-node.
 If a later macOS refuses to dlopen an executable, kaya-node says so at start
 and the options are a node built with `--shared` or with apple-sdk_26 (a
 source build; nixpkgs caches neither).
+
+## The two-pane sidebar fell to SwiftUI's floor (measured 2026-10-25)
+
+The music app on the Mac opened its sidebar 140 pt wide (148 in the split
+view's frame) and broke the library's "Through The Olive Branches" inside
+its words ("Throu / gh / The / Olive / Branc / hes"); GTK and WinUI drew
+the same page at a quarter of the window. Three causes, each measured alone:
+- KayaSplitRoot declared no column width, so NavigationSplitView sized the
+  sidebar from its content, and since KayaFlex answers a zero offer with at
+  most zero (a sideways shelf widened the window, above) that is SwiftUI's
+  floor. With `v > 0` put back the same sidebar opened 272 wide, the length
+  of its longest library title. It now declares
+  `navigationSplitViewColumnWidth(ideal:)` from kayaLeadingPaneWidth, the
+  copy of protocol.rs's leading_pane_width (25% of the window, 180..280)
+  that GTK (libadwaita's own rule) and WinUI (Pane1Length) already follow:
+  275 at 1100, 200 at 800. Ideal only (check-pane-ladder's clause A).
+- A COLUMN WITH NO VIEW TAKES NO WIDTH. The sidebar was `Group { if let
+  root { ... } }`, and a guest's root arrives after the split view exists,
+  so the declaration rode an empty Group and SwiftUI kept the floor it
+  opened at; it never re-reads the ideal once the column has a width. In a
+  bare NSHostingView with the root present from the start the ideal held
+  (283), which is why the first probe passed while the app read 148; with
+  the root set 0.3 s after the window, 148. The empty arm is `Color.clear`
+  now, in KayaSplitRoot3's sidebar too.
+- SwiftUI autosaves the split's column frames as `NSSplitView Subview
+  Frames main.KayaRoot-1-AppWindow-1, SidebarNavigationSplitView` in the
+  host binary's domain (kaya-python: every python app and every python leg)
+  and restores them at the next launch, so one narrow run narrowed the next
+  app's sidebar: kaya-python held 148 at the start of the session, and a
+  bisect run's 280 then answered every later launch, which made the first
+  readings of a fix look right at 1100 and at 760 alike.
+  kayaForgetAppKitFrames drops those keys at launch with the window frames;
+  a sidebar the user drags keeps its width for the session.
+And a wrapping label (no `max_lines`) now takes its longest word as its
+minimum width on SwiftUI (kayaLabelWordFloor, docs/flex-shrink-plan.md §2.3),
+as GTK's `WrapMode::Word` and WinUI's `WrapWholeWords` already answer: a
+growerless row is an HStack, which shrank the title to 36 pt and let Text
+break inside words. expect_no_clipping did not catch it: it ran before the
+library row's art arrived, while the title was still 91 pt wide; the scene
+now waits for that image first.
+
+## A mac card read hovered under the host's resting pointer (measured 2026-10-25)
+
+music_home-python went red on the mac lane at its first fill read, `column@card_201715
+reads filled hovered ..., wanted neutral`, twice by hand and once in a filtered matrix,
+after the sidebar's width moved the Home shelves 127 pt right. Nothing had hovered it:
+the host's own pointer rested at (915, 430) on the screen, the guest window opened at
+the same frame every run (594, 91, 1100, 720 from the bottom left), and that point is
+(321, 124) in the window, inside the first card. SwiftUI's `.onHover` fires for a
+background accessory window under a still real pointer. With the pointer parked at
+(5, 1100) the same leg passed; put back, it failed again. The bundle carried both
+halves (windows.txt's `Cursor` window, the leg log's `windowframe saved`), but only
+by arithmetic, so a failed expect_fill on the mac now says where the host's pointer
+rests in the window and whether it is over the target (kayaHostPointerNote; both
+branches made to print). Any mac leg that reads a hover-dependent fill or a tooltip
+is exposed while a person's pointer rests over the guest's window position; no wall
+moves the pointer (the lanes never drive the host UI while a person may be using it).
 
