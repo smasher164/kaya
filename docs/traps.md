@@ -19001,3 +19001,35 @@ passed. Any user's `python3 app.py` on a modern-stamped python (Apple's
 /usr/bin/python3 stamps 26.5) hit it. kayaSwiftUIRun now registers
 `NSTreatUnknownArgumentsAsOpen = NO` before the app starts; the cut is
 watched red in identity-python ("chrome holds 0 items").
+
+## A process snapshot of a modern split view is empty (measured 2026-10-25)
+
+Under the modern generation `cacheDisplay` of the window's content view, and
+`CALayer.render(in:)` of its layer, hold none of a NavigationSplitView's
+columns: dumped, the picture was blank but for the floating sidebar's
+shadow, while the window on screen showed the music app's cards. Every
+expect_shape and expect_fill in music_home python read the bare ground. The
+window readers (kayaWindowPixels, kayaFillRead) read the WINDOW SERVER's
+picture now, `screencapture -x -o -l<wid>` cropped to the content view, the
+same route kayaVideoInk took. Two things on the way. A CGImage from
+`CGImageSourceCreateWithURL` decodes lazily, and the capture's temporary
+file is deleted on return, so every later draw of it was empty and the reads
+saw only the fill under it: the file is read into memory first (the cut back
+to the URL source is watched red, "reads shape unmatched"). And the window
+server's ground carries the desktop's tint (sampled 34393A where the
+resolved neutral card is 303030, a pressed 343434 the nearest), so
+expect_fill ranks against the ground it measures 4 pt beside the container in
+the same picture (the cut is watched red, "reads filled pressed"). The canvas
+and colour-well reads still use cacheDisplay: the canvas compare is exact
+and a colour-managed capture would move it.
+
+## A dark picture's corner read as the bare ground (measured 2026-10-25)
+
+On the modern-stamped python host, music_artist and its dark leg read
+`column@artist_header reads ground none (top 2A1C1D, middle E10406, bottom
+E10406, ground 1E1E1E)`: the header's picture has a near-black corner where
+expect_ground probes, 0.047 from the dark window ground, inside the 0.06 the
+"none" answer took first, so the picture was never asked. kayaGroundRead
+now answers image when the picture's own pixel there is nearer the sample
+than the ground is, and none otherwise; music_artist green on the mac both
+ways.

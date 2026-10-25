@@ -22070,11 +22070,17 @@ struct KayaLabelTint: ViewModifier {
         guard let window = NSApp.windows.first(where: { $0.isVisible }), let content = window.contentView else {
             return "<no visible window>"
         }
-        let y = content.isFlipped ? probe.minY : content.bounds.height - probe.maxY
-        let rect = CGRect(x: probe.minX, y: y, width: probe.width, height: probe.height)
-        guard let rep = content.bitmapImageRepForCachingDisplay(in: rect) else { return "<no bitmap for \(rect)>" }
-        content.cacheDisplay(in: rect, to: rep)
-        guard let cg = rep.cgImage else { return "<no image for \(rect)>" }
+        let (captured, why) = kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size))
+        guard let whole = captured else { return "<screencapture -l\(window.windowNumber): \(why)>" }
+        let s = CGFloat(whole.width) / content.bounds.width
+        guard let cg = whole.cropping(to: CGRect(x: probe.minX * s, y: probe.minY * s, width: probe.width * s, height: probe.height * s))
+        else { return "<the capture holds no \(probe)>" }
+        // The ground the container sits on, read beside it in the same picture:
+        // the window server's ground carries the desktop's tint, which no
+        // resolved colour does.
+        let beside = [CGPoint(x: frame.maxX + 4, y: frame.midY), CGPoint(x: frame.minX - 4, y: frame.midY)]
+            .first { $0.x >= 0 && $0.x < content.bounds.width }
+        let measuredGround = beside.flatMap { kayaSRGBComponents(whole, Int($0.x * s), Int($0.y * s)) }
         let appearance = window.effectiveAppearance
         func rgba(_ c: NSColor) -> [Double] {
             var out: [Double] = [0, 0, 0, 1]
@@ -22086,7 +22092,7 @@ struct KayaLabelTint: ViewModifier {
             return out
         }
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        let ground = rgba(.windowBackgroundColor)
+        let ground = measuredGround.map { $0 + [1] } ?? rgba(.windowBackgroundColor)
         let neutral: NSColor
         if #available(macOS 14, *) { neutral = .secondarySystemFill } else { neutral = .quaternaryLabelColor }
         var accent = rgba(.controlAccentColor)
@@ -22241,10 +22247,8 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
     #if os(macOS)
         guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }),
             let content = window.contentView,
-            let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds)
+            let cg = kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image
         else { return nil }
-        content.cacheDisplay(in: content.bounds, to: rep)
-        guard let cg = rep.cgImage else { return nil }
         let appearance = window.effectiveAppearance
         func rgba(_ c: NSColor) -> [Double] {
             var out: [Double] = [0, 0, 0, 1]
@@ -22527,12 +22531,19 @@ struct KayaSkinFrameHolder: View {
     else { return "<the probes fall outside the window: \(frame)>" }
     let page = kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground
     let seen = "top \(kayaHex(top)), middle \(kayaHex(mid)), bottom \(kayaHex(bottom)), ground \(kayaHex(page))"
-    if kayaColourGap(top, page) <= kayaSkinTolerance {
-        return "none (\(seen))"
-    }
-    if let art = kayaPictureAt(node, CGPoint(x: frame.width - 4, y: 4), frame.size),
-        kayaColourGap(art, top) <= kayaSkinTolerance * 2
+    // The nearer of the two answers when a dark picture's corner sits within
+    // the tolerance of a dark ground (docs/traps.md, a dark picture's corner
+    // read as the bare ground).
+    let art = kayaPictureAt(node, CGPoint(x: frame.width - 4, y: 4), frame.size)
+    if let art, kayaColourGap(art, top) <= kayaSkinTolerance * 2,
+        kayaColourGap(art, top) < kayaColourGap(top, page)
     {
+        return "image (\(seen), the picture there \(kayaHex(art)))"
+    }
+    if kayaColourGap(top, page) <= kayaSkinTolerance {
+        return "none (\(seen)\(art.map { ", the picture there \(kayaHex($0))" } ?? ""))"
+    }
+    if let art, kayaColourGap(art, top) <= kayaSkinTolerance * 2 {
         return "image (\(seen), the picture there \(kayaHex(art)))"
     }
     let stop = shot.dark ? node.groundTops & 0xFF_FFFF : (node.groundTops >> 24) & 0xFF_FFFF
@@ -26984,7 +26995,7 @@ struct KayaRender: View {
     /// The macOS button, bridged to AppKit rather than SwiftUI's Button: under a
     /// pre-26 SDK stamp SwiftUI 26 measures Button at borderless metrics (38x20)
     /// while drawing the bezel (52x32). An AppKit control cannot disagree with
-    /// itself (tools/check-design-generation.py).
+    /// itself (DESIGN.md, the bridged macOS button).
     private struct KayaMacButton: NSViewRepresentable {
         let id: UInt64
         let title: String
@@ -37420,26 +37431,61 @@ func kayaMediaRefusal(_ item: String) -> String? {
         return read.hasPrefix("<") ? "<screencapture -l\(wid): \(read.dropFirst())" : read
     }
 
-    /// One pixel of window `wid` as screencapture(1) captures it, in sRGB.
-    func kayaScreencapturePixel(_ wid: CGWindowID, _ x: Int, _ y: Int) -> String {
+    /// Window `wid` as screencapture(1) captures it, or why not.
+    func kayaScreencaptureWindow(_ wid: CGWindowID) -> (image: CGImage?, why: String) {
         let out = FileManager.default.temporaryDirectory
-            .appendingPathComponent("kaya-ink-\(getpid())-\(wid).png")
+            .appendingPathComponent("kaya-ink-\(getpid())-\(wid)-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: out) }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         task.arguments = ["-x", "-o", "-t", "png", "-l\(wid)", out.path]
-        do { try task.run() } catch { return "<could not start: \(error.localizedDescription)>" }
+        do { try task.run() } catch { return (nil, "could not start: \(error.localizedDescription)") }
         let until = Date().addingTimeInterval(5)
         while task.isRunning, Date() < until { Thread.sleep(forTimeInterval: 0.02) }
         if task.isRunning {
             task.terminate()
-            return "<no picture within 5 s>"
+            return (nil, "no picture within 5 s")
         }
-        guard task.terminationStatus == 0 else { return "<exited \(task.terminationStatus)>" }
-        guard let source = CGImageSourceCreateWithURL(out as CFURL, nil),
+        guard task.terminationStatus == 0 else { return (nil, "exited \(task.terminationStatus)") }
+        // Read into memory first: the image decodes lazily, and the file is
+        // removed on return.
+        guard let data = try? Data(contentsOf: out), let source = CGImageSourceCreateWithData(data as CFData, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { return "<wrote no image to \(out.lastPathComponent)>" }
+        else { return (nil, "wrote no image to \(out.lastPathComponent)") }
+        return (image, "")
+    }
+
+    /// `rect` (the content view's points, y down) as the WINDOW SERVER composited
+    /// it. Not cacheDisplay: under the modern design generation a split view's
+    /// columns draw in nothing a process snapshot holds (docs/traps.md, a
+    /// process snapshot of a modern split view is empty).
+    @MainActor func kayaWindowServerImage(_ window: NSWindow, _ content: NSView, _ rect: CGRect) -> (image: CGImage?, why: String) {
+        let flipped = content.isFlipped ? rect
+            : CGRect(x: rect.minX, y: content.bounds.height - rect.maxY, width: rect.width, height: rect.height)
+        let inWindow = content.convert(flipped, to: nil)
+        let scale = window.backingScaleFactor
+        let crop = CGRect(
+            x: (inWindow.minX * scale).rounded(), y: ((window.frame.height - inWindow.maxY) * scale).rounded(),
+            width: (inWindow.width * scale).rounded(), height: (inWindow.height * scale).rounded())
+        let (captured, why) = kayaScreencaptureWindow(CGWindowID(window.windowNumber))
+        guard let whole = captured else { return (nil, why) }
+        guard let cg = whole.cropping(to: crop) else {
+            return (nil, "the capture is \(whole.width)x\(whole.height), no \(crop) in it")
+        }
+        return (cg, "")
+    }
+
+    /// One pixel of window `wid` as screencapture(1) captures it, in sRGB.
+    func kayaScreencapturePixel(_ wid: CGWindowID, _ x: Int, _ y: Int) -> String {
+        let (captured, why) = kayaScreencaptureWindow(wid)
+        guard let image = captured else { return "<\(why)>" }
         return kayaSRGBPixel(image, x, y) ?? "<the capture is \(image.width)x\(image.height), no pixel at \(x),\(y)>"
+    }
+
+    /// One pixel of `image` as sRGB components, 0-1.
+    func kayaSRGBComponents(_ image: CGImage, _ x: Int, _ y: Int) -> [Double]? {
+        guard let hex = kayaSRGBPixel(image, x, y), let v = UInt32(hex, radix: 16) else { return nil }
+        return [Double((v >> 16) & 0xFF) / 255, Double((v >> 8) & 0xFF) / 255, Double(v & 0xFF) / 255]
     }
 
     /// One pixel of `image`, converted into sRGB by CoreGraphics.

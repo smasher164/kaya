@@ -963,7 +963,8 @@ def fill_reads(swiftui_text):
         return [f"{SWIFTUI}: kayaFillRead is missing — expect_fill has no reader"]
     end = body.find("\n}\n", start)
     reader = body[start:end if end > 0 else len(body)]
-    for needle in ("content.cacheDisplay(in: rect, to: rep)",
+    for needle in ("kayaWindowServerImage(window, content, "
+                   "CGRect(origin: .zero, size: content.bounds.size))",
                    "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)"):
         if needle not in reader:
             bad.append(f"{SWIFTUI}: kayaFillRead no longer samples the window ({needle!r} missing)")
@@ -1385,8 +1386,8 @@ for label, path, pattern, repl in (
      r"    let probe = CGRect\(x: frame\.maxX - 8, ",
      "    _ = node.filled\n    let probe = CGRect(x: frame.maxX - 8, "),
     ("SwiftUI's fill read no longer sampling the mac window", SWIFTUI,
-     r'return "<no bitmap for \\\(rect\)>" \}\n        content\.cacheDisplay\(in: rect, to: rep\)',
-     'return "<no bitmap for \\(rect)>" }\n        _ = rect'),
+     r"let \(captured, why\) = kayaWindowServerImage\(window, content, ",
+     "let (captured, why) = kayaNoImage(window, content, "),
     ("GTK's fill read answering from the tint class", GTK,
      r"            let \(px, py\) = \(w - 4\.0, h / 2\.0\);",
      "            let _ = TINT_CLASSES;\n            let (px, py) = (w - 4.0, h / 2.0);"),

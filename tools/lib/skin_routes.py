@@ -177,7 +177,7 @@ def native_table_findings(swift):
 # (label, opener, what the block must hold) -- and never MODEL
 READS = [
     ("the window's pixels", "func kayaWindowPixels() -> KayaWindowPixels? {",
-     ["content.cacheDisplay(in: content.bounds, to: rep)", "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)",
+     ["kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image", "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)",
       "rgba(.windowBackgroundColor)", "rgba(.systemBackground)"]),
     ("expect_ground's reader", "func kayaGroundRead(_ node: KayaNode) -> String {",
      ["kayaWindowPixels()", "kayaContrast(mid, shot.text)", "contrast >= 4.5", "kayaColourGap(bottom, page)",
