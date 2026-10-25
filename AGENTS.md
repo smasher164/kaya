@@ -336,8 +336,8 @@ docs/gates.md.
      id, and every lane verifies it.
    - `tools/check-pins.py` — every dependency fetched over the network names
      an exact version (and bytes).
-   - `tools/check-design-generation.py` — both macOS design generations stay
-     on the mac lane.
+   - `tools/check-design-generation.py` — every mac leg's main executable is
+     stamped modern (kaya's launchers; the old look is dropped).
    - `tools/check-symbols.py` — every SF symbol name exists at kaya's macOS
      floor.
    - `tools/check-symbol-parity.py` — one symbol vocabulary across its six
