@@ -21201,10 +21201,11 @@ struct KayaFlex: Layout {
     private func cross(_ size: CGSize) -> CGFloat { vertical ? size.width : size.height }
 
     /// The cross extent this container was actually offered, or nil when
-    /// the proposal leaves it open (SwiftUI's natural-size passes do).
+    /// the proposal leaves it open (SwiftUI's natural-size passes do). A zero
+    /// is an offer (docs/traps.md, a sideways shelf widened the window).
     static func offeredCross(_ proposal: ProposedViewSize, vertical: Bool) -> CGFloat? {
         guard let v = vertical ? proposal.width : proposal.height,
-            v.isFinite, v > 0
+            v.isFinite, v >= 0
         else { return nil }
         return v
     }

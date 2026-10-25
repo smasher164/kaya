@@ -18210,6 +18210,16 @@ cards a shelf, too few to widen anything, so the guard is a probe:
 tools/check-pane-ladder.py's third half reads the ideal width of a grid of
 twelve (watched red with the old answer: `ideal width is 1860`).
 
+AND EVERY ROW OF TEXT, ONCE THE MAC WENT MODERN (2026-10-25): on the
+modern-stamped hosts music_search held the window at 667x600 (wanted 560)
+with the Tracks chip chosen, and shrank with Albums or nothing shown. The
+modern split view asks its detail column the same zero-width question, and
+KayaFlex.offeredCross read 0 as no offer, so each track row answered with its
+title's full width. A zero proposal is an offer now (`v >= 0`): a column
+offered 0 answers at most 0. iOS shares the layout; run-sim was run over it.
+Watched red: `v > 0` restored, music_search-python `window 667x600,
+wanted 560x600`.
+
 
 ## The two-pane detail's stack (measured 2026-10-20)
 
