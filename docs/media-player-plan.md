@@ -774,7 +774,7 @@ takes a maximum width; (18) no volume on phones; (19) the phone dock opens the
 player from its art and title only; (20) the toast shows above an open sheet;
 (21) a button's symbol is settable from a template in all nine bindings; (22)
 dark dock legs. Header: (23) an album's total in "1 hr 12 min" style, a
-track's in "3:45"; (24) favourites persist, cleared under the harness; (25) the
+track's in "3:45"; (24) favourites persist, cleared under the harness (replaced by M25); (25) the
 600 px artist picture where the snapshot has one. iOS: (26) keep the status
 bar style hook, with a check that refuses loudly if its method is not found;
 (27) a screen whose top is a picture uses the inline title. Bindings: (28)
@@ -1203,6 +1203,27 @@ their tooltips are each backend's to give.
 music_dock reads both on all five lanes: `expect_help` on the dock's and the
 full player's controls, and the Liked Songs block (like, the entry's count,
 the page's rows in order, unlike, the row gone, Undo, play from a row).
+
+### M25: The album heart likes the album's songs (RULED 2026-10-25)
+
+The maintainer: "liking an album should just like all its songs." The
+album header's heart (`checkbox@favorite`) is ON exactly when every song of
+the album is in Liked Songs, derived from the list, so a song liked or
+unliked anywhere moves it. Tapped off, it likes the album's songs not yet
+liked, in the album's order, ahead of the list (newest liked), with the
+song heart's toast ("Added to Liked Songs") and one Undo that takes back
+exactly the songs that tap added. Tapped on, it unlikes all of them
+("Removed from Liked Songs"), and Undo puts each back where it stood. The
+album's page already holds every field a liked record keeps (M24 (1)), so
+no catalogue call is made. Spotify's separate "save album" was declined.
+The `music.favorites` preference (M16 (24)) is gone; a value kept before is
+ignored.
+
+music_header reads it on all five lanes: the album liked, the heart on,
+the toast; on the desktops and phones' tails, the count, the dock's heart
+unliking and reliking one song with the album heart following, the album
+unliked, Undo, an album like that adds only the missing song and whose
+Undo removes only it, and the Liked Songs rows.
 
 ## §6: Build order
 

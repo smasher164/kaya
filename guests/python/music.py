@@ -56,8 +56,7 @@ VIVID_L = (8, 96)
 VIVID_CHROMA = 15
 CLIENT_ID_PREF = "jamendo.client_id"
 # The harness's preference store is scratch, emptied at a leg's start
-# (crates/kaya/src/prefs.rs), so no leg reads another's favourites.
-FAVORITES_PREF = "music.favorites"
+# (crates/kaya/src/prefs.rs), so no leg reads another's likes.
 LIKED_PREF = "music.liked"
 LIKED_FIELDS = ("title", "artist", "album", "album_name", "art_url", "audio", "seconds")
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
@@ -276,23 +275,17 @@ known = {}
 artist_names = {}
 # The phones' Search section, a page with no entry of its own.
 roots = []
-# The like steps the window's undo ledger holds, newest last.
+# The like steps the window's undo ledger holds, newest last; a step is a
+# list of (track, liked, position), one per track it moved.
 like_steps = []
 redo_steps = []
 # Each surface's navigation stack of album and artist pages, top last.
 stacks = {}
 songs = {}
+album_keys = {}
 playback = {"key": None, "album": [], "order": [], "at": 0, "start": False,
             "shuffle": False, "repeat": "off", "seconds": 0, "ms": 0,
             "muted": False}
-def kept(key):
-    return {k for k in kaya.prefs().get(key, "").split(",") if k}
-
-
-def keep(key, ids):
-    kaya.prefs().set(key, ",".join(sorted(ids)))
-
-
 def stored_likes() -> list[dict[str, Any]]:
     """The liked tracks, newest first. A list kept before Liked Songs holds
     only the tracks' ids, which the catalogue fills in (migrate_likes)."""
@@ -306,7 +299,6 @@ def stored_likes() -> list[dict[str, Any]]:
     return [r for r in stored if isinstance(r, dict) and isinstance(r.get("id"), str)]
 
 
-favorites = kept(FAVORITES_PREF)
 liked = [r for r in stored_likes() if all(f in r for f in LIKED_FIELDS)]
 liked_pending = [r["id"] for r in stored_likes() if not all(f in r for f in LIKED_FIELDS)]
 for record in liked:
@@ -417,7 +409,7 @@ def show_album(album, surface):
         page["cover"] = kaya.signal(b"")
         page["cover_phase"] = kaya.signal(kaya.ImagePhase.LOADING)
         page["colour"] = kaya.signal(UNKNOWN_COLOUR)
-        page["liked"] = kaya.signal(album["id"] in favorites)
+        page["liked"] = kaya.signal(album_liked(album["id"]))
         page["tracks"] = kaya.collection(Track)
         page["art"] = kaya.RowImages(app, page["tracks"], url="art_url", art="art",
                                      phase="phase", fetch=catalogue.fetch)
@@ -485,20 +477,34 @@ def header_content(album, page):
                             symbol=kaya.Symbol.PLAY) \
                     .role(kaya.Role.PROMINENT).help(kaya.tr("help-play")).a11y_id("play_album")
                 kaya.checkbox("Favorite", checked=page["liked"],
-                              on_toggle=lambda on: set_favorite(album["id"], on)) \
+                              on_toggle=lambda on: set_album_liked(album, on)) \
                     .role(kaya.Role.TOGGLE).symbol(kaya.Symbol.FAVORITE) \
                     .help(kaya.tr("help-favorite")).a11y_id("favorite")
 
 
-def set_favorite(album_id, on):
-    if on:
-        favorites.add(album_id)
-    else:
-        favorites.discard(album_id)
-    keep(FAVORITES_PREF, favorites)
+def album_liked(album_id):
+    keys = album_keys.get(album_id)
+    return bool(keys) and set(keys) <= set(liked_ids())
+
+
+def set_album_liked(album, on):
+    """docs/media-player-plan.md M25."""
+    ids = liked_ids()
+    keys = [k for k in album_keys.get(album["id"], []) if (k in ids) != on]
+    if not keys:
+        show_album_hearts()
+        return
+    kaya.undoable(f"{'Like' if on else 'Unlike'} {album['name']}")
+    step = [(key, on, apply_like(key, on, at)) for at, key in enumerate(keys)]
+    record_step(step)
+    kaya.show_toast("Added to Liked Songs" if on else "Removed from Liked Songs",
+                    action="Undo", undo=True)
+
+
+def show_album_hearts():
     for page in all_pages():
-        if page["kind"] == "album" and page["album"] == album_id:
-            page["liked"].set(on)
+        if page["kind"] == "album":
+            page["liked"].set(album_liked(page["album"]))
 
 
 def page_closed(surface, entry):
@@ -615,6 +621,7 @@ def album_arrived(album, surface, entry, answer):
     year = answer.get("releasedate", "")[:4]
     listed = sorted(answer["tracks"], key=lambda t: int(t["position"]))
     total = songs_line(len(listed), sum(int(t["duration"]) for t in listed))
+    album_keys[album["id"]] = [t["id"] for t in listed]
     page["about"].set(" · ".join(p for p in (year, total) if p))
     for t in listed:
         key = t["id"]
@@ -628,6 +635,7 @@ def album_arrived(album, surface, entry, answer):
             art_url=album["image"], art=b"", phase=kaya.ImagePhase.LOADING,
             tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
             selected=False))
+    show_album_hearts()
 
 
 def pages_holding(key):
@@ -807,11 +815,16 @@ def set_liked(on):
     if key is None:
         return
     kaya.undoable(f"{'Like' if on else 'Unlike'} {songs[key]['title']}")
-    at = apply_like(key, on, 0)
-    like_steps.append((key, on, at))
-    redo_steps.clear()
+    record_step([(key, on, apply_like(key, on, 0))])
     kaya.show_toast("Added to Liked Songs" if on else "Removed from Liked Songs",
                     action="Undo", undo=True)
+
+
+def record_step(step):
+    like_steps.append(step)
+    redo_steps.clear()
+    keep_likes()
+    show_likes()
 
 
 def liked_ids():
@@ -828,8 +841,6 @@ def apply_like(key, on, at):
             del liked[at]
     elif on:
         liked.insert(min(at, len(liked)), {"id": key, **{f: songs[key][f] for f in LIKED_FIELDS}})
-    keep_likes()
-    show_likes()
     return at
 
 
@@ -853,6 +864,7 @@ def show_likes():
 
 
 def fill_liked_pages():
+    show_album_hearts()
     for page in all_pages():
         if page["kind"] == "liked":
             fill_liked(page)
@@ -860,16 +872,22 @@ def fill_liked_pages():
 
 def on_undone(_label, _delta):
     if like_steps:
-        key, on, at = like_steps.pop()
-        redo_steps.append((key, on, at))
-        apply_like(key, not on, at)
+        step = like_steps.pop()
+        redo_steps.append(step)
+        for key, on, at in reversed(step):
+            apply_like(key, not on, at)
+        keep_likes()
+        show_likes()
 
 
 def on_redone(_label, _delta):
     if redo_steps:
-        key, on, at = redo_steps.pop()
-        like_steps.append((key, on, at))
-        apply_like(key, on, at)
+        step = redo_steps.pop()
+        like_steps.append(step)
+        for key, on, at in step:
+            apply_like(key, on, at)
+        keep_likes()
+        show_likes()
 
 
 def migrate_likes(keys):

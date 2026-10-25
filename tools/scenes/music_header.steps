@@ -8,7 +8,7 @@
 # ground, full bleed: the window gives no
 # margin and the page gives its own back to the track table (M15). The dark
 # leg runs this script under KAYA_APPEARANCE=dark. Play starts the album's first track; the heart
-# is the app's, so it is still on when the album is opened again.
+# likes the album's songs and is on while all of them are liked (M25).
 expect_image_phase image@art_201715 shown
 click column@card_201715
 expect_image_phase image@album_art shown
@@ -27,8 +27,7 @@ expect_ax checkbox@favorite "toggle/Favorite"
 expect_checked checkbox@favorite off
 toggle checkbox@favorite on
 expect_checked checkbox@favorite on
-# The favourites are kept in the app's preferences (M16 (24)).
-expect_pref music.favorites "201715"
+expect_toast "Added to Liked Songs|Undo"
 click button@play_album
 expect_selected row@track[1860160] on
 # The selected row's fill clears its cells by the platform's own cell padding
@@ -48,9 +47,44 @@ expect_title "Fellow Traveler"
 expect_checked checkbox@favorite off
 click row@saved[201715]
 expect_checked checkbox@favorite on
-toggle checkbox@favorite off
+expect label@liked_count "2 songs"
+# The album heart follows one song's: the dock's heart is Seven Chimes'.
+expect_checked checkbox@like on
+toggle checkbox@like off
 expect_checked checkbox@favorite off
-expect_pref music.favorites ""
+expect label@liked_count "1 song"
+toggle checkbox@like on
+expect_checked checkbox@favorite on
+expect label@liked_count "2 songs"
+toggle checkbox@favorite off
+expect_toast "Removed from Liked Songs|Undo"
+expect_checked checkbox@favorite off
+expect_checked checkbox@like off
+expect label@liked_count "0 songs"
+toast_action
+expect_no_toast
+expect_checked checkbox@favorite on
+expect_checked checkbox@like on
+expect label@liked_count "2 songs"
+click row@go_liked
+expect_rows column@liked_tracks "1,Seven Chimes/Pierce Murphy,Through The Olive Branches,0:20|2,Athens/Pierce Murphy,Through The Olive Branches,0:20"
+click row@saved[201715]
+# An album's like adds only the songs not yet liked, and its Undo takes
+# back only those.
+toggle checkbox@like off
+expect_checked checkbox@favorite off
+toggle checkbox@favorite on
+expect_toast "Added to Liked Songs|Undo"
+expect_checked checkbox@like on
+expect label@liked_count "2 songs"
+toast_action
+expect_no_toast
+expect_checked checkbox@favorite off
+expect_checked checkbox@like off
+expect label@liked_count "1 song"
+click row@go_liked
+expect_rows column@liked_tracks "1,Athens/Pierce Murphy,Through The Olive Branches,0:20"
+click row@saved[201715]
 # A button the app gave no help shows its name as its tooltip on the
 # desktops (docs/tooltip-plan.md T6).
 expect_help button@album_artist "Pierce Murphy"
