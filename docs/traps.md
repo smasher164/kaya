@@ -18984,3 +18984,20 @@ minutes old: the iOS lane's media legs, whose simulated apps died with their
 audio device context still open. None from the earlier matrices were left,
 so they do drain, but while they last they add heat. The lane-health line's
 "busiest now" already names coreaudiod.
+
+## A script's path on the command line opens no window under the modern generation (measured 2026-10-25)
+
+Moved onto the modern-stamped hosts (tools/mac/kaya-host.c), identity, panes,
+dock and music_home went red in python, JS, java and C# alike with no window
+at all: `mount parked wid=1 (no openWindow yet)`, no `primaryRoot appear`,
+"no visible kaya window was registered", while rust and go passed. Each of
+those four carries a bare word on its command line (the .py, the .ts, the
+.dll, java's main class), and AppKit takes a bare argument as a document to
+open; launched to open a document, SwiftUI's WindowGroup opens no window.
+The same python3.14 re-stamped sdk 26.5 (`vtool`-style, ad hoc re-signed)
+failed the same way and the 14.4 original passed, so the generation decides,
+not the host; the same host with `-c "runpy.run_path(...)"` (no bare word)
+passed. Any user's `python3 app.py` on a modern-stamped python (Apple's
+/usr/bin/python3 stamps 26.5) hit it. kayaSwiftUIRun now registers
+`NSTreatUnknownArgumentsAsOpen = NO` before the app starts; the cut is
+watched red in identity-python ("chrome holds 0 items").

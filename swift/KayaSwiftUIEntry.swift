@@ -157,6 +157,10 @@ public func kayaSwiftUIRun(_ api: UnsafePointer<KayaHostApi>) -> Int32 {
     }
     // The locale knob, before the app object exists (docs/compliance-plan.md §2.2).
     kayaInstallLocaleKnob()
+    #if os(macOS)
+        // docs/traps.md, a script's path on the command line opens no window.
+        UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
+    #endif
     KayaApp.main() // takes over the calling (main) thread; does not return
     return 0
 }
