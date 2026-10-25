@@ -48,7 +48,7 @@ reserves long press for context menus, which kaya already uses).
 
 Plain text, one short sentence saying what the control is or does. Every
 widget kind carries it, containers included, exactly as the two a11y props
-do. Wire: PROPS `help` 26, `PropKind::Str`; the root refuses an empty one.
+do. Wire: PROPS `help` 26, `PropKind::Str`; the root refused an empty one until T6 made it the opt-out.
 Sugar: THE A11Y LABEL'S SPELLING IN EACH BINDING, since the three
 universal props must not be spelled three ways inside one binding —
 `.help("…")` chained on Rust's widget and on python's and JS's shared
@@ -105,6 +105,35 @@ where the read goes through the accessibility tree, as `expect_ax` does.
 The visible bubble is pixels no verb reads, so it is measured once per
 desktop with a real pointer (GTK's above; the Mac's and Windows' in §6 as
 they are taken) and recorded, not asserted per run.
+
+### T6 — Button-like controls default to their name (RULED 2026-10-25)
+
+The maintainer, after a hand test of the music app: "by default we should
+have tooltips for anything that is button-like." On the three DESKTOPS
+(SwiftUI on the Mac, GTK, WinUI) a button-like control the app gave no help
+shows its accessible name as its tooltip: the app's `a11y_label` when it set
+one, else the control's text (an icon-only button's text is its name). The
+button-like controls are the button kind in every role (text, prominent,
+destructive, plain, icon-only), the checkbox in `role toggle` (the toggle
+button), and every segment of a segmented control (which carry no help of
+their own, so a segment's tooltip is always its name). NOT included: plain
+checkboxes, switches and radios (their caption sits beside them), selects
+(they show their value), links (the label kind; GTK's link button already
+shows its address), and activatable rows, cards and columns, whose
+accessible name is their own visible content and whose platforms (Finder,
+Music, Files, Explorer) give a list row or a tile no tooltip; an app that
+wants one there sets `help`.
+
+The app's help wins, and AN EMPTY HELP HIDES THE DEFAULT: `help("")` is the
+opt-out, through the setter every binding already has (the root refused an
+empty help until this ruling; now it passes it through to the backend). The
+phones show nothing (§0: no hover; iOS and iPadOS draw no tooltip, and a
+default hint would make VoiceOver speak the name twice), and Compose takes
+no default either: its long press would show the name over a phone's
+button. Where a desktop routes help to its reader (AXHelp, the AT-SPI
+description, UIA HelpText) the default rides along, as the platforms' own
+toolbar buttons do. tools/scenes/music_header.steps reads a default on the
+three desktops, tools/scenes/tooltips.steps the opt-out on all five lanes.
 
 ## §2 — The wire
 

@@ -31,6 +31,7 @@ with app.window(title="tooltips"):
         kaya.button("Discard").help(                         # button#1
             "Throws the draft away").a11y_hint(
             "discard every change").a11y_id("discard")
+        kaya.button("Clear").help("").a11y_id("clear")       # button#2
         kaya.entry().help(name_help).a11y_id("fullname")     # entry#0
         kaya.slider(min=0.0, max=1.0, value=0.5).help(       # slider#0
             "How loud the preview plays").a11y_id("volume")

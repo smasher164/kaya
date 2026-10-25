@@ -159,6 +159,9 @@ def main(argv=None):
              if line.strip() and not line.startswith("#")]
     if args.hold_after < 0 or args.hold_after > len(lines):
         ap.error(f"--hold-after {args.hold_after} is past the scene's {len(lines)} steps")
+    if args.hold_after == 0 and args.then:
+        ap.error("--then runs at the hold point, and --hold-after 0 holds at the first expect; "
+                 "give --hold-after 1 or later")
     held = lines[:args.hold_after] + args.then + ["settle 20000"]
     if args.hold_after == 0:
         first = next((line for line in lines if line.startswith("expect")), None)

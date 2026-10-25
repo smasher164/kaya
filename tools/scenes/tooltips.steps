@@ -12,6 +12,9 @@ expect_help slider#0 "How loud the preview plays"
 # An authored hint wins the hint slot where a platform has one (T3): this
 # button declares both, and the reader hears the hint.
 expect_ax_hint button#1 "discard every change"
+# An empty help hides the tooltip a button takes from its name
+# (docs/tooltip-plan.md T6).
+expect_help button#2 ""
 # A BOUND help follows its signal: button#0's handler rewrites entry#0's.
 click button#0
 expect_help entry#0 "Your name, as saved"

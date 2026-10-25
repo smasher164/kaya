@@ -791,6 +791,8 @@ final class KayaNode: Identifiable {
     var a11yLabel = ""
     var a11yHint = ""
     var help = ""
+    /// An app's help, even an empty one, replaces the default (docs/tooltip-plan.md T6).
+    var helpSet = false
     /// The prompt an empty text field shows (docs/search-plan.md S3).
     var placeholder = ""
     /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
@@ -6803,6 +6805,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propHelp, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.help = String(decoding: bytes, as: UTF8.self)
+                    kayaScene.nodes[id]!.helpSet = true
                 case (propPlaceholder, valueStr):
                     let bytes = raw[(body + 24)..<(body + 24 + len)]
                     kayaScene.nodes[id]!.placeholder = String(decoding: bytes, as: UTF8.self)
@@ -7536,6 +7539,19 @@ func kayaA11y(_ view: some View, _ node: KayaNode, leaf: Bool = false) -> some V
     }
 }
 
+/// docs/tooltip-plan.md T6: a button-like control's default help is its accessible name.
+func kayaShownHelp(_ node: KayaNode) -> String {
+    #if os(macOS)
+        if node.helpSet { return node.help }
+        guard node.kind == kindButton || (node.kind == kindCheckbox && node.role == roleToggle) else {
+            return ""
+        }
+        return node.a11yLabel.isEmpty ? node.text : node.a11yLabel
+    #else
+        return node.help
+    #endif
+}
+
 @ViewBuilder
 private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // Containers need `.contain` first or these props do the wrong thing on
@@ -7560,8 +7576,9 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // an iPad app's when it runs on a Mac; iPadOS itself draws none), and
     // Apple's own mapping makes it the accessibility hint too. It goes on
     // BEFORE the hint so an authored hint wins the hint slot (T3).
+    let help = kayaShownHelp(node)
     let helped =
-        node.help.isEmpty ? labelled : AnyView(labelled.help(node.help))
+        help.isEmpty ? labelled : AnyView(labelled.help(help))
     // The HINT: what activating this control does. Apple speaks it after the
     // label and forbids naming the gesture, which is why the authored text is
     // a verb phrase.
@@ -29594,7 +29611,12 @@ struct KayaSegmented: View {
                         .help(segment.text)
                         .tag(index)
                 } else {
-                    Text(segment.text).font(kayaBrandFont()).tag(index)
+                    #if os(macOS)
+                        // docs/tooltip-plan.md T6.
+                        Text(segment.text).font(kayaBrandFont()).help(segment.text).tag(index)
+                    #else
+                        Text(segment.text).font(kayaBrandFont()).tag(index)
+                    #endif
                 }
             }
         }

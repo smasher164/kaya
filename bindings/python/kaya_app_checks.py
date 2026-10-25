@@ -712,10 +712,10 @@ with app.build():
             and int.from_bytes(empty_label[0][28:32], "little") == 0,
         )
 
-# AND AN EMPTY HELP, the same rule one prop over
-# (crates/kaya/src/scene.rs, empty_help_dies_at_declare;
-# docs/tooltip-plan.md T1): a binding that dropped it as a no-op would
-# leave the root nothing to refuse.
+# AND AN EMPTY HELP, which hides a default tooltip
+# (crates/kaya/src/scene.rs, an_empty_help_reaches_the_backend;
+# docs/tooltip-plan.md T6): a binding that dropped it as a no-op would
+# leave the default showing.
 with app.build():
     if True:
         before = len(kaya._tx)
@@ -730,7 +730,7 @@ with app.build():
             and int.from_bytes(r[24:28], "little") == kaya.wire.VALUE_STR
         ]
         check(
-            "an empty help reaches the records for the ROOT to refuse",
+            "an empty help reaches the records for the backend",
             len(empty_help) == 1
             and int.from_bytes(empty_help[0][28:32], "little") == 0,
         )

@@ -27,6 +27,7 @@ public final class Tooltips {
                         .help("Throws the draft away")
                         .a11yHint("discard every change")
                         .a11yId("discard"); // button#1
+                tx.button("Clear").help("").a11yId("clear"); // button#2
                 tx.entry().help(nameHelp).a11yId("fullname"); // entry#0
                 tx.slider(0.0, 1.0, 0.5, null)
                         .help("How loud the preview plays")

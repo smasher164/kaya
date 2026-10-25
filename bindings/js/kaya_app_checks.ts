@@ -697,10 +697,10 @@ if (isMainThread) {
   const helpRecs = shipped.pop()!;
   check("a live help packs tx_set_help's own bytes", helpRecs.length === 4 && asBytes(helpRecs[1]) === asBytes(wire.tx_set_help(field.id, "Saves the draft to disk")));
   check("and a live help from a Signal packs tx_bind_help's", asBytes(helpRecs[2]) === asBytes(wire.tx_bind_help(field.id, helpSig.id)));
-  // The root's wall is the one that refuses it (crates/kaya/src/scene.rs,
-  // empty_help_dies_at_declare): a binding that dropped it as a no-op
-  // would leave the root nothing to refuse.
-  check("an empty help passes through for the root's wall", asBytes(helpRecs[3]) === asBytes(wire.tx_set_help(field.id, "")));
+  // An empty help hides a default tooltip (crates/kaya/src/scene.rs,
+  // an_empty_help_reaches_the_backend): a binding that dropped it as a
+  // no-op would leave the default showing.
+  check("an empty help passes through to the backend", asBytes(helpRecs[3]) === asBytes(wire.tx_set_help(field.id, "")));
 
   let sourcedHelp!: K.Widget;
   let constHelp!: K.Widget;

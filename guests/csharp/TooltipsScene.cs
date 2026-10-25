@@ -26,6 +26,9 @@ static class TooltipsScene
                 tx.SetHelp(discard, "Throws the draft away");
                 tx.SetA11yHint(discard, "discard every change");
                 tx.SetA11yId(discard, "discard");
+                var clear = tx.Button("Clear");                         // button#2
+                tx.SetHelp(clear, "");
+                tx.SetA11yId(clear, "clear");
                 var name = tx.Entry();                                  // entry#0
                 tx.SetHelp(name, nameHelp);
                 tx.SetA11yId(name, "fullname");

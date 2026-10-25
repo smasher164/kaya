@@ -4141,10 +4141,46 @@ fn expander_describe(x: &GtkExpanderParts) {
 /// there (docs/tasks-s2-plan.md T3): a `GtkLinkButton`'s caption is its
 /// `label` property, not a `GtkLabel`'s `text`.
 fn segment_text_apply(toggle: &adw::Toggle, text: &str) {
-    if toggle.icon_name().is_some() {
-        toggle.set_tooltip(text);
-    } else {
+    // docs/tooltip-plan.md T6: every segment, not only an icon's.
+    toggle.set_tooltip(text);
+    if toggle.icon_name().is_none() {
         toggle.set_label(Some(text));
+    }
+}
+
+#[derive(Default)]
+struct Tip {
+    text: String,
+    label: String,
+    help: Option<String>,
+}
+
+/// docs/tooltip-plan.md T6: a button-like control's tooltip is the app's
+/// help when it set one (an empty one hides it), its accessible name
+/// otherwise.
+fn default_tip(core: &mut CoreState, id: WidgetId, prop: Prop, text: Option<String>) {
+    use gtk4::prelude::{Cast, WidgetExt};
+    // A checkbox is recorded too: `role toggle` swaps it for a button later.
+    let control: Option<gtk4::Widget> = match core.widgets.get(&id) {
+        Some(NativeWidget::Button(button)) => Some(button.clone().upcast()),
+        Some(NativeWidget::Toggle(toggle)) => Some(toggle.clone().upcast()),
+        Some(NativeWidget::Checkbox(_)) => None,
+        _ => return,
+    };
+    let tip = core.tips.entry(id.0).or_default();
+    match (prop, text) {
+        (Prop::Text, Some(s)) => tip.text = s,
+        (Prop::A11yLabel, Some(s)) => tip.label = s,
+        (Prop::Help, Some(s)) => tip.help = Some(s),
+        _ => {}
+    }
+    let shown = match &tip.help {
+        Some(help) => help.as_str(),
+        None if tip.label.is_empty() => tip.text.as_str(),
+        None => tip.label.as_str(),
+    };
+    if let Some(control) = control {
+        control.set_tooltip_text((!shown.is_empty()).then_some(shown));
     }
 }
 
@@ -6021,6 +6057,8 @@ struct CoreState {
     /// whose constructor sets the props before the text. The text arms
     /// re-apply it from here.
     a11y_labels: HashMap<u64, String>,
+    /// docs/tooltip-plan.md T6.
+    tips: HashMap<u64, Tip>,
     /// The declared `href` per widget (docs/tasks-s2-plan.md T3), because the
     /// prop and the `link` role arrive in either order: the role reads this to
     /// build the LinkButton, and a prop landing after writes both. Never an
@@ -15313,6 +15351,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             }
         }
         ApplyOp::Destroy { id } => {
+            core.tips.remove(&id.0);
             // The clipboard hub forgets the widget with it (the weak
             // ref would go stale on its own; the maps must not grow).
             core.clipboard.widgets.borrow_mut().remove(&id.0);
@@ -16772,6 +16811,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             );
         }
         ApplyOp::SetProp { id, prop, value } => {
+            let tip_input = match (prop, &value) {
+                (Prop::Text | Prop::A11yLabel | Prop::Help, Value::Str(s)) => Some(Some(s.clone())),
+                (Prop::Role, _) => Some(None),
+                _ => None,
+            };
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
                 // docs/expander-plan.md K2-K4: both widgets carry the header,
@@ -17959,6 +18003,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }
+            }
+            if let Some(text) = tip_input {
+                default_tip(core, id, prop, text);
             }
         }
         ApplyOp::AddChild { parent, child } => {
@@ -20429,6 +20476,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 segmented_symbols: HashMap::new(),
                 select_options: HashMap::new(),
                 a11y_labels: HashMap::new(),
+                tips: HashMap::new(),
                 hrefs: HashMap::new(),
                 select_models: HashMap::new(),
                 apply_quiet: std::rc::Rc::new(std::cell::Cell::new(false)),
@@ -21940,7 +21988,7 @@ impl crate::harness::Stage for GtkStage {
                     Some(widget) => widget
                         .tooltip_text()
                         .map(|s| s.to_string())
-                        .unwrap_or_else(|| "<no help on this widget>".to_owned()),
+                        .unwrap_or_default(),
                 }
             });
         }

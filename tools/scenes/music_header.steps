@@ -51,3 +51,6 @@ expect_checked checkbox@favorite on
 toggle checkbox@favorite off
 expect_checked checkbox@favorite off
 expect_pref music.favorites ""
+# A button the app gave no help shows its name as its tooltip on the
+# desktops (docs/tooltip-plan.md T6).
+expect_help button@album_artist "Pierce Murphy"

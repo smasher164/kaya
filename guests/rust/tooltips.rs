@@ -31,6 +31,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_hint("discard every change")
                     .id();
                 tx.a11y_id(discard, "discard");
+                let clear = tx.button("Clear").help("").id(); // button#2
+                tx.a11y_id(clear, "clear");
                 let name = tx.entry().help(name_help).id(); // entry#0
                 tx.a11y_id(name, "fullname");
                 let volume = tx.slider(0.0, 1.0, 0.5).help("How loud the preview plays").id(); // slider#0

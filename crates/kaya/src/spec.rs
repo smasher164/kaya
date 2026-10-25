@@ -197,6 +197,8 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // Windows), nothing visible on the phones or the iPad (iPadOS draws no
     // tooltip at all — Apple's documentation, measured to match 2026-09-05)
     // — and hands it to its assistive reader itself (T2, T3). kaya draws none.
+    // A desktop's button-like control defaults to its name; an empty help
+    // hides that (T6).
     ("help", 26, PropKind::Str),
     // ONE CHILD'S CROSS-AXIS STRETCH (docs/layout-knobs-plan.md §1): true
     // spans the container's cross axis (a column's width, a row's height)

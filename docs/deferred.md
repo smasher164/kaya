@@ -15536,7 +15536,8 @@ THE BREADTH SLICE, two worktrees merged 2026-09-05:
   fake-name negative 9/9 on every run) and tools/tpl-surfaces.py's TPL_PROPS
   plus all eight PROP_MEMBERS rows, with tools/checks/py-node-props.py's WANT
   for python's zone — all nine watched red one binding at a time. The empty
-  help had NO test at the core and has two now (`empty_help_dies_at_declare`
+  help had NO test at the core and has two now (`empty_help_dies_at_declare`,
+  since 2026-10-25 `an_empty_help_reaches_the_backend` under T6's opt-out,
   and its positive control); the python and JS negatives compare `help`'s
   bytes to the generated setters' in both zones. The ANDROID roster waits on
   the Compose arm above.

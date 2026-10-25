@@ -476,6 +476,8 @@ struct CoreState {
     filled: HashMap<WidgetId, i64>,
     /// The composers (docs/composer-plan.md §4), for their default inset.
     composers: HashMap<WidgetId, ()>,
+    /// docs/tooltip-plan.md T6.
+    tips: HashMap<u64, Tip>,
     /// Icon-only buttons and whether each is prominent (docs/composer-plan.md
     /// §2, §3): the symbol and the role arrive in either order, and each arm
     /// restyles from both.
@@ -1385,13 +1387,60 @@ fn icon_uia_name(icon: &IconElement) -> String {
 fn segment_text_apply(item: &SelectorBarItem, text: &str) -> windows_core::Result<()> {
     let name = HSTRING::from(text);
     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(item, &name)?;
-    if item.Icon().is_ok() {
+    // docs/tooltip-plan.md T6: every segment, not only an icon's.
+    bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
+        item,
+        &PropertyValue::CreateString(&name)?,
+    )?;
+    if item.Icon().is_ok() { Ok(()) } else { item.SetText(&name) }
+}
+
+#[derive(Default)]
+struct Tip {
+    text: String,
+    label: String,
+    help: Option<String>,
+}
+
+fn record_tip(core: &mut CoreState, id: WidgetId, prop: Prop, s: &str) {
+    if !matches!(core.widgets.get(&id), Some(NativeWidget::Button { .. } | NativeWidget::Checkbox { .. })) {
+        return;
+    }
+    let tip = core.tips.entry(id.0).or_default();
+    match prop {
+        Prop::Text => tip.text = s.to_owned(),
+        Prop::A11yLabel => tip.label = s.to_owned(),
+        _ => tip.help = Some(s.to_owned()),
+    }
+}
+
+/// docs/tooltip-plan.md T6: a button-like control's tooltip is the app's
+/// help when it set one (an empty one hides it), its accessible name
+/// otherwise.
+fn default_tip(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    let element = match core.widgets.get(&id) {
+        Some(w @ NativeWidget::Button { .. })
+        | Some(w @ NativeWidget::Checkbox { toggle: Some(_), .. }) => w.identity_element()?,
+        _ => return Ok(()),
+    };
+    let Some(tip) = core.tips.get(&id.0) else {
+        return Ok(());
+    };
+    let shown = match &tip.help {
+        Some(help) => help.as_str(),
+        None if tip.label.is_empty() => tip.text.as_str(),
+        None => tip.label.as_str(),
+    };
+    if shown.is_empty() {
         bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
-            item,
-            &PropertyValue::CreateString(&name)?,
+            &element,
+            None::<&windows_core::IInspectable>,
         )
     } else {
-        item.SetText(&name)
+        bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
+            &element,
+            &PropertyValue::CreateString(&HSTRING::from(shown))?,
+        )
     }
 }
 
@@ -16942,6 +16991,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             core.child_order.place(parent, child, before);
         }
         ApplyOp::Destroy { id } => {
+            core.tips.remove(&id.0);
             // A destroyed anchor takes its context attachment with it: a
             // For-row removal must not leave the harness's open-menu
             // pointer dangling. The Stage's activation keeps its own
@@ -17987,6 +18037,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             .expect("SetCompleted");
         }
         ApplyOp::SetProp { id, prop, value } => {
+            if let (Prop::Text | Prop::A11yLabel | Prop::Help, Value::Str(s)) = (prop, &value) {
+                record_tip(core, id, prop, s);
+            }
             // Grow is handled ahead of the per-kind table: it is the one
             // kind-agnostic prop, and its effect lands on the parent's
             // track definitions rather than on the widget itself.
@@ -18058,7 +18111,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // match below holds `core.widgets` borrowed out of.
             if let (Prop::Role, Value::I64(role)) = (prop, &value) {
                 if apply_control_role(core, id, *role)? {
-                    return Ok(());
+                    return default_tip(core, id);
                 }
             }
             // docs/expander-plan.md K3, K8: an app-named header keeps its name,
@@ -19039,6 +19092,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             if let Some(NativeWidget::Expander { expander, .. }) = core.widgets.get(&id) {
                 expander_header_sync(expander)?;
+            }
+            if matches!(prop, Prop::Text | Prop::A11yLabel | Prop::Help) {
+                default_tip(core, id)?;
             }
         }
         ApplyOp::AddChild { parent, child } => {
@@ -21307,6 +21363,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             container_insets: HashMap::new(),
             filled: HashMap::new(),
             composers: HashMap::new(),
+            tips: HashMap::new(),
             symbol_buttons: HashMap::new(),
             symbol_values: HashMap::new(),
             prominent_buttons: HashMap::new(),
@@ -24468,12 +24525,17 @@ impl crate::harness::Stage for WinUiStage {
             let Some(element) = target_element(core, target)? else {
                 return Ok("<no such target>".to_owned());
             };
-            let tip = bindings::Microsoft::UI::Xaml::Controls::ToolTipService::GetToolTip(&element)?;
+            // A cleared tooltip reads back as a null object, an Err carrying S_OK.
+            let tip = match bindings::Microsoft::UI::Xaml::Controls::ToolTipService::GetToolTip(&element) {
+                Ok(tip) => tip,
+                Err(e) if e.code().is_ok() => return Ok(String::new()),
+                Err(e) => return Err(e),
+            };
             let text: windows_core::HSTRING = tip
                 .cast::<bindings::Windows::Foundation::IPropertyValue>()
                 .and_then(|v| v.GetString())
                 .unwrap_or_default();
-            Ok(if text.is_empty() { "<no help on this widget>".to_owned() } else { text.to_string() })
+            Ok(text.to_string())
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

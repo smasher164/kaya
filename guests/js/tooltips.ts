@@ -18,6 +18,7 @@ const { nameHelp } = app.window({ title: "tooltips" }, () => {
     settings.help("The settings for this account").a11yId("settings");
     kaya.button("Save", { onClick: onSave }).help("Saves the draft to disk").a11yId("save"); // button#0
     kaya.button("Discard").help("Throws the draft away").a11yHint("discard every change").a11yId("discard"); // button#1
+    kaya.button("Clear").help("").a11yId("clear"); // button#2
     kaya.entry().help(nameHelp).a11yId("fullname"); // entry#0
     kaya.slider({ min: 0, max: 1, value: 0.5 }).help("How loud the preview plays").a11yId("volume"); // slider#0
     for (const account of accounts) {

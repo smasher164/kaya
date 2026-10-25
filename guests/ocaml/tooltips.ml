@@ -22,6 +22,7 @@ let () =
                 write name_help ("Your name, as saved"));
             button ~text:"Discard" ~help:"Throws the draft away"   (* button#1 *)
               ~a11y_hint:"discard every change" ~a11y_id:"discard";
+            button ~text:"Clear" ~help:"" ~a11y_id:"clear";          (* button#2 *)
             entry ~help_bind:name_help ~a11y_id:"fullname";        (* entry#0 *)
             slider ~help:"How loud the preview plays"              (* slider#0 *)
               ~a11y_id:"volume" ~min:0.0 ~max:1.0 ~value:0.5;

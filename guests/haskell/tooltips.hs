@@ -46,6 +46,7 @@ main = kayaMain $ \app -> do
               A11yHint "discard every change",
               A11yId "discard"
             ],
+          buttonOn "Clear" (return ()) [Help "", A11yId "clear"], -- button#2
           entryOn (const (return ())) [HelpBound nameHelp, A11yId "fullname"], -- entry#0
           sliderOn 0.0 1.0 0.5 (const (return ())) -- slider#0
             [Help "How loud the preview plays", A11yId "volume"],

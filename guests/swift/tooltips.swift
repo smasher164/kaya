@@ -25,6 +25,9 @@ KayaApp.run { app in
             tx.setHelp(discard, "Throws the draft away")
             tx.setA11yHint(discard, "discard every change")
             tx.setA11yId(discard, "discard")
+            let clear = tx.button("Clear")  // button#2
+            tx.setHelp(clear, "")
+            tx.setA11yId(clear, "clear")
             let name = tx.entry()  // entry#0
             tx.setHelp(name, nameHelp)
             tx.setA11yId(name, "fullname")

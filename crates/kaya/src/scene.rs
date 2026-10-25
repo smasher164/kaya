@@ -2892,14 +2892,7 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
              the label off and let the platform derive the name)"
         );
     }
-    // Help text says something or is left off: an empty tooltip is a blank
-    // bubble on three platforms and a silent hint on the other two.
-    if let (Prop::Help, Value::Str(help)) = (prop, value) {
-        assert!(
-            !help.is_empty(),
-            "kaya: {kind:?} declares empty help text — say what the control is, or leave help off"
-        );
-    }
+    // An empty help is the app's "no tooltip here" (docs/tooltip-plan.md T6).
     // A placeholder says something or is left off, for help's reason.
     if let (Prop::Placeholder, Value::Str(placeholder)) = (prop, value) {
         assert!(
@@ -13140,20 +13133,27 @@ mod tests {
         ]);
     }
 
-    /// The a11y label's rule one prop over (docs/tooltip-plan.md T1): the
-    /// refusal shipped with the depth slice and nothing ran it.
+    /// docs/tooltip-plan.md T6: an empty help reaches the backend, which
+    /// shows no tooltip where a button-like control would default to one.
     #[test]
-    #[should_panic(expected = "declares empty help text")]
-    fn empty_help_dies_at_declare() {
+    fn an_empty_help_reaches_the_backend() {
         let mut scene = Scene::new();
-        scene.apply(vec![
-            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Button },
             TxOp::SetProperty {
-                widget: WidgetId(1),
+                widget: WidgetId(2),
                 prop: Prop::Help,
                 value: PropValue::Const(Value::Str(String::new())),
             },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
         ]);
+        assert!(
+            ops.iter().any(|op| matches!(op,
+                ApplyOp::SetProp { prop: Prop::Help, value: Value::Str(s), .. } if s.is_empty())),
+            "the empty help should reach the backend"
+        );
     }
 
     /// Its positive control, so the negative is not passing against a
