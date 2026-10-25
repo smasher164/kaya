@@ -1974,14 +1974,20 @@ findings, with watched negatives and substitution counts)
 
 ## tools/check-design-generation.py
 
-`tools/check-design-generation.py` (BOTH macOS design generations stay
-on the mac lane: SwiftUI reads the MAIN EXECUTABLE's sdk stamp, so
-flake.nix's apple-sdk_26 keeps the kaya-linked legs modern while the
-vendor-built hosts — python3, dotnet, the zulu JVM — hold the compat
-side, which is where the Button measurement bug class lives and which
-nobody chose. It measures COMPILES rather than artifacts (two probes
-built on the spot, three hosts resolved off PATH the way the lane
-resolves them) and refuses a verdict unless all five stamps were read)
+`tools/check-design-generation.py` (EVERY mac leg starts in a main
+executable stamped for macOS 26's modern design generation: SwiftUI reads
+the MAIN EXECUTABLE's sdk stamp, and the vendor hosts stamp 13.3 and 14.4,
+so python, java, C# and JS start in the hosts tools/mac/kaya-host.c builds
+(the maintainer, 2026-10-25: "drop the old look everywhere"). It measures
+COMPILES rather than artifacts: two probes and the four hosts, built on the
+spot through the lane's own build_hosts, six stamps or no verdict; it reads
+the lane's argv table so that no language starts in a name resolved off
+PATH; and it makes require_modern's refusal print against the shell's own
+python3.14 (sdk 14.4). The runtime half is require_modern in
+tools/lib/lanes/mac.py: every leg's argv passes it, and a leg host stamped
+below 26 stops the lane naming the host to use. Watched red: python routed
+back to `python3` (the gate's route clause, and run-leg's refusal), and
+KAYA_DESIGN_GEN_SUBST pointing kaya-python at python3.14)
 
 ## tools/check-symbols.py
 

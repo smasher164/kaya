@@ -31,6 +31,7 @@ COMPONENTS = {
     # android/*/build, a SIBLING of src), so the marker this id feeds
     # cannot land inside its own inputs.
     "compose": ["android/kaya/src", "bindings/java"],
+    "mac-host": ["tools/mac/kaya-host.c"],
 }
 
 # What each GATE reads BEYOND the implicit set every one of them gets:

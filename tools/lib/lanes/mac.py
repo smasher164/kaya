@@ -1032,9 +1032,140 @@ GO_GUESTS = "target/go-guests"
 # THE PYTHON APPS THAT DECLARE AN IDENTITY OF THEIR OWN run as their bundle
 # (docs/media-player-plan.md M22 (6)): the system's Now Playing names a
 # process by its bundle's display name, and a bare python3 by "python3.14"
-# (measured, M22 (3)). The bundle's executable is a copy of the interpreter,
-# so the process's executable is inside it.
+# (measured, M22 (3)). The bundle's executable is a copy of kaya-python, so
+# the process's executable is inside it.
 PY_GUESTS = "target/py-guests"
+
+# THE HOSTS (tools/mac/kaya-host.c): every python, java, C# and JS leg starts
+# in a main executable this lane compiled, because SwiftUI picks its design
+# generation from the main executable's sdk stamp and the vendor hosts stamp
+# 13.3 and 14.4 (docs/traps.md, SwiftUI resolves its design generation).
+HOSTS_DIR = "target/mac-hosts"
+HOSTS = {"python": "kaya-python", "java": "kaya-java", "csharp": "kaya-dotnet",
+         "js": "kaya-node"}
+HOST_SOURCE = "tools/mac/kaya-host.c"
+_ROOT = pathlib.Path(__file__).resolve().parents[3]
+
+
+def host_path(lang):
+    return f"{HOSTS_DIR}/{HOSTS[lang]}"
+
+
+def _host_runtimes():
+    """{lang: (defines, link args)} out of the dev shell's own runtimes."""
+    def out(argv):
+        got = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", check=False)
+        if got.returncode != 0:
+            raise SystemExit(f"mac lane: {' '.join(argv)} failed: {got.stderr.strip()}")
+        return got.stdout.strip()
+
+    def tool(name):
+        found = shutil.which(name)
+        if found is None:
+            raise SystemExit(f"mac lane: `{name}` is not on PATH, so its kaya host cannot be built")
+        return pathlib.Path(os.path.realpath(found))
+
+    libpython = pathlib.Path(out(["python3", "-c", "import sysconfig; print(sysconfig.get_config_var('LIBDIR') "
+                                  "+ '/' + sysconfig.get_config_var('LDLIBRARY'))"]))
+    java_home = tool("java").parents[1]
+    release = (java_home / "release").read_text(encoding="utf-8")
+    version = re.search(r'^JAVA_RUNTIME_VERSION="([^"]+)"', release, re.M)
+    dotnet_root = tool("dotnet").parent
+    packs = sorted(dotnet_root.glob("packs/Microsoft.NETCore.App.Host.osx-arm64/*/runtimes/osx-arm64/native/"
+                                    "libnethost.a"),
+                   key=lambda p: [int(x) if x.isdigit() else 0 for x in p.parts[-5].split(".")])
+    if not libpython.is_file() or version is None or not packs:
+        raise SystemExit(f"mac lane: a host's runtime is not where the shell says: libpython {libpython} "
+                         f"(file: {libpython.is_file()}), {java_home}/release JAVA_RUNTIME_VERSION "
+                         f"{version.group(1) if version else None}, libnethost.a under {dotnet_root}/packs: "
+                         f"{len(packs)}")
+    return {
+        "python": (["-DKAYA_HOST_PYTHON"], [str(libpython)]),
+        "java": (["-DKAYA_HOST_JAVA", f'-DKAYA_JAVA_VERSION="{version.group(1)}"'],
+                 [str(java_home / "lib/libjli.dylib"), f"-Wl,-rpath,{java_home / 'lib'}"]),
+        "csharp": (["-DKAYA_HOST_DOTNET", f'-DKAYA_DOTNET_ROOT="{dotnet_root}"'], [str(packs[-1]), "-lc++"]),
+        "js": (["-DKAYA_HOST_NODE", f'-DKAYA_NODE_PATH="{tool("node")}"'], []),
+    }
+
+
+def build_hosts(root, langs=None, out_dir=None, log=None):
+    """Compile tools/mac/kaya-host.c once per runtime with the dev shell's cc
+    (flake.nix's apple-sdk_26), each verified by its build id and its stamp.
+    Returns 0, or 1 with the reason written to `log` (stdout when None)."""
+    root = pathlib.Path(root)
+    out = pathlib.Path(out_dir) if out_dir else root / HOSTS_DIR
+    out.mkdir(parents=True, exist_ok=True)
+    say = (open(log, "a", encoding="utf-8") if log else sys.stdout)
+    try:
+        bid = subprocess.run([str(root / "tools/build-id.py"), "mac-host"], capture_output=True, text=True,
+                             encoding="utf-8", check=False)
+        if bid.returncode != 0:
+            say.write(f"build_hosts: tools/build-id.py mac-host failed: {bid.stderr.strip()}\n")
+            return 1
+        runtimes = _host_runtimes()
+        for lang in langs or HOSTS:
+            defines, link = runtimes[lang]
+            dest = out / HOSTS[lang]
+            dest.unlink(missing_ok=True)
+            cc = subprocess.run(["cc", "-O2", "-Wall", "-Werror", f'-DKAYA_BUILD_ID="{bid.stdout.strip()}"',
+                                 *defines, str(root / HOST_SOURCE), *link, "-o", str(dest)],
+                                capture_output=True, text=True, encoding="utf-8", check=False)
+            if cc.returncode != 0:
+                say.write(f"build_hosts: {HOSTS[lang]} did not compile:\n{cc.stderr}")
+                return 1
+            verify = subprocess.run([str(root / "tools/build-id.py"), "--verify", "--component", "mac-host",
+                                     str(dest)], capture_output=True, text=True, encoding="utf-8", check=False)
+            if verify.returncode != 0:
+                say.write(f"build_hosts: {verify.stderr}")
+                return 1
+            refused = modern_refusal(dest, lang)
+            if refused:
+                say.write(f"build_hosts: {refused}\n")
+                return 1
+        return 0
+    finally:
+        if log:
+            say.close()
+
+
+def modern_refusal(exe, lang):
+    """None when `exe` is stamped for macOS's modern design generation, else
+    the sentence a leg refuses with."""
+    import macho
+    st, why = macho.stamp(exe)
+    if st is None:
+        return f"the {lang} legs' main executable {exe} {why}"
+    plat, minos, sdk, which = st
+    if plat == macho.PLATFORM_MACOS and sdk >= macho.MODERN_FLOOR:
+        return None
+    host = (f"{host_path(lang)}, built from {HOST_SOURCE} by build_hosts" if lang in HOSTS
+            else "a binary this lane links with the dev shell's toolchain")
+    return (f"the {lang} legs would start in {exe}, stamped platform {plat} sdk {macho.show(sdk)} "
+            f"({which}, minos {macho.show(minos)}); below sdk {macho.floor_of(macho.MODERN_FLOOR)} "
+            f"macOS draws the old (compatibility) design generation. A {lang} leg starts in {host} "
+            f"(docs/traps.md, SwiftUI resolves its design generation from the MAIN EXECUTABLE's SDK stamp)")
+
+
+def require_modern(argv, lang):
+    """THE WALL every mac leg's argv passes through: a main executable
+    stamped below the modern floor refuses the lane, naming the host."""
+    exe = argv[0]
+    if "/" not in exe:
+        found = shutil.which(exe)
+        if found is None:
+            return argv
+        path = pathlib.Path(os.path.realpath(found))
+    else:
+        path = _ROOT / exe if not os.path.isabs(exe) else pathlib.Path(exe)
+    if not path.is_file():
+        if lang in HOSTS:
+            raise SystemExit(f"mac lane: the {lang} host {path} is not built; build_hosts in "
+                             f"tools/lib/lanes/mac.py builds it (validate-mac and run-leg call it)")
+        return argv
+    refused = modern_refusal(path, lang)
+    if refused:
+        raise SystemExit(f"mac lane: {refused}")
+    return argv
 
 
 def py_bundled(stem):
@@ -1044,17 +1175,13 @@ def py_bundled(stem):
 
 def stage_python(root, stems):
     """Each bundled python app's .app, through the generator's mac arm with
-    the app's own declaration; a fresh python3 copy every time."""
+    the app's own declaration; a fresh kaya-python copy every time."""
     from packaging import identity as app_identity
     from packaging import mac as packaging_mac
-    # THE INTERPRETER ITSELF, not the dev shell's python3, which is nix's C
-    # wrapper that execs it: a copied wrapper would run the process from the
-    # store again, outside the bundle.
-    asked = subprocess.run(["python3", "-c", "import sys, sysconfig; print(sysconfig.get_config_var('BINDIR') "
-                            "+ '/python%d.%d' % sys.version_info[:2])"], capture_output=True, text=True)
-    python = asked.stdout.strip()
-    if asked.returncode != 0 or not pathlib.Path(python).is_file():
-        raise SystemExit(f"mac lane: python3 named no interpreter to wrap in the music app's bundle: {asked.stderr.strip()}")
+    python = root / host_path("python")
+    if not python.is_file():
+        raise SystemExit(f"mac lane: {python} is not built, and the bundled python apps wrap it; "
+                         f"build_hosts builds it")
     staging = root / PY_GUESTS
     staging.mkdir(parents=True, exist_ok=True)
     for stem in stems:
@@ -1351,23 +1478,27 @@ def act_one_ok(log_text):
 
 
 def leg_argv(scene, lang, hs_bin):
-    """The guest command for one leg; `hs_bin(stem)` resolves a Haskell
-    binary (cabal list-bin) so this module does no I/O of its own."""
+    """The guest command for one leg, through require_modern's stamp wall;
+    `hs_bin(stem)` resolves a Haskell binary (cabal list-bin)."""
     stem = guest_stem(scene)
+    return require_modern(_guest_argv(scene, lang, hs_bin, stem), lang)
+
+
+def _guest_argv(scene, lang, hs_bin, stem):
     if lang == "rust":
         return [rust_guest_path(stem)]
     if lang == "python":
         if py_bundled(stem):
             return [f"{PY_GUESTS}/{stem}.app/Contents/MacOS/{stem}", f"guests/python/{stem}.py"]
-        return ["python3", f"guests/python/{stem}.py"]
+        return [host_path("python"), f"guests/python/{stem}.py"]
     if lang == "js":
-        return ["node", f"guests/js/{stem}.ts"]
+        return [host_path("js"), f"guests/js/{stem}.ts"]
     if lang == "go":
         if scene in BUNDLED_GO_SCENES:
             return [f"{GO_GUESTS}/{scene}.app/Contents/MacOS/{scene}"]
         return [f"{GO_GUESTS}/kaya-go"]
     if lang == "csharp":
-        return ["dotnet", "exec", CS_GUEST]
+        return [host_path("csharp"), CS_GUEST]
     if lang == "ocaml":
         return [f"_build/default/guests/ocaml/{stem}.exe"]
     if lang == "haskell":
@@ -1375,7 +1506,7 @@ def leg_argv(scene, lang, hs_bin):
     if lang == "swift":
         return [f"target/swift-guests/{stem}"]
     if lang == "java":
-        return ["java", "-XstartOnFirstThread", "-cp",
+        return [host_path("java"), "-XstartOnFirstThread", "-cp",
                 "target/java-guests", "dev.kaya.guests.Main"]
     if lang == "c":
         return [f"target/c-guests/{stem}"]

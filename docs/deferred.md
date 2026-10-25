@@ -4186,8 +4186,14 @@ unpicked.
   languages, optional static analyzers,
   multi-window ergonomics — waits for the guide, and the guide waits
   for maturity.
-- STANDING CONSTRAINT — do not bump the flake SDK without preserving
-  a compat-generation leg. The nix shell links every non-swift leg
+- ~~STANDING CONSTRAINT — do not bump the flake SDK without preserving
+  a compat-generation leg.~~ RETIRED 2026-10-25 (the maintainer: "go
+  ahead, drop the old look everywhere"): python, java, C# and JS start in
+  tools/mac/kaya-host.c's modern-stamped hosts, so no mac leg runs the
+  compat generation, and tools/check-design-generation.py now holds the
+  opposite wall, every leg's main executable modern. The NSButton bridges
+  stay (DESIGN.md, the macOS button): an app a user starts in an older
+  host still gets the compat generation. History below. The nix shell links every non-swift leg
   binary against its pinned SDK (audit 2026-07-21: python3/go/dotnet/
   ocaml/rust 14.4, zulu JDK 11.3), so those legs exercise SwiftUI 26's
   COMPATIBILITY design generation, while the swift mac guests compile

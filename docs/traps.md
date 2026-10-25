@@ -60,7 +60,9 @@ vendor-built hosts (SDK stamps 13.3 and 14.4, the compat design generation)
 NSButton's bezel is 64/86/64/70/96 pt for the five captions, 412 pt with the
 gaps and 428 with the leading pad; on the modern stamp the same row is 378, so
 the rust, go, ocaml, haskell and swift legs fit 420 and passed. Deleting the
-java domain's key made scrollto-java open at 900x450 and pass. The same class
+java domain's key made scrollto-java open at 900x450 and pass. (Since
+2026-10-25 those four languages start in kaya's own hosts, whose domains are
+`kaya-python`, `kaya-java`, `kaya-dotnet` and `kaya-node`, modern-stamped.) The same class
 produced "A hand-run resize_window poisons the NEXT python leg" below.
 
 Kaya's own window memory (docs/tasks-s4-plan.md P4, keyed by the app and
@@ -2165,10 +2167,14 @@ the same patterns return through interpreter drop-downs
   (flake.nix's `buildInputs = [ apple-sdk_26 ]`), the kaya-linked legs
   (rust, go, c, ocaml, haskell — and swift, modern already via the
   system toolchain) stamp sdk 26.5 with minos 14.0 and exercise the
-  MODERN generation, while the vendor-stamped hosts (python 14.4,
-  .NET 14.4, zulu JDK 11.3) keep the COMPAT generation covered —
-  observed coverage, held by tools/check-design-generation.py rather
-  than by this paragraph. In the compat generation `Button.sizeThatFits` answers borderless metrics while
+  MODERN generation. The vendor hosts stamp below it (nixpkgs python3
+  and node 14.4, Microsoft's dotnet 14.4, Azul's zulu java 13.3), so
+  SINCE 2026-10-25 ("drop the old look everywhere") python, java, C#
+  and JS start in tools/mac/kaya-host.c's hosts, compiled by the
+  shell's cc and hosting the runtime in their own process
+  (Py_BytesMain, JLI_Launch, hostfxr, node::Start); no lane runs the
+  compat generation any more (tools/check-design-generation.py,
+  require_modern in tools/lib/lanes/mac.py). In the compat generation `Button.sizeThatFits` answers borderless metrics while
   the renderer draws the bezel (caption truncates to "t…"). Guard:
   macOS controls that own chrome are bridged to AppKit
   (NSViewRepresentable + `fittingSize`), which cannot self-disagree
@@ -18947,7 +18953,9 @@ under the python host (SDK 14.4) 509 to 516 ms. The compat generation
 draws the toggle as an AppKit button (`SwiftUIAppKitButton`, an
 NSButtonCell tracking area) that waits half a second; the modern one draws
 it in SwiftUI. The host's SDK stamp chooses (the design generation entry
-above); kaya's code plays no part.
+above); kaya's code plays no part. Since 2026-10-25 the music app starts in
+kaya-python (sdk 26.5), and the same real-pointer probe read the hover 5 to
+11 ms after the pointer arrived, against 510 to 517 ms on python3.14.
 
 ## WinUI's pressed card unreadable (measured 2026-10-24)
 
@@ -19043,3 +19051,17 @@ expect_ground probes, 0.047 from the dark window ground, inside the 0.06 the
 now answers image when the picture's own pixel there is nearer the sample
 than the ground is, and none otherwise; music_artist green on the mac both
 ways.
+
+## dlopen() takes nixpkgs' node executable, and node::Start runs from it (measured 2026-10-25)
+
+nixpkgs' node is a 66 MB executable with no libnode (nodejs.nix has no
+`--shared`), yet on macOS 26 `dlopen(<store>/bin/node, RTLD_NOW |
+RTLD_GLOBAL)` loads it and `node::Start(int, char**)` (`_ZN4node5StartEiPPc`)
+is exported beside 178 `napi_*`, so kaya-node hosts node in its own process
+and libkaya's N-API symbols resolve against it (RTLD_GLOBAL:
+crates/kaya/src/node.rs looks each one up with `dlsym(dlopen(NULL))`, which
+sees only global images). `process.execPath` is kaya-node.
+If a later macOS refuses to dlopen an executable, kaya-node says so at start
+and the options are a node built with `--shared` or with apple-sdk_26 (a
+source build; nixpkgs caches neither).
+

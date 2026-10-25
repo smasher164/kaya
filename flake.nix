@@ -156,8 +156,8 @@
           # because SwiftUI reads the sdk field (docs/traps.md). MUST be
           # buildInputs, not packages — packages is mkShell's alias for
           # nativeBuildInputs and the SDK hook then breaks cc outright
-          # (docs/chrome/sdk-bump-scout.md §2). The design-generation
-          # split is verified by tools/check-design-generation.py.
+          # (docs/chrome/sdk-bump-scout.md §2). Every mac leg's main
+          # executable is held modern by tools/check-design-generation.py.
           buildInputs = [ pkgs.apple-sdk_26 ];
           packages = with pkgs; [
             # A bare `swiftc` in this shell is a WALL, not a compiler: the

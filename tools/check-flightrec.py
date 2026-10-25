@@ -2280,7 +2280,7 @@ def census_mac_apps(src):
     scope = {"__name__": "lane_health_shadow"}
     exec(compile(health, LANE_HEALTH, "exec"), scope)
     named = scope["LANE_APPS"]
-    gate.counted("the mac lane's own apps excluded by name", list(named), floor=5)
+    gate.counted("the mac lane's own apps excluded by name", list(named), floor=1)
     for label, _how, _pattern, rel, needle in named:
         if rel not in src:
             found.append(f"{LANE_HEALTH}: the exclusion `{label}` names {rel}, which this "
@@ -3528,9 +3528,9 @@ for label, rel, pattern, repl, want, check in (
         ("AP3 the lane's end reading without its apps", LANE_HEALTH,
          r"for sentence in MAC_APPS\.end\(\):", "for sentence in []:",
          "mac_report no longer takes the app reading", census_mac_apps),
-        ("AP4 the java guest launched by another spelling", MAC_LANE,
-         r'"-XstartOnFirstThread", "-cp",', '"-XstartOnFirstThread", "-classpath",',
-         "the exclusion `java` is no longer named", census_mac_apps),
+        ("AP4 the lane's argv builder renamed", MAC_LANE,
+         r'def leg_argv\(scene, lang, hs_bin\):', 'def leg_argv(scene, lang, hs):',
+         "the exclusion `a binary built in the tree` is no longer named", census_mac_apps),
         ("AP5 a leg's end that reads nothing", LANE_HEALTH,
          r'self\.sample\(f"after \{entry\[0\]\}"\)', "pass",
          "a leg's end no longer reads the apps", census_mac_apps),

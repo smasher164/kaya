@@ -115,6 +115,9 @@ if lang == "rust":
     # inode and the bundled scenes' .app wrapper both live there.
     lane.stage_rust(ROOT, [stem])
 
+if lang in lane.HOSTS and lane.build_hosts(ROOT, [lang]) != 0:
+    print(f"run-leg: the {lang} host did not build (tools/mac/kaya-host.c)", file=sys.stderr)
+    sys.exit(1)
 if lang == "python":
     lane.stage_python(ROOT, [lane.guest_stem(scene)])
 

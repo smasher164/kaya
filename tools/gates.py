@@ -177,13 +177,11 @@ GATES = [
      "it is the cache's own gate — a cached verdict about the cache is "
      "worth nothing"),
     ("check-pins", ["tools/check-pins.py"], True, ""),
-    # BOTH macOS design generations stay on the mac lane: SwiftUI reads
-    # the MAIN EXECUTABLE's sdk stamp, so the kaya-linked legs are
-    # modern and the vendor-built hosts hold the compat side.
+    # docs/gates.md: every mac leg's main executable is stamped modern.
     ("check-design-generation", ["tools/check-design-generation.py"], False,
-     "its inputs are the toolchain and the vendor hosts on the machine, not "
+     "its inputs are the toolchain and the runtimes on the machine, not "
      "files in this tree — a source-keyed skip would go quiet exactly when a "
-     "nixpkgs or vendor rebuild moved a stamp, which is the move it exists to "
+     "nixpkgs or SDK move changed a stamp, which is the move it exists to "
      "catch"),
     # An SF Symbols name above the OS floor renders BLANK on the floor
     # and resolves fine on every machine the project has — no scene can

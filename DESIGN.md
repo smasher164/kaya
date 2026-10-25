@@ -3681,6 +3681,12 @@ a GeometryReader reads the 38x20 layout box under the bezel), and in
 the modern generation all three are honest. There is no style,
 control size, or wrapper that escapes the compat table; only the
 control that measures itself does.
+Since 2026-10-25 kaya starts every app it launches on the Mac in a
+modern-stamped main executable (tools/mac/kaya-host.c hosts python,
+java, C# and JS in its own process), so its own lanes no longer run the
+compat generation; the bridge stays for apps users start in older hosts,
+and whether SwiftUI's Button could replace it under a modern stamp is
+unmeasured.
 The control assay (probe every vocabulary control both ways) cleared
 the rest: entry, label, image, slider, and checkbox measure what they
 draw; the knob and focus-ring spill are decoration outside the layout

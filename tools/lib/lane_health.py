@@ -713,14 +713,6 @@ APP_HEAD = re.compile(r'^\s*\d+\) "(.*)" (ASN:\S+?):?\s*$')
 LANE_APPS = (
     ("a binary built in the tree", "under-root", "",
      "tools/lib/lanes/mac.py", "def leg_argv(scene, lang, hs_bin):"),
-    ("python3", "name", r"[Pp]ython(?:3(?:\.\d+)?)?",
-     "tools/lib/lanes/mac.py", 'return ["python3", f"guests/python/{stem}.py"]'),
-    ("node", "name", r"node",
-     "tools/lib/lanes/mac.py", 'return ["node", f"guests/js/{stem}.ts"]'),
-    ("dotnet", "name", r"dotnet",
-     "tools/lib/lanes/mac.py", 'return ["dotnet", "exec", CS_GUEST]'),
-    ("java", "name", r"java",
-     "tools/lib/lanes/mac.py", 'return ["java", "-XstartOnFirstThread", "-cp",'),
 )
 # Host agents macOS itself relaunches through every lane, named so the record
 # stays readable (docs/traps.md, Accessibility Services every minute).
@@ -1715,7 +1707,7 @@ PREVIEW = _app(3, "Preview", "ASN:0x0-0x25e44f00", "com.apple.Preview",
 HIJACK = _app(4, "Preview", "ASN:0x0-0x25e44e1f", "com.apple.Preview",
               "/repo/target/go-guests/kaya-go", 84118, "Foreground",
               checkin="2026/10/14 16:00:38")
-PY_GUEST = _app(5, "python3.13", "ASN:0x0-0x2a2a2a", "", "/nix/store/x-python3/bin/python3.13",
+PY_GUEST = _app(5, "kaya-python", "ASN:0x0-0x2a2a2a", "", "/repo/target/mac-hosts/kaya-python",
                 900, "UIElement", checkin="2026/10/14 16:00:31")
 DAEMON = _app(6, "helperd", "ASN:0x0-0x3b3b3b", "com.example.helperd", "/usr/libexec/helperd",
               901, "BackgroundOnly", checkin="2026/10/14 16:00:32")
@@ -2127,7 +2119,7 @@ def drive():
              "(flightrec-winlist: 2 window(s)); gone by the lane's end"),
             ("parent gone", "gone before its parent process could be read"),
             ("summary", "2 GUI application(s) appeared during the lane (3 readings across 5 "
-             "legs; the lane's own apps excluded by name: python3 1; host agents excluded by "
+             "legs; the lane's own apps excluded by name: a binary built in the tree 1; host agents excluded by "
              "name: Accessibility Services 1)")):
         cases.append((label, want, seen))
     cases.append(("identity adopted", "IDENTITY ADOPTED: pid 84118 (/repo/target/go-guests/"
