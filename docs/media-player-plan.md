@@ -1294,7 +1294,8 @@ its own row's word, and choosing one acts on its row and moves only that
 row's label.
 
 In the app a song row's menu reads Play, Play Next, Add to Queue, Like (or
-Unlike), Go to Album, Go to Artist, the like in a group of its own; an album
+Unlike), Go to Album, Go to Artist, the like in a group of its own (placement
+RULED as built, the maintainer 2026-10-26: "i think it's fine the way it is"); an album
 card's reads Play, Add to Queue, Like Album (or Unlike Album), Go to Artist.
 Like and Unlike take the heart's step, its toast and its Undo; Like Album and
 Unlike Album take the album heart's (M25), an album no page has shown asking
