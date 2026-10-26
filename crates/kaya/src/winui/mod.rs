@@ -23205,6 +23205,7 @@ fn swipe_invoked() {}
 /// (docs/swipe-actions-plan.md §5), and injection needs no touch screen.
 #[cfg(feature = "harness")]
 fn inject_touch(path: &[(i32, i32)]) -> Result<(), String> {
+    WinUiStage::drive_pointer();
     use windows::Win32::Foundation::POINT;
     use windows::Win32::UI::Input::Pointer::{
         InitializeTouchInjection, InjectTouchInput, POINTER_FLAGS, POINTER_FLAG_DOWN,
