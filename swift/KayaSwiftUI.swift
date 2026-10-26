@@ -1549,9 +1549,12 @@ func kayaScrolledTo(_ node: KayaNode, _ key: String) -> String? {
             }
             guard let row = anchored(copy) else { return "row \"\(key)\" has no laid-out label" }
             guard let window = MainActor.assumeIsolated({ kayaHarnessWindow() }) else { return "no window" }
-            let shown = window.bounds.inset(by: window.safeAreaInsets)
+            var shown = window.bounds.inset(by: window.safeAreaInsets)
+            if let rows = MainActor.assumeIsolated({ kayaTableWindows[node.id]?.rowsRegion() }), !rows.isEmpty {
+                shown = shown.intersection(rows)
+            }
             if row.minY >= shown.minY - 1 && row.maxY <= shown.maxY + 1 { return nil }
-            return "row \"\(key)\"'s label at \(kayaRectText(row)) against the window's safe \(kayaRectText(shown))"
+            return "row \"\(key)\"'s label at \(kayaRectText(row)) against the window's safe area under the table's pinned header \(kayaRectText(shown))"
         }
     #endif
     if !node.tableColumns.isEmpty {
@@ -19829,6 +19832,9 @@ private struct KayaTableLayout: Layout {
             placement.bandRow = firstRow
             placement.bandOffset = top
             placement.bandTop = y - bounds.minY
+            placement.headerHeight = kayaTableCardInsetY + dividerY - bounds.minY + dividerH
+            placement.headerRest = dividerY - bounds.minY + dividerH
+            placement.rowGap = rowGap
             placement.rowPitches = rows.map { $0 + rowGap }
             // THE COLUMNS' PAIR: what they needed and what the track gave. THE
             // TRACK IS THE CARD'S INTERIOR, not this layout's box — the edge
@@ -20028,7 +20034,6 @@ private func kayaTableScrollSpace(_ node: KayaNode) -> String { "kaya-table-\(no
 /// with the ForEach's own element ids (KayaNode.ID is a UInt64 too).
 private struct KayaRowAnchor: Hashable {
     let row: UInt64
-    let col: Int
 }
 
 /// What KayaTableLayout PLACED, for the report that follows: where the band
@@ -20045,6 +20050,12 @@ final class KayaTablePlacement {
     var bandRow: UInt64?
     var bandOffset: CGFloat = 0
     var bandTop: CGFloat = 0
+    /// The pinned header block's height, and where its foot rests unpinned, in
+    /// the layout's own coordinates (docs/traps.md, a shape read of a row the
+    /// table clips).
+    var headerHeight: CGFloat = 0
+    var headerRest: CGFloat = 0
+    var rowGap: CGFloat = 0
     var rowPitches: [CGFloat] = []
 }
 
@@ -20306,8 +20317,8 @@ typealias KayaTablePlaced = () -> Void
         // was measured answering 197 for a viewport parked on 200. The header
         // block is inside `bandTop`.
         let drawnFirst = placement.bandFirst
-        let into = scrollTop - Double(placement.bandTop)
-        let below = into + viewportHeight
+        let into = headerFoot() - Double(placement.bandTop)
+        let below = scrollTop + viewportHeight - Double(placement.bandTop)
         let span = pitches.reduce(0, +)
         var measured: (first: Int, count: Int)
         if pitches.isEmpty || below <= 0.5 || into >= Double(span) - 0.5 {
@@ -20421,8 +20432,35 @@ typealias KayaTablePlaced = () -> Void
             return
         }
         note(node, "re-park: measured first \(measured.first), scrollTo r\(anchor)")
+        let k = anchor - drawnFirst
+        let pitch = k < placement.rowPitches.count ? Double(placement.rowPitches[k]) : 0
         proxy.scrollTo(
-            KayaRowAnchor(row: node.children[anchor - drawnFirst].id, col: 0), anchor: .top)
+            KayaRowAnchor(row: node.children[k].id),
+            anchor: UnitPoint(x: 0, y: Self.parkFraction(
+                header: Double(placement.headerHeight - placement.rowGap / 2), viewport: viewportHeight, pitch: pitch)))
+    }
+
+    /// The anchor that puts a row's top just under the pinned header, its
+    /// ground half a gap above it:
+    /// proxy.scrollTo lines the ground's point at `f` of its height up with the
+    /// clip's point at `f` of its own.
+    static func parkFraction(header: Double, viewport: Double, pitch: Double) -> Double {
+        viewport - pitch > header ? header / (viewport - pitch) : 0
+    }
+
+    /// The clip's first point the pinned header does not cover, in the layout's
+    /// coordinates.
+    private func headerFoot() -> Double {
+        max(scrollTop + Double(placement.headerHeight), Double(placement.headerRest))
+    }
+
+    /// The part of the clip the rows show, in the space the harness compares in.
+    func rowsRegion() -> CGRect {
+        var region = viewportRect
+        let covered = CGFloat(headerFoot() - scrollTop)
+        region.origin.y += covered
+        region.size.height = max(0, region.size.height - covered)
+        return region
     }
 
     /// scroll_to_row's tier half: park the row and move the band to it.
@@ -21423,6 +21461,7 @@ private struct KayaSynthesizedTable: View {
             Divider()
             ForEach(node.children) { row in
                 KayaTableRowGround(row: row)
+                    .id(KayaRowAnchor(row: row.id))
             }
             ForEach(node.children) { row in
                 ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
@@ -21433,10 +21472,6 @@ private struct KayaSynthesizedTable: View {
                             KayaEdgeReporter(
                                 node: node, key: kayaTableCellKey(row, col, cell),
                                 generation: generation))
-                        // The park's target (§2.4): the anchor is column
-                        // 0's cell, whose top IS the row's top. Every
-                        // cell carries its own so no two share an id.
-                        .id(KayaRowAnchor(row: row.id, col: col))
                 }
             }
             KayaTableHeaderGround()
@@ -26279,6 +26314,12 @@ struct KayaRootFrameReader: View {
         if let ancestor = kayaScene.nodes[parent], ancestor.kind == kindScroll {
             let next = shown.intersection(ancestor.scrollViewportGlobal)
             if next != shown { cuts.append("scroll \(ancestor.id)'s viewport \(kayaRectText(ancestor.scrollViewportGlobal))") }
+            shown = next
+        }
+        if let window = kayaTableWindows[parent] {
+            let rows = window.rowsRegion()
+            let next = shown.intersection(rows)
+            if next != shown { cuts.append("table \(parent)'s rows under its pinned header \(kayaRectText(rows))") }
             shown = next
         }
         current = parent

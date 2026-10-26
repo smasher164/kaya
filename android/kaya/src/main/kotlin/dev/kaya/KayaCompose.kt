@@ -8599,9 +8599,10 @@ object KayaCompose {
     private fun kayaSkinUnseen(id: Long, probed: androidx.compose.ui.geometry.Rect, density: Float): String? {
         val frame = kayaNodeFrames[id]
         val visible = kayaNodeVisible[id]
+        val rowsTop = kayaTableRowsTop(id)
         val shown = if (frame == null || visible == null) null else {
             val left = if (visible.left <= frame.left + density) probed.left else visible.left
-            val top = if (visible.top <= frame.top + density) probed.top else visible.top
+            val top = maxOf(if (visible.top <= frame.top + density) probed.top else visible.top, rowsTop ?: probed.top)
             val right = if (visible.right >= frame.right - density) probed.right else visible.right
             val bottom = if (visible.bottom >= frame.bottom - density) probed.bottom else visible.bottom
             androidx.compose.ui.geometry.Rect(left, top, right, bottom).intersect(probed)
@@ -8612,6 +8613,17 @@ object KayaCompose {
         if (shown.left > probed.left + density || shown.top > probed.top + density ||
             shown.right < probed.right - density || shown.bottom < probed.bottom - density
         ) return "<clipped by its parents: frame ${kayaRectText(probed)}, visible ${kayaRectText(shown)}>"
+        return null
+    }
+
+    /** Where the pinned header of the table [id] sits in leaves its rows,
+     *  in window pixels; null outside a windowed table. */
+    private fun kayaTableRowsTop(id: Long): Float? {
+        var at = KayaSceneModel.parents[id]
+        while (at != null) {
+            kayaTableWindows[at]?.let { return it.rowsTopInWindow() }
+            at = KayaSceneModel.parents[at]
+        }
         return null
     }
 
@@ -17329,6 +17341,20 @@ internal class KayaTableWindow(private val node: KayaNode) {
     /** Where the header segment rests in the scrolled content: past it, the
      *  header is pinned (docs/tables-plan.md, ruled 2026-10-14). */
     @Volatile var headerRestPx = 0
+    /** The pinned header block's height, its gap included, and the viewport's
+     *  top in window pixels (docs/traps.md, a shape read of a row the table
+     *  clips). */
+    @Volatile var headerBlockPx = 0
+    @Volatile var viewportTopPx = 0f
+
+    /** The scrolled content's first pixel the pinned header does not cover. */
+    private fun headerFoot(scroll: Int): Int = maxOf(headerRestPx, scroll) + headerBlockPx
+
+    /** The window's first pixel row the header leaves to the rows. */
+    fun rowsTopInWindow(): Float {
+        val scroll = node.scrollState.value
+        return viewportTopPx + (headerFoot(scroll) - scroll)
+    }
 
     private var lastHContent = -1
     private var lastHTrack = -1
@@ -17398,12 +17424,13 @@ internal class KayaTableWindow(private val node: KayaNode) {
     private fun visibleRange(scroll: Int): Pair<Int, Int> {
         val tops = rowTops
         val extents = rowExtents
+        val foot = headerFoot(scroll)
         var first = -1
         var count = 0
         for (at in tops.indices) {
             val top = rowsTopPx + tops[at]
             val bottom = top + extents[at]
-            if (bottom - scroll > KAYA_WINDOW_VISIBLE_PX && top < scroll + viewportPx) {
+            if (bottom - foot > KAYA_WINDOW_VISIBLE_PX && top < scroll + viewportPx) {
                 if (first < 0) first = laidOutFirst + at
                 count++
             }
@@ -17412,7 +17439,7 @@ internal class KayaTableWindow(private val node: KayaNode) {
         val total = slots[KayaPresent.GEOMETRY_TOTAL].toInt()
         val pitch = if (total > 0) KayaPresent.rowExtent(node.id, 0) else 0.0
         if (pitch <= 0.0) return Pair(0, 0)
-        val want = (scroll - rowsTopPx).toDouble().coerceAtLeast(0.0)
+        val want = (foot - rowsTopPx).toDouble().coerceAtLeast(0.0)
         var index = laidOutFirst.coerceIn(0, total - 1)
         if (slots[KayaPresent.GEOMETRY_CORRECTED] == 0.0) {
             index = (want / pitch).toInt()
@@ -17503,7 +17530,8 @@ internal class KayaTableWindow(private val node: KayaNode) {
                 KayaVTrace.note("window", "park yields table=${node.id} row=$anchorRow: scroll $scroll, parked at $anchorScroll")
                 anchorRow = -1
             } else {
-                val want = contentTopOf(anchorRow)
+                val top = contentTopOf(anchorRow)
+                val want = if (top < 0) -1 else maxOf(0, top - headerBlockPx)
                 // NOTHING IS REPORTED WHILE A PARK IS OUTSTANDING. The
                 // parked row may not be laid out yet — [park] moved the
                 // band and its stamps are still in flight — and the
@@ -17619,11 +17647,12 @@ internal class KayaTableWindow(private val node: KayaNode) {
         if (top < 0) return "row $row is not realized (the layout drew ${rowTops.size} rows from $laidOutFirst)"
         val bottom = top + rowExtents[row - laidOutFirst]
         val scroll = node.scrollState.value
-        if (Math.abs(top - scroll) <= 2 || (top >= scroll && bottom <= scroll + viewportPx)) return null
+        val foot = headerFoot(scroll)
+        if (Math.abs(top - foot) <= 2 || (top >= foot && bottom <= scroll + viewportPx)) return null
         // A row's extent is its pitch, spacing included, so the last row of a
         // table scrolled to its end ends past the viewport by that spacing.
-        if (scroll >= node.scrollState.maxValue && top >= scroll && top < scroll + viewportPx) return null
-        return "row $row drawn at $top..$bottom, the viewport showing $scroll..${scroll + viewportPx}"
+        if (scroll >= node.scrollState.maxValue && top >= foot && top < scroll + viewportPx) return null
+        return "row $row drawn at $top..$bottom, the viewport showing $foot..${scroll + viewportPx} under the pinned header"
     }
 
     fun firstVisible(children: Int): Pair<Int, Int> {
@@ -17856,6 +17885,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
                 kayaContainerExtents[node.id] = it.size.height.toDouble()
                 kayaContainerCross[node.id] = it.size.width.toDouble()
                 window.viewportPx = it.size.height
+                window.viewportTopPx = it.positionInWindow().y
                 window.schedule()
             }
             // THE COLUMNS' AXIS (docs/tables-plan.md), NOT
@@ -18012,6 +18042,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         val headerSeg = measurables[measurables.size - 2]
             .measure(kayaFixedRepresentable(totalW, headerSegH + gap))
         window.headerRestPx = foldedBlock
+        window.headerBlockPx = headerSegH + gap
         val bodySeg = measurables[measurables.size - 1]
             .measure(kayaFixedRepresentable(totalW, contentH - bodyTop))
         // A ROW'S SURFACE REACHES THE SEGMENT'S EDGE (M16 (8), M19): from

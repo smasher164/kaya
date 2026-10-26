@@ -17307,12 +17307,18 @@ the mac scroll lands the row at its top less the header's height, and the
 first-visible read leaves the rows under the header out, as the band report
 did; with the read fixed and the scroll not, `expect_window` read `151 300`
 for t150.
+The phones did the same the same day: the iOS synthesized tier and Compose
+park the row at the pinned header's foot, count the first visible row from
+the foot, and their readers cut a row by what the header covers; with the
+park's subtraction cut, both read `<clipped by its parents: ...>` for t000
+where before they read `circle` and the bare ground.
 
 Guard: every expect_ground, expect_shape and expect_tint reader on GTK,
 WinUI, SwiftUI and Compose refuses a probed frame its ancestors do not show
 whole (harness.rs's unseen_probe, its sentences; tools/lib/skin_routes.py's
 VISIBLE and nine cuts), and tools/scenes/netimage.steps reads the first row's
-shape, unscrolled.
+shape, unscrolled and again after `scroll_to_row column@tracks t000`, on all
+five lanes (tools/lib/netimage_routes.py pins each tier's park and read).
 
 ## The link redirect that exited before its owner read it (measured 2026-10-17)
 
@@ -18825,6 +18831,17 @@ The print is of the last frame drawn, which lags the state change under
 load, so each of the two readings is re-asked, 100 ms apart, until it holds
 or twenty tries pass, and the refusal names the tries and GoToState's answer.
 
+The second form (measured 2026-10-26): nav_java in the matrix at c71441ae and
+nav_rust twice in ten pooled runs of the six nav legs read `rest
+Err("grab: element_placement: The operation completed successfully.")` at
+the scene's first `back`, about 50 ms after the push that showed the button,
+while the PointerOver read just after it held on its second try. An error
+carrying S_OK is windows-rs saying a call answered null. A grab that fails is
+now re-asked inside the same twenty tries, with a `kaya: winui back_look:
+... read on try N after ...` line when one did, and element_placement names
+the call (the window's Content, the root's XamlRoot, TransformToVisual) and
+says `answered null` for an S_OK error, so the next sighting says which.
+
 
 ## An undo step's table delta replayed without the band (measured 2026-10-24)
 
@@ -19301,5 +19318,18 @@ legs went red with "the context flyout never opened (Opened did not arrive in
 flyout open Some(false)", and the bundle's lane-wide foreground ring showed the
 rowmenu_go window, then the C# leg's, then node's, in the second its open
 failed. music_context_python's red at c71441ae was the same class (it passed
-alone 3 of 3). The context-menu legs run ALONE between drains in win.py's
-ORDER; alone, all six passed at about 1 s each.
+alone 3 of 3): its open of row#16 fell in the second a pooled java netimage
+window took the foreground (the bundle's ring, 1793003376).
+
+Since 2026-10-26 the harness answers it instead of the roster. context_open
+takes the foreground back (SetForegroundWindow, then AttachThreadInput; never
+a key tap, which would reach a neighbour) before each ShowAt and shows again
+when Opened does not come in 3 s, up to four tries; menu_activate opens a
+flyout again when it finds it closed before the item is chosen. Each of those
+prints a `kaya: context_open ...` or `kaya: the context flyout ... had closed`
+line naming the window that held the foreground. Pooled among nav, scroll,
+confirm and window legs, three runs of the seven legs passed with 15, 31 and
+19 foreground retakes, 2 to 5 opens that came only on a later try, and 1 to
+3 re-opens before a choice. Most retakes were from another context-menu leg, so the seven run
+one at a time among themselves (win.py's SERIAL_GROUPS flyout group) and pool
+with everything else.

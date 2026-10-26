@@ -6922,6 +6922,9 @@ const BACK_BUTTON_STYLE: &str = "NavigationBackButtonNormalStyle";
 
 #[cfg(feature = "harness")]
 const BACK_REST_MAX_LIGHTNESS: f64 = 0.5;
+/// docs/traps.md, the flyout a neighbour dismissed.
+#[cfg(feature = "harness")]
+const CONTEXT_OPEN_TRIES: u64 = 4;
 #[cfg(feature = "harness")]
 const BACK_HOVER_MIN_LIGHTNESS: f64 = 1.0;
 
@@ -15928,15 +15931,29 @@ fn placement(core: &CoreState, image: &Image) -> windows_core::Result<Placement>
 
 #[cfg(feature = "harness")]
 fn element_placement(core: &CoreState, element: &FrameworkElement) -> windows_core::Result<Placement> {
-    let root = core.window.Content()?;
+    // Each call named: a null answer arrives as an error carrying S_OK, which
+    // says nothing on its own (docs/traps.md, the WinUI back button's state
+    // read before its frame).
+    let named = |call: &str, e: windows_core::Error| {
+        if e.code().is_ok() {
+            windows_core::Error::new(windows_core::HRESULT(0x8000_4003_u32 as i32), format!("{call} answered null"))
+        } else {
+            windows_core::Error::new(e.code(), format!("{call}: {}", e.message()))
+        }
+    };
+    let root = core.window.Content().map_err(|e| named("the window's Content", e))?;
     let image = element;
     // THE SAME SCALE THE CORE RASTERED AT: `presentation_report` sends
     // `RasterizationScale`, so any other reading of the DPI would sample
     // the right picture at the wrong place.
-    let scale = root.XamlRoot()?.RasterizationScale()?;
+    let scale = root
+        .XamlRoot()
+        .and_then(|r| r.RasterizationScale())
+        .map_err(|e| named("the root's XamlRoot", e))?;
     let origin = windows_core::Interface::cast::<UIElement>(image)?
-        .TransformToVisual(&root)?
-        .TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
+        .TransformToVisual(&root)
+        .and_then(|t| t.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 }))
+        .map_err(|e| named("TransformToVisual", e))?;
     let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
     let hwnd = native.window_handle()?;
     let client = client_origin(hwnd);
@@ -22237,6 +22254,115 @@ impl WinUiStage {
         }
     }
 
+    /// The REAL presentation path: ShowAt on the anchor's own ContextFlyout,
+    /// complete only once Opened arrives (docs/traps.md, `MenuFlyout.ShowAt` is
+    /// a request). A flyout closes when its window loses the foreground, which a
+    /// pooled neighbour's window takes whenever it comes up (docs/traps.md, the
+    /// flyout a neighbour dismissed): the guest takes the foreground back before
+    /// each show, and a show that never opens is tried again, each said.
+    fn open_context_flyout(&self, widget: u64, what: &str) {
+        let hwnd = Self::on_ui(|core| {
+            let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
+            native.window_handle()
+        });
+        let mut misses: Vec<String> = Vec::new();
+        for attempt in 1..=CONTEXT_OPEN_TRIES {
+            if unsafe { GetForegroundWindow() } != hwnd {
+                let holder = Self::foreground_holder();
+                let took = (0..20).find_map(|_| {
+                    let won = Self::take_foreground(hwnd);
+                    if won.is_none() {
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                    }
+                    won
+                });
+                let sentence = format!(
+                    "kaya: context_open {what} try {attempt}: the foreground was {holder}; {}",
+                    took.map_or("the guest could not take it back in 1s".to_owned(), |r| format!("taken back by {r}"))
+                );
+                eprintln!("{sentence}");
+                crate::vtrace::line(&sentence);
+            }
+            let opened = Self::on_ui_mut(move |core| {
+                if let Some((_, previous)) = core.open_context.take() {
+                    let _ = previous.Hide();
+                }
+                let flyout = core.context_flyouts.get(&widget).cloned().unwrap_or_else(|| {
+                    panic!("kaya: no context menu attached to widget {widget}")
+                });
+                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                let armed = std::sync::Mutex::new(Some(tx));
+                let handler = bindings::Windows::Foundation::EventHandler::<
+                    windows_core::IInspectable,
+                >::new(move |_, _| {
+                    if let Some(tx) = armed.lock().unwrap().take() {
+                        let _ = tx.send(());
+                    }
+                    Ok(())
+                });
+                flyout.Opened(&handler)?;
+                let anchor: FrameworkElement = core
+                    .widgets
+                    .get(&WidgetId(widget))
+                    .expect("the anchor widget lives")
+                    .element()?
+                    .cast()?;
+                flyout.ShowAt(&anchor)?;
+                core.open_context = Some((widget, flyout));
+                Ok(rx)
+            });
+            let wait = if attempt == CONTEXT_OPEN_TRIES { 10 } else { 3 };
+            if opened.recv_timeout(std::time::Duration::from_secs(wait)).is_ok() {
+                if !misses.is_empty() {
+                    let sentence = format!(
+                        "kaya: context_open {what} opened on try {attempt}, after {}",
+                        misses.join("; ")
+                    );
+                    eprintln!("{sentence}");
+                    crate::vtrace::line(&sentence);
+                }
+                return;
+            }
+            misses.push(format!(
+                "try {attempt} saw no Opened in {wait}s, the foreground then {}",
+                Self::foreground_holder()
+            ));
+        }
+        let named = what.to_owned();
+        let state = Self::on_ui_read(move |core| {
+            let what = named;
+            let anchor: FrameworkElement =
+                core.widgets.get(&WidgetId(widget)).expect("the anchor widget lives").element()?.cast()?;
+            let open = core.open_context.as_ref().map(|(_, f)| f.IsOpen()).transpose()?;
+            Ok(format!(
+                "the anchor {what} loaded {}, in a XamlRoot {}, {}x{}, visible {}; the flyout open {open:?}",
+                anchor.IsLoaded()?,
+                anchor.XamlRoot().is_ok(),
+                anchor.ActualWidth()?,
+                anchor.ActualHeight()?,
+                anchor.Visibility()? == Visibility::Visible,
+            ))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"));
+        panic!(
+            "kaya: the context flyout never opened (Opened did not arrive in {CONTEXT_OPEN_TRIES} tries): {state}; {}",
+            misses.join("; ")
+        );
+    }
+
+    /// The window holding the foreground, for a sentence: its handle, its
+    /// process and its caption.
+    fn foreground_holder() -> String {
+        let fg = unsafe { GetForegroundWindow() };
+        if fg == 0 {
+            return "no window".to_owned();
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(fg, &mut pid) };
+        let whose = if pid == std::process::id() { "this process".to_owned() } else { format!("pid {pid}") };
+        format!("{fg:#x} ({whose}, {:?})", window_text(fg))
+    }
+
     fn foreground_guest(what: &str) {
         let hwnd = Self::on_ui(|core| {
             let native: IWindowNative = windows_core::Interface::cast(&core.window)?;
@@ -23681,6 +23807,22 @@ static POINTER_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 impl crate::harness::Stage for WinUiStage {
     fn menu_activate(&self, path: &str) {
         let spec = path.to_owned();
+        let dismissed = Self::on_ui_read(|core| {
+            Ok(match &core.open_context {
+                Some((widget, flyout)) if !flyout.IsOpen()? => Some(*widget),
+                _ => None,
+            })
+        })
+        .unwrap_or(None);
+        if let Some(widget) = dismissed {
+            let sentence = format!(
+                "kaya: the context flyout of widget {widget} had closed before {spec:?} was chosen, the foreground {}; opening it again",
+                Self::foreground_holder()
+            );
+            eprintln!("{sentence}");
+            crate::vtrace::line(&sentence);
+            self.open_context_flyout(widget, &format!("widget {widget}"));
+        }
         // Resolve SEMANTICALLY against the model tree — the OPEN context menu
         // exclusively while one is presented, the primary window's catalog
         // otherwise — then drive the REAL invoke pipeline. For a context
@@ -24026,61 +24168,8 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn context_open(&self, t: crate::harness::Target) {
-        // The REAL presentation path: ShowAt on the anchor's own
-        // ContextFlyout. ShowAt is a request, not a readiness
-        // boundary (docs/traps.md): Opened is registered BEFORE the
-        // request and this step does not complete until it arrives —
-        // the following menu_activate then acts on a live presenter.
-        let opened = Self::on_ui_mut(move |core| {
-            // A lingering open menu would let this open overtake its
-            // close animation; the scene grammar always activates
-            // first, so this is the loud belt, not the path.
-            if let Some((_, previous)) = core.open_context.take() {
-                let _ = previous.Hide();
-            }
-            let widget = widget_id_for_target(core, t);
-            let flyout = core.context_flyouts.get(&widget).cloned().unwrap_or_else(|| {
-                panic!("kaya: no context menu attached to {t:?}")
-            });
-            let (tx, rx) = std::sync::mpsc::channel::<()>();
-            let armed = std::sync::Mutex::new(Some(tx));
-            let handler = bindings::Windows::Foundation::EventHandler::<
-                windows_core::IInspectable,
-            >::new(move |_, _| {
-                if let Some(tx) = armed.lock().unwrap().take() {
-                    let _ = tx.send(());
-                }
-                Ok(())
-            });
-            flyout.Opened(&handler)?;
-            let anchor: FrameworkElement = core
-                .widgets
-                .get(&WidgetId(widget))
-                .expect("the anchor widget lives")
-                .element()?
-                .cast()?;
-            flyout.ShowAt(&anchor)?;
-            core.open_context = Some((widget, flyout));
-            Ok(rx)
-        });
-        if opened.recv_timeout(std::time::Duration::from_secs(10)).is_err() {
-            let state = Self::on_ui_read(move |core| {
-                let widget = widget_id_for_target(core, t);
-                let anchor: FrameworkElement =
-                    core.widgets.get(&WidgetId(widget)).expect("the anchor widget lives").element()?.cast()?;
-                let open = core.open_context.as_ref().map(|(_, f)| f.IsOpen()).transpose()?;
-                Ok(format!(
-                    "the anchor {t:?} loaded {}, in a XamlRoot {}, {}x{}, visible {}; the flyout open {open:?}",
-                    anchor.IsLoaded()?,
-                    anchor.XamlRoot().is_ok(),
-                    anchor.ActualWidth()?,
-                    anchor.ActualHeight()?,
-                    anchor.Visibility()? == Visibility::Visible,
-                ))
-            })
-            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
-            panic!("kaya: the context flyout never opened (Opened did not arrive in 10s): {state}");
-        }
+        let widget = Self::on_ui_mut(move |core| Ok(widget_id_for_target(core, t)));
+        self.open_context_flyout(widget, &format!("{t:?}"));
     }
 
     fn menu_count(&self) -> usize {
@@ -28844,19 +28933,42 @@ impl crate::harness::Stage for WinUiStage {
         // docs/traps.md, the WinUI back button's state read before its frame.
         let read = |name: &'static str, holds: &dyn Fn(f64) -> bool| -> Result<(Option<bool>, usize, [f64; 3], [f64; 3]), String> {
             let mut last = None;
+            let mut missed: Vec<(usize, usize, String)> = Vec::new();
             for tries in 1..=20 {
                 let went = state(name).map_err(|e| format!("GoToState({name}) on try {tries}: {}", e.message()))?;
                 if went.is_none() {
                     return Err("the back button went".to_owned());
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                let (bar, ground) = grab()?;
-                last = Some((went, tries, bar, ground));
-                if holds(step(&ground, &bar)) {
-                    break;
+                match grab() {
+                    Ok((bar, ground)) => {
+                        last = Some((went, tries, bar, ground));
+                        if holds(step(&ground, &bar)) {
+                            break;
+                        }
+                    }
+                    Err(e) => match missed.last_mut() {
+                        Some((_, to, said)) if *said == e => *to = tries,
+                        _ => missed.push((tries, tries, e)),
+                    },
                 }
             }
-            Ok(last.expect("twenty tries ran"))
+            let missed = missed
+                .iter()
+                .map(|(from, to, said)| {
+                    if from == to { format!("try {from}: {said}") } else { format!("tries {from}-{to}: {said}") }
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            match last {
+                Some(read) => {
+                    if !missed.is_empty() {
+                        eprintln!("kaya: winui back_look: {name} read on try {} after {missed}", read.1);
+                    }
+                    Ok(read)
+                }
+                None => Err(missed),
+            }
         };
         match state("Normal") {
             Ok(Some(_)) => {}

@@ -277,7 +277,7 @@ CALLS = [
      "refresh()\napplySelection()\nlayoutColumns()"),
     (SWIFT, "a synthesized row's cells pass their press to the row (Y4)", ".modifier(KayaTableRowPress(row: row))"),
     (SWIFT, "the synthesized table stamps one ground per row (Y4)",
-     "ForEach(node.children) { row in\nKayaTableRowGround(row: row)\n}"),
+     "ForEach(node.children) { row in\nKayaTableRowGround(row: row)\n.id(KayaRowAnchor(row: row.id))\n}"),
     (SWIFT, "the synthesized table's layout knows its grounds (Y4)", "rowCount: node.children.count"),
     (SWIFT, "the synthesized table's layout places each row's ground across the card (Y4, M19)",
      "grounds[r].place(\nat: CGPoint(x: bounds.minX - kayaTableCardInsetX, y: y - rowGap / 2),\nanchor: .topLeading,"),

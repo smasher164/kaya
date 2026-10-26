@@ -373,6 +373,10 @@ ORDER = [
      # Search and the toasts: `type` posts to the guest's own window, as the
      # search pool's does, and the toast's Undo is pressed through its peer.
      "music_search_python",
+     # The context flyouts pool, one at a time among themselves (SERIAL_GROUPS'
+     # flyout group; docs/traps.md, the flyout a neighbour dismissed).
+     "music_context_python",
+     "rowmenu_rust", "rowmenu_python", "rowmenu_js", "rowmenu_go", "rowmenu_csharp", "rowmenu_java",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -855,30 +859,6 @@ ORDER = [
     [
      "menus_java",
     ],
-    # THE CONTEXT FLYOUTS, each leg ALONE between drains: an open MenuFlyout
-    # closes, or never opens, when a pooled neighbour's window takes the
-    # foreground (docs/traps.md, the flyout a neighbour dismissed).
-    [
-     "music_context_python",
-    ],
-    [
-     "rowmenu_rust",
-    ],
-    [
-     "rowmenu_python",
-    ],
-    [
-     "rowmenu_js",
-    ],
-    [
-     "rowmenu_go",
-    ],
-    [
-     "rowmenu_csharp",
-    ],
-    [
-     "rowmenu_java",
-    ],
     [
      "commands_rust",
     ],
@@ -927,7 +907,9 @@ ORDER = [
 # the arm opens its devices ExclusiveControl, so two guests on one virtual
 # camera would answer each other in_use, and nothing else in the lane opens
 # them. The runner keeps the lane's devices up around every block holding one.
-SERIAL_GROUPS = {"camera": ("capture", "capture_denied")}
+# The flyout group: two context-menu legs at once take the foreground from
+# each other at every open (docs/traps.md, the flyout a neighbour dismissed).
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied"), "flyout": ("music_context", "rowmenu")}
 
 
 def serial_group(leg):

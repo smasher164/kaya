@@ -596,7 +596,7 @@ leg's picture, and the picker's process log (check-steps holds them;
 docs/traps.md). Read those first on the next sighting (the bundle is kept
 under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
 
-## OPEN — a phone's scroll_to_row parks the row under the table's pinned header (iOS and Compose, measured 2026-10-26)
+## ~~OPEN — a phone's scroll_to_row parks the row under the table's pinned header (iOS and Compose, measured 2026-10-26)~~ FIXED 2026-10-26: both phone tiers park the row at the pinned header's foot (iOS: the row ground's scroll anchor placed by the header block's height over the viewport less the row; Compose: the row's top less headerBlockPx), count the first visible row from the foot, and their readers cut a row by what the header covers (iOS kayaVisibleFrame and the table's expect_scrolled_to, Compose kayaSkinUnseen and scrolledTo); the phones' netimage cut is gone and netimage.steps' tail runs on all five lanes, watched red with each park's subtraction cut (iOS `<clipped by its parents: frame (32,513,40x40), visible (32,546,40x7)>`, Compose `frame (32,384,40,40), visible (32,418,40,6)`)
 KEY: scroll_to_row, pinned header, KayaHeaderPin, headerRestPx, park, netimage.steps, expect_window column@tracks 0
 
 The mac native table's form of this is fixed (the struck entry below). With
