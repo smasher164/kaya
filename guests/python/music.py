@@ -4,8 +4,9 @@ through kaya's player (tools/scenes/music_playlist.steps), and the album's
 gradient header (tools/scenes/music_header.steps), and the dock with the
 media session and the phones' full player (tools/scenes/music_dock.steps),
 the artist page (tools/scenes/music_artist.steps), search with the
-toasts (tools/scenes/music_search.steps), and Liked Songs and the controls'
-help text (tools/scenes/music_dock.steps)."""
+toasts (tools/scenes/music_search.steps), Liked Songs and the controls'
+help text (tools/scenes/music_dock.steps), and the right-click menus
+(tools/scenes/music_context.steps)."""
 
 import html
 import json
@@ -58,7 +59,8 @@ CLIENT_ID_PREF = "jamendo.client_id"
 # The harness's preference store is scratch, emptied at a leg's start
 # (crates/kaya/src/prefs.rs), so no leg reads another's likes.
 LIKED_PREF = "music.liked"
-LIKED_FIELDS = ("title", "artist", "album", "album_name", "art_url", "audio", "seconds")
+LIKED_FIELDS = ("title", "artist", "artist_id", "album", "album_name", "art_url", "audio",
+                "seconds")
 JAMENDO_API = "https://api.jamendo.com/v3.0/"
 SAMPLER = "sampler:"
 # A lane's leg takes the host's Now Playing only in the scene that reads it
@@ -331,6 +333,7 @@ def show_library_selection(album_id):
 
 def open_album(album, surface=None):
     key = album["id"]
+    known.setdefault(key, album)
     show_album(album, (0 if desktop else SECTION_HOME) if surface is None else surface)
     if key not in library_keys:
         library.insert(key, Saved(title=album["name"], caption=f"Album · {album['artist']}",
@@ -430,10 +433,12 @@ def album_body(album, page):
 
 
 def track_table(page, names, a11y="tracks", prefix="", grow: float | None = 1, timed=True):
+    menu = song_menu(page)
     for track in page["tracks"].columns(*names, a11y_id=a11y, grow=grow):
         with kaya.row(selected=track.selected, on_select=on_pick,
                       on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id(f"{prefix}track")
+            line.context_menu(menu)
             kaya.label(bind=track.number)
             with kaya.row(spacing=8, align="center") as cell:
                 cell.a11y_id(f"{prefix}track_cell")
@@ -617,17 +622,12 @@ def album_arrived(album, surface, entry, answer):
     if answer is None:
         page["about"].set("Couldn't reach the catalogue.")
         return
-    artist = html.unescape(answer["artist_name"])
+    artist, listed = learn_album(album, answer)
     year = answer.get("releasedate", "")[:4]
-    listed = sorted(answer["tracks"], key=lambda t: int(t["position"]))
     total = songs_line(len(listed), sum(int(t["duration"]) for t in listed))
-    album_keys[album["id"]] = [t["id"] for t in listed]
     page["about"].set(" · ".join(p for p in (year, total) if p))
     for t in listed:
         key = t["id"]
-        songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],
-                      "artist": artist, "album": album["id"], "album_name": album["name"],
-                      "seconds": int(t["duration"]), "art_url": album["image"]}
         page["keys"].append(key)
         page["tracks"].insert(key, Track(
             number=str(t["position"]), title=songs[key]["title"], artist=artist,
@@ -636,6 +636,44 @@ def album_arrived(album, surface, entry, answer):
             tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
             selected=False))
     show_album_hearts()
+
+
+def learn_album(album, answer):
+    """The album's artist and its tracks in order, each known to the queue."""
+    artist = html.unescape(answer["artist_name"])
+    listed = sorted(answer["tracks"], key=lambda t: int(t["position"]))
+    album_keys[album["id"]] = [t["id"] for t in listed]
+    for t in listed:
+        songs[t["id"]] = {"title": html.unescape(t["name"]), "audio": t["audio"],
+                          "artist": artist, "artist_id": answer["artist_id"],
+                          "album": album["id"], "album_name": album["name"],
+                          "seconds": int(t["duration"]), "art_url": album["image"]}
+    return artist, listed
+
+
+def with_album_keys(album, then):
+    """`then` with the album's tracks, asking the catalogue for an album no
+    page has shown."""
+    keys = album_keys.get(album["id"])
+    if keys:
+        then(keys)
+        return
+    threading.Thread(target=load_album_keys, args=(album, then), daemon=True).start()
+
+
+def load_album_keys(album, then):
+    try:
+        answer = catalogue.album(album["id"])
+    except (OSError, ValueError, KeyError, IndexError) as e:
+        print(f"music: album {album['id']} did not load: {e!r}", file=sys.stderr)
+        return
+    app.post(album_keys_arrived, album, answer, then)
+
+
+def album_keys_arrived(album, answer, then):
+    learn_album(album, answer)
+    if album_keys[album["id"]]:
+        then(album_keys[album["id"]])
 
 
 def pages_holding(key):
@@ -671,6 +709,67 @@ def start_queue(keys, first):
     playback["order"] = shuffled(first) if playback["shuffle"] else list(keys)
     playback["at"] = playback["order"].index(first)
     play_track(first, start=True)
+
+
+def enqueue(keys, next_up):
+    """Play Next puts the tracks after the playing one and Add to Queue at
+    the queue's end; a track already waiting moves; with nothing playing
+    they play (docs/media-player-plan.md M26)."""
+    if playback["key"] is None:
+        start_queue(keys, keys[0])
+        return
+    for name in ("order", "album"):
+        queue = playback[name]
+        at = playback["at"] if name == "order" else queue.index(playback["key"])
+        rest = [k for k in queue[at + 1:] if k not in keys]
+        playback[name] = queue[:at + 1] + (keys + rest if next_up else rest + keys)
+
+
+def song_album(key):
+    song = songs[key]
+    return known.get(song["album"]) or {"id": song["album"], "name": song["album_name"],
+                                        "artist": song["artist"],
+                                        "artist_id": song["artist_id"], "image": song["art_url"]}
+
+
+def song_menu(page):
+    """A song's menu (M26), one catalog for the page's rows."""
+    surface = page["surface"]
+    with kaya.context_catalog() as catalog:
+        kaya.item("Play", on_activate=lambda row: play_row(page, row.key))
+        kaya.item("Play Next", on_activate=lambda row: enqueue([row.key], next_up=True))
+        kaya.item("Add to Queue", on_activate=lambda row: enqueue([row.key], next_up=False))
+        kaya.separator()
+        kaya.item("Go to Album", on_activate=lambda row: open_album(song_album(row.key), surface))
+        kaya.item("Go to Artist",
+                  on_activate=lambda row: open_artist(songs[row.key]["artist_id"],
+                                                      songs[row.key]["artist"], surface))
+    return catalog
+
+
+def album_items(album_of, surface):
+    """An album card's menu (M26); `album_of` takes the stamped row, or
+    nothing on a live card."""
+    def play(*row):
+        with_album_keys(album_of(*row), lambda keys: start_queue(keys, keys[0]))
+
+    def add(*row):
+        with_album_keys(album_of(*row), lambda keys: enqueue(keys, next_up=False))
+
+    def artist(*row):
+        album = album_of(*row)
+        open_artist(album["artist_id"], album["artist"], surface)
+
+    kaya.item("Play", on_activate=play)
+    kaya.item("Add to Queue", on_activate=add)
+    kaya.separator()
+    kaya.item("Go to Artist", on_activate=artist)
+
+
+def album_menu(surface):
+    with kaya.context_catalog() as catalog:
+        album_items(lambda row: known[row.key], surface)
+    return catalog
 
 
 def shuffled(first):
@@ -900,7 +999,8 @@ def migrate_likes(keys):
             continue
         for t in tracks[:1]:
             found.append({"id": key, "title": html.unescape(t["name"]),
-                          "artist": html.unescape(t["artist_name"]), "album": t["album_id"],
+                          "artist": html.unescape(t["artist_name"]),
+                          "artist_id": t["artist_id"], "album": t["album_id"],
                           "album_name": html.unescape(t["album_name"]),
                           "art_url": catalogue.address(t["album_image"]), "audio": t["audio"],
                           "seconds": int(t["duration"])})
@@ -1321,7 +1421,7 @@ def artist_arrived(surface, entry, answer):
     for rank, t in enumerate(tracks, start=1):
         key = t["id"]
         songs[key] = {"title": html.unescape(t["name"]), "audio": t["audio"],
-                      "artist": name, "album": t["album_id"],
+                      "artist": name, "artist_id": about["id"], "album": t["album_id"],
                       "album_name": html.unescape(t["album_name"]),
                       "seconds": int(t["duration"]),
                       "art_url": catalogue.address(t["album_image"])}
@@ -1415,6 +1515,9 @@ def card(album, registry=None, prefix="", surface=None):
     with kaya.column(filled=kaya.Tint.NEUTRAL, selected=selected,
                      on_activate=lambda: open_album(album, surface)) as tile:
         tile.a11y_id(f"{prefix}card_{album['id']}").fill(True)
+        with tile.context_menu():
+            album_items(lambda: album, (0 if desktop else SECTION_HOME) if surface is None
+                        else surface)
         kaya.image(art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=phase) \
             .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"{prefix}art_{album['id']}")
         kaya.label(album["name"], max_lines=2)
@@ -1493,10 +1596,12 @@ def search_body(page):
 
 
 def found_list(page):
+    menu = song_menu(page)
     for track in page["tracks"].rows(a11y_id="found_tracks", align="stretch"):
         with kaya.row(spacing=12, align="center",
                       on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id("found_track")
+            line.context_menu(menu)
             kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                        phase=track.phase, on_needed=page["tracks_art"].needed,
                        on_released=page["tracks_art"].released) \
@@ -1518,11 +1623,14 @@ def found_shelf(page, group, title, shape, on_open):
 
 
 def found_strip(page, group, one, shape, on_open):
+    menu = album_menu(page["surface"]) if group == "albums" else None
     with kaya.scroll(axis=kaya.Axis.HORIZONTAL) as strip:
         strip.a11y_id(f"{group}_shelf")
         for found in page[group].rows(a11y_id=f"found_{group}"):
             with kaya.column(spacing=4, filled=kaya.Tint.NEUTRAL, on_activate=on_open) as tile:
                 tile.a11y_id(f"found_{one}")
+                if menu is not None:
+                    tile.context_menu(menu)
                 kaya.image(found.art, fit=kaya.Fit.COVER, shape=shape, phase=found.phase,
                            on_needed=page[f"{group}_art"].needed,
                            on_released=page[f"{group}_art"].released) \
@@ -1615,7 +1723,8 @@ def found_rows(group, results):
         else:
             art = catalogue.address(r["album_image"])
             songs[key] = {"title": html.unescape(r["name"]), "audio": r["audio"],
-                          "artist": html.unescape(r["artist_name"]), "album": r["album_id"],
+                          "artist": html.unescape(r["artist_name"]),
+                          "artist_id": r["artist_id"], "album": r["album_id"],
                           "album_name": html.unescape(r["album_name"]),
                           "seconds": int(r["duration"]), "art_url": art}
             rows.append((key, Track(
@@ -1733,9 +1842,11 @@ def library_body():
                 kaya.label("Liked Songs")
                 kaya.caption(bind=liked_count).a11y_id("liked_count")
         kaya.caption(bind=library_hint)
+        menu = album_menu(0 if desktop else SECTION_LIBRARY)
         for item in library:
             with kaya.row(align="center", selected=item.selected, on_activate=on_saved) as entry:
                 entry.a11y_id("saved")
+                entry.context_menu(menu)
                 kaya.image(item.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                            phase=item.phase, on_needed=library_art.needed,
                            on_released=library_art.released) \

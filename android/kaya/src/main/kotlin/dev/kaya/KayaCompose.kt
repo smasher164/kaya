@@ -351,6 +351,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.editableText
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.collapse
@@ -1212,7 +1213,16 @@ fun kayaActivatable(node: KayaNode): Modifier {
     }
     val name = if (node.a11yLabel.isEmpty()) kayaSkinName(node) else ""
     val interaction = remember(node) { MutableInteractionSource() }
-    val press = if (node.selectedDeclared) {
+    val press = if (KayaSceneModel.contextMenus.containsKey(node.id)) {
+        // A held press opens the anchored menu, Material's long-press idiom.
+        Modifier.combinedClickable(
+            interactionSource = interaction,
+            indication = androidx.compose.material3.ripple(),
+            role = Role.Button,
+            onLongClick = { KayaSceneModel.openContextWidget = node.id },
+            onClick = activate,
+        ).semantics { if (node.selectedDeclared) selected = node.selected }
+    } else if (node.selectedDeclared) {
         Modifier.selectable(
             selected = node.selected,
             interactionSource = interaction,
@@ -15541,6 +15551,39 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else kayaAwaitAnswer(answered)
                         }
                     }
+                    "expect_context_items" -> {
+                        // The anchor's catalog where a long press opens it
+                        // (docs/media-player-plan.md M26).
+                        val spec = parts.getOrNull(1) ?: ""
+                        val head = quotedHead(line.substring(parts[0].length + 1 + spec.length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("expect_context_items wants a target and a quoted spec: $line")
+                        } else {
+                            val want = head.first
+                            fun items(): String? = onUi(activity) {
+                                val node = kayaWidgetTarget(spec) ?: return@onUi null
+                                val attachment = KayaSceneModel.contextMenus[node.id]
+                                    ?: return@onUi "<no context menu attached to $spec>"
+                                if (node.id !in kayaContextHosts) {
+                                    return@onUi "<the menu has no host in the composition>"
+                                }
+                                kayaContextSpec(attachment.roots.map {
+                                    if (it.kind == KayaCompose.MENU_KIND_SEPARATOR) null else it.label
+                                })
+                            }
+                            var got = items()
+                            val deadline = android.os.SystemClock.uptimeMillis() + 5000
+                            while (got != want && android.os.SystemClock.uptimeMillis() < deadline) {
+                                Thread.sleep(50)
+                                got = items()
+                            }
+                            when {
+                                got == null -> failures.add("no such target $spec")
+                                got == want -> observed.add("context items $got")
+                                else -> failures.add("$spec context items $got, wanted $want")
+                            }
+                        }
+                    }
                     "expect_swipe_actions" -> {
                         // The row's swipe items (docs/swipe-actions-plan.md §4):
                         // the full ones read from the SwipeToDismissBox that
@@ -15666,6 +15709,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     ?: return@onUi "no such target $spec"
                                 if (!KayaSceneModel.contextMenus.containsKey(node.id)) {
                                     "no context menu attached to $spec"
+                                } else if (node.id !in kayaContextHosts) {
+                                    "$spec's context menu has no host in the composition: " +
+                                        "no long press on it can open it"
                                 } else {
                                     KayaSceneModel.openContextWidget = node.id
                                     ""
@@ -18014,7 +18060,10 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
 @Composable
 private fun KayaTableRowGround(row: KayaNode) {
     val tag = if (row.a11yId.isNotEmpty()) Modifier.testTag(row.a11yId) else Modifier
-    Box(if (row.activatable) tag.then(kayaFilledSurface(row)) else Modifier)
+    val attachment = KayaSceneModel.contextMenus[row.id]
+    Box(if (row.activatable) tag.then(kayaFilledSurface(row)) else Modifier) {
+        if (attachment != null) KayaContextDropdown(row, attachment)
+    }
 }
 
 /**
@@ -18502,6 +18551,16 @@ private fun KayaSwipeRow(
 /** Each full-swipe row's bounds in the window, for swipe_action's gesture. */
 internal val kayaSwipeBounds = HashMap<Long, androidx.compose.ui.geometry.Rect>()
 
+/** The anchors whose context menu is in the composition, for context_open
+ * and expect_context_items: a catalog with no host is a menu no gesture
+ * can open. */
+internal val kayaContextHosts = HashSet<Long>()
+
+/** A context menu's root items as expect_context_items spells them:
+ *  harness.rs's `context_spec`, a separator as `-`, `none` for none. */
+internal fun kayaContextSpec(items: List<String?>): String =
+    if (items.isEmpty()) "none" else items.joinToString("|") { it ?: "-" }
+
 /** Each laid-out SwipeToDismissBox's items, for expect_swipe_actions. */
 internal val kayaSwipeLowered = HashMap<Long, List<Pair<Long, String>>>()
 
@@ -18534,64 +18593,79 @@ private fun KayaRenderContextAnchor(
             // owns its own activation route.
             onClick = {},
             onLongClick = { KayaSceneModel.openContextWidget = node.id },
-        )
+        ),
+        // A grid measures a stretched card at its row's fixed height
+        // (docs/media-player-plan.md M21), which a plain Box would loosen.
+        propagateMinConstraints = true,
     ) {
         KayaRenderCore(node, isRoot, flexVertical, flexStretch, a11yFallback)
-        val open = KayaSceneModel.openContextWidget == node.id
-        DropdownMenu(
-            expanded = open,
-            onDismissRequest = { KayaSceneModel.openContextWidget = null },
-        ) {
-            KayaMenuPopupRoot()
-            val close = { KayaSceneModel.openContextWidget = null }
-            // The drill-in state resets on every (re)open: the menu
-            // always surfaces at its roots.
-            var drilled by remember(open) { mutableStateOf<KayaMenuItem?>(null) }
-            val sub = drilled
-            if (sub == null) {
-                // The attached roots in attach order — the semantic
-                // tree's first level. A grouping root (menu or
-                // radio_group) is a labeled drill-in: its label IS a
-                // path segment ("Stuff>Rename"); a leaf root is its
-                // own row ("Rename" resolves bare only then).
-                // Separators between roots come from the catalog
-                // itself — nothing is added here.
-                attachment.roots.forEach { root ->
-                    when (root.kind) {
-                        KayaCompose.MENU_KIND_MENU,
-                        KayaCompose.MENU_KIND_RADIO_GROUP ->
-                            DropdownMenuItem(
-                                text = { Text(root.label) },
-                                modifier = Modifier.testTag(kayaMenuTag(root.id)),
-                                leadingIcon = kayaSymbolSlot(root.symbol),
-                                trailingIcon = { Text("▸") },
-                                enabled = kayaMenuEffectivelyEnabled(root),
-                                onClick = { drilled = root },
-                            )
-                        else ->
-                            KayaMenuRows(
-                                listOf(root), attachment.noun,
-                                onDrill = { drilled = it }, onClose = close)
-                    }
+        KayaContextDropdown(node, attachment)
+    }
+}
+
+/** The anchor's context menu, open while the model names it: the anchor
+ * itself hosts it, or a table row's ground, whose cells are the row's
+ * children and never the row (docs/media-player-plan.md M26). */
+@Composable
+private fun KayaContextDropdown(node: KayaNode, attachment: KayaContextAttachment) {
+    DisposableEffect(node.id) {
+        kayaContextHosts.add(node.id)
+        onDispose { kayaContextHosts.remove(node.id) }
+    }
+    val open = KayaSceneModel.openContextWidget == node.id
+    DropdownMenu(
+        expanded = open,
+        onDismissRequest = { KayaSceneModel.openContextWidget = null },
+    ) {
+        KayaMenuPopupRoot()
+        val close = { KayaSceneModel.openContextWidget = null }
+        // The drill-in state resets on every (re)open: the menu
+        // always surfaces at its roots.
+        var drilled by remember(open) { mutableStateOf<KayaMenuItem?>(null) }
+        val sub = drilled
+        if (sub == null) {
+            // The attached roots in attach order — the semantic
+            // tree's first level. A grouping root (menu or
+            // radio_group) is a labeled drill-in: its label IS a
+            // path segment ("Stuff>Rename"); a leaf root is its
+            // own row ("Rename" resolves bare only then).
+            // Separators between roots come from the catalog
+            // itself — nothing is added here.
+            attachment.roots.forEach { root ->
+                when (root.kind) {
+                    KayaCompose.MENU_KIND_MENU,
+                    KayaCompose.MENU_KIND_RADIO_GROUP ->
+                        DropdownMenuItem(
+                            text = { Text(root.label) },
+                            modifier = Modifier.testTag(kayaMenuTag(root.id)),
+                            leadingIcon = kayaSymbolSlot(root.symbol),
+                            trailingIcon = { Text("▸") },
+                            enabled = kayaMenuEffectivelyEnabled(root),
+                            onClick = { drilled = root },
+                        )
+                    else ->
+                        KayaMenuRows(
+                            listOf(root), attachment.noun,
+                            onDrill = { drilled = it }, onClose = close)
                 }
+            }
+        } else {
+            // The drill-in: a back row over the grouping root's
+            // rows (the overflow's idiom). Deeper grouping cannot
+            // occur: the root's closed grammar caps context depth
+            // at root items + one grouping-node level.
+            DropdownMenuItem(
+                text = { Text("‹ ${sub.label}") },
+                onClick = { drilled = null },
+            )
+            HorizontalDivider()
+            if (sub.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
+                // The options with the platform's checkmark idiom.
+                KayaRadioRows(sub, attachment.noun, close)
             } else {
-                // The drill-in: a back row over the grouping root's
-                // rows (the overflow's idiom). Deeper grouping cannot
-                // occur: the root's closed grammar caps context depth
-                // at root items + one grouping-node level.
-                DropdownMenuItem(
-                    text = { Text("‹ ${sub.label}") },
-                    onClick = { drilled = null },
-                )
-                HorizontalDivider()
-                if (sub.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
-                    // The options with the platform's checkmark idiom.
-                    KayaRadioRows(sub, attachment.noun, close)
-                } else {
-                    KayaMenuRows(
-                        sub.children.toList(), attachment.noun,
-                        onDrill = { drilled = it }, onClose = close)
-                }
+                KayaMenuRows(
+                    sub.children.toList(), attachment.noun,
+                    onDrill = { drilled = it }, onClose = close)
             }
         }
     }

@@ -255,7 +255,7 @@ LEGS = {
         "varied-python", "portfolio-python", "music_home-python", "music_playlist-python",
         "music_header-python", "music_headerdark-python", "music_dock-python",
         "music_artist-python", "music_artistdark-python", "music_search-python",
-        "music_dockdark-python",
+        "music_dockdark-python", "music_context-python",
     ],
 }
 
@@ -263,7 +263,7 @@ LEGS = {
 # name, the one the host's main.py runs (tools/pyhost-main.py).
 PYTHON_GUESTS = {"portfolio": "portfolio", "varied": "varied", "music_home": "music",
                  "music_playlist": "music", "music_header": "music", "music_dock": "music",
-                 "music_artist": "music", "music_search": "music"}
+                 "music_artist": "music", "music_search": "music", "music_context": "music"}
 
 # The locale a scene runs under, the knob the leg carries as an intent
 # extra (docs/compliance-plan.md §4); the reads ask the platform, never
@@ -386,6 +386,7 @@ FULLSCREEN_APP_TAIL = ('click button#0;expect label#0 "asked for a window";'
 # exactly one step and the specs of one block together one contiguous
 # run; `append` rides after the cut's prefix. The reasons live at the
 # runner's sites and the plans.
+MUSIC_CONTEXT_TAIL = 'select_section 2;expect_context_items row@saved[581719] "Play|Add to Queue|-|Go to Artist";select_section 0;'
 MUSIC_SEARCH_TAIL = ('select_section 1;expect_placeholder search@find "Artists, albums or tracks";expect_ax search@find "field/Search";expect label@search_status "Search Jamendo for artists, albums and tracks.";expect_segments segmented@chips "[All]|Albums|Artists|Tracks";click search@find;expect_focused search@find;type "David";expect label@search_status "2 albums · 1 artist · 3 tracks";expect_image_phase image@found_album_art[149020] shown;expect_shape image@found_album_art[149020] rounded;expect label@found_album_name[149020] "David Amber and Friends, Vol. 1";expect label@found_album_name[154466] "David Amber and Friends, Vol. 2 Instrumentals";expect_text_lines label@found_album_name[154466] 3 whole;expect_same_width column@found_album[154466] column@found_artist[476280];expect_same_height column@found_album[154466] column@found_album[149020];expect label@found_artist_name[476280] "David Amber";expect label@found_track_name[1243462] "Gnarly (feat. Devyn Rush)";expect label@found_track_time[1243462] "0:20";expect_image_phase image@found_track_art[1243462] shown;expect_no_clipping;choose segmented@chips 1;expect_segments segmented@chips "All|[Albums]|Artists|Tracks";expect label@search_status "2 albums";expect_no_target column@found_artist[476280];expect_no_target row@found_track[1243462];choose segmented@chips 2;expect label@search_status "1 artist";expect_image_phase image@found_artist_art[476280] shown;expect_shape image@found_artist_art[476280] circle;expect_no_target column@found_album[149020];choose segmented@chips 3;expect label@search_status "3 tracks";expect_no_target column@found_artist[476280];click row@found_track[1243462];expect label@dock_title "Gnarly (feat. Devyn Rush)";expect_tint label@found_track_name[1243462] accent;click row@dock_open;expect_sheets 1;toggle checkbox@like on;dismiss_sheet;expect_sheets 0;expect_toast "Added to Liked Songs|Undo";toast_action;expect_no_toast;click row@dock_open;expect_sheets 1;expect_checked checkbox@like off;toggle checkbox@like on;dismiss_sheet;expect_sheets 0;expect_toast "Added to Liked Songs|Undo";choose segmented@chips 0;expect label@search_status "2 albums · 1 artist · 3 tracks";clear_search search@find;expect search@find "";expect label@search_status "Search Jamendo for artists, albums and tracks.";expect_segments segmented@chips "[All]|Albums|Artists|Tracks";expect_no_target column@found_album[149020];expect_no_target row@found_track[1243462];click search@find;expect_focused search@find;type "zzqxv";expect label@search_status "No results for “zzqxv”.";expect_no_target column@found_artist[476280];set_text search@find "David";expect label@search_status "2 albums · 1 artist · 3 tracks";expect label@found_artist_name[476280] "David Amber";click column@found_artist[476280];expect_ax label@artist_name "heading/David Amber";back;expect label@search_status "2 albums · 1 artist · 3 tracks";select_section 0;expect_title "Music";')
 
 MODS = {
@@ -461,6 +462,10 @@ MODS = {
     "music_search": {"cut": ("click row@go_search", "expect_image_phase=image@art_116452",
                              MUSIC_SEARCH_TAIL),
                      "append": MUSIC_SEARCH_TAIL},
+    # The library row's menu is the Library section's on a phone.
+    "music_context": {"cut": ("expect_context_items row@saved[581719]",
+                              "expect_context_items=row@top_track[1860165]", MUSIC_CONTEXT_TAIL),
+                      "append": MUSIC_CONTEXT_TAIL},
     "music_home": {"cut": ("hover", "expect_ax expect_grid_columns", ""),
                    "append": "expect_title \"Music\";click column@card_201715;back;expect_selected column@card_201715 on;expect_selected column@card_581719 off;expect_fill column@card_201715 selected;click column@card_139585;back;expect_selected column@card_139585 on;expect_selected column@card_201715 off;select_section 2;expect_selected row@saved[139585] on;expect_selected row@saved[201715] off;expect_image_phase image@saved_art[139585] shown;expect_shape image@saved_art[139585] rounded;click row@saved[201715];back;expect_selected row@saved[201715] on;select_section 0;expect_selected column@card_201715 on;expect_selected column@card_139585 off;"},
     # A phone app is handed no FOREIGN drag source (docs/dnd-plan.md D9),

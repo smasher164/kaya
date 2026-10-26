@@ -4576,6 +4576,11 @@ fn children_of(widget: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
     let mut child = widget.as_ref().first_child();
     while let Some(w) = child {
         child = w.next_sibling();
+        // A context menu's popover is parented to its anchor and takes no
+        // place among the cells (docs/traps.md, a table row's context menu).
+        if w.is::<gtk4::Popover>() {
+            continue;
+        }
         if !is_ground_picture(&w) {
             out.push(w);
         }
@@ -21539,6 +21544,42 @@ impl crate::harness::Stage for GtkStage {
                 })
                 .collect();
             crate::harness::swipe_spec(items)
+        })
+    }
+
+    fn context_items(&self, t: crate::harness::Target) -> String {
+        Self::on_main(move |core| {
+            use gtk4::gio::prelude::MenuModelExt;
+            let anchor = context_anchor_id(core, t);
+            let Some(attachment) = core.context_menus.get(&anchor) else {
+                return format!("<no context menu attached to {t:?}>");
+            };
+            // The popover's own GMenu: each section is a run of rows, and the
+            // gap between two sections is the separator the catalog declared.
+            let mut items = Vec::new();
+            let model = &attachment.model;
+            for i in 0..model.n_items() {
+                let label = |m: &gio::MenuModel, at: i32| {
+                    m.item_attribute_value(at, gio::MENU_ATTRIBUTE_LABEL, None)
+                        .and_then(|v| v.get::<String>())
+                };
+                match model.item_link(i, gio::MENU_LINK_SECTION) {
+                    Some(section) => {
+                        if i > 0 {
+                            items.push(None);
+                        }
+                        if let Some(heading) = label(model.upcast_ref(), i) {
+                            items.push(Some(heading));
+                        } else {
+                            for j in 0..section.n_items() {
+                                items.push(Some(label(&section, j).unwrap_or_default()));
+                            }
+                        }
+                    }
+                    None => items.push(Some(label(model.upcast_ref(), i).unwrap_or_default())),
+                }
+            }
+            crate::harness::context_spec(&items)
         })
     }
 

@@ -373,6 +373,9 @@ ORDER = [
      # Search and the toasts: `type` posts to the guest's own window, as the
      # search pool's does, and the toast's Undo is pressed through its peer.
      "music_search_python",
+     # The context menus (docs/media-player-plan.md M26): the flyout is
+     # opened and read through its own element, no pointer.
+     "music_context_python",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -945,7 +948,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_headerdark": "music", "music_dock": "music", "music_dockdark": "music", "music_artist": "music",
-              "music_artistdark": "music", "music_search": "music"}
+              "music_artistdark": "music", "music_search": "music", "music_context": "music"}
 
 # THE MEDIA SUITE'S SERVER (docs/media-plan.md §7a): the VM reaches the host
 # over UTM's bridge, so the runner binds it there, on this lane's own port,

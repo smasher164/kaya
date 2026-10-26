@@ -19219,3 +19219,30 @@ its own GeometryReader width, which is 0 at that first layout, and fell back to
 the DECLARED width, so the split guest, compact at its undeclared 540 and two-pane
 only after `resize_window 1100x700`, opened its sidebar at 180 (a quarter of 540,
 floored). kayaSplitTotal reads the real window's content width first: 275.
+
+## A table row's context menu was hosted by nothing on four tiers (measured 2026-10-26)
+
+The macOS native table, iOS's synthesized table, iPad's SwiftUI Table and
+Compose's table each draw a stamped row's CHILDREN as cells and never the row
+node itself, so a catalog attached to the row (`row.context_menu(catalog)`)
+rode a view nobody rendered: a right-click on an album's track on the Mac
+opened nothing (a probe: an NSTableView whose cells host SwiftUI opens no menu
+on a right-click until the table has a `menu` of its own, then
+`menuNeedsUpdate` sees the clicked row), and an adb long press on a Compose
+track row opened nothing. The harness passed regardless: context_open
+resolved the catalog from the model on all four. Now the Mac table's own menu
+is filled for the clicked row and its context_open goes through the table's
+`menu(for:)`; on Compose and SwiftUI every view that hosts a menu registers
+its anchor (kayaContextHosts), and context_open and expect_context_items
+refuse an anchor nothing hosts (docs/media-player-plan.md M26, the
+music_context scene). A real right-click posted to a harness guest by pid
+(`CGEvent.postToPid`) opened no SwiftUI context menu on the Mac either; the
+lane's reads do not depend on it.
+
+Two wrappers broke once a stamped row or a stretched card had a menu. GTK
+parents the PopoverMenu to its anchor, and children_of counted it as the row's
+first cell (music_header and music_artist read "cell 0 off by -20 (the cell
+-1..1)" on x11 and wayland); children_of now leaves a popover out. Compose's
+anchor Box loosened the fixed row height a grid measures a stretched card at
+(music_home read "column@card_201715 208 tall, column@card_581719 192 tall");
+the Box now propagates its minimum constraints.

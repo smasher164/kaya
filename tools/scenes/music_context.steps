@@ -1,0 +1,41 @@
+# The media player demo's context menus (docs/media-player-plan.md M26): a
+# right-click on the desktops, a long press on the phones. An album card
+# offers Play, Add to Queue and Go to Artist; a song row Play, Play Next, Add
+# to Queue, Go to Album and Go to Artist. Play Next puts a song after the
+# playing one and Add to Queue at the queue's end, so the dock's next plays
+# them in that order; Go to Album and Go to Artist open the page a click
+# does. A native table's row reads the menu its own right-click opens.
+expect_image_phase image@art_201715 shown
+expect_context_items column@card_201715 "Play|Add to Queue|-|Go to Artist"
+context_open column@card_201715
+menu_activate "Play"
+expect label@dock_title "Seven Chimes"
+click column@card_581719
+expect_image_phase image@track_art[2207899] shown
+expect_context_items row@track[2207899] "Play|Play Next|Add to Queue|-|Go to Album|Go to Artist"
+context_open row@track[2207899]
+menu_activate "Play Next"
+context_open row@track[2207896]
+menu_activate "Add to Queue"
+click button@next
+expect label@dock_title "A Serpent I Did Hear"
+click button@next
+expect label@dock_title "Athens"
+click button@next
+expect label@dock_title "Persimmon"
+context_open row@track[2207896]
+menu_activate "Go to Artist"
+expect_ax label@artist_name "heading/Pierce Murphy"
+expect_context_items column@artist_card_581719 "Play|Add to Queue|-|Go to Artist"
+context_open column@artist_card_581719
+menu_activate "Add to Queue"
+click button@next
+expect label@dock_title "A Serpent I Did Hear"
+expect_context_items row@top_track[1860165] "Play|Play Next|Add to Queue|-|Go to Album|Go to Artist"
+context_open row@top_track[1860165]
+menu_activate "Go to Album"
+expect_image_phase image@track_art[1860160] shown
+# A library row sits in the Library section on a phone (tools/lib/lanes/ios.py,
+# android.py).
+expect_title "Through The Olive Branches"
+expect_context_items row@saved[581719] "Play|Add to Queue|-|Go to Artist"

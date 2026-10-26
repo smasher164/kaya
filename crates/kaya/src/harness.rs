@@ -769,6 +769,11 @@ pub enum Step {
     /// items read from what the backend lowered each to, `none` for a row
     /// with none (docs/swipe-actions-plan.md §4; `swipe_spec`'s order).
     ExpectSwipeActions(Target, String),
+    /// `expect_context_items <target> "<label>|-|<label>"`: the anchor's
+    /// context menu as the platform built it, root items in order, `-` a
+    /// separator, `none` for none (`context_spec`; docs/media-player-plan.md
+    /// M26).
+    ExpectContextItems(Target, String),
     /// Choose this emoji in the picker the app's emoji command opened, the
     /// way the picker's own grid would (docs/emoji-picker-plan.md §5).
     PickEmoji(String),
@@ -1189,6 +1194,7 @@ impl Step {
             | Step::AxAction(t, _)
             | Step::SwipeAction(t, _)
             | Step::ExpectSwipeActions(t, _)
+            | Step::ExpectContextItems(t, _)
             | Step::ExpectOrder(t, _)
             | Step::ExpectColumns(t, _)
             | Step::ExpectRows(t, _)
@@ -1463,6 +1469,7 @@ impl Step {
             Step::AnswerPermission(..) => false,
             Step::SwipeAction(..) => false,
             Step::ExpectSwipeActions(..) => true,
+            Step::ExpectContextItems(..) => true,
             Step::ExpectImageSize(..) => true,
             Step::ExpectImagePhase(..) => true,
             Step::ExpectSaveDialog(..) => true,
@@ -2645,6 +2652,11 @@ pub trait Stage: Send + 'static {
     /// what this backend lowered it to: a swipe surface where there is one,
     /// the context menu's own model where the item stays in the menu.
     fn swipe_actions(&self, target: Target) -> String;
+    /// The anchor's context menu as `context_spec` spells it, read from the
+    /// menu the platform presents where it can be built without a gesture,
+    /// the anchored catalog where it cannot (DESIGN.md, "Where a platform
+    /// cannot say it").
+    fn context_items(&self, target: Target) -> String;
     /// The top-level catalog count, read from the REAL materialized bar (or
     /// the phone overflow's group list) — never the scene model's copy.
     fn menu_count(&self) -> usize;
@@ -4413,6 +4425,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_swipe_actions wants a row and a quoted spec: {line:?}")
                 })?;
                 Step::ExpectSwipeActions(parse_target(target)?, parse_string(spec)?)
+            }
+            "expect_context_items" => {
+                let (target, spec) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_context_items wants a target and a quoted spec: {line:?}")
+                })?;
+                Step::ExpectContextItems(parse_target(target)?, parse_string(spec)?)
             }
             "swipe_action" => {
                 let (target, label) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7794,6 +7812,14 @@ fn run_with_log(
                     Err(format!("{} swipes {got}, wanted {want}", target_spec(t)))
                 }
             })),
+            Step::ExpectContextItems(t, want) => Some(poll(|| {
+                let got = stage.context_items(*t);
+                if got == *want {
+                    Ok(format!("context items {got}"))
+                } else {
+                    Err(format!("{} context items {got}, wanted {want}", target_spec(t)))
+                }
+            })),
             Step::ContextOpen(t) => {
                 // v1 rejects context menus on editable text (their native
                 // menus are dress — scene.rs refuses the attach), so
@@ -8211,6 +8237,15 @@ pub(crate) fn swipe_spec(mut items: Vec<(i64, String)>) -> String {
         .map(|(swipe, label)| format!("{}:{label}", edge(*swipe)))
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// A context menu's root items spelled for `expect_context_items`: each
+/// label in order, a separator as `-`, `none` for an empty menu.
+pub(crate) fn context_spec(items: &[Option<String>]) -> String {
+    if items.is_empty() {
+        return "none".to_owned();
+    }
+    items.iter().map(|item| item.as_deref().unwrap_or("-")).collect::<Vec<_>>().join("|")
 }
 
 /// `expect_safe`'s two verdicts (docs/safe-area-plan.md A9).
@@ -10984,6 +11019,9 @@ mod tests {
         fn swipe_actions(&self, _: Target) -> String {
             String::new()
         }
+        fn context_items(&self, _: Target) -> String {
+            String::new()
+        }
         fn context_open(&self, t: Target) {
             self.seen.lock().unwrap().push(format!("context_open {t:?}"));
         }
@@ -12201,6 +12239,9 @@ mod tests {
         fn swipe_actions(&self, _: Target) -> String {
             String::new()
         }
+        fn context_items(&self, _: Target) -> String {
+            String::new()
+        }
         fn menu_count(&self) -> usize {
             0
         }
@@ -12752,6 +12793,9 @@ mod tests {
         fn menu_activate(&self, _: &str) {}
         fn context_open(&self, _: Target) {}
         fn swipe_actions(&self, _: Target) -> String {
+            String::new()
+        }
+        fn context_items(&self, _: Target) -> String {
             String::new()
         }
         fn menu_count(&self) -> usize {
@@ -13676,6 +13720,15 @@ mod tests {
     /// there are dress (scene.rs refuses the attach). Parse accepts the
     /// target — the grammar is kind-agnostic — and the run arm holds the
     /// line.
+    #[test]
+    fn context_spec_spells_separators_and_an_empty_menu() {
+        assert_eq!(super::context_spec(&[]), "none");
+        assert_eq!(
+            super::context_spec(&[Some("Play".to_owned()), None, Some("Go to Artist".to_owned())]),
+            "Play|-|Go to Artist"
+        );
+    }
+
     /// The spelling all three harnesses share: edges by name, catalog order
     /// kept within one edge, `none` for a row with none.
     #[test]

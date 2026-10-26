@@ -23933,6 +23933,37 @@ impl crate::harness::Stage for WinUiStage {
         String::new()
     }
 
+    fn context_items(&self, t: crate::harness::Target) -> String {
+        // What the element itself will present on a right-click: its own
+        // ContextFlyout's items, read back from the control.
+        Self::on_ui_read(move |core| {
+            let widget = widget_id_for_target(core, t);
+            let Some(element) = core.widgets.get(&WidgetId(widget)) else {
+                return Ok(format!("<no widget behind {t:?}>"));
+            };
+            let Ok(flyout) = element.element()?.ContextFlyout().and_then(|f| f.cast::<MenuFlyout>())
+            else {
+                return Ok(format!("<no context flyout on {t:?}>"));
+            };
+            let items = flyout.Items()?;
+            let mut out = Vec::new();
+            for i in 0..items.Size()? {
+                let item = items.GetAt(i)?;
+                if item.cast::<MenuFlyoutSeparator>().is_ok() {
+                    out.push(None);
+                } else if let Ok(leaf) = item.cast::<MenuFlyoutItem>() {
+                    out.push(Some(leaf.Text()?.to_string()));
+                } else if let Ok(sub) = item.cast::<MenuFlyoutSubItem>() {
+                    out.push(Some(sub.Text()?.to_string()));
+                } else {
+                    out.push(Some("<unknown item>".to_owned()));
+                }
+            }
+            Ok(crate::harness::context_spec(&out))
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn context_open(&self, t: crate::harness::Target) {
         // The REAL presentation path: ShowAt on the anchor's own
         // ContextFlyout. ShowAt is a request, not a readiness

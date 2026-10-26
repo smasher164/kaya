@@ -81,11 +81,12 @@ GO_SCENES = [
 # CPython embedded in ONE bundle carrying every python scene
 # (docs/python-mobile-plan.md).
 PYTHON_SCENES = ["portfolio", "varied", "music_home", "music_playlist", "music_header",
-                 "music_dock", "music_artist", "music_search"]
+                 "music_dock", "music_artist", "music_search", "music_context"]
 # A scene whose guest file is another's: staged under the scene's name, the
 # one the host's main.py runs (tools/pyhost-main.py).
 PYTHON_GUEST = {"music_home": "music", "music_playlist": "music", "music_header": "music",
-                "music_dock": "music", "music_artist": "music", "music_search": "music"}
+                "music_dock": "music", "music_artist": "music", "music_search": "music",
+                "music_context": "music"}
 # Python scenes that also run under KAYA_APPEARANCE=dark, as `<scene>dark-python`
 # (docs/media-player-plan.md M5).
 PYTHON_DARK = ("music_header", "music_artist", "music_dock")
@@ -105,6 +106,7 @@ MUSIC_ARTIST_PHONE_TAIL = ('expect_ground_reach column@artist_header none; expec
 # The Vol. 2 card's line count is iOS's own: its 17 pt type needs a fourth line
 # at 120 points (docs/deferred.md, a line count that reads differently per platform).
 MUSIC_SEARCH_PHONE_TAIL = ('select_section 1; expect_placeholder search@find "Artists, albums or tracks"; expect_ax search@find "field/Search"; expect label@search_status "Search Jamendo for artists, albums and tracks."; expect_segments segmented@chips "[All]|Albums|Artists|Tracks"; click search@find; expect_focused search@find; type "David"; expect label@search_status "2 albums · 1 artist · 3 tracks"; expect_image_phase image@found_album_art[149020] shown; expect_shape image@found_album_art[149020] rounded; expect label@found_album_name[149020] "David Amber and Friends, Vol. 1"; expect label@found_album_name[154466] "David Amber and Friends, Vol. 2 Instrumentals"; expect_text_lines label@found_album_name[154466] 3 truncated; expect_same_width column@found_album[154466] column@found_artist[476280]; expect_same_height column@found_album[154466] column@found_album[149020]; expect label@found_artist_name[476280] "David Amber"; expect label@found_track_name[1243462] "Gnarly (feat. Devyn Rush)"; expect label@found_track_time[1243462] "0:20"; expect_image_phase image@found_track_art[1243462] shown; expect_no_clipping; choose segmented@chips 1; expect_segments segmented@chips "All|[Albums]|Artists|Tracks"; expect label@search_status "2 albums"; expect_no_target column@found_artist[476280]; expect_no_target row@found_track[1243462]; choose segmented@chips 2; expect label@search_status "1 artist"; expect_image_phase image@found_artist_art[476280] shown; expect_shape image@found_artist_art[476280] circle; expect_no_target column@found_album[149020]; choose segmented@chips 3; expect label@search_status "3 tracks"; expect_no_target column@found_artist[476280]; click row@found_track[1243462]; expect label@dock_title "Gnarly (feat. Devyn Rush)"; expect_tint label@found_track_name[1243462] accent; click row@dock_open; expect_sheets 1; toggle checkbox@like on; dismiss_sheet; expect_sheets 0; expect_toast "Added to Liked Songs|Undo"; toast_action; expect_no_toast; click row@dock_open; expect_sheets 1; expect_checked checkbox@like off; toggle checkbox@like on; dismiss_sheet; expect_sheets 0; expect_toast "Added to Liked Songs|Undo"; choose segmented@chips 0; expect label@search_status "2 albums · 1 artist · 3 tracks"; clear_search search@find; expect search@find ""; expect label@search_status "Search Jamendo for artists, albums and tracks."; expect_segments segmented@chips "[All]|Albums|Artists|Tracks"; expect_no_target column@found_album[149020]; expect_no_target row@found_track[1243462]; click search@find; expect_focused search@find; type "zzqxv"; expect label@search_status "No results for “zzqxv”."; expect_no_target column@found_artist[476280]; set_text search@find "David"; expect label@search_status "2 albums · 1 artist · 3 tracks"; expect label@found_artist_name[476280] "David Amber"; click column@found_artist[476280]; expect_ax label@artist_name "heading/David Amber"; back; expect label@search_status "2 albums · 1 artist · 3 tracks"; select_section 0; expect_title "Music"')
+MUSIC_CONTEXT_PHONE_TAIL = 'select_section 2; expect_context_items row@saved[581719] "Play|Add to Queue|-|Go to Artist"; select_section 0'
 MUSIC_PHONE_TAIL = ('expect_title "Music"; click column@card_201715; back; expect_selected column@card_201715 on; expect_selected column@card_581719 off; expect_fill column@card_201715 selected; click column@card_139585; back; expect_selected column@card_139585 on; expect_selected column@card_201715 off; select_section 2; expect_selected row@saved[139585] on; expect_selected row@saved[201715] off; expect_image_phase image@saved_art[139585] shown; expect_shape image@saved_art[139585] rounded; click row@saved[201715]; back; expect_selected row@saved[201715] on; select_section 0; expect_selected column@card_201715 on; expect_selected column@card_139585 off')
 
 # The rust-swiftui suite: one cargo example per scene, milestone2 first
@@ -357,6 +359,10 @@ MODS = {
     ("python", "music_artist"): {"cut": "expect_title",
                                  "keep": "expect_ground expect_fill expect_shape expect_tint",
                                  "extra": MUSIC_ARTIST_PHONE_TAIL},
+    # The library row's menu is the Library section's on a phone.
+    ("python", "music_context"): {"cut": "expect_title",
+                                  "keep": "expect_context_items=row@top_track[1860165]",
+                                  "extra": MUSIC_CONTEXT_PHONE_TAIL},
     ("python", "music_search"): {"cut": "click row@go_search",
                                  "keep": "expect_image_phase=image@art_116452",
                                  "extra": MUSIC_SEARCH_PHONE_TAIL},

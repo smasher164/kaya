@@ -201,6 +201,12 @@ func kayaSwipeSpec(_ items: [(Int64, String)]) -> String {
         .map { "\(edge($0.element.0)):\($0.element.1)" }
         .joined(separator: "/")
 }
+/// A context menu's root items as expect_context_items spells them:
+/// harness.rs's `context_spec`, a separator as `-`, `none` for none.
+func kayaContextSpec(_ items: [String?]) -> String {
+    if items.isEmpty { return "none" }
+    return items.map { $0 ?? "-" }.joined(separator: "|")
+}
 private let commandClear: UInt32 = 1
 private let commandFocus: UInt32 = 2
 private let commandEmojiPicker: UInt32 = 3
@@ -15155,6 +15161,13 @@ private func kayaRunScript(_ script: String) {
                 kayaAwaitQuiet()
                 let answered = kayaAnswers()
                 let failure = DispatchQueue.main.sync { () -> String? in
+                    #if os(macOS)
+                        if let menu = kayaOpenContextNSMenu {
+                            kayaOpenContextNSMenu = nil
+                            kayaOpenContextWidget = nil
+                            return kayaPerformNSMenuPath(menu, path)
+                        }
+                    #endif
                     if let wid = kayaOpenContextWidget {
                         guard let roots = kayaScene.contextRoots[wid],
                             let item = kayaResolveMenuPath(path, roots: roots)
@@ -15190,6 +15203,49 @@ private func kayaRunScript(_ script: String) {
                     failures.append(failure)
                 } else {
                     kayaAwaitAnswer(answered)
+                }
+            case "expect_context_items":
+                // The anchor's menu (docs/media-player-plan.md M26): a native
+                // table row's from the AppKit menu its right-click opens, any
+                // other anchor's from the catalog its .contextMenu draws.
+                let restLine = String(line.dropFirst(parts[0].count + 1 + parts[1].count))
+                guard let (want, tail) = kayaQuotedPrefix(restLine), tail.isEmpty else {
+                    failures.append("expect_context_items wants a target and a quoted spec: \(line)")
+                    break
+                }
+                func contextItems() -> String? {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaAnyTarget(parts[1]) else { return nil }
+                        #if os(macOS)
+                            if let driver = kayaTableDrivers.values.first(where: { $0.stamps(node) }) {
+                                let (menu, why) = driver.contextMenu(for: node)
+                                guard let menu else { return "<\(why)>" }
+                                return kayaContextSpec(
+                                    menu.items.map { $0.isSeparatorItem ? nil : $0.title })
+                            }
+                        #endif
+                        guard let roots = kayaScene.contextRoots[node.id] else {
+                            return "<no context menu attached to \(parts[1])>"
+                        }
+                        guard kayaContextHosts[node.id] != nil else {
+                            return "<no view on screen hosts the menu>"
+                        }
+                        return kayaContextSpec(
+                            roots.map { $0.kind == menuKindSeparator ? nil : $0.label })
+                    }
+                }
+                var gotItems = contextItems()
+                let itemsDeadline = Date().addingTimeInterval(5)
+                while gotItems != want && Date() < itemsDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    gotItems = contextItems()
+                }
+                if let gotItems, gotItems == want {
+                    observed.append("context items \(gotItems)")
+                } else if let gotItems {
+                    failures.append("\(parts[1]) context items \(gotItems), wanted \(want)")
+                } else {
+                    failures.append("no such target \(parts[1])")
                 }
             case "expect_swipe_actions":
                 // The row's swipe items (docs/swipe-actions-plan.md §4). Apple
@@ -15283,6 +15339,20 @@ private func kayaRunScript(_ script: String) {
                     }
                     guard kayaScene.contextRoots[node.id]?.isEmpty == false else {
                         return "no context menu attached to \(parts[1])"
+                    }
+                    #if os(macOS)
+                        kayaOpenContextNSMenu = nil
+                        if let driver = kayaTableDrivers.values.first(where: { $0.stamps(node) }) {
+                            let (menu, why) = driver.contextMenu(for: node)
+                            guard let menu else { return "context_open \(parts[1]): \(why)" }
+                            kayaOpenContextNSMenu = menu
+                            kayaOpenContextWidget = node.id
+                            return nil
+                        }
+                    #endif
+                    guard kayaContextHosts[node.id] != nil else {
+                        return "context_open \(parts[1]): no view on screen hosts its context menu, "
+                            + "so no press on it can open one"
                     }
                     kayaOpenContextWidget = node.id
                     return nil
@@ -18362,6 +18432,8 @@ private struct KayaNativeTable: View {
                                 node: row.children[spec.id], flexVertical: false,
                                 flexStretch: false
                             )
+                            .onAppear { kayaContextHosted(row.id, true) }
+                            .onDisappear { kayaContextHosted(row.id, false) }
                             .background(
                                 KayaEdgeReporter(
                                     node: node,
@@ -18369,6 +18441,12 @@ private struct KayaNativeTable: View {
                                     generation: generation))
                         }
                     }
+                }
+            }
+            // The row's catalog, the Table's own row menu (docs/media-player-plan.md M26).
+            .contextMenu(forSelectionType: KayaNode.ID.self) { ids in
+                if let id = ids.first, kayaScene.contextRoots[id]?.isEmpty == false {
+                    KayaContextMenuItems(widgetId: id)
                 }
             }
             // A TIER REPORTS WHAT IT REALIZES, and this one realizes the WHOLE
@@ -18544,11 +18622,15 @@ private struct KayaNativeTable: View {
     /// reporter — ONE object, because they are one loop: AppKit asks the CORE
     /// for row heights, the core's band decides which rows carry widgets, and
     /// this hands back the visible range and the extents laid out.
-    final class KayaTableDriver: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class KayaTableDriver: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSMenuDelegate {
         private(set) var node: KayaNode
         private var generation = 0
         private let scrollView = KayaTableScrollView()
         private let tableView = KayaNativeTableView()
+        /// A row's context catalog, filled for the clicked row as AppKit opens
+        /// it: the table's own menu, since a cell hosts the row's children and
+        /// never the row the catalog is attached to.
+        private let contextMenu = NSMenu()
         /// The core's band and the collection's declared total, read
         /// TOGETHER and held for the length of a layout pass: AppKit's
         /// row count may not change under it.
@@ -18589,6 +18671,9 @@ private struct KayaNativeTable: View {
             tableView.allowsEmptySelection = true
             tableView.target = self
             tableView.doubleAction = #selector(rowDoubleClicked(_:))
+            contextMenu.autoenablesItems = false  // docs/traps.md
+            contextMenu.delegate = self
+            tableView.menu = contextMenu
             tableView.setAccessibilityIdentifier(kayaNativeTableAxId(node.id))
             tableView.onReturn = { [weak self] in
                 guard let self else { return false }
@@ -18938,6 +19023,46 @@ private struct KayaNativeTable: View {
                     ? ", and the doubleAction was \(tableView.doubleAction == nil ? "absent" : sent ? "sent" : "not taken") "
                         + "\(activated ? "and activated" : "and nothing activated")"
                     : "")
+        }
+
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            menu.removeAllItems()
+            guard let stamped = row(at: tableView.clickedRow),
+                let roots = kayaScene.contextRoots[stamped.id], !roots.isEmpty
+            else { return }
+            kayaBuildNSMenuItems(
+                into: menu, children: roots, noun: kayaScene.contextNouns[stamped.id] ?? [])
+        }
+
+        /// The menu a right-click on `stamped` opens, through the table's own
+        /// menu(for:) and the update AppKit runs before it shows; nil and what
+        /// it measured when there is none. No host pointer moves.
+        func contextMenu(for stamped: KayaNode) -> (NSMenu?, String) {
+            guard let at = axRow(of: stamped), at.index < numberOfRows(in: tableView) else {
+                return (nil, "node \(stamped.id) is not among the native table's realized rows")
+            }
+            guard let window = tableView.window else {
+                return (nil, "the native table is in no window")
+            }
+            let rect = tableView.rect(ofRow: at.index)
+            let point = tableView.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+            guard
+                let event = NSEvent.mouseEvent(
+                    with: .rightMouseDown, location: point, modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                    clickCount: 1, pressure: 1)
+            else { return (nil, "AppKit made no right-mouse event at row \(at.index)") }
+            tableView.harnessClickedRow = at.index
+            defer { tableView.harnessClickedRow = nil }
+            guard let menu = tableView.menu(for: event) else {
+                return (nil, "the native table answers no menu for a right-click on row \(at.index)")
+            }
+            menu.delegate?.menuNeedsUpdate?(menu)
+            if menu.items.isEmpty {
+                return (nil, "the native table's menu for row \(at.index) (node \(stamped.id)) holds no items")
+            }
+            return (menu, "")
         }
 
         /// The table holding the keyboard: the window's first responder.
@@ -19632,6 +19757,10 @@ private struct KayaTableRowGround: View {
     let row: KayaNode
 
     var body: some View {
+        kayaGroundBody.modifier(KayaRowContextMenu(row: row))
+    }
+
+    @ViewBuilder private var kayaGroundBody: some View {
         if row.activatable {
             Rectangle()
                 .fill(row.selected ? AnyShapeStyle(kayaSelectedPair().fill) : AnyShapeStyle(Color.clear))
@@ -19661,6 +19790,24 @@ private struct KayaTableRowPress: ViewModifier {
                 .environment(\.kayaInFill, row.selected && kayaSelectionTakesText)
                 .contentShape(Rectangle())
                 .onTapGesture { KayaHost.emitPress(row) }
+        } else {
+            content
+        }
+    }
+}
+
+/// A synthesized table row's context menu (docs/media-player-plan.md M26): the
+/// cells are the row's children and never the row, so the row's catalog rides
+/// its ground and each cell, wherever the press lands.
+private struct KayaRowContextMenu: ViewModifier {
+    let row: KayaNode
+
+    func body(content: Content) -> some View {
+        if kayaScene.contextRoots[row.id]?.isEmpty == false {
+            content
+                .contextMenu { KayaContextMenuItems(widgetId: row.id) }
+                .onAppear { kayaContextHosted(row.id, true) }
+                .onDisappear { kayaContextHosted(row.id, false) }
         } else {
             content
         }
@@ -21142,6 +21289,7 @@ private struct KayaSynthesizedTable: View {
                 ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
                     KayaRender(node: cell, flexVertical: false, flexStretch: false)
                         .modifier(KayaTableRowPress(row: row))
+                        .modifier(KayaRowContextMenu(row: row))
                         .background(
                             KayaEdgeReporter(
                                 node: node, key: kayaTableCellKey(row, col, cell),
@@ -26400,6 +26548,8 @@ struct KayaRender: View {
         // every node's view passes through (tools/check-universal-props.py).
         if kayaScene.contextRoots[node.id]?.isEmpty == false {
             kayaA11y(kayaDragDrop(widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }), node)
+                .onAppear { kayaContextHosted(node.id, true) }
+                .onDisappear { kayaContextHosted(node.id, false) }
         } else {
             kayaA11y(kayaDragDrop(widget), node)
         }
@@ -27380,6 +27530,19 @@ func kayaUserPops(_ sid: UInt64, to depth: Int) {
 /// The harness's OPEN context menu: context_open records the anchor here and
 /// the following menu_activate resolves against it (main actor).
 var kayaOpenContextWidget: UInt64?
+/// How many views host each anchor's context menu, for context_open and
+/// expect_context_items: a catalog nothing hosts is a menu no gesture opens.
+var kayaContextHosts: [UInt64: Int] = [:]
+
+func kayaContextHosted(_ id: UInt64, _ on: Bool) {
+    let count = (kayaContextHosts[id] ?? 0) + (on ? 1 : -1)
+    kayaContextHosts[id] = count > 0 ? count : nil
+}
+#if os(macOS)
+    /// The AppKit menu context_open opened, for a native table's row: the
+    /// following menu_activate performs its item.
+    var kayaOpenContextNSMenu: NSMenu?
+#endif
 
 /// The interpreter's shortcut dispatch table: canonical spelling -> action item
 /// id, rebuilt from the presented catalog on every menu change. On iOS the
@@ -30178,6 +30341,30 @@ func kayaSectionTrace() {
     FileHandle.standardError.write(Data(out.utf8))
 }
 
+#if os(macOS)
+    /// Perform the item at a `>`-joined title path in an AppKit menu through
+    /// the menu's own action route; nil, or why it could not.
+    func kayaPerformNSMenuPath(_ menu: NSMenu, _ path: String) -> String? {
+        var owner = menu
+        let steps = path.split(separator: ">").map(String.init)
+        for (depth, title) in steps.enumerated() {
+            guard let index = owner.items.firstIndex(where: { $0.title == title }) else {
+                return "no such context item \(path): the menu holds "
+                    + owner.items.map { $0.isSeparatorItem ? "-" : $0.title }.joined(separator: "|")
+            }
+            let item = owner.items[index]
+            if depth < steps.count - 1 {
+                guard let submenu = item.submenu else { return "\(title) in \(path) opens no submenu" }
+                owner = submenu
+                continue
+            }
+            guard item.isEnabled else { return "context item \(path) is disabled" }
+            owner.performActionForItem(at: index)
+        }
+        return nil
+    }
+#endif
+
 /// The expect_menu read: wherever the item surfaced — the OPEN context menu
 /// first, then the bar. macOS reads the REAL NSMenuItem state; iOS reads the
 /// model, since SwiftUI exposes no item registry and every aspect here rides a
@@ -30252,6 +30439,12 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// back into the shared dispatch path.
     final class KayaMenuDispatcher: NSObject {
         @objc func fire(_ sender: NSMenuItem) {
+            if let pick = sender.representedObject as? KayaContextPick,
+                let item = kayaScene.menuItems[pick.item]
+            {
+                kayaMenuUserActivate(item, noun: pick.noun)
+                return
+            }
             guard let number = sender.representedObject as? NSNumber,
                 let item = kayaScene.menuItems[number.uint64Value]
             else { return }
@@ -30263,13 +30456,24 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         /// application menu, which validates. Answering with the inherited AND
         /// keeps that item's enablement ours instead of AppKit's (docs/traps.md).
         @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
-            guard let number = item.representedObject as? NSNumber,
-                let model = kayaScene.menuItems[number.uint64Value]
-            else { return true }
+            let id = (item.representedObject as? KayaContextPick)?.item
+                ?? (item.representedObject as? NSNumber)?.uint64Value
+            guard let id, let model = kayaScene.menuItems[id] else { return true }
             return kayaMenuEffectiveEnabled(model)
         }
     }
     let kayaMenuDispatch = KayaMenuDispatcher()
+
+    /// A context item in an AppKit menu: the item and the anchor's noun, which
+    /// the bar's NSNumber has no room for.
+    final class KayaContextPick: NSObject {
+        let item: UInt64
+        let noun: [UInt8]
+        init(item: UInt64, noun: [UInt8]) {
+            self.item = item
+            self.noun = noun
+        }
+    }
 
     /// The canonical shortcut spelling (root-validated) onto AppKit's key
     /// equivalent. `primary` = Command on Apple hosts. The same mapping builds
@@ -30320,20 +30524,25 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
 
     /// Builds one grouping node's submenu content. A nested menu cascades; a
     /// radio_group materializes INLINE with the checkmark idiom.
-    private func kayaBuildNSMenuItems(into menu: NSMenu, children: [KayaMenuItemModel]) {
+    func kayaBuildNSMenuItems(
+        into menu: NSMenu, children: [KayaMenuItemModel], noun: [UInt8]? = nil
+    ) {
+        func tag(_ id: UInt64) -> Any {
+            noun.map { KayaContextPick(item: id, noun: $0) } ?? NSNumber(value: id)
+        }
         for child in children {
             switch child.kind {
             case menuKindSeparator:
                 menu.addItem(NSMenuItem.separator())
             case menuKindMenu:
                 let holder = NSMenuItem(title: child.label, action: nil, keyEquivalent: "")
-                holder.representedObject = NSNumber(value: child.id)
+                holder.representedObject = tag(child.id)
                 holder.isEnabled = kayaMenuEffectiveEnabled(child)
                 let submenu = NSMenu(title: child.label)
                 submenu.autoenablesItems = false  // docs/traps.md
             submenu.delegate = kayaMenuRefresher
                 kayaApplySymbol(holder, child.symbol)
-                kayaBuildNSMenuItems(into: submenu, children: child.children)
+                kayaBuildNSMenuItems(into: submenu, children: child.children, noun: noun)
                 holder.submenu = submenu
                 menu.addItem(holder)
             case menuKindRadioGroup:
@@ -30342,7 +30551,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                         title: option.label,
                         action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
                     nsItem.target = kayaMenuDispatch
-                    nsItem.representedObject = NSNumber(value: option.id)
+                    nsItem.representedObject = tag(option.id)
                     nsItem.isEnabled = kayaMenuEffectiveEnabled(option)
                     nsItem.state = Int(child.value) == index ? .on : .off
                     kayaApplySymbol(nsItem, option.symbol)
@@ -30358,7 +30567,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                     title: child.label,
                     action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
                 nsItem.target = kayaMenuDispatch
-                nsItem.representedObject = NSNumber(value: child.id)
+                nsItem.representedObject = tag(child.id)
                 nsItem.isEnabled = kayaMenuEffectiveEnabled(child)
                 if child.kind == menuKindToggle {
                     nsItem.state = child.checked ? .on : .off
