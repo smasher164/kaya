@@ -22132,6 +22132,14 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
+    fn drag_sidebar(&self, _: f64) -> Result<(), String> {
+        Err("libadwaita's split views have no divider a user can drag (docs/tasks-s4-plan.md P8)".to_owned())
+    }
+
+    fn sidebar_width(&self) -> Result<f64, String> {
+        Err("libadwaita's split views have no divider a user can drag, so nothing is remembered (docs/tasks-s4-plan.md P8)".to_owned())
+    }
+
     fn resize_window(&self, window: u64, width: f64, height: f64) {
         // The REAL resize path: the size a user's drag would set. AN ACTION,
         // so a miss IS a bug — but it dies on the HARNESS thread, not inside

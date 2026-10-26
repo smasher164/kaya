@@ -116,7 +116,7 @@ else:
         grid = "let width = proposal.width.flatMap { $0.isFinite ? $0 : nil } ?? minWidth"
         ends = ("?? (minWidth * CGFloat(subviews.count) + spacing * "
                 "CGFloat(max(0, subviews.count - 1)))")
-        ideal = ".navigationSplitViewColumnWidth(\n                    ideal: kayaLeadingPaneWidth("
+        ideal = ".navigationSplitViewColumnWidth(ideal: sidebarIdeal)"
         empty = ("                    KayaRender(node: root, isRoot: true)\n"
                  "                } else {\n"
                  "                    // A column with no view yet")
@@ -128,7 +128,7 @@ else:
              grid, grid.replace("?? minWidth", ends), "an auto grid's ideal width is"),
             # docs/traps.md, the two-pane sidebar fell to SwiftUI's floor.
             ("NG2", "cut the two-pane sidebar's ideal width",
-             ideal, ".id(\n                    kayaLeadingPaneWidth(",
+             ideal, ".id(sidebarIdeal)",
              "the two-pane sidebar opened"),
             ("NG3", "left the two-pane sidebar empty until its root",
              empty, empty.replace("} else {", "} else if false {"), "the two-pane sidebar opened"),

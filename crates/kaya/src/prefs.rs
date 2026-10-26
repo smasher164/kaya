@@ -259,6 +259,28 @@ pub(crate) fn set_window_frame(window: u64, frame: &str) {
     set(&window_frame_key(window), PrefValue::Str(frame.to_owned()));
 }
 
+/// `kaya.window.<id>.sidebar`, the sidebar width the user dragged
+/// (docs/tasks-s4-plan.md P8), in the platform's own units.
+pub(crate) fn sidebar_width_key(window: u64) -> String {
+    format!("{RESERVED_PREFIX}window.{window}.sidebar")
+}
+
+#[cfg_attr(not(any(target_os = "macos", target_os = "ios", test)), allow(dead_code))]
+pub(crate) fn sidebar_width(window: u64) -> Option<f64> {
+    match get(&sidebar_width_key(window)) {
+        Some(PrefValue::I64(n)) if n > 0 => Some(n as f64),
+        _ => None,
+    }
+}
+
+#[cfg_attr(not(any(target_os = "macos", target_os = "ios", test)), allow(dead_code))]
+pub(crate) fn set_sidebar_width(window: u64, width: f64) {
+    if width.is_finite() && width >= 1.0 {
+        // docs/traps.md, a dragged sidebar lands on a half point.
+        set(&sidebar_width_key(window), PrefValue::I64((width + 1e-6).floor() as i64));
+    }
+}
+
 /// ACT ONE'S RESET (§4): empty the scratch pref domain and the scratch
 /// data directory, so a relaunch scene measures what act one wrote and
 /// nothing older. REFUSES OUTSIDE THE HARNESS — a process that reached
@@ -527,6 +549,8 @@ mod tests {
         // The guest floor refuses exactly this shape, which is why the
         // backends reach it through window_frame/set_window_frame.
         assert!(is_reserved(&window_frame_key(0)));
+        assert_eq!(sidebar_width_key(0), "kaya.window.0.sidebar");
+        assert!(is_reserved(&sidebar_width_key(3)));
     }
 
     #[test]

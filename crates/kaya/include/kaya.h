@@ -2592,6 +2592,13 @@ typedef struct KayaHostApi {
   uintptr_t (*window_frame)(uint64_t, uint8_t*, uintptr_t);
   void (*set_window_frame)(uint64_t, const uint8_t*, uintptr_t);
   /**
+   * The sidebar width the user dragged (docs/tasks-s4-plan.md P8):
+   * `sidebar_width` answers it fitted to a window `total` wide, or 0 for
+   * none.
+   */
+  double (*sidebar_width)(uint64_t, double);
+  void (*set_sidebar_width)(uint64_t, double);
+  /**
    * RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5/R9): the
    * six reports an arm makes and the two reads the harness makes.
    */

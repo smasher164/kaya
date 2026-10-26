@@ -2246,7 +2246,9 @@ _runners = [
      {win_lane.scene_lang(leg)[0] for leg in win_lane.legs()}),
     ("tools/linux/run-suites.sh",
      linux_doors(read_rel("tools/linux/run-suites.sh")),
-     {p.stem for p in STEPS}),
+     {p.stem for p in STEPS} - set(" ".join(re.findall(
+         r'^OFF_SCENES="([^"]*)"$', read_rel("tools/linux/run-suites.sh"),
+         re.M)).split())),
 ]
 _relaunch_bad += relaunch_doors(_relaunch, _runners, _act2_sources)
 _relaunch_bad += act_one_verdict(_act2_sources)

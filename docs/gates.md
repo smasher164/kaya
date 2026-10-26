@@ -1190,7 +1190,12 @@ other applications' windows, since a leg passes with the host's
 browser in front), a shrink waits nothing, the expiry names each
 corner's holder, and a main-thread caller is refused; three cuts
 watched. check-verbs holds the resize arm's call, the choice refusal's
-server reading and the walk (tools/lib/resize_shape.py, eleven cuts))
+server reading and the walk (tools/lib/resize_shape.py, eleven cuts).
+Clause H, static, holds the sidebar memory (docs/tasks-s4-plan.md P8):
+every macOS NavigationSplitView's sidebar carries KayaSidebarWatchHolder,
+and the save asks NSSplitViewUserResizeKey, since a sidebar toggle names
+the divider too (docs/traps.md); two cuts watched. tools/scenes/windowmem.steps
+drives the two-pane root across a relaunch.)
 
 ## tools/check-canvas-blit.py
 

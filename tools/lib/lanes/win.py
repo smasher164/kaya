@@ -58,7 +58,8 @@ SCENES = [
 OFF_SCENES = {"chatkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "taskskeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
               "autofillkeyboard": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
-              "chatkeyboardland": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)"}
+              "chatkeyboardland": "Windows has no software keyboard on this lane (docs/safe-area-plan.md A13)",
+              "windowmem": "TwoPaneView and NavigationView have no sidebar divider a user can drag (docs/tasks-s4-plan.md P8)"}
 
 # THE LEGS THAT RUN AS THE ONLY INPUT-DRIVING LEG ON THE HOST (tools/lib/
 # exclusive.py): the drag family, already alone inside this lane for the

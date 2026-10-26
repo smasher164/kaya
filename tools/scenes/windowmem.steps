@@ -1,0 +1,16 @@
+# THE SIDEBAR WIDTH THE USER DRAGGED, REMEMBERED (docs/tasks-s4-plan.md P8).
+# The Mac's alone: each lane's OFF_SCENES says why the others are off.
+expect_title "split"
+resize_window 1100x700
+expect_split "regular/split"
+# A harness run starts from the default, never from a width a previous run left.
+expect_sidebar_width 275
+drag_sidebar 340
+expect_sidebar_width 340
+expect_pref kaya.window.0.sidebar "340"
+
+relaunch launch
+
+expect_title "split"
+expect_window_size 1100x700
+expect_sidebar_width 340

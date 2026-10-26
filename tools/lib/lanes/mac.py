@@ -92,7 +92,7 @@ LANGS = ("rust", "python", "go", "csharp", "ocaml", "haskell", "swift",
 # differ: the listdetail legs run split's guests (a scene selects a
 # SCRIPT, never an app). editor/portfolio/varied are single-language
 # apps whose launchers already name the right artifact.
-GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks",
+GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "split",
               "links": "tasks", "formatde": "format", "formatar": "format",
               "tasksrtl": "tasks", "clock24": "format", "scrollrtl": "scroll",
               "numberfieldde": "numberfield", "numberfieldar": "numberfield",
@@ -162,6 +162,9 @@ HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "p
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
                "taskspersist": "rust",
+               # The split guest's dragged sidebar across a relaunch
+               # (docs/tasks-s4-plan.md P8).
+               "windowmem": "rust",
                # The app-links scene: the same rust example under a third
                # script (docs/app-links-plan.md L5).
                "links": "rust",
@@ -381,6 +384,9 @@ ORDER = [
     # door. Alone between drains — act one leaves a marker in the state
     # home and act two is a second process of the same bundle.
     ("taskspersist", ("rust",)),
+    ("drain",),
+    # The dragged sidebar across a relaunch (docs/tasks-s4-plan.md P8).
+    ("windowmem", ("rust",)),
     ("drain",),
     # APP LINKS (docs/app-links-plan.md L5): the tasks guest a third
     # time, warm through NSWorkspace and cold through `open`. Alone
@@ -1230,6 +1236,7 @@ CS_GUEST = "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"
 # delegate's own funnel one step past the tap. tools/check-steps.py reads
 # this table against the scenes that carry a `relaunch` line.
 RELAUNCH_DOOR = {"tasks": "launch-notification", "taskspersist": "launch",
+                 "windowmem": "launch",
                  # THE LINK DOOR (docs/app-links-plan.md L5): `open` hands
                  # the URL to LaunchServices, which starts the bundle and
                  # delivers it as an Apple event 21 ms in.
@@ -1252,13 +1259,104 @@ def act2_dir(root, env=None):
     return pathlib.Path(state) / "kaya" / "act2" / load(root).id
 
 
-def clear_act2(root, env=None):
+def clear_act2(root, env=None, scene=None):
     """A stale marker or verdict may not serve this run. The core
     consumes the marker on read, so this covers the run that DIED before
     its second act."""
     d = act2_dir(root, env)
     for name in ("marker", "act2.verdict"):
         (d / name).unlink(missing_ok=True)
+    if scene in REAL_STORE_SENTINEL:
+        plant_real_store(root, scene)
+
+
+# THE HARNESS NEVER READS OR WRITES THE APP'S REAL STORE (docs/tasks-s4-plan.md
+# P8): a value planted in the real domain before act one, which the scene's
+# first read shows if the harness read it, and which second_act finds changed
+# if the harness wrote it. Put back in the process's exit at the latest.
+REAL_STORE_SENTINEL = {"windowmem": ("kaya.window.0.sidebar", "123")}
+_real_store_prior = {}
+
+
+def real_domain(root, scene):
+    from packaging import identity
+    return identity.load(root, identity.manifest_for(guest_stem(scene))).id
+
+
+def _defaults(*argv):
+    return subprocess.run(["defaults", *argv], capture_output=True, text=True,
+                          timeout=30, check=False)
+
+
+def plant_real_store(root, scene):
+    import atexit
+    key, value = REAL_STORE_SENTINEL[scene]
+    domain = real_domain(root, scene)
+    if (domain, key) not in _real_store_prior:
+        held = _defaults("read", domain, key)
+        prior = held.stdout.strip() if held.returncode == 0 else None
+        _real_store_prior[(domain, key)] = None if prior == value else prior
+        atexit.register(release_real_store, domain, key)
+    _defaults("write", domain, key, "-int", value)
+
+
+def release_real_store(domain, key):
+    if (domain, key) not in _real_store_prior:
+        return
+    prior = _real_store_prior.pop((domain, key))
+    if prior is None:
+        _defaults("delete", domain, key)
+    else:
+        _defaults("write", domain, key, "-int", prior)
+
+
+def standard_domain(argv):
+    """The domain NSUserDefaults.standard names for the process argv starts:
+    the bundle's identifier, else the executable's name (docs/traps.md, the
+    host domain's window frame)."""
+    import plistlib
+    exe = pathlib.Path(argv[0])
+    if exe.parent.name == "MacOS" and exe.parent.parent.name == "Contents":
+        info = exe.parent.parent / "Info.plist"
+        if info.is_file():
+            return plistlib.loads(info.read_bytes()).get("CFBundleIdentifier", exe.name)
+    return exe.name
+
+
+def real_store_verdict(root, scene, lf, argv):
+    """0 when the planted value is still the real domain's and no split
+    frame was autosaved, else 1 with the sentence; the user's own value is
+    put back either way."""
+    key, value = REAL_STORE_SENTINEL[scene]
+    domain = real_domain(root, scene)
+    held = _defaults("read", domain, key)
+    got = held.stdout.strip() if held.returncode == 0 else None
+    release_real_store(domain, key)
+    import plistlib
+    split = []
+    for where in sorted({domain, standard_domain(argv)}):
+        exported = subprocess.run(["defaults", "export", where, "-"], capture_output=True,
+                                  timeout=30, check=False)
+        keys = plistlib.loads(exported.stdout).keys() if exported.returncode == 0 else ()
+        split += [f"{where}: {k}" for k in sorted(keys)
+                  if k.startswith("NSSplitView Subview Frames ")
+                  and ("KayaRoot" in k or "KayaAuxRoot" in k)]
+    rc = 0
+    if got != value:
+        lf.write(f"{scene}: the real domain {domain} holds {key} = {got!r} after the leg, "
+                 f"planted {value} before act one: the harness wrote the app's real store "
+                 f"(docs/tasks-s4-plan.md P8)\n")
+        rc = 1
+    if split:
+        lf.write(f"{scene}: AppKit's split frames {split} were written by the leg, which "
+                 f"every launch forgets: the sidebar's split view still autosaves "
+                 f"(docs/tasks-s4-plan.md P8)\n")
+        rc = 1
+    if rc == 0:
+        lf.write(f"{scene}: the real domain {domain} still holds {key} = {value}, planted "
+                 f"before act one, and no AppKit split frame is in it or in "
+                 f"{standard_domain(argv)}\n")
+    return rc
 
 
 def plain_launch(argv, env, root, lf):
@@ -1467,7 +1565,10 @@ def second_act(root, scene, argv, env, log, launch=None):
                      f"died before publishing\n")
             return 1
         lf.write(f"{scene}: act two verdict {line}\n")
-        return 0 if line.startswith("KAYA_SELFTEST: OK") else 1
+        rc = 0 if line.startswith("KAYA_SELFTEST: OK") else 1
+        if scene in REAL_STORE_SENTINEL:
+            rc = real_store_verdict(root, scene, lf, argv) or rc
+        return rc
 
 
 def act_one_ok(log_text):

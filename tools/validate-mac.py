@@ -442,7 +442,7 @@ def run_recorded(name, argv, env, log, scene=None):
         leg_env.setdefault("KAYA_SELFTEST", "1")
         second = scene is not None and scene in lane.RELAUNCH_DOOR
         if second:
-            lane.clear_act2(ROOT, leg_env)
+            lane.clear_act2(ROOT, leg_env, scene)
         with open(rec_dir / "leg.log", "w", encoding="utf-8",
                   errors="replace") as lf:
             rc = _record_process(rec_dir, slot, argv, leg_env, lf, log, name)
@@ -678,7 +678,7 @@ def _leg_body(name, argv, env, scene=None):
     # left over is from a run that DIED before its second act.
     second = scene is not None and scene in lane.RELAUNCH_DOOR
     if second:
-        lane.clear_act2(ROOT, leg_env)
+        lane.clear_act2(ROOT, leg_env, scene)
     rc = attempt("w")
     if foreign_pasteboard_retry(rc, log.read_text(encoding="utf-8",
                                                   errors="replace")):

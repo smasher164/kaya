@@ -550,6 +550,48 @@ refuses_bar("a flat bar over the content",
             real_rule, want="RAISED_BORDER")
 negatives += 7
 
+
+# --- Clause H: the sidebar width memory (docs/tasks-s4-plan.md P8) -----
+# windowmem.steps drives the two-pane root alone; this holds every macOS
+# NavigationSplitView's sidebar to the watch, and the save to the user's
+# own drag (docs/traps.md, a sidebar toggle names the divider too).
+def sidebar_memory(interp):
+    bad = []
+    code = strip(interp)
+    sites = [m.start() for m in re.finditer(r"\bNavigationSplitView\s*[({]", code)]
+    if len(sites) < 3:
+        bad.append(f"{len(sites)} NavigationSplitView sites read, wanted at least 3: "
+                   f"this clause no longer finds the sidebars it holds")
+    for at in sites:
+        sidebar = span(interp, interp.index("{", at))
+        line = interp.count("\n", 0, at) + 1
+        watched = r"KayaSidebarWatchHolder\(|KayaRememberedSidebar\("
+        if sidebar is None or not re.search(watched, sidebar):
+            bad.append(f"{SWIFTUI}:{line}: a NavigationSplitView's sidebar carries no "
+                       f"KayaSidebarWatchHolder, so a width the user drags there is never saved")
+    dragged = braced(interp, r"forName: NSSplitView\.didResizeSubviewsNotification")
+    if dragged is None or '"NSSplitViewUserResizeKey"' not in dragged:
+        bad.append("the sidebar's resize observer no longer asks NSSplitViewUserResizeKey, so a "
+                   "hide or show of the sidebar saves the width it passed through")
+    return bad
+
+
+for line in sidebar_memory(real):
+    gate.finding(line)
+gate.negative("a three-pane sidebar with no watch",
+              lambda: sidebar_memory(gate.doctor(
+                  "the split3 watch perturbation", real,
+                  r"(navigationSplitViewColumnWidth\(\n\s*ideal: kayaSidebarIdeal\("
+                  r"windowId, total: [^\n]*\?\? 220\)\n)"
+                  r"\s*\.background\(KayaSidebarWatchHolder\(windowId: windowId\)\)\n", r"\1")),
+              want="carries no KayaSidebarWatchHolder")
+gate.negative("a save that takes a sidebar toggle for a drag",
+              lambda: sidebar_memory(gate.doctor(
+                  "the user-resize perturbation", real,
+                  r',\n\s*\(note\.userInfo\?\["NSSplitViewUserResizeKey"\] as\? Int\) == 1', "")),
+              want="NSSplitViewUserResizeKey")
+negatives += 2
+
 # --- Clause B: the rule, driven, where the toolchain exists. ----------
 if platform.system() != "Darwin":
     print("check-window-memory: clause B (the six by-value cases, the "

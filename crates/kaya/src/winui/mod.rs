@@ -24680,6 +24680,14 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|_| "<accessibility read failed>".to_owned())
     }
 
+    fn drag_sidebar(&self, _: f64) -> Result<(), String> {
+        Err("TwoPaneView and NavigationView have no divider a user can drag (docs/tasks-s4-plan.md P8)".to_owned())
+    }
+
+    fn sidebar_width(&self) -> Result<f64, String> {
+        Err("TwoPaneView and NavigationView have no divider a user can drag, so nothing is remembered (docs/tasks-s4-plan.md P8)".to_owned())
+    }
+
     fn resize_window(&self, window: u64, width: f64, height: f64) {
         Self::on_ui_mut(move |core| {
             // The REAL resize, through the same DPI-aware path the width and

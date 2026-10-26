@@ -5685,6 +5685,17 @@ enum KayaHost {
         }
     }
 
+    static func sidebarWidth(_ window: UInt64, total: Double) -> Double? {
+        guard api != nil else { return nil }
+        let w = api.sidebar_width(window, total)
+        return w > 0 ? w : nil
+    }
+
+    static func setSidebarWidth(_ window: UInt64, _ width: Double) {
+        guard api != nil else { return }
+        api.set_sidebar_width(window, width)
+    }
+
     static func canvasRasterShape(_ widget: UInt64) -> String {
         guard api != nil else { return "" }
         var buffer = [UInt8](repeating: 0, count: 160)
@@ -12861,6 +12872,41 @@ private func kayaRunScript(_ script: String) {
                 }
             case "pointer_up":
                 if let why = DispatchQueue.main.sync(execute: { kayaPointerUp() }) { failures.append(why) }
+            case "drag_sidebar":
+                // docs/tasks-s4-plan.md P8: the user's drag, through AppKit's own tracking.
+                guard parts.count == 2, let want = Double(parts[1]) else {
+                    failures.append("drag_sidebar wants a width in points: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                #if os(macOS)
+                    if let why = DispatchQueue.main.sync(execute: { kayaDragSidebar(want) }) { failures.append(why) }
+                #else
+                    failures.append("drag_sidebar: an iPad's sidebar has no divider to drag")
+                #endif
+            case "expect_sidebar_width":
+                // The sidebar column's laid-out width, read off the platform's split view.
+                guard parts.count == 2, let want = Double(parts[1]) else {
+                    failures.append("expect_sidebar_width wants a width in points: \(line)")
+                    break
+                }
+                #if os(macOS)
+                    var gotSidebar = DispatchQueue.main.sync { kayaSidebarWidthRead(0) }
+                    let sidebarDeadline = Date().addingTimeInterval(5)
+                    while Date() < sidebarDeadline, gotSidebar.map({ abs($0 - want) > 1 }) ?? true {
+                        Thread.sleep(forTimeInterval: 0.1)
+                        gotSidebar = DispatchQueue.main.sync { kayaSidebarWidthRead(0) }
+                    }
+                    if let got = gotSidebar, abs(got - want) <= 1 {
+                        observed.append("sidebar \(parts[1]) wide")
+                    } else if let got = gotSidebar {
+                        failures.append("sidebar \(Int(got.rounded())) wide, wanted \(parts[1])")
+                    } else {
+                        failures.append("sidebar width unread: the primary window shows no sidebar")
+                    }
+                #else
+                    failures.append("expect_sidebar_width: an iPad's sidebar has no divider to drag")
+                #endif
             case "rest_pointer":
                 kayaAwaitQuiet()
                 if let why = DispatchQueue.main.sync(execute: { kayaRestPointer(parts[1]) }) { failures.append(why) }
@@ -32116,6 +32162,186 @@ func kayaPanesReading(_ windowId: UInt64) -> String {
     }
 #endif
 
+// MARK: - Sidebar memory (docs/tasks-s4-plan.md P8)
+
+#if os(macOS)
+    /// The sidebar column's own view per window: its width is the column's, and
+    /// its enclosing NSSplitView the one the user drags.
+    nonisolated(unsafe) var kayaSidebarProbes: [UInt64: KayaWeakView] = [:]
+    nonisolated(unsafe) var kayaSidebarSaveQueued: Set<UInt64> = []
+
+    struct KayaSidebarWatchHolder: View {
+        let windowId: UInt64
+        var body: some View {
+            KayaSidebarWatch(windowId: windowId).accessibilityHidden(true).allowsHitTesting(false)
+        }
+    }
+
+    @MainActor func kayaSidebarProbe(_ windowId: UInt64) -> KayaSidebarWatch.Probe? {
+        kayaSidebarProbes[windowId]?.view as? KayaSidebarWatch.Probe
+    }
+
+    struct KayaSidebarWatch: NSViewRepresentable {
+        let windowId: UInt64
+
+        final class Probe: NSView {
+            var windowId: UInt64 = 0
+            weak var split: NSSplitView?
+            var observer: NSObjectProtocol?
+
+            override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                guard window != nil else { return }
+                kayaSidebarProbes[windowId] = KayaWeakView(self)
+                watch()
+                DispatchQueue.main.async { self.watch() }
+            }
+
+            func enclosingSplit() -> NSSplitView? {
+                var v = superview
+                while let view = v {
+                    if let split = view as? NSSplitView { return split }
+                    v = view.superview
+                }
+                return nil
+            }
+
+            func watch() {
+                guard let found = enclosingSplit(), found !== split else { return }
+                if let observer { NotificationCenter.default.removeObserver(observer) }
+                // docs/traps.md, the split view's autosave wrote the app's real domain under the harness.
+                found.autosaveName = nil
+                split = found
+                let wid = windowId
+                observer = NotificationCenter.default.addObserver(
+                    forName: NSSplitView.didResizeSubviewsNotification, object: found, queue: .main
+                ) { note in
+                    // docs/traps.md, a sidebar toggle names the divider too.
+                    guard (note.userInfo?["NSSplitViewDividerIndex"] as? Int) == 0,
+                        (note.userInfo?["NSSplitViewUserResizeKey"] as? Int) == 1
+                    else { return }
+                    MainActor.assumeIsolated { kayaSidebarDragged(wid) }
+                }
+            }
+        }
+
+        func makeNSView(context: Context) -> Probe {
+            let probe = Probe()
+            probe.windowId = windowId
+            return probe
+        }
+
+        func updateNSView(_ probe: Probe, context: Context) {
+            probe.windowId = windowId
+        }
+    }
+
+    /// A sidebar that declares no width of its own takes one only when memory
+    /// holds one at launch, so a window nobody resized keeps the platform's.
+    struct KayaRememberedSidebar: ViewModifier {
+        let windowId: UInt64
+        @State private var launch: Double?
+
+        init(windowId: UInt64) {
+            self.windowId = windowId
+            _launch = State(initialValue: MainActor.assumeIsolated {
+                kayaSidebarIdeal(windowId, total: kayaSplitTotal(windowId))
+            })
+        }
+
+        func body(content: Content) -> some View {
+            if let launch {
+                content
+                    .navigationSplitViewColumnWidth(ideal: launch)
+                    .background(KayaSidebarWatchHolder(windowId: windowId))
+            } else {
+                content.background(KayaSidebarWatchHolder(windowId: windowId))
+            }
+        }
+    }
+
+    /// The sidebar column's laid-out width, the number an ideal width declares.
+    @MainActor func kayaSidebarWidthRead(_ windowId: UInt64) -> Double? {
+        guard let probe = kayaSidebarProbe(windowId), probe.window != nil, probe.split != nil else { return nil }
+        return Double(probe.bounds.width)
+    }
+
+    /// A divider the USER moved, saved on the next turn. The split keeps the
+    /// width itself from here on: SwiftUI applies an ideal width once.
+    @MainActor func kayaSidebarDragged(_ windowId: UInt64) {
+        guard !kayaFrameMemoryInert, kayaScene.windows[windowId]?.rememberFrame != false,
+            !kayaSidebarSaveQueued.contains(windowId)
+        else { return }
+        kayaSidebarSaveQueued.insert(windowId)
+        DispatchQueue.main.async {
+            kayaSidebarSaveQueued.remove(windowId)
+            guard let split = kayaSidebarProbe(windowId)?.split,
+                let column = split.arrangedSubviews.first, !column.isHidden,
+                let width = kayaSidebarWidthRead(windowId), width >= 1
+            else { return }
+            KayaHost.setSidebarWidth(windowId, width)
+            kayaDiag("sidebar saved wid=\(windowId) \(width)")
+        }
+    }
+
+    /// The width a split view opens into before its own geometry has been read:
+    /// the window's content as it stands, which a resize or a remembered frame
+    /// may have moved off the declaration.
+    @MainActor func kayaSplitTotal(_ windowId: UInt64) -> Double {
+        if let window = kayaNSWindows[windowId] {
+            let w = Double(window.contentRect(forFrameRect: window.frame).width)
+            if w > 0 { return w }
+        }
+        return kayaScene.windows[windowId]?.width ?? Double(kayaUndeclaredWindowSize.width)
+    }
+
+    /// The width the store holds for a window's sidebar, fitted to a window
+    /// `total` wide, or nil.
+    @MainActor func kayaSidebarIdeal(_ windowId: UInt64, total: Double) -> Double? {
+        guard !kayaFrameMemoryInert, kayaScene.windows[windowId]?.rememberFrame != false else { return nil }
+        return KayaHost.sidebarWidth(windowId, total: total)
+    }
+
+    /// drag_sidebar: the divider pressed, dragged and released through the
+    /// window, so AppKit's own tracking moves it as a user's hand does.
+    @MainActor func kayaDragSidebar(_ want: Double) -> String? {
+        guard let probe = kayaSidebarProbe(0), let split = probe.split, let window = split.window,
+            let column = split.arrangedSubviews.first, let have = kayaSidebarWidthRead(0)
+        else { return "drag_sidebar: the primary window shows no sidebar" }
+        let x = column.frame.maxX
+        let y = split.bounds.midY
+        let start = split.convert(NSPoint(x: x, y: y), to: nil)
+        let end = NSPoint(x: start.x + (want - have), y: start.y)
+        let t0 = ProcessInfo.processInfo.systemUptime
+        func event(_ type: NSEvent.EventType, _ at: NSPoint, _ n: Int) -> NSEvent? {
+            NSEvent.mouseEvent(
+                with: type, location: at, modifierFlags: [], timestamp: t0 + Double(n) / 60,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseUp ? 0 : 1)
+        }
+        let steps = 8
+        for i in 1...steps {
+            let at = NSPoint(x: start.x + ((end.x - start.x) * CGFloat(i) / CGFloat(steps)).rounded(), y: start.y)
+            guard let drag = event(.leftMouseDragged, at, i) else {
+                return "drag_sidebar: no mouse-dragged event could be made"
+            }
+            window.postEvent(drag, atStart: false)
+        }
+        guard let up = event(.leftMouseUp, end, steps + 1), let down = event(.leftMouseDown, start, 0)
+        else { return "drag_sidebar: no mouse-down or mouse-up event could be made" }
+        window.postEvent(up, atStart: false)
+        window.sendEvent(down)
+        let got = kayaSidebarWidthRead(0) ?? 0
+        kayaDiag("drag_sidebar from \(have) to \(got), the divider pressed at \(start.x) and released at \(end.x)")
+        if abs(got - want) > 1 {
+            return "drag_sidebar \(Int(want)): the sidebar reads \(Int(got.rounded())) after the drag from \(Int(have.rounded()))"
+        }
+        return nil
+    }
+#endif
+
 /// The two-column presentation of a window's entry stack: pane 0 the base root,
 /// the trailing pane the stack's TOP, the middles retained and covered
 /// (docs/multicolumn-plan.md D1). The ceiling-3 form is KayaSplitRoot3, a
@@ -32142,10 +32368,8 @@ struct KayaSplitRoot: View {
             .navigationTitle(kayaWindowCaption(windowId))
             #if os(macOS)
                 // docs/traps.md, the two-pane sidebar fell to SwiftUI's floor.
-                .navigationSplitViewColumnWidth(
-                    ideal: kayaLeadingPaneWidth(
-                        width > 0
-                            ? width : scene.windows[windowId]?.width ?? Double(kayaUndeclaredWindowSize.width)))
+                .navigationSplitViewColumnWidth(ideal: sidebarIdeal)
+                .background(KayaSidebarWatchHolder(windowId: windowId))
             #endif
         } detail: {
             // The TOP of the stack is the detail, the entries above the first
@@ -32186,6 +32410,13 @@ struct KayaSplitRoot: View {
         .tint(kayaBrandTint())
         .font(kayaBrandFont())
     }
+
+    #if os(macOS)
+        private var sidebarIdeal: Double {
+            let total = width > 0 ? width : kayaSplitTotal(windowId)
+            return kayaSidebarIdeal(windowId, total: total) ?? kayaLeadingPaneWidth(total)
+        }
+    #endif
 
     /// Stamp the arm THIS BODY TOOK. Never derived from panes or
     /// formFactor: a derived answer agrees with the lowering by construction and
@@ -32238,7 +32469,13 @@ struct KayaSplitRoot3: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(kayaWindowCaption(windowId))
             // Ideal ONLY, never a minimum (MECHANICS AMENDMENTS 1).
-            .navigationSplitViewColumnWidth(ideal: 220)
+            #if os(macOS)
+                .navigationSplitViewColumnWidth(
+                    ideal: kayaSidebarIdeal(windowId, total: width > 0 ? width : kayaSplitTotal(windowId)) ?? 220)
+                .background(KayaSidebarWatchHolder(windowId: windowId))
+            #else
+                .navigationSplitViewColumnWidth(ideal: 220)
+            #endif
         } content: {
             Group {
                 if let first = scene.windows[windowId]?.entries.first {
@@ -35089,6 +35326,7 @@ struct KayaSectionsView: View {
                         // and a default that changed under an SDK bump would
                         // silently de-modernize every sectioned window.
                         .listStyle(.sidebar)
+                        .modifier(KayaRememberedSidebar(windowId: windowId))
                     } detail: {
                         KayaSectionPane(sectionId: selection.wrappedValue)
                     }

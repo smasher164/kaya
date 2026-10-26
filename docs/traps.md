@@ -19169,3 +19169,53 @@ makes one real move onto the card's centre, put back before the verdict, under
 a one-process lock (check-exclusive holds the one post site and the idle
 refusal). On a busy host the Mac's pointer is not moved and the leg log says so.
 
+
+## A sidebar toggle names the divider too (measured 2026-10-25)
+
+NSSplitView's `didResizeSubviewsNotification` carries `NSSplitViewDividerIndex`
+for more than a user's drag. Measured on a bare NavigationSplitView (macOS 26):
+a drag posts {DividerIndex 0} and {DividerIndex 0, NSSplitViewUserResizeKey 1}
+alternately, six of each over eight drag events; a window resize posts two
+notifications with no user key; the sidebar toggle's hide and its show post
+thirty each, DividerIndex 0 and no user key, the width passing through 2 to 340.
+A save keyed on the divider index alone would store a half-hidden width. The
+sidebar memory saves only on `NSSplitViewUserResizeKey == 1`
+(tools/check-window-memory.py clause H, the user-resize cut watched).
+
+## A dragged sidebar lands on a half point (measured 2026-10-25)
+
+The same synthesized drag (press at the divider's edge, eight drags, release, one
+window frame) left NSSplitView's sidebar column at 348.0 or 348.5 points from one
+run to the next: 5 of 17 runs at 340.5 with every event at one timestamp, 8 of 10
+and then 3 of 6 with the events 1/60 s apart, with no relation to the window's
+frame. So the store keeps whole points rounded down (prefs::set_sidebar_width),
+and windowmem.steps' `expect_pref kaya.window.0.sidebar "340"` reads the same
+number for both landings.
+
+## The split view's autosave wrote the app's real domain under the harness (measured 2026-10-25)
+
+SwiftUI names every NavigationSplitView's NSSplitView for autosave
+("main.KayaRoot-1-AppWindow-1, SidebarNavigationSplitView") and AppKit writes
+the column frames into the app's STANDARD domain, which for a bundled app is its
+real one (dev.kaya.aurora.notes for every guest on the default manifest): a
+harness run of the tasks app left 308 there. kayaForgetAppKitFrames dropped the
+key at the next launch, so nothing read it, but the harness still wrote the real
+store. Clearing `autosaveName` one turn after the sidebar appeared stopped the
+drag's writes and not the first layout's (the key came back with act two's 308);
+clearing it in the watch's `viewDidMoveToWindow`, synchronously, stopped both.
+A guest that runs as a bare executable writes the same key into the domain
+named after it instead (`split` for the split guest: 348 after a cut run). The
+mac lane's windowmem leg refuses any `NSSplitView Subview Frames` key naming
+KayaRoot or KayaAuxRoot in the app's real domain or the process's standard one
+after the leg (tools/lib/lanes/mac.py, real_store_verdict); with the clear cut
+it read red naming `split`.
+
+## A split view that opened after a resize took the declared window's quarter (measured 2026-10-25)
+
+NavigationSplitView honours `navigationSplitViewColumnWidth(ideal:)` once, at its
+first layout: a later ideal does not move the column (a probe set 275, dragged
+to 340, set 200: 340, and 340 after a hide and show). KayaSplitRoot's ideal read
+its own GeometryReader width, which is 0 at that first layout, and fell back to
+the DECLARED width, so the split guest, compact at its undeclared 540 and two-pane
+only after `resize_window 1100x700`, opened its sidebar at 180 (a quarter of 540,
+floored). kayaSplitTotal reads the real window's content width first: 275.

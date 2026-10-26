@@ -14255,6 +14255,17 @@ mod tests {
     }
 
     #[test]
+    fn a_remembered_sidebar_fits_the_window_it_opens_in() {
+        use crate::protocol::remembered_pane_width;
+        assert_eq!(remembered_pane_width(340.0, 1100.0), 340.0);
+        assert_eq!(remembered_pane_width(150.0, 1100.0), 180.0);
+        assert_eq!(remembered_pane_width(900.0, 1100.0), 780.0);
+        assert_eq!(remembered_pane_width(400.0, 600.0), 280.0);
+        assert_eq!(remembered_pane_width(400.0, 450.0), 180.0);
+        assert_eq!(remembered_pane_width(400.0, 120.0), 120.0);
+    }
+
+    #[test]
     fn panes_takes_the_three_legal_ceilings() {
         let mut scene = Scene::new();
         for n in 1..=3 {

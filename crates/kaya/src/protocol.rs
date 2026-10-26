@@ -2427,6 +2427,19 @@ pub(crate) fn leading_pane_width(total: f64) -> f64 {
     (total * 0.25).clamp(180.0, 280.0).min(total)
 }
 
+/// The detail's share a remembered sidebar may not take (the mac ladder's
+/// detail minimum, swift/KayaSwiftUI.swift's kayaPaneMinDetail).
+pub(crate) const DETAIL_MIN_WIDTH: f64 = 320.0;
+
+/// A sidebar width the user dragged, onto the window it opens in
+/// (docs/tasks-s4-plan.md P8): no narrower than leading_pane_width's floor,
+/// and leaving the detail its minimum.
+#[cfg_attr(not(any(target_os = "macos", target_os = "ios", test)), allow(dead_code))]
+pub(crate) fn remembered_pane_width(saved: f64, total: f64) -> f64 {
+    let floor = 180.0_f64.min(total);
+    saved.clamp(floor, (total - DETAIL_MIN_WIDTH).max(floor))
+}
+
 /// Window property keys — the presentation-context twin of [`Prop`],
 /// separate because windows are not widgets (DESIGN.md, Presentation
 /// contexts). Window 0 is the primary surface and always exists.

@@ -98,6 +98,55 @@ back through the platform's own record.
   setting, choose Dark, resize the window, `relaunch launch`, then read
   the task back in Inbox, the setting from the settings label,
   `expect_appearance "dark"`, and `expect_window_size` on the desktops.
+- **P8. The sidebar width the user dragged is remembered per app** (the
+  maintainer, 2026-10-25: "remember the dragged sidebar width per app, on
+  all three desktops, with the test runs always starting from the
+  default"). BUILT on the Mac. The width is kaya's, under the reserved key
+  `kaya.window.<id>.sidebar` in the app's own preferences domain, whole
+  points rounded down; SwiftUI's own split autosave is never the store
+  (kayaForgetAppKitFrames drops it at launch, and the sidebar's watch
+  clears the split view's autosave name before its first layout). It is
+  saved only when the USER moves the divider (AppKit's
+  NSSplitViewUserResizeKey; a toggle, a resize or the ladder's collapse
+  saves nothing), and restored at launch as the column's ideal width,
+  fitted to the window it opens in by protocol.rs's remembered_pane_width:
+  no narrower than leading_pane_width's floor of 180, and leaving the
+  detail DETAIL_MIN_WIDTH (320). A window with `remember_frame(false)`
+  and recording mode's tiled legs remember nothing, as P4. All three Mac
+  sidebars take it: the two-pane and three-pane split roots, and the
+  sections sidebar, which declares a width only when the store holds one
+  at launch, so an untouched window keeps SwiftUI's own. Under the harness
+  the store is the scratch domain act one empties (§4), so every run starts
+  from the default.
+  THE SWEEP. SwiftUI macOS: do. GTK: CAN'T, as things stand: libadwaita's
+  AdwNavigationSplitView has no divider a user can drag (its width is
+  `sidebar-width-fraction` between min and max), and the drag-resize for
+  AdwOverlaySplitView is an open, unmerged merge request
+  (GNOME/libadwaita!1329, read 2026-10-25; it names Files' fixed sidebar,
+  GNOME/nautilus#3010, among the cases it would serve). WinUI: CAN'T, as things stand: TwoPaneView's
+  Pane1Length and NavigationView's OpenPaneLength have no splitter.
+  iPadOS: NavigationSplitView's columns are not user-resizable. Android:
+  DEFER with GTK and WinUI: kaya's ListDetailPaneScaffold is given no
+  `paneExpansionDragHandle`, so its panes have no drag handle; adding one
+  belongs to the same ruling. The verbs refuse there with the
+  reason, and windowmem.steps is declared off on those lanes.
+  THE RULING OPEN FOR THE MAINTAINER: whether GTK and Windows should GROW a
+  draggable sidebar, which neither toolkit's own split view offers. The
+  options: (a) leave both fixed, the platforms' own idiom, and the memory
+  is the Mac's alone; (b) GTK: a GtkPaned around the two panes in the
+  regular arm, giving up AdwNavigationSplitView's collapse there (kaya
+  would do the collapse), or wait for !1329 and move to
+  AdwOverlaySplitView; (c) WinUI: a splitter of kaya's own (the Toolkit's
+  GridSplitter, or a thumb on the pane's edge) in place of TwoPaneView's
+  fixed Pane1Length, as File Explorer's navigation pane does. Either (b)
+  or (c) would then save through the same key and clamp.
+  THE GUARD. tools/scenes/windowmem.steps (the split guest, rust, mac):
+  the default 275 at 1100, `drag_sidebar 340`, the store read back, `relaunch
+  launch`, and 340 again; the mac lane plants 123 under the key in the
+  app's REAL domain before act one and requires it unchanged, and no AppKit
+  split frame there, after act two (tools/lib/lanes/mac.py,
+  REAL_STORE_SENTINEL); tools/check-window-memory.py clause H holds every
+  NavigationSplitView's sidebar to the watch and the save to the user key.
 
 ## §2 — Unknowns to measure before the arms are called done
 

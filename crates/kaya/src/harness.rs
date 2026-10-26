@@ -1057,6 +1057,12 @@ pub enum Step {
     /// re-run. `None` targets the implicit primary. Capability-rejected on
     /// the phone hosts: a phone window has no size to command.
     ResizeWindow(Option<u64>, f64, f64),
+    /// The primary window's sidebar divider dragged by the user's own route
+    /// until the sidebar is this wide (docs/tasks-s4-plan.md P8).
+    DragSidebar(f64),
+    /// The primary window's sidebar column width, read off the platform's
+    /// split view.
+    ExpectSidebarWidth(f64),
     /// The window's live list-detail presentation,
     /// `<size class>/<presentation>` with presentations `split` and
     /// `stacked`. `None` — the BARE form a SHARED scene can carry — asserts
@@ -1332,6 +1338,8 @@ impl Step {
             | Step::ExpectToolbarItem(..)
             | Step::Shortcut(..)
             | Step::ResizeWindow(..)
+            | Step::DragSidebar(..)
+            | Step::ExpectSidebarWidth(..)
             | Step::ExpectSplit(..)
             | Step::ExpectPanes(..)
             | Step::Frame(..)
@@ -1540,6 +1548,8 @@ impl Step {
             Step::ExpectToolbarItem { .. } => true,
             Step::Shortcut { .. } => false,
             Step::ResizeWindow { .. } => false,
+            Step::DragSidebar(_) => false,
+            Step::ExpectSidebarWidth(_) => true,
             Step::ExpectSplit { .. } => true,
             Step::ExpectPanes { .. } => true,
             Step::ExpectHighlights { .. } => true,
@@ -2664,6 +2674,11 @@ pub trait Stage: Send + 'static {
     /// without commandable window size reject the scene loudly rather than
     /// silently no-op.
     fn resize_window(&self, window: u64, width: f64, height: f64);
+    /// Drag the primary window's sidebar divider until the sidebar is
+    /// `width` wide, by the user's own route; Err names why it could not.
+    fn drag_sidebar(&self, width: f64) -> Result<(), String>;
+    /// The primary window's sidebar column width; Err names why it is unread.
+    fn sidebar_width(&self) -> Result<f64, String>;
     /// The window's live list-detail presentation — see Step::ExpectSplit.
     /// The presentation half must name THE ARM THAT RENDERED, read from
     /// the view layer's own stamp, never derived from the prop or the size
@@ -4505,6 +4520,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .map_err(|_| format!("resize_window wants numeric WxH: {line:?}"))?;
                 Step::ResizeWindow(window, w, h)
             }
+            "drag_sidebar" => Step::DragSidebar(
+                rest.trim().parse().map_err(|_| format!("drag_sidebar wants a width: {line:?}"))?,
+            ),
+            "expect_sidebar_width" => Step::ExpectSidebarWidth(
+                rest.trim().parse().map_err(|_| format!("expect_sidebar_width wants a width: {line:?}"))?,
+            ),
             "expect_split" => {
                 if rest.trim().is_empty() {
                     Step::ExpectSplit(None)
@@ -7921,6 +7942,15 @@ fn run_with_log(
                 stage.resize_window(window.unwrap_or(0), *w, *h);
                 None
             }
+            Step::DragSidebar(w) => {
+                await_quiet();
+                stage.drag_sidebar(*w).err().map(|why| Err(format!("drag_sidebar {w}: {why}")))
+            }
+            Step::ExpectSidebarWidth(want) => Some(poll(|| match stage.sidebar_width() {
+                Ok(got) if (got - want).abs() <= 1.0 => Ok(format!("sidebar {want} wide")),
+                Ok(got) => Err(format!("sidebar {} wide, wanted {want}", got.round())),
+                Err(why) => Err(format!("sidebar width unread: {why}")),
+            })),
             Step::ExpectSplit(want) => Some(poll(|| {
                 let got = stage.split_presentation();
                 let Some(want) = want else {
@@ -10964,6 +10994,12 @@ mod tests {
             "regular/bar".to_owned()
         }
         fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn drag_sidebar(&self, _: f64) -> Result<(), String> {
+            Ok(())
+        }
+        fn sidebar_width(&self) -> Result<f64, String> {
+            Err(String::new())
+        }
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
         }
@@ -12172,6 +12208,12 @@ mod tests {
             "regular/none".to_owned()
         }
         fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn drag_sidebar(&self, _: f64) -> Result<(), String> {
+            Ok(())
+        }
+        fn sidebar_width(&self) -> Result<f64, String> {
+            Err(String::new())
+        }
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
         }
@@ -12719,6 +12761,12 @@ mod tests {
             "regular/none".to_owned()
         }
         fn resize_window(&self, _: u64, _: f64, _: f64) {}
+        fn drag_sidebar(&self, _: f64) -> Result<(), String> {
+            Ok(())
+        }
+        fn sidebar_width(&self) -> Result<f64, String> {
+            Err(String::new())
+        }
         fn split_presentation(&self) -> String {
             "unknown/stacked".to_owned()
         }

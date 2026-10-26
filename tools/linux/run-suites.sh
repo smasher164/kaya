@@ -70,8 +70,9 @@ eval "$(opam env 2>/dev/null)" || true
 SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
-# software keyboard (docs/safe-area-plan.md A13).
-OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland"
+# software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
+# split views have no divider a user can drag (docs/tasks-s4-plan.md P8).
+OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland windowmem"
 # Depth-slice scenes, rust only. `windowed` and `canvas` are rust BY
 # DESIGN rather than by depth — the compiled conformance scenes every
 # lane runs (docs/virtualization-plan.md §6.3, docs/canvas-plan.md

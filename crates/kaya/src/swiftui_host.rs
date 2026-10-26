@@ -362,6 +362,11 @@ pub struct KayaHostApi {
     /// crates/kaya/src/prefs.rs. `window_frame` answers 0 for none.
     pub window_frame: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
     pub set_window_frame: unsafe extern "C" fn(u64, *const u8, usize),
+    /// The sidebar width the user dragged (docs/tasks-s4-plan.md P8):
+    /// `sidebar_width` answers it fitted to a window `total` wide, or 0 for
+    /// none.
+    pub sidebar_width: extern "C" fn(u64, f64) -> f64,
+    pub set_sidebar_width: extern "C" fn(u64, f64),
     /// RICH TEXT, presentation side (docs/rich-text-plan.md R4/R5/R9): the
     /// six reports an arm makes and the two reads the harness makes.
     pub text_composing: extern "C" fn(u64, u8),
@@ -497,6 +502,14 @@ unsafe extern "C" fn set_window_frame(window: u64, frame: *const u8, len: usize)
     let bytes = unsafe { std::slice::from_raw_parts(frame, len) };
     let Ok(text) = std::str::from_utf8(bytes) else { return };
     crate::prefs::set_window_frame(window, text);
+}
+
+extern "C" fn sidebar_width(window: u64, total: f64) -> f64 {
+    crate::prefs::sidebar_width(window).map_or(0.0, |w| crate::protocol::remembered_pane_width(w, total))
+}
+
+extern "C" fn set_sidebar_width(window: u64, width: f64) {
+    crate::prefs::set_sidebar_width(window, width);
 }
 
 unsafe extern "C" {
@@ -677,6 +690,8 @@ pub(crate) fn run() -> i32 {
         canvas_raster_shape: crate::capi::kaya_canvas_raster_shape,
         window_frame,
         set_window_frame,
+        sidebar_width,
+        set_sidebar_width,
         text_composing: crate::capi::kaya_text_composing,
         text_pending: crate::capi::kaya_text_pending,
         text_edit_source: crate::capi::kaya_text_edit_source,

@@ -16456,3 +16456,16 @@ calling animationDidStart: with nil), so on this leg every real animation's add
 was seen (docs/traps.md, the animations-idle wait). On the next sighting a
 "never seen added" line is a real bypass of addAnimation:forKey:, and an
 "added from" line names the code that started the spring.
+
+## RULING — should GTK and Windows grow a sidebar a user can drag? (raised 2026-10-25 by the sidebar memory, docs/tasks-s4-plan.md P8)
+
+KEY: drag_sidebar, expect_sidebar_width, windowmem, kaya.window.<id>.sidebar, AdwNavigationSplitView, TwoPaneView, paneExpansionDragHandle
+- The maintainer ruled the dragged sidebar width remembered per app "on all three
+  desktops". It is built on the Mac. On GTK and WinUI there is nothing to
+  remember: AdwNavigationSplitView, TwoPaneView and NavigationView have no
+  divider a user can drag, so the verbs refuse there and windowmem.steps is
+  declared off. The options and what each costs are P8's (a), (b) and (c);
+  Android's ListDetailPaneScaffold takes the same ruling (no
+  paneExpansionDragHandle). Closing this means either striking it with (a), or
+  building the drag on the chosen toolkits, saving through the same key, and
+  taking windowmem.steps' OFF_SCENES entries out on those lanes.

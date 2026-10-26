@@ -144,7 +144,7 @@ if _override and _override != env["KAYA_SELFTEST_SCRIPT"]:
 # the same door.
 second = scene in lane.RELAUNCH_DOOR
 if second:
-    lane.clear_act2(ROOT, env)
+    lane.clear_act2(ROOT, env, scene)
 
 # THE FLIGHT RECORDER, THE LANE'S OWN (CLAUDE.md: a red leg is read from
 # the recorder first): one run, one leg, through the same
