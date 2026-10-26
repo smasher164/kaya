@@ -19058,6 +19058,17 @@ the same picture (the cut is watched red, "reads filled pressed"). The canvas
 and colour-well reads still use cacheDisplay: the canvas compare is exact
 and a colour-managed capture would move it.
 
+They are not vacuous on a modern-stamped host (measured 2026-10-26): with the
+canvas's blitted Image at `.opacity(0)` every ink read went red reading black,
+canvas-rust `ink dark 000000/000000 at 15,20 70,63`, sizepolicy-rust three
+times `ink dark 000000 at 50,50`, media_reader-rust on both canvases and
+portfolio-python on both; with the colour well at `alphaValue = 0`,
+colorpicker-rust read `ink dark 000000 at center, wanted ... 3584E4`. Each
+was one substitution, restored from a saved copy with the sha256 equal. So
+cacheDisplay draws these views as they are; what it cannot draw is a split
+view's columns, and a canvas or well placed in one reads black, which no
+expectation in the scenes is, so the read fails rather than passing.
+
 ## A dark picture's corner read as the bare ground (measured 2026-10-25)
 
 On the modern-stamped python host, music_artist and its dark leg read
