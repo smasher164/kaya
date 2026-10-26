@@ -166,6 +166,9 @@ public final class Main {
             case "menus":
                 app = Menus::app;
                 break;
+            case "rowmenu":
+                app = Rowmenu::app;
+                break;
             case "commands":
                 app = Commands::app;
                 break;

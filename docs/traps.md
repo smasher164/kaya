@@ -19281,3 +19281,25 @@ first cell (music_header and music_artist read "cell 0 off by -20 (the cell
 anchor Box loosened the fixed row height a grid measures a stretched card at
 (music_home read "column@card_201715 208 tall, column@card_581719 192 tall");
 the Box now propagates its minimum constraints.
+
+## The Windows leg with no launcher (measured 2026-10-26)
+
+A scene added to tools/lib/lanes/win.py's roster runs `tools/guest/run_<leg>.cmd`
+on the VM, and the first rowmenu run had none: the scheduled task started
+nothing, every leg waited out its whole 316 s ceiling with "timed out waiting
+for output", and the bundle could say only that no window and no verb trace
+ever came. deploy-win now refuses before any deploy when a rostered leg has no
+launcher, naming the leg; copy a sibling scene's launcher for the language and
+rename the scene in it.
+
+## The flyout a neighbour dismissed (measured 2026-10-26)
+
+A WinUI MenuFlyout opened by context_open closes, or never reports Opened, when
+another process's window takes the foreground. Pooled, five of the six rowmenu
+legs went red with "the context flyout never opened (Opened did not arrive in
+10s): the anchor ... loaded true, in a XamlRoot true, ... visible true; the
+flyout open Some(false)", and the bundle's lane-wide foreground ring showed the
+rowmenu_go window, then the C# leg's, then node's, in the second its open
+failed. music_context_python's red at c71441ae was the same class (it passed
+alone 3 of 3). The context-menu legs run ALONE between drains in win.py's
+ORDER; alone, all six passed at about 1 s each.

@@ -6412,6 +6412,13 @@ func (t *Tpl) ContextMenu(n Node, c *ContextCatalog) {
 	}
 }
 
+// ContextLabel follows ContextMenu: on each stamped copy, item reads the
+// row's own string field (docs/media-player-plan.md M26), followed when
+// the field changes.
+func (t *Tpl) ContextLabel(n Node, item MenuItem, field Field[string]) {
+	t.tx.emit(TxContextLabelNode(n.id, item.id, 0, field.index))
+}
+
 func (t *Tpl) When(s Signal[bool], fn func(*Tpl)) Node {
 	t.tx.app.c.widget++
 	n := Node{t.tx.app.c.widget, t.tx}

@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xcfb6ed50af9e65deULL
+#define KAYA_SPEC_HASH 0x7b5c931f2513c73bULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -982,6 +982,16 @@ static inline void kaya_tx_set_dock_player(KayaTx *tx, uint64_t dock, uint64_t p
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DOCK_PLAYER);
     kaya_wire_u64(tx, dock);
     kaya_wire_u64(tx, player);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string. */
+static inline void kaya_tx_context_label_node(KayaTx *tx, uint64_t node, uint64_t item, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CONTEXT_LABEL_NODE);
+    kaya_wire_u64(tx, node);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
     kaya_wire_end(tx, kaya_at);
 }
 

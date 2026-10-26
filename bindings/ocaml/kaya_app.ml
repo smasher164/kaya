@@ -6629,6 +6629,11 @@ module Tpl = struct
       (fun m -> emit (the_tx ()) (Kaya_wire.tx_context_attach_node n m))
       catalog.cc_roots
 
+  (* After [context_menu]: on each stamped copy, [item] reads the row's own
+     string field (docs/media-player-plan.md M26). *)
+  let context_label ?(level = 0) (Node n) (MenuItem m) (fd : (_, string) field) =
+    emit (the_tx ()) (Kaya_wire.tx_context_label_node n m level fd.fd_index)
+
   (* An existing node as a child (the floor's escape into a sugar
      list): the outer zone's [w], template flavor. *)
   let w n () = n

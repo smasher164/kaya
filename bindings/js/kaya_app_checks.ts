@@ -407,10 +407,14 @@ if (isMainThread) {
   let notes!: K.Collection<TodoFields, K.Row<typeof Todo.schema>>;
   let flatItemId = 0;
   let nestedItemId = 0;
+  let flatItem!: K.MenuItem;
+  let liveLabelRefusal = "";
+  let constantLabelRefusal = "";
   app.window(() => {
     notes = kaya.collection(Todo);
     catalogRow = kaya.contextCatalog((c) => {
-      flatItemId = kaya.item("Remove", { onActivate: (row: unknown) => catalogFlat.push(row) }).id;
+      flatItem = kaya.item("Remove", { onActivate: (row: unknown) => catalogFlat.push(row) });
+      flatItemId = flatItem.id;
       kaya.menu("More", () => {
         nestedItemId = kaya.item("Archive", { onActivate: (row: unknown) => catalogNested.push(row) }).id;
       });
@@ -418,7 +422,17 @@ if (isMainThread) {
     });
     kaya.column(() => {
       for (const note of notes) {
-        kaya.label({ bind: note.title }).contextMenu(catalogRow);
+        const line = kaya.label({ bind: note.title }).contextMenu(catalogRow).contextLabel(flatItem, note.title);
+        try {
+          line.contextLabel(flatItem, "Remove" as unknown as K.FieldRef);
+        } catch (e) {
+          constantLabelRefusal = String(e);
+        }
+      }
+      try {
+        kaya.label("live").contextLabel(flatItem, "Remove" as unknown as K.FieldRef);
+      } catch (e) {
+        liveLabelRefusal = String(e);
       }
     });
     notes.insert("n1", { title: "keep", done: false });
@@ -429,6 +443,8 @@ if (isMainThread) {
   const nestedRow = catalogNested[0] as K.RowHandle<TodoFields> | undefined;
   check("a context catalog's item on a template node receives the row",
     catalogFlat.length === 1 && (flatRow as unknown) instanceof Todo && flatRow!.key === "n1" && flatRow!.exists && flatRow!.title === "keep");
+  check("node.contextLabel refuses a constant (M26)", constantLabelRefusal.includes("the row's own field"));
+  check("a live widget refuses contextLabel (M26)", liveLabelRefusal.includes("has no row"));
   check("a nested menu's item inside a context catalog receives the row too",
     catalogNested.length === 1 && (nestedRow as unknown) instanceof Todo && nestedRow!.key === "n1" && nestedRow!.exists && nestedRow!.title === "keep");
 

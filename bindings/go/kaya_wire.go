@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xcfb6ed50af9e65de
+	SpecHash uint64 = 0x7b5c931f2513c73b
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -494,6 +494,7 @@ const (
 	txCollectionPatchIf = 84
 	txAttachDock = 85
 	txSetDockPlayer = 86
+	txContextLabelNode = 87
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -566,6 +567,7 @@ const (
 	applyWithdrawToast = 72
 	applyAttachDock = 73
 	applySetDockPlayer = 74
+	applyContextLabelNode = 75
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -1896,6 +1898,16 @@ func TxSetDockPlayer(dock uint64, player uint64) []byte {
 	b := beginRecord(txSetDockPlayer)
 	b = binary.LittleEndian.AppendUint64(b, dock)
 	b = binary.LittleEndian.AppendUint64(b, player)
+	return endRecord(b)
+}
+
+// TxContextLabelNode: Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string.
+func TxContextLabelNode(node uint64, item uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txContextLabelNode)
+	b = binary.LittleEndian.AppendUint64(b, node)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
 	return endRecord(b)
 }
 

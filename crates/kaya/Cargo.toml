@@ -503,6 +503,10 @@ name = "menus"
 path = "../../guests/rust/menus.rs"
 
 [[example]]
+name = "rowmenu"
+path = "../../guests/rust/rowmenu.rs"
+
+[[example]]
 name = "commands"
 path = "../../guests/rust/commands.rs"
 

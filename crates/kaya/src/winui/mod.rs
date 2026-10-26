@@ -774,6 +774,8 @@ struct CoreState {
     /// MenuFlyout set as the element's ContextFlyout.
     context_roots: HashMap<u64, Vec<u64>>,
     context_nouns: HashMap<u64, Path>,
+    /// A stamped copy's own labels, item id -> label (docs/media-player-plan.md M26).
+    context_labels: HashMap<u64, HashMap<u64, String>>,
     context_flyouts: HashMap<u64, MenuFlyout>,
     /// (attachment, item id) -> its materialized native chrome, rebuilt
     /// with the catalog. Keyed PER ATTACHMENT because a template context
@@ -6750,17 +6752,32 @@ fn menu_preorder(core: &CoreState, roots: &[u64], out: &mut Vec<u64>) {
     }
 }
 
+/// An item's label on one attachment: a stamped copy's own where its row gave
+/// one (docs/media-player-plan.md M26), else the item's.
+fn menu_label(core: &CoreState, attachment: MenuAttachment, id: u64) -> &str {
+    let own = match attachment {
+        MenuAttachment::Context(widget) => core.context_labels.get(&widget).and_then(|l| l.get(&id)),
+        MenuAttachment::Window(_) => None,
+    };
+    own.unwrap_or(&core.menu_models[&id].label)
+}
+
 /// Resolve a `>`-joined label path against root items, labels compared
 /// byte-for-byte (the shared-scene contract). The path walks the SEMANTIC
 /// tree: a grouping root's label is a path segment whether or not
 /// materialization mints a titled row.
-fn resolve_menu_path(core: &CoreState, path: &str, roots: &[u64]) -> Option<u64> {
+fn resolve_menu_path(
+    core: &CoreState,
+    path: &str,
+    roots: &[u64],
+    attachment: MenuAttachment,
+) -> Option<u64> {
     let mut current: Vec<u64> = roots.to_vec();
     let mut found = None;
     for seg in path.split('>') {
         let item = *current
             .iter()
-            .find(|id| core.menu_models.get(id).is_some_and(|m| m.label == seg))?;
+            .find(|id| core.menu_models.contains_key(id) && menu_label(core, attachment, **id) == seg)?;
         found = Some(item);
         current = core.menu_models[&item].children.clone();
     }
@@ -9368,7 +9385,7 @@ fn sync_swipe_hosts(core: &mut CoreState) -> windows_core::Result<()> {
             items.SetMode(*mode)?;
             for &id in ids {
                 let item = SwipeItem::new()?;
-                item.SetText(&HSTRING::from(&*core.menu_models[&id].label))?;
+                item.SetText(&HSTRING::from(menu_label(core, MenuAttachment::Context(widget), id)))?;
                 item.SetBehaviorOnInvoked(SwipeBehaviorOnInvoked::Close)?;
                 item.Invoked(&TypedEventHandler::<SwipeItem, SwipeItemInvokedEventArgs>::new(
                     move |_, _| {
@@ -9581,7 +9598,7 @@ fn build_menu_items(
             let m = &core.menu_models[&id];
             (
                 m.kind,
-                m.label.clone(),
+                menu_label(core, attachment, id).to_owned(),
                 m.checked,
                 m.value,
                 m.shortcut.clone(),
@@ -17029,6 +17046,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // flyout handle through Closed, so this is safe mid-activation.
             if core.context_roots.remove(&id.0).is_some() {
                 core.context_nouns.remove(&id.0);
+                core.context_labels.remove(&id.0);
                 core.context_flyouts.remove(&id.0);
                 // The dead copy's native instances leave the map too: a
                 // detached item still raises Click through its automation
@@ -17588,6 +17606,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // from this anchor carries (the on_click_node encoding).
             core.context_nouns.insert(widget.0, path);
             ensure_context_flyout(core, widget.0)?;
+            core.menus_touched = true;
+        }
+        ApplyOp::ContextLabelNode { widget, item, label } => {
+            core.context_labels.entry(widget.0).or_default().insert(item.0, label);
             core.menus_touched = true;
         }
         ApplyOp::SetMenuProp { item, prop, value } => {
@@ -21534,6 +21556,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             menu_windows: HashMap::new(),
             context_roots: HashMap::new(),
             context_nouns: HashMap::new(),
+            context_labels: HashMap::new(),
             context_flyouts: HashMap::new(),
             menu_natives: HashMap::new(),
             menubars: HashMap::new(),
@@ -23684,7 +23707,7 @@ impl crate::harness::Stage for WinUiStage {
                     MenuAttachment::Window(0),
                 ),
             };
-            let Some(item) = resolve_menu_path(core, &spec, &roots) else {
+            let Some(item) = resolve_menu_path(core, &spec, &roots, attachment) else {
                 panic!("kaya: no such menu item {spec:?}");
             };
             // The OPEN attachment's own instance: the anchor-qualified
@@ -23761,8 +23784,8 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
             for id in &swipe_lowering(core, roots).menu_only {
-                let m = &core.menu_models[id];
-                items.push((m.swipe, m.label.clone()));
+                let label = menu_label(core, MenuAttachment::Context(widget), *id).to_owned();
+                items.push((core.menu_models[id].swipe, label));
             }
             Ok(crate::harness::swipe_spec(items))
         })
@@ -23787,7 +23810,9 @@ impl crate::harness::Stage for WinUiStage {
                 return Ok(Err(format!("no context menu attached to {t:?}")));
             };
             let lowering = swipe_lowering(core, roots);
-            let named = |ids: &[u64]| ids.iter().any(|id| core.menu_models[id].label == wanted);
+            let named = |ids: &[u64]| {
+                ids.iter().any(|id| menu_label(core, MenuAttachment::Context(widget), *id) == wanted)
+            };
             let on = |(mode, _): &(SwipeMode, Vec<u64>), leading: bool| {
                 if *mode == SwipeMode::Execute {
                     Route::Execute { leading }
@@ -24946,7 +24971,7 @@ impl crate::harness::Stage for WinUiStage {
                     MenuAttachment::Window(0),
                 ),
             };
-            let Some(item) = resolve_menu_path(core, &path, &roots) else {
+            let Some(item) = resolve_menu_path(core, &path, &roots, attachment) else {
                 return Ok("no such item".to_owned());
             };
             Ok(match aspect {
@@ -25030,7 +25055,7 @@ impl crate::harness::Stage for WinUiStage {
                     MenuAttachment::Window(0),
                 ),
             };
-            let Some(item) = resolve_menu_path(core, &path, &roots) else {
+            let Some(item) = resolve_menu_path(core, &path, &roots, attachment) else {
                 return Ok("no such item".to_owned());
             };
             let Some(native) = core.menu_natives.get(&(attachment, item)) else {

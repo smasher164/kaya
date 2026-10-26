@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xcfb6ed50af9e65de
+SPEC_HASH = 0x7b5c931f2513c73b
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -495,6 +495,7 @@ TX_DISMISS_TOAST = 83
 TX_COLLECTION_PATCH_IF = 84
 TX_ATTACH_DOCK = 85
 TX_SET_DOCK_PLAYER = 86
+TX_CONTEXT_LABEL_NODE = 87
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -567,6 +568,7 @@ APPLY_PRESENT_TOAST = 71
 APPLY_WITHDRAW_TOAST = 72
 APPLY_ATTACH_DOCK = 73
 APPLY_SET_DOCK_PLAYER = 74
+APPLY_CONTEXT_LABEL_NODE = 75
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -1052,6 +1054,10 @@ def tx_attach_dock(window: int, dock: int) -> bytes:
 def tx_set_dock_player(dock: int, player: int) -> bytes:
     """The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it."""
     return record(TX_SET_DOCK_PLAYER, struct.pack("<Q", dock) + struct.pack("<Q", player))
+
+def tx_context_label_node(node: int, item: int, level: int, field: int) -> bytes:
+    """Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string."""
+    return record(TX_CONTEXT_LABEL_NODE, struct.pack("<Q", node) + struct.pack("<Q", item) + struct.pack("<I", level) + struct.pack("<I", field))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:

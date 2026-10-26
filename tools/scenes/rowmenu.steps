@@ -1,0 +1,31 @@
+# docs/media-player-plan.md M26: one context catalog per list, and each
+# row's item reads that row's own record. The notes are a plain list, the
+# files a table (on the Mac the native table's own menu, filled for the
+# row the right-click lands on).
+expect_title "rowmenu"
+expect label#0 "ready"
+expect_context_items row@note[a] "Star|-|Open"
+expect_context_items row@note[b] "Unstar|-|Open"
+context_open row@note[b]
+menu_activate "Unstar"
+expect label#0 "unstarred b"
+expect_context_items row@note[b] "Star|-|Open"
+expect_context_items row@note[a] "Star|-|Open"
+context_open row@note[a]
+menu_activate "Star"
+expect label#0 "starred a"
+expect_context_items row@note[a] "Unstar|-|Open"
+context_open row@note[a]
+menu_activate "Open"
+expect label#0 "opened a"
+expect_context_items row@file[x] "Pin|-|Open"
+expect_context_items row@file[y] "Unpin|-|Open"
+context_open row@file[y]
+menu_activate "Unpin"
+expect label#0 "unpinned y"
+expect_context_items row@file[y] "Pin|-|Open"
+expect_context_items row@file[x] "Pin|-|Open"
+context_open row@file[x]
+menu_activate "Pin"
+expect label#0 "pinned x"
+expect_context_items row@file[x] "Unpin|-|Open"

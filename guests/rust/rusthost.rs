@@ -61,6 +61,8 @@ mod textarea;
 mod sections;
 #[path = "menus.rs"]
 mod menus;
+#[path = "rowmenu.rs"]
+mod rowmenu;
 #[path = "commands.rs"]
 mod commands;
 #[path = "a11y.rs"]
@@ -235,6 +237,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("textarea") => textarea::app(ctx),
         Ok("sections") => sections::app(ctx),
         Ok("menus") => menus::app(ctx),
+        Ok("rowmenu") => rowmenu::app(ctx),
         Ok("commands") => commands::app(ctx),
         Ok("a11y") => a11y::app(ctx),
         Ok("a11yrows") => a11yrows::app(ctx),

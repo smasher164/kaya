@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xcfb6ed50af9e65de
+specHash = 0x7b5c931f2513c73b
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -982,6 +982,8 @@ txKindAttachDock :: Word16
 txKindAttachDock = 85
 txKindSetDockPlayer :: Word16
 txKindSetDockPlayer = 86
+txKindContextLabelNode :: Word16
+txKindContextLabelNode = 87
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1126,6 +1128,8 @@ applyKindAttachDock :: Word16
 applyKindAttachDock = 73
 applyKindSetDockPlayer :: Word16
 applyKindSetDockPlayer = 74
+applyKindContextLabelNode :: Word16
+applyKindContextLabelNode = 75
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1619,6 +1623,10 @@ txAttachDock window dock = wireRecord txKindAttachDock (word64LE window <> word6
 -- The dock `dock` shows `player` (docs/media-player-plan.md M17), 0 for none: the backend draws its own idiom from that player, Android a progress line at the dock's top edge and the others nothing. The root refuses an unknown dock or a player that is not live; releasing the player detaches it.
 txSetDockPlayer :: Word64 -> Word64 -> Builder
 txSetDockPlayer dock player = wireRecord txKindSetDockPlayer (word64LE dock <> word64LE player)
+
+-- Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string.
+txContextLabelNode :: Word64 -> Word64 -> Word32 -> Word32 -> Builder
+txContextLabelNode node item level field = wireRecord txKindContextLabelNode (word64LE node <> word64LE item <> word32LE level <> word32LE field)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

@@ -2946,6 +2946,10 @@ module Tpl : sig
      attached from an unanchored [context_catalog]. *)
   val context_menu : node -> context_catalog -> unit
 
+  (* After [context_menu]: on each stamped copy, the item reads the row's
+     own string field (docs/media-player-plan.md M26). *)
+  val context_label : ?level:int -> node -> menu_item -> ('r, string) field -> unit
+
   (* An existing node as a child. *)
   val w : 'a -> unit -> 'a
 end

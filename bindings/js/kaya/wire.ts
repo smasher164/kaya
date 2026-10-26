@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xcfb6ed50af9e65den;
+export const SPEC_HASH = 0x7b5c931f2513c73bn;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -488,6 +488,7 @@ export const TX_DISMISS_TOAST = 83;
 export const TX_COLLECTION_PATCH_IF = 84;
 export const TX_ATTACH_DOCK = 85;
 export const TX_SET_DOCK_PLAYER = 86;
+export const TX_CONTEXT_LABEL_NODE = 87;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -560,6 +561,7 @@ export const APPLY_PRESENT_TOAST = 71;
 export const APPLY_WITHDRAW_TOAST = 72;
 export const APPLY_ATTACH_DOCK = 73;
 export const APPLY_SET_DOCK_PLAYER = 74;
+export const APPLY_CONTEXT_LABEL_NODE = 75;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -1527,6 +1529,16 @@ export function tx_set_dock_player(dock: number, player: number): Uint8Array {
   enc.u64(dock);
   enc.u64(player);
   return enc.end(TX_SET_DOCK_PLAYER);
+}
+
+/** Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string. */
+export function tx_context_label_node(node: number, item: number, level: number, field: number): Uint8Array {
+  enc.begin();
+  enc.u64(node);
+  enc.u64(item);
+  enc.u32(level);
+  enc.u32(field);
+  return enc.end(TX_CONTEXT_LABEL_NODE);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

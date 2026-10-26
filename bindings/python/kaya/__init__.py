@@ -1303,6 +1303,17 @@ class Widget(_Handle):
             )
         return _MenuScope(("widget", self.id), shortcut_ok=False)
 
+    def context_label(self, item: MenuItem, field: TextSource) -> None:
+        """The TEMPLATE NODE's per-row label (Node.context_label), refused
+        here: a live widget is one thing on screen and has no row, so its
+        context item's label is the item's own, constant or signal-bound
+        (docs/media-player-plan.md M26)."""
+        raise KayaStateError(
+            "kaya: a live widget's context item has no row to read a label "
+            "from — set the item's own label (a constant or a signal); "
+            "context_label is the TEMPLATE node's spelling"
+        )
+
 
 class Node(_Handle):
     """A template node: a blueprint entry, stamped per collection entry.
@@ -1325,6 +1336,22 @@ class Node(_Handle):
         catalog._owner = _row_owner("a context catalog on a template node")
         for root in catalog._roots:
             _records().append(wire.tx_context_attach_node(self.id, root))
+
+    def context_label(self, item: MenuItem, field: TextSource) -> None:
+        """After `context_menu`: on each stamped copy, `item` reads that
+        row's own string field (`node.context_label(star, row.mark)`,
+        docs/media-player-plan.md M26), followed when the field changes."""
+        if isinstance(field, FieldRef):
+            level, index = field._level(), field._index
+        elif isinstance(field, Element):
+            level, index = field._level(), 0
+        else:
+            raise KayaTypeError(
+                "kaya: a context item's per-row label is the row's own "
+                "field (row.mark), not a constant or a signal — a constant "
+                "label is the item's own (docs/media-player-plan.md M26)")
+        _records().append(
+            wire.tx_context_label_node(self.id, item.id, level, index))
 
 
 class Element(Generic[T]):

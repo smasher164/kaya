@@ -479,6 +479,12 @@
  */
 #define KAYA_TX_SET_DOCK_PLAYER 86
 
+/**
+ * CONTEXT_LABEL_NODE { u64 node; u64 item; u32 level; u32 field }
+ * (docs/media-player-plan.md M26).
+ */
+#define KAYA_TX_CONTEXT_LABEL_NODE 87
+
 #define KAYA_TX_ADD_SECTION 25
 
 #define KAYA_TX_SELECT_SECTION 26
@@ -894,6 +900,11 @@
  * SET_DOCK_PLAYER { u64 dock; u64 player }.
  */
 #define KAYA_APPLY_SET_DOCK_PLAYER 74
+
+/**
+ * CONTEXT_LABEL_NODE { u64 widget; u64 item; value label }.
+ */
+#define KAYA_APPLY_CONTEXT_LABEL_NODE 75
 
 #define KAYA_APPLY_ADD_SECTION 15
 

@@ -148,6 +148,15 @@ if only.active() and SUITE == "all" and not LEGS:
     LEGS = only.matches(lane.legs())
     only.summary("deploy-win", len(LEGS))
     SUITE = "only"
+# A ROSTERED LEG WITHOUT ITS LAUNCHER RAN NOTHING AND WAITED OUT ITS WHOLE
+# CEILING, six legs at 316 s each with a bundle that could only say no output
+# came (docs/traps.md, the leg with no launcher).
+_unlaunched = [leg for leg in lane.legs()
+               if not (ROOT / "tools/guest" / lane.launcher(leg)).is_file()]
+if _unlaunched:
+    die("deploy-win: no launcher for " + ", ".join(_unlaunched) + " — every leg the roster "
+        "names runs tools/guest/" + lane.launcher("<leg>") + "; copy a sibling scene's "
+        "launcher for the same language and rename the scene in it")
 
 TARGET = ROOT / "target/aarch64-pc-windows-msvc/release"
 SDK = ROOT / "third_party/winappsdk"

@@ -179,6 +179,9 @@ func (r accountRow) SetMaxLines(n kaya.Node, lines int)                { r.t.Set
 
 func (r accountRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r accountRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }
+func (r accountRow) ContextLabel(n kaya.Node, item kaya.MenuItem, f kaya.Field[string]) {
+	r.t.ContextLabel(n, item, f)
+}
 
 func (r accountRow) A11yID(n kaya.Node, f kaya.Field[string]) { r.c.A11yID(r.t, n, f) }
 

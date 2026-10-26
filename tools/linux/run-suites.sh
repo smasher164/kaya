@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -2521,6 +2521,18 @@ for proto in x11 wayland; do
     run "$proto" menus-ocaml env KAYA_SELFTEST=menus KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/menus.exe
     run "$proto" menus-haskell env KAYA_SELFTEST=menus "$(hs_bin menus)"
     run "$proto" menus-java env KAYA_SELFTEST=menus KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" rowmenu-rust env KAYA_SELFTEST=rowmenu "$CARGO_TARGET_DIR/debug/examples/rowmenu"
+    run "$proto" rowmenu-python env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
+        python3 guests/python/rowmenu.py
+    run "$proto" rowmenu-js env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
+        node guests/js/rowmenu.ts
+    run "$proto" rowmenu-go env KAYA_SELFTEST=rowmenu /tmp/go-guests/kaya-go
+    run "$proto" rowmenu-csharp env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" rowmenu-ocaml env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/rowmenu.exe
+    run "$proto" rowmenu-haskell env KAYA_SELFTEST=rowmenu "$(hs_bin rowmenu)"
+    run "$proto" rowmenu-java env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" commands-rust env KAYA_SELFTEST=commands \
         "$CARGO_TARGET_DIR/debug/examples/commands"

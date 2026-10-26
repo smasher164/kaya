@@ -346,6 +346,9 @@ enum TplOp {
     /// shows the shared `item` tree, and each stamp emits a
     /// CONTEXT_ATTACH_NODE apply carrying that copy's key path.
     ContextAttachNode { node: u64, item: MenuItemId },
+    /// One item of that catalog reads a row's string field on each copy
+    /// (docs/media-player-plan.md M26).
+    ContextLabelNode { node: u64, item: MenuItemId, level: u32, field: u32 },
     /// The drag declarations on a template node (docs/dnd-plan.md §4):
     /// every stamped copy is a source with this constant payload, or a
     /// destination with these operations; a per-copy keyed record
@@ -583,6 +586,7 @@ struct Stamp {
     /// The copies whose drag payload binds a row field, per entry: an
     /// update re-declares each (docs/dnd-plan.md §4).
     drag_binds: Vec<(EntryRef, WidgetId)>,
+    context_label_binds: Vec<(EntryRef, WidgetId)>,
     /// Collection instances born with this copy.
     colls: Vec<(CollectionId, PathKey)>,
     for_sites: Vec<(CollectionId, PathKey)>,
@@ -823,6 +827,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::MenubarAppend { .. } => UndoVerdict::Refused("menubar_append"),
         TxOp::ContextAttach { .. } => UndoVerdict::Refused("context_attach"),
         TxOp::ContextAttachNode { .. } => UndoVerdict::Refused("context_attach_node"),
+        TxOp::ContextLabelNode { .. } => UndoVerdict::Refused("context_label_node"),
         TxOp::SetMenuProp { .. } => UndoVerdict::Refused("set_menu_prop"),
         TxOp::CreateCollection { .. } => UndoVerdict::Refused("create_collection"),
         // The header bar is not state; the order underneath it already
@@ -1045,6 +1050,9 @@ pub(crate) struct Scene {
     /// entry -> (copy, template node, copy keys) for every stamped copy
     /// with a bound payload; element_bindings' twin for drag.
     drag_binds: HashMap<EntryRef, Vec<(WidgetId, u64, PathKey)>>,
+    /// entry -> (copy, item, field, the label last sent) for every stamped
+    /// copy whose context item reads a field of it.
+    context_label_binds: HashMap<EntryRef, Vec<(WidgetId, MenuItemId, u32, String)>>,
     /// EVERY LIVE CANVAS'S VALIDATED DRAWING, live ids and stamped
     /// instance ids alike (docs/canvas-plan.md). This is the raster's
     /// root: a scale report or an appearance flip re-rasters exactly
@@ -5101,6 +5109,13 @@ impl Scene {
                          inside a For/When template scope (use context_attach for a live widget)"
                     )
                 }
+                TxOp::ContextLabelNode { .. } => {
+                    panic!(
+                        "kaya: context_label_node reads a row's field, so it is valid only inside \
+                         a For template; a live widget's context item takes a constant or a signal \
+                         label"
+                    )
+                }
                 TxOp::SetMenuProp { item, prop, value } => {
                     self.set_menu_prop(item, prop, value, &mut out)
                 }
@@ -9141,6 +9156,60 @@ impl Scene {
                 self.note_context_root((true, node.0), item);
                 top.current.ops.push(TplOp::ContextAttachNode { node: node.0, item });
             }
+            TxOp::ContextLabelNode { node, item, level, field } => {
+                assert!(
+                    self.menu_items.contains_key(&item),
+                    "kaya: context_label_node names unknown menu item {item:?}"
+                );
+                let root = self.menu_root(item);
+                assert!(
+                    top.current.ops.iter().any(|op| matches!(
+                        op,
+                        TplOp::ContextAttachNode { node: n, item: r } if *n == node.0 && *r == root
+                    )),
+                    "kaya: context_label_node names item {item:?}, which is not in a context \
+                     catalog attached to node {} in this template case (attach the catalog \
+                     first)",
+                    node.0
+                );
+                let kind = self.menu_items[&item].kind;
+                assert!(
+                    matches!(kind, MenuItemKind::Action | MenuItemKind::Toggle | MenuItemKind::Menu),
+                    "kaya: context_label_node on a {kind:?} item, which shows no label of its own"
+                );
+                let depth = scopes
+                    .iter()
+                    .filter(|s| matches!(s.header, ScopeHeader::For { .. }))
+                    .count() as u32;
+                assert!(
+                    level < depth,
+                    "kaya: element level {level} exceeds For nesting depth {depth}"
+                );
+                let (collection, variant) = scopes
+                    .iter()
+                    .rev()
+                    .filter_map(|s| match s.header {
+                        ScopeHeader::For { collection, .. } => Some((collection, s.current.variant)),
+                        ScopeHeader::When { .. } => None,
+                    })
+                    .nth(level as usize)
+                    .expect("level checked against For depth above");
+                let schema = &self.collections[&collection].variants[variant as usize];
+                assert!(
+                    (field as usize) < schema.len(),
+                    "kaya: field {field} out of bounds for variant {variant} of {collection:?} \
+                     ({} fields)",
+                    schema.len()
+                );
+                assert!(
+                    schema[field as usize] == ValueType::Str,
+                    "kaya: a context item's label reads a string field; field {field} of variant \
+                     {variant} of {collection:?} is a {:?} field",
+                    schema[field as usize]
+                );
+                let top = scopes.last_mut().unwrap();
+                top.current.ops.push(TplOp::ContextLabelNode { node: node.0, item, level, field });
+            }
             TxOp::SetColumnHeaders { widget, sorted, direction, path, titles } => {
                 // The nested For's TEMPLATE-SCOPED bar: the rows() chain
                 // closed that For one op ago, so its blueprint is in this
@@ -9381,6 +9450,29 @@ impl Scene {
             );
             out.push(op);
         }
+    }
+
+    fn context_label_of(&self, entry: &EntryRef, field: u32) -> String {
+        match &self.coll_instances[&(entry.0, entry.1.clone())].entries[&entry.2].1[field as usize] {
+            Value::Str(label) => label.clone(),
+            other => unreachable!("a context label field holds {other:?}"),
+        }
+    }
+
+    /// An entry changed: every copy whose context item reads a field of it
+    /// gets that item's label again, when the label moved.
+    fn refresh_context_labels(&mut self, entry: &EntryRef, out: &mut Vec<ApplyOp>) {
+        let Some(mut binds) = self.context_label_binds.remove(entry) else {
+            return;
+        };
+        for (widget, item, field, last) in &mut binds {
+            let label = self.context_label_of(entry, *field);
+            if label != *last {
+                *last = label.clone();
+                out.push(ApplyOp::ContextLabelNode { widget: *widget, item: *item, label });
+            }
+        }
+        self.context_label_binds.insert(entry.clone(), binds);
     }
 
     fn drop_target_apply(&mut self, id: WidgetId, operations: u32, tag: Vec<u8>) -> ApplyOp {
@@ -9851,7 +9943,9 @@ impl Scene {
                 self.push_bound_prop(widget, prop, value, out);
             }
         }
-        self.refresh_drag_binds(&(id, path, key), out);
+        let entry = (id, path, key);
+        self.refresh_drag_binds(&entry, out);
+        self.refresh_context_labels(&entry, out);
     }
 
     /// A restamped copy was appended to its container; move it back to
@@ -9941,7 +10035,9 @@ impl Scene {
                 }
             }
         }
-        self.refresh_drag_binds(&(id, path, key), out);
+        let entry = (id, path, key);
+        self.refresh_drag_binds(&entry, out);
+        self.refresh_context_labels(&entry, out);
     }
 
     /// A run of consecutive removes from one instance, applied as one: the
@@ -10371,6 +10467,19 @@ impl Scene {
                         path: path_values(copy_path),
                     });
                 }
+                TplOp::ContextLabelNode { node, item, level, field } => {
+                    let widget = node_map[node];
+                    let entry = chain[chain.len() - 1 - *level as usize].clone();
+                    let label = self.context_label_of(&entry, *field);
+                    self.context_label_binds.entry(entry.clone()).or_default().push((
+                        widget,
+                        *item,
+                        *field,
+                        label.clone(),
+                    ));
+                    stamp.context_label_binds.push((entry, widget));
+                    out.push(ApplyOp::ContextLabelNode { widget, item: *item, label });
+                }
             }
         }
     }
@@ -10578,6 +10687,11 @@ impl Scene {
         for (entry, widget) in &stamp.drag_binds {
             if let Some(bound) = self.drag_binds.get_mut(entry) {
                 bound.retain(|(w, _, _)| w != widget);
+            }
+        }
+        for (entry, widget) in &stamp.context_label_binds {
+            if let Some(bound) = self.context_label_binds.get_mut(entry) {
+                bound.retain(|(w, _, _, _)| w != widget);
             }
         }
         // THE COPY TAKES ITS TYPING HISTORY WITH IT: an episode on a field
@@ -16513,6 +16627,145 @@ mod tests {
             )),
             "the stamped context attach must carry the row's key as the noun"
         );
+    }
+
+    fn row_label_scene(scene: &mut Scene, label_op: TxOp) {
+        scene.apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Star"),
+            item(2, MenuItemKind::Action),
+            label(2, "Rename"),
+            item(9, MenuItemKind::Action),
+            label(9, "Other"),
+            TxOp::CreateCollection {
+                id: CollectionId(1),
+                variants: vec![vec![ValueType::Str, ValueType::Str, ValueType::Bool]],
+            },
+            TxOp::CreateFor { id: 3, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(30), kind: WidgetKind::Label },
+            TxOp::SetProperty {
+                widget: WidgetId(30),
+                prop: Prop::Text,
+                value: PropValue::Element { level: 0, field: 0 },
+            },
+            TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(1) },
+            TxOp::ContextAttachNode { node: TemplateNodeId(30), item: MenuItemId(2) },
+            label_op,
+            TxOp::TemplateEnd,
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(3) },
+        ]);
+    }
+
+    fn row(key: &str, title: &str, mark: &str) -> TxOp {
+        TxOp::CollectionInsert {
+            id: CollectionId(1),
+            path: vec![],
+            key: v(key),
+            variant: 0,
+            record: vec![v(title), v(mark), Value::Bool(false)],
+        }
+    }
+
+    fn row_labels(ops: &[ApplyOp]) -> Vec<(WidgetId, MenuItemId, String)> {
+        ops.iter()
+            .filter_map(|op| match op {
+                ApplyOp::ContextLabelNode { widget, item, label } => {
+                    Some((*widget, *item, label.clone()))
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn star_label_op() -> TxOp {
+        TxOp::ContextLabelNode { node: TemplateNodeId(30), item: MenuItemId(1), level: 0, field: 1 }
+    }
+
+    /// docs/media-player-plan.md M26: each stamped copy's item reads ITS
+    /// row's field, after the copy's attach, and follows the field.
+    #[test]
+    fn context_label_node_resolves_per_row_and_follows_the_field() {
+        let mut scene = Scene::new();
+        row_label_scene(&mut scene, star_label_op());
+        let ops = scene.apply(vec![row("a", "apples", "Star"), row("b", "bread", "Unstar")]);
+        let labels = row_labels(&ops);
+        assert_eq!(labels.len(), 2, "{ops:?}");
+        assert_ne!(labels[0].0, labels[1].0);
+        assert_eq!((labels[0].1, labels[0].2.as_str()), (MenuItemId(1), "Star"));
+        assert_eq!((labels[1].1, labels[1].2.as_str()), (MenuItemId(1), "Unstar"));
+        let attach_at = ops
+            .iter()
+            .position(|op| matches!(op, ApplyOp::ContextAttachNode { item: MenuItemId(1), .. }))
+            .unwrap();
+        let label_at =
+            ops.iter().position(|op| matches!(op, ApplyOp::ContextLabelNode { .. })).unwrap();
+        assert!(attach_at < label_at, "the label follows its copy's attach: {ops:?}");
+        let a = labels[0].0;
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            field: 1,
+            value: v("Unstar"),
+        }]);
+        assert_eq!(row_labels(&ops), vec![(a, MenuItemId(1), "Unstar".to_owned())]);
+        let ops = scene.apply(vec![TxOp::CollectionUpdateField {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("a"),
+            variant: 0,
+            field: 2,
+            value: Value::Bool(true),
+        }]);
+        assert!(row_labels(&ops).is_empty(), "an unmoved label is not sent again: {ops:?}");
+        let ops = scene.apply(vec![TxOp::CollectionUpdate {
+            id: CollectionId(1),
+            path: vec![],
+            key: v("b"),
+            variant: 0,
+            record: vec![v("bread"), v("Star"), Value::Bool(false)],
+        }]);
+        assert_eq!(row_labels(&ops), vec![(labels[1].0, MenuItemId(1), "Star".to_owned())]);
+        scene.apply(vec![TxOp::CollectionRemove { id: CollectionId(1), path: vec![], key: v("b") }]);
+        assert!(scene.context_label_binds.values().all(|binds| binds.iter().all(|b| b.0 != labels[1].0)));
+    }
+
+    #[test]
+    #[should_panic(expected = "which is not in a context catalog attached to node 30")]
+    fn context_label_node_refuses_an_item_outside_the_catalog() {
+        row_label_scene(
+            &mut Scene::new(),
+            TxOp::ContextLabelNode { node: TemplateNodeId(30), item: MenuItemId(9), level: 0, field: 1 },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "reads a string field; field 2")]
+    fn context_label_node_refuses_a_field_that_is_not_a_string() {
+        row_label_scene(
+            &mut Scene::new(),
+            TxOp::ContextLabelNode { node: TemplateNodeId(30), item: MenuItemId(1), level: 0, field: 2 },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "element level 1 exceeds For nesting depth 1")]
+    fn context_label_node_refuses_a_level_past_the_fors() {
+        row_label_scene(
+            &mut Scene::new(),
+            TxOp::ContextLabelNode { node: TemplateNodeId(30), item: MenuItemId(1), level: 1, field: 1 },
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "context_label_node reads a row's field, so it is valid only inside")]
+    fn context_label_node_refuses_the_live_zone() {
+        Scene::new().apply(vec![
+            item(1, MenuItemKind::Action),
+            label(1, "Star"),
+            TxOp::ContextLabelNode { node: TemplateNodeId(30), item: MenuItemId(1), level: 0, field: 0 },
+        ]);
     }
 
     /// The full canonical-shortcut grammar and the reserved floor, as an

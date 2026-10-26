@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xcfb6ed50af9e65de;
+    public const ulong SpecHash = 0x7b5c931f2513c73b;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -492,6 +492,7 @@ static class KayaWire
     public const ushort TxKindCollectionPatchIf = 84;
     public const ushort TxKindAttachDock = 85;
     public const ushort TxKindSetDockPlayer = 86;
+    public const ushort TxKindContextLabelNode = 87;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -564,6 +565,7 @@ static class KayaWire
     public const ushort ApplyKindWithdrawToast = 72;
     public const ushort ApplyKindAttachDock = 73;
     public const ushort ApplyKindSetDockPlayer = 74;
+    public const ushort ApplyKindContextLabelNode = 75;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -1565,6 +1567,17 @@ static class KayaWire
         w.Write(dock);
         w.Write(player);
         return Finish(stream, w, TxKindSetDockPlayer);
+    }
+
+    /// Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string.
+    public static byte[] TxContextLabelNode(ulong node, ulong item, uint level, uint field)
+    {
+        var w = Begin(out var stream);
+        w.Write(node);
+        w.Write(item);
+        w.Write(level);
+        w.Write(field);
+        return Finish(stream, w, TxKindContextLabelNode);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

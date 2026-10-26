@@ -7197,7 +7197,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:29 rc:1 named:True"""
+swift-census-floor=applied:30 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -7962,7 +7962,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 25")
+        if n == 1 else src, n, "typed-row reader found only 26")
     return "\n".join(lines)
 
 
@@ -9089,13 +9089,15 @@ check_menus("rust", "crates/kaya/src/app.rs", [
     r"toggle=pub fn toggle\(", "radio_group=pub fn radio_group",
     r"option=pub fn option\(", r"separator=pub fn separator\(",
     "context_menu=pub fn context_menu",
-    "context_catalog=pub fn context_catalog"])
+    "context_catalog=pub fn context_catalog",
+    r"context_label=pub fn context_label\("])
 check_menus("python", "bindings/python/kaya/__init__.py", [
     r"menu=^def menu\(", r"item=^def item\(",
     r"toggle=^def toggle\(", r"radio_group=^def radio_group\(",
     r"option=^def option\(", r"separator=^def separator\(",
     r"context_menu=def context_menu\(self",
-    r"context_catalog=^def context_catalog\("])
+    r"context_catalog=^def context_catalog\(",
+    r"context_label=    def context_label\(self"])
 check_menus("go", "bindings/go/app.go", [
     r"menu=func \(w WindowRef\) Menu\(",
     r"item=func \(m MenuItem\) Item\(",
@@ -9104,7 +9106,8 @@ check_menus("go", "bindings/go/app.go", [
     r"option=func \(m MenuItem\) Option\(",
     r"separator=func \(m MenuItem\) Separator\(",
     r"context_menu=func \(tx \*Tx\) ContextMenu\(",
-    r"context_catalog=func \(tx \*Tx\) ContextCatalog\("])
+    r"context_catalog=func \(tx \*Tx\) ContextCatalog\(",
+    r"context_label=func \(t \*Tpl\) ContextLabel\("])
 check_menus("csharp", "bindings/csharp/KayaApp.cs", [
     r"menu=public MenuItem Menu\(", r"item=public MenuItem Item\(",
     r"toggle=public MenuItem Toggle\(",
@@ -9112,7 +9115,8 @@ check_menus("csharp", "bindings/csharp/KayaApp.cs", [
     r"option=public MenuItem Option\(",
     r"separator=public MenuItem Separator\(",
     r"context_menu=public void ContextMenu\(",
-    r"context_catalog=public ContextCatalog ContextCatalog\("])
+    r"context_catalog=public ContextCatalog ContextCatalog\(",
+    r"context_label=public void ContextLabel\("])
 check_menus("java", "bindings/java/dev/kaya/KayaApp.java", [
     r"menu=public MenuItem menu\(", r"item=public MenuItem item\(",
     r"toggle=public MenuItem toggle\(",
@@ -9120,23 +9124,27 @@ check_menus("java", "bindings/java/dev/kaya/KayaApp.java", [
     r"option=public MenuItem option\(",
     r"separator=public void separator\(",
     r"context_menu=public ContextRef contextMenu\(",
-    r"context_catalog=public ContextCatalog contextCatalog\("])
+    r"context_catalog=public ContextCatalog contextCatalog\(",
+    r"context_label=public void contextLabel\("])
 check_menus("swift", "bindings/swift/KayaApp.swift", [
     r"menu=func menu\(", r"item=func item\(",
     r"toggle=func toggle\(", r"radio_group=func radioGroup\(",
     r"option=func option\(", r"separator=func separator\(",
     r"context_menu=func contextMenu\(",
-    r"context_catalog=func contextCatalog\("])
+    r"context_catalog=func contextCatalog\(",
+    r"context_label=public func contextLabel\("])
 check_menus("haskell", "bindings/haskell/KayaApp.hs", [
     "menu=^menu ::", "item=^item ::", "toggle=^toggle ::",
     "radio_group=^radioGroup ::", "option=^option ::",
     "separator=^separator ::", "context_menu=^contextMenu ::",
-    "context_catalog=^contextCatalog ::"])
+    "context_catalog=^contextCatalog ::",
+    "context_label=^nodeContextLabel ::"])
 check_menus("ocaml", "bindings/ocaml/kaya_app.ml", [
     "menu=^let menu ", "item=^let item ", "toggle=^let toggle ",
     "radio_group=^let radio_group ", "option=^let option ",
     "separator=^let separator ", "context_menu=^let context_menu ",
-    "context_catalog=^let context_catalog "])
+    "context_catalog=^let context_catalog ",
+    "context_label=^  let context_label "])
 # The context anchor is a HANDLE method here (python's shape); the rest
 # are module-level, since the transaction is ambient and has no surface
 # to hang them on.
@@ -9147,7 +9155,8 @@ check_menus("js", "bindings/js/kaya/index.ts", [
     r"option=^export function option\(",
     r"separator=^export function separator\(",
     r"context_menu=^  contextMenu\(",
-    r"context_catalog=^export function contextCatalog(<[^>]*>)?\("])
+    r"context_catalog=^export function contextCatalog(<[^>]*>)?\(",
+    r"context_label=^  contextLabel\("])
 
 # EVERY WINDOW PROP NEEDS A SUGAR SPELLING TOO. Props come from the
 # GENERATED wire file, so this tracks the spec by construction; C is

@@ -78,6 +78,7 @@ object GuestStart : KayaGuestStart {
             "toast" -> Toast::app
             "sections" -> Sections::app
             "menus" -> Menus::app
+            "rowmenu" -> Rowmenu::app
             "commands" -> Commands::app
             "clipboard" -> Clipboard::app
             "background" -> Background::app

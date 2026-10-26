@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xcfb6ed50af9e65de
+let kayaSpecHash: UInt64 = 0x7b5c931f2513c73b
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -914,6 +914,16 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCK_PLAYER))
         self.u64(dock)
         self.u64(player)
+        self.end(kayaAt)
+    }
+
+    /// Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string.
+    mutating func contextLabelNode(_ node: UInt64, _ item: UInt64, _ level: UInt32, _ field: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CONTEXT_LABEL_NODE))
+        self.u64(node)
+        self.u64(item)
+        self.u32(level)
+        self.u32(field)
         self.end(kayaAt)
     }
 

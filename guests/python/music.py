@@ -81,6 +81,7 @@ class Saved:
     art: bytes
     phase: kaya.ImagePhase
     selected: bool
+    like: str
 
 
 @dataclass
@@ -90,6 +91,7 @@ class Found:
     art_url: str
     art: bytes
     phase: kaya.ImagePhase
+    like: str
 
 
 @dataclass
@@ -104,6 +106,7 @@ class Track:
     phase: kaya.ImagePhase
     tint: kaya.Tint
     selected: bool
+    like: str
 
 
 def http_fetch(url):
@@ -338,7 +341,8 @@ def open_album(album, surface=None):
     if key not in library_keys:
         library.insert(key, Saved(title=album["name"], caption=f"Album · {album['artist']}",
                                   art_url=album["image"], art=b"",
-                                  phase=kaya.ImagePhase.LOADING, selected=False))
+                                  phase=kaya.ImagePhase.LOADING, selected=False,
+                                  like=album_word(key)))
         library_keys.append(key)
     library_keys.remove(key)
     library_keys.insert(0, key)
@@ -433,12 +437,13 @@ def album_body(album, page):
 
 
 def track_table(page, names, a11y="tracks", prefix="", grow: float | None = 1, timed=True):
-    menu = song_menu(page)
+    menu, like = song_menu(page)
     for track in page["tracks"].columns(*names, a11y_id=a11y, grow=grow):
         with kaya.row(selected=track.selected, on_select=on_pick,
                       on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id(f"{prefix}track")
             line.context_menu(menu)
+            line.context_label(like, track.like)
             kaya.label(bind=track.number)
             with kaya.row(spacing=8, align="center") as cell:
                 cell.a11y_id(f"{prefix}track_cell")
@@ -510,6 +515,26 @@ def show_album_hearts():
     for page in all_pages():
         if page["kind"] == "album":
             page["liked"].set(album_liked(page["album"]))
+
+
+def show_like_words():
+    """Every Like item's label follows its song's or album's state (M26)."""
+    def follow(rows, key, word):
+        row = rows.get(key)
+        if row is not None and row.like != word:
+            rows.patch(key, like=word)
+    for page in all_pages():
+        if "tracks" in page:
+            for key in page["tracks"].keys():
+                follow(page["tracks"], key, like_word(key))
+        if "albums" in page:
+            for key in page["albums"].keys():
+                follow(page["albums"], key, album_word(key))
+    for key in library_keys:
+        follow(library, key, album_word(key))
+    for registry in [cards, *(p["cards"] for p in all_pages() if "cards" in p)]:
+        for album_id, entry in registry.items():
+            entry["word"].set(album_word(album_id))
 
 
 def page_closed(surface, entry):
@@ -634,8 +659,9 @@ def album_arrived(album, surface, entry, answer):
             album=album["name"], duration=kaya.fmt.duration(int(t["duration"]) * 1000),
             art_url=album["image"], art=b"", phase=kaya.ImagePhase.LOADING,
             tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
-            selected=False))
+            selected=False, like=like_word(key)))
     show_album_hearts()
+    show_like_words()
 
 
 def learn_album(album, answer):
@@ -672,6 +698,7 @@ def load_album_keys(album, then):
 
 def album_keys_arrived(album, answer, then):
     learn_album(album, answer)
+    show_like_words()
     if album_keys[album["id"]]:
         then(album_keys[album["id"]])
 
@@ -733,23 +760,36 @@ def song_album(key):
 
 
 def song_menu(page):
-    """A song's menu (M26), one catalog for the page's rows."""
+    """A song's menu (M26), one catalog for the page's rows, and its Like,
+    which each row names from its own `like`."""
     surface = page["surface"]
     with kaya.context_catalog() as catalog:
         kaya.item("Play", on_activate=lambda row: play_row(page, row.key))
         kaya.item("Play Next", on_activate=lambda row: enqueue([row.key], next_up=True))
         kaya.item("Add to Queue", on_activate=lambda row: enqueue([row.key], next_up=False))
         kaya.separator()
+        like = kaya.item("Like", on_activate=lambda row: like_song(row.key,
+                                                                   row.key not in liked_ids()))
+        kaya.separator()
         kaya.item("Go to Album", on_activate=lambda row: open_album(song_album(row.key), surface))
         kaya.item("Go to Artist",
                   on_activate=lambda row: open_artist(songs[row.key]["artist_id"],
                                                       songs[row.key]["artist"], surface))
-    return catalog
+    return catalog, like
 
 
-def album_items(album_of, surface):
+def like_word(key):
+    return "Unlike" if key in liked_ids() else "Like"
+
+
+def album_word(album_id):
+    return "Unlike Album" if album_liked(album_id) else "Like Album"
+
+
+def album_items(album_of, surface, word):
     """An album card's menu (M26); `album_of` takes the stamped row, or
-    nothing on a live card."""
+    nothing on a live card. `word` is the Like item's label, a live card's
+    own signal; a stamped row names it from its `like`."""
     def play(*row):
         with_album_keys(album_of(*row), lambda keys: start_queue(keys, keys[0]))
 
@@ -760,16 +800,24 @@ def album_items(album_of, surface):
         album = album_of(*row)
         open_artist(album["artist_id"], album["artist"], surface)
 
+    def like(*row):
+        album = album_of(*row)
+        on = not album_liked(album["id"])
+        with_album_keys(album, lambda _keys: set_album_liked(album, on))
+
     kaya.item("Play", on_activate=play)
     kaya.item("Add to Queue", on_activate=add)
     kaya.separator()
+    liking = kaya.item(word, on_activate=like)
+    kaya.separator()
     kaya.item("Go to Artist", on_activate=artist)
+    return liking
 
 
 def album_menu(surface):
     with kaya.context_catalog() as catalog:
-        album_items(lambda row: known[row.key], surface)
-    return catalog
+        like = album_items(lambda row: known[row.key], surface, "Like Album")
+    return catalog, like
 
 
 def shuffled(first):
@@ -910,9 +958,12 @@ def cycle_repeat(_on):
 
 def set_liked(on):
     """The heart offers its undo in a toast (docs/toast-plan.md T4)."""
-    key = playback["key"]
-    if key is None:
-        return
+    if playback["key"] is not None:
+        like_song(playback["key"], on)
+
+
+def like_song(key, on):
+    """The heart's like, for any song: a row's menu takes the same step."""
     kaya.undoable(f"{'Like' if on else 'Unlike'} {songs[key]['title']}")
     record_step([(key, on, apply_like(key, on, 0))])
     kaya.show_toast("Added to Liked Songs" if on else "Removed from Liked Songs",
@@ -964,6 +1015,7 @@ def show_likes():
 
 def fill_liked_pages():
     show_album_hearts()
+    show_like_words()
     for page in all_pages():
         if page["kind"] == "liked":
             fill_liked(page)
@@ -1092,7 +1144,7 @@ def fill_liked(page):
                 duration=kaya.fmt.duration(int(record["seconds"]) * 1000),
                 art_url=record["art_url"], art=b"", phase=kaya.ImagePhase.LOADING,
                 tint=kaya.Tint.ACCENT if record["id"] == playback["key"] else kaya.Tint.NONE,
-                selected=False))
+                selected=False, like="Unlike"))
     for number, key in enumerate(keys, start=1):
         page["tracks"].move_to_end(key)
         page["tracks"].patch(key, number=str(number))
@@ -1433,7 +1485,7 @@ def artist_arrived(surface, entry, answer):
             art_url=catalogue.address(t["album_image"]), art=b"",
             phase=kaya.ImagePhase.LOADING,
             tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
-            selected=False))
+            selected=False, like=like_word(key)))
     threading.Thread(target=load_picture, args=(about["image"], surface, entry),
                      daemon=True).start()
 
@@ -1512,18 +1564,19 @@ def card(album, registry=None, prefix="", surface=None):
     art = kaya.signal(b"")
     phase = kaya.signal(kaya.ImagePhase.LOADING)
     selected = kaya.signal(False)
+    word = kaya.signal(album_word(album["id"]))
     with kaya.column(filled=kaya.Tint.NEUTRAL, selected=selected,
                      on_activate=lambda: open_album(album, surface)) as tile:
         tile.a11y_id(f"{prefix}card_{album['id']}").fill(True)
         with tile.context_menu():
             album_items(lambda: album, (0 if desktop else SECTION_HOME) if surface is None
-                        else surface)
+                        else surface, word)
         kaya.image(art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED, phase=phase) \
             .max_width(CARD_ART).max_height(CARD_ART).a11y_id(f"{prefix}art_{album['id']}")
         kaya.label(album["name"], max_lines=2)
         kaya.caption(album["artist"])
     registry[album["id"]] = {"art": art, "phase": phase, "selected": selected,
-                             "url": album["image"]}
+                             "url": album["image"], "word": word}
 
 
 def open_search():
@@ -1596,12 +1649,13 @@ def search_body(page):
 
 
 def found_list(page):
-    menu = song_menu(page)
+    menu, like = song_menu(page)
     for track in page["tracks"].rows(a11y_id="found_tracks", align="stretch"):
         with kaya.row(spacing=12, align="center",
                       on_activate=lambda row: play_row(page, row.key)) as line:
             line.a11y_id("found_track")
             line.context_menu(menu)
+            line.context_label(like, track.like)
             kaya.image(track.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                        phase=track.phase, on_needed=page["tracks_art"].needed,
                        on_released=page["tracks_art"].released) \
@@ -1623,14 +1677,15 @@ def found_shelf(page, group, title, shape, on_open):
 
 
 def found_strip(page, group, one, shape, on_open):
-    menu = album_menu(page["surface"]) if group == "albums" else None
+    menu, like = album_menu(page["surface"]) if group == "albums" else (None, None)
     with kaya.scroll(axis=kaya.Axis.HORIZONTAL) as strip:
         strip.a11y_id(f"{group}_shelf")
         for found in page[group].rows(a11y_id=f"found_{group}"):
             with kaya.column(spacing=4, filled=kaya.Tint.NEUTRAL, on_activate=on_open) as tile:
                 tile.a11y_id(f"found_{one}")
-                if menu is not None:
+                if menu is not None and like is not None:
                     tile.context_menu(menu)
+                    tile.context_label(like, found.like)
                 kaya.image(found.art, fit=kaya.Fit.COVER, shape=shape, phase=found.phase,
                            on_needed=page[f"{group}_art"].needed,
                            on_released=page[f"{group}_art"].released) \
@@ -1714,12 +1769,12 @@ def found_rows(group, results):
             known[key] = album
             rows.append((key, Found(name=album["name"], caption=album["artist"],
                                     art_url=album["image"], art=b"",
-                                    phase=kaya.ImagePhase.LOADING)))
+                                    phase=kaya.ImagePhase.LOADING, like=album_word(key))))
         elif group == "artists":
             artist_names[key] = html.unescape(r["name"])
             rows.append((key, Found(name=html.unescape(r["name"]), caption="Artist",
                                     art_url=catalogue.address(r["image"]), art=b"",
-                                    phase=kaya.ImagePhase.LOADING)))
+                                    phase=kaya.ImagePhase.LOADING, like="")))
         else:
             art = catalogue.address(r["album_image"])
             songs[key] = {"title": html.unescape(r["name"]), "audio": r["audio"],
@@ -1733,7 +1788,7 @@ def found_rows(group, results):
                 duration=kaya.fmt.duration(int(r["duration"]) * 1000), art_url=art, art=b"",
                 phase=kaya.ImagePhase.LOADING,
                 tint=kaya.Tint.ACCENT if key == playback["key"] else kaya.Tint.NONE,
-                selected=False)))
+                selected=False, like=like_word(key))))
     return rows
 
 
@@ -1842,11 +1897,12 @@ def library_body():
                 kaya.label("Liked Songs")
                 kaya.caption(bind=liked_count).a11y_id("liked_count")
         kaya.caption(bind=library_hint)
-        menu = album_menu(0 if desktop else SECTION_LIBRARY)
+        menu, like = album_menu(0 if desktop else SECTION_LIBRARY)
         for item in library:
             with kaya.row(align="center", selected=item.selected, on_activate=on_saved) as entry:
                 entry.a11y_id("saved")
                 entry.context_menu(menu)
+                entry.context_label(like, item.like)
                 kaya.image(item.art, fit=kaya.Fit.COVER, shape=kaya.Shape.ROUNDED,
                            phase=item.phase, on_needed=library_art.needed,
                            on_released=library_art.released) \

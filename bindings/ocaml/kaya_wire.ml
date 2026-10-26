@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xcfb6ed50af9e65deL
+let spec_hash = 0x7b5c931f2513c73bL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -510,6 +510,7 @@ let tx_kind_dismiss_toast = 83
 let tx_kind_collection_patch_if = 84
 let tx_kind_attach_dock = 85
 let tx_kind_set_dock_player = 86
+let tx_kind_context_label_node = 87
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -582,6 +583,7 @@ let apply_kind_present_toast = 71
 let apply_kind_withdraw_toast = 72
 let apply_kind_attach_dock = 73
 let apply_kind_set_dock_player = 74
+let apply_kind_context_label_node = 75
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -1307,6 +1309,14 @@ let tx_set_dock_player dock player =
   finish tx_kind_set_dock_player (fun b ->
       Buffer.add_int64_le b dock;
       Buffer.add_int64_le b player)
+
+(* Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string. *)
+let tx_context_label_node node item level field =
+  finish tx_kind_context_label_node (fun b ->
+      Buffer.add_int64_le b node;
+      Buffer.add_int64_le b item;
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =

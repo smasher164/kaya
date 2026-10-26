@@ -1422,6 +1422,28 @@ export class Widget extends Handle {
     }
     return new MenuScope(["widget", this.id], false).run(bodyOrCatalog, this);
   }
+
+  /** After `contextMenu(catalog)`: on each stamped copy, `item` reads that
+   * row's own string field (`node.contextLabel(star, row.mark)`,
+   * docs/media-player-plan.md M26), followed when the field changes. */
+  contextLabel(item: MenuItem, field: FieldRef | Element): this {
+    if (!this.isNode) {
+      throw new TypeError("kaya: a live widget's context item has no row — its label is a constant or a signal (item.label)");
+    }
+    let level: number;
+    let index: number;
+    if (field instanceof FieldRef) {
+      level = field._level();
+      index = field._index;
+    } else if (field instanceof Element) {
+      level = field._level();
+      index = 0;
+    } else {
+      throw new TypeError("kaya: a context item's per-row label is the row's own field (row.mark), not a constant or a signal — a constant label is the item's own (docs/media-player-plan.md M26)");
+    }
+    records().push(wire.tx_context_label_node(this.id, item.id, level, index));
+    return this;
+  }
 }
 
 /** The element of an enclosing For over a SCALAR collection: the value

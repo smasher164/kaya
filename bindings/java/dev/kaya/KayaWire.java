@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xcfb6ed50af9e65deL;
+    public static final long SPEC_HASH = 0x7b5c931f2513c73bL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -493,6 +493,7 @@ public final class KayaWire {
     public static final short TX_KIND_COLLECTION_PATCH_IF = 84;
     public static final short TX_KIND_ATTACH_DOCK = 85;
     public static final short TX_KIND_SET_DOCK_PLAYER = 86;
+    public static final short TX_KIND_CONTEXT_LABEL_NODE = 87;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -565,6 +566,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_WITHDRAW_TOAST = 72;
     public static final short APPLY_KIND_ATTACH_DOCK = 73;
     public static final short APPLY_KIND_SET_DOCK_PLAYER = 74;
+    public static final short APPLY_KIND_CONTEXT_LABEL_NODE = 75;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -1506,6 +1508,16 @@ public final class KayaWire {
         Enc b = begin(TX_KIND_SET_DOCK_PLAYER);
         b.putLong(dock);
         b.putLong(player);
+        return finish(b);
+    }
+
+    /** Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string. */
+    public static byte[] txContextLabelNode(long node, long item, int level, int field) {
+        Enc b = begin(TX_KIND_CONTEXT_LABEL_NODE);
+        b.putLong(node);
+        b.putLong(item);
+        b.putInt(level);
+        b.putInt(field);
         return finish(b);
     }
 

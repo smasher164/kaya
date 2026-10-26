@@ -521,6 +521,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) SetA11yID(n kaya.Node, id string) { r.t.SetA11yID(n, id) }", lowerFirst(name))
 	w("func (r %sRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }", lowerFirst(name))
+	w("func (r %sRow) ContextLabel(n kaya.Node, item kaya.MenuItem, f kaya.Field[string]) { r.t.ContextLabel(n, item, f) }", lowerFirst(name))
 	w("")
 	w("func (r %sRow) A11yID(n kaya.Node, f kaya.Field[string]) { r.c.A11yID(r.t, n, f) }", lowerFirst(name))
 	w("")

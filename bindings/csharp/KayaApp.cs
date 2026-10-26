@@ -8171,6 +8171,12 @@ sealed class Tpl
             tx.Records.Add(KayaWire.TxContextAttachNode(n.Id, root.Id));
     }
 
+    /// After ContextMenu: on each stamped copy, `item` reads the row's own
+    /// string field (docs/media-player-plan.md M26), followed when the
+    /// field changes.
+    public void ContextLabel(Node n, MenuItem item, Field<string> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxContextLabelNode(n.Id, item.Id, level, f.Index));
+
     public Collection Collection() => tx.Collection();
 
     /// A nested For as a child: ForEach whose body keeps no handles.

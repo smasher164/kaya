@@ -4463,8 +4463,9 @@ unpicked.
   say it". What stayed out is trigger-gated, each trigger
   stated in that section's "Deliberate cuts and admission triggers":
   shared command identity across anchors (the responder-chain/target
-  problem), For-stamped items, `bind_field` labels on context items,
-  merging authored items into native text-control menus, a GTK
+  problem), For-stamped items, ~~`bind_field` labels on context items~~
+  (ARRIVED 2026-10-26 as `context_label`, a copy's own label from its
+  row's field, docs/media-player-plan.md M26), merging authored items into native text-control menus, a GTK
   hamburger presentation hint, item removal, context-item shortcuts,
   ~~role-based standard items (including native Settings placement)~~,
   punctuation shortcut keys, and ~~a toolbar grammar, only under
@@ -9021,7 +9022,11 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   guests. The guest's field READ was moved off the generator-only
   `KayaRecords.FieldAt<string>(0)` onto the element token 2026-08-19; the
   For is still open there, and it must be, because that is where the
-  ContextMenu lives. Small, but it is a semantics difference behind a
+  ContextMenu lives. 2026-10-26: `ContextLabel` (the per-row label,
+  docs/media-player-plan.md M26) joins `ContextMenu` on the C# façade's
+  NOT_FORWARDED list in tools/tpl-surfaces.py, so guests/csharp/
+  RowmenuScene.cs opens its Fors the same way. Small, but it is a
+  semantics difference behind a
   spelling difference, which invariant 1 does not allow to stand once
   someone has seen it. THE DIRECTION IS THE MAINTAINER'S — forward
   `ContextMenu` on the C# façade, or ratify Rust's forward away — and

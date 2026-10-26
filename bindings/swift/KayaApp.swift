@@ -6486,7 +6486,7 @@ public final class KayaAppTx {
     }
 
     /// Native grouping chrome: no label, no props, no handler.
-    func separator() -> KayaMenuItem {
+    public func separator() -> KayaMenuItem {
         newMenuItem(KAYA_MENU_KIND_SEPARATOR, nil)
     }
 
@@ -8137,6 +8137,13 @@ public final class KayaTpl {
         for root in catalog.roots {
             tx.tx.contextAttachNode(node.id, root.id)
         }
+    }
+
+    /// After contextMenu: on each stamped copy, `item` reads the row's own
+    /// string field (docs/media-player-plan.md M26), followed when the
+    /// field changes.
+    public func contextLabel(_ node: KayaNodeHandle, _ item: KayaMenuItem, _ field: KayaField<String>) {
+        tx.tx.contextLabelNode(node.id, item.id, 0, field.index)
     }
 
     public func collection() -> KayaCollection {

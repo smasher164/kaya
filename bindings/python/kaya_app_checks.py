@@ -871,10 +871,10 @@ with app.build():
     )
 
     with kaya.context_catalog() as catalog:
-        kaya.item("Remove")
+        remove = kaya.item("Remove")
     with kaya.column():
         coll = kaya.collection()
-        with kaya.for_each(coll):
+        with kaya.for_each(coll) as element:
             try:
                 kaya.item("Late")
                 check("menu items are live-zone only", False)
@@ -890,6 +890,21 @@ with app.build():
                     for r in kaya._tx[before:]
                 ),
             )
+            before = len(kaya._tx)
+            row.context_label(remove, element)
+            check(
+                "node.context_label names the row's field (M26)",
+                any(
+                    _rec_kind(r) == kaya.wire.TX_CONTEXT_LABEL_NODE
+                    for r in kaya._tx[before:]
+                ),
+            )
+            try:
+                row.context_label(remove, "Remove")
+                check("node.context_label refuses a constant", False)
+            except TypeError as refused:
+                check("node.context_label refuses a constant",
+                      "the row's own field" in str(refused))
     try:
         row.context_menu(catalog)
         check("a context catalog takes exactly one anchor", False)
@@ -909,6 +924,12 @@ with app.build():
         check("a live widget's context anchor refuses a catalog",
               "takes no catalog" in str(refused)
               and "node.context_menu(catalog)" in str(refused))
+    try:
+        live.context_label(remove, "Remove")
+        check("a live widget refuses context_label", False)
+    except RuntimeError as refused:
+        check("a live widget refuses context_label",
+              "context_label is the TEMPLATE node's spelling" in str(refused))
 
 # The rest of the menu guard layer (menus-plan §6). A fresh App keeps
 # the module-global _app pointed at what these blocks assert.

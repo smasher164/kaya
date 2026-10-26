@@ -2856,6 +2856,9 @@ pub enum TxOp {
     /// stamped copy shows the same catalog, and an activation carries the
     /// copy's key path (the on_click_node encoding).
     ContextAttachNode { node: TemplateNodeId, item: MenuItemId },
+    /// On each stamped copy of `node`, the context item `item` reads the
+    /// string field `field` of the record `level` Fors up.
+    ContextLabelNode { node: TemplateNodeId, item: MenuItemId, level: u32, field: u32 },
     /// Bind a menu property (MENU_PROPS). Element sources are rejected at
     /// decode — menu items are not collection elements; `icon`,
     /// `primary`, and `shortcut` reject signal sources at the root.
@@ -3157,6 +3160,8 @@ pub enum ApplyOp {
     /// copy's key path — the noun every activation from this attachment
     /// stamps into its occurrence (the on_click_node encoding).
     ContextAttachNode { widget: WidgetId, item: MenuItemId, path: Path },
+    /// The stamped copy's own label for one item of its context menu.
+    ContextLabelNode { widget: WidgetId, item: MenuItemId, label: String },
     /// Set a menu property to an already-resolved value.
     SetMenuProp { item: MenuItemId, prop: MenuProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },

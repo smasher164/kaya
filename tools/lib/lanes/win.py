@@ -34,7 +34,7 @@ SCENES = [
     "safearea",
     "toast",
     "sections",
-    "menus", "commands", "a11y", "a11yrows", "filedialog",
+    "menus", "rowmenu", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
     "sheet",
@@ -373,9 +373,6 @@ ORDER = [
      # Search and the toasts: `type` posts to the guest's own window, as the
      # search pool's does, and the toast's Undo is pressed through its peer.
      "music_search_python",
-     # The context menus (docs/media-player-plan.md M26): the flyout is
-     # opened and read through its own element, no pointer.
-     "music_context_python",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of
@@ -857,6 +854,30 @@ ORDER = [
     ],
     [
      "menus_java",
+    ],
+    # THE CONTEXT FLYOUTS, each leg ALONE between drains: an open MenuFlyout
+    # closes, or never opens, when a pooled neighbour's window takes the
+    # foreground (docs/traps.md, the flyout a neighbour dismissed).
+    [
+     "music_context_python",
+    ],
+    [
+     "rowmenu_rust",
+    ],
+    [
+     "rowmenu_python",
+    ],
+    [
+     "rowmenu_js",
+    ],
+    [
+     "rowmenu_go",
+    ],
+    [
+     "rowmenu_csharp",
+    ],
+    [
+     "rowmenu_java",
     ],
     [
      "commands_rust",

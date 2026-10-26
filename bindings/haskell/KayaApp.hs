@@ -504,6 +504,7 @@ module KayaApp
     contextMenu,
     contextCatalog,
     nodeContextMenu,
+    nodeContextLabel,
     setMenuLabel,
     bindMenuLabel,
     setMenuEnabled,
@@ -1705,6 +1706,12 @@ contextCatalog roots =
 nodeContextMenu :: Node -> Catalog -> Tpl ()
 nodeContextMenu (Node n) (Catalog roots) =
   mapM_ (emitT . W.txContextAttachNode n) roots
+
+-- | After 'nodeContextMenu': on each stamped copy, the item reads the row's
+-- own string field (docs/media-player-plan.md M26), followed when the field
+-- changes.
+nodeContextLabel :: Node -> MItem 'CtxM -> KField Text -> Tpl ()
+nodeContextLabel (Node n) (MItem m) (KField i) = emitT (W.txContextLabelNode n m 0 i)
 
 setMenuLabel :: MItem s -> Text -> Build ()
 setMenuLabel (MItem n) label = emitB (W.txSetMenuLabel n (T.unpack label))

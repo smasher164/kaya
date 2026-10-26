@@ -5540,6 +5540,10 @@ impl<'b> Row<'_, 'b> {
     pub fn context_menu(&mut self, node: TemplateNodeId, catalog: ContextCatalog) {
         self.tpl().context_menu(node, catalog)
     }
+
+    pub fn context_label(&mut self, node: TemplateNodeId, item: MenuItemId, field: Field<StrKind>) {
+        self.tpl().context_label(node, item, field)
+    }
 }
 
 impl Drop for Row<'_, '_> {
@@ -9585,6 +9589,12 @@ impl<'b> Tpl<'_, 'b> {
     /// The floor: attach one context-catalog root to a template node.
     pub fn context_attach(&mut self, node: TemplateNodeId, item: MenuItemId) {
         self.tx.ops.push(TxOp::ContextAttachNode { node, item });
+    }
+
+    /// After [`Tpl::context_menu`]: on each stamped copy, `item` reads the
+    /// row's own string field (docs/media-player-plan.md M26).
+    pub fn context_label(&mut self, node: TemplateNodeId, item: MenuItemId, field: Field<StrKind>) {
+        self.tx.ops.push(TxOp::ContextLabelNode { node, item, level: 0, field: field.index });
     }
 }
 

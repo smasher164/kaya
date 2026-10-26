@@ -10486,6 +10486,8 @@ struct MenuRegistry {
 struct GtkContextMenu {
     roots: Vec<u64>,
     noun: Vec<Value>,
+    /// The copy's own labels by item id (docs/media-player-plan.md M26).
+    labels: HashMap<u64, String>,
     model: gio::Menu,
     popover: gtk4::PopoverMenu,
     group: gio::SimpleActionGroup,
@@ -10570,14 +10572,19 @@ fn claim_trail(
         .join("\n")
 }
 
-fn menu_resolve_path(reg: &MenuRegistry, roots: &[u64], path: &str) -> Option<u64> {
+fn menu_resolve_path(
+    reg: &MenuRegistry,
+    roots: &[u64],
+    labels: &HashMap<u64, String>,
+    path: &str,
+) -> Option<u64> {
     let mut current: Vec<u64> = roots.to_vec();
     let mut found = None;
     for seg in path.split('>') {
         let id = current
             .iter()
             .copied()
-            .find(|id| reg.items[id].label == seg)?;
+            .find(|id| menu_label(reg, labels, *id) == seg)?;
         found = Some(id);
         current = reg.items[&id].children.clone();
     }
@@ -10858,7 +10865,19 @@ fn append_radio_options(reg: &MenuRegistry, group: u64, prefix: &str, into: &gio
 /// anonymous section, a separator starts the next one, a nested menu cascades
 /// as a real submenu, and a nested radio group lands INLINE as its own
 /// labeled section.
-fn build_menu_items(reg: &MenuRegistry, children: &[u64], prefix: &str, into: &gio::Menu) {
+/// An item's label on one anchor: a stamped copy's own where its row gave one
+/// (docs/media-player-plan.md M26), else the item's.
+fn menu_label<'r>(reg: &'r MenuRegistry, labels: &'r HashMap<u64, String>, id: u64) -> &'r str {
+    labels.get(&id).unwrap_or(&reg.items[&id].label)
+}
+
+fn build_menu_items(
+    reg: &MenuRegistry,
+    children: &[u64],
+    labels: &HashMap<u64, String>,
+    prefix: &str,
+    into: &gio::Menu,
+) {
     let mut section = gio::Menu::new();
     for &child in children {
         let item = &reg.items[&child];
@@ -10866,7 +10885,7 @@ fn build_menu_items(reg: &MenuRegistry, children: &[u64], prefix: &str, into: &g
             MenuItemKind::Separator => flush_menu_section(into, &mut section),
             MenuItemKind::Action | MenuItemKind::Toggle => {
                 let row = gio::MenuItem::new(
-                    Some(&item.label),
+                    Some(menu_label(reg, labels, child)),
                     Some(&format!("{prefix}.kmi-{child}")),
                 );
                 set_row_symbol(&row, item.symbol);
@@ -10874,8 +10893,8 @@ fn build_menu_items(reg: &MenuRegistry, children: &[u64], prefix: &str, into: &g
             }
             MenuItemKind::Menu => {
                 let submenu = gio::Menu::new();
-                build_menu_items(reg, &item.children, prefix, &submenu);
-                let row = gio::MenuItem::new_submenu(Some(&item.label), &submenu);
+                build_menu_items(reg, &item.children, labels, prefix, &submenu);
+                let row = gio::MenuItem::new_submenu(Some(menu_label(reg, labels, child)), &submenu);
                 set_row_symbol(&row, item.symbol);
                 section.append_item(&row);
             }
@@ -10915,7 +10934,7 @@ fn rebuild_menubar(core: &CoreState, window: u64) {
                 // options wear the checkmark idiom.
                 append_radio_options(&reg, root, "win", &submenu);
             } else {
-                build_menu_items(&reg, &item.children, "win", &submenu);
+                build_menu_items(&reg, &item.children, &HashMap::new(), "win", &submenu);
             }
 // A TOP-LEVEL holder gets no icon, measured rather than an omission:
 // PopoverMenuBar renders each as a GtkPopoverMenuBarItem binding `label`
@@ -11344,7 +11363,7 @@ fn rebuild_context(core: &CoreState, widget: u64) {
     };
     let reg = core.menus.borrow();
     attachment.model.remove_all();
-    build_menu_items(&reg, &attachment.roots, "kayactx", &attachment.model);
+    build_menu_items(&reg, &attachment.roots, &attachment.labels, "kayactx", &attachment.model);
 }
 
 /// Rebuild whatever anchors present the tree `id` lives in — the bar
@@ -11710,6 +11729,7 @@ fn context_attach(core: &mut CoreState, widget: u64, item: u64, noun: Vec<Value>
             GtkContextMenu {
                 roots: Vec::new(),
                 noun,
+                labels: HashMap::new(),
                 model,
                 popover,
                 group,
@@ -15974,6 +15994,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // The stamped copy's key path IS the noun: baked into the
             // attachment's action tags (the on_click_node encoding).
             context_attach(core, widget.0, item.0, path);
+        }
+        ApplyOp::ContextLabelNode { widget, item, label } => {
+            core.context_menus
+                .get_mut(&widget.0)
+                .expect("the core sends a copy's label after its attach")
+                .labels
+                .insert(item.0, label);
+            rebuild_context(core, widget.0);
         }
         ApplyOp::SetMenuProp { item, prop, value } => {
             use gtk4::glib::prelude::ToVariant;
@@ -21503,7 +21531,7 @@ impl crate::harness::Stage for GtkStage {
                     .expect("kaya: the open context menu lost its attachment");
                 let route = {
                     let reg = core.menus.borrow();
-                    let item = menu_resolve_path(&reg, &attachment.roots, &path)
+                    let item = menu_resolve_path(&reg, &attachment.roots, &attachment.labels, &path)
                         .unwrap_or_else(|| panic!("kaya: no such context item {path:?}"));
                     menu_activation_route(&reg, item, Some(attachment))
                 };
@@ -21527,7 +21555,7 @@ impl crate::harness::Stage for GtkStage {
             let route = {
                 let reg = core.menus.borrow();
                 let roots = reg.bars.get(&0).cloned().unwrap_or_default();
-                let item = menu_resolve_path(&reg, &roots, &path).unwrap_or_else(|| {
+                let item = menu_resolve_path(&reg, &roots, &HashMap::new(), &path).unwrap_or_else(|| {
                     // REACHING HERE MEANS THE CLAIM WAS NONE, which for a
                     // context item is the whole bug: the bar cannot contain
                     // it, so the useful question is never "which item" but
@@ -21565,7 +21593,7 @@ impl crate::harness::Stage for GtkStage {
                 .filter_map(|id| {
                     let item = &reg.items[&id];
                     (item.kind == MenuItemKind::Action && item.swipe != 0)
-                        .then(|| (item.swipe, item.label.clone()))
+                        .then(|| (item.swipe, menu_label(&reg, &attachment.labels, id).to_owned()))
                 })
                 .collect();
             crate::harness::swipe_spec(items)
@@ -22433,14 +22461,14 @@ impl crate::harness::Stage for GtkStage {
             // exclusively while presented.
             let reg = core.menus.borrow();
             let open = *core.open_context.borrow();
-            let roots = match open {
+            let (roots, labels) = match open {
                 Some(anchor) => match core.context_menus.get(&anchor) {
-                    Some(attachment) => attachment.roots.clone(),
+                    Some(attachment) => (attachment.roots.clone(), attachment.labels.clone()),
                     None => return "no such item".to_owned(),
                 },
-                None => reg.bars.get(&0).cloned().unwrap_or_default(),
+                None => (reg.bars.get(&0).cloned().unwrap_or_default(), HashMap::new()),
             };
-            let Some(id) = menu_resolve_path(&reg, &roots, &path) else {
+            let Some(id) = menu_resolve_path(&reg, &roots, &labels, &path) else {
                 return "no such item".to_owned();
             };
             let item = &reg.items[&id];
@@ -22502,17 +22530,17 @@ impl crate::harness::Stage for GtkStage {
             let reg = core.menus.borrow();
             // Open-context EXCLUSIVITY, the state read's rule verbatim.
             let open = *core.open_context.borrow();
-            let roots = match open {
+            let (roots, labels) = match open {
                 Some(anchor) => match core.context_menus.get(&anchor) {
-                    Some(attachment) => attachment.roots.clone(),
+                    Some(attachment) => (attachment.roots.clone(), attachment.labels.clone()),
                     None => return "no such item".to_owned(),
                 },
-                None => reg.bars.get(&0).cloned().unwrap_or_default(),
+                None => (reg.bars.get(&0).cloned().unwrap_or_default(), HashMap::new()),
             };
-            let Some(id) = menu_resolve_path(&reg, &roots, &path) else {
+            let Some(id) = menu_resolve_path(&reg, &roots, &labels, &path) else {
                 return "no such item".to_owned();
             };
-            let label = reg.items[&id].label.clone();
+            let label = menu_label(&reg, &labels, id).to_owned();
 
             // The chrome that presents this item's tree.
             let popover: gtk4::Widget = match open {

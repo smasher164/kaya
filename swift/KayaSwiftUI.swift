@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xcfb6ed50af9e65de
+let kayaSpecHash: UInt64 = 0x7b5c931f2513c73b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -128,6 +128,7 @@ private let applyMenubarAppend: UInt16 = 20
 private let applyContextAttach: UInt16 = 21
 private let applyContextAttachNode: UInt16 = 22
 private let applySetMenuProp: UInt16 = 23
+private let applyContextLabelNode: UInt16 = 75
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -1306,6 +1307,9 @@ final class KayaSceneModel {
     /// The anchor copy's key-path bytes by widget id — the NOUN every
     /// activation from that anchor stamps; absent for live-widget anchors.
     var contextNouns: [UInt64: [UInt8]] = [:]
+    /// A stamped copy's own labels for its context items, item id -> label
+    /// (docs/media-player-plan.md M26).
+    var contextLabels: [UInt64: [UInt64: String]] = [:]
     // The focus command's landing spot; expect_focused reads it back.
     var focusedId: UInt64?
     /// A4.2's pan by root id (docs/safe-area-plan.md): how far the focused
@@ -7065,6 +7069,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 // pointer dangling.
                 if kayaScene.contextRoots.removeValue(forKey: id) != nil {
                     kayaScene.contextNouns.removeValue(forKey: id)
+                    kayaScene.contextLabels.removeValue(forKey: id)
                     if kayaOpenContextWidget == id {
                         kayaOpenContextWidget = nil
                     }
@@ -7236,6 +7241,15 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 let mid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 kayaScene.contextRoots[widget, default: []].append(kayaScene.menuItems[mid]!)
                 kayaScene.contextNouns[widget] = [UInt8](raw[(body + 16)..<(at + size)])
+                menusTouched = true
+            case applyContextLabelNode:
+                // u64 widget (the stamped copy), u64 item, then the label value
+                // { u32 type; u32 len; bytes }.
+                let widget = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let mid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                kayaScene.contextLabels[widget, default: [:]][mid] = String(
+                    decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
                 menusTouched = true
             case applySetMenuProp:
                 // u64 item, u32 mprop, u32 pad, value. Programmatic
@@ -15261,7 +15275,8 @@ private func kayaRunScript(_ script: String) {
                     #endif
                     if let wid = kayaOpenContextWidget {
                         guard let roots = kayaScene.contextRoots[wid],
-                            let item = kayaResolveMenuPath(path, roots: roots)
+                            let item = kayaResolveMenuPath(
+                                path, roots: roots, labels: kayaScene.contextLabels[wid] ?? [:])
                         else {
                             return "no such context item \(path)"
                         }
@@ -15321,8 +15336,9 @@ private func kayaRunScript(_ script: String) {
                         guard kayaContextHosts[node.id] != nil else {
                             return "<no view on screen hosts the menu>"
                         }
+                        let labels = kayaScene.contextLabels[node.id] ?? [:]
                         return kayaContextSpec(
-                            roots.map { $0.kind == menuKindSeparator ? nil : $0.label })
+                            roots.map { $0.kind == menuKindSeparator ? nil : kayaMenuLabel($0, labels) })
                     }
                 }
                 var gotItems = contextItems()
@@ -15354,9 +15370,10 @@ private func kayaRunScript(_ script: String) {
                             return "<no context menu attached to \(parts[1])>"
                         }
                         var items: [(Int64, String)] = []
+                        let labels = kayaScene.contextLabels[node.id] ?? [:]
                         func walk(_ item: KayaMenuItemModel) {
                             if item.kind == menuKindAction && item.swipe != 0 {
-                                items.append((item.swipe, item.label))
+                                items.append((item.swipe, kayaMenuLabel(item, labels)))
                             }
                             item.children.forEach(walk)
                         }
@@ -15397,7 +15414,10 @@ private func kayaRunScript(_ script: String) {
                     guard let roots = kayaScene.contextRoots[node.id], !roots.isEmpty else {
                         return "no context menu attached to \(parts[1])"
                     }
-                    guard let item = kayaResolveMenuPath(label, roots: roots) else {
+                    guard
+                        let item = kayaResolveMenuPath(
+                            label, roots: roots, labels: kayaScene.contextLabels[node.id] ?? [:])
+                    else {
                         return "no such context item \(label) on \(parts[1])"
                     }
                     guard item.swipe != 0 else {
@@ -19122,7 +19142,8 @@ private struct KayaNativeTable: View {
                 let roots = kayaScene.contextRoots[stamped.id], !roots.isEmpty
             else { return }
             kayaBuildNSMenuItems(
-                into: menu, children: roots, noun: kayaScene.contextNouns[stamped.id] ?? [])
+                into: menu, children: roots, noun: kayaScene.contextNouns[stamped.id] ?? [],
+                labels: kayaScene.contextLabels[stamped.id] ?? [:])
         }
 
         /// The menu a right-click on `stamped` opens, through the table's own
@@ -28782,17 +28803,25 @@ func kayaPresentedCatalog() -> [KayaMenuItemModel] {
 /// Resolve a `>`-joined label path against root items, labels compared
 /// byte-for-byte (the shared-scene contract). `"Sort>Date"` lands on
 /// option Date inside group Sort; `"Sort"` lands on the group itself.
-func kayaResolveMenuPath(_ path: String, roots: [KayaMenuItemModel]) -> KayaMenuItemModel? {
+func kayaResolveMenuPath(
+    _ path: String, roots: [KayaMenuItemModel], labels: [UInt64: String] = [:]
+) -> KayaMenuItemModel? {
     var current = roots
     var found: KayaMenuItemModel?
     for seg in path.split(separator: ">", omittingEmptySubsequences: false).map(String.init) {
-        guard let item = current.first(where: { kayaBytesEqual($0.label, seg) }) else {
+        guard let item = current.first(where: { kayaBytesEqual(kayaMenuLabel($0, labels), seg) }) else {
             return nil
         }
         found = item
         current = item.children
     }
     return found
+}
+
+/// An item's label on one anchor: a stamped copy's own where the row gave one
+/// (docs/media-player-plan.md M26), else the item's.
+func kayaMenuLabel(_ item: KayaMenuItemModel, _ labels: [UInt64: String]) -> String {
+    labels[item.id] ?? item.label
 }
 
 /// THE user dispatch path: chrome clicks, shortcuts, and harness verbs all land
@@ -28889,7 +28918,9 @@ func kayaMenuSymbolRead(_ path: String) -> String {
     let item: KayaMenuItemModel?
     if let wid = kayaOpenContextWidget {
         // Open-context EXCLUSIVITY, the state read's rule verbatim.
-        item = kayaScene.contextRoots[wid].flatMap { kayaResolveMenuPath(path, roots: $0) }
+        item = kayaScene.contextRoots[wid].flatMap {
+            kayaResolveMenuPath(path, roots: $0, labels: kayaScene.contextLabels[wid] ?? [:])
+        }
     } else {
         item = kayaResolveMenuPath(path, roots: kayaPresentedCatalog())
     }
@@ -30522,7 +30553,8 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         // resolution — a miss reads as the retryable "no such item", never a
         // bar fallback.
         guard let roots = kayaScene.contextRoots[wid],
-            let item = kayaResolveMenuPath(path, roots: roots)
+            let item = kayaResolveMenuPath(
+                path, roots: roots, labels: kayaScene.contextLabels[wid] ?? [:])
         else { return "no such item" }
         return kayaModelMenuState(item, aspect)
     }
@@ -30672,7 +30704,8 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// Builds one grouping node's submenu content. A nested menu cascades; a
     /// radio_group materializes INLINE with the checkmark idiom.
     func kayaBuildNSMenuItems(
-        into menu: NSMenu, children: [KayaMenuItemModel], noun: [UInt8]? = nil
+        into menu: NSMenu, children: [KayaMenuItemModel], noun: [UInt8]? = nil,
+        labels: [UInt64: String] = [:]
     ) {
         func tag(_ id: UInt64) -> Any {
             noun.map { KayaContextPick(item: id, noun: $0) } ?? NSNumber(value: id)
@@ -30682,14 +30715,16 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             case menuKindSeparator:
                 menu.addItem(NSMenuItem.separator())
             case menuKindMenu:
-                let holder = NSMenuItem(title: child.label, action: nil, keyEquivalent: "")
+                let holder = NSMenuItem(
+                    title: kayaMenuLabel(child, labels), action: nil, keyEquivalent: "")
                 holder.representedObject = tag(child.id)
                 holder.isEnabled = kayaMenuEffectiveEnabled(child)
-                let submenu = NSMenu(title: child.label)
+                let submenu = NSMenu(title: kayaMenuLabel(child, labels))
                 submenu.autoenablesItems = false  // docs/traps.md
             submenu.delegate = kayaMenuRefresher
                 kayaApplySymbol(holder, child.symbol)
-                kayaBuildNSMenuItems(into: submenu, children: child.children, noun: noun)
+                kayaBuildNSMenuItems(
+                    into: submenu, children: child.children, noun: noun, labels: labels)
                 holder.submenu = submenu
                 menu.addItem(holder)
             case menuKindRadioGroup:
@@ -30711,7 +30746,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 // in the menu that declared it.
                 if child.role == "settings" { continue }
                 let nsItem = NSMenuItem(
-                    title: child.label,
+                    title: kayaMenuLabel(child, labels),
                     action: #selector(KayaMenuDispatcher.fire(_:)), keyEquivalent: "")
                 nsItem.target = kayaMenuDispatch
                 nsItem.representedObject = tag(child.id)
@@ -31033,12 +31068,13 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
 /// menu and every context menu, so it resolves nothing beyond the table.
 struct KayaMenuRowLabel: View {
     let item: KayaMenuItemModel
+    var labels: [UInt64: String] = [:]
 
     var body: some View {
         if let sf = kayaSFSymbol(item.symbol) {
-            Label(item.label, systemImage: sf)
+            Label(kayaMenuLabel(item, labels), systemImage: sf)
         } else {
-            Text(item.label)
+            Text(kayaMenuLabel(item, labels))
         }
     }
 }
@@ -31052,6 +31088,7 @@ struct KayaMenuNodeView: View {
     let noun: [UInt8]
     /// Promoted primaries render in the bar, not in overflow.
     var promoted: Set<UInt64> = []
+    var labels: [UInt64: String] = [:]
 
     var body: some View {
         switch item.kind {
@@ -31062,10 +31099,10 @@ struct KayaMenuNodeView: View {
             // mac disables the holder — one semantics).
             Menu {
                 ForEach(item.children) { child in
-                    KayaMenuNodeView(item: child, noun: noun, promoted: promoted)
+                    KayaMenuNodeView(item: child, noun: noun, promoted: promoted, labels: labels)
                 }
             } label: {
-                KayaMenuRowLabel(item: item)
+                KayaMenuRowLabel(item: item, labels: labels)
             }
             .disabled(!kayaMenuEffectiveEnabled(item))
         case menuKindRadioGroup:
@@ -31076,7 +31113,7 @@ struct KayaMenuNodeView: View {
                     get: { item.checked },
                     set: { _ in kayaMenuUserActivate(item, noun: noun) })
             ) {
-                KayaMenuRowLabel(item: item)
+                KayaMenuRowLabel(item: item, labels: labels)
             }
             .disabled(!kayaMenuEffectiveEnabled(item))
         case menuKindAction:
@@ -31084,7 +31121,7 @@ struct KayaMenuNodeView: View {
                 Button {
                     kayaMenuUserActivate(item, noun: noun)
                 } label: {
-                    KayaMenuRowLabel(item: item)
+                    KayaMenuRowLabel(item: item, labels: labels)
                 }
                 .disabled(!kayaMenuEffectiveEnabled(item))
             }
@@ -31127,8 +31164,9 @@ struct KayaContextMenuItems: View {
 
     var body: some View {
         let noun = kayaScene.contextNouns[widgetId] ?? []
+        let labels = kayaScene.contextLabels[widgetId] ?? [:]
         ForEach(kayaScene.contextRoots[widgetId] ?? []) { root in
-            KayaMenuNodeView(item: root, noun: noun)
+            KayaMenuNodeView(item: root, noun: noun, labels: labels)
         }
     }
 }

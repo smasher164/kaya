@@ -2148,6 +2148,24 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   the others nothing. The root refuses an unknown dock or a \
                   player that is not live; releasing the player detaches it.",
         },
+        Record {
+            kind: 87,
+            name: "context_label_node",
+            fields: &[
+                f("node", FieldTy::U64),
+                f("item", FieldTy::U64),
+                f("level", FieldTy::U32),
+                f("field", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Inside a template, after the node's context_attach_node: \
+                  on each stamped copy of `node`, the context item `item` \
+                  reads the string field `field` of the record `level` Fors \
+                  up, resolved per copy by the core and followed when the \
+                  field changes (docs/media-player-plan.md M26). The root \
+                  refuses an item outside the node's catalog, an item that \
+                  takes no label, and a field that is not a string.",
+        },
     ],
     apply: &[
         Record {
@@ -3178,6 +3196,20 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "The dock `dock` shows `player` (0: none; \
                   docs/media-player-plan.md M17).",
+        },
+        Record {
+            kind: 75,
+            name: "context_label_node",
+            fields: &[
+                f("widget", FieldTy::U64),
+                f("item", FieldTy::U64),
+                f("label", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "The stamped copy `widget`'s context menu shows `item` as \
+                  `label` (a string), in place of the item's own label; sent \
+                  after the copy's context_attach_node and again whenever \
+                  the row's field changes.",
         },
     ],
     occurrence: &[
@@ -5079,6 +5111,7 @@ mod tests {
             ("collection_patch_if", wire::TX_COLLECTION_PATCH_IF),
             ("attach_dock", wire::TX_ATTACH_DOCK),
             ("set_dock_player", wire::TX_SET_DOCK_PLAYER),
+            ("context_label_node", wire::TX_CONTEXT_LABEL_NODE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5164,6 +5197,7 @@ mod tests {
                 ("withdraw_toast", wire::APPLY_WITHDRAW_TOAST),
                 ("attach_dock", wire::APPLY_ATTACH_DOCK),
                 ("set_dock_player", wire::APPLY_SET_DOCK_PLAYER),
+                ("context_label_node", wire::APPLY_CONTEXT_LABEL_NODE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -6190,6 +6224,10 @@ mod tests {
         w.record(tx_record("menubar_append"), &[Arg::U64(0), Arg::U64(101)]);
         w.record(tx_record("context_attach"), &[Arg::U64(5), Arg::U64(101)]);
         w.record(tx_record("context_attach_node"), &[Arg::U64(8), Arg::U64(101)]);
+        w.record(
+            tx_record("context_label_node"),
+            &[Arg::U64(8), Arg::U64(100), Arg::U32(0), Arg::U32(1)],
+        );
         // set_menu_prop carries the SET_PROPERTY variable tail (spliced
         // by hand, as a generated helper would).
         {
@@ -6364,6 +6402,12 @@ mod tests {
             TxOp::ContextAttachNode {
                 node: TemplateNodeId(8),
                 item: MenuItemId(101),
+            },
+            TxOp::ContextLabelNode {
+                node: TemplateNodeId(8),
+                item: MenuItemId(100),
+                level: 0,
+                field: 1,
             },
             TxOp::SetMenuProp {
                 item: MenuItemId(100),

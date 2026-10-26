@@ -240,6 +240,11 @@ executable menus
   main-is: menus.hs
   build-depends: kaya-guests
 
+executable rowmenu
+  import: shared
+  main-is: rowmenu.hs
+  build-depends: kaya-guests
+
 executable commands
   import: shared
   main-is: commands.hs

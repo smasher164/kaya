@@ -6619,6 +6619,12 @@ public final class KayaApp {
         public void contextMenu(Node n, ContextCatalog catalog) {
             t.contextMenu(n, catalog);
         }
+
+        /** After contextMenu: on each stamped copy, {@code item} reads this
+         * row's own string field (docs/media-player-plan.md M26). */
+        public void contextLabel(Node n, MenuItem item, KayaRecords.Field<String> field) {
+            t.contextLabel(n, item, field);
+        }
     }
 
     /**
@@ -10341,6 +10347,15 @@ public final class KayaApp {
             for (long root : catalog.roots) {
                 tx.emit(KayaWire.txContextAttachNode(n.id, root));
             }
+        }
+
+        /**
+         * After contextMenu: on each stamped copy, {@code item} reads the
+         * row's own string field (docs/media-player-plan.md M26), followed
+         * when the field changes.
+         */
+        public void contextLabel(Node n, MenuItem item, KayaRecords.Field<String> field) {
+            tx.emit(KayaWire.txContextLabelNode(n.id, item.id, 0, field.index));
         }
 
         /** Register a toggle handler on a template node — the bridge

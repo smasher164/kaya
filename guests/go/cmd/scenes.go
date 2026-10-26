@@ -37,6 +37,7 @@ import (
 	"dev.kaya/guests/go/layout"
 	"dev.kaya/guests/go/media"
 	"dev.kaya/guests/go/menus"
+	"dev.kaya/guests/go/rowmenu"
 	"dev.kaya/guests/go/milestone2"
 	"dev.kaya/guests/go/nav"
 	"dev.kaya/guests/go/netimage"
@@ -128,6 +129,7 @@ var scenes = map[string]func() *kaya.App{
 	"media_reader":     media.App,
 	"listdetail":       split.App,
 	"menus":            menus.App,
+	"rowmenu":          rowmenu.App,
 	"nav":              nav.App,
 	"netimage":         netimage.App,
 	"grounds":          grounds.App,

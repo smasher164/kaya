@@ -76,6 +76,7 @@ pub(crate) const TX_DISMISS_TOAST: u16 = 83;
 pub(crate) const TX_COLLECTION_PATCH_IF: u16 = 84;
 pub(crate) const TX_ATTACH_DOCK: u16 = 85;
 pub(crate) const TX_SET_DOCK_PLAYER: u16 = 86;
+pub(crate) const TX_CONTEXT_LABEL_NODE: u16 = 87;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -198,6 +199,7 @@ pub(crate) const APPLY_PRESENT_TOAST: u16 = 71;
 pub(crate) const APPLY_WITHDRAW_TOAST: u16 = 72;
 pub(crate) const APPLY_ATTACH_DOCK: u16 = 73;
 pub(crate) const APPLY_SET_DOCK_PLAYER: u16 = 74;
+pub(crate) const APPLY_CONTEXT_LABEL_NODE: u16 = 75;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -2932,6 +2934,12 @@ pub fn decode_transaction_with_blobs(
                 node: TemplateNodeId(r.u64()),
                 item: MenuItemId(r.u64()),
             },
+            TX_CONTEXT_LABEL_NODE => TxOp::ContextLabelNode {
+                node: TemplateNodeId(r.u64()),
+                item: MenuItemId(r.u64()),
+                level: r.u32(),
+                field: r.u32(),
+            },
             TX_SET_MENU_PROP => {
                 let item = MenuItemId(r.u64());
                 let p = menu_prop(r.u32());
@@ -4779,6 +4787,13 @@ impl Writer {
                     }
                 })
             }
+            ApplyOp::ContextLabelNode { widget, item, label } => {
+                self.record(APPLY_CONTEXT_LABEL_NODE, |b, blobs| {
+                    b.extend_from_slice(&widget.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                    write_value(b, &Value::Str(label.clone()), blobs);
+                })
+            }
             // SET_MENU_PROP: u64 item, u32 mprop, u32 pad, value.
             ApplyOp::SetMenuProp { item, prop, value } => {
                 self.record(APPLY_SET_MENU_PROP, |b, blobs| {
@@ -5443,6 +5458,14 @@ impl Writer {
                 self.record(TX_CONTEXT_ATTACH_NODE, |b, _| {
                     b.extend_from_slice(&node.0.to_le_bytes());
                     b.extend_from_slice(&item.0.to_le_bytes());
+                })
+            }
+            TxOp::ContextLabelNode { node, item, level, field } => {
+                self.record(TX_CONTEXT_LABEL_NODE, |b, _| {
+                    b.extend_from_slice(&node.0.to_le_bytes());
+                    b.extend_from_slice(&item.0.to_le_bytes());
+                    b.extend_from_slice(&level.to_le_bytes());
+                    b.extend_from_slice(&field.to_le_bytes());
                 })
             }
             TxOp::SetMenuProp { item, prop, value } => self.record(TX_SET_MENU_PROP, |b, blobs| {

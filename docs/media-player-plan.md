@@ -68,7 +68,7 @@ in all nine bindings unless said otherwise.
 | 1. Home | art per card from the network, phases and the fetch helper (docs/network-images-plan.md N2, N7, N8, N12) | built |
 | 2. Playlist | a table whose title cell is art beside two lines, the pinned header, the playing track's tinted name (Y5-Y7, tools/scenes/tracks.steps) | built |
 | 2. Playlist | a row that plays on double-click or Return | built 2026-10-17 (Y4, §6 step 2): on the macOS native table `on_activate` is the NSTableView's `doubleAction` and Return, `selected` its own selection; since the Y4 amendment (built 2026-10-18) a user's click and the arrows move that selection and tell the app through `selection_changed` / `on_select`; the iOS synthesized tier, Compose and WinUI table rows activate and wear the selection too, and tools/scenes/tracks.steps clicks and reads two album rows on every lane (docs/traps.md, "The table row nobody rendered") |
-| 2. Playlist | a context menu on a track (Add to queue, Go to artist) | built 2026-10-26 (M26): every track row and album card; the tables' rows on the macOS native table, the phones' synthesized tier, iPad's Table and Compose's table had no menu at all until then (their cells are the row's children, never the row), measured and fixed; a per-row label (Like / Unlike) waits for a ruling (M26) |
+| 2. Playlist | a context menu on a track (Add to queue, Go to artist) | built 2026-10-26 (M26): every track row and album card; the tables' rows on the macOS native table, the phones' synthesized tier, iPad's Table and Compose's table had no menu at all until then (their cells are the row's children, never the row), measured and fixed; a per-row label (Like / Unlike, Like Album / Unlike Album) built 2026-10-26 (M26) |
 | 2. Playlist | track and playlist durations ("3:45", "1 hr 12 min") | NOT BUILT: crates/kaya/src/fmt.rs has date, time, number, percent, currency and timecode, no duration (§2 M9) |
 | 3. Gradient header | the gradient ground from one data colour, `image_dominant` (Y2) | built |
 | 4. Dock (player bar) | the dock (Y8), the player (docs/media-plan.md §2), a progress slider and a volume slider, transport buttons | dock, player and sliders built; the TRANSPORT SYMBOLS are NOT BUILT: crates/kaya/src/wire.rs's SYMBOLS has 25 entries and none is play, pause, next, previous, shuffle, repeat or volume (§2 M8) |
@@ -1225,7 +1225,7 @@ unliking and reliking one song with the album heart following, the album
 unliked, Undo, an album like that adds only the missing song and whose
 Undo removes only it, and the Liked Songs rows.
 
-### M26: Right-click menus on songs and album cards (RULED 2026-10-25)
+### M26: Right-click menus on songs and album cards (RULED 2026-10-25; Like / Unlike RULED and built 2026-10-26)
 
 The maintainer said yes to right-click menus, a long press on the phones. A
 song row (an album's tracks, Liked Songs, the artist page's top tracks,
@@ -1263,34 +1263,55 @@ long press, and iOS's ground and cells (the phones) and the Table's
 row's context_open and `expect_context_items` go through the table's own
 `menu(for:)`; elsewhere both refuse an anchor no view hosts.
 
-LIKE / UNLIKE IS NOT BUILT, AND WAITS FOR A RULING. The ruling asks for a
-Like item whose label follows the song's state, and an album card's Like
-Album / Unlike Album. A context catalog attached to a list's row is one menu
-shared by every row (DESIGN.md, Menus: "`bind_field` labels on context items
-wait for a stamped row whose command label must derive from row data"), so
-no row can say Unlike while its neighbour says Like. The options:
+LIKE / UNLIKE, RULED 2026-10-26 AND BUILT. The ruling asked for a Like
+item whose label follows the song's state, and an album card's Like Album /
+Unlike Album. A context catalog attached to a list's row is one menu shared by
+every row, so no row could say Unlike while its neighbour said Like. Four
+options were offered: (1) a context item's label bound to a field of the row's
+record, resolved per row by the core the way a drag payload's bound fields are
+(docs/dnd-plan.md §4); (2) Like and Unlike each hidden per row by a field; (3)
+one toggle "Liked" with a per-row check; (4) one "Like" that toggles. The
+maintainer: "i agree, we should be able to have separate menu items for each
+entry" (option 1).
 
-1. A context item's label bound to a field of the row's record, resolved
-   per row by the core the way a drag payload's bound fields already are
-   (docs/dnd-plan.md §4): the app keeps "Like" or "Unlike" on each row.
-   New in the spec, the four backends and the nine bindings plus C; the
-   spelling in each binding is the ruling's.
-2. Two items, Like and Unlike, each hidden per row by a field: the same
-   per-row machinery, for a `hidden` property menus do not have yet.
-3. One toggle item "Liked" with a per-row check: the same machinery, for
-   `checked`.
-4. One item labelled "Like" that toggles: no new surface, but its label is
-   wrong on a liked song.
+Built: the spec's `context_label_node` (TX 87 with the node, the item and the
+field; apply 75 with the stamped copy, the item and the resolved label). The
+core sends a copy its label after the copy's attach and again when the field
+moves, and refuses an item outside the node's catalog, an item with no label
+of its own, a field that is not a string and the live zone. SwiftUI (the menu
+views, the Mac native table's own menu filled for the clicked row, the
+harness's model reads), GTK, WinUI and Compose each draw that copy's menu with
+its own label. Every binding spells it beside the template's `context_menu`,
+the drag payload's shape: Rust `row.context_label(node, item, Rec::field())`,
+Python `node.context_label(item, row.field)`, JS `node.contextLabel(item,
+row.field)`, Go `row.ContextLabel(n, item, row.Field())`, C# `t.ContextLabel(n,
+item, RecKaya.Field)`, Java `row.contextLabel(n, item, row.field)`, Swift
+`row.t.contextLabel(n, item, row.field)`, OCaml `Tpl.context_label n item
+field`, Haskell `nodeContextLabel n item (field @"f" @Rec)`; the C floor is
+the generated packer. tools/scenes/rowmenu.steps proves it in every language
+on all five lanes: two rows of a list and two of a table, each menu saying
+its own row's word, and choosing one acts on its row and moves only that
+row's label.
 
-Recommended: 1, DESIGN.md's own named admission, which the ruling triggers.
+In the app a song row's menu reads Play, Play Next, Add to Queue, Like (or
+Unlike), Go to Album, Go to Artist, the like in a group of its own; an album
+card's reads Play, Add to Queue, Like Album (or Unlike Album), Go to Artist.
+Like and Unlike take the heart's step, its toast and its Undo; Like Album and
+Unlike Album take the album heart's (M25), an album no page has shown asking
+the catalogue for its tracks first. Home's and the artist page's cards are
+live, so their item reads a signal of the card's own; the search's albums and
+the library's rows read the row's `like` field, as every song row does.
 
-On the phones the press lifts the cell it lands on, not the whole row,
-because the row is not one view on that tier (a visual question left open).
+The three menu visuals the slice left open were each called "fine" the same
+day, RULED: on the phones the press lifts the cell it lands on, not the whole
+row; Compose's menu opens at the row's leading edge; the items carry no icons.
 
 music_context reads it on all five lanes: a Home card's items, Play, a
-track's items, Play Next and Add to Queue read back through three nexts, a
-library row's items, Go to Artist, an artist card's Add to Queue, a top
-track's Go to Album.
+track's items, its Like and Unlike with their toasts and the Undo, the
+neighbour still saying Like, Play Next and Add to Queue read back through
+three nexts, Go to Artist, an artist card's Add to Queue, its Like Album and
+Unlike Album with their toasts and Undo, a top track's Go to Album, and a
+library row's Unlike Album.
 
 ## §6: Build order
 

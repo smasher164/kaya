@@ -351,6 +351,9 @@ pub const KAYA_TX_COLLECTION_PATCH_IF: u16 = 84;
 pub const KAYA_TX_ATTACH_DOCK: u16 = 85;
 /// SET_DOCK_PLAYER { u64 dock; u64 player } (docs/media-player-plan.md M17).
 pub const KAYA_TX_SET_DOCK_PLAYER: u16 = 86;
+/// CONTEXT_LABEL_NODE { u64 node; u64 item; u32 level; u32 field }
+/// (docs/media-player-plan.md M26).
+pub const KAYA_TX_CONTEXT_LABEL_NODE: u16 = 87;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -697,6 +700,7 @@ const _: () = assert!(
         && KAYA_TX_COLLECTION_PATCH_IF == wire::TX_COLLECTION_PATCH_IF
         && KAYA_TX_ATTACH_DOCK == wire::TX_ATTACH_DOCK
         && KAYA_TX_SET_DOCK_PLAYER == wire::TX_SET_DOCK_PLAYER
+        && KAYA_TX_CONTEXT_LABEL_NODE == wire::TX_CONTEXT_LABEL_NODE
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -802,6 +806,8 @@ pub const KAYA_APPLY_WITHDRAW_TOAST: u16 = 72;
 pub const KAYA_APPLY_ATTACH_DOCK: u16 = 73;
 /// SET_DOCK_PLAYER { u64 dock; u64 player }.
 pub const KAYA_APPLY_SET_DOCK_PLAYER: u16 = 74;
+/// CONTEXT_LABEL_NODE { u64 widget; u64 item; value label }.
+pub const KAYA_APPLY_CONTEXT_LABEL_NODE: u16 = 75;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -948,6 +954,7 @@ const _: () = assert!(
         && KAYA_APPLY_WITHDRAW_TOAST == wire::APPLY_WITHDRAW_TOAST
         && KAYA_APPLY_ATTACH_DOCK == wire::APPLY_ATTACH_DOCK
         && KAYA_APPLY_SET_DOCK_PLAYER == wire::APPLY_SET_DOCK_PLAYER
+        && KAYA_APPLY_CONTEXT_LABEL_NODE == wire::APPLY_CONTEXT_LABEL_NODE
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -7484,6 +7491,7 @@ mod tests {
             ("collection_patch_if", KAYA_TX_COLLECTION_PATCH_IF),
             ("attach_dock", KAYA_TX_ATTACH_DOCK),
             ("set_dock_player", KAYA_TX_SET_DOCK_PLAYER),
+            ("context_label_node", KAYA_TX_CONTEXT_LABEL_NODE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7558,6 +7566,7 @@ mod tests {
             ("withdraw_toast", KAYA_APPLY_WITHDRAW_TOAST),
             ("attach_dock", KAYA_APPLY_ATTACH_DOCK),
             ("set_dock_player", KAYA_APPLY_SET_DOCK_PLAYER),
+            ("context_label_node", KAYA_APPLY_CONTEXT_LABEL_NODE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

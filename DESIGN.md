@@ -2319,6 +2319,17 @@ One item vocabulary has two anchors:
   TextArea, the editable text controls, reject context attachment in
   v1; their native edit menus remain backend dress.
 
+A node-anchored catalog is ONE item tree shared by every stamped copy,
+built in the live zone before the template, so its labels are the
+items' own. A label that must say something about the row — Like on one
+song, Unlike on the next — is a property of the ATTACHMENT, declared in
+the template beside it: `context_label(node, item, field)` names a
+string field of the row's record, the core resolves it per copy (the
+drag payload's bound fields' rule, docs/dnd-plan.md §4) and sends the
+copy `context_label_node(widget, item, label)` after its attach and
+whenever the field changes, and each backend draws that copy's menu
+with its own label (docs/media-player-plan.md M26, ruled 2026-10-26).
+
 The window lowering is deliberately platform-shaped:
 
 | Host | Native lowering |
@@ -2597,8 +2608,10 @@ of being re-decided per binding.
   pre-solve it.
 - **For-stamped menu items** wait for a dynamic command collection
   such as Recent Files.
-- **`bind_field` labels on context items** wait for a stamped row whose
-  command label must derive from row data.
+- ~~**`bind_field` labels on context items** wait for a stamped row whose
+  command label must derive from row data.~~ ARRIVED 2026-10-26 with the
+  music app's Like / Unlike (docs/media-player-plan.md M26): the per-copy
+  label above, `context_label` in all nine bindings.
 - **Merging authored items into native text-control menus** — GTK
   extra-menu and UIKit edit-menu APIs — waits for an app that needs
   both its own command and the native editing commands on one control.

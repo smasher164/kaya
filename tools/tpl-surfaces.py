@@ -1935,9 +1935,10 @@ NOT_FORWARDED_JAVA = {
 # C#'s façade documents its own exclusions in its generated header
 # (guests/csharp/*Kaya.cs). ContextMenu and When are on this list and off
 # Java's RowSurface — a real divergence between two façades over one zone,
-# recorded and ledgered rather than silently blessed.
+# recorded and ledgered rather than silently blessed. ContextLabel follows
+# ContextMenu: a label for a menu the façade cannot attach.
 NOT_FORWARDED_CSHARP = {
-    "Widget", "AddChild", "When", "ContextMenu",
+    "Widget", "AddChild", "When", "ContextMenu", "ContextLabel",
     "BindTextElement", "BindTextField", "BindCheckedField", "BindValueField",
     "BindSourceField", "BindDateField", "BindTimeField",
     "BindColorField",
@@ -2082,7 +2083,7 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 26
+CSHARP_TWIN_FLOOR = 27
 
 
 JAVA_TWIN_FLOOR = 21

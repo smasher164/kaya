@@ -2253,6 +2253,10 @@ class KayaMenuItem(val id: Long, val kind: Int) {
 class KayaContextAttachment {
     val roots = androidx.compose.runtime.mutableStateListOf<KayaMenuItem>()
     var noun: ByteArray = ByteArray(0)
+    /** The stamped copy's own labels by item id (docs/media-player-plan.md M26). */
+    val labels = androidx.compose.runtime.mutableStateMapOf<Long, String>()
+
+    fun label(item: KayaMenuItem): String = labels[item.id] ?: item.label
 }
 
 /**
@@ -3365,7 +3369,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xcfb6ed50af9e65deuL
+    private const val SPEC_HASH: ULong = 0x7b5c931f2513c73buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3506,6 +3510,7 @@ object KayaCompose {
     private const val APPLY_CONTEXT_ATTACH = 21
     private const val APPLY_CONTEXT_ATTACH_NODE = 22
     private const val APPLY_SET_MENU_PROP = 23
+    private const val APPLY_CONTEXT_LABEL_NODE = 75
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -5509,6 +5514,12 @@ object KayaCompose {
                         .getOrPut(widget) { KayaContextAttachment() }
                     attachment.roots.add(KayaSceneModel.menuItems[item]!!)
                     attachment.noun = noun
+                }
+                APPLY_CONTEXT_LABEL_NODE -> {
+                    // u64 widget (the stamped copy), u64 item, then the label value.
+                    val widget = b.long
+                    val item = b.long
+                    KayaSceneModel.contextMenus[widget]!!.labels[item] = readString(b)
                 }
                 APPLY_SET_MENU_PROP -> {
                     // u64 item, u32 mprop, u32 pad, value (resolved).
@@ -15573,7 +15584,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     return@onUi "<the menu has no host in the composition>"
                                 }
                                 kayaContextSpec(attachment.roots.map {
-                                    if (it.kind == KayaCompose.MENU_KIND_SEPARATOR) null else it.label
+                                    if (it.kind == KayaCompose.MENU_KIND_SEPARATOR) null else attachment.label(it)
                                 })
                             }
                             var got = items()
@@ -15611,7 +15622,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                         (item.swipe == KayaCompose.SWIPE_LEADING ||
                                             item.swipe == KayaCompose.SWIPE_TRAILING)
                                     ) {
-                                        items.add(item.swipe to item.label)
+                                        items.add(item.swipe to attachment.label(item))
                                     }
                                     item.children.forEach { walk(it) }
                                 }
@@ -15656,7 +15667,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     item.children.forEach { walk(it) }
                                 }
                                 attachment.roots.forEach { walk(it) }
-                                val item = all.firstOrNull { it.label == head.first }
+                                val item = all.firstOrNull { attachment.label(it) == head.first }
                                     ?: return@onUi Triple("no such context item ${head.first} on $spec", null, null)
                                 if (item.swipe == 0L) {
                                     return@onUi Triple(
@@ -18521,8 +18532,8 @@ private fun KayaSwipeRow(
         modifier = Modifier.onGloballyPositioned {
             kayaSwipeBounds[node.id] = it.boundsInWindow()
             kayaSwipeLowered[node.id] = listOfNotNull(
-                leading?.let { item -> KayaCompose.SWIPE_LEADING_FULL to item.label },
-                trailing?.let { item -> KayaCompose.SWIPE_TRAILING_FULL to item.label },
+                leading?.let { item -> KayaCompose.SWIPE_LEADING_FULL to attachment.label(item) },
+                trailing?.let { item -> KayaCompose.SWIPE_TRAILING_FULL to attachment.label(item) },
             )
         },
         enableDismissFromStartToEnd = leading != null,
@@ -18544,7 +18555,7 @@ private fun KayaSwipeRow(
                         Icon(it, contentDescription = null,
                             tint = MaterialTheme.colorScheme.onSecondaryContainer)
                     }
-                    Text(" ${item.label}", color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    Text(" ${attachment.label(item)}", color = MaterialTheme.colorScheme.onSecondaryContainer)
                 }
             }
         },
@@ -18641,7 +18652,7 @@ private fun KayaContextDropdown(node: KayaNode, attachment: KayaContextAttachmen
                     KayaCompose.MENU_KIND_MENU,
                     KayaCompose.MENU_KIND_RADIO_GROUP ->
                         DropdownMenuItem(
-                            text = { Text(root.label) },
+                            text = { Text(attachment.label(root)) },
                             modifier = Modifier.testTag(kayaMenuTag(root.id)),
                             leadingIcon = kayaSymbolSlot(root.symbol),
                             trailingIcon = { Text("▸") },
@@ -18651,7 +18662,7 @@ private fun KayaContextDropdown(node: KayaNode, attachment: KayaContextAttachmen
                     else ->
                         KayaMenuRows(
                             listOf(root), attachment.noun,
-                            onDrill = { drilled = it }, onClose = close)
+                            onDrill = { drilled = it }, onClose = close, labels = attachment.labels)
                 }
             }
         } else {
@@ -18660,7 +18671,7 @@ private fun KayaContextDropdown(node: KayaNode, attachment: KayaContextAttachmen
             // occur: the root's closed grammar caps context depth
             // at root items + one grouping-node level.
             DropdownMenuItem(
-                text = { Text("‹ ${sub.label}") },
+                text = { Text("‹ ${attachment.label(sub)}") },
                 onClick = { drilled = null },
             )
             HorizontalDivider()
@@ -18670,7 +18681,7 @@ private fun KayaContextDropdown(node: KayaNode, attachment: KayaContextAttachmen
             } else {
                 KayaMenuRows(
                     sub.children.toList(), attachment.noun,
-                    onDrill = { drilled = it }, onClose = close)
+                    onDrill = { drilled = it }, onClose = close, labels = attachment.labels)
             }
         }
     }
@@ -22349,8 +22360,10 @@ fun KayaMenuRows(
     onDrill: (KayaMenuItem) -> Unit,
     onClose: () -> Unit,
     promoted: Set<Long> = emptySet(),
+    labels: Map<Long, String> = emptyMap(),
 ) {
     items.forEach { item ->
+        val label = labels[item.id] ?: item.label
         // The SEMANTIC ICON rides the LEADING slot on every row kind
         // that has one free — which is all of them here; a toggle's
         // checkmark and a submenu's ▸ are trailing marks, and neither
@@ -22363,7 +22376,7 @@ fun KayaMenuRows(
             KayaCompose.MENU_KIND_SEPARATOR -> HorizontalDivider()
             KayaCompose.MENU_KIND_MENU ->
                 DropdownMenuItem(
-                    text = { Text(item.label) },
+                    text = { Text(label) },
                     modifier = tag,
                     leadingIcon = symbol,
                     trailingIcon = { Text("▸") },
@@ -22373,7 +22386,7 @@ fun KayaMenuRows(
             KayaCompose.MENU_KIND_RADIO_GROUP -> KayaRadioRows(item, noun, onClose)
             KayaCompose.MENU_KIND_TOGGLE ->
                 DropdownMenuItem(
-                    text = { Text(item.label) },
+                    text = { Text(label) },
                     modifier = tag,
                     leadingIcon = symbol,
                     // The platform's checkmark idiom: a trailing mark
@@ -22389,7 +22402,7 @@ fun KayaMenuRows(
                 // A promoted primary renders in the bar, not here.
                 if (!promoted.contains(item.id)) {
                     DropdownMenuItem(
-                        text = { Text(item.label) },
+                        text = { Text(label) },
                         modifier = tag,
                         leadingIcon = symbol,
                         enabled = kayaMenuEffectivelyEnabled(item),
@@ -22401,7 +22414,7 @@ fun KayaMenuRows(
                 }
             else ->
                 DropdownMenuItem(
-                    text = { Text(item.label) },
+                    text = { Text(label) },
                     modifier = tag,
                     leadingIcon = symbol,
                     enabled = kayaMenuEffectivelyEnabled(item),
@@ -22691,7 +22704,7 @@ fun kayaResolveMenuPath(path: String): Pair<KayaMenuItem, ByteArray>? {
     val openWidget = KayaSceneModel.openContextWidget
     if (openWidget != null) {
         val attachment = KayaSceneModel.contextMenus[openWidget] ?: return null
-        return kayaMenuDescend(attachment.roots.toList(), segments)
+        return kayaMenuDescend(attachment.roots.toList(), segments, attachment.labels)
             ?.let { Pair(it, attachment.noun) }
     }
     return kayaMenuDescend(KayaSceneModel.menubar.toList(), segments)
@@ -22704,12 +22717,13 @@ fun kayaResolveMenuPath(path: String): Pair<KayaMenuItem, ByteArray>? {
 private fun kayaMenuDescend(
     roots: List<KayaMenuItem>,
     segments: List<String>,
+    labels: Map<Long, String> = emptyMap(),
 ): KayaMenuItem? {
     var candidates = roots
     var current: KayaMenuItem? = null
     for (segment in segments) {
         current = candidates.firstOrNull {
-            it.kind != KayaCompose.MENU_KIND_SEPARATOR && it.label == segment
+            it.kind != KayaCompose.MENU_KIND_SEPARATOR && (labels[it.id] ?: it.label) == segment
         } ?: return null
         candidates = current.children
     }
