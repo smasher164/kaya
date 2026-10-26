@@ -28795,7 +28795,10 @@ impl crate::harness::Stage for WinUiStage {
         let grab = move || {
             Self::on_ui_read(move |core| {
                 let Some(back) = shown_entry_back(core, window)? else { return Ok(Err("the back button went".to_owned())) };
-                let at = element_placement(core, &back.cast::<FrameworkElement>()?)?;
+                let at = match element_placement(core, &back.cast::<FrameworkElement>()?) {
+                    Ok(at) => at,
+                    Err(e) => return Ok(Err(format!("element_placement: {}", e.message()))),
+                };
                 let pad = ((3.0 * at.scale).round() as i32).max(2);
                 let width = at.w;
                 let wide = Placement { w: at.w + 3 * pad, ..at };
@@ -28808,8 +28811,8 @@ impl crate::harness::Stage for WinUiStage {
                     (px(width + 2 * pad), px(pad))
                 }))
             })
-            .map_err(|e| e.message().to_string())
-            .and_then(|read| read)
+            .map_err(|e| format!("the grab's UI read: {}", e.message()))
+            .and_then(|read| read.map_err(|e| format!("grab: {e}")))
         };
         let hex = |c: &[f64; 3]| format!("{:02X}{:02X}{:02X}", c[0] as u8, c[1] as u8, c[2] as u8);
         let step = |a: &[f64; 3], b: &[f64; 3]| (crate::harness::lightness(*a) - crate::harness::lightness(*b)).abs();
@@ -28817,7 +28820,7 @@ impl crate::harness::Stage for WinUiStage {
         let read = |name: &'static str, holds: &dyn Fn(f64) -> bool| -> Result<(Option<bool>, usize, [f64; 3], [f64; 3]), String> {
             let mut last = None;
             for tries in 1..=20 {
-                let went = state(name).map_err(|e| e.message().to_string())?;
+                let went = state(name).map_err(|e| format!("GoToState({name}) on try {tries}: {}", e.message()))?;
                 if went.is_none() {
                     return Err("the back button went".to_owned());
                 }
