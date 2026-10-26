@@ -29,3 +29,11 @@ expect_help label#last "The second account, opened in May"
 # (docs/tooltip-plan.md T7).
 expect_help label@cut "Every statement since March"
 expect_help label@whole ""
+# The bubble drawn at the target's centre (docs/tooltip-plan.md §6): the
+# innermost help wins, and a widget with none of its own, or one that opted
+# out, shows its container's.
+expect_tooltip label@cut "Every statement since March"
+expect_tooltip label#2 "The first account, opened in March"
+expect_tooltip button#0 "Saves the draft to disk"
+expect_tooltip label@whole "The settings for this account"
+expect_tooltip button#2 "The settings for this account"

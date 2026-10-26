@@ -1029,6 +1029,8 @@ pub enum Step {
     ExpectAxHint(Target, String),
     /// The control's HELP TEXT as the platform offers it (docs/tooltip-plan.md T5).
     ExpectHelp(Target, String),
+    /// The tooltip the platform draws at the target's centre (docs/tooltip-plan.md §6).
+    ExpectTooltip(Target, String),
     ExpectMenus(usize),
     /// How the window catalog is CURRENTLY presented, spelled
     /// `<size class>/<presentation>`. THE PAIR is the assertion on purpose:
@@ -1220,6 +1222,7 @@ impl Step {
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
+            | Step::ExpectTooltip(t, _)
             | Step::ExpectPlaceholder(t, _)
             | Step::ExpectMasked(t, _)
             | Step::ExpectUnmasked(t, _)
@@ -1549,6 +1552,7 @@ impl Step {
             Step::ExpectAx { .. } => true,
             Step::ExpectAxHint { .. } => true,
             Step::ExpectHelp { .. } => true,
+            Step::ExpectTooltip { .. } => true,
             Step::ExpectMenus { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
             Step::ExpectToolbar => true,
@@ -2674,6 +2678,9 @@ pub trait Stage: Send + 'static {
     /// desktop shows, read off the control or the accessibility tree, never
     /// kaya's model (docs/tooltip-plan.md T5).
     fn help_text(&self, target: Target) -> String;
+    /// The tooltip a resting pointer raises at the target's centre: the
+    /// innermost help on the path, as the toolkit resolves it.
+    fn tooltip_at(&self, target: Target) -> String;
     /// The window catalog's live presentation,
     /// `<size class>/<presentation>` — see Step::ExpectMenuPresentation.
     /// Both halves must come FROM THE PLATFORM: the failure being gated is
@@ -4464,6 +4471,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_help wants a target and a help string: {line:?}")
                 })?;
                 Step::ExpectHelp(parse_target(target)?, parse_string(text)?)
+            }
+            "expect_tooltip" => {
+                let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
+                    format!("expect_tooltip wants a target and a tooltip string: {line:?}")
+                })?;
+                Step::ExpectTooltip(parse_target(target)?, parse_string(text)?)
             }
             "expect_placeholder" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7940,6 +7953,14 @@ fn run_with_log(
                     Err(format!("help {got:?}, wanted {want:?}"))
                 }
             })),
+            Step::ExpectTooltip(target, want) => Some(poll(|| {
+                let got = stage.tooltip_at(*target);
+                if got == *want {
+                    Ok(format!("tooltip {want:?}"))
+                } else {
+                    Err(format!("tooltip {got:?}, wanted {want:?}"))
+                }
+            })),
             Step::ExpectAxHint(target, want) => Some(poll(|| {
                 let got = stage.ax_hint(*target);
                 if got == *want {
@@ -11053,6 +11074,9 @@ mod tests {
         fn help_text(&self, _: Target) -> String {
             "Saves the draft".to_string()
         }
+        fn tooltip_at(&self, _: Target) -> String {
+            String::new()
+        }
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
             String::new()
@@ -12270,6 +12294,9 @@ mod tests {
         fn help_text(&self, _: Target) -> String {
             String::new()
         }
+        fn tooltip_at(&self, _: Target) -> String {
+            String::new()
+        }
         fn clear_search(&self, _: Target) {}
         fn placeholder_text(&self, _: Target) -> String {
             String::new()
@@ -12824,6 +12851,9 @@ mod tests {
             String::new()
         }
         fn help_text(&self, _: Target) -> String {
+            String::new()
+        }
+        fn tooltip_at(&self, _: Target) -> String {
             String::new()
         }
         fn clear_search(&self, _: Target) {}

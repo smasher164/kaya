@@ -162,11 +162,8 @@ label in their tails. tools/scenes/tooltips.steps reads `label@cut` (80 wide,
 one line) as its text and `label@whole` (the same text, one line, room to
 spare) as `""` on the desktops.
 
-On the Mac a helped CONTAINER's bubble covers its children's: over the
-tooltips scene's cut label and its stamped labels (each with help of its
-own) AppKit drew the column's "The settings for this account", while AXHelp
-on the label read the label's own (§6, measured 2026-10-26; docs/deferred.md,
-a helped container's bubble covers its children on the Mac).
+On the Mac a helped CONTAINER's bubble covered its children's until
+2026-10-26 (§6, the fix and `expect_tooltip`).
 
 ## §2 — The wire
 
@@ -250,6 +247,25 @@ android rosters, the matrix.
   the cut label's bubble read its own text. AXHelp read each label's own help
   throughout, so expect_help cannot see it. GTK and WinUI drew the cut
   label's own over the same column (T7's captures).
+  FIXED 2026-10-26. SwiftUI's NSHostingView answers tooltips through its
+  own `_dynamicToolTipManager` (one tracking area over the whole hosting
+  view), and its `dynamicToolTipStringAtPoint:trackingRect:` returns the
+  outermost `.help` on the hit view's path: a plain probe (a VStack with
+  `.help` over a Text and a Button with their own) answered the VStack's
+  over all three. A container's help now goes on a hit-testable clear
+  background behind its children, and a node with no help of its own
+  (`help("")` included) carries its nearest helped container's through the
+  environment, with an empty accessibility hint so its AXHelp stays its own
+  (the probe: the plain Text answered the outer bubble and AXHelp ""). The
+  Mac now draws what GTK and WinUI draw: the innermost help under the
+  pointer, the container's elsewhere. An activatable container (a card,
+  one Button) keeps `.help` on itself. `expect_tooltip <target> "text"`
+  reads the bubble at the target's centre: on the Mac the hit view's path
+  asked as AppKit asks it (a view's own toolTip, else a hosting view's
+  tooltip manager), on GTK the picked widget and its ancestors until one's
+  tooltip answers, on WinUI the topmost element at the point with a
+  tooltip; the phones refuse it (§0). tooltips.steps reads five of them on
+  the desktops.
 - WinUI's tooltip drew above the pointer on the VM (2026-09-05) only when
   the pointer MOVED through the input queue (`mouse_event` relative moves
   onto the Save button): a bare `SetCursorPos` teleport gave the Slider no

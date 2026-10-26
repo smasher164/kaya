@@ -16497,7 +16497,7 @@ KEY: drag_sidebar, expect_sidebar_width, windowmem, kaya.window.<id>.sidebar, Ad
   building the drag on the chosen toolkits, saving through the same key, and
   taking windowmem.steps' OFF_SCENES entries out on those lanes.
 
-## OPEN — a helped container's bubble covers its children on the Mac (measured 2026-10-26, docs/tooltip-plan.md §6 and T7)
+## ~~OPEN — a helped container's bubble covers its children on the Mac (measured 2026-10-26, docs/tooltip-plan.md §6 and T7)~~ FIXED 2026-10-26: a container's help sits on a clear background behind its children and a node with none of its own carries its container's, AXHelp left its own; `expect_tooltip` reads the bubble at a target's centre (SwiftUI's tooltip manager on the Mac, the picked widget's ancestors on GTK, the topmost tooltip at the point on WinUI) and tooltips.steps reads five on the desktops (docs/tooltip-plan.md §6)
 
 KEY: outer .help wins, kayaA11yProps, helped container, tooltips scene column help, expect_help AXHelp
 - SwiftUI on macOS draws the OUTERMOST `.help` under the pointer: the tooltips

@@ -14688,6 +14688,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         failures.add("${parts[0]}: an Android phone has no sidebar divider to drag (docs/tasks-s4-plan.md P8)")
                     "pointer_down" -> failures.add("pointer_down ${parts[1]}: an Android phone has no pointer to press with")
                     "pointer_up" -> failures.add("pointer_up: an Android phone has no pointer to release")
+                    "expect_tooltip" -> {
+                        val want = quoted(parts.drop(2))
+                        val got = "<an Android phone draws no tooltip bubble>"
+                        if (got == want) observed.add("tooltip \"$want\"") else failures.add("tooltip \"$got\", wanted \"$want\"")
+                    }
                     "expect_back_help" -> {
                         val want = quoted(parts.drop(if (parts.getOrNull(1)?.startsWith("window#") == true) 2 else 1))
                         val got = "<an Android phone shows no help on its back button>"

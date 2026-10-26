@@ -7602,8 +7602,26 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // Apple's own mapping makes it the accessibility hint too. It goes on
     // BEFORE the hint so an authored hint wins the hint slot (T3).
     let help = kayaShownHelp(node)
-    let helped =
-        help.isEmpty ? labelled : AnyView(labelled.help(help))
+    #if os(macOS)
+        // docs/tooltip-plan.md §6: the outermost `.help` on the hit view's path
+        // wins, so a container's sits behind its children.
+        let helped: AnyView = {
+            if help.isEmpty {
+                return node.children.isEmpty || node.activatable
+                    ? AnyView(labelled.modifier(KayaInheritedHelp())) : labelled
+            }
+            if isContainer && !node.activatable {
+                return AnyView(
+                    labelled
+                        .background(Color.clear.contentShape(Rectangle()).help(help))
+                        .environment(\.kayaInheritedHelp, help))
+            }
+            return AnyView(labelled.help(help))
+        }()
+    #else
+        let helped =
+            help.isEmpty ? labelled : AnyView(labelled.help(help))
+    #endif
     // The HINT: what activating this control does. Apple speaks it after the
     // label and forbids naming the gesture, which is why the authored text is
     // a verb phrase.
@@ -8190,6 +8208,48 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
         }
     }
 
+    /// What SwiftUI's own tooltip manager answers at the element's centre: the
+    /// bubble a resting pointer raises (docs/tooltip-plan.md §6).
+    private func kayaTooltipRead(_ identifier: String) -> String {
+        _ = kayaAwaitWindow(0)
+        return DispatchQueue.main.sync { () -> String in
+            let app = AXUIElementCreateApplication(getpid())
+            AXUIElementSetMessagingTimeout(app, 2.0)
+            guard let hit = kayaAxFind(app, identifier), let frame = kayaAxFrame(hit) else {
+                return "<not in the accessibility tree>"
+            }
+            let top = NSScreen.screens.first?.frame.maxY ?? 0
+            let screen = CGPoint(x: frame.midX, y: top - frame.midY)
+            guard let window = NSApp.windows.first(where: { $0.isVisible && $0.frame.contains(screen) }),
+                let content = window.contentView
+            else { return "<no window under the element's centre \(screen)>" }
+            let inWindow = window.convertPoint(fromScreen: screen)
+            let frameView = content.superview ?? content
+            guard let hitView = frameView.hitTest(frameView.superview?.convert(inWindow, from: nil) ?? inWindow)
+            else { return "<nothing in the window under the element's centre>" }
+            // AppKit's resolution: the deepest view under the pointer whose
+            // tooltip answers, an AppKit view's own toolTip or a SwiftUI
+            // hosting view's tooltip manager.
+            let ask = NSSelectorFromString("_dynamicToolTipManager")
+            let at = NSSelectorFromString("dynamicToolTipStringAtPoint:trackingRect:")
+            typealias Answer = @convention(c) (AnyObject, Selector, NSPoint, UnsafeMutablePointer<NSRect>) -> NSString?
+            var view: NSView? = hitView
+            while let here = view {
+                if let tip = here.toolTip, !tip.isEmpty { return tip }
+                if String(describing: type(of: here)).contains("HostingView"),
+                    let manager = here.perform(ask)?.takeUnretainedValue() as? NSObject,
+                    manager.responds(to: at), let imp = class_getMethodImplementation(object_getClass(manager), at)
+                {
+                    var rect = NSRect.zero
+                    let said = unsafeBitCast(imp, to: Answer.self)(manager, at, here.convert(inWindow, from: nil), &rect)
+                    if let said, said.length > 0 { return said as String }
+                }
+                view = here.superview
+            }
+            return ""
+        }
+    }
+
     /// Whether the window's CHROME really shows the unsaved-work mark: `AXEdited`
     /// on the CLOSE BUTTON, measured (the AXWindow carries no edited state). nil
     /// = unreadable, never `false`; the thread rule is docs/traps.md's.
@@ -8545,6 +8605,10 @@ func kayaExpanderDescription(_ node: KayaNode) -> String {
             }
             return (nil, "the content type could not be read: the field is not in the accessibility tree")
         }
+    }
+
+    private func kayaTooltipRead(_ identifier: String) -> String {
+        "<an iPhone or iPad draws no tooltip bubble>"
     }
 
     /// The HINT as UIKit publishes it — `.accessibilityHint()` lands
@@ -14746,6 +14810,30 @@ private func kayaRunScript(_ script: String) {
                     observed.append("help \"\(wantHelp)\"")
                 } else {
                     failures.append("help \"\(gotHelp)\", wanted \"\(wantHelp)\"")
+                }
+            case "expect_tooltip":
+                // docs/tooltip-plan.md §6: the bubble drawn at the target's
+                // centre, which AXHelp does not say.
+                let wantTip = kayaQuoted(Array(parts[2...]))
+                let tipIdentifier = DispatchQueue.main.sync { () -> String? in
+                    kayaAnyTarget(parts[1])?.a11yId
+                }
+                var gotTip = "<no such target>"
+                let tipDeadline = Date().addingTimeInterval(5)
+                repeat {
+                    switch tipIdentifier {
+                    case .none: gotTip = "<no such target>"
+                    case .some(let ident) where ident.isEmpty:
+                        gotTip = "<no a11y_id authored on this widget>"
+                    case .some(let ident): gotTip = kayaTooltipRead(ident)
+                    }
+                    if gotTip == wantTip { break }
+                    Thread.sleep(forTimeInterval: 0.1)
+                } while Date() < tipDeadline
+                if gotTip == wantTip {
+                    observed.append("tooltip \"\(wantTip)\"")
+                } else {
+                    failures.append("tooltip \"\(gotTip)\", wanted \"\(wantTip)\"")
                 }
             case "expect_ax_hint":
                 // The hint's own verb (harness.rs is the norm): what
@@ -20998,6 +21086,32 @@ extension EnvironmentValues {
 /// draws the field's chrome, so the field inside draws none of its own.
 private struct KayaInComposerKey: EnvironmentKey {
     static let defaultValue = false
+}
+
+/// The nearest helped container's help (docs/tooltip-plan.md §6).
+private struct KayaInheritedHelpKey: EnvironmentKey {
+    static let defaultValue = ""
+}
+
+extension EnvironmentValues {
+    var kayaInheritedHelp: String {
+        get { self[KayaInheritedHelpKey.self] }
+        set { self[KayaInheritedHelpKey.self] = newValue }
+    }
+}
+
+/// A node with no help of its own shows its container's bubble, and its
+/// AXHelp stays its own (docs/tooltip-plan.md §6).
+private struct KayaInheritedHelp: ViewModifier {
+    @Environment(\.kayaInheritedHelp) private var inherited
+
+    func body(content: Content) -> some View {
+        if inherited.isEmpty {
+            content
+        } else {
+            content.help(inherited).accessibilityHint("")
+        }
+    }
 }
 
 /// The composer's surface (docs/composer-plan.md §4): the field chrome

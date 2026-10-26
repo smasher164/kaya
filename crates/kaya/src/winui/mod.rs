@@ -24656,6 +24656,37 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn tooltip_at(&self, target: crate::harness::Target) -> String {
+        // The topmost element at the target's centre with a tooltip of its own.
+        Self::on_ui_read(move |core| {
+            let Some(element) = target_element(core, target)? else {
+                return Ok("<no such target>".to_owned());
+            };
+            let frame: FrameworkElement = element.cast()?;
+            let root = core.window.Content()?;
+            let centre = element.TransformToVisual(&root)?.TransformPoint(Point {
+                X: (frame.ActualWidth()? / 2.0) as f32,
+                Y: (frame.ActualHeight()? / 2.0) as f32,
+            })?;
+            for hit in hits_at(centre, &root)? {
+                let tip = match bindings::Microsoft::UI::Xaml::Controls::ToolTipService::GetToolTip(&hit) {
+                    Ok(tip) => tip,
+                    Err(e) if e.code().is_ok() => continue,
+                    Err(e) => return Err(e),
+                };
+                let text: windows_core::HSTRING = tip
+                    .cast::<bindings::Windows::Foundation::IPropertyValue>()
+                    .and_then(|v| v.GetString())
+                    .unwrap_or_default();
+                if !text.is_empty() {
+                    return Ok(text.to_string());
+                }
+            }
+            Ok(String::new())
+        })
+        .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
     fn ax_hint(&self, target: crate::harness::Target) -> String {
         // UIA's HelpText is the hint slot: "a brief description of the
         // control's purpose", read off the same peer `ax` reads.

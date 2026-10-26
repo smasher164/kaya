@@ -22144,6 +22144,44 @@ impl crate::harness::Stage for GtkStage {
         }
     }
 
+    fn tooltip_at(&self, target: crate::harness::Target) -> String {
+        // GTK's own resolution: the picked widget, then its ancestors, the
+        // first whose tooltip answers (gtk_tooltip_run_requery).
+        #[cfg(feature = "harness")]
+        {
+            return Self::on_main(move |core| {
+                use gtk4::prelude::WidgetExt;
+                let Some(widget) = target_widget(core, target) else { return "<no such target>".to_owned() };
+                let Some(b) = widget.compute_bounds(&core.window) else {
+                    return "<the target has no bounds in the window>".to_owned();
+                };
+                let (x, y) = (f64::from(b.x() + b.width() / 2.0), f64::from(b.y() + b.height() / 2.0));
+                let ignored = !core.window.can_target();
+                core.window.set_can_target(true);
+                let hit = core.window.pick(x, y, gtk4::PickFlags::DEFAULT);
+                core.window.set_can_target(!ignored);
+                let mut at = hit;
+                while let Some(w) = at {
+                    if w.has_tooltip() {
+                        if let Some(tip) = w.downcast_ref::<gtk4::Label>().and_then(truncated_tip) {
+                            return tip;
+                        }
+                        if let Some(text) = w.tooltip_text() {
+                            return text.to_string();
+                        }
+                    }
+                    at = w.parent();
+                }
+                String::new()
+            });
+        }
+        #[cfg(not(feature = "harness"))]
+        {
+            let _ = target;
+            String::new()
+        }
+    }
+
     fn ax_hint(&self, target: crate::harness::Target) -> String {
         // The HINT rides AT-SPI's DESCRIPTION — GTK's
         // `Property::Description`, the slot for "what does acting on this
