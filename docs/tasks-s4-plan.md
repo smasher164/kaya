@@ -130,7 +130,8 @@ back through the platform's own record.
   `paneExpansionDragHandle`, so its panes have no drag handle; adding one
   belongs to the same ruling. The verbs refuse there with the
   reason, and windowmem.steps is declared off on those lanes.
-  THE RULING OPEN FOR THE MAINTAINER: whether GTK and Windows should GROW a
+  RULED (a) (the maintainer, 2026-10-26: "yes, leave them fixed"). The
+  question was whether GTK and Windows should GROW a
   draggable sidebar, which neither toolkit's own split view offers. The
   options: (a) leave both fixed, the platforms' own idiom, and the memory
   is the Mac's alone; (b) GTK: a GtkPaned around the two panes in the
