@@ -8854,6 +8854,18 @@ const COMPOSER_CLASS: &str = "kaya-composer";
 const MAX_WIDTH_KEY: &str = "kaya-max-width";
 const MAX_HEIGHT_KEY: &str = "kaya-max-height";
 const BLEED_KEY: &str = "kaya-bleed";
+const HELP_SET_KEY: &str = "kaya-help-set";
+
+/// docs/tooltip-plan.md T7: a label Pango cut short shows its whole text,
+/// unless the app set a help of its own (an empty one included).
+fn truncated_tip(label: &gtk4::Label) -> Option<String> {
+    use gtk4::prelude::{ObjectExt, WidgetExt};
+    // SAFETY: the key is private to this module and only ever holds a bool,
+    // written in the help arm.
+    let helped = unsafe { label.data::<bool>(HELP_SET_KEY).is_some() };
+    (!helped && label.tooltip_text().is_none() && label.layout().is_ellipsized())
+        .then(|| label.text().to_string())
+}
 const BLEED_CLASSES: [&str; 4] = ["kaya-bleed-top", "kaya-bleed-bottom", "kaya-bleed-left", "kaya-bleed-right"];
 
 /// The `.kaya-root` padding and the margins that take a bled widget back out
@@ -17191,6 +17203,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     label.set_wrap(true);
                     label.set_lines(lines as i32);
                     label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                    label.set_has_tooltip(true);
+                    label.connect_query_tooltip(|label, _, _, _, tooltip| match truncated_tip(label) {
+                        Some(text) => {
+                            tooltip.set_text(Some(&text));
+                            true
+                        }
+                        None => false,
+                    });
                 }
                 (NativeWidget::Label(label), Prop::Tint, Value::I64(tint)) => {
                     set_label_tint(label.upcast_ref(), tint);
@@ -17432,7 +17452,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // on the control, which GTK also publishes as the AT-SPI
                 // description. Universal, like the a11y props above.
                 (w, Prop::Help, Value::Str(text)) => {
-                    use gtk4::prelude::WidgetExt;
+                    use gtk4::prelude::{ObjectExt, WidgetExt};
+                    if let NativeWidget::Label(label) = w {
+                        // SAFETY: the key is private to this module and only
+                        // ever holds a bool, read by truncated_tip.
+                        unsafe { label.set_data(HELP_SET_KEY, true) }
+                    }
                     w.control()
                         .set_tooltip_text((!text.is_empty()).then_some(text.as_str()));
                 }
@@ -22107,6 +22132,7 @@ impl crate::harness::Stage for GtkStage {
                     Some(widget) => widget
                         .tooltip_text()
                         .map(|s| s.to_string())
+                        .or_else(|| widget.downcast_ref::<gtk4::Label>().and_then(truncated_tip))
                         .unwrap_or_default(),
                 }
             });

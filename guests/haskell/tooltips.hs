@@ -17,6 +17,14 @@ data Account = Account {name :: Text, note :: Text}
   deriving stock (Generic)
   deriving anyclass (KayaRecord)
 
+statements :: Text
+statements = "Every statement since March"
+
+capped :: [Attr 'LeafW] -> Build Widget
+capped attrs = do
+  w <- labelText statements attrs
+  setMaxLines w 1
+  pure w
 
 main :: IO ()
 main = kayaMain $ \app -> do
@@ -50,6 +58,8 @@ main = kayaMain $ \app -> do
           entryOn (const (return ())) [HelpBound nameHelp, A11yId "fullname"], -- entry#0
           sliderOn 0.0 1.0 0.5 (const (return ())) -- slider#0
             [Help "How loud the preview plays", A11yId "volume"],
+          capped [MaxWidth 80, A11yId "cut"], -- label#0
+          capped [A11yId "whole"], -- label#1
           pure rows
         ]
     mount root

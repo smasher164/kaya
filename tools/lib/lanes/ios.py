@@ -258,6 +258,11 @@ SAFEAREA_EXTRA = ('expect_insets "bar/bar"; click button@full; expect label@capt
                   'expect_fullscreen on; expect_insets "cutout/bar"; expect_safe image@picture bleeds; '
                   'expect_safe canvas@ground bleeds; expect_safe label@caption')
 
+# A PHONE SHOWS NO TOOLTIP (docs/tooltip-plan.md T7): a cut label reads no
+# help, as the whole one does.
+TOOLTIPS_CUT = {"cut": "expect_help label@cut", "keep": "expect_help=label#last",
+                "extra": 'expect_help label@cut ""; expect_help label@whole ""'}
+
 # Per-leg modifiers, keyed (suite, scene). `cut` names the verb this host
 # cannot express (everything from it on is dropped, printed); `drop` names
 # ONE step by verb and target, before any cut; `keep` names the assertions neither may
@@ -266,6 +271,9 @@ MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
     # ends at its first pointer step.
     ("rust-swiftui", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
+    ("rust-swiftui", "tooltips"): TOOLTIPS_CUT,
+    ("swift", "tooltips"): TOOLTIPS_CUT,
+    ("go", "tooltips"): TOOLTIPS_CUT,
     ("swift", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
     ("go", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
     # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,

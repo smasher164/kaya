@@ -11,6 +11,8 @@ public final class Tooltips {
     @KayaGen(key = "String")
     record Account(String name, String note) {}
 
+    private static final String STATEMENTS = "Every statement since March";
+
     public static void app() {
         KayaApp app = new KayaApp();
 
@@ -32,6 +34,8 @@ public final class Tooltips {
                 tx.slider(0.0, 1.0, 0.5, null)
                         .help("How loud the preview plays")
                         .a11yId("volume"); // slider#0
+                tx.label(STATEMENTS).maxLines(1).maxWidth(80).a11yId("cut"); // label#0
+                tx.label(STATEMENTS).maxLines(1).a11yId("whole"); // label#1
                 for (var row : AccountKaya.rows(tx, accounts)) {
                     KayaApp.Node label = row.label(row.name);
                     row.setHelp(label, row.note);

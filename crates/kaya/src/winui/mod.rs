@@ -1403,7 +1403,10 @@ struct Tip {
 }
 
 fn record_tip(core: &mut CoreState, id: WidgetId, prop: Prop, s: &str) {
-    if !matches!(core.widgets.get(&id), Some(NativeWidget::Button { .. } | NativeWidget::Checkbox { .. })) {
+    if !matches!(
+        core.widgets.get(&id),
+        Some(NativeWidget::Button { .. } | NativeWidget::Checkbox { .. } | NativeWidget::Label { .. })
+    ) {
         return;
     }
     let tip = core.tips.entry(id.0).or_default();
@@ -1416,20 +1419,23 @@ fn record_tip(core: &mut CoreState, id: WidgetId, prop: Prop, s: &str) {
 
 /// docs/tooltip-plan.md T6: a button-like control's tooltip is the app's
 /// help when it set one (an empty one hides it), its accessible name
-/// otherwise.
+/// otherwise; T7: a label's is its text while the block trims it.
 fn default_tip(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
-    let element = match core.widgets.get(&id) {
+    let (element, trimmed) = match core.widgets.get(&id) {
         Some(w @ NativeWidget::Button { .. })
-        | Some(w @ NativeWidget::Checkbox { toggle: Some(_), .. }) => w.identity_element()?,
+        | Some(w @ NativeWidget::Checkbox { toggle: Some(_), .. }) => (w.identity_element()?, None),
+        Some(w @ NativeWidget::Label { block, .. }) => (w.identity_element()?, Some(block.IsTextTrimmed()?)),
         _ => return Ok(()),
     };
     let Some(tip) = core.tips.get(&id.0) else {
         return Ok(());
     };
-    let shown = match &tip.help {
-        Some(help) => help.as_str(),
-        None if tip.label.is_empty() => tip.text.as_str(),
-        None => tip.label.as_str(),
+    let shown = match (&tip.help, trimmed) {
+        (Some(help), _) => help.as_str(),
+        (None, Some(true)) => tip.text.as_str(),
+        (None, Some(false)) => "",
+        (None, None) if tip.label.is_empty() => tip.text.as_str(),
+        (None, None) => tip.label.as_str(),
     };
     if shown.is_empty() {
         bindings::Microsoft::UI::Xaml::Controls::ToolTipService::SetToolTip(
@@ -18307,6 +18313,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (NativeWidget::Label { block, .. }, Prop::MaxLines, Value::F64(lines)) => {
                     block.SetMaxLines(lines as i32)?;
                     block.SetTextTrimming(bindings::Microsoft::UI::Xaml::TextTrimming::CharacterEllipsis)?;
+                    block.IsTextTrimmedChanged(&TypedEventHandler::new(move |_, _| {
+                        with_core_now_or_soon(move |core| default_tip(core, id));
+                        Ok(())
+                    }))?;
                 }
                 // docs/media-player-plan.md M20 (2): a label wraps under its
                 // widest width, a container is bounded by it; Left, since a

@@ -135,6 +135,39 @@ description, UIA HelpText) the default rides along, as the platforms' own
 toolbar buttons do. tools/scenes/music_header.steps reads a default on the
 three desktops, tools/scenes/tooltips.steps the opt-out on all five lanes.
 
+### T7 — A label cut short shows its whole text (RULED 2026-10-25)
+
+The maintainer said yes to: on the three desktops, a label cut short with an
+ellipsis (a `max_lines` label, a card's or a row's title among them) shows
+its whole text as its tooltip on hover, as Finder, Music and Mail do; the
+same label shown whole shows none, so T6's exclusion of plain labels, rows
+and cards stands. The app's help still wins and `help("")` still opts out.
+Each toolkit's own signal decides "cut short":
+
+- SwiftUI (macOS): Text has no expansion tooltip (it is not an NSTextField),
+  so a capped label carries KayaTruncationReader, a ViewThatFits behind it
+  holding the label's text at the label's width with no line limit to the
+  label's height; the branch that fits sets the node's `truncated`, and
+  kayaShownHelp gives a cut label its text. Layout only, no GeometryReader
+  (docs/traps.md, the mac app's interaction latency), and only on labels
+  with `max_lines`, the only ones that can be cut.
+- GTK: no built-in either. A capped label has a `query-tooltip` handler that
+  answers the label's text while its Pango layout `is_ellipsized()`; the help
+  reader asks the same function for a label with no tooltip text.
+- WinUI: `TextBlock.IsTextTrimmedChanged` re-derives the tooltip
+  (default_tip), whose label arm is the text while `IsTextTrimmed`.
+
+The phones show none (no hover; §0): iOS and Android read `""` for the cut
+label in their tails. tools/scenes/tooltips.steps reads `label@cut` (80 wide,
+one line) as its text and `label@whole` (the same text, one line, room to
+spare) as `""` on the desktops.
+
+On the Mac a helped CONTAINER's bubble covers its children's: over the
+tooltips scene's cut label and its stamped labels (each with help of its
+own) AppKit drew the column's "The settings for this account", while AXHelp
+on the label read the label's own (§6, measured 2026-10-26; docs/deferred.md,
+a helped container's bubble covers its children on the Mac).
+
 ## §2 — The wire
 
 One prop, no occurrence: help emits nothing. PROPS 26 `help` Str; the
@@ -208,6 +241,15 @@ android rosters, the matrix.
   thread now, the Mac reader's shape.
 - The authored hint wins over `.help` on the Mac when `.help` is applied
   first (measured on button#1 the same day: T3's ordering holds).
+- ON THE MAC THE OUTER `.help` WINS THE BUBBLE (measured 2026-10-26, the
+  tooltips scene held on an idle host, the guest made frontmost and a real
+  pointer rested on each label): over the stamped label `a` (help "The
+  first account, opened in March") and over the cut label of T7 the bubble
+  read the root column's "The settings for this account" (as it should over
+  the whole label, which has none of its own); with the column's help taken out of a scratch copy of the guest
+  the cut label's bubble read its own text. AXHelp read each label's own help
+  throughout, so expect_help cannot see it. GTK and WinUI drew the cut
+  label's own over the same column (T7's captures).
 - WinUI's tooltip drew above the pointer on the VM (2026-09-05) only when
   the pointer MOVED through the input queue (`mouse_event` relative moves
   onto the Save button): a bare `SetCursorPos` teleport gave the Slider no
@@ -251,7 +293,8 @@ android rosters, the matrix.
   "Saves the draft to disk" with the root column's "The settings for this
   account" beside it). Material's anchor detects the press on the Initial
   pass at every level and neither stands down, where GTK, WinUI and AppKit
-  pick the innermost widget under the pointer. Left as the toolkit's:
+  pick the innermost widget under the pointer (the Mac does NOT, measured
+  2026-10-26 below). Left as the toolkit's:
   arbitration would be kaya's own invention, and a composition local flows
   down, so an ancestor cannot learn that a descendant is helped.
 

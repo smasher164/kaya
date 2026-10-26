@@ -83,6 +83,8 @@ fn main() {
         // `SetTextWrapping`/`SetTextTrimming` take.
         "Microsoft.UI.Xaml.TextWrapping".to_string(),
         "Microsoft.UI.Xaml.TextTrimming".to_string(),
+        // docs/tooltip-plan.md T7: a capped label's tooltip follows its trim.
+        "Microsoft.UI.Xaml.Controls.IsTextTrimmedChangedEventArgs".to_string(),
         // THE LAYOUT DIRECTION (docs/compliance-plan.md §2.2, the WinUI row):
         // the enum `FrameworkElement.SetFlowDirection` takes, a pad until
         // named, and the ground's `FlowDirection` read is the direction verb.

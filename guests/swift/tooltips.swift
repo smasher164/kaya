@@ -9,6 +9,8 @@ struct Account: KayaGen {
     var note: String
 }
 
+let statements = "Every statement since March"
+
 KayaApp.run { app in
     app.build { tx in
         tx.window(title: "tooltips")
@@ -34,6 +36,13 @@ KayaApp.run { app in
             let volume = tx.slider(min: 0.0, max: 1.0, value: 0.5)  // slider#0
             tx.setHelp(volume, "How loud the preview plays")
             tx.setA11yId(volume, "volume")
+            let cut = tx.label(statements)  // label#0
+            tx.setMaxLines(cut, 1)
+            tx.setMaxWidth(cut, 80)
+            tx.setA11yId(cut, "cut")
+            let whole = tx.label(statements)  // label#1
+            tx.setMaxLines(whole, 1)
+            tx.setA11yId(whole, "whole")
             for row in accounts.rows {
                 let label = row.label(row.name)
                 row.t.setHelp(label, row.note)

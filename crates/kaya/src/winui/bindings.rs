@@ -106605,6 +106605,20 @@ pub mod Microsoft {
                     TemplateSettingsProperty: usize,
                 }
                 windows_core::imp::define_interface!(
+                    IIsTextTrimmedChangedEventArgs,
+                    IIsTextTrimmedChangedEventArgs_Vtbl,
+                    0x3c709b2f_16ba_55d2_b6f6_dfc54a1ed021
+                );
+                impl windows_core::RuntimeType for IIsTextTrimmedChangedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_interface::<Self>();
+                }
+                #[repr(C)]
+                #[doc(hidden)]
+                pub struct IIsTextTrimmedChangedEventArgs_Vtbl {
+                    pub base__: windows_core::IInspectable_Vtbl,
+                }
+                windows_core::imp::define_interface!(
                     IItemContainer,
                     IItemContainer_Vtbl,
                     0x6332a67f_7fd9_53c7_afd8_cfa1237cf6d1
@@ -111792,7 +111806,12 @@ pub mod Microsoft {
                             *mut core::ffi::c_void,
                             i64,
                         ) -> windows_core::HRESULT,
-                    IsTextTrimmedChanged: usize,
+                    pub IsTextTrimmedChanged: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut core::ffi::c_void,
+                        *mut i64,
+                    )
+                        -> windows_core::HRESULT,
                     pub RemoveIsTextTrimmedChanged:
                         unsafe extern "system" fn(
                             *mut core::ffi::c_void,
@@ -127748,6 +127767,34 @@ pub mod Microsoft {
                             b"enum(Microsoft.UI.Xaml.Controls.InfoBarSeverity;i4)",
                         );
                 }
+                #[repr(transparent)]
+                #[derive(Clone, Debug, Eq, PartialEq)]
+                pub struct IsTextTrimmedChangedEventArgs(windows_core::IUnknown);
+                windows_core::imp::interface_hierarchy!(
+                    IsTextTrimmedChangedEventArgs,
+                    windows_core::IUnknown,
+                    windows_core::IInspectable
+                );
+                impl IsTextTrimmedChangedEventArgs {}
+                impl windows_core::RuntimeType for IsTextTrimmedChangedEventArgs {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::for_class::<
+                            Self,
+                            IIsTextTrimmedChangedEventArgs,
+                        >();
+                }
+                unsafe impl windows_core::Interface for IsTextTrimmedChangedEventArgs {
+                    type Vtable =
+                        <IIsTextTrimmedChangedEventArgs as windows_core::Interface>::Vtable;
+                    const IID: windows_core::GUID =
+                        <IIsTextTrimmedChangedEventArgs as windows_core::Interface>::IID;
+                }
+                impl windows_core::RuntimeName for IsTextTrimmedChangedEventArgs {
+                    const NAME: &'static str =
+                        "Microsoft.UI.Xaml.Controls.IsTextTrimmedChangedEventArgs";
+                }
+                unsafe impl Send for IsTextTrimmedChangedEventArgs {}
+                unsafe impl Sync for IsTextTrimmedChangedEventArgs {}
                 #[repr(transparent)]
                 #[derive(Clone, Debug, Eq, PartialEq)]
                 pub struct ItemCollection(windows_core::IUnknown);
@@ -239122,6 +239169,26 @@ pub mod Microsoft {
                                 token,
                             )
                             .ok()
+                        }
+                    }
+                    pub fn IsTextTrimmedChanged<P0>(&self, handler: P0) -> windows_core::Result<i64>
+                    where
+                        P0: windows_core::Param<
+                            super::super::super::super::Windows::Foundation::TypedEventHandler<
+                                TextBlock,
+                                IsTextTrimmedChangedEventArgs,
+                            >,
+                        >,
+                    {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).IsTextTrimmedChanged)(
+                                windows_core::Interface::as_raw(this),
+                                handler.param().abi(),
+                                &mut result__,
+                            )
+                            .map(|| result__)
                         }
                     }
                     pub fn RemoveIsTextTrimmedChanged(

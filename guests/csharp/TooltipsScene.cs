@@ -6,6 +6,8 @@ record Account(string Name, string Note);
 
 static class TooltipsScene
 {
+    const string Statements = "Every statement since March";
+
     public static void Run()
     {
         var app = new KayaApp();
@@ -35,6 +37,13 @@ static class TooltipsScene
                 var volume = tx.Slider(0.0, 1.0, 0.5);                  // slider#0
                 tx.SetHelp(volume, "How loud the preview plays");
                 tx.SetA11yId(volume, "volume");
+                var cut = tx.Label(Statements);                          // label#0
+                tx.SetMaxLines(cut, 1);
+                tx.SetMaxWidth(cut, 80);
+                tx.SetA11yId(cut, "cut");
+                var whole = tx.Label(Statements);                        // label#1
+                tx.SetMaxLines(whole, 1);
+                tx.SetA11yId(whole, "whole");
                 foreach (var row in accounts.Rows())
                 {
                     var label = row.Label(row.Name);

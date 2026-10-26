@@ -799,6 +799,8 @@ final class KayaNode: Identifiable {
     var help = ""
     /// An app's help, even an empty one, replaces the default (docs/tooltip-plan.md T6).
     var helpSet = false
+    /// A capped label cut short (docs/tooltip-plan.md T7).
+    var truncated = false
     /// The prompt an empty text field shows (docs/search-plan.md S3).
     var placeholder = ""
     /// One child's cross-axis stretch (docs/layout-knobs-plan.md §1): nil
@@ -7565,6 +7567,7 @@ func kayaA11y(_ view: some View, _ node: KayaNode, leaf: Bool = false) -> some V
 func kayaShownHelp(_ node: KayaNode) -> String {
     #if os(macOS)
         if node.helpSet { return node.help }
+        if node.kind == kindLabel { return node.truncated ? node.text : "" }
         guard node.kind == kindButton || (node.kind == kindCheckbox && node.role == roleToggle) else {
             return ""
         }
@@ -22270,6 +22273,34 @@ struct KayaActivatableStyle: ButtonStyle {
     }
 }
 
+/// docs/tooltip-plan.md T7: the label's text at its own width with no line
+/// limit, held to its height; past it, the label was cut.
+struct KayaTruncationReader<Whole: View>: ViewModifier {
+    let node: KayaNode
+    let whole: Whole
+    func body(content: Content) -> some View {
+        #if os(macOS)
+            if node.maxLines > 0 {
+                content.background {
+                    ViewThatFits(in: .vertical) {
+                        whole.lineLimit(nil).fixedSize(horizontal: false, vertical: true).hidden()
+                            .onAppear { kayaMarkTruncated(node, false) }
+                        Color.clear.onAppear { kayaMarkTruncated(node, true) }
+                    }
+                }
+            } else {
+                content
+            }
+        #else
+            content
+        #endif
+    }
+}
+
+@MainActor func kayaMarkTruncated(_ node: KayaNode, _ cut: Bool) {
+    if node.truncated != cut { node.truncated = cut }
+}
+
 struct KayaLabelTint: ViewModifier {
     let tint: Int64
     @Environment(\.kayaInFill) private var inFill
@@ -26886,6 +26917,7 @@ struct KayaRender: View {
             // cut with the platform's ellipsis.
             .lineLimit(node.maxLines > 0 ? Int(node.maxLines) : nil)
             .truncationMode(.tail)
+            .modifier(KayaTruncationReader(node: node, whole: base))
             // docs/media-player-plan.md M20 (2): the text wraps under its
             // widest width.
             .frame(

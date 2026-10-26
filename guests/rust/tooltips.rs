@@ -9,6 +9,8 @@ struct Account {
     note: String,
 }
 
+const STATEMENTS: &str = "Every statement since March";
+
 #[derive(Clone)]
 enum Msg {
     Save,
@@ -37,6 +39,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.a11y_id(name, "fullname");
                 let volume = tx.slider(0.0, 1.0, 0.5).help("How loud the preview plays").id(); // slider#0
                 tx.a11y_id(volume, "volume");
+                let statements = tx.signal(STATEMENTS);
+                tx.label(statements).max_lines(1).max_width(80.0).a11y_id("cut").id(); // label#0
+                tx.label(statements).max_lines(1).a11y_id("whole").id(); // label#1
                 for mut row in accounts.rows(tx) {
                     let label = row.label(Account::name());
                     row.help(label, Account::note());

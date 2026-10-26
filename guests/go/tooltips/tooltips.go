@@ -11,6 +11,8 @@ type Account struct {
 	Note string
 }
 
+const statements = "Every statement since March"
+
 func App() *kaya.App {
 	app := kaya.NewApp()
 
@@ -27,11 +29,13 @@ func App() *kaya.App {
 				Help("Throws the draft away").
 				A11yHint("discard every change").
 				A11yID("discard") // button#1
-			tx.Button("Clear", nil).Help("").A11yID("clear") // button#2
+			tx.Button("Clear", nil).Help("").A11yID("clear")    // button#2
 			tx.Entry(nil).BindHelp(nameHelp).A11yID("fullname") // entry#0
 			tx.Slider(0.0, 1.0, 0.5, nil).
 				Help("How loud the preview plays").
 				A11yID("volume") // slider#0
+			tx.Label(tx.Signal(statements)).MaxLines(1).MaxWidth(80).A11yID("cut") // label#0
+			tx.Label(tx.Signal(statements)).MaxLines(1).A11yID("whole")            // label#1
 			for row := range AccountRows(tx, accounts).All() {
 				name := row.Label(row.Name())
 				row.Help(name, row.Note())

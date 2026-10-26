@@ -5,6 +5,8 @@ open Kaya_app
 
 type account = { name : string; note : string } [@@deriving kaya_gen]
 
+let statements = "Every statement since March"
+
 let () =
   let app = Kaya_app.create () in
 
@@ -26,6 +28,15 @@ let () =
             entry ~help_bind:name_help ~a11y_id:"fullname";        (* entry#0 *)
             slider ~help:"How loud the preview plays"              (* slider#0 *)
               ~a11y_id:"volume" ~min:0.0 ~max:1.0 ~value:0.5;
+            (fun () ->                                             (* label#0 *)
+              let w = label ~text:statements ~a11y_id:"cut" () in
+              set_max_lines w 1;
+              set_max_width w 80.0;
+              w);
+            (fun () ->                                             (* label#1 *)
+              let w = label ~text:statements ~a11y_id:"whole" () in
+              set_max_lines w 1;
+              w);
             (* THE TRAILING [()] IS LOAD-BEARING inside an `each` body,
                where nothing checks the result: without it the label is a
                partial application the body discards and no copy stamps

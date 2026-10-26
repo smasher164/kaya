@@ -5,6 +5,8 @@ import * as kaya from "kaya-gui";
 
 const Account = kaya.record({ name: String, note: String }, "Account");
 
+const STATEMENTS = "Every statement since March";
+
 const app = new kaya.App();
 
 function onSave(): void {
@@ -21,6 +23,8 @@ const { nameHelp } = app.window({ title: "tooltips" }, () => {
     kaya.button("Clear").help("").a11yId("clear"); // button#2
     kaya.entry().help(nameHelp).a11yId("fullname"); // entry#0
     kaya.slider({ min: 0, max: 1, value: 0.5 }).help("How loud the preview plays").a11yId("volume"); // slider#0
+    kaya.label(STATEMENTS, { maxLines: 1 }).maxWidth(80).a11yId("cut"); // label#0
+    kaya.label(STATEMENTS, { maxLines: 1 }).a11yId("whole"); // label#1
     for (const account of accounts) {
       kaya.label({ bind: account.name }).help(account.note).a11yId(account.name);
     }

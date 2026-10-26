@@ -22,5 +22,10 @@ expect_help entry#0 "Your name, as saved"
 # are addressed by INDEX with SOURCED ids, as a11yrows does: the Apple read
 # goes through the accessibility identifier, and copies sharing one id
 # cannot be told apart there.
-expect_help label#0 "The first account, opened in March"
+expect_help label#2 "The first account, opened in March"
 expect_help label#last "The second account, opened in May"
+# A label cut short with an ellipsis shows its whole text as its tooltip on
+# the desktops, and the same label shown whole shows none
+# (docs/tooltip-plan.md T7).
+expect_help label@cut "Every statement since March"
+expect_help label@whole ""

@@ -15,6 +15,8 @@ class Account:
     note: str
 
 
+STATEMENTS = "Every statement since March"
+
 app = kaya.App()
 
 
@@ -35,6 +37,8 @@ with app.window(title="tooltips"):
         kaya.entry().help(name_help).a11y_id("fullname")     # entry#0
         kaya.slider(min=0.0, max=1.0, value=0.5).help(       # slider#0
             "How loud the preview plays").a11y_id("volume")
+        kaya.label(STATEMENTS, max_lines=1).max_width(80).a11y_id("cut")  # label#0
+        kaya.label(STATEMENTS, max_lines=1).a11y_id("whole")              # label#1
         for account in accounts:
             kaya.label(bind=account.name).help(
                 account.note).a11y_id(account.name)

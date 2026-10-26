@@ -16469,3 +16469,18 @@ KEY: drag_sidebar, expect_sidebar_width, windowmem, kaya.window.<id>.sidebar, Ad
   paneExpansionDragHandle). Closing this means either striking it with (a), or
   building the drag on the chosen toolkits, saving through the same key, and
   taking windowmem.steps' OFF_SCENES entries out on those lanes.
+
+## OPEN — a helped container's bubble covers its children on the Mac (measured 2026-10-26, docs/tooltip-plan.md §6 and T7)
+
+KEY: outer .help wins, kayaA11yProps, helped container, tooltips scene column help, expect_help AXHelp
+- SwiftUI on macOS draws the OUTERMOST `.help` under the pointer: the tooltips
+  scene's root column carries help, and over its stamped labels (each with help
+  of its own) and over T7's cut label the bubble read the column's text, while
+  AXHelp read each label's own, so no scene step can see it. GTK and WinUI drew
+  the inner widget's. Not fixed with T7: the fix is in how kayaA11yProps lowers
+  a container's help (whether AppKit's tooltip rects can be kept off the area of
+  a helped child, or the container's help moves to a view behind its children),
+  and it needs its own probe and a reader for the bubble itself. Closing this
+  means the bubble over a helped child of a helped container shows the child's
+  text on the Mac, held by a step that reads the drawn tooltip rather than AXHelp.
+
