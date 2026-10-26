@@ -24038,9 +24038,24 @@ impl crate::harness::Stage for WinUiStage {
             core.open_context = Some((widget, flyout));
             Ok(rx)
         });
-        opened
-            .recv_timeout(std::time::Duration::from_secs(10))
-            .expect("kaya: the context flyout never opened (Opened did not arrive)");
+        if opened.recv_timeout(std::time::Duration::from_secs(10)).is_err() {
+            let state = Self::on_ui_read(move |core| {
+                let widget = widget_id_for_target(core, t);
+                let anchor: FrameworkElement =
+                    core.widgets.get(&WidgetId(widget)).expect("the anchor widget lives").element()?.cast()?;
+                let open = core.open_context.as_ref().map(|(_, f)| f.IsOpen()).transpose()?;
+                Ok(format!(
+                    "the anchor {t:?} loaded {}, in a XamlRoot {}, {}x{}, visible {}; the flyout open {open:?}",
+                    anchor.IsLoaded()?,
+                    anchor.XamlRoot().is_ok(),
+                    anchor.ActualWidth()?,
+                    anchor.ActualHeight()?,
+                    anchor.Visibility()? == Visibility::Visible,
+                ))
+            })
+            .unwrap_or_else(|e| format!("<unreadable: {e}>"));
+            panic!("kaya: the context flyout never opened (Opened did not arrive in 10s): {state}");
+        }
     }
 
     fn menu_count(&self) -> usize {
