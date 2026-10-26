@@ -40,7 +40,8 @@ cd "$ROOT"
 # shellcheck source=tools/lib/swift-toolchain.sh
 source "$ROOT/tools/lib/swift-toolchain.sh"
 
-cargo build --locked --lib "${CARGO_PROFILE[@]}"
+tools/lib/content_fresh.py --profile "${CARGO_TARGET_DIR:-target}/$PROFILE" -- \
+    cargo build --locked --lib "${CARGO_PROFILE[@]}"
 # The Swift dylib below compiles against this library's header and loads
 # it at run time; both must come from one tree.
 tools/build-id.py --verify "${CARGO_TARGET_DIR:-target}/$PROFILE/libkaya.dylib"

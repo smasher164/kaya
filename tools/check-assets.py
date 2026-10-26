@@ -91,6 +91,10 @@ EXEMPT = {
     "crates/kaya/src/assets.rs":
         "the core's own resolver — this is the one place the rule "
         "lives",
+    "crates/kaya/build.rs":
+        "the core id's rerun-if-changed on the font assets.rs compiles in "
+        "(tools/build-id.py's COMPONENTS['core']); cargo's freshness "
+        "input, never a runtime read",
     "crates/kaya/src/winui/mod.rs":
         "the harness-only include_bytes! of the vendored font, so the "
         "DirectWrite name-table tests measure a real font on whatever "

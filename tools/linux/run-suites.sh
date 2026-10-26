@@ -171,8 +171,8 @@ lld_selftest() {
 lld_selftest || exit 1
 # Debuginfo off, AND the link parallelism bounded (docs/traps.md:
 # "Container linker OOM scales with the example count").
-CARGO_PROFILE_DEV_DEBUG=0 cargo build -j8 --locked --features harness --lib \
-    "${BUILD_EXAMPLES[@]}" || exit 1
+CARGO_PROFILE_DEV_DEBUG=0 tools/lib/content_fresh.py --profile "$CARGO_TARGET_DIR/debug" -- \
+    cargo build -j8 --locked --features harness --lib "${BUILD_EXAMPLES[@]}" || exit 1
 tools/build-id.py --verify "$CARGO_TARGET_DIR/debug/libkaya.so" || exit 1
 for kaya_linked in "$CARGO_TARGET_DIR/debug/libkaya.so" "$CARGO_TARGET_DIR/debug/examples/milestone2"; do
     if ! lld_linked "$kaya_linked"; then

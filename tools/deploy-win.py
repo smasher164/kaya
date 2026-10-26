@@ -48,6 +48,7 @@ import os
 from lanes import win as lane
 from packaging import identity as app_identity
 from packaging import windows as win_package
+import content_fresh
 import exclusive
 import verdict as verdict_reader
 import only  # noqa: E402
@@ -558,7 +559,9 @@ for build_args in (
     # (docs/traps.md, the chat app's textarea in a pushed pane). kaya.pdb
     # ships beside the dll, where the guest's dbghelp looks for it.
     build_env = xwin_env(dict(os.environ, CARGO_PROFILE_RELEASE_DEBUG="line-tables-only"))
-    if subprocess.run(build_args, cwd=ROOT, check=False, env=build_env).returncode != 0:
+    if content_fresh.cargo(lambda a=build_args, e=build_env: subprocess.run(
+            a, cwd=ROOT, check=False, env=e).returncode, TARGET,
+            content_fresh.examples_in(build_args), "{name}.exe", "deploy-win") != 0:
         sys.exit(1)
 # THE CAPTURE LEGS' SYNTHETIC DEVICES (tools/winvcam): the virtual cameras'
 # media source and the helper that makes them and plays the cable's tone,

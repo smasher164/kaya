@@ -43,6 +43,7 @@ import urllib.parse
 from packaging import identity as app_identity
 from packaging import ios as packaging_ios
 from lanes import ios as lane
+import content_fresh
 import exclusive
 import only  # noqa: E402
 import scene_cut
@@ -3354,7 +3355,8 @@ def cargo_ios(args):
     for name, tool in (("CC", CC_SIM), ("AR", AR_SIM)):
         env[f"{name}_{IOS_SIM_TARGET}"] = tool
         env[f"{name}_{IOS_SIM_TARGET.replace('-', '_')}"] = tool
-    if run(["cargo", *args], env=env).returncode != 0:
+    if content_fresh.cargo(lambda: run(["cargo", *args], env=env).returncode, TARGET_DIR,
+                         content_fresh.examples_in(args), "{name}", "run-sim") != 0:
         sys.exit(1)
 
 

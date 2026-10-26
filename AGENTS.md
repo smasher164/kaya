@@ -333,7 +333,7 @@ docs/gates.md.
    - `tools/check-jni.py` — every declared native is in a registration
      list, on both attach paths.
    - `tools/check-build-id.py` — each compiled artifact carries its sources'
-     id, and every lane verifies it.
+     id, every lane verifies it, and cargo, make and MSBuild judge by content.
    - `tools/check-pins.py` — every dependency fetched over the network names
      an exact version (and bytes).
    - `tools/check-design-generation.py` — every mac leg's main executable is

@@ -1910,6 +1910,17 @@ what it runs or ships before it runs or ships it. The GTK hand capture
 also executes 16 controlled failure/success cases and 10 counted
 mutations: checked stages, fresh output, no publication on failure,
 and guest cleanup)
+AND THE GUESTS CARGO, MAKE AND MSBUILD JUDGE BY MTIME, SINCE 2026-10-26
+(docs/traps.md, "cargo keeps an artifact a restore with an old mtime made
+stale"): every runner's cargo build of kaya goes through
+tools/lib/content_fresh.py, which ages a core build-script run that baked
+another id and rebuilds an example whose artifact matches neither this
+build nor the stamp of the bytes it came from, and the mac lane's C and C#
+guests take a full build when their sources' bytes moved. Clause 3 holds
+the core id to every file libkaya's dep-info names, and build.rs's rerun
+list to the id's inputs; clause 4 counts each runner's routed builds;
+clause 5 runs the trap on a scratch crate and a make probe. Watched red:
+each aging cut and by_content's decision cut.
 
 ## tools/check-pins.py
 

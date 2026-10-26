@@ -33,6 +33,7 @@ import tempfile
 import time
 
 import flightrec_lane
+import content_fresh
 import guest_warnings
 import media_server
 from lanes import mac as lane
@@ -65,7 +66,12 @@ DYLIB = ROOT / "target/swiftui/libkaya_swiftui.dylib"
 if "--build" in flags:
     for cmd in (["cargo", "build", "--locked", "--lib"],
                 [str(ROOT / "tools/swiftui/build-dylib.sh")]):
-        if subprocess.run(cmd, cwd=ROOT).returncode != 0:
+        if cmd[0] == "cargo":
+            rc = content_fresh.cargo(lambda c=cmd: subprocess.run(c, cwd=ROOT).returncode,
+                                   ROOT / "target/debug", who="run-leg")
+        else:
+            rc = subprocess.run(cmd, cwd=ROOT).returncode
+        if rc != 0:
             print(f"run-leg: build failed: {' '.join(cmd)}", file=sys.stderr)
             sys.exit(1)
 # THE LEG'S OWN LANGUAGE, THE LANE'S OWN BUILD, ON EVERY RUN: the same
@@ -101,11 +107,18 @@ if _spec is not None:
 
 # A RUST GUEST CARRIES ITS OWN CORE: the example links the crate statically,
 # so the two verified artifacts above vouch for nothing it runs. Build it
-# and stage it the lane's way, every run — cargo's no-op is the verify.
+# and stage it the lane's way, every run, through tools/lib/content_fresh.py.
 if lang == "rust":
     stem = lane.guest_stem(scene)
     build = ["cargo", "build", "--locked", "-p", "kaya", "--example", stem]
-    _code, _warned = guest_warnings.build(build, ROOT)
+    _warned = []
+
+    def _cargo():
+        code, warned = guest_warnings.build(build, ROOT)
+        _warned.extend(warned)
+        return code
+
+    _code = content_fresh.cargo(_cargo, ROOT / "target/debug", [stem], "{name}", "run-leg")
     for _line in _warned:
         print(f"run-leg: {_line}", file=sys.stderr)
     if _code != 0 or _warned:

@@ -270,7 +270,8 @@ BUILD = [
     # regenerates only when its generator's bytes move; check-assets
     # holds the stamp honest.
     ("market data", ["python3", "tools/gen-market.py", "--ensure"]),
-    ("libkaya", ["cargo", "build", "--locked", "--lib"]),
+    ("libkaya", ["tools/lib/content_fresh.py", "--profile", str(TARGET / "debug"), "--",
+                 "cargo", "build", "--locked", "--lib"]),
     ("libkaya id", ["tools/build-id.py", "--verify", str(TARGET / "debug/libkaya.dylib")]),
     # RUNG 1, HERE BECAUSE IT RELINKS: `cargo test` builds the lib, which
     # no GATE may do (the relink refusal below), and nothing automatic ran

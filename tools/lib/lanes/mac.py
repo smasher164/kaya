@@ -32,6 +32,7 @@ import sys
 import threading
 import time
 
+import content_fresh
 import exclusive
 import media_server
 import scene_cut
@@ -1706,8 +1707,14 @@ def build_haskell(root, log=None):
 
 def build_csharp(root, log=None):
     # dotnet run rebuilds per invocation; build once, legs exec it.
-    return _run(["dotnet", "build", "--nologo", "-v", "q",
-                 "guests/csharp/kaya-guests.csproj"], log, cwd=root)
+    rc = content_fresh.by_content(
+        lambda full: _run(["dotnet", "build", "--nologo", "-v", "q",
+                           *(["--no-incremental"] if full else []),
+                           "guests/csharp/kaya-guests.csproj"], log, cwd=root).returncode,
+        ["guests/csharp", "bindings/csharp"],
+        [root / "guests/csharp/bin/Debug/net10.0/kaya-guests.dll"],
+        root / "target/csharp-guests.sources.json", skip={"bin", "obj"}, who="build_csharp")
+    return subprocess.CompletedProcess([], rc)
 
 
 def build_go(root, log=None):
@@ -1815,10 +1822,15 @@ def build_c(root, log=None):
     # THE C FLOOR, THE SCENES THIS LANE ACTUALLY RUNS: C_SCENES, which
     # check-steps' sweep_c_floor reads from the other side — a guest
     # built here and run nowhere is false coverage.
-    return _run(["make", "-C", "guests/c",
-                 f"SCENES={' '.join(C_SCENES)}",
-                 f"TARGET_DIR={root}/target/debug",
-                 f"OUT={root}/target/c-guests"], log, cwd=root)
+    rc = content_fresh.by_content(
+        lambda full: _run(["make", "-C", "guests/c", *(["-B"] if full else []),
+                           f"SCENES={' '.join(C_SCENES)}",
+                           f"TARGET_DIR={root}/target/debug",
+                           f"OUT={root}/target/c-guests"], log, cwd=root).returncode,
+        ["guests/c", "bindings/c", "crates/kaya/include"],
+        [root / "target/c-guests" / s for s in C_SCENES],
+        root / "target/c-guests.sources.json", who="build_c")
+    return subprocess.CompletedProcess([], rc)
 
 
 def build_java(root, log=None):

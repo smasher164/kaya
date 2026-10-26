@@ -23,7 +23,9 @@ root = ROOT
 # What each artifact is BUILT FROM. Cargo.lock is an input, not an
 # output: the resolved dependency graph is compiled into the library.
 COMPONENTS = {
-    "core": ["crates", "Cargo.toml", "Cargo.lock"],
+    # The font: crates/kaya/src/assets.rs include_bytes! it (check-build-id's
+    # dep-info clause holds this list to what rustc read).
+    "core": ["crates", "Cargo.toml", "Cargo.lock", "guests/assets/fonts/sora-wght.ttf"],
     # The INTERFACE it compiles against (kaya.h), not the core's
     # implementation — a gtk.rs edit does not change this dylib.
     "swiftui": ["swift", "crates/kaya/include"],

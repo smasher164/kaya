@@ -33,6 +33,7 @@ from packaging import android as packaging_android
 from packaging import mark
 from packaging import identity as app_identity
 from lanes import android as lane
+import content_fresh
 import exclusive
 import only  # noqa: E402
 import scene_cut
@@ -61,6 +62,13 @@ def out_of(argv, stderr=subprocess.DEVNULL):
 def die(msg):
     print(msg, file=sys.stderr)
     sys.exit(1)
+
+
+def cargo_ndk(args):
+    return content_fresh.cargo(
+        lambda: run(["cargo", "ndk", "-t", "arm64-v8a", *args]).returncode,
+        ROOT / "target/aarch64-linux-android/debug", content_fresh.examples_in(args),
+        "lib{name}.so", "run-emulator")
 
 
 # Two clocks: the lane's phases, and the suites' builds, which run on their own
@@ -4434,8 +4442,8 @@ def build_suite(suite):
         if suite == "compose":
             jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
             fresh_jnilibs(jnilibs)
-            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                    "--example", "rusthost"]).returncode != 0:
+            if cargo_ndk(["build", "--locked",
+                    "--example", "rusthost"]) != 0:
                 return False
             shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
                                 "examples/librusthost.so", jnilibs)
@@ -4448,8 +4456,8 @@ def build_suite(suite):
         elif suite == "jvm":
             jnilibs = ROOT / "android/javahost/src/main/jniLibs/arm64-v8a"
             fresh_jnilibs(jnilibs)
-            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                    "--lib"]).returncode != 0:
+            if cargo_ndk(["build", "--locked",
+                    "--lib"]) != 0:
                 return False
             shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
                                 "libkaya.so", jnilibs)
@@ -4464,8 +4472,8 @@ def build_suite(suite):
             fresh_jnilibs(jnilibs)
             # The Go guest NEEDs libkaya.so by SONAME and the app's linker
             # resolves it out of this directory.
-            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                    "--lib"]).returncode != 0:
+            if cargo_ndk(["build", "--locked",
+                    "--lib"]) != 0:
                 return False
             shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
                                 "libkaya.so", jnilibs)
@@ -4492,8 +4500,8 @@ def build_suite(suite):
                 return False
             jnilibs = ROOT / "android/pyhost/src/main/jniLibs/arm64-v8a"
             fresh_jnilibs(jnilibs)
-            if run(["cargo", "ndk", "-t", "arm64-v8a", "build", "--locked",
-                    "--lib"]).returncode != 0:
+            if cargo_ndk(["build", "--locked",
+                    "--lib"]) != 0:
                 return False
             shutil.copy2(ROOT / "target/aarch64-linux-android/debug/"
                                 "libkaya.so", jnilibs)

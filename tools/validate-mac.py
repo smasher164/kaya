@@ -28,6 +28,7 @@ from lanes import mac as lane
 import exclusive
 import only  # noqa: E402
 import flightrec_lane
+import content_fresh
 import guest_warnings
 import verdict as verdict_reader
 import lane_health
@@ -81,8 +82,17 @@ def kaya_swiftc(args, **kw):
 BUILD_EXAMPLES = []
 for _s in [*lane.SCENES, *lane.DEPTH_SCENES]:
     BUILD_EXAMPLES += ["--example", _s]
-_code, _warned = guest_warnings.build(["cargo", "build", "--locked", "--lib",
-                                      *BUILD_EXAMPLES], ROOT)
+_warned = []
+
+
+def _cargo(cmd=("cargo", "build", "--locked", "--lib", *BUILD_EXAMPLES)):
+    code, warned = guest_warnings.build(list(cmd), ROOT)
+    _warned.extend(warned)
+    return code
+
+
+_code = content_fresh.cargo(_cargo, ROOT / "target/debug",
+                          content_fresh.examples_in(BUILD_EXAMPLES), "{name}", "validate-mac")
 for _line in _warned:
     print(f"validate-mac: {_line}", file=sys.stderr)
 if _code != 0 or _warned:

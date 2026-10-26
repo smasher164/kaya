@@ -375,7 +375,7 @@ def rung1_skip_problem(matrix, gates):
 
 PRUNE_BUILD = '("stale objects", ["tools/prune-objects.py"]),'
 PRUNE_MAC = 'if run([str(ROOT / "tools/prune-objects.py")]).returncode != 0:'
-MAC_CARGO = '_code, _warned = guest_warnings.build(["cargo", "build", "--locked", "--lib",'
+MAC_CARGO = '_code = content_fresh.cargo(_cargo, ROOT / "target/debug",'
 
 
 def prune_problem(gates, mac):

@@ -16,7 +16,7 @@ fn main() {
         // build.rs re-runs only when something it DECLARES changes, and
         // the id is a function of the whole source set. Miss one and the
         // baked id silently keeps a value the sources moved away from.
-        for input in ["crates", "Cargo.toml", "Cargo.lock"] {
+        for input in ["crates", "Cargo.toml", "Cargo.lock", "guests/assets/fonts/sora-wght.ttf"] {
             println!("cargo::rerun-if-changed={}", root.join(input).display());
         }
         let out = Command::new("python3")

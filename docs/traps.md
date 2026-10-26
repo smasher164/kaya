@@ -4,6 +4,43 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## cargo keeps an artifact a restore with an old mtime made stale (measured 2026-10-26)
+
+The sixth sighting of the class the copy2 entries below record, and the
+first where the doctrine (touch after restoring) was not enough, because
+the restore was not a negative: a capture script swapped guests/rust/tasks.rs
+out to HEAD's text and back with `shutil.copy2`, and the full matrix at
+5d7df248 ran six Windows legs (tasks, tasksrtl, taskspkg, taskspersist,
+tasksbig, links) on a tasks.exe built from the swapped-out text: 'the
+catalog "tasks" (en) has no message "open"'. Nothing on any lane checked a
+Rust example against its sources: the core marker does not survive into an
+example executable (build-id --verify on target/debug/examples/tasks reads
+NO build id), and every runner trusted cargo's no-op.
+
+Measured on a scratch crate with cargo 1.97: a source restored with
+copy2 after a build of other bytes is Fresh to cargo; deleting the uplifted
+examples/ex alone is still Fresh (cargo links the stale hashed file back);
+aging the hashed examples/ex-<16hex> to mtime 0 rebuilds that example
+alone; aging build/<pkg>-*/output reruns build.rs; aging an rlib does
+nothing, aging .fingerprint/<pkg>-*/dep-lib-<crate> recompiles the lib, and
+.fingerprint/<pkg>-*/dep-example-<name> the example. On
+aarch64-pc-windows-msvc an example has NO hashed file (examples/tasks.exe,
+tasks.pdb, tasks.d and nothing else), so the first cut of the wall, which
+aged the hashed file, found nothing to age and refused on the Windows lane;
+the fingerprint's dep-info is the reference on every target.
+
+The same class made run-sim refuse libkaya.a as STALE ("carries a575...,
+core in this tree is 9989..."): a crates/ file restored with an old mtime
+after a build of the perturbed text, so build.rs never reran. It was read
+at the time as an asset-only change, but the core id reads no asset except
+the font the library compiles in (which it had missed until this change).
+
+The wall is tools/lib/content_fresh.py, on every runner's cargo build
+(check-build-id clauses 3 to 5). make and MSBuild skip by the same ordering;
+the mac lane's C and C# guests go through its by_content. SwiftPM, cabal,
+dune, go and gradle compare by stat equality or content, and the other
+lanes' C, C# and Java builds start from an empty directory.
+
 ## The last row's one-row band: a mac table scroll past the document's end (measured 2026-10-13)
 
 The mac native table's `scroll(toRow:)` and its anchor's re-park put the row's
@@ -12789,6 +12826,8 @@ a restore verified by sha256 until the file was touched. In the other order
 it is worse — a negative run after such a restore passes VACUOUSLY. Every
 perturb-restore touches the file after restoring, or uses a copy that
 writes a fresh mtime.
+The runners' builds answer it by content since 2026-10-26 (cargo keeps an
+artifact a restore with an old mtime made stale, above).
 
 ## A watched negative can pass for the wrong reason when the perturbed guard is not the only one (measured 2026-09-17)
 
