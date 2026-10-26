@@ -52,10 +52,9 @@ expect_image_phase image@art[t000] shown
 expect image@art[t000] "600x600"
 expect image@art[t001] "320x320"
 expect image@art[t002] "1000x1000"
-# A shape is read off pixels the user sees, so off the first row, unscrolled:
-# the second runs under the table's edge in a short window, and a row scrolled
-# to the top sits under GTK's scroll shadow and the mac header (docs/traps.md,
-# the shape read of a clipped row).
+# A shape is read off pixels the user sees, so off the first row: the second
+# runs under the table's edge in a short window (docs/traps.md, the shape read
+# of a clipped row).
 expect_shape image@art[t000] rounded
 scroll_to_row column@tracks t299
 expect_image_phase image@art[t299] loading
@@ -79,3 +78,7 @@ expect_image_phase image@art[t297] shown
 scroll_to_row column@tracks t000
 expect_image_phase image@art[t000] shown
 expect label@again "again: none"
+# docs/traps.md, a shape read of a row the table clips: a row scrolled to the
+# top sits wholly under the header.
+expect_window column@tracks 0 299
+expect_shape image@art[t000] rounded

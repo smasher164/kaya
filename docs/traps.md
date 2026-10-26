@@ -17302,7 +17302,11 @@ white "under it" and reads a rounded picture as `rect`. On the mac,
 under the floating header, and the header lies inside the NSClipView's bounds
 (the clip view's contentInsets hold it), so the visible part is the clip
 bounds less those insets: the first draft that took the bounds read four of
-ten netimage legs `unmatched` with the probes on the header.
+ten netimage legs `unmatched` with the probes on the header. Since 2026-10-26
+the mac scroll lands the row at its top less the header's height, and the
+first-visible read leaves the rows under the header out, as the band report
+did; with the read fixed and the scroll not, `expect_window` read `151 300`
+for t150.
 
 Guard: every expect_ground, expect_shape and expect_tint reader on GTK,
 WinUI, SwiftUI and Compose refuses a probed frame its ancestors do not show

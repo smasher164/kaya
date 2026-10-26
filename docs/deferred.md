@@ -596,7 +596,31 @@ leg's picture, and the picker's process log (check-steps holds them;
 docs/traps.md). Read those first on the next sighting (the bundle is kept
 under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
 
-## OPEN — the mac native table's scroll_to_row hides the first row under its header (2026-10-17)
+## OPEN — a phone's scroll_to_row parks the row under the table's pinned header (iOS and Compose, measured 2026-10-26)
+KEY: scroll_to_row, pinned header, KayaHeaderPin, headerRestPx, park, netimage.steps, expect_window column@tracks 0
+
+The mac native table's form of this is fixed (the struck entry below). With
+the netimage scene's new tail (`expect_window column@tracks 0 299`, then
+`expect_shape image@art[t000] rounded` after `scroll_to_row column@tracks
+t000`), GTK and WinUI pass, and the phones do not: iOS netimage (swift, go,
+swiftui) read `image@art[t000] reads shape circle ((1,1) FFFFFF over FFFFFF,
+(6,6) FFFFFF over FFFFFF, centre ACACAC ...)` and Compose (compose, jvm, go)
+`reads shape unmatched ((1,1) F3EDF7 over F3EDF7, ...)`. The fail-shots show
+the same thing on both: Track 0 parked under the pinned "Art | Title" header,
+a sliver of its art below the header's rule. Both tiers park the row's top at
+the scroll's top (iOS: `proxy.scrollTo(..., anchor: .top)` in
+KayaSynthesizedWindow's repark; Compose: KayaTableWindow's park scrolls to
+`contentTopOf(row)`), and both first-visible reads count the rows under the
+header. Two faults to fix together: the park lands the row below the pinned
+header block (iOS: the header block's height is placement's bandTop less the
+band offset; Compose: rowsTopPx less headerRestPx), and the visible range
+starts under the header. A third: neither shape reader refused a row its
+header covers (the mac and GTK readers do, harness.rs's unseen_probe).
+Closing this means removing the phones' cut at `expect_window column@tracks
+0` (tools/lib/lanes/ios.py NETIMAGE_TOP_CUT, tools/lib/lanes/android.py MODS)
+and seeing both steps green there.
+
+## ~~OPEN — the mac native table's scroll_to_row hides the first row under its header (2026-10-17)~~ FIXED 2026-10-26: the scroll and its re-park put the row at its top less the header's height, and the first-visible read takes the rows under the header out, as the band report already did; netimage.steps reads `expect_window column@tracks 0 299` and t000's shape after `scroll_to_row column@tracks t000` on the desktops, watched red with the subtraction cut ("reads shape <clipped by its parents: frame (32,312,40x40), visible (32,348,40x4)>")
 KEY: scroll_to_row, native table, floating header, content insets, first row
 
 Found while fixing netimage's shape read (docs/traps.md, the clipped-row
@@ -8826,8 +8850,11 @@ check-steps and check-stubs (depth then breadth, CLAUDE.md's sequencing):
   interpreter's table", wanted "home"`, where the whole matrix once
   stayed green. Report: docs/chrome/sections-symbol.md.
 
-- **`expect_sections_presentation`'s window#N verdict is spelled two
-  different ways** (found 2026-08-17 while comparing the sections legs
+- ~~**`expect_sections_presentation`'s window#N verdict is spelled two
+  different ways**~~ — FIXED 2026-09-24 (94b9ae36): the mac prints
+  `window#1 sections sidebar` like harness.rs and Compose, and check-verbs'
+  one-spelling clause holds the observation and the failure sentence; the
+  headline was left unstruck until 2026-10-26 (found 2026-08-17 while comparing the sections legs
   across lanes). harness.rs — the implementation the GTK and WinUI
   backends run — appends `"{prefix}sections {arm}"`, so the windows lane
   prints `window#1 sections sidebar`; the Compose interpreter spells it

@@ -260,6 +260,7 @@ SAFEAREA_EXTRA = ('expect_insets "bar/bar"; click button@full; expect label@capt
 
 # A PHONE SHOWS NO TOOLTIP (docs/tooltip-plan.md T7): a cut label reads no
 # help, as the whole one does.
+NETIMAGE_TOP_CUT = {"cut": "expect_window column@tracks 0", "keep": "expect expect_image_phase"}
 TOOLTIPS_CUT = {"cut": "expect_help label@cut", "keep": "expect_help=label#last",
                 "extra": 'expect_help label@cut ""; expect_help label@whole ""'}
 
@@ -272,6 +273,10 @@ MODS = {
     # ends at its first pointer step.
     ("rust-swiftui", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
     ("rust-swiftui", "tooltips"): TOOLTIPS_CUT,
+    # docs/deferred.md, a phone's scroll_to_row parks the row under the pinned header.
+    ("rust-swiftui", "netimage"): NETIMAGE_TOP_CUT,
+    ("swift", "netimage"): NETIMAGE_TOP_CUT,
+    ("go", "netimage"): NETIMAGE_TOP_CUT,
     ("swift", "tooltips"): TOOLTIPS_CUT,
     ("go", "tooltips"): TOOLTIPS_CUT,
     ("swift", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},

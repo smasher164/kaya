@@ -445,6 +445,8 @@ MODS = {
     # help, as the whole one does.
     "tooltips": {"cut": ("expect_help label@cut", "expect_help=label#last", TOOLTIPS_PHONE_TAIL),
                  "append": TOOLTIPS_PHONE_TAIL},
+    # docs/deferred.md, a phone's scroll_to_row parks the row under the pinned header.
+    "netimage": {"cut": ("expect_window column@tracks 0", "expect expect_image_phase", "")},
     # An image ground at a screen's top runs under the status bar
     # (docs/media-player-plan.md M15).
     "grounds": {"append": 'expect_ground_reach column@hero top;expect_system_bars "legible/legible";'},

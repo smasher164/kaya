@@ -19200,7 +19200,7 @@ private struct KayaNativeTable: View {
         private func reparkAnchor() {
             guard let anchor = anchorRow, anchor < numberOfRows(in: tableView) else { return }
             let clip = scrollView.contentView
-            let want = kayaClipTop(clip, tableView.rect(ofRow: anchor).minY)
+            let want = kayaClipTop(clip, rowTop(anchor))
             if abs(clip.bounds.origin.y - want) > 0.5 {
                 inProgrammaticScroll = true
                 clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: want))
@@ -19453,9 +19453,15 @@ private struct KayaNativeTable: View {
                 + "the scroll view \(inWindow ? "inside" : "outside") the window"
         }
 
+        /// The clip origin that puts a row just under the header (docs/traps.md,
+        /// a shape read of a row the table clips).
+        private func rowTop(_ index: Int) -> CGFloat {
+            tableView.rect(ofRow: index).minY - (tableView.headerView?.frame.height ?? 0)
+        }
+
         func firstVisible() -> (first: Int, total: Int) {
             refresh()
-            let visible = tableView.rows(in: tableView.visibleRect)
+            let visible = tableView.rows(in: visibleRect())
             let declared = total > 0 ? total : node.children.count
             return (visible.length > 0 ? visible.location : 0, declared)
         }
@@ -19466,14 +19472,9 @@ private struct KayaNativeTable: View {
         func scroll(toRow index: Int) {
             guard index >= 0, index < numberOfRows(in: tableView) else { return }
             anchorRow = index
-            let rect = tableView.rect(ofRow: index)
             let clip = scrollView.contentView
-            // The header FLOATS above the clip; subtracting its height
-            // here over-scrolled by two rows (measured: expect_window
-            // read 7498 for a scroll to 7500) — the row's own minY IS
-            // the top.
             inProgrammaticScroll = true
-            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: kayaClipTop(clip, rect.minY)))
+            clip.scroll(to: NSPoint(x: clip.bounds.origin.x, y: kayaClipTop(clip, rowTop(index))))
             scrollView.reflectScrolledClipView(clip)
             inProgrammaticScroll = false
             report()
