@@ -1019,10 +1019,6 @@ def wired_scenes():
 # has no selection of its own to move.
 MODS = {
     "tracks": {"cut": "press down", "keep": "expect_tint expect_rows"},
-    # docs/traps.md, WinUI's pressed card unreadable: its Pressed fill and its
-    # PointerOver fill sit a lightness step apart on a card, so a read cannot
-    # tell the two; the pressed look is ItemContainer's own template.
-    "cards": {"cut": "pointer_down", "keep": "expect_selected expect_ax"},
 }
 
 

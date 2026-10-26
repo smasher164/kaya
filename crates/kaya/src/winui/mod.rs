@@ -27187,6 +27187,8 @@ impl crate::harness::Stage for WinUiStage {
             ];
             candidates.push(("hovered", resting[0].0));
             candidates.push(("hovered", resting[1].0));
+            candidates.push(("pressed", layered("ItemContainerPressedBackground", bare)?));
+            candidates.push(("pressed", layered("ItemContainerPressedBackground", card)?));
             let dist = |c: &[f64; 3]| (0..3).map(|k| (c[k] - got[k]).powi(2)).sum::<f64>();
             candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
             let hex = |c: &[f64; 3]| {
@@ -27283,6 +27285,25 @@ impl crate::harness::Stage for WinUiStage {
                     }
                 }
             }
+            // docs/traps.md, WinUI's pressed card unreadable: the two layers sit
+            // a lightness step apart, so the template's own state names which.
+            let state = match id {
+                Some(id) if matches!(candidates[0].0, "hovered" | "pressed") => skin::item_state(id)?,
+                _ => None,
+            };
+            let pressed = state.as_deref().is_some_and(|s| s.ends_with("Pressed"));
+            if !pressed {
+                candidates.retain(|(n, _)| *n != "pressed");
+            }
+            let front = if pressed {
+                Some("pressed")
+            } else {
+                state.as_deref().filter(|s| s.ends_with("PointerOver")).map(|_| "hovered")
+            };
+            if let Some(at) = front.and_then(|named| candidates.iter().position(|(n, _)| *n == named)) {
+                let chosen = candidates.remove(at);
+                candidates.insert(0, chosen);
+            }
             if candidates[0].0 == "hovered" {
                 if let Some(faint) = resting
                     .iter()
@@ -27293,14 +27314,15 @@ impl crate::harness::Stage for WinUiStage {
                 }
             }
             Ok(format!(
-                "{} (sampled {} at ({x},{y}) of a {}x{} print, {}, on a ground of {}; {})",
+                "{} (sampled {} at ({x},{y}) of a {}x{} print, {}, on a ground of {}; {}{})",
                 candidates[0].0,
                 hex(&got),
                 grab.width,
                 grab.height,
                 if dark { "dark" } else { "light" },
                 hex(&[ground[0], ground[1], ground[2]]),
-                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", hex(c))).collect::<Vec<_>>().join(", ")
+                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", hex(c))).collect::<Vec<_>>().join(", "),
+                state.map(|s| format!("; ItemContainer's CombinedStates reads {s}")).unwrap_or_default()
             ))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))

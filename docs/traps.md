@@ -18972,7 +18972,18 @@ PointerOver fill: ItemContainer's Pressed and PointerOver fills sit within
 a lightness step of each other on a card. The pressed look there is
 ItemContainer's own template, which kaya does not draw; the windows lane
 cuts cards at pointer_down (tools/lib/lanes/win.py MODS) and expect_fill
-offers no `pressed` on WinUI.
+offered no `pressed` on WinUI.
+
+SINCE 2026-10-26 the read names the state ItemContainer's own template shows:
+its root's `CombinedStates` group (generic.xaml: UnselectedNormal,
+UnselectedPointerOver, UnselectedPressed and the Selected ones) through
+`VisualStateManager::GetVisualStateGroups`, `skin::item_state`. `pressed` is
+answered only while that state ends in Pressed, and PointerOver puts hovered
+first. The pixels stay unable to say it: a held press read F5F5F5 and a hover
+F2F2F2 on a ground of F3F3F3. Watched red: the mouse-down cut read "hovered
+(... CombinedStates reads UnselectedPointerOver)", and the Pressed match cut
+read "none (sampled F5F5F5 ...; CombinedStates reads UnselectedPressed)". The
+windows lane runs the whole cards scene.
 
 ## A throttled host halves every lane (measured 2026-10-24)
 

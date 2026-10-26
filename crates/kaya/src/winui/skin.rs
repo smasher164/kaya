@@ -385,6 +385,29 @@ pub(super) fn frame_of(id: WidgetId) -> Option<Grid> {
     SKIN.with_borrow(|s| s.frames.get(&id.0).cloned())
 }
 
+/// The state ItemContainer's template shows for an activatable container, from
+/// its CombinedStates group (docs/traps.md, WinUI's pressed card unreadable).
+#[cfg(feature = "harness")]
+pub(super) fn item_state(id: WidgetId) -> windows_core::Result<Option<String>> {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let Some(host) = SKIN.with_borrow(|s| s.hosts.get(&id.0).cloned()) else { return Ok(None) };
+    if VisualTreeHelper::GetChildrenCount(&host)? == 0 {
+        return Ok(Some("<no template applied>".to_owned()));
+    }
+    let root: FrameworkElement = VisualTreeHelper::GetChild(&host, 0)?.cast()?;
+    let groups = bindings::Microsoft::UI::Xaml::VisualStateManager::GetVisualStateGroups(&root)?;
+    for i in 0..groups.Size()? {
+        let group = groups.GetAt(i)?;
+        if group.Name()? == "CombinedStates" {
+            return Ok(Some(match group.CurrentState() {
+                Ok(state) => state.Name()?.to_string(),
+                Err(_) => "<no current state>".to_owned(),
+            }));
+        }
+    }
+    Ok(Some(format!("<no CombinedStates group among {} on the template root>", groups.Size()?)))
+}
+
 /// Whether a container takes a click as a whole (its inset follows, Y4).
 pub(super) fn is_activatable(id: WidgetId) -> bool {
     SKIN.with_borrow(|s| s.hosts.contains_key(&id.0))

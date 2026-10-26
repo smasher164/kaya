@@ -15469,6 +15469,62 @@ pub mod Microsoft {
                 ) -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
+                IVisualState,
+                IVisualState_Vtbl,
+                0x4bb32ae8_0e28_5521_a7f5_66b661372994
+            );
+            impl windows_core::RuntimeType for IVisualState {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualState_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Name: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                Storyboard: usize,
+                SetStoryboard: usize,
+                Setters: usize,
+                StateTriggers: usize,
+            }
+            windows_core::imp::define_interface!(
+                IVisualStateGroup,
+                IVisualStateGroup_Vtbl,
+                0x8dfd691b_710c_5d6d_b71a_7a7f5ed54ac7
+            );
+            impl windows_core::RuntimeType for IVisualStateGroup {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_interface::<Self>();
+            }
+            #[repr(C)]
+            #[doc(hidden)]
+            pub struct IVisualStateGroup_Vtbl {
+                pub base__: windows_core::IInspectable_Vtbl,
+                pub Name: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                Transitions: usize,
+                pub States: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                ) -> windows_core::HRESULT,
+                pub CurrentState: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                CurrentStateChanged: usize,
+                pub RemoveCurrentStateChanged:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+                CurrentStateChanging: usize,
+                pub RemoveCurrentStateChanging:
+                    unsafe extern "system" fn(*mut core::ffi::c_void, i64) -> windows_core::HRESULT,
+            }
+            windows_core::imp::define_interface!(
                 IVisualStateManager,
                 IVisualStateManager_Vtbl,
                 0x342c8d32_ad61_5925_93d1_0c704df2a7d1
@@ -15516,7 +15572,17 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IVisualStateManagerOverrides_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                GoToStateCore: usize,
+                pub GoToStateCore: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    bool,
+                    *mut bool,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IVisualStateManagerProtected,
@@ -15531,8 +15597,22 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IVisualStateManagerProtected_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                RaiseCurrentStateChanging: usize,
-                RaiseCurrentStateChanged: usize,
+                pub RaiseCurrentStateChanging: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
+                pub RaiseCurrentStateChanged: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
             }
             windows_core::imp::define_interface!(
                 IVisualStateManagerStatics,
@@ -15547,7 +15627,12 @@ pub mod Microsoft {
             #[doc(hidden)]
             pub struct IVisualStateManagerStatics_Vtbl {
                 pub base__: windows_core::IInspectable_Vtbl,
-                GetVisualStateGroups: usize,
+                pub GetVisualStateGroups: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut core::ffi::c_void,
+                    *mut *mut core::ffi::c_void,
+                )
+                    -> windows_core::HRESULT,
                 CustomVisualStateManagerProperty: usize,
                 pub GetCustomVisualStateManager: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
@@ -18795,6 +18880,177 @@ pub mod Microsoft {
             }
             #[repr(transparent)]
             #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct VisualState(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                VisualState,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(VisualState, DependencyObject);
+            impl VisualState {
+                pub fn new() -> windows_core::Result<Self> {
+                    Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                }
+                fn IActivationFactory<
+                    R,
+                    F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        VisualState,
+                        windows_core::imp::IGenericFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                pub fn DispatcherQueue(
+                    &self,
+                ) -> windows_core::Result<super::Dispatching::DispatcherQueue> {
+                    let this = &windows_core::Interface::cast::<IDependencyObject>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DispatcherQueue)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Name(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Name)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for VisualState {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IVisualState>();
+            }
+            unsafe impl windows_core::Interface for VisualState {
+                type Vtable = <IVisualState as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IVisualState as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for VisualState {
+                const NAME: &'static str = "Microsoft.UI.Xaml.VisualState";
+            }
+            unsafe impl Send for VisualState {}
+            unsafe impl Sync for VisualState {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
+            pub struct VisualStateGroup(windows_core::IUnknown);
+            windows_core::imp::interface_hierarchy!(
+                VisualStateGroup,
+                windows_core::IUnknown,
+                windows_core::IInspectable
+            );
+            windows_core::imp::required_hierarchy!(VisualStateGroup, DependencyObject);
+            impl VisualStateGroup {
+                pub fn new() -> windows_core::Result<Self> {
+                    Self::IActivationFactory(|f| f.ActivateInstance::<Self>())
+                }
+                fn IActivationFactory<
+                    R,
+                    F: FnOnce(&windows_core::imp::IGenericFactory) -> windows_core::Result<R>,
+                >(
+                    callback: F,
+                ) -> windows_core::Result<R> {
+                    static SHARED: windows_core::imp::FactoryCache<
+                        VisualStateGroup,
+                        windows_core::imp::IGenericFactory,
+                    > = windows_core::imp::FactoryCache::new();
+                    SHARED.call(callback)
+                }
+                pub fn DispatcherQueue(
+                    &self,
+                ) -> windows_core::Result<super::Dispatching::DispatcherQueue> {
+                    let this = &windows_core::Interface::cast::<IDependencyObject>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).DispatcherQueue)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn Name(&self) -> windows_core::Result<windows_core::HSTRING> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).Name)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| core::mem::transmute(result__))
+                    }
+                }
+                pub fn States(
+                    &self,
+                ) -> windows_core::Result<windows_collections::IVector<VisualState>>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).States)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn CurrentState(&self) -> windows_core::Result<VisualState> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).CurrentState)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    }
+                }
+                pub fn RemoveCurrentStateChanged(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveCurrentStateChanged)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RemoveCurrentStateChanging(&self, token: i64) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RemoveCurrentStateChanging)(
+                            windows_core::Interface::as_raw(this),
+                            token,
+                        )
+                        .ok()
+                    }
+                }
+            }
+            impl windows_core::RuntimeType for VisualStateGroup {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::for_class::<Self, IVisualStateGroup>();
+            }
+            unsafe impl windows_core::Interface for VisualStateGroup {
+                type Vtable = <IVisualStateGroup as windows_core::Interface>::Vtable;
+                const IID: windows_core::GUID = <IVisualStateGroup as windows_core::Interface>::IID;
+            }
+            impl windows_core::RuntimeName for VisualStateGroup {
+                const NAME: &'static str = "Microsoft.UI.Xaml.VisualStateGroup";
+            }
+            unsafe impl Send for VisualStateGroup {}
+            unsafe impl Sync for VisualStateGroup {}
+            #[repr(transparent)]
+            #[derive(Clone, Debug, Eq, PartialEq)]
             pub struct VisualStateManager(windows_core::IUnknown);
             windows_core::imp::interface_hierarchy!(
                 VisualStateManager,
@@ -18823,6 +19079,106 @@ pub mod Microsoft {
                             windows_core::Interface::as_raw(this),
                             core::ptr::null_mut(),
                             &mut core::ptr::null_mut(),
+                            &mut result__,
+                        )
+                        .and_then(|| windows_core::Type::from_abi(result__))
+                    })
+                }
+                pub fn GoToStateCore<P0, P1, P3, P4>(
+                    &self,
+                    control: P0,
+                    templateroot: P1,
+                    statename: &windows_core::HSTRING,
+                    group: P3,
+                    state: P4,
+                    usetransitions: bool,
+                ) -> windows_core::Result<bool>
+                where
+                    P0: windows_core::Param<Controls::Control>,
+                    P1: windows_core::Param<FrameworkElement>,
+                    P3: windows_core::Param<VisualStateGroup>,
+                    P4: windows_core::Param<VisualState>,
+                {
+                    let this =
+                        &windows_core::Interface::cast::<IVisualStateManagerOverrides>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GoToStateCore)(
+                            windows_core::Interface::as_raw(this),
+                            control.param().abi(),
+                            templateroot.param().abi(),
+                            core::mem::transmute_copy(statename),
+                            group.param().abi(),
+                            state.param().abi(),
+                            usetransitions,
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn RaiseCurrentStateChanging<P0, P1, P2, P3>(
+                    &self,
+                    stategroup: P0,
+                    oldstate: P1,
+                    newstate: P2,
+                    control: P3,
+                ) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<VisualStateGroup>,
+                    P1: windows_core::Param<VisualState>,
+                    P2: windows_core::Param<VisualState>,
+                    P3: windows_core::Param<Controls::Control>,
+                {
+                    let this =
+                        &windows_core::Interface::cast::<IVisualStateManagerProtected>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RaiseCurrentStateChanging)(
+                            windows_core::Interface::as_raw(this),
+                            stategroup.param().abi(),
+                            oldstate.param().abi(),
+                            newstate.param().abi(),
+                            control.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn RaiseCurrentStateChanged<P0, P1, P2, P3>(
+                    &self,
+                    stategroup: P0,
+                    oldstate: P1,
+                    newstate: P2,
+                    control: P3,
+                ) -> windows_core::Result<()>
+                where
+                    P0: windows_core::Param<VisualStateGroup>,
+                    P1: windows_core::Param<VisualState>,
+                    P2: windows_core::Param<VisualState>,
+                    P3: windows_core::Param<Controls::Control>,
+                {
+                    let this =
+                        &windows_core::Interface::cast::<IVisualStateManagerProtected>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).RaiseCurrentStateChanged)(
+                            windows_core::Interface::as_raw(this),
+                            stategroup.param().abi(),
+                            oldstate.param().abi(),
+                            newstate.param().abi(),
+                            control.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn GetVisualStateGroups<P0>(
+                    obj: P0,
+                ) -> windows_core::Result<windows_collections::IVector<VisualStateGroup>>
+                where
+                    P0: windows_core::Param<FrameworkElement>,
+                {
+                    Self::IVisualStateManagerStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).GetVisualStateGroups)(
+                            windows_core::Interface::as_raw(this),
+                            obj.param().abi(),
                             &mut result__,
                         )
                         .and_then(|| windows_core::Type::from_abi(result__))

@@ -211,6 +211,9 @@ fn main() {
         "Microsoft.UI.Xaml.Style".to_string(),
         // The back button's hover read without the pointer (docs/media-player-plan.md M23 (2)).
         "Microsoft.UI.Xaml.VisualStateManager".to_string(),
+        // A card's pressed look is ItemContainer's CombinedStates (docs/traps.md, WinUI's pressed card unreadable).
+        "Microsoft.UI.Xaml.VisualStateGroup".to_string(),
+        "Microsoft.UI.Xaml.VisualState".to_string(),
         "Microsoft.Windows.ApplicationModel.Resources.ResourceManager".to_string(),
         "Microsoft.Windows.ApplicationModel.Resources.ResourceMap".to_string(),
         "Microsoft.Windows.ApplicationModel.Resources.ResourceCandidate".to_string(),
