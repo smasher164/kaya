@@ -19187,7 +19187,12 @@ pointer verbs alone:
   hit-test through it (hits_at). The touch was missed at first: the matrix
   of 2026-10-26 read chat_go red on Windows, "the touch swipe ... left no
   button labelled \"Mark unread\" at rest", since a touch no ground takes
-  opens no SwipeControl, and that change's --only run had no chat scene. The VM's cursor rests where the
+  opens no SwipeControl, and that change's --only run had no chat scene.
+  Driving the pointer from inject_touch was not enough: the leg alone still
+  failed 3 of 3 with the swipe's sentence reading "the window ground takes
+  hits: true", because the touch went in before the compositor drew the
+  change. drive_pointer now waits for two Rendering frames (2 s bound,
+  logged when it runs out); 4 of 4 passed alone. The VM's cursor rests where the
   last pointer leg left it, in slot 0, where pooled legs open.
 - A tool that drives the real pointer at a harness guest on purpose sets
   KAYA_REAL_POINTER=1 (tools/mac/dragwitness-leg.py, tools/mac/dragwitness/run.py,

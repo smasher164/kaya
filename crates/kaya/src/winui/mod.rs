@@ -21849,6 +21849,27 @@ impl WinUiStage {
             }
             Ok(())
         });
+        // docs/traps.md, the WinUI ground under the harness: a touch injected
+        // before the compositor has drawn the change reaches no SwipeControl.
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let token = Self::on_ui(move |_core| {
+            let frames = std::sync::atomic::AtomicU32::new(0);
+            let tx = std::sync::Mutex::new(Some(tx));
+            let handler = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                if frames.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 1
+                    && let Some(tx) = tx.lock().unwrap().take()
+                {
+                    let _ = tx.send(());
+                }
+                Ok(())
+            });
+            CompositionTarget::Rendering(&handler)
+        });
+        let drawn = rx.recv_timeout(std::time::Duration::from_secs(2)).is_ok();
+        Self::on_ui(move |_core| CompositionTarget::RemoveRendering(token));
+        if !drawn {
+            eprintln!("kaya: winui drive_pointer: no frame drawn within 2s of the ground taking hits");
+        }
     }
 
     fn on_ui<T: Send + 'static>(
@@ -23855,11 +23876,15 @@ impl crate::harness::Stage for WinUiStage {
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
             let Some((bx, by, bw, bh)) = settled else {
+                let ground = Self::on_ui_read(|core| core.window.Content()?.IsHitTestVisible())
+                    .map_or_else(|e| format!("<unreadable: {e}>"), |v| v.to_string());
                 return format!(
                     "the touch swipe {:?} -> {:?} across {t:?} left no button labelled {label:?} \
-                     at rest inside the row's {rect:?} within 2s (last read {last:?})",
+                     at rest inside the row's {rect:?} within 2s (last read {last:?}); the window \
+                     ground takes hits: {ground}, the harness pointer driven: {}",
                     path[0],
-                    path[path.len() - 1]
+                    path[path.len() - 1],
+                    POINTER_DRIVEN.load(std::sync::atomic::Ordering::SeqCst)
                 );
             };
             // A SLEEP, because SwipeControl publishes no idle state: a touch
