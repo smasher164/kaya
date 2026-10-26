@@ -852,17 +852,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         let projects_root = tx
             .column(|tx| {
                 for mut row in projects_coll.rows(tx) {
-                    row.row(|t| {
+                    let (project, _) = row.row(|t| {
                         let name = t.label(ProjectRow::name());
                         t.a11y_id(name, "name");
                         let count = t.caption(ProjectRow::count());
                         t.a11y_id(count, "pcount");
                         t.spacer();
-                        let open = t.button(kaya::tr!("open").as_str());
-                        t.a11y_id(open, "open");
-                        t.role(open, kaya::Role::Plain);
-                        msgs.on_click_node(open, Msg::OpenProject);
                     });
+                    row.a11y_id(project, "proj");
+                    row.on_activate(project, &msgs, Msg::OpenProject);
                 }
             })
             .id();

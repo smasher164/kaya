@@ -8,10 +8,16 @@
 expect_title "chat"
 expect label@unread[maya] "4 new"
 expect label@unread[sam] "1 new"
-# A thread's plain open button sits on its preview's text column (docs/media-player-plan.md M20 (1)).
-expect_text_aligned button@open[maya] label@preview[maya]
-click button@open[maya]
+# A conversation's row takes the click as a whole and wears the platform's
+# selected surface while its thread is open; the unread count is the row's one
+# accent word (docs/styling-pass-plan.md Y4, Y7). A phone's list sits under the
+# pushed thread, so the phone lanes drop the two reads of it while it is open.
+expect_tint label@unread[maya] accent
+expect_selected row@open[alex] off
+click row@open[maya]
 expect_scrolled_to column@thread m27
+expect_selected row@open[maya] on
+expect_selected row@open[sam] off
 expect label@unread[maya] ""
 click button@quote[m27]
 expect_scrolled_to column@thread m03
@@ -116,4 +122,4 @@ expect_swipe_actions row@convo[maya] "leading:Mark unread/trailing_full:Archive"
 swipe_action row@convo[maya] "Mark unread"
 expect label@unread[maya] "1 new"
 swipe_action row@convo[alex] "Archive"
-expect_no_target button@open[alex]
+expect_no_target row@convo[alex]

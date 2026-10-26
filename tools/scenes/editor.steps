@@ -178,6 +178,8 @@ menu_activate "Format>Formatting Bar"
 click button@bold[format]
 expect label#0 "bold 132:134"
 expect_runs textarea#0 "132:134 bold"
+expect_help button@heading1[format] "Format as heading 1"
+expect_help button@heading2[format] "Format as heading 2"
 click button@heading1[format]
 expect label#0 "heading1 125:134"
 expect_runs textarea#0 "125:134 block=heading1|132:134 bold"

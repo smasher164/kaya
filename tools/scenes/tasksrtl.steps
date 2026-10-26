@@ -68,7 +68,7 @@ expect label@caption[t2] "{fmt:date_weekday 2026-09-08}"
 select_section 4
 expect_section "المشاريع"
 expect label@pcount[trip] "مهمتان"
-click button@open[trip]
+click row@proj[trip]
 expect_entries 1
 expect_order column@rows "Book the flights|Renew passport"
 back

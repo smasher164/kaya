@@ -438,14 +438,17 @@ func App() *kaya.App {
 			formatRows = tx.Collection()
 			for row := range tx.Rows(formatRows).All() {
 				bar := row.Row(func() {
-					for _, act := range []struct{ id, title string }{
-						{"bold", "Bold"}, {"italic", "Italic"}, {"underline", "Underline"},
-						{"strike", "Strike"}, {"code", "Code"},
-						{"heading1", "H1"}, {"heading2", "H2"}, {"quote", "Quote"},
-						{"body", "Body"},
+					for _, act := range []struct{ id, title, help string }{
+						{"bold", "Bold", ""}, {"italic", "Italic", ""}, {"underline", "Underline", ""},
+						{"strike", "Strike", ""}, {"code", "Code", ""},
+						{"heading1", "H1", "Format as heading 1"}, {"heading2", "H2", "Format as heading 2"},
+						{"quote", "Quote", ""}, {"body", "Body", ""},
 					} {
 						n := row.Button(act.title)
 						row.SetA11yID(n, act.id)
+						if act.help != "" {
+							row.SetHelp(n, act.help)
+						}
 						acts[act.id] = n
 					}
 				})

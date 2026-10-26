@@ -49,7 +49,7 @@ select_section 4
 expect_section "Projects"
 expect label@pcount[trip] "2 tasks"
 expect_no_clipping
-click button@open[trip]
+click row@proj[trip]
 expect_entries 1
 expect_order column@rows "Book the flights|Renew passport"
 expect_no_clipping

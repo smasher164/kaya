@@ -596,6 +596,28 @@ leg's picture, and the picker's process log (check-steps holds them;
 docs/traps.md). Read those first on the next sighting (the bundle is kept
 under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
 
+## DEFER — `grow` on a Rust template node (found 2026-10-26)
+
+Go's template zone sets a stamped node's grow (`Tpl.SetGrow`); Rust's `Tpl` has no grow setter, only
+`spacer()`, and a spacer inside a container does not make the container grow. So a Rust row cannot
+make one stamped child take the row's free width, which is what an activatable title beside a
+checkbox needs (the task manager's rows, which keep their Details button for it). The other seven
+bindings were not read. Settle with a census of the template grow spelling in all nine before a Rust
+app needs it.
+KEY: template grow, SetGrow, Tpl grow, tasks.rs Details.
+
+## OPEN — WinUI refuses swipes on an activatable row (measured 2026-10-26)
+
+A stamped row that is activatable (`on_activate`, docs/styling-pass-plan.md Y4) and carries a
+context menu with swipe items fails its first transaction on WinUI: "kaya: lowering the row swipes
+failed: The parameter is incorrect. (0x80070057)" (chat_go, 2026-10-26, while the chat app's
+conversation row was made activatable). `sync_swipe_hosts` reseats the anchor's `inner_element()`
+into a SwipeControl, and an activatable container's inner element is the child of its ItemContainer
+(crates/kaya/src/winui/mod.rs). The other backends took the same row. The chat app puts its swipes on
+a plain row around the activatable one until this is fixed; a scene that combines the two on one row
+on every lane is the guard to add with the fix.
+KEY: swipe activatable, sync_swipe_hosts, ItemContainer, row@open.
+
 ## ~~OPEN — a phone's scroll_to_row parks the row under the table's pinned header (iOS and Compose, measured 2026-10-26)~~ FIXED 2026-10-26: both phone tiers park the row at the pinned header's foot (iOS: the row ground's scroll anchor placed by the header block's height over the viewport less the row; Compose: the row's top less headerBlockPx), count the first visible row from the foot, and their readers cut a row by what the header covers (iOS kayaVisibleFrame and the table's expect_scrolled_to, Compose kayaSkinUnseen and scrolledTo); the phones' netimage cut is gone and netimage.steps' tail runs on all five lanes, watched red with each park's subtraction cut (iOS `<clipped by its parents: frame (32,513,40x40), visible (32,546,40x7)>`, Compose `frame (32,384,40,40), visible (32,418,40,6)`)
 KEY: scroll_to_row, pinned header, KayaHeaderPin, headerRestPx, park, netimage.steps, expect_window column@tracks 0
 

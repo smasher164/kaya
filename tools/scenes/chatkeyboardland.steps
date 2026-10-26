@@ -3,7 +3,7 @@
 # nothing is asserted of the thread while the keyboard is up. A phone's script,
 # run by an app pinned to landscape (A13: the desktops have no software keyboard).
 expect_title "chat"
-click button@open[maya]
+click row@open[maya]
 click button@newest
 expect_scrolled_to column@thread m30
 click textarea@compose

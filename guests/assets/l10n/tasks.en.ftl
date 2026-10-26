@@ -40,7 +40,6 @@ search = Search
 new-task = New task
 add = Add
 details = Details
-open = Open
 # Settings
 week-starts-on = Week starts on
 monday = Monday

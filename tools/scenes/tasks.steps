@@ -149,7 +149,7 @@ select_section 4
 expect_section "Projects"
 expect label@name[trip] "Trip"
 expect label@pcount[trip] "2 tasks"
-click button@open[trip]
+click row@proj[trip]
 expect_entries 1
 expect_order column@rows "Book the flights|Renew passport"
 drag label@ptitle[t6] to label@ptitle[t5] before

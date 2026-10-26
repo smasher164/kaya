@@ -19,9 +19,10 @@ import (
 
 //go:generate go run dev.kaya/cmd/kaya-gen -type Conversation -key string
 type Conversation struct {
-	Name    string
-	Preview string
-	Unread  string
+	Name     string
+	Preview  string
+	Unread   string
+	Selected bool
 }
 
 //go:generate go run dev.kaya/cmd/kaya-gen -type Message -key string
@@ -89,7 +90,7 @@ func App() *kaya.App {
 		}
 		refresh := func(tx *kaya.Tx, c *conversation) {
 			last := c.messages[len(c.messages)-1]
-			list.Update(tx, c.id, Conversation{Name: c.name, Preview: last.text, Unread: unreadText(c)})
+			list.Update(tx, c.id, Conversation{Name: c.name, Preview: last.text, Unread: unreadText(c), Selected: c.id == open})
 		}
 		insert := func(tx *kaya.Tx, m message) {
 			switch {
@@ -148,15 +149,27 @@ func App() *kaya.App {
 			refresh(tx, c)
 		}
 
+		selectOpen := func(tx *kaya.Tx, id string, on bool) {
+			if convs[id] != nil {
+				ConversationPatch(list, tx, id).Selected(on)
+			}
+		}
 		openThread := func(tx *kaya.Tx, id string) {
 			c := convs[id]
 			if open != "" {
+				selectOpen(tx, open, false)
 				tx.PopEntry()
 			}
 			open = id
+			selectOpen(tx, id, true)
 			entry := tx.PushEntry(threadEntry).
 				Title(c.name).
-				OnPopped(func(tx *kaya.Tx) { open = "" }).
+				OnPopped(func(tx *kaya.Tx) {
+					if open == id {
+						selectOpen(tx, id, false)
+						open = ""
+					}
+				}).
 				Id()
 			var compose kaya.Widget
 			send := func(tx *kaya.Tx, text string) {
@@ -410,19 +423,29 @@ func App() *kaya.App {
 
 		tx.Mount(tx.Column(func() {
 			for row := range ConversationRows(tx, list).All() {
+				// The swipes sit on a plain row around the activatable one: WinUI
+				// cannot lower swipes on an activatable container
+				// (docs/deferred.md, swipes on an activatable row).
+				var opener kaya.Node
 				convo := row.Row(func() {
-					row.Column(func() {
-						name := row.Button(row.Name(), openThread)
-						row.SetA11yID(name, "open")
-						row.SetRole(name, kaya.RolePlain)
-						preview := row.Caption(row.Preview())
-						row.SetA11yID(preview, "preview")
+					opener = row.Row(func() {
+						row.Column(func() {
+							name := row.Label(row.Name())
+							row.SetA11yID(name, "name")
+							preview := row.Caption(row.Preview())
+							row.SetA11yID(preview, "preview")
+						})
+						row.Spacer()
+						unread := row.Label(row.Unread())
+						row.SetA11yID(unread, "unread")
+						row.SetTint(unread, kaya.TintAccent)
 					})
-					row.Spacer()
-					unread := row.Label(row.Unread())
-					row.SetA11yID(unread, "unread")
+					row.SetGrow(opener, 1)
 				})
 				row.SetA11yID(convo, "convo")
+				row.SetA11yID(opener, "open")
+				row.BindSelected(opener, row.Selected())
+				opener.OnActivate(func(tx *kaya.Tx, keys []any) { openThread(tx, keys[0].(string)) })
 				row.ContextMenu(convo, rowActions)
 			}
 		}))

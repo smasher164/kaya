@@ -41,7 +41,6 @@ search = بحث
 new-task = مهمة جديدة
 add = إضافة
 details = التفاصيل
-open = فتح
 week-starts-on = يبدأ الأسبوع يوم
 monday = الاثنين
 sunday = الأحد
