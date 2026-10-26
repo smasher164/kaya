@@ -5466,6 +5466,18 @@ fn harness_drives_frames() -> bool {
     std::env::var_os("KAYA_SELFTEST").is_some()
 }
 
+/// docs/traps.md, a mac card read hovered under the host's resting pointer:
+/// under the harness a window is no pointer target until a verb drives the
+/// pointer itself. KAYA_REAL_POINTER=1 is the opt-in of a tool that drives
+/// the real pointer on purpose.
+static POINTER_DRIVEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn pointer_ignored() -> bool {
+    harness_drives_frames()
+        && std::env::var_os("KAYA_REAL_POINTER").is_none_or(|v| v != "1")
+        && !POINTER_DRIVEN.load(Ordering::SeqCst)
+}
+
 /// THE WINDOW'S FRAME CLOCK: the one reader of every canvas's track, and the
 /// platform's frame drive outside the harness. ONE PER WINDOW, never one per
 /// canvas — GTK has a frame clock per surface, so a second callback would
@@ -7515,6 +7527,9 @@ fn read_app_icon(probe: &IdentityProbe) -> String {
 fn install_nav_chrome(window: &gtk4::Window, id: u64) -> WindowChrome {
     use adw::prelude::{AdwApplicationWindowExt, AdwWindowExt};
     use gtk4::prelude::{ButtonExt, ObjectExt, WidgetExt};
+    if pointer_ignored() {
+        window.set_can_target(false);
+    }
     let header = adw::HeaderBar::new();
     let back = gtk4::Button::from_icon_name("go-previous-symbolic");
     back.set_tooltip_text(Some(&glib::dgettext(Some("libadwaita"), "Back")));
@@ -20966,6 +20981,69 @@ impl GtkStage {
         })
     }
 
+    /// The harness's own pointer from here on: every window takes it again.
+    fn drive_pointer() {
+        if POINTER_DRIVEN.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        Self::on_main(|core| {
+            for window in std::iter::once(&core.window).chain(core.aux_windows.values()) {
+                window.set_can_target(true);
+            }
+        });
+    }
+
+    /// The pointer over the target's centre, `off` from it, by the lane's
+    /// own pointer (tools/linux/dragdrive.py's `move`; a held wlpointer on
+    /// wayland), so GTK's crossing sees it as a person's (docs/styling-pass-plan.md §5).
+    fn place_pointer(t: crate::harness::Target, verb: &'static str, off: (f64, f64)) {
+        let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
+            panic!("kaya: {verb}: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py")
+        });
+        Self::await_frames(2);
+        let point = Self::on_main(move |core| {
+            let widget = skin_layout_widget(core, t)?;
+            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
+            let b = widget.compute_bounds(&window)?;
+            Some((
+                f64::from(b.x()) + f64::from(b.width()) / 2.0 + off.0,
+                f64::from(b.y()) + f64::from(b.height()) / 2.0 + off.1,
+                gtk4::prelude::NativeExt::surface_transform(&window),
+            ))
+        });
+        let Some((x, y, transform)) = point else {
+            panic!("kaya: {verb} {}: no laid-out widget in a window", crate::harness::target_spec(&t))
+        };
+        let wayland = linux_wayland_session();
+        let out = std::process::Command::new("python3")
+            .arg(&driver)
+            .args([if wayland { "locate" } else { "move" }, if wayland { "wayland" } else { "x11" }])
+            .arg(std::process::id().to_string())
+            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
+            .output()
+            .unwrap_or_else(|e| panic!("kaya: {verb}: {driver} could not be run: {e}"));
+        if wayland && out.status.success() {
+            hold_wayland_pointer(&String::from_utf8_lossy(&out.stdout));
+        }
+        crate::vtrace::note(
+            verb,
+            format_args!(
+                "{} at ({x}, {y}) -> exit {:?} {}{}",
+                crate::harness::target_spec(&t),
+                out.status.code(),
+                String::from_utf8_lossy(&out.stdout).trim(),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+        );
+        assert!(
+            out.status.success(),
+            "kaya: {verb}: the pointer move failed ({}): {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        Self::await_frames(2);
+    }
+
     fn on_main<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> T + Send + 'static,
     ) -> T {
@@ -22751,6 +22829,7 @@ impl crate::harness::Stage for GtkStage {
     /// wlpointer child kept alive on wayland, pressed on the thumb GtkRange
     /// reports and walked to the value's point.
     fn hold(&self, t: crate::harness::Target, to: Option<f64>) -> Result<(), String> {
+        Self::drive_pointer();
         let driver = std::env::var(DRAG_DRIVER_VAR)
             .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer"))?;
         Self::await_frames(2);
@@ -23021,7 +23100,11 @@ impl crate::harness::Stage for GtkStage {
             else {
                 return "<the trough is not in the window>".to_owned();
             };
-            let Some(hit) = core.window.pick(f64::from(p.x()), f64::from(p.y()), gtk4::PickFlags::DEFAULT) else {
+            let ignored = !core.window.can_target();
+            core.window.set_can_target(true);
+            let hit = core.window.pick(f64::from(p.x()), f64::from(p.y()), gtk4::PickFlags::DEFAULT);
+            core.window.set_can_target(!ignored);
+            let Some(hit) = hit else {
                 return "<nothing>".to_owned();
             };
             if hit.is_ancestor(&pair.low) || hit == *pair.low.upcast_ref::<gtk4::Widget>() {
@@ -23076,6 +23159,7 @@ impl crate::harness::Stage for GtkStage {
     /// the press runs gtk_spin_button_update and one step, and the release
     /// comes inside the 200ms before GTK's autorepeat would step again.
     fn nudge(&self, t: crate::harness::Target, up: bool) {
+        Self::drive_pointer();
         if t.kind == crate::harness::TargetKind::Slider {
             Self::scale_key(t, up, move |core| {
                 let i = crate::harness::try_resolve(t.index, core.sliders.len())?;
@@ -23922,6 +24006,7 @@ impl crate::harness::Stage for GtkStage {
         reorder: Option<bool>,
         across: Option<u32>,
     ) -> String {
+        Self::drive_pointer();
         let driver = match std::env::var(DRAG_DRIVER_VAR) {
             Ok(path) if !path.is_empty() => path,
             _ => {
@@ -24600,57 +24685,16 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    /// The pointer over the target's centre by the lane's own pointer
-    /// (tools/linux/dragdrive.py's `move`), so GTK's crossing sets the hover
-    /// state the stylesheet paints (docs/styling-pass-plan.md §5).
     fn hover(&self, t: crate::harness::Target) {
-        let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
-            panic!("kaya: hover: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py")
-        });
-        Self::await_frames(2);
-        let point = Self::on_main(move |core| {
-            let widget = skin_layout_widget(core, t)?;
-            let window = widget.root().and_then(|r| r.downcast::<gtk4::Window>().ok())?;
-            let b = widget.compute_bounds(&window)?;
-            Some((
-                f64::from(b.x()) + f64::from(b.width()) / 2.0,
-                f64::from(b.y()) + f64::from(b.height()) / 2.0,
-                gtk4::prelude::NativeExt::surface_transform(&window),
-            ))
-        });
-        let Some((x, y, transform)) = point else {
-            panic!("kaya: hover {}: no laid-out widget in a window", crate::harness::target_spec(&t))
-        };
-        let wayland = linux_wayland_session();
-        let out = std::process::Command::new("python3")
-            .arg(&driver)
-            .args([if wayland { "locate" } else { "move" }, if wayland { "wayland" } else { "x11" }])
-            .arg(std::process::id().to_string())
-            .args([transform.0, transform.1, x, y].iter().map(|v| (v.round() as i64).to_string()))
-            .output()
-            .unwrap_or_else(|e| panic!("kaya: hover: {driver} could not be run: {e}"));
-        if wayland && out.status.success() {
-            hold_wayland_pointer(&String::from_utf8_lossy(&out.stdout));
-        }
-        crate::vtrace::note(
-            "hover",
-            format_args!(
-                "{} at ({x}, {y}) -> exit {:?} {}{}",
-                crate::harness::target_spec(&t),
-                out.status.code(),
-                String::from_utf8_lossy(&out.stdout).trim(),
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
-        );
-        assert!(
-            out.status.success(),
-            "kaya: hover: the pointer move failed ({}): {}",
-            out.status,
-            String::from_utf8_lossy(&out.stderr).trim()
-        );
-        Self::await_frames(2);
+        Self::drive_pointer();
+        Self::place_pointer(t, "hover", (0.0, 0.0));
+    }
+    fn rest_pointer(&self, t: crate::harness::Target) -> Result<(), String> {
+        Self::place_pointer(t, "rest_pointer", (6.0, 3.0));
+        Ok(())
     }
     fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
+        Self::drive_pointer();
         use std::os::unix::process::CommandExt;
         let driver = std::env::var(DRAG_DRIVER_VAR)
             .map_err(|_| format!("{DRAG_DRIVER_VAR} is unset, so this lane has no pointer: export it naming tools/linux/dragdrive.py"))?;
@@ -25818,6 +25862,7 @@ impl crate::harness::Stage for GtkStage {
 
     /// tools/linux/dragdrive.py's `move`, nudge's route with no button.
     fn move_pointer(&self, window: u64, spot: crate::harness::PointerSpot) {
+        Self::drive_pointer();
         let driver = std::env::var(DRAG_DRIVER_VAR).unwrap_or_else(|_| {
             panic!(
                 "kaya: move_pointer: {DRAG_DRIVER_VAR} is unset, so this lane has no pointer: \

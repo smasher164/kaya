@@ -34,6 +34,9 @@ expect_no_clipping
 expect_no_overlap
 # M16 (3): a When showing nothing and an empty For take no space and no gap.
 expect_gap label@status label@end 16
+# docs/traps.md, a mac card read hovered under the host's resting pointer.
+rest_pointer column@card2
+expect_fill column@card2 neutral
 hover column@card2
 expect_fill column@card2 hovered
 expect_fill column@card1 neutral

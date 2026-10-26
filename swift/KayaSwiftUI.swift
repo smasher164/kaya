@@ -5048,6 +5048,8 @@ var kayaTearingDown: Set<UInt64> = []
     /// deduplicated against what the store already holds — and every
     /// harness step after a resize is a hop to that loop.
     nonisolated(unsafe) var kayaFrameCoalesced: Set<UInt64> = []
+    /// Windows rest_pointer moved under the host's pointer: never remembered.
+    nonisolated(unsafe) var kayaPointerRested: Set<UInt64> = []
 
     /// Which windows are wearing a remembered frame, and the size the app
     /// had declared when it went on. THE MEMORY WINS OVER THE
@@ -5181,6 +5183,7 @@ var kayaTearingDown: Set<UInt64> = []
 
     func kayaNoteWindowFrame(_ windowId: UInt64, _ window: NSWindow) {
         guard !kayaFrameMemoryInert else { return }
+        guard !kayaPointerRested.contains(windowId) else { return }
         guard kayaScene.windows[windowId]?.rememberFrame != false else { return }
         guard !kayaFrameCoalesced.contains(windowId) else { return }
         kayaFrameCoalesced.insert(windowId)
@@ -12858,6 +12861,9 @@ private func kayaRunScript(_ script: String) {
                 }
             case "pointer_up":
                 if let why = DispatchQueue.main.sync(execute: { kayaPointerUp() }) { failures.append(why) }
+            case "rest_pointer":
+                kayaAwaitQuiet()
+                if let why = DispatchQueue.main.sync(execute: { kayaRestPointer(parts[1]) }) { failures.append(why) }
             case "hover":
                 // The platform's own hover route (docs/styling-pass-plan.md §5):
                 // a mouse-moved event over the target through the window, in
@@ -15359,6 +15365,9 @@ private func kayaRunScript(_ script: String) {
             print("KAYA_HARNESS: step-failed \(left)")
         }
     }
+    #endif
+    #if os(macOS)
+        kayaPutBackHostPointer()
     #endif
     if failures.isEmpty && observed.isEmpty {
         failures.append("script has no expects")
@@ -22002,6 +22011,7 @@ struct KayaActivatable: ViewModifier {
             .buttonStyle(KayaActivatableStyle(node: node, hovering: hovering))
             #if os(macOS)
                 .onHover { inside in
+                    guard kayaTakesHover() else { return }
                     hovering = inside
                     if inside { kayaHovered.insert(node.id) } else { kayaHovered.remove(node.id) }
                 }
@@ -22078,6 +22088,16 @@ struct KayaLabelTint: ViewModifier {
         }
     }
 }
+
+#if os(macOS)
+    /// docs/traps.md, a mac card read hovered under the host's resting pointer:
+    /// under the harness a hover moves only while the hover verb delivers one.
+    /// KAYA_REAL_POINTER=1 is the opt-in of a tool that drives the real pointer.
+    let kayaHostPointerIgnored = kayaHarnessActive && ProcessInfo.processInfo.environment["KAYA_REAL_POINTER"] != "1"
+    @MainActor var kayaHoverDelivering = false
+
+    @MainActor func kayaTakesHover() -> Bool { !kayaHostPointerIgnored || kayaHoverDelivering }
+#endif
 
 /// Where the HOST's own pointer rests against `node`, for a fill read that
 /// failed: a real pointer hovers what it rests on, and the lane leaves it
@@ -22984,6 +23004,95 @@ func kayaCellText(_ node: KayaNode) -> String? {
     #endif
 }
 
+/// rest_pointer on the Mac (docs/traps.md, a mac card read hovered under the
+/// host's resting pointer); check-exclusive holds its one post site.
+#if os(macOS)
+    nonisolated(unsafe) var kayaHostPointerHome: CGPoint?
+    let kayaHostPointerIdleS = 20.0
+
+    func kayaHostPointerLock() -> Bool {
+        let fd = open(NSTemporaryDirectory() + "kaya-host-pointer.lock", O_CREAT | O_RDWR, 0o644)
+        return fd >= 0 && flock(fd, LOCK_EX | LOCK_NB) == 0
+    }
+
+    func kayaPostPointerMove(_ at: CGPoint) {
+        CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: at, mouseButton: .left)?
+            .post(tap: .cghidEventTap)
+    }
+
+    func kayaPutBackHostPointer() {
+        guard let home = kayaHostPointerHome else { return }
+        kayaHostPointerHome = nil
+        kayaPostPointerMove(home)
+        kayaDiag("rest_pointer: the host's pointer put back at (\(Int(home.x)), \(Int(home.y)))")
+    }
+
+    @MainActor func kayaTopWindowAt(_ screen: NSPoint) -> String {
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        let at = CGPoint(x: screen.x, y: height - screen.y)
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] ?? []
+        for info in list where (info[kCGWindowLayer as String] as? Int) == 0 {
+            guard let bounds = info[kCGWindowBounds as String] as? NSDictionary,
+                let rect = CGRect(dictionaryRepresentation: bounds), rect.contains(at),
+                (info[kCGWindowAlpha as String] as? Double ?? 1) > 0
+            else { continue }
+            let pid = info[kCGWindowOwnerPID as String] as? Int32 ?? 0
+            let number = info[kCGWindowNumber as String] as? Int ?? 0
+            return pid == getpid()
+                ? "this guest's window \(number)" : "\(info[kCGWindowOwnerName as String] ?? "?")'s window \(number)"
+        }
+        return "no window"
+    }
+#endif
+
+@MainActor func kayaRestPointer(_ spec: Substring) -> String? {
+    guard let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) else {
+        return "no such target \(spec)"
+    }
+    #if os(macOS)
+        guard let frame = kayaSkinFrame(node) else { return "\(spec) has no laid-out frame to rest the pointer on" }
+        guard let (windowId, window) = kayaNSWindows.sorted(by: { $0.key < $1.key }).first.map({ ($0.key, $0.value) }),
+            let content = window.contentView
+        else { return "no window to rest the pointer on" }
+        func onScreen(_ local: CGPoint) -> NSPoint {
+            window.convertPoint(
+                toScreen: content.convert(
+                    content.isFlipped ? local : CGPoint(x: local.x, y: content.bounds.height - local.y), to: nil))
+        }
+        let pointer = NSEvent.mouseLocation
+        let aside = onScreen(CGPoint(x: frame.midX + 6, y: frame.midY + 3))
+        kayaPointerRested.insert(windowId)
+        window.setFrameOrigin(
+            NSPoint(x: window.frame.minX + pointer.x - aside.x, y: window.frame.minY + pointer.y - aside.y))
+        window.orderFrontRegardless()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        let idle = CGEventSource.secondsSinceLastEventType(.hidSystemState, eventType: CGEventType(rawValue: ~0)!)
+        let height = NSScreen.screens.first?.frame.height ?? 0
+        let moved: String
+        if idle < kayaHostPointerIdleS {
+            moved = "not moved: the host is in use (idle \(Int(idle)) s, wants \(Int(kayaHostPointerIdleS)))"
+        } else if !kayaHostPointerLock() {
+            moved = "not moved: another process holds the host's pointer"
+        } else {
+            let centre = onScreen(CGPoint(x: frame.midX, y: frame.midY))
+            let home = NSEvent.mouseLocation
+            kayaHostPointerHome = CGPoint(x: home.x, y: height - home.y)
+            kayaPostPointerMove(CGPoint(x: centre.x, y: height - centre.y))
+            moved = "moved onto the target's centre (idle \(Int(idle)) s)"
+            RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        }
+        let now = content.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+        let at = CGPoint(x: now.x, y: content.isFlipped ? now.y : content.bounds.height - now.y)
+        kayaDiag(
+            "rest_pointer \(spec): the host's pointer \(moved), at (\(Int(at.x)), \(Int(at.y))) in the window, "
+                + "\(frame.contains(at) ? "over" : "outside") the target \(frame); on top there: "
+                + kayaTopWindowAt(NSEvent.mouseLocation))
+        return nil
+    #else
+        return "rest_pointer is a desktop verb: \(spec) has no pointer on this platform"
+    #endif
+}
+
 @MainActor func kayaHoverTarget(_ spec: Substring) -> String? {
     guard let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) else {
         return "no such target \(spec)"
@@ -23002,6 +23111,26 @@ func kayaCellText(_ node: KayaNode) -> String? {
             windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0)
         else { return "no mouse-moved event could be made" }
         kayaHovered.removeAll()
+        kayaHoverDelivering = true
+        defer { kayaHoverDelivering = false }
+        if kayaHostPointerIgnored {
+            let outside = CGPoint(x: -100, y: -100)
+            func leave(_ view: NSView) {
+                for area in view.trackingAreas where area.options.contains(.mouseEnteredAndExited) {
+                    guard let owner = area.owner as? NSResponder,
+                        let exit = NSEvent.enterExitEvent(
+                            with: .mouseExited, location: outside, modifierFlags: [],
+                            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                            context: nil, eventNumber: 0,
+                            trackingNumber: Int(bitPattern: Unmanaged.passUnretained(area).toOpaque()), userData: nil)
+                    else { continue }
+                    owner.mouseExited(with: exit)
+                }
+                view.subviews.forEach(leave)
+            }
+            leave(content)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
         window.sendEvent(event)
         var movers = 0
         var entered = 0
@@ -31373,7 +31502,7 @@ struct KayaToastView: View {
         .accessibilityIdentifier("kaya.toast")
         .accessibilityAction(.escape) { closeToast() }
         #if os(macOS)
-            .onHover { hovering = $0 }
+            .onHover { inside in if kayaTakesHover() { hovering = inside } }
         #else
             .gesture(
                 DragGesture(minimumDistance: 12).onEnded { drag in

@@ -551,6 +551,10 @@ pub enum Step {
     ExpectFill(Target, String),
     /// The pointer over a target, by the platform's own hover route (Y9).
     Hover(Target),
+    /// The pointer resting over a target as a person's would, which a
+    /// window under the harness ignores (docs/traps.md, a mac card read
+    /// hovered under the host's resting pointer).
+    RestPointer(Target),
     /// The pointer's button down over a target and held, by the platform's
     /// own route, so a step can read the pressed look before the app's answer
     /// (docs/deferred.md, the mac interaction latency, 1(a)).
@@ -1144,6 +1148,7 @@ impl Step {
             | Step::ContextOpen(t)
             | Step::ExpectHeightFits(t)
             | Step::Hover(t)
+            | Step::RestPointer(t)
             | Step::PointerDown(t)
             | Step::ExpectGround(t, _)
             | Step::ExpectGroundReach(t, _)
@@ -1545,7 +1550,7 @@ impl Step {
             Step::ExpectRuns { .. } => true,
             Step::ExpectEdit { .. } => true,
             Step::Press { .. } => false,
-            Step::Hover(_) => false,
+            Step::Hover(_) | Step::RestPointer(_) => false,
             Step::PointerDown(_) | Step::PointerUp => false,
             Step::ExpectBackHelp(..) => true,
         }
@@ -2164,6 +2169,10 @@ pub trait Stage: Send + 'static {
     /// Put the pointer over the target by the platform's own hover route
     /// (docs/styling-pass-plan.md §5): a desktop verb, cut on the phones.
     fn hover(&self, target: Target);
+    /// Rest the pointer over the target outside the hover route: the
+    /// desktop's own pointer brought over it, which the harness's window
+    /// does not take; a desktop verb, cut on the phones.
+    fn rest_pointer(&self, target: Target) -> Result<(), String>;
     /// Press the pointer's primary button over the target's centre by the
     /// platform's own route and hold it; a desktop verb, cut on the phones.
     fn pointer_down(&self, target: Target) -> Result<(), String>;
@@ -3211,6 +3220,7 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectFill(parse_target(target.trim())?, tint.to_owned())
             }
             "hover" => Step::Hover(parse_target(rest)?),
+            "rest_pointer" => Step::RestPointer(parse_target(rest)?),
             "pointer_down" => Step::PointerDown(parse_target(rest)?),
             "expect_back_help" => {
                 let (window, rest) = parse_window_target(rest);
@@ -7390,6 +7400,13 @@ fn run_with_log(
                 vtrace::note("hover", format_args!("<- stage.hover {}", target_spec(t)));
                 None
             }
+            Step::RestPointer(t) => {
+                await_quiet();
+                vtrace::note("rest_pointer", format_args!("-> stage.rest_pointer {}", target_spec(t)));
+                let rested = stage.rest_pointer(*t);
+                vtrace::note("rest_pointer", format_args!("<- stage.rest_pointer {rested:?}"));
+                rested.err().map(|why| Err(format!("rest_pointer {}: {why}", target_spec(t))))
+            }
             Step::PointerDown(t) => {
                 await_quiet();
                 vtrace::note("pointer_down", format_args!("-> stage.pointer_down {}", target_spec(t)));
@@ -10858,6 +10875,9 @@ mod tests {
             if t.index == 0 { "accent".into() } else { "none".into() }
         }
         fn hover(&self, _: Target) {}
+        fn rest_pointer(&self, _: Target) -> Result<(), String> {
+            Ok(())
+        }
         fn pointer_down(&self, _: Target) -> Result<(), String> {
             Ok(())
         }
@@ -11966,6 +11986,9 @@ mod tests {
                 String::new()
             }
             fn hover(&self, _: Target) {}
+            fn rest_pointer(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
             fn pointer_down(&self, _: Target) -> Result<(), String> {
                 Ok(())
             }
@@ -12510,6 +12533,9 @@ mod tests {
                 String::new()
             }
             fn hover(&self, _: Target) {}
+            fn rest_pointer(&self, _: Target) -> Result<(), String> {
+                Ok(())
+            }
             fn pointer_down(&self, _: Target) -> Result<(), String> {
                 Ok(())
             }

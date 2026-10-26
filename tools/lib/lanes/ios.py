@@ -262,10 +262,10 @@ SAFEAREA_EXTRA = ('expect_insets "bar/bar"; click button@full; expect label@capt
 # take with it; `extra` appends steps only true on this device.
 MODS = {
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
-    # ends at its first hover.
-    ("rust-swiftui", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
-    ("swift", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
-    ("go", "cards"): {"cut": "hover", "keep": "expect_selected expect_ax"},
+    # ends at its first pointer step.
+    ("rust-swiftui", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
+    ("swift", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
+    ("go", "cards"): {"cut": "rest_pointer", "keep": "expect_selected expect_ax"},
     # The macOS native table's own keyboard (docs/styling-pass-plan.md Y4,
     # AMENDED 2026-10-17): a phone's table has no selection of its own to move.
     ("rust-swiftui", "tracks"): {"cut": "press down", "keep": "expect_tint expect_rows"},

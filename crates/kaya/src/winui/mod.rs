@@ -9190,6 +9190,28 @@ fn window_surface(window: &Window) -> windows_core::Result<FrameworkElement> {
     windows_core::Interface::cast(&ground)
 }
 
+/// docs/traps.md, a mac card read hovered under the host's resting pointer:
+/// under the harness a window ground takes no hit until a verb drives the
+/// pointer itself. KAYA_REAL_POINTER=1 is the opt-in of a tool that drives
+/// the real pointer on purpose.
+static POINTER_DRIVEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn pointer_ignored() -> bool {
+    std::env::var_os("KAYA_SELFTEST").is_some()
+        && std::env::var_os("KAYA_REAL_POINTER").is_none_or(|v| v != "1")
+        && !POINTER_DRIVEN.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// A hit-test read through a ground that ignores the pointer.
+#[cfg(feature = "harness")]
+fn hits_at(point: Point, root: &UIElement) -> windows_core::Result<windows_collections::IIterable<UIElement>> {
+    let ignored = !root.IsHitTestVisible()?;
+    root.SetIsHitTestVisible(true)?;
+    let hits = bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper::FindElementsInHostCoordinatesPoint(point, root);
+    root.SetIsHitTestVisible(!ignored)?;
+    hits
+}
+
 fn window_ground(window: &Window) -> windows_core::Result<Grid> {
     if let Ok(content) = window.Content()
         && let Ok(grid) = windows_core::Interface::cast::<Grid>(&content)
@@ -9205,6 +9227,9 @@ fn window_ground(window: &Window) -> windows_core::Result<Grid> {
     // language (U5), so the ground says the process locale's — the knob's
     // when set, the user's otherwise — and everything under it inherits.
     let ground_element: FrameworkElement = windows_core::Interface::cast(&ground)?;
+    if pointer_ignored() {
+        ground_element.SetIsHitTestVisible(false)?;
+    }
     ground_element.SetLanguage(&HSTRING::from(crate::fmt::locale().tag.as_str()))?;
     ground_element.SetFlowDirection(if crate::fmt::direction() == crate::fmt::Direction::Rtl {
         FlowDirection::RightToLeft
@@ -21766,6 +21791,56 @@ impl WinUiStage {
             .expect("the step's WinRT calls succeeded")
     }
 
+    /// REAL INPUT on the VM's pointer (docs/styling-pass-plan.md §5): no
+    /// in-process route reaches the ListViewItem's own PointerOver state, so
+    /// the cursor moves onto the target, `path` from its centre, and the
+    /// presenter answers as it answers a user; the pointer legs are
+    /// EXCLUSIVE (tools/lib/lanes/win.py).
+    fn place_cursor(t: crate::harness::Target, verb: &str, path: [(i32, i32); 2]) {
+        Self::foreground_guest(verb);
+        let aim = Self::on_ui_read(move |core| {
+            let Some(id) = target_widget_id(core, t) else { return Ok(None) };
+            Ok(widget_screen_rect(core, id))
+        });
+        let Ok(Some((x, y, w, h))) = aim else {
+            eprintln!("kaya: winui {verb} {t:?}: no laid-out box ({aim:?})");
+            return;
+        };
+        let (cx, cy) = ((x + w / 2.0) as i32, (y + h / 2.0) as i32);
+        eprintln!("kaya: winui {verb} {t:?} at ({cx},{cy})");
+        const MOVE: u32 = 0x0001;
+        const ABSOLUTE: u32 = 0x8000;
+        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
+        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
+        for (dx, dy) in path {
+            let (px, py) = (cx + dx, cy + dy);
+            unsafe {
+                mouse_event(
+                    MOVE | ABSOLUTE,
+                    ((i64::from(px) * 65535) / width) as u32,
+                    ((i64::from(py) * 65535) / height) as u32,
+                    0,
+                    0,
+                );
+                SetCursorPos(px, py);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
+    }
+
+    /// The harness's own pointer from here on: every window ground takes it.
+    fn drive_pointer() {
+        if POINTER_DRIVEN.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        Self::on_ui(|core| {
+            for window in std::iter::once(&core.window).chain(core.aux_windows.values()) {
+                window.Content()?.SetIsHitTestVisible(true)?;
+            }
+            Ok(())
+        });
+    }
+
     fn on_ui<T: Send + 'static>(
         f: impl FnOnce(&CoreState) -> windows_core::Result<T> + Send + 'static,
     ) -> T {
@@ -23803,7 +23878,7 @@ impl crate::harness::Stage for WinUiStage {
                         Y: (frame.ActualHeight()? / 2.0) as f32,
                     })?;
                 let mut names = Vec::new();
-                for hit in VisualTreeHelper::FindElementsInHostCoordinatesPoint(centre, &root)? {
+                for hit in hits_at(centre, &root)? {
                     let class = hit
                         .cast::<windows_core::IInspectable>()
                         .and_then(|i| i.GetRuntimeClassName())
@@ -25195,6 +25270,7 @@ impl crate::harness::Stage for WinUiStage {
     /// `hover`'s mouse_event route, pressed at the thumb's place on the track
     /// and walked to the value's.
     fn hold(&self, t: crate::harness::Target, to: Option<f64>) -> Result<(), String> {
+        Self::drive_pointer();
         Self::foreground_guest("hold");
         let aim = Self::on_ui_read(move |core| {
             let i = crate::harness::try_resolve(t.index, core.sliders.len());
@@ -25377,7 +25453,7 @@ impl crate::harness::Stage for WinUiStage {
             })?;
             let (low, high): (DependencyObject, DependencyObject) = (pair.low.cast()?, pair.high.cast()?);
             let mut first = None;
-            for hit in VisualTreeHelper::FindElementsInHostCoordinatesPoint(point, &root)? {
+            for hit in hits_at(point, &root)? {
                 let mut up: Option<DependencyObject> = Some(hit.cast()?);
                 while let Some(node) = up {
                     if node == low {
@@ -26317,6 +26393,7 @@ impl crate::harness::Stage for WinUiStage {
         reorder: Option<bool>,
         across: Option<u32>,
     ) -> String {
+        Self::drive_pointer();
         // REAL INPUT, from the leg's own process (docs/dnd-plan.md D10):
         // WinUI's own remarks say there is no generalized DoDragDrop for a
         // UI element, and OLE's modal loop reads real mouse messages.
@@ -26364,6 +26441,7 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     fn drag_file(&self, path: &str, destination: crate::harness::Target) -> String {
+        Self::drive_pointer();
         // THE CLASSIC ROUTE'S OWN ARMS (docs/dnd-plan.md D6): a foreign
         // file drop is what `RegisterDragDrop` exists for, so the verb
         // hands kaya's own IDropTarget a CF_HDROP-only IDataObject at the
@@ -26896,42 +26974,16 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
-    /// REAL INPUT on the VM's pointer (docs/styling-pass-plan.md §5): no
-    /// in-process route reaches the ListViewItem's own PointerOver state, so
-    /// the cursor moves onto the target's centre and the presenter answers as
-    /// it answers a user; the hover legs are EXCLUSIVE (tools/lib/lanes/win.py).
     fn hover(&self, t: crate::harness::Target) {
-        Self::foreground_guest("hover");
-        let aim = Self::on_ui_read(move |core| {
-            let Some(id) = target_widget_id(core, t) else { return Ok(None) };
-            Ok(widget_screen_rect(core, id))
-        });
-        let Ok(Some((x, y, w, h))) = aim else {
-            eprintln!("kaya: winui hover {t:?}: no laid-out box ({aim:?})");
-            return;
-        };
-        let (cx, cy) = ((x + w / 2.0) as i32, (y + h / 2.0) as i32);
-        eprintln!("kaya: winui hover {t:?} at ({cx},{cy})");
-        const MOVE: u32 = 0x0001;
-        const ABSOLUTE: u32 = 0x8000;
-        let width = i64::from(unsafe { GetSystemMetrics(0) }.max(2) - 1);
-        let height = i64::from(unsafe { GetSystemMetrics(1) }.max(2) - 1);
-        for (dx, dy) in [(-6, -3), (0, 0)] {
-            let (px, py) = (cx + dx, cy + dy);
-            unsafe {
-                mouse_event(
-                    MOVE | ABSOLUTE,
-                    ((i64::from(px) * 65535) / width) as u32,
-                    ((i64::from(py) * 65535) / height) as u32,
-                    0,
-                    0,
-                );
-                SetCursorPos(px, py);
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
+        Self::drive_pointer();
+        Self::place_cursor(t, "hover", [(-6, -3), (0, 0)]);
+    }
+    fn rest_pointer(&self, t: crate::harness::Target) -> Result<(), String> {
+        Self::place_cursor(t, "rest_pointer", [(12, 6), (6, 3)]);
+        Ok(())
     }
     fn pointer_down(&self, t: crate::harness::Target) -> Result<(), String> {
+        Self::drive_pointer();
         if POINTER_HELD.swap(true, std::sync::atomic::Ordering::SeqCst) {
             return Err("an earlier pointer_down still holds the button".to_owned());
         }

@@ -19124,7 +19124,48 @@ background accessory window under a still real pointer. With the pointer parked 
 halves (windows.txt's `Cursor` window, the leg log's `windowframe saved`), but only
 by arithmetic, so a failed expect_fill on the mac now says where the host's pointer
 rests in the window and whether it is over the target (kayaHostPointerNote; both
-branches made to print). Any mac leg that reads a hover-dependent fill or a tooltip
-is exposed while a person's pointer rests over the guest's window position; no wall
-moves the pointer (the lanes never drive the host UI while a person may be using it).
+branches made to print).
+
+THE RULING (the maintainer asked, the coordinator chose, 2026-10-25): a test window
+ignores the real pointer; the lanes never park it. Measured with a plain SwiftUI
+probe (a 600x400 card with .onHover, its window placed under the resting pointer,
+the host idle each run): SwiftUI evaluates .onHover IN PROCESS when a hover view
+is created, against the pointer's location and no event at all (`onContinuousHover`
+read active at 0.01 s), and a real 1 pt pointer move fired onHover(true) on a
+window with `ignoresMouseEvents` set, so neither the window server's routing nor
+a still pointer explains a hover, and `ignoresMouseEvents` alone stops none of
+it. A posted move at the pointer's exact resting point read `ended` twice, at
++1 pt `active`: unexplained, so nothing relies on a zero-length post. Under the
+harness now, on every desktop, a window's hover comes from the harness's own
+pointer verbs alone:
+- SwiftUI (macOS): kaya's own .onHover handlers (KayaActivatable, the toast)
+  take a hover only while the hover verb delivers one (kayaTakesHover). The
+  hover verb first sends every tracking area an exit: without it SwiftUI,
+  already inside from a filtered real move, never fired the enter (cards-rust
+  read ".onHover never fired"). `ignoresMouseEvents` on the test windows was
+  tried and dropped: the window server then hit-tests through the window, so
+  the reads that ask what a click at a control's centre would reach
+  (kayaChoiceRead's AX element at a position, the expander header's,
+  kayaServerHit) answered the app's menu bar, and music_search-python went red
+  at `segments` with "the element at the control's centre sits in no radio
+  group or pop-up button (AXMenuBar < AXApplication)". A person's click on a
+  test window still reaches it.
+- GTK: every window is no pointer target (`can_target` false) until a verb
+  drives the lane's pointer (hover, pointer_down, the slider holds, nudge,
+  drag, move_pointer); press_takes picks with targeting on for its read. The
+  x11 pool's pointer stays where the last leg left it (the parked key-verb
+  pointer above); wayland's virtual pointer leaves with its client.
+- WinUI: the window ground is not hit-test visible until a verb drives the
+  VM's cursor (hover, pointer_down, the holds, drag, drag_file); the swipe and
+  press reads hit-test through it (hits_at). The VM's cursor rests where the
+  last pointer leg left it, in slot 0, where pooled legs open.
+- A tool that drives the real pointer at a harness guest on purpose sets
+  KAYA_REAL_POINTER=1 (tools/mac/dragwitness-leg.py, tools/mac/dragwitness/run.py,
+  tools/linux/dragwitness-leg.py). A shipped app is unchanged.
+The verb `rest_pointer <target>` (cards.steps) rests the pointer on a card as a
+person's would and reads it neutral: GTK and WinUI move their lane's pointer
+there; the Mac moves the WINDOW under the host's pointer and, on a host idle 20 s,
+makes one real move onto the card's centre, put back before the verdict, under
+a one-process lock (check-exclusive holds the one post site and the idle
+refusal). On a busy host the Mac's pointer is not moved and the leg log says so.
 

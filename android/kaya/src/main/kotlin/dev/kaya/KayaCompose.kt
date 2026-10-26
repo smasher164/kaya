@@ -14673,6 +14673,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     // docs/styling-pass-plan.md §5: a phone has no pointer, and the
                     // lane cuts a scene at its first hover (tools/lib/lanes/android.py MODS).
                     "hover" -> failures.add("hover ${parts[1]}: an Android phone has no pointer to hover with")
+                    "rest_pointer" -> failures.add("rest_pointer ${parts[1]}: an Android phone has no pointer to rest")
                     "pointer_down" -> failures.add("pointer_down ${parts[1]}: an Android phone has no pointer to press with")
                     "pointer_up" -> failures.add("pointer_up: an Android phone has no pointer to release")
                     "expect_back_help" -> {

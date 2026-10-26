@@ -752,7 +752,13 @@ toggleFullScreen, NSWorkspace.shared.open) at their counts, each to the
 takeover verb that reaches it, and holds every harness key to
 `kayaHarnessSend`, so the leg log's `host key:` line counts only keys the
 host's keyboard sent (docs/traps.md, the emoji leg took the maintainer's
-keystrokes). AND THE WINDOWS LANE REFUSES A DISPLAY ITS
+keystrokes). AND THE HOST'S POINTER MOVES FROM ONE SITE, ON AN IDLE HOST,
+since 2026-10-25 (docs/traps.md, a mac card read hovered under the host's
+resting pointer): the interpreter posts a pointer event at one site,
+kayaPostPointerMove, called only by kayaPutBackHostPointer and by
+kayaRestPointer past its 20 s HIDIdle refusal and its one-process lock,
+so `rest_pointer` stays a pooled verb; the idle refusal cut and a second
+post site are watched. AND THE WINDOWS LANE REFUSES A DISPLAY ITS
 LEGS DO NOT ASSUME since 2026-10-03 (docs/traps.md, the UTM entry): the
 desktop warm-up reads `Screen.AllScreens` in the interactive session and
 deploy-win's desk_warm refuses unless lane.screens_refusal finds exactly

@@ -297,6 +297,7 @@ def run(proto, direction, kaya_cmd):
     env = dict(os.environ)
     env["KAYA_SELFTEST"] = "dnd"
     env["KAYA_SCENES_DIR"] = str(scenes)
+    env["KAYA_REAL_POINTER"] = "1"
     kaya = subprocess.Popen(kaya_cmd, env=env, stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8")

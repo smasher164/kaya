@@ -232,6 +232,24 @@ def foreground_census(swift, verbs):
         out.append(f"{INTERPRETER}: NSApp.sendEvent( has {len(sends)} site(s) (lines {sends}), "
                    f"wanted one, inside kayaHarnessSend — a harness key sent around it reads "
                    f"in the leg log as the host's keyboard reaching the guest")
+    # AND THE HOST'S POINTER MOVES ONLY UNDER rest_pointer, ON AN IDLE HOST
+    # (docs/traps.md, a mac card read hovered under the host's resting pointer).
+    posts = [n for n, line in enumerate(code, 1) if ".post(tap:" in line]
+    movers = [n for n, line in enumerate(code, 1)
+              if "kayaPostPointerMove(" in line and "func kayaPostPointerMove(" not in line]
+    rest = re.search(r"\n@MainActor func kayaRestPointer\(_ spec: Substring\) -> String\? \{\n"
+                     r"([\s\S]*?)\n\}\n", swift)
+    gated = rest and re.search(r"if idle < kayaHostPointerIdleS \{\n[^\n]*\n"
+                               r"\s*\} else if !kayaHostPointerLock\(\) \{"
+                               r"[\s\S]*?\} else \{[\s\S]*?kayaPostPointerMove\(", rest.group(1))
+    back = re.search(r"\n    func kayaPutBackHostPointer\(\) \{\n([\s\S]*?)\n    \}\n", swift)
+    homed = back and "kayaPostPointerMove(home)" in back.group(1)
+    if len(posts) != 1 or len(movers) != 2 or not gated or not homed:
+        out.append(f"{INTERPRETER}: the host's pointer moves from {len(posts)} CGEvent post "
+                   f"site(s) (lines {posts}) and {len(movers)} kayaPostPointerMove call(s) "
+                   f"(lines {movers}), wanted one post, called by kayaPutBackHostPointer and "
+                   f"by kayaRestPointer only past its HIDIdle and lock refusals — a lane may "
+                   f"not move the pointer of a host in use")
     watch = r"if kayaHarnessKeyDepth == 0 \{\n\s*kayaHostKeys \+= 1\n\s*kayaDiag\("
     if not re.search(watch, swift):
         out.append(f"{INTERPRETER}: the key-down watch no longer counts and prints a key the "
@@ -1153,6 +1171,18 @@ _deaf = gate.doctor("the key-down watch's print cut", REAL[INTERPRETER],
 watched("a host key that reaches the guest unnamed", {**REAL, INTERPRETER: _deaf},
         "the key-down watch no longer counts")
 
+# 17f. THE HOST'S POINTER MOVED ON A BUSY HOST, OR FROM A SECOND SITE.
+_busy = gate.doctor("rest_pointer's idle refusal cut", REAL[INTERPRETER],
+                    r"if idle < kayaHostPointerIdleS \{", "if idle < 0 {")
+watched("a rest_pointer that moves a busy host's pointer", {**REAL, INTERPRETER: _busy},
+        "the host's pointer moves from 1 CGEvent post site(s)")
+_posted = gate.doctor("a second pointer post in the interpreter", REAL[INTERPRETER],
+                      r"\n(\s*)kayaPutBackHostPointer\(\)\n",
+                      r"\n\1kayaPutBackHostPointer()\n"
+                      r"\1CGEvent(source: nil)?.post(tap: .cghidEventTap)\n")
+watched("an interpreter posting pointer events around rest_pointer",
+        {**REAL, INTERPRETER: _posted}, "the host's pointer moves from 2 CGEvent post site(s)")
+
 # 18. THE FUNNEL RUNNING A REFUSED LEG.
 _ignored = gate.doctor("queue_leg running a refused leg", REAL[MAC_RUNNER],
                        r'(if outcome == "not-run":\n\s+)_not_run\(name, said\)',
@@ -1383,7 +1413,7 @@ check_catalogue_server_routes(gate)
 from shade_hand_routes import run as check_shade_hand_routes  # noqa: E402
 check_shade_hand_routes(gate)
 
-gate.negatives_ran(95)
+gate.negatives_ran(97)
 
 gate.counted("linux QUIET legs", sorted(MODS["linux"].quiet_legs(REAL[LINUX])), floor=8)
 gate.counted("windows legs whose scene posts a notification",

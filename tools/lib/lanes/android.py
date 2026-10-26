@@ -436,8 +436,8 @@ MODS = {
     "identity": {"drop": ((("expect_title window#1",), "expect_app_icon",
                            "no auxiliary windows"),)},
     # A phone has no pointer (docs/styling-pass-plan.md §5): the cards leg
-    # ends at its first hover.
-    "cards": {"cut": ("hover", "expect_selected expect_ax", "")},
+    # ends at its first pointer step.
+    "cards": {"cut": ("rest_pointer", "expect_selected expect_ax", "")},
     # An image ground at a screen's top runs under the status bar
     # (docs/media-player-plan.md M15).
     "grounds": {"append": 'expect_ground_reach column@hero top;expect_system_bars "legible/legible";'},

@@ -213,6 +213,7 @@ def run():
     env["KAYA_SELFTEST"] = "dnd"
     env["KAYA_SELFTEST_SCRIPT"] = scene_for()
     env["KAYA_WINDOW_FRONT"] = "1"
+    env["KAYA_REAL_POINTER"] = "1"
     kaya = subprocess.Popen(lane.leg_argv("dnd", "rust", lambda _n: ""), cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8")

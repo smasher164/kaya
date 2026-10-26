@@ -84,8 +84,10 @@ DOORS = [
       "window_ground(&winui_window(core, window)?)?"], ["SolidColorBrush"]),
     ("batch's end", "pub(super) fn sync(core: &CoreState) -> windows_core::Result<()> {",
      ["let shown = root.is_some_and(|r| holds_widget(core, r));", "spoken(core, WidgetId(id), &mut words);"], []),
-    ("hover", "fn hover(&self, t: crate::harness::Target) {",
-     ['Self::foreground_guest("hover");', "SetCursorPos(px, py);", "mouse_event("], []),
+    ("hover's verb", "fn hover(&self, t: crate::harness::Target) {",
+     ["Self::drive_pointer();", 'Self::place_cursor(t, "hover", [(-6, -3), (0, 0)]);'], []),
+    ("hover", "fn place_cursor(t: crate::harness::Target, verb: &str, path: [(i32, i32); 2]) {",
+     ["Self::foreground_guest(verb);", "SetCursorPos(px, py);", "mouse_event("], []),
 ]
 # (label, opener, what the block must hold) -- and never MODEL
 READS = [

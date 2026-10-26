@@ -211,7 +211,7 @@ MILESTONE2_LEGS = ("rust", "python", "go", "csharp", "java", "js")
 # slot 0 (deploy-win's `_release_slot` sorts the free list), so the rule is
 # simply: a pointer leg is never pooled. tools/deploy-win.py refuses the
 # roster and tools/check-steps.py holds it.
-POINTER_VERBS = ("drag", "drag_file", "hover", "pointer_down", "pointer_up")
+POINTER_VERBS = ("drag", "drag_file", "hover", "rest_pointer", "pointer_down", "pointer_up")
 
 
 def pointer_scenes(scenes_dir):

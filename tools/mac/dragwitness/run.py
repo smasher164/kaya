@@ -188,6 +188,7 @@ def hand():
     # An accessory app's window opens BEHIND the terminal; the interpreter
     # raises it on this knob, which no lane sets.
     env["KAYA_WINDOW_FRONT"] = "1"
+    env["KAYA_REAL_POINTER"] = "1"
     kaya = subprocess.Popen(lane.leg_argv("dnd", "rust", lambda _n: ""), cwd=ROOT, env=env,
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                             encoding="utf-8")

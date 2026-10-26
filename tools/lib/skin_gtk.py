@@ -101,7 +101,9 @@ READS = [
      ["button.child()", "text.compute_bounds(&root)"]),
     ("expect_row_centered's reader", "fn row_centered(&self, t: crate::harness::Target) -> String {",
      ["table_row_box(core, t)", "if off.abs() > 2.0 => format!("]),
-    ("hover's route", "fn hover(&self, t: crate::harness::Target) {",
+    ("hover's verb", "fn hover(&self, t: crate::harness::Target) {",
+     ["Self::drive_pointer();", 'Self::place_pointer(t, "hover", (0.0, 0.0));']),
+    ("hover's route", "fn place_pointer(t: crate::harness::Target, verb: &'static str, off: (f64, f64)) {",
      ['.args([if wayland { "locate" } else { "move" }, if wayland { "wayland" } else { "x11" }])',
       "hold_wayland_pointer(&String::from_utf8_lossy(&out.stdout));"]),
 ]
