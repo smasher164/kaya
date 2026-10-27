@@ -18881,6 +18881,13 @@ now re-asked inside the same twenty tries, with a `kaya: winui back_look:
 the call (the window's Content, the root's XamlRoot, TransformToVisual) and
 says `answered null` for an S_OK error, so the next sighting says which.
 
+Named (measured 2026-10-26, six pooled runs of the nav, confirm, scroll,
+window and panels legs in six languages): nav_rust once, at the same first
+`back` 62 ms after the push's click, `Normal read on try 2 after try 1: grab:
+element_placement: the root's XamlRoot answered null`. The window's content
+had no XamlRoot for that instant (the pushed page was still being joined to
+the tree); the second try held and the leg passed. The re-ask is the fix.
+
 
 ## An undo step's table delta replayed without the band (measured 2026-10-24)
 
@@ -19372,3 +19379,23 @@ confirm and window legs, three runs of the seven legs passed with 15, 31 and
 3 re-opens before a choice. Most retakes were from another context-menu leg, so the seven run
 one at a time among themselves (win.py's SERIAL_GROUPS flyout group) and pool
 with everything else.
+
+## expect_shape reads a small circle as rounded (measured 2026-10-26)
+
+expect_shape's three probes sit at fixed units (1,1), (6,6) and the centre
+(docs/styling-pass-plan.md, the shapes scene), so a circle reads `circle` only
+when (6,6) falls outside its arc: sqrt(2) * (r - 6) > r, a diameter over about
+41 units. The chat app's first 40x40 avatars were drawn round and read
+`rounded ((1,1) F7F7F7 over F7F7F7, (6,6) EC8D4E over F7F7F7, ...)` on the
+mac; at 48 (shapes.steps' size) they read `circle`. Assert a circle at 44
+units or more, or read it some other way.
+
+## The mac's untinted text read as tinted in the dark appearance (measured 2026-10-26)
+
+`expect_tint ... none` read `tint accent` on the mac under --appearance=dark:
+the portfolio's plain table cell `(ink DFE0E0; accent C1CDEE, none FFFFFF, ...)`
+and the editor's status label `(ink DEDEDF; accent C4D1CE, none FFFFFF, ...)`.
+labelColor is white at about 85% alpha in the dark appearance, and the reader's
+`none` candidate dropped the alpha, so plain text sat nearer a pale accent than
+white. Since 2026-10-26 the label tint reader composites labelColor over the
+window ground (kayaLabelTintRead's `plain`).

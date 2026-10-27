@@ -5,13 +5,20 @@
 # two screens TIE OUT to the byte, and expect_window says the first
 # visible row and the declared total — both DATA, never the band's WIDTH.
 expect label#0 "Portfolio: $10026.50"
-expect label#1 "Transactions: 15000"
-expect label#2 "Brokerage"
-expect label#3 "Account total: $7163.50"
-expect label#4 "Retirement"
-expect label#5 "Account total: $2363.00"
-expect label#6 "Savings"
-expect label#7 "Account total: $500.00"
+# The day's change from the previous close, red when the book fell, under the
+# total in a header fading from the mark's blue (docs/styling-pass-plan.md Y2,
+# Y7).
+expect label#1 "-$15.88 (-0.16%) today"
+expect_tint label@day critical
+expect_ground column@hero gradient
+expect_ground_color column@hero "light 94C1FF dark 1F6BCB"
+expect label#2 "Transactions: 15000"
+expect label#3 "Brokerage"
+expect label#4 "Account total: $7163.50"
+expect label#5 "Retirement"
+expect label#6 "Account total: $2363.00"
+expect label#7 "Savings"
+expect label#8 "Account total: $500.00"
 # THE CHART (docs/canvas-plan.md §10); canvas.steps' header says why the
 # three verbs are not redundant. ONE STRING ON THREE LANES: the op
 # stream is app arithmetic over prices.csv, which every lane stages and
@@ -80,9 +87,11 @@ expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$
 # pushed writes to nothing that is gone.
 click button#0
 expect label#0 "Portfolio: $10023.00"
-expect label#1 "Transactions: 15003"
-expect label#3 "Account total: $7153.00"
-expect label#5 "Account total: $2370.00"
+expect label#1 "-$19.38 (-0.19%) today"
+expect_tint label@day critical
+expect label#2 "Transactions: 15003"
+expect label#4 "Account total: $7153.00"
+expect label#6 "Account total: $2370.00"
 expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
 expect_column_edges column@positions[brokerage] 4
 expect_rows column@positions[retirement] "BND,20,$72.00,$1440.00|VXUS,15,$62.00,$930.00"
@@ -119,6 +128,10 @@ expect_column_edges column@ledger 4
 # the last three rows are the dividends the tick posted.
 expect_window column@recent 0 8
 expect_rows column@recent "2026-08-24,VTI,sell,$7547.25|2026-08-24,AAPL,sell,$7200.00|2026-08-24,VTI,buy,$7547.25|2026-08-24,VTI,div,$0.50|2026-08-24,VTI,sell,$10410.00|2026-08-25,AAPL,div,$2.40|2026-08-25,BND,div,$6.20|2026-08-25,CASH,div,$2.05"
+# A buy reads green and a sell red; a dividend keeps the text's colour.
+expect_tint label@side[t14997] success
+expect_tint label@side[t14996] critical
+expect_tint label@side[t15000] none
 expect_window column@ledger 0 15003
 # Addressed by the ROW and not by a pixel: t07500 is the 7,501st line of
 # the CSV, realized or not.
@@ -135,7 +148,7 @@ expect label@count "4698 of 15003 transactions"
 expect label@first "first 2023-10-21 BND buy $841.44"
 expect label@last "last 2026-08-25 BND div $6.20"
 # THE TIE-OUT, one account: Retirement's transactions net to what its
-# card holds and to label#5's money above.
+# card holds and to label#6's money above.
 expect label@net "net BND 20, VXUS 15 = $2370.00"
 # Scrolled to the FIRST row, so `first` is 0 whichever end of the band
 # the tier reports.
@@ -171,7 +184,7 @@ expect_entries 0
 settle 600
 expect_title "portfolio"
 expect label#0 "Portfolio: $10023.00"
-expect label#1 "Transactions: 15003"
+expect label#2 "Transactions: 15003"
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"

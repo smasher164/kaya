@@ -190,6 +190,7 @@ func App() *kaya.App {
 	var (
 		buffer        kaya.Widget
 		status, count kaya.Signal[string]
+		countTint     kaya.Signal[kaya.Tint]
 		// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
 		// key path".
 		findRows kaya.Collection
@@ -211,6 +212,7 @@ func App() *kaya.App {
 		hits = nil
 		at = 0
 		// LIVE zone: a stamped copy has no id select_range can aim at.
+		tx.Write(countTint, kaya.TintNone)
 		if !open {
 			tx.HighlightRanges(buffer, nil)
 			tx.Write(count, "")
@@ -226,6 +228,7 @@ func App() *kaya.App {
 		if err != nil {
 			tx.HighlightRanges(buffer, nil)
 			tx.Write(count, "bad pattern")
+			tx.Write(countTint, kaya.TintCritical)
 			return
 		}
 		// GO STRING INDICES, unconverted: a UTF-16 backend converts its side.
@@ -238,6 +241,9 @@ func App() *kaya.App {
 		}
 		tx.HighlightRanges(buffer, hits)
 		tx.Write(count, tally(len(hits)))
+		if len(hits) == 0 {
+			tx.Write(countTint, kaya.TintCritical)
+		}
 	}
 
 	show := func(tx *kaya.Tx, i int) {
@@ -307,6 +313,7 @@ func App() *kaya.App {
 
 		status = tx.Signal("new file")
 		count = tx.Signal("")
+		countTint = tx.Signal(kaya.TintNone)
 
 		newDoc := func(tx *kaya.Tx) {
 			text = ""
@@ -440,9 +447,9 @@ func App() *kaya.App {
 				bar := row.Row(func() {
 					for _, act := range []struct{ id, title, help string }{
 						{"bold", "Bold", ""}, {"italic", "Italic", ""}, {"underline", "Underline", ""},
-						{"strike", "Strike", ""}, {"code", "Code", ""},
+						{"strike", "Strike", "Strikethrough"}, {"code", "Code", "Format as code"},
 						{"heading1", "H1", "Format as heading 1"}, {"heading2", "H2", "Format as heading 2"},
-						{"quote", "Quote", ""}, {"body", "Body", ""},
+						{"quote", "Quote", "Format as quote"}, {"body", "Body", "Format as body text"},
 					} {
 						n := row.Button(act.title)
 						row.SetA11yID(n, act.id)
@@ -461,10 +468,19 @@ func App() *kaya.App {
 			for row := range tx.Rows(findRows).All() {
 				bar := row.Row(func() {
 					query = row.Entry() // entry#0
-					prev = row.Button("prev")          // button#0
-					next = row.Button("next")          // button#1
+					row.SetPlaceholder(query, "Find")
+					row.SetGrow(query, 1)
+					icon := func(id, title string, symbol kaya.Symbol) kaya.Node {
+						n := row.Button(title)
+						row.SetA11yID(n, id)
+						row.SetSymbol(n, symbol)
+						row.SetHelp(n, title)
+						return n
+					}
+					prev = icon("prev", "Previous match", kaya.SymbolBack) // button#0
+					next = icon("next", "Next match", kaya.SymbolForward)  // button#1
 					// Dismiss cannot be a keystroke: no bare Escape exists.
-					done = row.Button("done") // button#2
+					done = icon("done", "Close find bar", kaya.SymbolClose) // button#2
 				})
 				row.SetInset(bar, 8)
 			}
@@ -472,8 +488,8 @@ func App() *kaya.App {
 			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) above takes this
 			// row's margin with it (docs/deferred.md, the inset entry).
 			tx.Row(func() {
-				tx.Label(status).Grow(1).A11yID("status") // label#0
-				tx.Label(count).A11yID("matches")         // label#1
+				tx.Label(status).Grow(1).A11yID("status")             // label#0
+				tx.Label(count).BindTint(countTint).A11yID("matches") // label#1
 			}).Inset(8)
 		}).Align(kaya.AlignStretch))
 

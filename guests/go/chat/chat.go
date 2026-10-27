@@ -23,6 +23,7 @@ type Conversation struct {
 	Preview  string
 	Unread   string
 	Selected bool
+	Avatar   []byte
 }
 
 //go:generate go run dev.kaya/cmd/kaya-gen -type Message -key string
@@ -51,6 +52,7 @@ type message struct {
 
 type conversation struct {
 	id, name    string
+	avatar      []byte
 	note        uint64
 	messages    []message
 	unread      int
@@ -90,7 +92,8 @@ func App() *kaya.App {
 		}
 		refresh := func(tx *kaya.Tx, c *conversation) {
 			last := c.messages[len(c.messages)-1]
-			list.Update(tx, c.id, Conversation{Name: c.name, Preview: last.text, Unread: unreadText(c), Selected: c.id == open})
+			list.Update(tx, c.id, Conversation{Name: c.name, Preview: last.text, Unread: unreadText(c),
+				Selected: c.id == open, Avatar: c.avatar})
 		}
 		insert := func(tx *kaya.Tx, m message) {
 			switch {
@@ -429,12 +432,19 @@ func App() *kaya.App {
 				var opener kaya.Node
 				convo := row.Row(func() {
 					opener = row.Row(func() {
-						row.Column(func() {
+						avatar := row.Image(row.Avatar())
+						row.SetFit(avatar, kaya.FitCover)
+						row.SetMaxWidth(avatar, 48)
+						row.SetMaxHeight(avatar, 48)
+						row.SetShape(avatar, kaya.ShapeCircle)
+						row.SetA11yID(avatar, "avatar")
+						lines := row.Column(func() {
 							name := row.Label(row.Name())
 							row.SetA11yID(name, "name")
 							preview := row.Caption(row.Preview())
 							row.SetA11yID(preview, "preview")
 						})
+						row.SetFill(lines, false)
 						row.Spacer()
 						unread := row.Label(row.Unread())
 						row.SetA11yID(unread, "unread")
@@ -451,7 +461,10 @@ func App() *kaya.App {
 		}))
 		for _, id := range order {
 			c := convs[id]
-			list.Insert(tx, id, Conversation{Name: c.name})
+			picture := tx.Asset("avatars/" + id + ".jpg")
+			c.avatar = picture.Bytes()
+			picture.Close()
+			list.Insert(tx, id, Conversation{Name: c.name, Avatar: c.avatar})
 			refresh(tx, c)
 		}
 	})

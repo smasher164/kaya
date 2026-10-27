@@ -23195,7 +23195,18 @@ func kayaSystemBarWords() -> (String, String) {
         }
         var accent = tone(.controlAccentColor)
         let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
+        // docs/traps.md, the mac's untinted text read as tinted in the dark appearance.
+        var plain = shot.text
+        NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
+            if let s = NSColor.labelColor.usingColorSpace(.sRGB) {
+                let a = Double(s.alphaComponent)
+                plain = [s.redComponent, s.greenComponent, s.blueComponent].enumerated().map {
+                    Double($0.element) * a + shot.ground[$0.offset] * (1 - a)
+                }
+            }
+        }
     #else
+        let plain = shot.text
         func tone(_ c: UIColor) -> [Double] {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             c.getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -23208,7 +23219,7 @@ func kayaSystemBarWords() -> (String, String) {
         let rgb = shot.dark ? brand[8] : brand[3]
         accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255]
     }
-    let candidates: [(String, [Double])] = [("none", shot.text), ("accent", accent)] + others
+    let candidates: [(String, [Double])] = [("none", plain), ("accent", accent)] + others
     func distance(_ c: [Double]) -> Double {
         var sum = 0.0
         for k in 0..<3 { sum += (c[k] - ink[k]) * (c[k] - ink[k]) }

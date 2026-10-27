@@ -138,6 +138,9 @@ expect entry#0 ""
 # flying past unread.
 set_text entry#0 "["
 expect label#1 "bad pattern"
+# A query that finds nothing reads in the error colour, as Zed's count and
+# GNOME Text Editor's field do; a found one in the text's own.
+expect_tint label#1 critical
 expect_highlights textarea#0 ""
 set_text entry#0 "[0-9]+"
 # FOUR RUNS OF DIFFERENT LENGTHS, so a backend that lowered one range's
@@ -145,6 +148,7 @@ set_text entry#0 "[0-9]+"
 # assertion carries the covered TEXT as well, because the core converts
 # into the backend's unit and back: two symmetric mistakes cancel.
 expect label#1 "1 of 4"
+expect_tint label#1 none
 expect_highlights textarea#0 "4:5=7|66:68=13|129:131=42|132:134=99"
 expect_selection textarea#0 "4:5=7"
 # The `offscreen` line is what makes the `visible` one mean anything: on
@@ -154,6 +158,9 @@ expect_revealed textarea#0 132:134 offscreen
 # has been torn down yet. After a teardown a backend need not prune its
 # harness registry (the SwiftUI interpreter does not), so every later
 # step addresses the bar as `#last`.
+# The walk's buttons are icons, each named in its tooltip.
+expect_symbol button@next[bar] "forward"
+expect_help button@next[bar] "Next match"
 click button#1
 click button#1
 click button#1
@@ -180,6 +187,7 @@ expect label#0 "bold 132:134"
 expect_runs textarea#0 "132:134 bold"
 expect_help button@heading1[format] "Format as heading 1"
 expect_help button@heading2[format] "Format as heading 2"
+expect_help button@quote[format] "Format as quote"
 click button@heading1[format]
 expect label#0 "heading1 125:134"
 expect_runs textarea#0 "125:134 block=heading1|132:134 bold"

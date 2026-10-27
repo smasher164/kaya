@@ -813,10 +813,10 @@ def check(root):
 
             scene_text = pf_scene_path.read_text(encoding="utf-8")
             derived = [
-                (f'expect label#1 "Transactions: {csv_len}"',
+                (f'expect label#2 "Transactions: {csv_len}"',
                  "the dashboard's count of the book as the artifact "
                  "has it"),
-                (f'expect label#1 "Transactions: {len(rows)}"',
+                (f'expect label#2 "Transactions: {len(rows)}"',
                  "the dashboard's count after the tick posted its "
                  "rows"),
                 (f'expect label@count "{len(rows)} of {len(rows)} '
@@ -1072,6 +1072,10 @@ def covers_derivation(root):
     return derivation(root, "covers", "gen-covers.py")
 
 
+def avatars_derivation(root):
+    return derivation(root, "avatars", "gen-avatars.py")
+
+
 def catalogue_derivation(root):
     """C14 (docs/media-player-plan.md M2): the Jamendo snapshot cannot be
     regenerated without a client id and the network, so it is READ: every
@@ -1322,8 +1326,8 @@ refused(s, "most recent rows",
 s = fresh("n18")
 doctor_shadow("N18's drifted book count", s,
               "tools/scenes/portfolio.steps",
-              r'expect label#1 "Transactions: 15003"',
-              'expect label#1 "Transactions: 999"')
+              r'expect label#2 "Transactions: 15003"',
+              'expect label#2 "Transactions: 999"')
 refused(s, "after the tick posted its rows",
         "N18 (a dashboard count the ledger cannot produce)")
 
@@ -1528,6 +1532,18 @@ g.negative("N38 (a committed cover its generator no longer writes)",
            lambda: covers_derivation(s),
            want="differs from what tools/gen-covers.py generates")
 
+# N38b — C13: one committed avatar drifts from its generator.
+s = fresh("n38b")
+jpg = s / "guests/assets/avatars/sam.jpg"
+raw = bytearray(jpg.read_bytes())
+raw[len(raw) // 2] ^= 1
+jpg.write_bytes(bytes(raw))
+print("check-assets: N38b flipped 1 byte of guests/assets/avatars/sam.jpg "
+      "in the shadow")
+g.negative("N38b (a committed avatar its generator no longer writes)",
+           lambda: avatars_derivation(s),
+           want="differs from what tools/gen-avatars.py generates")
+
 # N39 — C14: one snapshot entry's licence doctored to BY-NC.
 s = fresh("n39")
 doctor_shadow("N39's BY-NC licence", s, "guests/assets/catalogue/api.json",
@@ -1590,7 +1606,7 @@ snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=1, sort_keys=Tr
 g.negative("N43 (a named search with an answer missing)",
            lambda: catalogue_derivation(s), want="has no answer")
 
-g.negatives_ran(45)
+g.negatives_ran(46)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",
@@ -1602,6 +1618,7 @@ g.counted("files under the asset root",
 out, bad = check(ROOT)
 bad += media_derivation(ROOT)
 bad += covers_derivation(ROOT)
+bad += avatars_derivation(ROOT)
 bad += catalogue_derivation(ROOT)
 print("\n".join(out))
 if bad:

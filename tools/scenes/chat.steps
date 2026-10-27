@@ -8,6 +8,11 @@
 expect_title "chat"
 expect label@unread[maya] "4 new"
 expect label@unread[sam] "1 new"
+# Each conversation leads with its picture, clipped to a circle at 48 points
+# (docs/styling-pass-plan.md Y6; guests/assets/avatars).
+expect image@avatar[maya] "160x160"
+expect_shape image@avatar[maya] circle
+expect_image_size image@avatar[sam] "48x48"
 # A conversation's row takes the click as a whole and wears the platform's
 # selected surface while its thread is open; the unread count is the row's one
 # accent word (docs/styling-pass-plan.md Y4, Y7). A phone's list sits under the

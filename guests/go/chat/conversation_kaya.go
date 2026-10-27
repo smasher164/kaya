@@ -46,6 +46,11 @@ func (p conversationPatchBuilder) Selected(v bool) conversationPatchBuilder {
 	return p
 }
 
+func (p conversationPatchBuilder) Avatar(v []byte) conversationPatchBuilder {
+	p.p.Set(func(t *Conversation) *[]byte { return &t.Avatar }, v)
+	return p
+}
+
 // ConversationPatchIf is ConversationPatch made only while the entry exists and the
 // guard's field still holds expected; otherwise nothing, and no panic
 // (docs/network-images-plan.md N7). The chain is one record.
@@ -77,6 +82,11 @@ func (p conversationPatchIfBuilder) Selected(v bool) conversationPatchIfBuilder 
 	return p
 }
 
+func (p conversationPatchIfBuilder) Avatar(v []byte) conversationPatchIfBuilder {
+	p.p.Set(func(t *Conversation) *[]byte { return &t.Avatar }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type conversationRow struct {
@@ -91,6 +101,8 @@ func (r conversationRow) Preview() kaya.Field[string] { return kaya.FieldAt[stri
 func (r conversationRow) Unread() kaya.Field[string] { return kaya.FieldAt[string](2) }
 
 func (r conversationRow) Selected() kaya.Field[bool] { return kaya.FieldAt[bool](3) }
+
+func (r conversationRow) Avatar() kaya.Field[[]byte] { return kaya.FieldAt[[]byte](4) }
 
 func (r conversationRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 

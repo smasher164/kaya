@@ -618,6 +618,21 @@ a plain row around the activatable one until this is fixed; a scene that combine
 on every lane is the guard to add with the fix.
 KEY: swipe activatable, sync_swipe_hosts, ItemContainer, row@open.
 
+## OPEN — a Compose textarea drops its selection when a sibling is stamped before it (measured 2026-10-26)
+
+With the text editor's formatting and find bars moved above the document (a try at the code editors'
+top bar, docs/editor-plan.md), the Android leg lost the textarea's selection the moment the format
+bar was stamped above it: the find walk had selected "99" (132:134), the bar's Bold then formatted
+nothing ("label#0 reads \"saved, 134 bytes\", wanted \"bold 132:134\"", runs ""), while H1, which
+needs only the caret's block, still applied (bundle android-editor-go of run 20261027T004551Z-074912;
+the fail shot shows both matches highlighted and neither selected). Mac, GTK, WinUI and iOS kept the
+selection. The likely cause is positional composition: KayaRenderCore emits a container's children
+in a loop with no `key(child.id)`, so a child inserted before the field moves it to a new slot and
+its BasicTextField is composed afresh; unproven. The editor keeps its bars below the document. The
+guard to add with the fix: an editor.steps variant (or a scene) that stamps a row before a textarea
+holding a selection and reads expect_selection after it, on every lane.
+KEY: Compose key, positional composition, stamped before a textarea, selection lost, format bar above.
+
 ## ~~OPEN — a phone's scroll_to_row parks the row under the table's pinned header (iOS and Compose, measured 2026-10-26)~~ FIXED 2026-10-26: both phone tiers park the row at the pinned header's foot (iOS: the row ground's scroll anchor placed by the header block's height over the viewport less the row; Compose: the row's top less headerBlockPx), count the first visible row from the foot, and their readers cut a row by what the header covers (iOS kayaVisibleFrame and the table's expect_scrolled_to, Compose kayaSkinUnseen and scrolledTo); the phones' netimage cut is gone and netimage.steps' tail runs on all five lanes, watched red with each park's subtraction cut (iOS `<clipped by its parents: frame (32,513,40x40), visible (32,546,40x7)>`, Compose `frame (32,384,40,40), visible (32,418,40,6)`)
 KEY: scroll_to_row, pinned header, KayaHeaderPin, headerRestPx, park, netimage.steps, expect_window column@tracks 0
 

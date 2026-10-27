@@ -29,6 +29,7 @@ class Txn:
     ticker: str
     side: str
     total: str
+    side_tint: kaya.Tint
 
 
 # tools/gen-market.py reads BOOK by ast and generates a history that nets
@@ -118,6 +119,27 @@ def account_total(account):
 
 def portfolio_total():
     return sum(account_total(a) for a in ACCOUNT_ORDER)
+
+
+# The book at the close before the last day of history: the day's change
+# is measured from it, and a tick moves only today's side.
+PREVIOUS_CLOSE = sum(qty * history[t][-2]
+                     for _, holdings in BOOK.values() for t, qty, _ in holdings)
+
+# Green up, red down, the sign carrying the same news for a reader who
+# does not see the colour.
+SIDE_TINT = {"buy": kaya.Tint.SUCCESS, "sell": kaya.Tint.CRITICAL}
+
+
+def day_change():
+    change = portfolio_total() - PREVIOUS_CLOSE
+    sign = "+" if change >= 0 else "-"
+    hundredths = round(abs(change) * 10000 / PREVIOUS_CLOSE)
+    text = (f"{sign}{money(abs(change))} ({sign}{hundredths // 100}."
+            f"{hundredths % 100:02d}%) today")
+    tint = (kaya.Tint.SUCCESS if change > 0
+            else kaya.Tint.CRITICAL if change < 0 else kaya.Tint.NONE)
+    return text, tint
 
 
 def position(account, ticker, qty):
@@ -274,6 +296,9 @@ def tick():
         if account in sorted_accounts:
             apply_order(account, *sorted_accounts[account])
     portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
+    change, tint = day_change()
+    day_text.set(change)
+    day_tint.set(tint)
     # The chart's right edge IS the total above it: one transaction.
     draw_chart()
     txns.extend(POSTED)
@@ -300,7 +325,8 @@ def key_of(index):
 
 def cells(row):
     date, _account, ticker, side, _qty, total = row
-    return Txn(date=date, ticker=ticker, side=side, total=money(total))
+    return Txn(date=date, ticker=ticker, side=side, total=money(total),
+               side_tint=SIDE_TINT.get(side, kaya.Tint.NONE))
 
 
 def edge(label, row):
@@ -440,7 +466,7 @@ def open_transactions(account=None):
                     with kaya.row():
                         kaya.label(bind=row.date)
                         kaya.label(bind=row.ticker)
-                        kaya.label(bind=row.side)
+                        kaya.label(bind=row.side, tint=row.side_tint).a11y_id("side")
                         kaya.label(bind=row.total)
             ledger = kaya.collection(Txn)
             # GROWN: the fill-and-scroll viewport, and the row's direct
@@ -451,7 +477,7 @@ def open_transactions(account=None):
                 with kaya.row():
                     kaya.label(bind=row.date)
                     kaya.label(bind=row.ticker)
-                    kaya.label(bind=row.side)
+                    kaya.label(bind=row.side, tint=row.side_tint)
                     kaya.label(bind=row.total)
         screen.update(count=count_line, first=first_line, last=last_line,
                       net=net_signal, recent=recent, ledger=ledger,
@@ -467,25 +493,34 @@ with app.window(title="portfolio", width=900, height=600):
     # The mark's blue, before the first mount per the set-once wall.
     kaya.brand_accent(0x1C71D8)
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
+    change, tint = day_change()
+    day_text = kaya.signal(change)
+    day_tint = kaya.signal(tint)
     book_size = kaya.signal(f"Transactions: {len(txns)}")
     # STACK ON A PHONE, where unstacked the detail column was clipped, and
     # SCROLL WHEN IT DOES NOT FIT (docs/deferred.md, both entries).
     with kaya.scroll(grow=1):
         with kaya.row(stack_when=kaya.COMPACT):
             with kaya.column():
-                # INLINE WITH THE TITLE: a row hugs, so the chip takes no
-                # share of the column's leftover (docs/deferred.md).
-                with kaya.row(align="center"):
-                    mark = kaya.canvas(MARK_BOX, fixed=True)
-                    mark.a11y_id("mark").a11y_label("kaya portfolio mark")
-                    with mark.draw() as d:
-                        # The ground makes the centre opaque: a translucent
-                        # probe reads the compositor's.
-                        d.polyline(MARK_AREA).close().fill("ground")
-                        d.polyline(MARK_AREA).close().fill("series_fill")
-                        d.polyline(MARK_LINE).stroke("series", width=2)
-                    kaya.label(bind=portfolio_value)  # label#0
-                kaya.label(bind=book_size)  # label#1
+                # The total's header fades from the mark's blue
+                # (docs/styling-pass-plan.md Y2).
+                with kaya.column(inset=12, spacing=4,
+                                 ground_gradient=kaya.Color.from_hex(0x1C71D8FF)) as hero:
+                    hero.a11y_id("hero")
+                    # INLINE WITH THE TITLE: a row hugs, so the chip takes no
+                    # share of the column's leftover (docs/deferred.md).
+                    with kaya.row(align="center"):
+                        mark = kaya.canvas(MARK_BOX, fixed=True)
+                        mark.a11y_id("mark").a11y_label("kaya portfolio mark")
+                        with mark.draw() as d:
+                            # The ground makes the centre opaque: a translucent
+                            # probe reads the compositor's.
+                            d.polyline(MARK_AREA).close().fill("ground")
+                            d.polyline(MARK_AREA).close().fill("series_fill")
+                            d.polyline(MARK_LINE).stroke("series", width=2)
+                        kaya.heading(bind=portfolio_value)  # label#0
+                    kaya.label(bind=day_text, tint=day_tint).a11y_id("day")  # label#1
+                kaya.label(bind=book_size)  # label#2
                 # A drawing is an image to every accessibility tree, and an
                 # empty a11y label is refused at the tx.
                 chart_summary = kaya.signal(chart_summary_text(*value_series()))

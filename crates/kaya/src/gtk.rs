@@ -25178,7 +25178,7 @@ impl crate::harness::Stage for GtkStage {
                 [("accent", "accent_color"), ("success", "success_color"), ("warning", "warning_color"), ("critical", "error_color")]
             {
                 let Some(c) = skin::colour(&widget, colour) else { return format!("<{colour} did not resolve>") };
-                candidates.push((name, skin::over(c, shot.ground)));
+                candidates.push((name, skin::over(c, shot.ground).map(|v| v.clamp(0.0, 1.0))));
             }
             let dist = |c: &[f64; 3]| (0..3).map(|i| (c[i] - ink[i]).powi(2)).sum::<f64>();
             candidates.sort_by(|a, b| dist(&a.1).total_cmp(&dist(&b.1)));
