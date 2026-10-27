@@ -364,7 +364,9 @@ fn draw(gutter: &mut Gutter) -> windows_core::Result<()> {
         if top - offset > viewport {
             break;
         }
-        if top + height >= offset {
+        // The story's closing mark answers a second paragraph start on the
+        // last line (measured 2026-10-27, "40 ·!40"): one number a line.
+        if top + height >= offset && gutter.drawn.last().map(|d| d.0) != Some(line_of(&units, at)) {
             let number = line_of(&units, at);
             let label = number_block(&number.to_string(), size)?;
             let measured = label.DesiredSize()?;
@@ -436,7 +438,8 @@ pub(super) mod read {
             if top - offset > viewport {
                 break;
             }
-            if inside(top + height / 2.0) {
+            let repeat = fragments.last().is_some_and(|f: &(f64, f64, u32, bool)| (f.0 - top).abs() < 0.5);
+            if inside(top + height / 2.0) && !repeat {
                 let first = at == 0 || units[at as usize - 1] == 13;
                 fragments.push((top, top + height, line_of(&units, at), first));
             }

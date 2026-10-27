@@ -251,7 +251,8 @@ menu_activate "View>Line Numbers"
 expect_gutter textarea#0 off
 menu_activate "View>Line Numbers"
 expect_gutter textarea#0 on
-expect_menu "View>Font>System Monospaced" checked
+expect_menu "View>Line Numbers" checked
+expect_menu "View>Font" value 0
 
 # ---- the unsaved-work guard, from two different doors --------------
 #

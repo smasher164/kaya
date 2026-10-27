@@ -10,7 +10,7 @@ static class CodesurfaceScene
     {
         var lines = new List<string>
         {
-            "// codesurface: a small source file for the gutter",
+            "// codesurface",
             "fn main() {",
             "    let note = \"this line is long on purpose, so that the textarea wraps it onto a second row "
                 + "and the gutter has a continuation to leave unnumbered, the way every editor does\";",

@@ -4,6 +4,54 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## An NSRulerView on a SwiftUI-hosted scroll view empties the window's accessibility tree (measured 2026-10-27)
+
+The prior art's line-number gutter is the scroll view's `verticalRulerView`
+(NSRulerView, drawHashMarksAndLabels). Shown on the mac textarea's
+NSScrollView inside SwiftUI, the window's content AXGroup published no
+children at all: `expect_ax label@mono` read "not in the accessibility
+tree" for every label in the window, and the same read passed with the
+ruler off (the scene's gutter switched off, nothing else moved). Overriding
+the ruler's isAccessibilityElement and accessibilityChildren and dropping
+its clientView did not help. The gutter is a plain view in the scroll
+view's leading contentInsets (KayaGutterView, docs/code-surface-plan.md G6).
+Two more on the way: NSTextView's `usesRuler = false` and `isRulerVisible =
+false` hide every ruler of the ENCLOSING scroll view on each write (the
+plain-text pin ran after the gutter and hid it every update), and under
+TextKit 2 `characterIndexForInsertion(at:)` answered the end of the
+document for a point inside the first line, and `firstRect(forCharacterRange:)`
+answers only the part of a line inside the viewport and an empty rect for
+a line outside it (the mac gutter reader unclips by the tallest whole row).
+
+## A label's font, read back: the mac's AXFont and iOS's accessibility tokens (measured 2026-10-27)
+
+SwiftUI draws a label with no AppKit or UIKit text view to ask. On the mac
+the label's element answers kAXAttributedStringForRangeParameterizedAttribute
+with an AXFont dictionary (AXFontName, AXFontFamily, AXFontSize), but only
+with the app's AXManualAccessibility set and a non-empty range, and the
+system faces carry private names NSFont(name:) refuses (".SFNS-Regular",
+".AppleSystemUIFont" as the family). On iOS the element's
+accessibilityAttributedLabel carries UIAccessibilityTokenFontName,
+...FontFamily and ...FontSize. Measuring the label's box against candidate
+faces was tried first and is wrong: the box read 51.0 wide for "picked" in
+Academy Engraved LET, whose own width is 46.7, so it matched the system
+font's 50.7. An empty entry publishes no attributed text (-25201), so the
+scene's entry carries text.
+
+## GTK's text view gutter is not the widget you gave it (measured 2026-10-27)
+
+`gtk_text_view_get_gutter` hands back the private GtkTextViewChild that
+`set_gutter` wrapped kaya's widget in (gtktextview.c), so a downcast to the
+gutter's own type fails ("its left gutter is not kaya's" on every linux leg);
+the gutter is the child's first child.
+
+## RichEdit's story end mark is a second line start on the last line (measured 2026-10-27)
+
+A RichEditBox's story always ends with a paragraph mark. Stepping the
+visible window by Paragraph or by Line reaches the last line twice, so the
+WinUI gutter drew the last number twice and the reader saw a continuation
+row beside it ("40 ·!40"). Both walks keep one row per line top.
+
 ## cargo keeps an artifact a restore with an old mtime made stale (measured 2026-10-26)
 
 The sixth sighting of the class the copy2 entries below record, and the

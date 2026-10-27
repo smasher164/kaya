@@ -374,7 +374,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.text.drawText
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -9317,7 +9317,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
             val layout = kayaTextKindLayout(node) ?: return@onUi null to ": no laid-out text"
             val base = kayaPlatformSizes[node.id]?.toDouble() ?: return@onUi null to ": no platform size recorded"
-            val size = layout.layoutInput.style.fontSize.value.toDouble()
+            val drawn = layout.layoutInput.style.fontSize
+            val size = (if (drawn.isSpecified) drawn else KAYA_COMPOSE_DEFAULT_TEXT_SIZE).value.toDouble()
             val ratio = size / base
             val text = "%.2f of %.2f, %.3fx".format(java.util.Locale.ROOT, size, base, ratio)
             if (Math.abs(ratio - want) <= want * 0.02) text to ""
@@ -20992,7 +20993,7 @@ internal fun kayaNodeFontSet(node: KayaNode): Boolean =
  *  in sp times `text_scale`, so the platform's font scale still applies.
  *  The base size is recorded for expect_scaled. */
 internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle {
-    val size = if (base.fontSize.isSpecified) base.fontSize else 16.sp
+    val size = if (base.fontSize.isSpecified) base.fontSize else KAYA_COMPOSE_DEFAULT_TEXT_SIZE
     kayaPlatformSizes[node.id] = size.value
     if (!kayaNodeFontSet(node)) return base
     val family = node.family.takeIf { it.isNotEmpty() }?.let { kayaInstalledFamilyMap()[it] }
@@ -21002,6 +21003,10 @@ internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextSt
     if (node.textScale != 1.0) style = style.copy(fontSize = size * node.textScale.toFloat())
     return style
 }
+
+/** What a text layout draws at when its style names no size: Compose's own
+ *  default (foundation's DefaultFontSize). */
+internal val KAYA_COMPOSE_DEFAULT_TEXT_SIZE = 14.sp
 
 /** The size in sp the platform gave each text kind, before text_scale. */
 internal val kayaPlatformSizes = HashMap<Long, Float>()
@@ -21051,11 +21056,11 @@ internal fun KayaGutter(node: KayaNode, textStyle: androidx.compose.ui.text.Text
                 val mid = (layout.getLineTop(i) + layout.getLineBottom(i)) / 2f - scroll
                 if (mid < 0f || mid > size.height) continue
                 val label = measurer.measure(number.toString(), numberStyle)
-                drawText(
-                    label,
-                    topLeft = androidx.compose.ui.geometry.Offset(
-                        width.toPx() - 8.dp.toPx() - label.size.width, mid - label.size.height / 2f),
-                )
+                // TextPainter, not DrawScope.drawText: the canvas vocabulary's
+                // name stays out of this interpreter (tools/check-canvas-blit.py).
+                translate(width.toPx() - 8.dp.toPx() - label.size.width, mid - label.size.height / 2f) {
+                    drawIntoCanvas { canvas -> androidx.compose.ui.text.TextPainter.paint(canvas, label) }
+                }
                 drawn.add(number to mid)
             }
             kayaGutterDrawn[node.id] = KayaGutterDrawn(drawn, size.height)

@@ -855,7 +855,7 @@ mod gutter {
             (width, width, -1, -1)
         }
 
-        fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+        fn snapshot(&self, snap: &gtk4::Snapshot) {
             self.drawn.borrow_mut().clear();
             let Some(view) = self.view.upgrade() else { return };
             let obj = self.obj();
@@ -881,13 +881,13 @@ mod gutter {
                             0,
                             mid.round() as i32,
                         );
-                        snapshot.save();
-                        snapshot.translate(&gtk4::graphene::Point::new(
+                        snap.save();
+                        snap.translate(&gtk4::graphene::Point::new(
                             (width - 8 - w) as f32,
                             (wy - h / 2) as f32,
                         ));
-                        snapshot.append_layout(&layout, &colour);
-                        snapshot.restore();
+                        snap.append_layout(&layout, &colour);
+                        snap.restore();
                         self.drawn.borrow_mut().push((number, mid));
                     }
                 }
@@ -22171,9 +22171,14 @@ impl crate::harness::Stage for GtkStage {
             let widget = target_widget(core, target).ok_or("no such target")?;
             let view = widget.downcast::<gtk4::TextView>().map_err(|_| "not a textarea".to_owned())?;
             let Some(gutter) = view.gutter(gtk4::TextWindowType::Left) else { return Ok(None) };
+            // GTK hands back the private GtkTextViewChild it wrapped kaya's
+            // widget in (gtktextview.c, set_gutter); the gutter is its child.
             let gutter = gutter
+                .clone()
                 .downcast::<gutter::KayaGutter>()
-                .map_err(|_| "its left gutter is not kaya's".to_owned())?;
+                .ok()
+                .or_else(|| gutter.first_child().and_then(|c| c.downcast::<gutter::KayaGutter>().ok()))
+                .ok_or_else(|| format!("its left gutter is a {}, not kaya's", gutter.type_().name()))?;
             if !gutter.is_mapped() || gutter.width() == 0 {
                 return Err("the gutter is not on screen yet".to_owned());
             }

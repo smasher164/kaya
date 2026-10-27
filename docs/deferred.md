@@ -109,6 +109,37 @@ ships now and moves little; what is left is two design questions.
    images, grids, scrolls and flowing rows; no per-node reader) are not yet
    measured.
 
+## DEFER — a minimap beside the textarea (docs/code-surface-plan.md §6; 2026-10-27)
+KEY: minimap, scroll report, scroll_to_line, textarea scrolled, KayaProtoMinimap, GtkSourceMap
+
+Studied, not built. The cheaper route is two textarea additions every lane
+can lower from APIs it already uses (a report of the first visible line and
+the visible line count as the user scrolls, and a request to scroll to a
+line), with the app drawing the minimap on a canvas; a mac prototype drawn
+inside the interpreter followed the scroll with no new protocol and was not
+committed (the code surface review page has its capture). A native second
+view is reachable on the mac, iOS and GTK and costly on WinUI. Trigger: the
+maintainer asks for a minimap in the editor.
+
+## DEFER — the current line's number tinted in the gutter (docs/code-surface-plan.md G3; 2026-10-27)
+KEY: line_numbers, current line, gutter tint, KayaGutterView, KayaUIGutter, KayaGutter, code_surface.rs
+
+Every surveyed editor tints the caret's line number (VS Code's
+editorLineNumber.activeForeground, Zed, GtkSourceView's current-line-number
+colour); kaya's gutter numbers every line in the secondary colour alone.
+Each lowering already redraws on the text's change; the caret's moves are
+the missing trigger. Trigger: the editor's next styling pass.
+
+## DEFER — fonts the user installed are not in iOS's family list (docs/code-surface-plan.md M3; 2026-10-27)
+KEY: list_font_families, font_families, UIFont.familyNames, CTFontManagerRequestFonts, UIFontPickerViewController
+
+UIFont.familyNames lists the system's families and the app's own; a font a
+user installed through a font provider app reaches another app only through
+the system picker or CTFontManagerRequestFonts (Apple's
+UIFontPickerViewController page). A picker kind is refused for now (plan M5),
+so on iOS the list is the system's. Trigger: a ruling for a font picker kind,
+whose iOS arm would be UIFontPickerViewController.
+
 ## DEFER — Compose's per-node readers and WinUI's LayoutUpdated hooks, unmeasured (the mac interaction latency's sweep; 2026-10-24)
 KEY: onGloballyPositioned, LayoutUpdated, kayaHarnessActive, KayaGeometryTap, per-node reader, interaction latency
 

@@ -6277,7 +6277,7 @@ drainPosted app = do
 
 isMediaKind :: Word16 -> Bool
 isMediaKind kind =
-  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun]
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun, W.occKindFontFamilies]
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do

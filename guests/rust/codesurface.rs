@@ -6,7 +6,7 @@
 /// Forty lines; the third wraps at every lane's width.
 fn document() -> String {
     let mut lines = vec![
-        "// codesurface: a small source file for the gutter".to_string(),
+        "// codesurface".to_string(),
         "fn main() {".to_string(),
         "    let note = \"this line is long on purpose, so that the textarea wraps it onto a second row \
          and the gutter has a continuation to leave unnumbered, the way every editor does\";"

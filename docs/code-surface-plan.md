@@ -1,7 +1,9 @@
 # The code surface: a line-number gutter, the text's face and size, and whether kaya can carry a minimap
 
-Status: DESIGNED 2026-10-27; the depth (spec, core, SwiftUI on the mac, the
-Rust binding, the scene) is being built, the breadth follows it. The
+Status: BUILT 2026-10-27 on all five backends, in all nine bindings and the
+C floor, with the codesurface scene on every lane in every language and the
+editor app wired in (line numbers, a monospaced document, the View menu's
+zoom and font). The minimap is a study (§6) and a ledger entry. The
 maintainer, 2026-10-27: "We should definitely have a line number gutter";
 "I think it'd be good to know that we could support something like the
 mini-map, especially since we're doing a lot of native controls"; on the code
@@ -72,7 +74,7 @@ starts inside the viewport, `hides N` that no row of line N is inside it,
 
 | backend | mechanism |
 |---|---|
-| SwiftUI, macOS | an `NSRulerView` subclass as the textarea's scroll view's `verticalRulerView`, drawing in `drawHashMarksAndLabels(in:)` from the TextKit 2 layout fragments in the visible rect (`enumerateTextLayoutFragments` from the fragment at the viewport's top; a paragraph is a layout fragment, its first `textLineFragment` the numbered row). Never `.layoutManager`, which drops the view to TextKit 1 for good (mjtsai.com 2026-02-09). `clipsToBounds` on, since macOS 14 a ruler that does not clip paints over the text (Apple forums thread 767825). Redrawn on the clip view's bounds change and the text's change. |
+| SwiftUI, macOS | a view in the textarea's scroll view, in a leading `contentInsets` its width wide, drawing in `draw(_:)` from the TextKit 2 layout fragments in the visible rect (`enumerateTextLayoutFragments` from the fragment just above the viewport's top; a paragraph is a layout fragment, its first `textLineFragment` the numbered row), redrawn on the clip view's bounds change and the text's change. Never `.layoutManager`, which drops the view to TextKit 1 for good (mjtsai.com 2026-02-09). NOT the scroll view's `verticalRulerView`, the prior art's hook: with an `NSRulerView` shown, the window's SwiftUI content published no accessibility children at all (measured 2026-10-27: `expect_ax label@mono` read "not in the accessibility tree" with the ruler and passed without it), and the plain-text pin's `isRulerVisible = false` hides every ruler of the scroll view. STTextView left the ruler for a plain gutter view too. |
 | SwiftUI, iOS | a gutter view inside the UITextView (a scroll view, so a subview at a content y scrolls with the text), `textContainerInset.left` reserving its width, drawn from the same TextKit 2 enumeration, redrawn from `scrollViewDidScroll` and the text's change; `isAccessibilityElement = false`. Runestone and STTextView's UIKit gutter are the prior art. |
 | GTK | `gtk_text_view_set_gutter(view, GTK_TEXT_WINDOW_LEFT, area)` with a drawing area that sizes itself to the digit count and draws from `gtk_text_view_get_visible_rect`, `get_line_at_y`, `get_line_yrange` and the first display line's height, the GtkSourceGutter recipe; redrawn on the vadjustment's `value-changed` and the buffer's `changed`. Accessible role presentation. |
 | WinUI | the RichEditBox in a two-column Grid with a Canvas of TextBlocks to its left, placed from the TOM object model: `Document.GetRange(0,0).Expand(TextRangeUnit.Window)` for the visible span, stepped by `TextRangeUnit.Paragraph`, `GetRect(PointOptions.ClientCoordinates)` for each paragraph's first row; redrawn on the template's `ContentElement` ScrollViewer's `ViewChanged`, `TextChanged` and `SizeChanged`. `AccessibilityView = Raw`. The weakest lane: the scroller is a template part, not an API. |
@@ -125,8 +127,9 @@ list reads the same way everywhere.
 
 **M4. How a leg sees it.** `expect_face <target> monospaced|proportional|named`
 reads the font the toolkit RESOLVED for the widget (the NSTextView's font,
-the accessibility attributed string's AXFont for a SwiftUI label or field,
-the UITextView's or UILabel's font, Pango's resolved font description, the
+the AXFont on a SwiftUI label's accessibility attributed string on the mac,
+the font tokens on its accessibilityAttributedLabel on iOS (docs/traps.md),
+the NSTextField's, UITextView's or UITextField's font, Pango's resolved font description, the
 TextBlock's or RichEditBox's resolved FontFamily through DirectWrite, the
 Compose text layout's resolved typeface) and answers `monospaced <family>` or
 `proportional <family>` from the font's own fixed-pitch trait. `named` holds
@@ -252,6 +255,14 @@ would need two small additions: a `scrolled` occurrence from the textarea
 on a canvas beside the textarea and moves the box on each report. Each
 backend already holds both facts (the table above), so the two additions are
 small everywhere, WinUI included.
+
+**A prototype.** On the mac a minimap was drawn beside the code surface
+scene's textarea from the text alone (a block per run of non-space
+characters, two points a line, the box from the scroll view's visible rect,
+a click or drag scrolling the clip view), and it followed the textarea's
+scroll with no new protocol; it was not committed (the review page carries
+its capture). It is the app-drawn shape, built inside the interpreter only
+because the scroll report does not exist yet.
 
 **Verdict.** Yes, kaya can carry a minimap, and the cheaper path is the
 second: two textarea additions (a scroll report and a scroll request) that

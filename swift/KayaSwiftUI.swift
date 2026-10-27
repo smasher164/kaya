@@ -9727,7 +9727,8 @@ func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
     #if os(macOS)
         return (kayaPlatformFont(style) ?? NSFont.preferredFont(forTextStyle: style)).pointSize
     #else
-        return (kayaPlatformFont(style) ?? UIFont.preferredFont(forTextStyle: style)).pointSize
+        let traits = kayaHarnessWindow()?.traitCollection ?? UITraitCollection.current
+        return UIFont.preferredFont(forTextStyle: style, compatibleWith: traits).pointSize
     #endif
 }
 
@@ -9786,6 +9787,7 @@ func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
         return .failure("publishes an AXFont no font answers to: \(ax)")
     }
 #else
+
     /// The font the toolkit resolved for a text kind: the UITextView's or the
     /// UITextField's own.
     @MainActor func kayaResolvedFont(_ node: KayaNode) -> KayaRead<UIFont> {
@@ -9797,14 +9799,39 @@ func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
             for sub in view.subviews { walk(sub) }
         }
         guard !node.a11yId.isEmpty else { return .failure("no a11y_id authored on this widget") }
+        if node.kind == kindTextarea, let view = kayaLiveUITextView(node.id), let font = view.font {
+            return .success(font)
+        }
         for scene in UIApplication.shared.connectedScenes {
             for window in (scene as? UIWindowScene)?.windows ?? [] { walk(window) }
         }
-        guard let found else {
-            return .failure(node.kind == kindLabel
-                ? "a SwiftUI label publishes no font on iOS" : "no text view on screen")
+        if let found { return .success(found) }
+        guard node.kind == kindLabel else { return .failure("no text view on screen") }
+        // A SwiftUI label has no UILabel; its accessibility element publishes
+        // the font it drew in as tokens on its attributed label (measured
+        // 2026-10-27: UIAccessibilityTokenFontName, ...FontFamily, ...FontSize).
+        var tokens: [NSAttributedString.Key: Any]?
+        for scene in UIApplication.shared.connectedScenes {
+            for window in (scene as? UIWindowScene)?.windows ?? [] where tokens == nil {
+                if let label = kayaAxFind(window, node.a11yId)?.accessibilityAttributedLabel, label.length > 0 {
+                    tokens = label.attributes(at: 0, effectiveRange: nil)
+                }
+            }
         }
-        return .success(found)
+        guard let tokens else { return .failure("not in the accessibility tree with an attributed label") }
+        let name = tokens[NSAttributedString.Key("UIAccessibilityTokenFontName")] as? String ?? ""
+        let size = (tokens[NSAttributedString.Key("UIAccessibilityTokenFontSize")] as? NSNumber)
+            .map { CGFloat($0.doubleValue) } ?? 0
+        guard !name.isEmpty, size > 0 else {
+            return .failure("its attributed label carries no font: \(tokens.keys.map(\.rawValue).sorted())")
+        }
+        if let font = UIFont(name: name, size: size) { return .success(font) }
+        // The system faces publish private, `.`-led names (the mac's case).
+        if name.hasPrefix(".") {
+            return .success(name.contains("Mono")
+                ? .monospacedSystemFont(ofSize: size, weight: .regular) : .systemFont(ofSize: size))
+        }
+        return .failure("its attributed label names a font no UIFont answers to: \(name)")
     }
 #endif
 
@@ -24455,18 +24482,35 @@ func kayaNodeFontSet(_ node: KayaNode) -> Bool {
 /// style, its family swapped for the node's installed `family`, else for the
 /// platform's monospaced face when `monospaced`, and its size the platform's
 /// times `text_scale`, taken AFTER Dynamic Type so the multiple composes.
-@MainActor func kayaNodeFont(_ node: KayaNode, _ style: KayaPlatformTextStyle) -> KayaPlatformFont {
+#if os(macOS)
+    typealias KayaTextTraits = Void
+#else
+    typealias KayaTextTraits = UITraitCollection
+#endif
+
+@MainActor func kayaNodeFont(
+    _ node: KayaNode, _ style: KayaPlatformTextStyle, traits context: KayaTextTraits? = nil
+) -> KayaPlatformFont {
     #if os(macOS)
         let base = kayaPlatformFont(style) ?? NSFont.preferredFont(forTextStyle: style)
+        let size = base.pointSize * CGFloat(node.textScale)
     #else
-        let base = kayaPlatformFont(style) ?? UIFont.preferredFont(forTextStyle: style)
+        // The size the platform gives the style at the view's own traits
+        // (Dynamic Type included), times the multiple (S2); the views re-read
+        // it when the setting moves.
+        let base = UIFont.preferredFont(forTextStyle: style, compatibleWith: context ?? UITraitCollection.current)
+        let size = base.pointSize * CGFloat(node.textScale)
     #endif
-    let size = base.pointSize * CGFloat(node.textScale)
     let traits =
         base.fontDescriptor.object(forKey: .traits)
         as? [KayaPlatformFontDescriptor.TraitKey: Any]
     let weight = (traits?[.weight] as? NSNumber)?.doubleValue ?? 0
-    if !node.family.isEmpty, kayaFamilyPresent(node.family) {
+    #if os(macOS)
+        let present = !node.family.isEmpty && kayaFamilyPresent(node.family)
+    #else
+        let present = !node.family.isEmpty && !UIFont.fontNames(forFamilyName: node.family).isEmpty
+    #endif
+    if present {
         let descriptor = KayaPlatformFontDescriptor(fontAttributes: [
             .family: node.family,
             .traits: [KayaPlatformFontDescriptor.TraitKey.weight: weight],
@@ -24474,18 +24518,36 @@ func kayaNodeFontSet(_ node: KayaNode) -> Bool {
         #if os(macOS)
             if let font = NSFont(descriptor: descriptor, size: size) { return font }
         #else
-            return UIFont(descriptor: descriptor, size: size)
+            // A family with no face at the ramp's weight can answer another
+            // family from the descriptor; its first face then.
+            var font = UIFont(descriptor: descriptor, size: size)
+            if font.familyName != node.family,
+                let first = UIFont.fontNames(forFamilyName: node.family).first,
+                let face = UIFont(name: first, size: size)
+            {
+                font = face
+            }
+            return font
         #endif
     }
-    if node.monospaced {
-        return KayaPlatformFont.monospacedSystemFont(ofSize: size, weight: KayaPlatformFont.Weight(weight))
-    }
-    return base.withSize(size)
+    #if os(macOS)
+        if node.monospaced {
+            return NSFont.monospacedSystemFont(ofSize: size, weight: NSFont.Weight(weight))
+        }
+        return base.withSize(size)
+    #else
+        if node.monospaced {
+            return UIFont.monospacedSystemFont(ofSize: size, weight: UIFont.Weight(weight))
+        }
+        return (kayaPlatformFont(style) ?? base).withSize(size)
+    #endif
 }
 
 /// The SwiftUI spelling of kayaNodeFont, or nil when the node asks for nothing.
-@MainActor func kayaNodeSwiftFont(_ node: KayaNode, _ style: KayaPlatformTextStyle) -> Font? {
-    kayaNodeFontSet(node) ? Font(kayaNodeFont(node, style) as CTFont) : nil
+@MainActor func kayaNodeSwiftFont(
+    _ node: KayaNode, _ style: KayaPlatformTextStyle, traits: KayaTextTraits? = nil
+) -> Font? {
+    kayaNodeFontSet(node) ? Font(kayaNodeFont(node, style, traits: traits) as CTFont) : nil
 }
 
 /// A text kind's own face and size, applied only when it asks for one: a
@@ -24493,9 +24555,32 @@ func kayaNodeFontSet(_ node: KayaNode) -> Bool {
 struct KayaNodeFontModifier: ViewModifier {
     let node: KayaNode
     let style: KayaPlatformTextStyle
+    /// Read so a text-size change re-renders the custom font (S2).
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     func body(content: Content) -> some View {
-        if let font = kayaNodeSwiftFont(node, style) { content.font(font) } else { content }
+        #if os(macOS)
+            let font = kayaNodeSwiftFont(node, style)
+        #else
+            let font = kayaNodeSwiftFont(
+                node, style, traits: UITraitCollection(preferredContentSizeCategory: UIContentSizeCategory(typeSize)))
+        #endif
+        if let font { content.font(font) } else { content }
+    }
+}
+
+/// A label's font: its own face and size when it asks for one (with the
+/// role's text style under it), else the role's.
+struct KayaLabelFont: ViewModifier {
+    let node: KayaNode
+    let font: Font?
+
+    func body(content: Content) -> some View {
+        if kayaNodeFontSet(node) {
+            content.modifier(KayaNodeFontModifier(node: node, style: kayaNodeStyle(node)))
+        } else {
+            content.font(font)
+        }
     }
 }
 
@@ -27675,7 +27760,7 @@ struct KayaRender: View {
             // be the one label still in the system face (measured). Unroled
             // labels pass nil and inherit the root's.
             let font: Font? = kayaNodeFontSet(node)
-                ? kayaNodeSwiftFont(node, kayaNodeStyle(node))
+                ? nil
                 : node.role == roleHeading
                     ? (sectionText
                         ? (kayaBrandFont(.footnote) ?? .footnote)
@@ -27688,7 +27773,7 @@ struct KayaRender: View {
                 ? Text(AttributedString(kayaAttributedDocument(
                     node.text, node.richRuns, base: kayaLabelBaseFont(node), ground: true)))
                 : Text(node.text))
-                .font(font)
+                .modifier(KayaLabelFont(node: node, font: font))
                 .textCase(
                     node.role == roleHeading && sectionText ? .uppercase : nil)
             Group {
@@ -35524,6 +35609,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var flexStretch = false
         @Environment(\.kayaInGroupedCard) private var inGroupedCard
         @Environment(\.kayaInComposer) private var inComposer
+        @Environment(\.dynamicTypeSize) private var typeSize
 
         var body: some View {
             // EVERY OBSERVATION IS READ HERE, in a SwiftUI body, and handed down
@@ -35542,7 +35628,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 richRuns: node.richRuns,
                 richSeq: node.richSeq,
                 cap: kayaScene.keyboardFieldCap[node.id],
-                surface: kayaSurfaceKey(node)
+                surface: kayaSurfaceKey(node) + " \(typeSize)"
             )
             .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
@@ -35788,7 +35874,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             kayaApplyUIGutter(view, on: node.lineNumbers)
             // docs/code-surface-plan.md M1, M2, S1: the node's own face and size.
             if kayaNodeFontSet(node) {
-                let font = kayaNodeFont(node, .body)
+                let font = kayaNodeFont(node, .body, traits: view.traitCollection)
                 if view.font != font {
                     view.font = font
                     context.coordinator.richDone = -1
@@ -36086,7 +36172,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// expression, so a uniform document reads exactly as it did.
     @MainActor func kayaRichBaseFont(_ view: UITextView) -> UIFont {
         if let id = (view as? KayaTextView)?.nodeId, let node = kayaScene.nodes[id], kayaNodeFontSet(node) {
-            return kayaNodeFont(node, .body)
+            return kayaNodeFont(node, .body, traits: view.traitCollection)
         }
         return kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
     }

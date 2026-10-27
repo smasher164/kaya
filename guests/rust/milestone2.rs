@@ -168,8 +168,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceDrawRequested { .. }
             | Occurrence::Tick { .. }
             | Occurrence::InstanceTick { .. } => {}
-            // No link route is declared here.
-            Occurrence::LinkOpened { .. } => {}
+            // No link route is declared here, and no family list asked for.
+            Occurrence::LinkOpened { .. } | Occurrence::FontFamilies { .. } => {}
             Occurrence::Shutdown => break,
         }
     }
