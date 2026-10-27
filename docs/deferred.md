@@ -628,7 +628,8 @@ needs only the caret's block, still applied (bundle android-editor-go of run 202
 the fail shot shows both matches highlighted and neither selected). Mac, GTK, WinUI and iOS kept the
 selection. The likely cause is positional composition: KayaRenderCore emits a container's children
 in a loop with no `key(child.id)`, so a child inserted before the field moves it to a new slot and
-its BasicTextField is composed afresh; unproven. The editor keeps its bars below the document. The
+its BasicTextField is composed afresh; unproven. The editor keeps its find bar below the document (its
+formatting bar became the Format menu on 2026-10-27, so only the find bar can still meet this). The
 guard to add with the fix: an editor.steps variant (or a scene) that stamps a row before a textarea
 holding a selection and reads expect_selection after it, on every lane.
 KEY: Compose key, positional composition, stamped before a textarea, selection lost, format bar above.

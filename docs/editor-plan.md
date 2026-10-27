@@ -99,6 +99,16 @@ the widget's own selection; the runs are the widget's, never the file's
 (docs/rich-text-plan.md §9). Saving writes the plain text; an interchange
 format for the runs is the notes app's question, not the editor's.
 
+2026-10-27 (the maintainer: "those formatting buttons are typically in some menu
+bar"): the bar is gone and its acts are the Format menu's items, the way
+TextEdit, Pages, Word and Google Docs carry them: Bold, Italic, Underline,
+Strikethrough and Code, then a Paragraph Style submenu (Heading 1, Heading 2,
+Quote, Body), with Word's and Google Docs' chords (primary+b, i, u,
+primary+shift+x, primary+e, primary+alt+1, 2 and 0). On a phone the menu is
+the overflow's Format group (DESIGN.md, the window anchor). The document the
+editor opens is a short walking journal in place of the dotted fixture; its
+numbers are the find's matches.
+
 ## §3 — not in v1 (recorded, not forgotten)
 
 Syntax highlighting; tabs and panes; find-and-replace-all across a

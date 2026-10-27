@@ -37,66 +37,61 @@ func workingDir() string {
 }
 
 // TALL ON PURPOSE: on a document that fits, reveal_range has nothing to
-// move. A newline after the backtick would shift every offset in the script.
-const notesDoc = `top 7
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-mid 13
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-.
-end 42`
+// move. Its four numbers are the find's matches, and its last line takes
+// the scene's typed " 99". A newline after the backtick would shift every
+// offset in the script.
+const notesDoc = `Walking the coast path
+
+Day 3. Rain until noon, then a low
+sun that turned the wet slate the
+colour of pewter. We left the
+harbour by the steps behind the
+chapel and climbed until the
+village was a handful of roofs.
+
+The path keeps close to the edge
+here: gorse on one side, the drop
+on the other, and the sea working
+at the rocks far below with a
+sound like a slow engine.
+
+Lunch in the lee of a field wall.
+Bread, cheese, the last of the
+apples. A kestrel held still over
+the grass behind us for as long
+as it took to eat, then slid away
+downwind without a wingbeat.
+
+The lighthouse by mid afternoon.
+The keeper's daughter runs the
+tours now. She counts 140 steps
+to the lamp room and says she has
+never once climbed them without
+counting.
+
+From the gallery you can see the
+whole of the bay: the headland we
+walked from, the long beach, and
+the town at the far end, where
+the lights were coming on.
+
+Down again, and the last stretch
+along the sand with the tide out
+and the light going. Wet boots,
+cold hands, a good tiredness.
+
+Tomorrow the estuary, the ferry
+if it is running, and the inn on
+the far side that serves supper
+until late.
+
+Things to remember
+- dry socks in the top of the pack
+- the ferry stops at dusk
+- fill the bottles at the chapel
+- 12 plasters left
+
+Miles walked so far:`
 
 // readDoc reads a picked file whole.
 func readDoc(file kaya.PickedFile) (string, error) {
@@ -147,9 +142,6 @@ func docName(dest *kaya.PickedFile) string {
 
 const findKey = "bar"
 
-// The formatting bar is stamped and torn down the find bar's way.
-const barKey = "format"
-
 // Spelled rather than formatted: "1 matches" is what a person reads.
 func tally(n int) string {
 	switch n {
@@ -196,12 +188,6 @@ func App() *kaya.App {
 		findRows kaya.Collection
 		// TEMPLATE NODES, not widgets: their handlers register below Build.
 		query, prev, next, done kaya.Node
-		// THE FORMATTING BAR (docs/rich-text-plan.md §8): the app's own
-		// toolbar over the widget's own selection, shown and hidden the
-		// find bar's way. One template node per act, keyed by its a11y id.
-		formatRows kaya.Collection
-		barOpen    bool
-		acts       = map[string]kaya.Node{}
 	)
 
 	mark := func(tx *kaya.Tx) { tx.Window(0).Dirty(text != saved) }
@@ -384,18 +370,6 @@ func App() *kaya.App {
 
 		win.OnCloseRequested(func(tx *kaya.Tx) { ask(tx, quit) })
 
-		format := win.Menu("Format")
-		format.Item("Formatting Bar").Shortcut("primary+shift+f").OnActivate(func(tx *kaya.Tx) {
-			if barOpen {
-				barOpen = false
-				tx.Remove(formatRows, barKey)
-				tx.Focus(buffer)
-				return
-			}
-			barOpen = true
-			tx.Insert(formatRows, barKey, "")
-		})
-
 		file := win.Menu("File")
 		file.Item("New").Shortcut("primary+n").OnActivate(func(tx *kaya.Tx) {
 			ask(tx, newDoc)
@@ -430,6 +404,20 @@ func App() *kaya.App {
 			refind(tx)
 		})
 
+		// Over the widget's own selection (docs/rich-text-plan.md §7).
+		format := win.Menu("Format")
+		format.Item("Bold").Shortcut("primary+b").OnActivate(func(tx *kaya.Tx) { tx.Bold(buffer) })
+		format.Item("Italic").Shortcut("primary+i").OnActivate(func(tx *kaya.Tx) { tx.Italic(buffer) })
+		format.Item("Underline").Shortcut("primary+u").OnActivate(func(tx *kaya.Tx) { tx.Underline(buffer) })
+		format.Item("Strikethrough").Shortcut("primary+shift+x").OnActivate(func(tx *kaya.Tx) { tx.Strike(buffer) })
+		format.Item("Code").Shortcut("primary+e").OnActivate(func(tx *kaya.Tx) { tx.Code(buffer) })
+		format.Separator()
+		style := format.Menu("Paragraph Style")
+		style.Item("Heading 1").Shortcut("primary+alt+1").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Heading1) })
+		style.Item("Heading 2").Shortcut("primary+alt+2").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Heading2) })
+		style.Item("Quote").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Quote) })
+		style.Item("Body").Shortcut("primary+alt+0").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Body) })
+
 		// grow divides the MAIN axis and align owns the cross one: a
 		// full-window buffer needs both.
 		tx.Mount(tx.Column(func() {
@@ -442,28 +430,8 @@ func App() *kaya.App {
 				refind(tx)
 			}).Grow(1).A11yID("buffer").A11yLabel("Document").Rich() // textarea#0
 
-			formatRows = tx.Collection()
-			for row := range tx.Rows(formatRows).All() {
-				bar := row.Row(func() {
-					for _, act := range []struct{ id, title, help string }{
-						{"bold", "Bold", ""}, {"italic", "Italic", ""}, {"underline", "Underline", ""},
-						{"strike", "Strike", "Strikethrough"}, {"code", "Code", "Format as code"},
-						{"heading1", "H1", "Format as heading 1"}, {"heading2", "H2", "Format as heading 2"},
-						{"quote", "Quote", "Format as quote"}, {"body", "Body", "Format as body text"},
-					} {
-						n := row.Button(act.title)
-						row.SetA11yID(n, act.id)
-						if act.help != "" {
-							row.SetHelp(n, act.help)
-						}
-						acts[act.id] = n
-					}
-				})
-				row.SetInset(bar, 8)
-			}
-
-			// There is no visibility property: "shown and hidden" means
-			// stamped and torn down. SetInset rides the STAMPED row.
+			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
+			// (editor.steps reads it). SetInset rides the STAMPED row.
 			findRows = tx.Collection()
 			for row := range tx.Rows(findRows).All() {
 				bar := row.Row(func() {
@@ -507,19 +475,6 @@ func App() *kaya.App {
 	prev.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
 	next.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
 
-	// THE ACTS, each over the widget's own selection (docs/rich-text-plan.md
-	// §7): an inline attribute goes on, a block kind is set, body takes the
-	// block off. The widget answers through OnFormat.
-	for _, name := range []string{"bold", "italic", "underline", "strike", "code"} {
-		name := name
-		acts[name].OnClick(func(tx *kaya.Tx, _ []any) { tx.FormatFlag(buffer, name, true) })
-	}
-	for id, kind := range map[string]kaya.Block{
-		"heading1": kaya.Heading1, "heading2": kaya.Heading2, "quote": kaya.Quote, "body": kaya.Body,
-	} {
-		kind := kind
-		acts[id].OnClick(func(tx *kaya.Tx, _ []any) { tx.SetBlock(buffer, kind) })
-	}
 	buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
 		switch {
 		case f.Removed:
