@@ -294,13 +294,10 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # docs/media-player-plan.md M20 (2): a stamped label's or container's widest width.
              "max_width"]
 
-# Rust's `grow` is the generic floor `set(node, prop, value)` and not a
-# named setter, so that one row cannot tell grow from any other generic
-# write. The named rows can.
 PROP_MEMBERS = {
     "rust": {
         "format": "format",
-        "grow": "set", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
+        "grow": "grow", "a11y_id": "a11y_id", "a11y_label": "a11y_label",
         "a11y_hint": "a11y_hint", "accepts": "accepts", "role": "role",
         "inset": "inset", "help": "help", "placeholder": "placeholder",
         "href": "href", "fill": "fill", "align": "align", "filled": "filled",
@@ -314,7 +311,7 @@ PROP_MEMBERS = {
         "ground_gradient": "ground_gradient", "ground_image": "ground_image", "shape": "shape",
         "tint": "tint", "selected": "selected", "on_activate": "on_activate", "on_select": "on_select",
         "max_lines": "max_lines",
-        "max_width": "max_lines",
+        "max_width": "max_width",
     },
     "go": {
         "format": "SetFormat",

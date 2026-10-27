@@ -193,13 +193,59 @@ def by_content(run, inputs, outputs, stamp, skip=frozenset(), who="content_fresh
     return 0
 
 
+def clean_for(cmd, package):
+    """The `cargo clean` that drops `package`'s artifacts from the profile `cmd` builds into."""
+    out = ["cargo", "clean", "--locked", "-p", package]
+    for i, arg in enumerate(cmd):
+        if arg == "--release":
+            out.append(arg)
+        elif arg in ("--target", "--target-dir", "--manifest-path", "--profile") and i + 1 < len(cmd):
+            out += [arg, cmd[i + 1]]
+        elif arg.split("=", 1)[0] in ("--target", "--target-dir", "--manifest-path", "--profile"):
+            out.append(arg)
+    return out
+
+
+def package_of(crate):
+    m = re.search(r'^\[package\][^\[]*?^name\s*=\s*"([^"]+)"',
+                  (pathlib.Path(crate) / "Cargo.toml").read_text(encoding="utf-8"), re.M | re.S)
+    if not m:
+        raise SystemExit(f"content_fresh: {crate}/Cargo.toml names no [package]")
+    return m.group(1)
+
+
+def nested(cmd, crate, outputs, who="content_fresh", env=None):
+    """A crate in a workspace of its own: when its sources' bytes or its outputs moved since the
+    last build through here, its package is cleaned first, so cargo cannot keep an artifact by
+    mtime."""
+    crate = pathlib.Path(crate).resolve()
+    outputs = [pathlib.Path(o) for o in outputs]
+    package = package_of(crate)
+
+    def run(full):
+        if full:
+            rc = subprocess.run(clean_for(cmd, package), cwd=crate, env=env, check=False).returncode
+            if rc != 0:
+                return rc
+        return subprocess.run(cmd, cwd=crate, env=env, check=False).returncode
+
+    return by_content(run, [str(crate)], outputs, outputs[0].parent / f".kaya-sources-{package}.json",
+                      skip={"target"}, who=who)
+
+
+USAGE = ("usage: content_fresh.py --profile DIR [--artifact PATTERN] -- CARGO-COMMAND...\n"
+         "       content_fresh.py --crate DIR --outputs FILE[,FILE] -- CARGO-COMMAND...")
+
+
 def main(argv):
     if "--" not in argv:
-        sys.exit("usage: content_fresh.py --profile DIR [--artifact PATTERN] -- CARGO-COMMAND...")
+        sys.exit(USAGE)
     opts, cmd = argv[: argv.index("--")], argv[argv.index("--") + 1:]
     args = dict(zip(opts[::2], opts[1::2]))
+    if set(args) == {"--crate", "--outputs"}:
+        return nested(cmd, args["--crate"], args["--outputs"].split(","), "content_fresh")
     if "--profile" not in args or set(args) - {"--profile", "--artifact"}:
-        sys.exit("usage: content_fresh.py --profile DIR [--artifact PATTERN] -- CARGO-COMMAND...")
+        sys.exit(USAGE)
     return cargo(lambda: subprocess.run(cmd, check=False).returncode, args["--profile"],
                  examples_in(cmd), args.get("--artifact", "{name}"))
 

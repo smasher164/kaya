@@ -26,7 +26,8 @@ HOST="${1:?usage: run.sh <user@host>}"
 TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
 
 cd "$ROOT" || exit 1
-cargo xwin build --locked --features harness --release \
+python3 tools/lib/content_fresh.py --profile "$TARGET" --artifact '{name}.exe' -- \
+    cargo xwin build --locked --features harness --release \
     --target aarch64-pc-windows-msvc --lib --example undo >&2
 rc=$?
 if [ "$rc" -ne 0 ]; then

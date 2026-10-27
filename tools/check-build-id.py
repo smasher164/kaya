@@ -241,19 +241,24 @@ with scratch_dir("check-build-id-") as tmp:
         fail("crates/kaya/build.rs's rerun-if-changed list is not tools/build-id.py's "
              "COMPONENTS['core']: the baked id then misses an edit to what the list leaves out")
 
-    # 4. Every runner's cargo build of kaya, and the mac lane's make and MSBuild
-    # guests, go through tools/lib/content_fresh.py
+    # 4. Every runner's cargo build of kaya, the mac lane's make and MSBuild
+    # guests, the nested workspaces and the hand probes go through tools/lib/content_fresh.py
     # (docs/traps.md, cargo keeps an artifact a restore with an old mtime made stale).
     FRESH_SITES = {"tools/validate-mac.py": 1, "tools/run-leg.py": 2,
                    "tools/linux/run-suites.sh": 1, "tools/ios/run-sim.py": 1,
-                   "tools/android/run-emulator.py": 1, "tools/deploy-win.py": 1,
+                   "tools/android/run-emulator.py": 1, "tools/deploy-win.py": 2,
                    "tools/swiftui/build-dylib.sh": 1, "tools/gates.py": 1,
-                   "tools/lib/lanes/mac.py": 2}
+                   "tools/lib/lanes/mac.py": 2,
+                   "tools/win/clipprobe/build.sh": 1, "tools/win/dialogprobe/build.sh": 1,
+                   "tools/win/sheetprobe/build.sh": 1, "tools/win/undoprobe/build.sh": 1,
+                   "tools/win/undoarmprobe/run.sh": 1, "tools/win/keyprobe/run.py": 1,
+                   "tools/linux/shot-gtk.py": 1, "tools/ios/gpuprobe/build.py": 1,
+                   "tools/bench-tables.sh": 1}
 
     def fresh_calls(text):
         return sum(1 for line in text.splitlines() if not line.strip().startswith("#")
-                   and ("content_fresh.cargo(" in line or "content_fresh.by_content(" in line
-                        or "tools/lib/content_fresh.py" in line))
+                   and re.search(r"content_fresh\.(cargo|by_content|nested)\("
+                                 r"|lib/content_fresh\.py", line))
 
     for rel, want in FRESH_SITES.items():
         got = fresh_calls((ROOT / rel).read_text(encoding="utf-8"))
@@ -263,7 +268,7 @@ with scratch_dir("check-build-id-") as tmp:
                  f"by mtime alone")
     unrouted = g.doctor("4's content_fresh call deleted from the windows runner", win_text,
                         r"content_fresh\.cargo\(", "run_cargo(", want=1)
-    if fresh_calls(unrouted) != 0:
+    if fresh_calls(unrouted) != FRESH_SITES["tools/deploy-win.py"] - 1:
         fail("self-test failed: a runner with its content_fresh call deleted passed clause 4")
 
     # 5. The mechanism itself, on a scratch crate: an example and a library
@@ -370,6 +375,46 @@ with scratch_dir("check-build-id-") as tmp:
                  "itself, so the probe no longer shows the trap")
         elif by_content() != 0 or made() != "A\n":
             fail(f"content_fresh.by_content kept a make output built from other bytes: {made()!r}")
+
+    # 5c. nested on a crate in a workspace of its own (winvcam's, the probes'): a
+    # source restored with an old mtime gets its package cleaned and built again.
+    nest = tmp / "nested-probe"
+    (nest / "src").mkdir(parents=True)
+    (nest / "Cargo.toml").write_text(
+        '[package]\nname = "nestprobe"\nversion = "0.0.0"\nedition = "2021"\n\n[workspace]\n',
+        encoding="utf-8")
+    (nest / "Cargo.lock").write_text(
+        'version = 4\n\n[[package]]\nname = "nestprobe"\nversion = "0.0.0"\n', encoding="utf-8")
+    main_rs = nest / "src/main.rs"
+    main_rs.write_text('fn main() { println!("n1"); }\n', encoding="utf-8")
+    nest_cmd = ["cargo", "build", "--locked", "--quiet", "--offline",
+                "--target-dir", str(nest / "target")]
+    nest_bin = nest / "target/debug/nestprobe"
+
+    def nest_said():
+        return subprocess.run([str(nest_bin)], stdout=subprocess.PIPE, text=True,
+                              check=False).stdout.strip()
+
+    def nested():
+        return content_fresh.nested(nest_cmd, nest, [nest_bin], "check-build-id nested probe")
+
+    if content_fresh.clean_for(nest_cmd, "p") != ["cargo", "clean", "--locked", "-p", "p",
+                                                    "--target-dir", str(nest / "target")]:
+        fail("content_fresh.clean_for dropped the target dir: "
+             f"{content_fresh.clean_for(nest_cmd, 'p')}")
+    if nested() != 0 or nest_said() != "n1":
+        fail("the nested probe did not build")
+    else:
+        shutil.copy2(main_rs, tmp / "main.saved")
+        main_rs.write_text('fn main() { println!("n2"); }\n', encoding="utf-8")
+        nested()
+        shutil.copy2(tmp / "main.saved", main_rs)
+        if subprocess.run(nest_cmd, cwd=nest, check=False).returncode != 0 or nest_said() != "n2":
+            fail("self-test broken: cargo rebuilt a nested crate restored with an old mtime by "
+                 "itself, so the probe no longer shows the trap")
+        elif nested() != 0 or nest_said() != "n1":
+            fail("content_fresh.nested kept a binary built from other bytes: "
+                 f"it prints {nest_said()!r}")
 
 if subprocess.run(["python3", "tools/checks/gtk-capture.py"], cwd=ROOT, check=False).returncode:
     fail("GTK capture execution checks failed")

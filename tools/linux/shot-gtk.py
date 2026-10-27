@@ -42,7 +42,9 @@ def capture(scene, out, crop, settle, guest=None, go=False):
     # the way the lane builds it (tools/linux/run-suites.sh's build_go),
     # against the library this build writes.
     example = [] if go else ["--example", guest]
-    checked("build", ["cargo", "build", "-p", "kaya", "--features", "harness",
+    checked("build", ["python3", "tools/lib/content_fresh.py",
+                      "--profile", str(target / "debug"), "--",
+                      "cargo", "build", "-p", "kaya", "--features", "harness",
                       "--locked", "--lib", *example],
             env=dict(os.environ, CARGO_TARGET_DIR=str(target)))
     checked("build verification", ["python3", "tools/build-id.py", "--verify",

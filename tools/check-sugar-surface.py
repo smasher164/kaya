@@ -8651,7 +8651,7 @@ if py_props.returncode != 0:
 # out of the template zone's OWN BLOCK. These clauses stay because they
 # pass; they are not the pattern to copy.
 check("rust", "crates/kaya/src/app.rs", "template grow",
-      r"pub fn set\(&mut self, node: TemplateNodeId")
+      r"pub fn grow\(&mut self, node: TemplateNodeId")
 check("python", "bindings/python/kaya/__init__.py", "template grow",
       r"def _set_grow\(")
 check("go", "bindings/go/app.go", "template grow",

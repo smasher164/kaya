@@ -22,8 +22,9 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 HOST="${1:?usage: build.sh <user@host>}"
 
 cd "$HERE"
-cargo xwin build --locked --release --target aarch64-pc-windows-msvc >&2
 EXE="$HERE/target/aarch64-pc-windows-msvc/release/dialogprobe.exe"
+python3 "$HERE/../../lib/content_fresh.py" --crate "$HERE" --outputs "$EXE" -- \
+    cargo xwin build --locked --release --target aarch64-pc-windows-msvc >&2
 
 ssh -n -o BatchMode=yes "$HOST" 'cmd /c if not exist C:\kaya mkdir C:\kaya'
 scp -q "$EXE" "$HOST:C:/kaya/dialogprobe.exe"

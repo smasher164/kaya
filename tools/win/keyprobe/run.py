@@ -4,6 +4,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent.parent / "lib"))
 from kaya_gate import ROOT, dev_shell_or_die, scratch_dir
+import content_fresh
 
 dev_shell_or_die()
 
@@ -67,11 +68,10 @@ def hook_applied():
 
 def build():
     print("== cargo xwin build (kaya.dll + keyprobe.exe) ==")
-    p = subprocess.run(
-        ["cargo", "xwin", "build", "--locked", "--features", "harness", "--release",
-         "--target", "aarch64-pc-windows-msvc", "--lib", "--example", "keyprobe"],
-        cwd=ROOT, check=False)
-    if p.returncode != 0:
+    cmd = ["cargo", "xwin", "build", "--locked", "--features", "harness", "--release",
+           "--target", "aarch64-pc-windows-msvc", "--lib", "--example", "keyprobe"]
+    if content_fresh.cargo(lambda: subprocess.run(cmd, cwd=ROOT, check=False).returncode,
+                           TARGET, ["keyprobe"], "{name}.exe", "keyprobe") != 0:
         sys.exit("keyprobe: the build failed")
     p = subprocess.run([str(ROOT / "tools/build-id.py"), "--verify", str(TARGET / "kaya.dll")],
                        cwd=ROOT, check=False)

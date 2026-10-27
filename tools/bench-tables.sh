@@ -228,7 +228,7 @@ fi
 #
 # A bench that runs a stale library measures a tree nobody has.
 if [ "$PLATFORM" = "guest" ] || [ "$PLATFORM" = "macos" ]; then
-    cargo build --locked --lib
+    python3 tools/lib/content_fresh.py --profile target/debug -- cargo build --locked --lib
     build_status=$?
     if [ "$build_status" -ne 0 ]; then
         echo "$0: cargo build --locked --lib failed — not benching a stale library." >&2

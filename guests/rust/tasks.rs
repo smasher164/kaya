@@ -813,23 +813,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                             // words plus the switch and the button overflow a
                             // phone at twice the text size (docs/flex-shrink-plan.md
                             // §2, "the app's to fix"; the iOS tasksbig leg).
-                            t.column(|t| {
+                            let (item, _) = t.column(|t| {
                                 let title = t.label(TaskRow::title());
                                 t.a11y_id(title, "title");
                                 let caption = t.caption(TaskRow::caption());
                                 t.a11y_id(caption, "caption");
                             });
-                            // The trailing accessory: a spacer takes the row's
-                            // free width so every Details button shares one edge.
-                            t.spacer();
-                            let details = t.button(kaya::tr!("details").as_str());
-                            t.a11y_id(details, "details");
-                            t.role(details, kaya::Role::Plain);
-                            msgs.on_click_node(details, Msg::Details);
+                            t.a11y_id(item, "item");
+                            t.grow(item, 1.0);
+                            t.on_activate(item, &msgs, Msg::Details);
                         });
                         row.a11y_id(task_row, "task");
-                        // The checkbox and the details link on the title's
-                        // line, not the pair's middle (docs/flex-shrink-plan.md
+                        // The checkbox on the title's line, not the pair's
+                        // middle (docs/flex-shrink-plan.md
                         // §9; R5's centre unless the app says otherwise).
                         row.align(task_row, kaya::Align::Baseline);
                     }

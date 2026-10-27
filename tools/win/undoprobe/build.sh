@@ -24,7 +24,8 @@ HOST="${1:?usage: build.sh <user@host>}"
 TARGET="$ROOT/target/aarch64-pc-windows-msvc/release"
 
 cd "$ROOT"
-cargo xwin build --locked --features harness --release \
+python3 tools/lib/content_fresh.py --profile "$TARGET" --artifact '{name}.exe' -- \
+    cargo xwin build --locked --features harness --release \
     --target aarch64-pc-windows-msvc --lib --example undoprobe >&2
 "$ROOT/tools/build-id.py" --verify "$TARGET/kaya.dll" || exit 1
 

@@ -40,7 +40,6 @@ delete = حذف
 search = بحث
 new-task = مهمة جديدة
 add = إضافة
-details = التفاصيل
 week-starts-on = يبدأ الأسبوع يوم
 monday = الاثنين
 sunday = الأحد

@@ -95,7 +95,7 @@ expect label@caption[t7] "Kitchen"
 
 # Details: a when-date set on the pushed screen re-routes the task.
 select_section 0
-click button@details[t2]
+click column@item[t2]
 expect_entries 1
 expect textarea@notes ""
 # A text field fills its column (R10).
@@ -117,7 +117,7 @@ expect label@inbox_count "2 in inbox"
 # A reminder is a notification at its time (S3, N7): the observation is the
 # platform's own delivered list, clearing cancels it, and activating the
 # posted one opens that task's details.
-click button@details[t1]
+click column@item[t1]
 expect_entries 1
 # 08:30, not the bound default (09:00): the same value drives nothing.
 set_time time_picker@reminder 08:30
@@ -170,7 +170,7 @@ expect label@caption[t11] "Trip"
 
 # Delete from the details screen, then Edit>Undo brings the row back.
 select_section 0
-click button@details[t1]
+click column@item[t1]
 expect_entries 1
 click button@delete
 expect_entries 0
@@ -219,7 +219,7 @@ expect label@caption[t9] "Kitchen"
 # the tap opens that task's details with no memory of this one. The two
 # lines after `relaunch` are act two, and they run over there.
 select_section 0
-click button@details[t1]
+click column@item[t1]
 expect_entries 1
 set_time time_picker@reminder 10:30
 expect_notification 1 "Buy milk"

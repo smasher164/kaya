@@ -596,7 +596,7 @@ leg's picture, and the picker's process log (check-steps holds them;
 docs/traps.md). Read those first on the next sighting (the bundle is kept
 under ~/.local/state/kaya/flightrec/red/ once its run is pruned).
 
-## DEFER — `grow` on a Rust template node (found 2026-10-26)
+## ~~DEFER — `grow` on a Rust template node (found 2026-10-26)~~ FIXED 2026-10-26: the census (tools/tpl-surfaces.py's PROP_MEMBERS) read grow in the other eight template zones (Go SetGrow, C# SetGrow, Java setGrow, Swift setGrow, OCaml set_grow, Haskell TplGrow, JS grow, Python set_grow; the C floor's generated tx_set_grow takes a node id); Rust now spells `Tpl::grow(node, weight)` and the row trace forwards it, and the census row reads it by name, watched red with the setter cut ("rust's TEMPLATE zone cannot spell grow"). The task manager's title pair grows to the row's free width and opens the details on a click; the Details button is gone (expect_fills row@task[t1] holds the grow)
 
 Go's template zone sets a stamped node's grow (`Tpl.SetGrow`); Rust's `Tpl` has no grow setter, only
 `spacer()`, and a spacer inside a container does not make the container grow. So a Rust row cannot

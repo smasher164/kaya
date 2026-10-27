@@ -17,6 +17,7 @@ dev_shell_or_die()
 # Usage: tools/ios/gpuprobe/build.py [--out FILE] [--device ID] [--mac]
 #   --mac runs the same probe on this host instead (no phone needed).
 
+import content_fresh
 import json
 import os
 import plistlib
@@ -117,11 +118,13 @@ try:
     # own workspace and lockfile, locked like every cargo call here.
     sdk = out_of(xcrun + ["--sdk", "iphoneos", "--show-sdk-path"], env=env).strip()
     cargo_env = dict(env, SDKROOT=sdk)
-    if run(["cargo", "build", "--release", "--locked", "--target", "aarch64-apple-ios",
-            "--manifest-path", str(CRATE / "Cargo.toml"),
-            "--target-dir", str(nested_target("gpuprobe"))], env=cargo_env).returncode != 0:
-        sys.exit("gpuprobe: the Rust probe did not build for aarch64-apple-ios")
     staticlib = nested_target("gpuprobe") / "aarch64-apple-ios/release/libkaya_gpuprobe.a"
+    if content_fresh.nested(["cargo", "build", "--release", "--locked",
+                             "--target", "aarch64-apple-ios",
+                             "--manifest-path", str(CRATE / "Cargo.toml"),
+                             "--target-dir", str(nested_target("gpuprobe"))],
+                            CRATE, [staticlib], "gpuprobe", env=cargo_env) != 0:
+        sys.exit("gpuprobe: the Rust probe did not build for aarch64-apple-ios")
     if not staticlib.is_file():
         sys.exit(f"gpuprobe: {staticlib} is missing after the build")
 

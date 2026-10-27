@@ -5533,6 +5533,10 @@ impl<'b> Row<'_, 'b> {
         self.tpl().inset(node, pad)
     }
 
+    pub fn grow(&mut self, node: TemplateNodeId, weight: f64) {
+        self.tpl().grow(node, weight)
+    }
+
     // Forwarded because a ROW TRACE legitimately anchors context menus.
     // context_menu left tpl-surfaces.py's NOT_FORWARDED set in the same
     // change, so the pair is HELD level rather than merely level;
@@ -9480,6 +9484,12 @@ impl<'b> Tpl<'_, 'b> {
     /// says so at declare time.
     pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
         self.set(node, Prop::Inset, pad);
+    }
+
+    /// A stamped node's flex weight within its stamped row or column, the
+    /// blueprint twin of [`Tx::grow`].
+    pub fn grow(&mut self, node: TemplateNodeId, weight: f64) {
+        self.set(node, Prop::Grow, weight);
     }
 
     fn apply_source(&mut self, node: TemplateNodeId, prop: Prop, src: SourceInner) {

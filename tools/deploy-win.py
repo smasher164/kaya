@@ -566,10 +566,13 @@ for build_args in (
 # THE CAPTURE LEGS' SYNTHETIC DEVICES (tools/winvcam): the virtual cameras'
 # media source and the helper that makes them and plays the cable's tone,
 # its own workspace, built every run like the guests it serves.
-if subprocess.run(["cargo", "xwin", "build", "--locked", "--release",
-                   "--target", "aarch64-pc-windows-msvc",
-                   "--target-dir", str(nested_target("winvcam"))],
-                  cwd=ROOT / "tools/winvcam", check=False).returncode != 0:
+WINVCAM = nested_target("winvcam") / "aarch64-pc-windows-msvc/release"
+if content_fresh.nested(["cargo", "xwin", "build", "--locked", "--release",
+                         "--target", "aarch64-pc-windows-msvc",
+                         "--target-dir", str(nested_target("winvcam"))],
+                        ROOT / "tools/winvcam",
+                        [WINVCAM / lane.CAPTURE_LANE_EXE, WINVCAM / lane.CAPTURE_DLL],
+                        "deploy-win") != 0:
     sys.exit(1)
 # Verify BEFORE the deploy: a stale dll that reaches the VM is a stale
 # dll on another machine, where nothing local can see it.
@@ -1208,8 +1211,6 @@ kill_guests()
 WITNESS_SOURCES = (sorted((ROOT / "tools/win/dragprobe/stock").glob("*"))
                    + sorted((ROOT / "tools/win/dragprobe/shared").glob("*")))
 
-
-WINVCAM = nested_target("winvcam") / "aarch64-pc-windows-msvc/release"
 
 
 def deploy_artifacts():

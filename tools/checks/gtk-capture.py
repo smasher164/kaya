@@ -50,8 +50,8 @@ def inner_case(text, case):
             calls.append("kill")
 
     def run(command, **kwargs):
-        stage = {"cargo": "build", "python3": "verify", "import": "screenshot",
-                 "convert": "crop"}[command[0]]
+        stage = "build" if "tools/lib/content_fresh.py" in command else {
+            "python3": "verify", "import": "screenshot", "convert": "crop"}[command[0]]
         calls.append(stage)
         if case == stage:
             return types.SimpleNamespace(returncode=42)

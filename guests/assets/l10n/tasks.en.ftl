@@ -39,7 +39,6 @@ delete = Delete
 search = Search
 new-task = New task
 add = Add
-details = Details
 # Settings
 week-starts-on = Week starts on
 monday = Monday
