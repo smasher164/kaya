@@ -59,6 +59,13 @@ import secure_scan
 import walls
 import media_server
 import contextlib
+import deploy_args
+
+try:
+    ARGS = deploy_args.parse(sys.argv[1:], lane.legs())
+except deploy_args.Refused as refused:
+    print(refused.text, file=sys.stderr if refused.code else sys.stdout)
+    sys.exit(refused.code)
 
 SELF = pathlib.Path(__file__).resolve()
 LANE_MODULE = ROOT / "tools/lib/lanes/win.py"
@@ -72,7 +79,7 @@ KAYA_SOCK_MAX = 103
 MUX_DIR = pathlib.Path(os.environ.get("KAYA_SSH_MUX_DIR",
                                       os.path.expanduser("~/.ssh/kaya-mux")))
 _mux_key = hashlib.sha256(
-    f"{ROOT}\n{sys.argv[1] if len(sys.argv) > 1 else ''}\n".encode()
+    f"{ROOT}\n{ARGS['host']}\n".encode()
 ).hexdigest()[:16]
 CONTROL_PATH = str(MUX_DIR) + f"/m-{_mux_key}"
 # NO ssh TOKENS, or the length clause below is a lie: ssh expands
@@ -118,30 +125,14 @@ def die(msg):
 # lanes' duplicate target checks): the build below compiles the target
 # before the VM is touched.
 
-if len(sys.argv) < 2:
-    die("usage: deploy-win.py user@host [--provision] [rust|python|go|all]")
-HOST = sys.argv[1]
-PROVISION = False
-SUITE = "all"
+HOST = ARGS["host"]
+PROVISION = ARGS["provision"]
+SUITE = ARGS["suite"]
 # SEVERAL LEGS, IN THE ORDER GIVEN, through the funnel the lane uses: a
 # class that only fires when one leg follows another cannot be reproduced
 # one deploy at a time (docs/deferred.md, the phantom notification window —
 # the recipe is a notification leg and then notes_rust).
-LEGS = []
-PHASES = ("caption-centre", "enable-dumps", "crash-report", "analyze-dump")
-for arg in sys.argv[2:]:
-    if arg == "--provision":
-        PROVISION = True
-    elif arg == "all" or arg in PHASES or arg.startswith("probe="):
-        SUITE = arg
-    elif arg in lane.legs():
-        # EVERY LEG CAN BE RUN ON ITS OWN: the roster is the argument
-        # grammar.
-        LEGS.append(arg)
-        SUITE = arg
-    else:
-        print(f"unknown argument: {arg}", file=sys.stderr)
-        sys.exit(2)
+LEGS = ARGS["legs"]
 # ONE FILTER ON THE MATRIX (tools/lib/only.py): the matrix hands KAYA_ONLY
 # to this lane, which has no queue to filter at and runs its legs as a
 # list instead, in roster order; nothing matched refuses before the deploy.

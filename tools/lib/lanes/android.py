@@ -415,7 +415,7 @@ MODS = {
                         "expect_sheet_detent medium;dismiss_sheet;"
                         "expect_sheets 0;"},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
-    "chat": {"drop": ((("expect_selected row@open[maya]", "expect_selected row@open[sam]"),
+    "chat": {"drop": ((("expect_selected row@convo[maya]", "expect_selected row@convo[sam]"),
                        "expect_tint", "a phone's list sits under the pushed thread"),)},
     # A PHONE HAS NO USER DOOR OUT OF IMMERSIVE MODE (docs/fullscreen-plan.md
     # §2): the swiped-in bars are transient. The cut takes the user half, and

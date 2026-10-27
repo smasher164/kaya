@@ -9368,14 +9368,18 @@ fn sync_swipe_hosts(core: &mut CoreState) -> windows_core::Result<()> {
                     .get(&WidgetId(widget))
                     .expect("scene validated the context anchor")
                     .inner_element()?;
+                // An activatable container's control is its ItemContainer's
+                // child, so the item is what the swipe wraps (docs/deferred.md,
+                // WinUI refuses swipes on an activatable row).
+                let item = skin::host_of(&inner).unwrap_or(inner);
                 let control = SwipeControl::new()?;
                 control.SetHorizontalContentAlignment(HorizontalAlignment::Stretch)?;
                 control.SetVerticalContentAlignment(
                     bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch,
                 )?;
-                reseat_element(core, WidgetId(widget), &inner, &control.cast()?)?;
-                control.SetContent(&inner)?;
-                let key = swipe_key(&inner).expect("a live control has a COM identity");
+                reseat_element(core, WidgetId(widget), &item, &control.cast()?)?;
+                control.SetContent(&item)?;
+                let key = swipe_key(&item).expect("a live control has a COM identity");
                 SWIPE_HOSTS.with_borrow_mut(|(hosts, keys)| {
                     hosts.insert(key, control.clone());
                     keys.insert(widget, key);

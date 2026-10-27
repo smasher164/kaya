@@ -1656,6 +1656,72 @@ for label, rel, pattern, repl in (
         else:
             print(f"check-gates: self-test {label[:3]} refused: {verdict[:90]}")
 
+# THE WINDOWS RUNNER REFUSES THE SAME WAY (tools/lib/deploy_args.py):
+# `deploy-win.py --help` took --help as the host and started a real run.
+DEPLOY_LEGS = ["nav_rust", "nav_go"]
+DEPLOY_CASES = [(["--help"], 0, "usage:"), (["u@h", "-h"], 0, "usage:"),
+                ([], 2, "no host"), (["nav_rust"], 2, "is not a user@host"),
+                (["-x"], 2, "is not a user@host"), (["--u@h"], 2, "is not a user@host"),
+                (["u@h", "--bogus"], 2, "unknown flag '--bogus'"),
+                (["u@h", "navv"], 2, "unknown argument 'navv'"),
+                (["u@h"], None, "u@h|False|all|"),
+                (["u@h", "--provision", "nav_rust", "nav_go"], None,
+                 "u@h|True|nav_go|nav_rust,nav_go"),
+                (["u@h", "probe=x"], None, "u@h|False|probe=x|")]
+
+
+def deploy_args_problem(module_text, runner_text):
+    space = {}
+    exec(compile(module_text, "tools/lib/deploy_args.py", "exec"), space)
+    for argv, code, want in DEPLOY_CASES:
+        try:
+            got = space["parse"](argv, DEPLOY_LEGS)
+        except space["Refused"] as refused:
+            if refused.code != code or want not in refused.text:
+                return (f"deploy_args.parse({argv}) refused with {refused.code} and "
+                        f"{refused.text[:60]!r}, wanted {code} and {want!r}")
+            continue
+        seen = "|".join([got["host"], str(got["provision"]), got["suite"], ",".join(got["legs"])])
+        if code is not None or seen != want:
+            return f"deploy_args.parse({argv}) answered {seen!r}, wanted a refusal {code} {want!r}"
+    readers = [line for line in code_lines(runner_text) if "sys.argv" in line]
+    if readers != ["    ARGS = deploy_args.parse(sys.argv[1:], lane.legs())"]:
+        return f"tools/deploy-win.py reads argv outside deploy_args.parse: {readers}"
+    if runner_text.index("deploy_args.parse(") > runner_text.index("MUX_DIR.mkdir("):
+        return "tools/deploy-win.py parses its arguments after it has started making the run"
+    return None
+
+
+deploy_args_text = (root / "tools/lib/deploy_args.py").read_text(encoding="utf-8")
+deploy_runner_text = (root / "tools/deploy-win.py").read_text(encoding="utf-8")
+problem = deploy_args_problem(deploy_args_text, deploy_runner_text)
+if problem:
+    fail("the windows runner's arguments: " + problem)
+print(f"check-gates: windows runner arguments, {len(DEPLOY_CASES)} cases run")
+for label, rel, pattern, repl in (
+        ("ND1 dropped --help", "args", r'if any\(a in \("-h", "--help"\) for a in args\):',
+         'if False:'),
+        ("ND2 took a flag as the host", "args", r'host\.startswith\("-"\) or ', ''),
+        ("ND3 let an unknown argument through", "args",
+         r'raise Refused\(2, f"deploy-win: unknown argument',
+         'chosen["suite"] = (f"deploy-win: unknown argument'),
+        ("ND4 gave the runner a second argv reader", "runner",
+         r'HOST = ARGS\["host"\]', 'HOST = sys.argv[1]')):
+    texts = {"args": deploy_args_text, "runner": deploy_runner_text}
+    texts[rel], n = re.subn(pattern, repl, texts[rel], count=1)
+    print(f"check-gates: self-test {label}, {n} substitution(s)")
+    if n != 1:
+        fail(f"self-test {label[:3]} did not apply — the clause is not reading the real file")
+    else:
+        try:
+            verdict = deploy_args_problem(texts["args"], texts["runner"])
+        except SyntaxError as e:
+            verdict = f"(the doctored copy does not compile: {e})"
+        if verdict is None:
+            fail(f"self-test {label[:3]}: the doctored copy passed")
+        else:
+            print(f"check-gates: self-test {label[:3]} refused: {verdict[:90]}")
+
 # THE LINUX CONTAINER'S CARGO TARGET IS A DOCKER VOLUME (docs/traps.md, the
 # host out of memory under a matrix): every container that builds into
 # /work/target-linux mounts tools/lib/lanes/linux.py's volume there, and

@@ -426,36 +426,28 @@ func App() *kaya.App {
 
 		tx.Mount(tx.Column(func() {
 			for row := range ConversationRows(tx, list).All() {
-				// The swipes sit on a plain row around the activatable one: WinUI
-				// cannot lower swipes on an activatable container
-				// (docs/deferred.md, swipes on an activatable row).
-				var opener kaya.Node
 				convo := row.Row(func() {
-					opener = row.Row(func() {
-						avatar := row.Image(row.Avatar())
-						row.SetFit(avatar, kaya.FitCover)
-						row.SetMaxWidth(avatar, 48)
-						row.SetMaxHeight(avatar, 48)
-						row.SetShape(avatar, kaya.ShapeCircle)
-						row.SetA11yID(avatar, "avatar")
-						lines := row.Column(func() {
-							name := row.Label(row.Name())
-							row.SetA11yID(name, "name")
-							preview := row.Caption(row.Preview())
-							row.SetA11yID(preview, "preview")
-						})
-						row.SetFill(lines, false)
-						row.Spacer()
-						unread := row.Label(row.Unread())
-						row.SetA11yID(unread, "unread")
-						row.SetTint(unread, kaya.TintAccent)
+					avatar := row.Image(row.Avatar())
+					row.SetFit(avatar, kaya.FitCover)
+					row.SetMaxWidth(avatar, 48)
+					row.SetMaxHeight(avatar, 48)
+					row.SetShape(avatar, kaya.ShapeCircle)
+					row.SetA11yID(avatar, "avatar")
+					lines := row.Column(func() {
+						name := row.Label(row.Name())
+						row.SetA11yID(name, "name")
+						preview := row.Caption(row.Preview())
+						row.SetA11yID(preview, "preview")
 					})
-					row.SetGrow(opener, 1)
+					row.SetFill(lines, false)
+					row.Spacer()
+					unread := row.Label(row.Unread())
+					row.SetA11yID(unread, "unread")
+					row.SetTint(unread, kaya.TintAccent)
 				})
 				row.SetA11yID(convo, "convo")
-				row.SetA11yID(opener, "open")
-				row.BindSelected(opener, row.Selected())
-				opener.OnActivate(func(tx *kaya.Tx, keys []any) { openThread(tx, keys[0].(string)) })
+				row.BindSelected(convo, row.Selected())
+				convo.OnActivate(func(tx *kaya.Tx, keys []any) { openThread(tx, keys[0].(string)) })
 				row.ContextMenu(convo, rowActions)
 			}
 		}))

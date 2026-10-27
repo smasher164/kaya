@@ -2,7 +2,7 @@
 # composer rides the keyboard and the thread keeps its newest message above it.
 # A phone's script: the desktops have no software keyboard (A13).
 expect_title "chat"
-click row@open[maya]
+click row@convo[maya]
 click button@newest
 expect_scrolled_to column@thread m30
 expect_at_end scroll#0

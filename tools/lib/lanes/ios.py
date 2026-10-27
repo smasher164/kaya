@@ -350,8 +350,8 @@ MODS = {
     # (docs/editor-plan.md).
     ("go", "editor"): {"cut": "close_window", "keep": "expect_dirty"},
     # A phone's list sits under the pushed thread.
-    ("go", "chat"): {"drop": (("expect_selected", "row@open[maya]"),
-                              ("expect_selected", "row@open[sam]")),
+    ("go", "chat"): {"drop": (("expect_selected", "row@convo[maya]"),
+                              ("expect_selected", "row@convo[sam]")),
                      "keep": "expect_tint"},
     # The portfolio's fold block sits at the scene's END
     # (docs/adaptive-layout-plan.md D7): the cut takes the

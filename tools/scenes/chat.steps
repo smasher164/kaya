@@ -18,11 +18,11 @@ expect_image_size image@avatar[sam] "48x48"
 # accent word (docs/styling-pass-plan.md Y4, Y7). A phone's list sits under the
 # pushed thread, so the phone lanes drop the two reads of it while it is open.
 expect_tint label@unread[maya] accent
-expect_selected row@open[alex] off
-click row@open[maya]
+expect_selected row@convo[alex] off
+click row@convo[maya]
 expect_scrolled_to column@thread m27
-expect_selected row@open[maya] on
-expect_selected row@open[sam] off
+expect_selected row@convo[maya] on
+expect_selected row@convo[sam] off
 expect label@unread[maya] ""
 click button@quote[m27]
 expect_scrolled_to column@thread m03
