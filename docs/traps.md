@@ -23,6 +23,21 @@ document for a point inside the first line, and `firstRect(forCharacterRange:)`
 answers only the part of a line inside the viewport and an empty rect for
 a line outside it (the mac gutter reader unclips by the tallest whole row).
 
+## A gutter that forces TextKit 2 layout draws a row off the text (measured 2026-10-27)
+
+The mac gutter first enumerated the visible fragments with `.ensuresLayout`.
+After typing a line at the end of a scrolled document that moved fragments
+the text view had already drawn: the numbers sat one row above their lines
+in the capture (41 beside "}"), and every expect_gutter still passed,
+because the reader's rows (firstRect) and the numbers both came from the
+moved layout while the pixels came from the text view's earlier pass. The
+gutter now lays the viewport out with `textViewportLayoutController.layoutViewport()`
+and enumerates without forcing layout, and it is a floating subview of the
+scroll view in the text container's inset (contentInsets left the numbers
+outside the box after a scroll). The reads cannot see this class: a reader
+that pairs geometry with geometry agrees with itself, so the captures are
+the check, and the code surface review page carries one after an edit.
+
 ## A label's font, read back: the mac's AXFont and iOS's accessibility tokens (measured 2026-10-27)
 
 SwiftUI draws a label with no AppKit or UIKit text view to ask. On the mac

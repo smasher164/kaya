@@ -9586,7 +9586,7 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
         guard let view = kayaMacTextViews[node.id]?.view, let scroll = view.enclosingScrollView else {
             return .failure("no text view on screen")
         }
-        guard let gutter = scroll.subviews.compactMap({ $0 as? KayaGutterView }).first else {
+        guard let gutter = kayaFloatingGutter(scroll) else {
             return .success(nil)
         }
         gutter.display()
@@ -24441,7 +24441,11 @@ struct KayaGutterLine {
     var offset = content.offset(from: documentStart, to: startAt)
     var line = 1 + units.prefix(offset).filter { $0 == 10 }.count
     var out: [KayaGutterLine] = []
-    layout.enumerateTextLayoutFragments(from: startAt, options: [.ensuresLayout]) { fragment in
+    // NO .ensuresLayout: forcing layout here moved fragments the text view
+    // had already drawn, so the numbers sat a row off the text until the
+    // next viewport pass (measured 2026-10-27, after typing at the end).
+    // The callers lay the viewport out first, the frames the view draws.
+    layout.enumerateTextLayoutFragments(from: startAt, options: []) { fragment in
         let frame = fragment.layoutFragmentFrame
         if frame.minY + origin.y > visible.maxY { return false }
         let fragmentStart = content.offset(from: documentStart, to: fragment.rangeInElement.location)
@@ -35109,8 +35113,11 @@ private struct KayaMacTextarea: NSViewRepresentable {
         view.allowsUndo = !node.ownUndo
         // A growing field's one line needs room above and below it, which the
         // box's 2pt inset gave nothing of (docs/grow-lines-plan.md).
+        // The gutter's width rides the text container's inset, which is
+        // symmetric, so the text keeps a matching margin on its trailing side.
         let inset = CGSize(
-            width: 2, height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)
+            width: 2 + kayaGutterWidth(view, on: node.lineNumbers),
+            height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)
         if view.textContainerInset != inset { view.textContainerInset = inset }
         let font = kayaNodeFontSet(node)
             ? kayaNodeFont(node, .body) : (kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body))
@@ -35274,6 +35281,7 @@ final class KayaGutterView: NSView {
         bounds.fill()
         drawn = []
         guard let text = textView, let layout = text.textLayoutManager else { return }
+        layout.textViewportLayoutController.layoutViewport()
         let attributes: [NSAttributedString.Key: Any] = [
             .font: numberFont(), .foregroundColor: NSColor.secondaryLabelColor,
         ]
@@ -35294,20 +35302,41 @@ final class KayaGutterView: NSView {
 
 #if os(macOS)
 /// Shows or hides the gutter, and redraws it on every scroll and edit.
+/// The scroll view's gutter wherever AppKit seated the floating subview.
+@MainActor func kayaFloatingGutter(_ scroll: NSScrollView) -> KayaGutterView? {
+    func walk(_ view: NSView) -> KayaGutterView? {
+        if let gutter = view as? KayaGutterView { return gutter }
+        for sub in view.subviews { if let hit = walk(sub) { return hit } }
+        return nil
+    }
+    return walk(scroll)
+}
+
+/// The gutter's width for this text view, 0 when it has none.
+@MainActor func kayaGutterWidth(_ view: NSTextView, on: Bool) -> CGFloat {
+    guard on else { return 0 }
+    let probe = KayaGutterView(frame: .zero)
+    probe.textView = view
+    return probe.fittedWidth()
+}
+
+/// Shows or hides the gutter: a floating subview of the scroll view, so it
+/// scrolls vertically with the text and stays put horizontally, in the text
+/// container's leading inset (STTextView's gutter; an NSRulerView emptied
+/// the window's accessibility tree and contentInsets drew the numbers a row
+/// off the text after a scroll, docs/traps.md).
 @MainActor func kayaApplyGutter(_ scroll: NSScrollView, _ view: NSTextView, on: Bool) {
-    let held = scroll.subviews.compactMap { $0 as? KayaGutterView }.first
+    let held = kayaFloatingGutter(scroll)
     if !on {
-        if let held {
-            held.removeFromSuperview()
-            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-        }
+        held?.removeFromSuperview()
         return
     }
     let gutter = held ?? KayaGutterView(frame: .zero)
     if held == nil {
+        // macOS 14 stopped clipping a view's drawing to its bounds by default.
+        gutter.clipsToBounds = true
         gutter.textView = view
-        scroll.automaticallyAdjustsContentInsets = false
-        scroll.addSubview(gutter)
+        scroll.addFloatingSubview(gutter, for: .horizontal)
         scroll.contentView.postsBoundsChangedNotifications = true
         let center = NotificationCenter.default
         center.addObserver(
@@ -35321,13 +35350,19 @@ final class KayaGutterView: NSView {
                 gutter.needsDisplay = true
             }
         }
+        view.postsFrameChangedNotifications = true
+        center.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: .main) {
+            [weak scroll] _ in
+            MainActor.assumeIsolated {
+                guard let scroll else { return }
+                kayaApplyGutter(scroll, view, on: true)
+            }
+        }
     }
     let width = gutter.fittedWidth()
-    if abs(scroll.contentInsets.left - width) > 0.5 {
-        scroll.contentInsets = NSEdgeInsets(top: 0, left: width, bottom: 0, right: 0)
-    }
-    gutter.frame = NSRect(x: 0, y: 0, width: width, height: scroll.bounds.height)
-    gutter.autoresizingMask = [.height]
+    let height = max(view.frame.height, scroll.contentView.bounds.height)
+    let frame = NSRect(x: 0, y: 0, width: width, height: height)
+    if gutter.frame != frame { gutter.frame = frame }
     gutter.needsDisplay = true
 }
 #endif
@@ -36104,6 +36139,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             ]
             let visible = CGRect(origin: text.contentOffset, size: text.bounds.size)
             let origin = CGPoint(x: text.textContainerInset.left, y: text.textContainerInset.top)
+            layout.textViewportLayoutController.layoutViewport()
             for line in kayaGutterLines(layout, text.text ?? "", visible, origin) where line.first {
                 let label = String(line.line) as NSString
                 let size = label.size(withAttributes: attributes)
