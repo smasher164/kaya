@@ -1486,6 +1486,8 @@ val set_tint : widget -> Tint.t -> unit
 val bind_tint : widget -> Tint.t signal -> unit
 val set_selected : widget -> bool -> unit
 val bind_selected : widget -> bool signal -> unit
+val set_hidden : widget -> bool -> unit
+val bind_hidden : widget -> bool signal -> unit
 
 (* --- THE CANVAS VOCABULARY (docs/canvas-plan.md §3.3, §3.4) --------- *)
 
@@ -2223,6 +2225,9 @@ module Tpl : sig
   val bind_tint_field : ?level:int -> node -> ('e, Tint.t) field -> unit
   val set_selected : node -> bool -> unit
   val bind_selected_field : ?level:int -> node -> ('e, bool) field -> unit
+  val set_hidden : node -> bool -> unit
+  val bind_hidden : node -> bool signal -> unit
+  val bind_hidden_field : ?level:int -> node -> ('e, bool) field -> unit
 
   (* Every stamped copy takes a click as a whole, the handler handed that
      copy's keys; registering and declaring are one act (Y4). *)

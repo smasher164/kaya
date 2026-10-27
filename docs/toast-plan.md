@@ -119,7 +119,7 @@ AccessibilityNotification.Announcement (developer.apple.com/documentation/...).
 primary), with the alert's grammar: a binding-allocated id, one answer
 (T5), the handler bound at the show call and retired with its answer. It is
 not a kind: no platform lays a snackbar out among the content (§0 fact 2), a
-kind would need a place in the tree and a visibility prop that the app
+kind would need a place in the tree and a `hidden` prop that the app
 toggles and the timer toggles back, and that is two owners for one bool. It
 needs no capability bit, as the alert needs none: every backend can show
 one (T9, T10).

@@ -500,6 +500,8 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("func (r %sRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint]) { r.t.BindTint(n, f) }", lowerFirst(name))
 	w("func (r %sRow) SetSelected(n kaya.Node, on bool) { r.t.SetSelected(n, on) }", lowerFirst(name))
 	w("func (r %sRow) BindSelected(n kaya.Node, f kaya.Field[bool]) { r.t.BindSelected(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetHidden(n kaya.Node, on bool) { r.t.SetHidden(n, on) }", lowerFirst(name))
+	w("func (r %sRow) BindHidden(n kaya.Node, f kaya.Field[bool]) { r.t.BindHidden(n, f) }", lowerFirst(name))
 	w("func (r %sRow) SetGroundGradient(n kaya.Node, color kaya.Color) { r.t.SetGroundGradient(n, color) }", lowerFirst(name))
 	w("func (r %sRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) { r.t.BindGroundGradient(n, f) }", lowerFirst(name))
 	w("func (r %sRow) SetGroundImage(n kaya.Node, source []byte) { r.t.SetGroundImage(n, source) }", lowerFirst(name))

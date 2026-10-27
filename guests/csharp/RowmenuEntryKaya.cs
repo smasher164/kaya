@@ -12,6 +12,7 @@ static class RowmenuEntryKaya
 
     public static readonly Field<string> Title = KayaRecords.FieldAt<string>(0);
     public static readonly Field<string> Mark = KayaRecords.FieldAt<string>(1);
+    public static readonly Field<bool> Plain = KayaRecords.FieldAt<bool>(2);
 
     public static RowmenuEntryKayaPatch Patch(Tx tx, RecordCollection<RowmenuEntry> c, object key) =>
         new RowmenuEntryKayaPatch(c.Patch(tx, key));
@@ -77,6 +78,7 @@ sealed class RowmenuEntryRow
     readonly Tpl t;
     public readonly Field<string> Title = RowmenuEntryKaya.Title;
     public readonly Field<string> Mark = RowmenuEntryKaya.Mark;
+    public readonly Field<bool> Plain = RowmenuEntryKaya.Plain;
 
     internal RowmenuEntryRow(Tpl t) => this.t = t;
 
@@ -533,6 +535,13 @@ sealed class RowmenuEntryRow
     public void SetSelected(Node n, Field<bool> f, uint level = 0) =>
         t.SetSelected(n, f, level);
 
+    public void SetHidden(Node n, bool on) => t.SetHidden(n, on);
+
+    public void SetHidden(Node n, Signal s) => t.SetHidden(n, s);
+
+    public void SetHidden(Node n, Field<bool> f, uint level = 0) =>
+        t.SetHidden(n, f, level);
+
     public void OnActivate(Node n, System.Action<Tx, System.Collections.Generic.List<object>> handler) =>
         t.OnActivate(n, handler);
 
@@ -599,6 +608,12 @@ sealed class RowmenuEntryKayaPatch
         p.Set(RowmenuEntryKaya.Mark, v);
         return this;
     }
+
+    public RowmenuEntryKayaPatch Plain(bool v)
+    {
+        p.Set(RowmenuEntryKaya.Plain, v);
+        return this;
+    }
 }
 
 sealed class RowmenuEntryKayaPatchIf
@@ -616,6 +631,12 @@ sealed class RowmenuEntryKayaPatchIf
     public RowmenuEntryKayaPatchIf Mark(string v)
     {
         p.Set(RowmenuEntryKaya.Mark, v);
+        return this;
+    }
+
+    public RowmenuEntryKayaPatchIf Plain(bool v)
+    {
+        p.Set(RowmenuEntryKaya.Plain, v);
         return this;
     }
 }

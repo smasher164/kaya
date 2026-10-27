@@ -1191,7 +1191,8 @@ at once. The pages are filled in a transaction of their own, outside the
 like's undo group (docs/traps.md, an undo step's table delta replayed
 without the band). A heart on each liked row is DEFERRED: a table cell can
 draw a symbol only as a button or toggle, on every row alike, and showing it
-on the liked rows alone needs a per-row visibility kaya does not have.
+on the liked rows alone needed a per-row visibility kaya did not have (it has
+one since 2026-10-27, `hidden` bound to a row's field; the heart is not built).
 
 (2) HELP TEXT: every control the app draws as a symbol alone carries its
 action's name through `.help`, from the app's catalog (music.en.ftl's

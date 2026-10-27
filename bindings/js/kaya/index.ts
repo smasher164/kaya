@@ -826,6 +826,18 @@ export class Handle {
     return this;
   }
 
+  /** Takes this widget off the screen and out of the layout, its state
+   * kept: `when` controls existence, `hidden` controls space (DESIGN.md,
+   * Structural operators). A constant, a Signal, or the row's own field,
+   * so each stamped copy hides on its own. Chains. */
+  hidden(on: boolean | Signal<boolean> | FieldRef = true): this {
+    if (on instanceof Signal) records().push(wire.tx_bind_hidden(this.id, on.id));
+    else if (on instanceof FieldRef) records().push(wire.tx_bind_hidden_element(this.id, on._level(), on._index));
+    else if (typeof on === "boolean") records().push(wire.tx_set_hidden(this.id, on));
+    else throw new Error(`kaya: hidden takes a boolean, a Signal or one of the row's fields, got ${typeof on}`);
+    return this;
+  }
+
   /** An expander's second header line (docs/expander-plan.md K3): a
    * constant, a Signal, or the row's own field; empty draws none. Chains. */
   summary(text: Bindable | string): this {

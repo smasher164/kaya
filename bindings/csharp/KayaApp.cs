@@ -4399,6 +4399,15 @@ sealed class Tx : IDisposable
     public void SetSelected(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindSelected(w.Id, s.Id));
 
+    /// Takes a widget off the screen and out of the layout, its state kept:
+    /// `When` controls existence, `hidden` controls space (DESIGN.md,
+    /// Structural operators).
+    public void SetHidden(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetHidden(w.Id, on));
+
+    public void SetHidden(Widget w, Signal s) =>
+        Records.Add(KayaWire.TxBindHidden(w.Id, s.Id));
+
     /// This row or column takes a click as a whole (docs/styling-pass-plan.md
     /// Y4): a button to assistive technology, the platform's press, hover
     /// and selected surface. Declaring it and registering the handler are
@@ -7220,6 +7229,16 @@ sealed class Tpl
 
     public void SetSelected(Node n, Field<bool> f, uint level = 0) =>
         tx.Records.Add(KayaWire.TxBindSelectedElement(n.Id, level, f.Index));
+
+    /// A stamped copy off the screen and out of the layout (Tx.SetHidden);
+    /// bound to the row's field, each copy hides on its own.
+    public void SetHidden(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetHidden(n.Id, on));
+
+    public void SetHidden(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindHidden(n.Id, s.Id));
+
+    public void SetHidden(Node n, Field<bool> f, uint level = 0) =>
+        tx.Records.Add(KayaWire.TxBindHiddenElement(n.Id, level, f.Index));
 
     /// Every stamped copy of this container takes a click as a whole, the
     /// handler handed the copy's keys (Tx.OnActivate).

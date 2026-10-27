@@ -2101,6 +2101,12 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// [`Tx::hidden`] chained.
+    pub fn hidden(self, on: impl Into<LiveSource<BoolKind>>) -> Self {
+        self.tx.hidden(self.id, on);
+        self
+    }
+
     /// This row or column takes a click as a whole and means `msg`
     /// (docs/styling-pass-plan.md Y4): a button to assistive technology, the
     /// platform's press, hover and selected surface. Registering the message
@@ -3264,6 +3270,13 @@ impl<'a> Tx<'a> {
     /// where it wants it (docs/styling-pass-plan.md Y4).
     pub fn selected(&mut self, widget: WidgetId, on: impl Into<LiveSource<BoolKind>>) {
         self.set_live(widget, Prop::Selected, on.into());
+    }
+
+    /// A widget not drawn and taking no space, its state kept: `When`
+    /// controls existence, `hidden` controls space (DESIGN.md, Structural
+    /// operators).
+    pub fn hidden(&mut self, widget: WidgetId, on: impl Into<LiveSource<BoolKind>>) {
+        self.set_live(widget, Prop::Hidden, on.into());
     }
 
     /// An image's widest in points: the picture scales down to fit, its
@@ -5436,6 +5449,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.tpl().selected(node, src)
+    }
+
+    pub fn hidden(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.tpl().hidden(node, src)
     }
 
     pub fn on_activate<M: 'static>(
@@ -9132,6 +9149,12 @@ impl<'b> Tpl<'_, 'b> {
     /// A stamped container's selected surface, the blueprint twin of [`Tx::selected`].
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.apply_source(node, Prop::Selected, src.into().inner);
+    }
+
+    /// A stamped copy not drawn and taking no space, the blueprint twin of
+    /// [`Tx::hidden`]; bound to a row's field, each copy hides on its own.
+    pub fn hidden(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
+        self.apply_source(node, Prop::Hidden, src.into().inner);
     }
 
     /// Every stamped copy of this container takes a click as a whole, `f`

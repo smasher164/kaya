@@ -38,7 +38,7 @@ expect_section "Anytime"
 expect label@caption[t6] "due {fmt:date_weekday 2026-09-30}, Trip"
 expect_no_clipping
 select_section 0
-click column@item[t2]
+click row@task[t2]
 expect_entries 1
 expect_ax date_picker@when "datetime/When: none"
 expect_placeholder textarea@notes "Notes"

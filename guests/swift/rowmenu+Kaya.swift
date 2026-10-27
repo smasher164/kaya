@@ -7,13 +7,13 @@ import Kaya
 extension RowmenuEntry: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at
     /// its zero value.
-    static let prototype = RowmenuEntry(title: "", mark: "")
+    static let prototype = RowmenuEntry(title: "", mark: "", plain: false)
 
     init(values: [KayaValue]) {
-        guard case .str(let title) = values[0], case .str(let mark) = values[1] else {
+        guard case .str(let title) = values[0], case .str(let mark) = values[1], case .bool(let plain) = values[2] else {
             preconditionFailure("kaya: RowmenuEntry fields out of order")
         }
-        self.init(title: title, mark: mark)
+        self.init(title: title, mark: mark, plain: plain)
     }
 }
 
@@ -21,6 +21,7 @@ extension RowmenuEntry: KayaRecord {
 enum RowmenuEntryFields {
     static let title = KayaField<String>(index: 0)
     static let mark = KayaField<String>(index: 1)
+    static let plain = KayaField<Bool>(index: 2)
 }
 
 /// The collection factory; the struct is the schema.
@@ -34,6 +35,7 @@ struct RowmenuEntryRow {
     let t: KayaTpl
     let title = RowmenuEntryFields.title
     let mark = RowmenuEntryFields.mark
+    let plain = RowmenuEntryFields.plain
 
     @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {

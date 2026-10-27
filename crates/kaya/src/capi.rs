@@ -1197,6 +1197,7 @@ pub const KAYA_PROP_SELECTED: u32 = 65;
 pub const KAYA_PROP_TINT: u32 = 66;
 /// A row or column that emits KAYA_OCCURRENCE_ACTIVATED (docs/styling-pass-plan.md Y4).
 pub const KAYA_PROP_ACTIVATABLE: u32 = 67;
+pub const KAYA_PROP_HIDDEN: u32 = 68;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1478,6 +1479,7 @@ const _: () = assert!(
         && KAYA_PROP_SELECTED == wire::PROP_SELECTED
         && KAYA_PROP_TINT == wire::PROP_TINT
         && KAYA_PROP_ACTIVATABLE == wire::PROP_ACTIVATABLE
+        && KAYA_PROP_HIDDEN == wire::PROP_HIDDEN
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -2066,7 +2068,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 67,
+    crate::spec::PROPS.len() == 68,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

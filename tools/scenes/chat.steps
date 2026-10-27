@@ -13,6 +13,12 @@ expect label@unread[sam] "1 new"
 expect image@avatar[maya] "160x160"
 expect_shape image@avatar[maya] circle
 expect_image_size image@avatar[sam] "48x48"
+# The count stays whole on one line while the name and preview truncate, as
+# Messages, WhatsApp and Telegram keep the badge (the lines take the row's
+# leftover, docs/flex-shrink-plan.md §2); the rows' surfaces meet
+# (docs/list-row-plan.md).
+expect_text_lines label@unread[maya] 1 whole
+expect_gap row@convo[maya] row@convo[sam] 0
 # A conversation's row takes the click as a whole and wears the platform's
 # selected surface while its thread is open; the unread count is the row's one
 # accent word (docs/styling-pass-plan.md Y4, Y7). A phone's list sits under the

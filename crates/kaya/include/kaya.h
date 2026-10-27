@@ -1353,6 +1353,8 @@
  */
 #define KAYA_PROP_ACTIVATABLE 67
 
+#define KAYA_PROP_HIDDEN 68
+
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
  * windows are not widgets. Window 0 is the primary surface.

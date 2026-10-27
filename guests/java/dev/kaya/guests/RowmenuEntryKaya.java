@@ -17,6 +17,7 @@ final class RowmenuEntryKaya {
 
     static final KayaRecords.Field<String> TITLE = KayaRecords.fieldAt(0);
     static final KayaRecords.Field<String> MARK = KayaRecords.fieldAt(1);
+    static final KayaRecords.Field<Boolean> PLAIN = KayaRecords.fieldAt(2);
 
     static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Rowmenu.RowmenuEntry> c, String key) {
         return new Patch(c.patch(tx, key));
@@ -36,6 +37,11 @@ final class RowmenuEntryKaya {
 
         Patch mark(String v) {
             p.set(MARK, v);
+            return this;
+        }
+
+        Patch plain(boolean v) {
+            p.set(PLAIN, v);
             return this;
         }
     }
@@ -62,6 +68,11 @@ final class RowmenuEntryKaya {
 
         PatchIf mark(String v) {
             p.set(MARK, v);
+            return this;
+        }
+
+        PatchIf plain(boolean v) {
+            p.set(PLAIN, v);
             return this;
         }
     }
@@ -93,6 +104,7 @@ final class RowmenuEntryKaya {
         private final KayaRecords.Collection<String, Rowmenu.RowmenuEntry> c;
         final KayaRecords.Field<String> title = TITLE;
         final KayaRecords.Field<String> mark = MARK;
+        final KayaRecords.Field<Boolean> plain = PLAIN;
 
         Row(KayaApp.Tpl t, KayaRecords.Collection<String, Rowmenu.RowmenuEntry> c) {
             super(t);

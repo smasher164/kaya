@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x7b5c931f2513c73b
+specHash = 0x7a1263c53af5e0a4
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -292,6 +292,8 @@ propTint :: Word32
 propTint = 66
 propActivatable :: Word32
 propActivatable = 67
+propHidden :: Word32
+propHidden = 68
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -2929,6 +2931,25 @@ txBindActivatable widgetId signalId = wireRecord txKindSetProperty
 txBindActivatableElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindActivatableElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propActivatable <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant hidden value.
+txSetHidden :: Word64 -> Bool -> Builder
+txSetHidden widgetId hidden = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHidden <> word32LE sourceConst
+    <> encodeValue (VBool hidden))
+
+-- set_property with a signal-bound hidden value.
+txBindHidden :: Word64 -> Word64 -> Builder
+txBindHidden widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHidden <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindHiddenElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindHiddenElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propHidden <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

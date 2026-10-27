@@ -4507,6 +4507,17 @@ public final class KayaAppTx {
         tx.bindSelected(w.id, s.id)
     }
 
+    /// A widget off the screen and out of the layout, its state kept: `when`
+    /// controls existence, `hidden` controls space (DESIGN.md, Structural
+    /// operators).
+    public func setHidden(_ w: KayaWidget, _ on: Bool) {
+        tx.setHidden(w.id, on)
+    }
+
+    public func setHidden(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.bindHidden(w.id, s.id)
+    }
+
     /// This row or column takes a click as a whole (docs/styling-pass-plan.md
     /// Y4): a button to assistive technology, the platform's press, hover and
     /// selected surface. Registering the handler and declaring the container
@@ -6878,6 +6889,20 @@ public final class KayaTpl {
 
     public func setSelected(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
         tx.tx.bindSelectedElement(n.id, level: level, field: f.index)
+    }
+
+    /// A stamped copy off the screen and out of the layout
+    /// (KayaAppTx.setHidden); bound to the row's field, each copy hides on its own.
+    public func setHidden(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setHidden(n.id, on)
+    }
+
+    public func setHidden(_ n: KayaNodeHandle, _ s: KayaSignal) {
+        tx.tx.bindHidden(n.id, s.id)
+    }
+
+    public func setHidden(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<Bool>) {
+        tx.tx.bindHiddenElement(n.id, level: level, field: f.index)
     }
 
     /// Every stamped copy of this container takes a click as a whole, the

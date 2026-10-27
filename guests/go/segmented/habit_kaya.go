@@ -168,6 +168,8 @@ func (r habitRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.Se
 func (r habitRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r habitRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r habitRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r habitRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r habitRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r habitRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
 func (r habitRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
 	r.t.BindGroundGradient(n, f)

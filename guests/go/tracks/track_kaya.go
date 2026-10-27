@@ -228,6 +228,8 @@ func (r trackRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.Se
 func (r trackRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r trackRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r trackRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r trackRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r trackRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r trackRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
 func (r trackRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
 	r.t.BindGroundGradient(n, f)

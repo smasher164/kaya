@@ -2336,6 +2336,8 @@ pub enum Prop {
     Tint,
     /// A row or column that emits `activated` (Bool; Y4).
     Activatable,
+    /// Any widget not drawn, taking no space (Bool; DESIGN.md, Structural operators).
+    Hidden,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.

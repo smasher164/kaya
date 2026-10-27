@@ -1181,7 +1181,15 @@ children does.
 The known normalization worklist:
 
 - `hidden` means collapsed (occupies no space) everywhere. GTK collapses,
-  AppKit reserves space, XAML distinguishes Collapsed from Hidden.
+  AppKit reserves space, XAML distinguishes Collapsed from Hidden. BUILT
+  2026-10-27 as prop 68, a Bool on any kind from a constant, a signal or a
+  row's field: a hidden widget is not drawn, is gone from the accessibility
+  tree, keeps its state, and in a row or column takes no extent and no gap
+  (it joins the M16 (3) vacancy every backend already had, so a box holding
+  only hidden or vacant children is vacant itself). SwiftUI and Compose leave it out of the
+  container's laid-out children and render nothing for it; GTK unshows the
+  widget; WinUI collapses the element and gives it no track. rowmenu.steps
+  reads both zones with `expect_gap` on every lane in every language.
 - A row centres its children on the cross axis; a column starts them.
   The core emits the row's `align = center` at creation, live and
   template alike, unless the app sets an `align` of its own, so every

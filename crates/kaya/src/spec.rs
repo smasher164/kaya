@@ -322,6 +322,10 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // and emits `activated`. The binding lowers `on_activate` to it; the
     // guest never spells it, the canvas size policy's precedent.
     ("activatable", 67, PropKind::Bool),
+    // DESIGN.md, Structural operators: `When` controls existence, `hidden`
+    // controls space. A hidden widget of any kind is not drawn and takes no
+    // extent and no gap (docs/media-player-plan.md M16 (3)); its state stays.
+    ("hidden", 68, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4437,6 +4441,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("selected", 65),
                 ("tint", 66),
                 ("activatable", 67),
+                ("hidden", 68),
             ],
         },
         EnumSpec {
@@ -5609,6 +5614,7 @@ mod tests {
                     ("prop", "selected") => wire::PROP_SELECTED,
                     ("prop", "tint") => wire::PROP_TINT,
                     ("prop", "activatable") => wire::PROP_ACTIVATABLE,
+                    ("prop", "hidden") => wire::PROP_HIDDEN,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

@@ -4,16 +4,28 @@
 # row the right-click lands on).
 expect_title "rowmenu"
 expect label#0 "ready"
+# HIDDEN (DESIGN.md, Structural operators): a hidden widget takes no space and
+# no gap, from a signal in the live zone and from each row's own field in the
+# template zone, and comes back where it was declared.
+expect_gap label@va label@vc 8
+expect_gap label@title[a] label@foot[a] 8
+expect_gap label@title[b] label@flag[b] 8
+expect_gap label@flag[b] label@foot[b] 8
+click button@show
+expect_gap label@va label@vb 8
+expect_gap label@vb label@vc 8
 expect_context_items row@note[a] "Star|-|Open"
 expect_context_items row@note[b] "Unstar|-|Open"
 context_open row@note[b]
 menu_activate "Unstar"
 expect label#0 "unstarred b"
+expect_gap label@title[b] label@foot[b] 8
 expect_context_items row@note[b] "Star|-|Open"
 expect_context_items row@note[a] "Star|-|Open"
 context_open row@note[a]
 menu_activate "Star"
 expect label#0 "starred a"
+expect_gap label@title[a] label@flag[a] 8
 expect_context_items row@note[a] "Unstar|-|Open"
 context_open row@note[a]
 menu_activate "Open"

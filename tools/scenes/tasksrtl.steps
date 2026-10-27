@@ -53,7 +53,7 @@ expect_section "في أي وقت"
 expect label@anytime_count "{fmt:number 2 medium} في أي وقت"
 expect label@caption[t6] "مستحق {fmt:date_weekday 2026-09-30}, Trip"
 select_section 0
-click column@item[t2]
+click row@task[t2]
 expect_entries 1
 expect_ax date_picker@when "datetime/متى: بلا"
 expect_placeholder textarea@notes "ملاحظات"
@@ -74,7 +74,7 @@ expect_order column@rows "Book the flights|Renew passport"
 back
 expect_entries 0
 select_section 0
-click column@item[t1]
+click row@task[t1]
 expect_entries 1
 click button@delete
 expect_entries 0

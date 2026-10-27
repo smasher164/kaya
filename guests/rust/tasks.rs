@@ -96,6 +96,7 @@ mod store {
                     TaskRow {
                         title: row.get(1)?,
                         caption: String::new(),
+                        captionless: true,
                         done: row.get::<_, i64>(7)? != 0,
                         notes: row.get(2)?,
                         when: row.get(4)?,
@@ -214,6 +215,7 @@ fn appearance_mode(index: usize) -> kaya::Appearance {
 struct TaskRow {
     title: String,
     caption: String,
+    captionless: bool,
     done: bool,
     notes: String,
     when: String,
@@ -551,6 +553,7 @@ impl App {
     /// undo group.
     fn place(&mut self, tx: &mut kaya::Tx, key: &str, mut row: TaskRow) {
         row.caption = self.caption(&row);
+        row.captionless = row.caption.is_empty();
         let target = self.list_of(&row);
         let current = self.tasks.get(key).map(|(l, _)| *l);
         // A row a filter has hidden is in no collection: nothing to patch or
@@ -563,6 +566,7 @@ impl App {
                         .patch(tx, key.to_string())
                         .title(row.title.clone())
                         .caption(row.caption.clone())
+                        .captionless(row.captionless)
                         .done(row.done)
                         .notes(row.notes.clone())
                         .when(row.when.clone())
@@ -818,12 +822,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                 t.a11y_id(title, "title");
                                 let caption = t.caption(TaskRow::caption());
                                 t.a11y_id(caption, "caption");
+                                t.hidden(caption, TaskRow::captionless());
                             });
-                            t.a11y_id(item, "item");
                             t.grow(item, 1.0);
-                            t.on_activate(item, &msgs, Msg::Details);
                         });
                         row.a11y_id(task_row, "task");
+                        row.on_activate(task_row, &msgs, Msg::Details);
                         // The checkbox on the title's line, not the pair's
                         // middle (docs/flex-shrink-plan.md
                         // §9; R5's centre unless the app says otherwise).
@@ -931,6 +935,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let row = TaskRow {
                     title: title.into(),
                     caption: String::new(),
+                    captionless: true,
                     done,
                     notes: notes.into(),
                     when: date_field(when),
@@ -1029,6 +1034,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let row = TaskRow {
                     title: app.draft.trim().to_string(),
                     caption: String::new(),
+                    captionless: true,
                     done: false,
                     notes: String::new(),
                     when: String::new(),
@@ -1275,6 +1281,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let row = TaskRow {
                     title: app.pdraft.trim().to_string(),
                     caption: String::new(),
+                    captionless: true,
                     done: false,
                     notes: String::new(),
                     when: String::new(),
@@ -1394,6 +1401,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                                     t.a11y_id(title, "lb_title");
                                     let caption = t.caption(TaskRow::caption());
                                     t.a11y_id(caption, "lb_caption");
+                                    t.hidden(caption, TaskRow::captionless());
                                 });
                             }
                         })

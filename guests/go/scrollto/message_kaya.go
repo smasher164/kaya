@@ -156,6 +156,8 @@ func (r messageRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.
 func (r messageRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r messageRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r messageRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r messageRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r messageRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r messageRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
 func (r messageRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
 	r.t.BindGroundGradient(n, f)

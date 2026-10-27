@@ -180,6 +180,8 @@ func (r clipRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.Set
 func (r clipRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r clipRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r clipRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r clipRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r clipRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r clipRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
 func (r clipRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
 	r.t.BindGroundGradient(n, f)

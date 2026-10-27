@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x7b5c931f2513c73b
+	SpecHash uint64 = 0x7a1263c53af5e0a4
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -149,6 +149,7 @@ const (
 	PropSelected = 65
 	PropTint = 66
 	PropActivatable = 67
+	PropHidden = 68
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -4079,6 +4080,38 @@ func TxBindActivatableElement(widgetID uint64, level uint32, field uint32) []byt
 	b := beginRecord(txSetProperty)
 	b = binary.LittleEndian.AppendUint64(b, widgetID)
 	b = binary.LittleEndian.AppendUint32(b, PropActivatable)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetHidden: set_property with a constant hidden value.
+func TxSetHidden(widgetID uint64, hidden bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHidden)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, hidden)
+	return endRecord(b)
+}
+
+// TxBindHidden: set_property with a signal-bound hidden value.
+func TxBindHidden(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHidden)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindHiddenElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindHiddenElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropHidden)
 	b = binary.LittleEndian.AppendUint32(b, SourceElement)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)

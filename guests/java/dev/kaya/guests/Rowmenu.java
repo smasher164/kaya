@@ -13,7 +13,7 @@ import java.util.function.BiConsumer;
  */
 public final class Rowmenu {
     @KayaGen(key = "String")
-    record RowmenuEntry(String title, String mark) {}
+    record RowmenuEntry(String title, String mark, boolean plain) {}
 
     public static void app() {
         KayaApp app = new KayaApp();
@@ -21,6 +21,7 @@ public final class Rowmenu {
         app.build(tx -> {
             tx.window(0).title("rowmenu");
             KayaApp.Signal<String> status = tx.signal("ready");
+            KayaApp.Signal<Boolean> hide = tx.signal(true);
             var notes = RowmenuEntryKaya.collection(tx);
             var files = RowmenuEntryKaya.collection(tx);
             KayaApp.ContextCatalog noteMenu = tx.contextCatalog();
@@ -36,8 +37,22 @@ public final class Rowmenu {
 
             tx.mount(tx.column(col -> {
                 tx.label(status);
+                tx.row(pair -> {
+                    tx.column(trio -> {
+                        tx.label("A").a11yId("va");
+                        tx.label("B").a11yId("vb").hidden(hide);
+                        tx.label("C").a11yId("vc");
+                    });
+                    tx.button("Show B", t -> t.write(hide, false)).a11yId("show");
+                });
                 for (var note : RowmenuEntryKaya.rows(tx, notes)) {
-                    KayaApp.Node line = note.row(() -> note.label(note.title));
+                    KayaApp.Node line = note.row(() -> note.column(() -> {
+                        note.setA11yId(note.label(note.title), "title");
+                        KayaApp.Node flag = note.caption(note.mark);
+                        note.setA11yId(flag, "flag");
+                        note.setHidden(flag, note.plain);
+                        note.setA11yId(note.caption(note.title), "foot");
+                    }));
                     note.setA11yId(line, "note");
                     note.contextMenu(line, noteMenu);
                     note.contextLabel(line, star, note.mark);
@@ -54,11 +69,11 @@ public final class Rowmenu {
             }));
             String[][] noteSeeds = { { "a", "apples", "Star" }, { "b", "bread", "Unstar" } };
             for (String[] seed : noteSeeds) {
-                notes.insert(tx, seed[0], new RowmenuEntry(seed[1], seed[2]));
+                notes.insert(tx, seed[0], new RowmenuEntry(seed[1], seed[2], seed[2].equals("Star")));
             }
             String[][] fileSeeds = { { "x", "x.txt", "Pin" }, { "y", "y.txt", "Unpin" } };
             for (String[] seed : fileSeeds) {
-                files.insert(tx, seed[0], new RowmenuEntry(seed[1], seed[2]));
+                files.insert(tx, seed[0], new RowmenuEntry(seed[1], seed[2], seed[2].equals("Pin")));
             }
             return null;
         });
@@ -73,7 +88,7 @@ public final class Rowmenu {
             String key = (String) keys.get(0);
             RowmenuEntry entry = c.get(t, key);
             boolean set = entry != null && entry.mark().equals(on);
-            RowmenuEntryKaya.patch(t, c, key).mark(set ? off : on);
+            RowmenuEntryKaya.patch(t, c, key).mark(set ? off : on).plain(!set);
             t.write(status, (set ? did : undid) + " " + key);
         };
     }

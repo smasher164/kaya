@@ -3,7 +3,7 @@
 
 open Kaya_app
 
-type rowmenu_entry = { title : string; mark : string } [@@deriving kaya_gen]
+type rowmenu_entry = { title : string; mark : string; plain : bool } [@@deriving kaya_gen]
 
 let () =
   let app = Kaya_app.create () in
@@ -11,6 +11,7 @@ let () =
   build app (fun () ->
      window ~title:"rowmenu" ();
      let status = signal Scalar.Str "ready" in
+     let hide = signal Scalar.Bool true in
      let notes = collection_of rowmenu_entry_record in
      let files = collection_of rowmenu_entry_record in
      let toggle c on off did undid keys =
@@ -22,6 +23,7 @@ let () =
              | None -> false
            in
            update_field c (Key.str key) rowmenu_entry_mark (if set then off else on);
+           update_field c (Key.str key) rowmenu_entry_plain (not set);
            write status (Printf.sprintf "%s %s" (if set then did else undid) key)
        | _ -> ()
      in
@@ -48,7 +50,17 @@ let () =
        for_each (record_handle notes)
          (fun () ->
            Tpl.(
-             let line = row ~a11y_id:"note" [ label ~bind_field:rowmenu_entry_title ] () in
+             let flag () =
+               let n = caption ~bind_field:rowmenu_entry_mark ~a11y_id:"flag" () in
+               bind_hidden_field n rowmenu_entry_plain;
+               n
+             in
+             let body =
+               column
+                 [ label ~bind_field:rowmenu_entry_title ~a11y_id:"title"; flag;
+                   caption ~bind_field:rowmenu_entry_title ~a11y_id:"foot" ]
+             in
+             let line = row ~a11y_id:"note" [ body ] () in
              context_menu line note_menu;
              context_label line star rowmenu_entry_mark;
              line))
@@ -66,11 +78,22 @@ let () =
      in
      set_grow table 1.0;
      columns table [ "Name" ] sort_none;
-     let root = column [ label ~bind:status; w note_list; w table ] () in
+     let b () =
+       let b = label ~text:"B" ~a11y_id:"vb" () in
+       bind_hidden b hide;
+       b
+     in
+     let pair () =
+       row
+         [ column [ label ~text:"A" ~a11y_id:"va"; b; label ~text:"C" ~a11y_id:"vc" ];
+           button ~text:"Show B" ~a11y_id:"show" ~on_click:(fun () -> write hide false) ]
+         ()
+     in
+     let root = column [ label ~bind:status; pair; w note_list; w table ] () in
      mount root;
-     insert_record notes (Key.str "a") { title = "apples"; mark = "Star" };
-     insert_record notes (Key.str "b") { title = "bread"; mark = "Unstar" };
-     insert_record files (Key.str "x") { title = "x.txt"; mark = "Pin" };
-     insert_record files (Key.str "y") { title = "y.txt"; mark = "Unpin" });
+     insert_record notes (Key.str "a") { title = "apples"; mark = "Star"; plain = true };
+     insert_record notes (Key.str "b") { title = "bread"; mark = "Unstar"; plain = false };
+     insert_record files (Key.str "x") { title = "x.txt"; mark = "Pin"; plain = true };
+     insert_record files (Key.str "y") { title = "y.txt"; mark = "Unpin"; plain = false });
 
   exit (run app)

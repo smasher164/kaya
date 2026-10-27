@@ -180,6 +180,8 @@ func (r playlistRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t
 func (r playlistRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r playlistRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r playlistRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r playlistRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r playlistRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r playlistRow) SetGroundGradient(n kaya.Node, color kaya.Color) {
 	r.t.SetGroundGradient(n, color)
 }

@@ -2098,6 +2098,13 @@ let set_selected (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_selected id
 
 let bind_selected (Widget id) (s : bool signal) = emit (the_tx ()) (Kaya_wire.tx_bind_selected id s.sig_id)
 
+(* A widget off the screen and out of the layout, its state kept: [when_]
+   controls existence, [hidden] controls space (DESIGN.md, Structural
+   operators). *)
+let set_hidden (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_hidden id on)
+
+let bind_hidden (Widget id) (s : bool signal) = emit (the_tx ()) (Kaya_wire.tx_bind_hidden id s.sig_id)
+
 (* A textarea one line tall at rest that grows with its text to [lines]
    lines, then scrolls (docs/grow-lines-plan.md). *)
 let set_max_lines (Widget id) lines =
@@ -5759,6 +5766,15 @@ module Tpl = struct
 
   let bind_selected_field ?(level = 0) (Node id) (fd : (_, bool) field) =
     emit (the_tx ()) (Kaya_wire.tx_bind_selected_element ~level ~field:fd.fd_index id)
+
+  (* A stamped copy off the screen and out of the layout; bound to the row's
+     field, each copy hides on its own. *)
+  let set_hidden (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_hidden id on)
+
+  let bind_hidden (Node id) (s : bool signal) = emit (the_tx ()) (Kaya_wire.tx_bind_hidden id s.sig_id)
+
+  let bind_hidden_field ?(level = 0) (Node id) (fd : (_, bool) field) =
+    emit (the_tx ()) (Kaya_wire.tx_bind_hidden_element ~level ~field:fd.fd_index id)
 
   (* Every stamped copy takes a click as a whole, the handler handed that
      copy's keys; registering and declaring are one act (Y4). *)

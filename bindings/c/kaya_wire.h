@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x7b5c931f2513c73bULL
+#define KAYA_SPEC_HASH 0x7a1263c53af5e0a4ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -3171,6 +3171,38 @@ static inline void kaya_tx_bind_activatable_element(KayaTx *tx, uint64_t widget_
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_ACTIVATABLE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant hidden value. */
+static inline void kaya_tx_set_hidden(KayaTx *tx, uint64_t widget_id, int hidden) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIDDEN);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(hidden));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound hidden value. */
+static inline void kaya_tx_bind_hidden(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIDDEN);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_hidden_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_HIDDEN);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

@@ -433,14 +433,18 @@ func App() *kaya.App {
 					row.SetMaxHeight(avatar, 48)
 					row.SetShape(avatar, kaya.ShapeCircle)
 					row.SetA11yID(avatar, "avatar")
+					// The lines take the leftover and truncate, so the count
+					// stays whole (docs/flex-shrink-plan.md §2).
 					lines := row.Column(func() {
 						name := row.Label(row.Name())
 						row.SetA11yID(name, "name")
+						row.SetMaxLines(name, 1)
 						preview := row.Caption(row.Preview())
 						row.SetA11yID(preview, "preview")
+						row.SetMaxLines(preview, 1)
 					})
 					row.SetFill(lines, false)
-					row.Spacer()
+					row.SetGrow(lines, 1)
 					unread := row.Label(row.Unread())
 					row.SetA11yID(unread, "unread")
 					row.SetTint(unread, kaya.TintAccent)

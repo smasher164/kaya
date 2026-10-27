@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x7b5c931f2513c73b
+SPEC_HASH = 0x7a1263c53af5e0a4
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -149,6 +149,7 @@ PROP_SHAPE = 64
 PROP_SELECTED = 65
 PROP_TINT = 66
 PROP_ACTIVATABLE = 67
+PROP_HIDDEN = 68
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -2063,6 +2064,21 @@ def tx_bind_activatable(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_activatable_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_ACTIVATABLE, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_hidden(widget_id: int, hidden: bool) -> bytes:
+    """set_property with a constant hidden value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_HIDDEN, SOURCE_CONST) + _enc.value(hidden))
+
+
+def tx_bind_hidden(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound hidden value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_HIDDEN, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_hidden_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HIDDEN, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

@@ -12,6 +12,7 @@ import (
 type Entry struct {
 	Title string
 	Mark  string
+	Plain bool
 }
 
 func App() *kaya.App {
@@ -31,7 +32,7 @@ func App() *kaya.App {
 				if set {
 					next, word = off, did
 				}
-				EntryPatch(c, tx, key).Mark(next)
+				EntryPatch(c, tx, key).Mark(next).Plain(!set)
 				tx.Write(status, fmt.Sprintf("%s %s", word, key))
 			}
 		}
@@ -47,11 +48,28 @@ func App() *kaya.App {
 		fileMenu.Separator()
 		fileMenu.Item("Open").OnActivateNode(open)
 
+		hide := tx.Signal(true)
 		tx.Mount(tx.Column(func() {
 			tx.Label(status)
+			tx.Row(func() {
+				tx.Column(func() {
+					tx.LabelText("A").A11yID("va")
+					tx.LabelText("B").A11yID("vb").BindHidden(hide)
+					tx.LabelText("C").A11yID("vc")
+				})
+				tx.Button("Show B", func(tx *kaya.Tx) { tx.Write(hide, false) }).A11yID("show")
+			})
 			for note := range EntryRows(tx, notes).All() {
 				line := note.Row(func() {
-					note.Label(note.Title())
+					note.Column(func() {
+						title := note.Label(note.Title())
+						note.SetA11yID(title, "title")
+						flag := note.Caption(note.Mark())
+						note.SetA11yID(flag, "flag")
+						note.BindHidden(flag, note.Plain())
+						foot := note.Caption(note.Title())
+						note.SetA11yID(foot, "foot")
+					})
 				})
 				note.SetA11yID(line, "note")
 				note.ContextMenu(line, noteMenu)
@@ -71,12 +89,12 @@ func App() *kaya.App {
 		for _, seed := range []struct{ key, title, mark string }{
 			{"a", "apples", "Star"}, {"b", "bread", "Unstar"},
 		} {
-			notes.Insert(tx, seed.key, Entry{Title: seed.title, Mark: seed.mark})
+			notes.Insert(tx, seed.key, Entry{Title: seed.title, Mark: seed.mark, Plain: seed.mark == "Star"})
 		}
 		for _, seed := range []struct{ key, title, mark string }{
 			{"x", "x.txt", "Pin"}, {"y", "y.txt", "Unpin"},
 		} {
-			files.Insert(tx, seed.key, Entry{Title: seed.title, Mark: seed.mark})
+			files.Insert(tx, seed.key, Entry{Title: seed.title, Mark: seed.mark, Plain: seed.mark == "Pin"})
 		}
 	})
 

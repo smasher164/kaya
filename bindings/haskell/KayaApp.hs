@@ -3143,6 +3143,11 @@ data Attr (c :: WClass) where
   -- (docs\/layout-knobs-plan.md §1). Any widget class, like 'Grow';
   -- unset, the kind's own default holds.
   Fill :: Bool -> Attr c
+  -- | This widget off the screen and out of the layout, its state kept:
+  -- 'when' controls existence, hidden controls space (DESIGN.md,
+  -- Structural operators). Any widget class.
+  Hidden :: Bool -> Attr c
+  HiddenBound :: Signal Bool -> Attr c
   -- | THE GRID THAT FITS (docs\/layout-knobs-plan.md §3): as many columns
   -- as fit this grid's width at that many DIP each, sharing the extra.
   -- Grids only; an explicit 'columnsWhen' still wins while its class holds.
@@ -3324,6 +3329,8 @@ data Attr (c :: WClass) where
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
 applyAttr (Fill on) w = setFill w on
+applyAttr (Hidden on) (Widget n) = emitB (W.txSetHidden n on)
+applyAttr (HiddenBound (Signal s)) (Widget n) = emitB (W.txBindHidden n s)
 applyAttr (ColumnsAuto minWidth) w = setColumnsAuto w minWidth
 applyAttr (Wrap on) w = setWrap w on
 applyAttr (Spacing gap) w = setSpacing w gap
@@ -4760,6 +4767,11 @@ data TplAttr where
   TplSelected :: Bool -> TplAttr
   TplSelectedBound :: Signal Bool -> TplAttr
   TplSelectedField :: KField Bool -> TplAttr
+  -- | A stamped copy off the screen and out of the layout (the live
+  -- 'Hidden'); bound to the row's field, each copy hides on its own.
+  TplHidden :: Bool -> TplAttr
+  TplHiddenBound :: Signal Bool -> TplAttr
+  TplHiddenField :: KField Bool -> TplAttr
   TplShapeAs :: Shape -> TplAttr
   TplTintAs :: Tint -> TplAttr
   -- | A stamped label's most lines, the rest truncated (M16 (2)).
@@ -4809,6 +4821,9 @@ applyTplAttr (TplOnSelect handler) (Node n) = do
 applyTplAttr (TplSelected on) (Node n) = emitT (W.txSetSelected n on)
 applyTplAttr (TplSelectedBound (Signal s)) (Node n) = emitT (W.txBindSelected n s)
 applyTplAttr (TplSelectedField (KField i)) (Node n) = emitT (W.txBindSelectedElement n 0 i)
+applyTplAttr (TplHidden on) (Node n) = emitT (W.txSetHidden n on)
+applyTplAttr (TplHiddenBound (Signal s)) (Node n) = emitT (W.txBindHidden n s)
+applyTplAttr (TplHiddenField (KField i)) (Node n) = emitT (W.txBindHiddenElement n 0 i)
 applyTplAttr (TplShapeAs sh) (Node n) = emitT (W.txSetShape n (shapeWire sh))
 applyTplAttr (TplTintAs t) (Node n) = emitT (W.txSetTint n (tintWire t))
 applyTplAttr (TplMaxLines k) (Node n) = emitT (W.txSetMaxLines n (fromIntegral k))

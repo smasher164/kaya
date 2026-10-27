@@ -4824,6 +4824,17 @@ public final class KayaApp {
             return this;
         }
 
+        /** This widget off the screen and out of the layout (Tx#setHidden), chained. */
+        public Widget hidden(boolean on) {
+            building("hidden").setHidden(this, on);
+            return this;
+        }
+
+        public Widget hidden(Signal<Boolean> s) {
+            building("hidden").setHidden(this, s);
+            return this;
+        }
+
         /** This row or column takes a click as a whole (Tx#onActivate), chained. */
         public Widget onActivate(Consumer<Tx> handler) {
             building("onActivate").onActivate(this, handler);
@@ -6268,6 +6279,19 @@ public final class KayaApp {
             t.setSelected(n, f);
         }
 
+        /** This row's copy off the screen and out of the layout (Tpl.setHidden). */
+        public void setHidden(Node n, boolean on) {
+            t.setHidden(n, on);
+        }
+
+        public void setHidden(Node n, Signal<Boolean> s) {
+            t.setHidden(n, s);
+        }
+
+        public void setHidden(Node n, KayaRecords.Field<Boolean> f) {
+            t.setHidden(n, f);
+        }
+
         /** This row's copy of that container takes a click (Tpl.onActivate). */
         public void onActivate(Node n, BiConsumer<Tx, List<Object>> handler) {
             t.onActivate(n, handler);
@@ -7274,6 +7298,17 @@ public final class KayaApp {
 
         public void setSelected(Widget w, Signal<Boolean> s) {
             emit(KayaWire.txBindSelected(w.id, s.id));
+        }
+
+        /** A widget off the screen and out of the layout, its state kept:
+         * `when` controls existence, `hidden` controls space (DESIGN.md,
+         * Structural operators). */
+        public void setHidden(Widget w, boolean on) {
+            emit(KayaWire.txSetHidden(w.id, on));
+        }
+
+        public void setHidden(Widget w, Signal<Boolean> s) {
+            emit(KayaWire.txBindHidden(w.id, s.id));
         }
 
         /** This row or column takes a click as a whole
@@ -9709,6 +9744,20 @@ public final class KayaApp {
 
         public void setSelected(Node n, KayaRecords.Field<Boolean> f) {
             tx.emit(KayaWire.txBindSelectedElement(n.id, 0, f.index()));
+        }
+
+        /** A stamped copy off the screen and out of the layout ({@link Tx#setHidden});
+         * bound to the row's field, each copy hides on its own. */
+        public void setHidden(Node n, boolean on) {
+            tx.emit(KayaWire.txSetHidden(n.id, on));
+        }
+
+        public void setHidden(Node n, Signal<Boolean> s) {
+            tx.emit(KayaWire.txBindHidden(n.id, s.id));
+        }
+
+        public void setHidden(Node n, KayaRecords.Field<Boolean> f) {
+            tx.emit(KayaWire.txBindHiddenElement(n.id, 0, f.index()));
         }
 
         /** Every stamped copy of this container takes a click as a whole,

@@ -36,6 +36,11 @@ func (p entryPatchBuilder) Mark(v string) entryPatchBuilder {
 	return p
 }
 
+func (p entryPatchBuilder) Plain(v bool) entryPatchBuilder {
+	p.p.Set(func(t *Entry) *bool { return &t.Plain }, v)
+	return p
+}
+
 // EntryPatchIf is EntryPatch made only while the entry exists and the
 // guard's field still holds expected; otherwise nothing, and no panic
 // (docs/network-images-plan.md N7). The chain is one record.
@@ -57,6 +62,11 @@ func (p entryPatchIfBuilder) Mark(v string) entryPatchIfBuilder {
 	return p
 }
 
+func (p entryPatchIfBuilder) Plain(v bool) entryPatchIfBuilder {
+	p.p.Set(func(t *Entry) *bool { return &t.Plain }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type entryRow struct {
@@ -67,6 +77,8 @@ type entryRow struct {
 func (r entryRow) Title() kaya.Field[string] { return kaya.FieldAt[string](0) }
 
 func (r entryRow) Mark() kaya.Field[string] { return kaya.FieldAt[string](1) }
+
+func (r entryRow) Plain() kaya.Field[bool] { return kaya.FieldAt[bool](2) }
 
 func (r entryRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 
@@ -168,6 +180,8 @@ func (r entryRow) SetTint(n kaya.Node, tint kaya.Tint)                  { r.t.Se
 func (r entryRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r entryRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r entryRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r entryRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r entryRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r entryRow) SetGroundGradient(n kaya.Node, color kaya.Color)      { r.t.SetGroundGradient(n, color) }
 func (r entryRow) BindGroundGradient(n kaya.Node, f kaya.Field[kaya.Color]) {
 	r.t.BindGroundGradient(n, f)

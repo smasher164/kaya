@@ -1211,6 +1211,7 @@ pub(crate) const PROP_SHAPE: u32 = 64;
 pub(crate) const PROP_SELECTED: u32 = 65;
 pub(crate) const PROP_TINT: u32 = 66;
 pub(crate) const PROP_ACTIVATABLE: u32 = 67;
+pub(crate) const PROP_HIDDEN: u32 = 68;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1890,6 +1891,7 @@ fn prop(raw: u32) -> Prop {
         PROP_SELECTED => Prop::Selected,
         PROP_TINT => Prop::Tint,
         PROP_ACTIVATABLE => Prop::Activatable,
+        PROP_HIDDEN => Prop::Hidden,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -5870,6 +5872,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Selected => PROP_SELECTED,
         Prop::Tint => PROP_TINT,
         Prop::Activatable => PROP_ACTIVATABLE,
+        Prop::Hidden => PROP_HIDDEN,
     }
 }
 

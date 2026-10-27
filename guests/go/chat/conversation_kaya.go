@@ -204,6 +204,8 @@ func (r conversationRow) SetTint(n kaya.Node, tint kaya.Tint)                  {
 func (r conversationRow) BindTint(n kaya.Node, f kaya.Field[kaya.Tint])        { r.t.BindTint(n, f) }
 func (r conversationRow) SetSelected(n kaya.Node, on bool)                     { r.t.SetSelected(n, on) }
 func (r conversationRow) BindSelected(n kaya.Node, f kaya.Field[bool])         { r.t.BindSelected(n, f) }
+func (r conversationRow) SetHidden(n kaya.Node, on bool)                       { r.t.SetHidden(n, on) }
+func (r conversationRow) BindHidden(n kaya.Node, f kaya.Field[bool])           { r.t.BindHidden(n, f) }
 func (r conversationRow) SetGroundGradient(n kaya.Node, color kaya.Color) {
 	r.t.SetGroundGradient(n, color)
 }

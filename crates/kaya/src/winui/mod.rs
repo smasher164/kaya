@@ -2728,9 +2728,34 @@ fn ensure_accent_surface() -> windows_core::Result<()> {
 /// nowhere else to land (docs/traps.md: A window inset stamped on containers
 /// alone is dropped by a scroll-rooted window). Padding cannot go on the
 /// viewer itself: ScrollViewer's default template does not bind it.
+/// A LIST'S ROW (docs/list-row-plan.md): an activatable container stacked in
+/// a column, with no inset or fill of its own, pads its top and bottom by half
+/// the column's spacing, and reindex reaches it that far into the spacing.
+fn list_row_reach(core: &CoreState, id: WidgetId) -> f64 {
+    if !skin::is_activatable(id)
+        || core.container_insets.contains_key(&id)
+        || core.filled.contains_key(&id)
+        || in_declared_table(core, id)
+    {
+        return 0.0;
+    }
+    let Some(parent) = core.child_order.parent_of(id) else { return 0.0 };
+    if !matches!(core.widgets.get(&parent), Some(NativeWidget::Column(_) | NativeWidget::Row(_)))
+        || !effective_vertical(core, parent)
+    {
+        return 0.0;
+    }
+    core.spacings.get(&parent).copied().unwrap_or(8.0) / 2.0
+}
+
 fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let pad = container_padding(core, id);
-    let pad = table_row_padding(core, id, pad);
+    let reach = list_row_reach(core, id);
+    let pad = if reach > 0.0 {
+        Thickness { Left: pad, Top: reach, Right: pad, Bottom: reach }
+    } else {
+        table_row_padding(core, id, pad)
+    };
     match core.widgets.get(&id) {
         Some(
             NativeWidget::Column(grid)
@@ -3193,12 +3218,17 @@ fn wrap_retry(rid: u64, probe: Grid) {
 thread_local! {
     /// The children reindex collapsed because they are vacant (M16 (3)).
     static VACATED: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
+    /// The widgets the app hid (DESIGN.md, Structural operators): vacant, whatever their kind.
+    static HIDDEN: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
 }
 
 /// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
 /// column or row that draws nothing of its own and holds only such boxes (a
 /// When showing no case, an empty For) is vacant.
 fn vacant(core: &CoreState, id: WidgetId) -> bool {
+    if HIDDEN.with_borrow(|h| h.contains(&id.0)) {
+        return true;
+    }
     let (Some(NativeWidget::Column(grid)) | Some(NativeWidget::Row(grid))) = core.widgets.get(&id) else {
         return false;
     };
@@ -3414,6 +3444,11 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
         // different extent and correct a table whose data is uniform).
         if let Some((_, _, _, gap)) = &table {
             element.SetMargin(Thickness { Left: 0.0, Top: 0.0, Right: 0.0, Bottom: *gap })?;
+        } else if vertical {
+            let reach = list_row_reach(core, *child);
+            if reach > 0.0 {
+                element.SetMargin(Thickness { Left: 0.0, Top: -reach, Right: 0.0, Bottom: -reach })?;
+            }
         }
         // THE TEXTAREA'S LAYOUT FLOOR, AND THE ONE PLACE `grow` REACHES IT.
         // 240x96 is the size all four backends declare; on the other three it
@@ -18165,6 +18200,23 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 return Ok(());
             }
+            // Hidden likewise: the parent's reindex collapses a vacant child
+            // and gives it no track.
+            if let (Prop::Hidden, Value::Bool(on)) = (prop, &value) {
+                HIDDEN.with_borrow_mut(|h| if *on { h.insert(id.0) } else { h.remove(&id.0) });
+                // A grid's child has no reindex of this kind to collapse it.
+                if let Some(widget) = core.widgets.get(&id) {
+                    if *on {
+                        widget.element()?.SetVisibility(Visibility::Collapsed)?;
+                    } else if !VACATED.with_borrow(|v| v.contains(&id.0)) {
+                        widget.element()?.SetVisibility(Visibility::Visible)?;
+                    }
+                }
+                if let Some(parent) = core.child_order.parent_of(id) {
+                    core.child_order.mark(parent);
+                }
+                return Ok(());
+            }
             // A FORM'S SHARED LABEL TRACK IS MEASURED FROM THE LABELS
             // (docs/forms-plan.md §3), so a bound label's new text re-stamps
             // its row and the column, which re-stamps every sibling row.
@@ -28620,7 +28672,7 @@ impl crate::harness::Stage for WinUiStage {
                     return Ok(past);
                 }
                 let word = longest_word_width(label)?;
-                if presented(&element, &ground)? && word > width + 1.0 {
+                if presented(&element, &ground)? && word > width + 1.0 && !capped {
                     return Ok(format!(
                         "label {text:?} is {width}px wide, narrower than its longest word at {word}px"
                     ));

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x7b5c931f2513c73bL
+let spec_hash = 0x7a1263c53af5e0a4L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -165,6 +165,7 @@ let prop_shape = 64
 let prop_selected = 65
 let prop_tint = 66
 let prop_activatable = 67
+let prop_hidden = 68
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -3082,6 +3083,32 @@ let tx_bind_activatable_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_activatable);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant hidden value. *)
+let tx_set_hidden widget_id hidden =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_hidden);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool hidden))
+
+(* set_property with a signal-bound hidden value. *)
+let tx_bind_hidden widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_hidden);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_hidden_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_hidden);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

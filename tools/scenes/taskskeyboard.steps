@@ -13,7 +13,7 @@ expect entry@quick "Buy oat milk"
 click button@add
 expect_sheets 0
 expect label@title[t10] "Buy oat milk"
-click column@item[t2]
+click row@task[t2]
 expect_entries 1
 click textarea@notes
 expect_focused textarea@notes

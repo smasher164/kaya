@@ -137,6 +137,23 @@ func (w Widget) BindSelected(s Signal[bool]) Widget {
 	return w
 }
 
+// SetHidden takes a widget off the screen and out of the layout, its state
+// kept: When controls existence, hidden controls space (DESIGN.md,
+// Structural operators).
+func (tx *Tx) SetHidden(w Widget, on bool) { tx.emit(TxSetHidden(w.id, on)) }
+
+// Hidden is SetHidden's chain.
+func (w Widget) Hidden(on bool) Widget {
+	w.tx.SetHidden(w, on)
+	return w
+}
+
+// BindHidden reads the hidden state from a signal.
+func (w Widget) BindHidden(s Signal[bool]) Widget {
+	w.tx.emit(TxBindHidden(w.id, s.id))
+	return w
+}
+
 // OnActivate makes a row or column take a click as a whole: a button to
 // assistive technology, the platform's press, hover and selected surface.
 // Registering the handler and declaring the container activatable are one
@@ -240,6 +257,21 @@ func (t *Tpl) BindSelected[S interface {
 		t.tx.emit(TxBindSelected(n.id, v.id))
 	case Field[bool]:
 		t.tx.emit(TxBindSelectedElement(n.id, 0, v.index))
+	}
+}
+
+// SetHidden hides every stamped copy (Tx.SetHidden).
+func (t *Tpl) SetHidden(n Node, on bool) { t.tx.emit(TxSetHidden(n.id, on)) }
+
+// BindHidden hides each copy by the row's field or a signal.
+func (t *Tpl) BindHidden[S interface {
+	Signal[bool] | Field[bool]
+}](n Node, src S) {
+	switch v := any(src).(type) {
+	case Signal[bool]:
+		t.tx.emit(TxBindHidden(n.id, v.id))
+	case Field[bool]:
+		t.tx.emit(TxBindHiddenElement(n.id, 0, v.index))
 	}
 }
 

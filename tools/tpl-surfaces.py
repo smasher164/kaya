@@ -292,7 +292,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # docs/media-player-plan.md M16 (2): a stamped label's most lines.
              "max_lines",
              # docs/media-player-plan.md M20 (2): a stamped label's or container's widest width.
-             "max_width"]
+             "max_width",
+             # DESIGN.md, Structural operators: a stamped copy hidden by its row's field.
+             "hidden"]
 
 PROP_MEMBERS = {
     "rust": {
@@ -312,6 +314,7 @@ PROP_MEMBERS = {
         "tint": "tint", "selected": "selected", "on_activate": "on_activate", "on_select": "on_select",
         "max_lines": "max_lines",
         "max_width": "max_width",
+        "hidden": "hidden",
     },
     "go": {
         "format": "SetFormat",
@@ -331,6 +334,7 @@ PROP_MEMBERS = {
         "tint": "BindTint", "selected": "BindSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
         "max_lines": "SetMaxLines",
         "max_width": "SetMaxWidth",
+        "hidden": "BindHidden",
     },
     "csharp": {
         "format": "SetFormat",
@@ -350,6 +354,7 @@ PROP_MEMBERS = {
         "tint": "SetTint", "selected": "SetSelected", "on_activate": "OnActivate", "on_select": "OnSelect",
         "max_lines": "SetMaxLines",
         "max_width": "SetMaxWidth",
+        "hidden": "SetHidden",
     },
     "java": {
         "format": "setFormat",
@@ -369,6 +374,7 @@ PROP_MEMBERS = {
         "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
         "max_lines": "setMaxLines",
         "max_width": "setMaxWidth",
+        "hidden": "setHidden",
     },
     "swift": {
         "format": "setFormat",
@@ -388,6 +394,7 @@ PROP_MEMBERS = {
         "tint": "setTint", "selected": "setSelected", "on_activate": "onActivate", "on_select": "onSelect",
         "max_lines": "setMaxLines",
         "max_width": "setMaxWidth",
+        "hidden": "setHidden",
     },
     "ocaml": {
         "format": "set_format",
@@ -407,6 +414,7 @@ PROP_MEMBERS = {
         "tint": "set_tint", "selected": "set_selected", "on_activate": "on_activate", "on_select": "on_select",
         "max_lines": "set_max_lines",
         "max_width": "set_max_width",
+        "hidden": "bind_hidden_field",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -428,6 +436,7 @@ PROP_MEMBERS = {
         "tint": "TplTintField", "selected": "TplSelectedField", "on_activate": "TplOnActivate", "on_select": "TplOnSelect",
         "max_lines": "TplMaxLines",
         "max_width": "TplMaxWidth",
+        "hidden": "TplHiddenField",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -449,6 +458,7 @@ PROP_MEMBERS = {
         "tint": "tint", "selected": "selected", "on_activate": "onActivate", "on_select": "onSelect",
         "max_lines": "maxLines",
         "max_width": "maxWidth",
+        "hidden": "hidden",
     },
 }
 

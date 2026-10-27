@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x7b5c931f2513c73b
+let kayaSpecHash: UInt64 = 0x7a1263c53af5e0a4
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -365,6 +365,7 @@ private let propShape: UInt32 = 64
 private let propSelected: UInt32 = 65
 private let propTint: UInt32 = 66
 private let propActivatable: UInt32 = 67
+private let propHidden: UInt32 = 68
 private let groundNone: Int64 = 0
 private let groundGradient: Int64 = 1
 private let groundImage: Int64 = 2
@@ -836,6 +837,8 @@ final class KayaNode: Identifiable {
     var shape: Int64 = 0
     var labelTint: Int64 = 0
     var activatable = false
+    /// Not drawn and taking no space (DESIGN.md, Structural operators).
+    var hidden = false
     var selected = false
     /// A scroll that keeps its end in view while its content grows
     /// (docs/follow-end-plan.md).
@@ -1015,6 +1018,7 @@ final class KayaNode: Identifiable {
     /// (a When showing no case, an empty For) is laid out by no parent, so
     /// it takes no extent and no gap.
     var vacant: Bool {
+        if hidden { return true }
         // A grown empty box is a spacer, which takes its share on purpose.
         guard kind == kindColumn || kind == kindRow, grow == 0, filled == 0, ground == 0, !insetSet, !activatable,
             tableColumns.isEmpty
@@ -6887,6 +6891,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.selected = raw[body + 24] != 0
                 case (propActivatable, valueBool):
                     kayaScene.nodes[id]!.activatable = raw[body + 24] != 0
+                case (propHidden, valueBool):
+                    kayaScene.nodes[id]!.hidden = raw[body + 24] != 0
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`. The decode
@@ -12111,6 +12117,14 @@ private func kayaRunScript(_ script: String) {
                 }
                 func frameOf(_ spec: Substring) -> CGRect?? {
                     DispatchQueue.main.sync { () -> CGRect?? in
+                        // A row's or column's frame is its drawn surface
+                        // (docs/list-row-plan.md).
+                        if spec.hasPrefix("row@") || spec.hasPrefix("column@") {
+                            let kind = spec.hasPrefix("row@") ? "row" : "column"
+                            guard let node = kayaTarget(spec, kind, kind == "row" ? kayaScene.rows : kayaScene.columns)
+                            else { return nil }
+                            return .some(kayaAnchoredFrame(node.id))
+                        }
                         guard let node = kayaTarget(spec, "label", kayaScene.labels) else { return nil }
                         return .some(kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }))
                     }
@@ -21233,6 +21247,8 @@ struct KayaInsetPadding: ViewModifier {
     func body(content: Content) -> some View {
         if phoneDock != nil {
             content.padding(.horizontal, node.insetSet ? node.inset : 0)
+        } else if case let reach = kayaListRowReach(node), reach > 0 {
+            content.padding(.horizontal, kayaFilledDefaultInset).padding(.vertical, reach)
         } else {
             content.padding(kayaFilledInset(node))
         }
@@ -21920,6 +21936,19 @@ let kayaFilledDefaultInset: Double = 10
 @MainActor func kayaFilledInset(_ node: KayaNode) -> Double {
     (node.filled != 0 || node.activatable && !kayaInDeclaredTable(node)) && !node.insetSet
         ? kayaFilledDefaultInset : node.inset
+}
+
+/// A LIST'S ROW (docs/list-row-plan.md): an activatable row or column stacked
+/// in a column, with no inset or fill of its own, pads its top and bottom by
+/// half the column's spacing and reaches that far into the spacing on each
+/// side, so taking a click costs the list no height and the surfaces abut.
+@MainActor func kayaListRowReach(_ node: KayaNode) -> Double {
+    guard node.activatable, !node.insetSet, node.filled == 0, !kayaInDeclaredTable(node),
+        let parent = kayaScene.parents[node.id].flatMap({ kayaScene.nodes[$0] }),
+        parent.kind == kindColumn || parent.kind == kindRow,
+        (parent.axis ?? (parent.kind == kindColumn ? 1 : 0)) == 1
+    else { return 0 }
+    return parent.spacing / 2
 }
 
 @MainActor func kayaInDeclaredTable(_ node: KayaNode) -> Bool {
@@ -26765,7 +26794,10 @@ struct KayaRender: View {
         // node's view, and editable text never reaches here (the root rejects
         // the attach). The accessibility props ride EVERY kind, applied where
         // every node's view passes through (tools/check-universal-props.py).
-        if kayaScene.contextRoots[node.id]?.isEmpty == false {
+        // A row or column never lays a hidden node out (KayaNode.vacant).
+        if node.hidden {
+            EmptyView()
+        } else if kayaScene.contextRoots[node.id]?.isEmpty == false {
             kayaA11y(kayaDragDrop(widget.contextMenu { KayaContextMenuItems(widgetId: node.id) }), node)
                 .onAppear { kayaContextHosted(node.id, true) }
                 .onDisappear { kayaContextHosted(node.id, false) }
@@ -26974,6 +27006,7 @@ struct KayaRender: View {
             .modifier(KayaActivatable(node: node))
             .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))
             .modifier(KayaComposerSurface(on: node.role == roleComposer))
+            .padding(.vertical, -kayaListRowReach(node))
         case kindLabeled:
             // THE LABELLED ROW (docs/forms-plan.md §3): the label names the
             // control — LabeledContent is the platform's own pair, and it

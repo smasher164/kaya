@@ -776,6 +776,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var groundTops by mutableStateOf(0L)
     var shape by mutableStateOf(0L)
     var activatable by mutableStateOf(false)
+    /** Not drawn and taking no space (DESIGN.md, Structural operators). */
+    var hidden by mutableStateOf(false)
     var selected by mutableStateOf(false)
     var selectedDeclared by mutableStateOf(false)
     var labelTint by mutableStateOf(0L)
@@ -842,7 +844,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * column or row that draws nothing of its own and holds only such boxes
      * (a When showing no case, an empty For) is composed by no parent, so it
      * takes no extent and no gap. */
-    val vacant: Boolean get() =
+    val vacant: Boolean get() = hidden ||
         // A grown empty box is a spacer, which takes its share on purpose.
         (kind == KayaCompose.KIND_COLUMN || kind == KayaCompose.KIND_ROW) && grow == 0.0 && filled == 0L && ground == 0L &&
             !insetSet && !activatable && tableColumns.isEmpty() && children.all { it.vacant }
@@ -905,7 +907,35 @@ const val KAYA_FILLED_DEFAULT_INSET = 12.0
 @Composable
 fun kayaInsetPadding(node: KayaNode): Modifier {
     if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (if (node.insetSet) node.inset else 0.0).dp)
+    val reach = kayaListRowReach(node)
+    if (reach > 0.0) return Modifier.padding(horizontal = KAYA_FILLED_DEFAULT_INSET.dp, vertical = reach.dp)
     return Modifier.padding(kayaFilledInset(node).dp)
+}
+
+/** A LIST'S ROW (docs/list-row-plan.md): an activatable row or column stacked
+ * in a column, with no inset or fill of its own, pads its top and bottom by
+ * half the column's spacing and reaches that far into the spacing on each
+ * side, so taking a click costs the list no height and the surfaces abut. */
+fun kayaListRowReach(node: KayaNode): Double {
+    if (!node.activatable || node.insetSet || node.filled != 0L || kayaInDeclaredTable(node)) return 0.0
+    val parent = KayaSceneModel.parents[node.id]?.let { KayaSceneModel.nodes[it] } ?: return 0.0
+    if (parent.kind != KayaCompose.KIND_COLUMN && parent.kind != KayaCompose.KIND_ROW) return 0.0
+    if ((parent.axis ?: if (parent.kind == KayaCompose.KIND_COLUMN) 1L else 0L) != 1L) return 0.0
+    return parent.spacing / 2
+}
+
+/** The reach itself: the row reports its height less both reaches and draws
+ * its surface that far past its slot. */
+fun kayaListRowOverhang(node: KayaNode): Modifier {
+    val reach = kayaListRowReach(node)
+    if (reach <= 0.0) return Modifier
+    return Modifier.layout { measurable, constraints ->
+        val r = reach.dp.roundToPx()
+        // The slot the parent sizes is the content's; the surface is that
+        // slot grown by both reaches, whatever height the parent imposes.
+        val placeable = measurable.measure(constraints.offset(vertical = 2 * r))
+        layout(placeable.width, (placeable.height - 2 * r).coerceAtLeast(0)) { placeable.place(0, -r) }
+    }
 }
 
 val LocalKayaPhoneDock = staticCompositionLocalOf { false }
@@ -3369,7 +3399,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x7b5c931f2513c73buL
+    private const val SPEC_HASH: ULong = 0x7a1263c53af5e0a4uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3698,6 +3728,7 @@ object KayaCompose {
     private const val PROP_SELECTED = 65
     private const val PROP_TINT = 66
     private const val PROP_ACTIVATABLE = 67
+    private const val PROP_HIDDEN = 68
     // The ground and shape enums' wire values (docs/styling-pass-plan.md Y2, Y6).
     const val GROUND_NONE = 0L
     const val GROUND_GRADIENT = 1L
@@ -4771,6 +4802,7 @@ object KayaCompose {
                             node.selectedDeclared = true
                         }
                         PROP_ACTIVATABLE -> KayaSceneModel.nodes[id]!!.activatable = readBool(b)
+                        PROP_HIDDEN -> KayaSceneModel.nodes[id]!!.hidden = readBool(b)
                         PROP_TINT -> KayaSceneModel.nodes[id]!!.labelTint = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
@@ -13902,6 +13934,16 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             failures.add("expect_gap wants two targets and a gap in points: $line")
                         } else {
                             fun frame(spec: String): Pair<Boolean, androidx.compose.ui.geometry.Rect?> = onUi(activity) {
+                                // A row's or column's frame is its drawn surface
+                                // (docs/list-row-plan.md).
+                                if (spec.startsWith("row@") || spec.startsWith("column@")) {
+                                    val box = if (spec.startsWith("row@")) target(spec, "row", KayaSceneModel.rows)
+                                        else target(spec, "column", KayaSceneModel.columns)
+                                    box ?: return@onUi Pair(false, null)
+                                    val r = kayaFillBoxes[box.id] ?: return@onUi Pair(true, null)
+                                    return@onUi Pair(true, androidx.compose.ui.geometry.Rect(
+                                        r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat()))
+                                }
                                 val node = target(spec, "label", KayaSceneModel.labels) ?: return@onUi Pair(false, null)
                                 Pair(true, kayaOverlapRects[node.id] ?: kayaTextRects[node.id])
                             }
@@ -18429,6 +18471,8 @@ fun KayaRender(
     /** The name a labelled row lends its control (docs/forms-plan.md §4). */
     a11yFallback: String = "",
 ) {
+    // A row or column never lays a hidden node out (KayaNode.vacant).
+    if (node.hidden) return
     val dnd = kayaDragAndDropSurface(node)
     if (dnd == null) {
         KayaRenderHelped(node, isRoot, flexVertical, flexStretch, a11yFallback)
@@ -19220,7 +19264,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).then(formGroup).onGloballyPositioned {
+                }.then(kayaListRowOverhang(node)).then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).then(formGroup).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.height.toDouble()
@@ -19319,7 +19363,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(hugCross).then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).onGloballyPositioned {
+                }.then(kayaListRowOverhang(node)).then(kayaFilledSurface(node)).then(kayaInsetPadding(node)).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                     kayaContainerExtents[node.id] = it.size.width.toDouble()

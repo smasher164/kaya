@@ -681,6 +681,24 @@ class _Handle:
                 f"fields, not {type(on).__name__}")
         return self
 
+    def hidden(self: H, on: FlagSource = True) -> H:
+        """Take this widget off the screen and out of the layout, its state
+        kept: `when` controls existence, `hidden` controls space (DESIGN.md,
+        Structural operators). A constant, a Bool Signal, or a row's field,
+        so each stamped copy hides on its own. Returns the handle."""
+        if isinstance(on, Signal):
+            _records().append(wire.tx_bind_hidden(self.id, on.id))
+        elif isinstance(on, FieldRef):
+            _picker_field("a widget's hidden state", on, bool)
+            _records().append(wire.tx_bind_hidden_element(self.id, on._level(), on._index))
+        elif isinstance(on, bool):
+            _records().append(wire.tx_set_hidden(self.id, on))
+        else:
+            raise KayaTypeError(
+                f"kaya: hidden takes a bool, a Signal or one of the row's "
+                f"fields, not {type(on).__name__}")
+        return self
+
     def summary(self: H, text: TextSource) -> H:
         """Set an expander's second header line (docs/expander-plan.md K3):
         a str, a Signal or one of the row's fields; empty draws none.

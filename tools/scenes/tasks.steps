@@ -24,6 +24,10 @@ expect_fills row@task[t1]
 # The row spends no height its content did not ask for: the WinUI
 # runaway grew this row to 72px (docs/deferred.md's list-row entry).
 expect_height_fits row@task[t1]
+# A task row takes the click as a whole and costs the list no height: it pads
+# its top and bottom by half the list's spacing and its surface reaches into
+# the spacing, so neighbours' surfaces meet (docs/list-row-plan.md).
+expect_gap row@task[t1] row@task[t2] 0
 expect label@title[t2] "Call the plumber"
 expect label@caption[t2] ""
 # Every label allocated what its text needs, at this size (docs/compliance-plan.md
@@ -95,7 +99,7 @@ expect label@caption[t7] "Kitchen"
 
 # Details: a when-date set on the pushed screen re-routes the task.
 select_section 0
-click column@item[t2]
+click row@task[t2]
 expect_entries 1
 expect textarea@notes ""
 # A text field fills its column (R10).
@@ -117,7 +121,7 @@ expect label@inbox_count "2 in inbox"
 # A reminder is a notification at its time (S3, N7): the observation is the
 # platform's own delivered list, clearing cancels it, and activating the
 # posted one opens that task's details.
-click column@item[t1]
+click row@task[t1]
 expect_entries 1
 # 08:30, not the bound default (09:00): the same value drives nothing.
 set_time time_picker@reminder 08:30
@@ -170,7 +174,7 @@ expect label@caption[t11] "Trip"
 
 # Delete from the details screen, then Edit>Undo brings the row back.
 select_section 0
-click column@item[t1]
+click row@task[t1]
 expect_entries 1
 click button@delete
 expect_entries 0
@@ -219,7 +223,7 @@ expect label@caption[t9] "Kitchen"
 # the tap opens that task's details with no memory of this one. The two
 # lines after `relaunch` are act two, and they run over there.
 select_section 0
-click column@item[t1]
+click row@task[t1]
 expect_entries 1
 set_time time_picker@reminder 10:30
 expect_notification 1 "Buy milk"

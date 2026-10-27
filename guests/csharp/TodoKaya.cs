@@ -533,6 +533,13 @@ sealed class TodoRow
     public void SetSelected(Node n, Field<bool> f, uint level = 0) =>
         t.SetSelected(n, f, level);
 
+    public void SetHidden(Node n, bool on) => t.SetHidden(n, on);
+
+    public void SetHidden(Node n, Signal s) => t.SetHidden(n, s);
+
+    public void SetHidden(Node n, Field<bool> f, uint level = 0) =>
+        t.SetHidden(n, f, level);
+
     public void OnActivate(Node n, System.Action<Tx, System.Collections.Generic.List<object>> handler) =>
         t.OnActivate(n, handler);
 

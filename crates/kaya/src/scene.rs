@@ -1603,6 +1603,8 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // Cross-axis stretch rides any child, like grow
         // (docs/layout-knobs-plan.md §1).
         Prop::Fill => true,
+        // Any widget may be hidden (DESIGN.md, Structural operators).
+        Prop::Hidden => true,
         // Acceptance is scoped to what can RECEIVE a paste: the text
         // kinds, which are the ones with native paste behaviour to
         // override.
@@ -2194,7 +2196,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Bleed => ValueType::Bool,
         Prop::Phase => ValueType::I64,
         Prop::Ground | Prop::Shape | Prop::Tint => ValueType::I64,
-        Prop::Selected | Prop::Activatable => ValueType::Bool,
+        Prop::Selected | Prop::Activatable | Prop::Hidden => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -13293,6 +13295,40 @@ mod tests {
             1,
             "the help text should reach the backend"
         );
+    }
+
+    /// `hidden` rides any kind as a Bool (DESIGN.md, Structural operators),
+    /// and a number where the flag is read dies at the root by name.
+    #[test]
+    fn hidden_rides_any_kind_as_a_bool() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Label },
+            TxOp::CreateWidget { id: WidgetId(3), kind: WidgetKind::Row },
+            TxOp::SetProperty { widget: WidgetId(2), prop: Prop::Hidden, value: PropValue::Const(Value::Bool(true)) },
+            TxOp::SetProperty { widget: WidgetId(3), prop: Prop::Hidden, value: PropValue::Const(Value::Bool(false)) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(2) },
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(3) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        let hidden: Vec<(WidgetId, bool)> = ops
+            .iter()
+            .filter_map(|op| match op {
+                ApplyOp::SetProp { id, prop: Prop::Hidden, value: Value::Bool(on) } => Some((*id, *on)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(hidden, vec![(WidgetId(2), true), (WidgetId(3), false)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Hidden")]
+    fn hidden_of_the_wrong_type_dies_at_declare() {
+        Scene::new().apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Button },
+            TxOp::SetProperty { widget: WidgetId(1), prop: Prop::Hidden, value: PropValue::Const(Value::F64(1.0)) },
+        ]);
     }
 
     /// `fill` rides any kind, like grow (docs/layout-knobs-plan.md §1):

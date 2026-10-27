@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x7b5c931f2513c73bn;
+export const SPEC_HASH = 0x7a1263c53af5e0a4n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -142,6 +142,7 @@ export const PROP_SHAPE = 64;
 export const PROP_SELECTED = 65;
 export const PROP_TINT = 66;
 export const PROP_ACTIVATABLE = 67;
+export const PROP_HIDDEN = 68;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -2774,6 +2775,24 @@ export function tx_bind_activatable(widget_id: number, signal_id: number): Uint8
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_activatable_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_ACTIVATABLE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant hidden value. */
+export function tx_set_hidden(widget_id: number, hidden: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIDDEN); enc.u32(SOURCE_CONST); enc.value(hidden);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound hidden value. */
+export function tx_bind_hidden(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIDDEN); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_hidden_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_HIDDEN); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

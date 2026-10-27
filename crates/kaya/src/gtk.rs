@@ -6439,6 +6439,7 @@ fn drain_transactions() {
             refresh_bleeds(core);
             skin_refresh(core);
             refresh_vacancy(core);
+            refresh_list_rows(core);
         });
     });
 }
@@ -9585,6 +9586,44 @@ const FILLED_CLASS: &str = "kaya-filled";
 const PLAIN_CLASS: &str = "kaya-plain";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
 const ACTIVATABLE_PAD_CLASS: &str = "kaya-activatable-pad";
+/// A LIST'S ROW (docs/list-row-plan.md), one class per half spacing: the
+/// platform's side inset, half the column's spacing above and below, and a
+/// negative margin that reaches the surface that far into the spacing.
+const LIST_ROW_CLASS: &str = "kaya-list-row-";
+const LIST_ROW_MAX_REACH: i32 = 32;
+
+fn list_row_css() -> String {
+    (1..=LIST_ROW_MAX_REACH)
+        .map(|n| format!(".{LIST_ROW_CLASS}{n} {{ padding: {n}px 12px; margin-top: -{n}px; margin-bottom: -{n}px; }}\n"))
+        .collect()
+}
+
+/// After every batch: each activatable container stacked in a column, with no
+/// inset or fill of its own, takes the list row's class for its column's spacing.
+fn refresh_list_rows(core: &mut CoreState) {
+    use gtk4::prelude::WidgetExt;
+    for id in core.skin.activations.keys() {
+        let Some(widget) = core.widgets.get(&WidgetId(*id)).map(NativeWidget::widget) else { continue };
+        let classes = widget.css_classes();
+        let own = classes.iter().any(|c| c.starts_with(INSET_CLASS) || c.as_str() == FILLED_CLASS);
+        let reach = match widget.parent() {
+            Some(parent) if !own && container_vertical(&parent) == Some(true) => {
+                (container_spacing(&parent) / 2).clamp(0, LIST_ROW_MAX_REACH)
+            }
+            _ => 0,
+        };
+        let want = (reach > 0).then(|| format!("{LIST_ROW_CLASS}{reach}"));
+        for class in classes.iter().filter(|c| c.starts_with(LIST_ROW_CLASS)) {
+            if want.as_deref() != Some(class.as_str()) {
+                widget.remove_css_class(class);
+            }
+        }
+        if let Some(class) = want {
+            widget.add_css_class(&class);
+            widget.remove_css_class(ACTIVATABLE_PAD_CLASS);
+        }
+    }
+}
 const TINT_CLASSES: [&str; 6] =
     ["kaya-tint-accent", "kaya-tint-success", "kaya-tint-warning", "kaya-tint-critical", "card", "osd"];
 
@@ -9826,6 +9865,15 @@ fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
 }
 
 const VACATED_KEY: &str = "kaya-vacated";
+/// The app's `hidden` (DESIGN.md, Structural operators), kept apart from the
+/// vacancy this module derives, since either alone keeps a widget unshown.
+const HIDDEN_KEY: &str = "kaya-hidden";
+
+fn is_hidden(w: &gtk4::Widget) -> bool {
+    use gtk4::prelude::ObjectExt;
+    // SAFETY: the key is private to this module and only ever holds a bool.
+    unsafe { w.data::<bool>(HIDDEN_KEY).is_some_and(|p| *p.as_ref()) }
+}
 
 /// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
 /// column or row that draws nothing of its own and holds nothing but such
@@ -9847,6 +9895,9 @@ fn refresh_vacancy(core: &mut CoreState) {
     roots.extend(core.sheets.values().filter_map(|s| s.root.clone()));
     roots.extend(core.skin.dock_roots.values().cloned());
     fn vacant(w: &gtk4::Widget, boxes: &HashSet<gtk4::Widget>, roots: &HashSet<gtk4::Widget>) -> bool {
+        if is_hidden(w) {
+            return true;
+        }
         // A grown empty box is a spacer, which takes its share on purpose.
         if !boxes.contains(w) || roots.contains(w) || grow_weight(w) > 0.0 {
             return false;
@@ -9867,6 +9918,9 @@ fn refresh_vacancy(core: &mut CoreState) {
         let empty = vacant(w, &kaya_boxes, &roots);
         // SAFETY: the key is private to this function and only holds a bool.
         let vacated = unsafe { w.data::<bool>(VACATED_KEY).is_some_and(|p| *p.as_ref()) };
+        if is_hidden(w) {
+            continue;
+        }
         if empty && !vacated && w.is_visible() {
             w.set_visible(false);
             unsafe { w.set_data(VACATED_KEY, true) };
@@ -17494,6 +17548,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     set_fill(&widget, on);
                     restamp_cross_align(&widget);
                 }
+                // HIDDEN (DESIGN.md, Structural operators): GtkBox and kaya's
+                // own layouts skip an unshown child, gap included; a box this
+                // module vacated stays unshown when the app shows it again.
+                (w, Prop::Hidden, Value::Bool(on)) => {
+                    use gtk4::prelude::{ObjectExt, WidgetExt};
+                    let widget = w.widget();
+                    // SAFETY: both keys are private to this module and only
+                    // ever hold a bool.
+                    let vacated = unsafe { widget.data::<bool>(VACATED_KEY).is_some_and(|p| *p.as_ref()) };
+                    unsafe { widget.set_data(HIDDEN_KEY, on) };
+                    widget.set_visible(!on && !vacated);
+                }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the list
                 // drives the paste split and Paste's enablement, both read
                 // off the hub. Empty means unset, the universal prop rule.
@@ -20147,7 +20213,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         load_kaya_css(&badge_css, "section badge", BADGE_CSS, &css_error);
         let tint_css = gtk4::CssProvider::new();
         watch_css_errors(&tint_css, &css_error);
-        load_kaya_css(&tint_css, "tints", TINT_CSS, &css_error);
+        load_kaya_css(&tint_css, "tints", &format!("{TINT_CSS}{}", list_row_css()), &css_error);
         let skin_css = gtk4::CssProvider::new();
         watch_css_errors(&skin_css, &css_error);
         load_kaya_css(&skin_css, "skin", SKIN_CSS, &css_error);
