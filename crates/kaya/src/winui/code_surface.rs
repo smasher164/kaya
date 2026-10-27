@@ -344,7 +344,9 @@ fn draw(gutter: &mut Gutter) -> windows_core::Result<()> {
         field.SetPadding(Thickness { Left: gutter.base_pad + width, ..pad })?;
     }
     let clip = RectangleGeometry::new()?;
-    clip.SetRect(bindings::Windows::Foundation::Rect { X: 0.0, Y: 0.0, Width: width as f32, Height: viewport.max(0.0) as f32 })?;
+    let pad = field.Padding()?;
+    let band = viewport.max(0.0) + pad.Top + pad.Bottom;
+    clip.SetRect(bindings::Windows::Foundation::Rect { X: 0.0, Y: 0.0, Width: width as f32, Height: band as f32 })?;
     gutter.canvas.SetClip(&clip)?;
     let children = gutter.canvas.Children()?;
     children.Clear()?;
@@ -353,6 +355,7 @@ fn draw(gutter: &mut Gutter) -> windows_core::Result<()> {
     let window = doc.GetRange(0, 0)?;
     window.Expand(TextRangeUnit::Window)?;
     let (start, end) = (window.StartPosition()?, window.EndPosition()?);
+    let pad_top = pad.Top;
     let walk = doc.GetRange(start, start)?;
     walk.StartOf(TextRangeUnit::Paragraph, false)?;
     for _ in 0..4096 {
@@ -371,7 +374,10 @@ fn draw(gutter: &mut Gutter) -> windows_core::Result<()> {
             let label = number_block(&number.to_string(), size)?;
             let measured = label.DesiredSize()?;
             Canvas::SetLeft(&label, width - 6.0 - measured.Width as f64)?;
-            Canvas::SetTop(&label, top - offset + (height - measured.Height as f64) / 2.0)?;
+            // GetRect's client space starts inside the box's Padding, which
+            // the template's ScrollViewer carries and the canvas beside it
+            // does not (the numbers sat half a row high, captured 2026-10-27).
+            Canvas::SetTop(&label, pad_top + top - offset + (height - measured.Height as f64) / 2.0)?;
             children.Append(&label)?;
             gutter.drawn.push((number, top + height / 2.0));
         }
