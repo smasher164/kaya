@@ -422,6 +422,8 @@ pub struct KayaHostApi {
     pub emit_activated: unsafe extern "C" fn(*const u8, usize),
     /// docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the user's pick.
     pub emit_selection_changed: unsafe extern "C" fn(*const u8, usize),
+    /// docs/code-surface-plan.md M3: the installed families, `\n`-joined.
+    pub font_families: unsafe extern "C" fn(*const u8, usize),
 }
 
 /// # Safety
@@ -727,6 +729,7 @@ pub(crate) fn run() -> i32 {
         video_view_box: crate::capi::kaya_video_view_box,
         emit_activated: crate::capi::kaya_emit_activated,
         emit_selection_changed: crate::capi::kaya_emit_selection_changed,
+        font_families: crate::capi::kaya_font_families,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

@@ -888,6 +888,11 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_capture_permission as *mut _,
             },
             NativeMethod {
+                name: "fontFamilies".into(),
+                sig: "(Ljava/lang/String;)V".into(),
+                fn_ptr: present_font_families as *mut _,
+            },
+            NativeMethod {
                 name: "captureDevicesBegin".into(),
                 sig: "()V".into(),
                 fn_ptr: present_capture_devices_begin as *mut _,
@@ -2747,6 +2752,13 @@ extern "system" fn present_capture_overdue(_env: JNIEnv, _class: JClass, capture
 extern "system" fn present_capture_permission(mut env: JNIEnv, _class: JClass, kind: jint, permission: jint, detail: JString) {
     let detail = jstring_text(&mut env, &detail, "permission detail");
     unsafe { crate::capi::kaya_capture_permission(kind.max(0) as u32, permission.max(0) as u32, detail.as_ptr(), detail.len()) }
+}
+
+/// KayaPresent.fontFamilies: the installed families, `\n`-joined
+/// (docs/code-surface-plan.md M3).
+extern "system" fn present_font_families(mut env: JNIEnv, _class: JClass, names: JString) {
+    let names = jstring_text(&mut env, &names, "font families");
+    unsafe { crate::capi::kaya_font_families(names.as_ptr(), names.len()) }
 }
 
 extern "system" fn present_capture_devices_begin(_env: JNIEnv, _class: JClass) {

@@ -523,6 +523,12 @@ sealed class NoteRow
 
     public void SetMaxLines(Node n, int lines) => t.SetMaxLines(n, lines);
 
+    public void SetMonospaced(Node n, bool on) => t.SetMonospaced(n, on);
+
+    public void SetFamily(Node n, string name) => t.SetFamily(n, name);
+
+    public void SetTextScale(Node n, double scale) => t.SetTextScale(n, scale);
+
     public void SetTint(Node n, Signal s) => t.SetTint(n, s);
 
     public void SetTint(Node n, Field<Tint> f, uint level = 0) =>

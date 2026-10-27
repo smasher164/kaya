@@ -39,6 +39,13 @@
 #define Aspect_MAX_PART 65535
 
 /**
+ * `text_scale`'s range (docs/code-surface-plan.md S1).
+ */
+#define TEXT_SCALE_MIN 0.5
+
+#define TEXT_SCALE_MAX 3.0
+
+/**
  * Occurrence record kinds (the ring, core -> guest). BUTTON_CLICKED
  * body: u64 id, u32 path_len, u32 reserved, then path_len key values.
  * path_len 0 means id is a widget id (a click on a guest-created
@@ -278,6 +285,11 @@
 #define KAYA_OCCURRENCE_SELECTION_CHANGED 59
 
 /**
+ * FONT_FAMILIES { Values: one Str a family } (docs/code-surface-plan.md M3).
+ */
+#define KAYA_OCCURRENCE_FONT_FAMILIES 60
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -484,6 +496,11 @@
  * (docs/media-player-plan.md M26).
  */
 #define KAYA_TX_CONTEXT_LABEL_NODE 87
+
+/**
+ * LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
+ */
+#define KAYA_TX_LIST_FONT_FAMILIES 88
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -905,6 +922,11 @@
  * CONTEXT_LABEL_NODE { u64 widget; u64 item; value label }.
  */
 #define KAYA_APPLY_CONTEXT_LABEL_NODE 75
+
+/**
+ * LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
+ */
+#define KAYA_APPLY_LIST_FONT_FAMILIES 76
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1354,6 +1376,26 @@
 #define KAYA_PROP_ACTIVATABLE 67
 
 #define KAYA_PROP_HIDDEN 68
+
+/**
+ * A textarea's line-number gutter (docs/code-surface-plan.md G1).
+ */
+#define KAYA_PROP_LINE_NUMBERS 69
+
+/**
+ * A text kind in the platform's monospaced face (docs/code-surface-plan.md M1).
+ */
+#define KAYA_PROP_MONOSPACED 70
+
+/**
+ * A text kind in a named installed family (docs/code-surface-plan.md M2).
+ */
+#define KAYA_PROP_FAMILY 71
+
+/**
+ * A text kind's size as a multiple of the platform's (docs/code-surface-plan.md S1).
+ */
+#define KAYA_PROP_TEXT_SCALE 72
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -2755,6 +2797,10 @@ typedef struct KayaHostApi {
    * docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the user's pick.
    */
   void (*emit_selection_changed)(const uint8_t*, uintptr_t);
+  /**
+   * docs/code-surface-plan.md M3: the installed families, `\n`-joined.
+   */
+  void (*font_families)(const uint8_t*, uintptr_t);
 } KayaHostApi;
 
 
@@ -3899,6 +3945,18 @@ void kaya_capture_permission(uint32_t kind,
                              uint32_t permission,
                              const uint8_t *detail,
                              uintptr_t detail_len);
+
+/**
+ * Presentation side: the installed font families, answering
+ * list_font_families, as UTF-8 names separated by `\n` in any order; the
+ * core drops empty and private (`.`-led) names, deduplicates and sorts in
+ * code-point order, so every backend's list reads the same way
+ * (docs/code-surface-plan.md M3).
+ *
+ * # Safety
+ * `names` must describe `len` readable bytes.
+ */
+void kaya_font_families(const uint8_t *names, uintptr_t len);
 
 /**
  * Presentation side: a device list starts.

@@ -1100,6 +1100,18 @@ pub enum Step {
     /// from being vacuous — a scene asserts it BEFORE the reveal, so a
     /// document short enough to be entirely visible fails the leg.
     ExpectRevealed(Target, TextRange, String),
+    /// A textarea's line-number gutter against the text beside it
+    /// (docs/code-surface-plan.md G5): `off`, `on`, `shows N`, `hides N` or
+    /// `wraps N`. Every reading but `off` also holds each visible line
+    /// fragment to its number: a logical line's first fragment carries its
+    /// own, a wrapped continuation none.
+    ExpectGutter(Target, GutterClause),
+    /// The face a text kind's toolkit RESOLVED, `monospaced` or
+    /// `proportional` (docs/code-surface-plan.md M4).
+    ExpectFace(Target, String),
+    /// A text kind's resolved size against the size the platform gives it
+    /// now, as a multiple (docs/code-surface-plan.md S3).
+    ExpectScaled(Target, f64),
     /// Start an input-method COMPOSITION in the target with this marked
     /// text — the mid-word IME state no other verb can reach (`type` is
     /// printable ASCII by contract). The text is MARKED, not committed:
@@ -1258,6 +1270,7 @@ impl Step {
             }
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
+            Step::ExpectGutter(t, _) | Step::ExpectFace(t, _) | Step::ExpectScaled(t, _) => vec![t],
             Step::ExpectWindow(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
             Step::Settle(..)
@@ -1566,6 +1579,7 @@ impl Step {
             Step::ExpectHighlights { .. } => true,
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
+            Step::ExpectGutter { .. } | Step::ExpectFace { .. } | Step::ExpectScaled { .. } => true,
             Step::Compose { .. } => false,
             Step::Format { .. } => false,
             Step::ExpectRuns { .. } => true,
@@ -1623,6 +1637,152 @@ pub(crate) fn faint_hover(sample: [f64; 3], resting: [f64; 3]) -> Option<String>
             hex(resting)
         )
     })
+}
+
+/// `expect_face`'s words (docs/code-surface-plan.md M4).
+pub const FACES: [&str; 3] = ["monospaced", "proportional", "named"];
+
+/// What `Stage::face` read: the resolved font's fixed-pitch trait and
+/// family, and the family the app asked for ("" for none).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaceRead {
+    pub monospaced: bool,
+    pub family: String,
+    pub asked: String,
+}
+
+pub(crate) fn face_verdict(read: &FaceRead, want: &str) -> Result<String, String> {
+    let word = if read.monospaced { "monospaced" } else { "proportional" };
+    let got = format!("{word} {}", read.family);
+    let ok = match want {
+        "named" => !read.asked.is_empty() && read.family.eq_ignore_ascii_case(&read.asked),
+        _ => word == want,
+    };
+    match (ok, want) {
+        (true, _) => Ok(got),
+        (false, "named") if read.asked.is_empty() => Err(format!("reads {got}, and the app asked for no family")),
+        (false, "named") => Err(format!("reads {got}, wanted the family {:?}", read.asked)),
+        (false, _) => Err(format!("reads {got}, wanted {want}")),
+    }
+}
+
+/// How far `expect_scaled` lets the ratio stray, as a fraction of it.
+pub(crate) const SCALED_TOLERANCE: f64 = 0.02;
+
+/// `expect_gutter`'s clauses that name a line, in GutterClause's order.
+pub const GUTTER_LINE_WORDS: [&str; 3] = ["shows", "hides", "wraps"];
+
+/// What `expect_gutter` asks of a textarea's gutter (docs/code-surface-plan.md G5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GutterClause {
+    Off,
+    On,
+    Shows(u32),
+    Hides(u32),
+    Wraps(u32),
+}
+
+/// One line fragment inside a textarea's viewport: the logical line it
+/// belongs to (1-based), whether it begins that line, and the number the
+/// gutter drew beside it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GutterRow {
+    pub line: u32,
+    pub first: bool,
+    pub drawn: Option<u32>,
+}
+
+/// A gutter's reading: its rows, and any number it drew beside no fragment.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct GutterRead {
+    pub rows: Vec<GutterRow>,
+    pub stray: Vec<u32>,
+}
+
+/// Pairs the text's fragments (`top`, `bottom`, line, first) with the
+/// gutter's drawn labels (number, vertical centre), both in one coordinate
+/// space: a label belongs to the fragment its centre falls in. Backends pass
+/// every label the gutter drew; one beside no fragment is a stray only when
+/// its centre lies within the rows read, since a row half out of the
+/// viewport is read by its centre and its label may sit just outside.
+pub(crate) fn pair_gutter(fragments: &[(f64, f64, u32, bool)], labels: &[(u32, f64)]) -> GutterRead {
+    let mut read = GutterRead::default();
+    let mut used = vec![false; labels.len()];
+    for &(top, bottom, line, first) in fragments {
+        let mut drawn = None;
+        for (i, &(number, mid)) in labels.iter().enumerate() {
+            if !used[i] && mid >= top && mid < bottom {
+                used[i] = true;
+                drawn = Some(number);
+                break;
+            }
+        }
+        read.rows.push(GutterRow { line, first, drawn });
+    }
+    let span = fragments.first().zip(fragments.last()).map(|(a, z)| (a.0, z.1));
+    read.stray = labels
+        .iter()
+        .zip(used)
+        .filter(|((_, mid), u)| !u && span.is_some_and(|(top, bottom)| *mid >= top && *mid < bottom))
+        .map(|(l, _)| l.0)
+        .collect();
+    read
+}
+
+/// The rows as one line: `N` a numbered first fragment, `·` an unnumbered
+/// continuation, and `want!drew` wherever the two disagree.
+pub(crate) fn gutter_line(read: &GutterRead) -> String {
+    let mut out: Vec<String> = read
+        .rows
+        .iter()
+        .map(|row| {
+            let want = row.first.then_some(row.line);
+            let word = |n: Option<u32>| n.map_or_else(|| "·".to_owned(), |n| n.to_string());
+            if want == row.drawn {
+                word(want)
+            } else {
+                format!("{}!{}", word(want), row.drawn.map_or_else(|| "-".to_owned(), |n| n.to_string()))
+            }
+        })
+        .collect();
+    if !read.stray.is_empty() {
+        out.push(format!("(beside no line: {})", read.stray.iter().map(u32::to_string).collect::<Vec<_>>().join(" ")));
+    }
+    out.join(" ")
+}
+
+pub(crate) fn gutter_verdict(read: Option<&GutterRead>, clause: GutterClause) -> Result<String, String> {
+    let Some(read) = read else {
+        return if clause == GutterClause::Off { Ok("off".to_owned()) } else { Err("draws no gutter".to_owned()) };
+    };
+    let line = gutter_line(read);
+    if clause == GutterClause::Off {
+        return Err(format!("is drawn: {line}"));
+    }
+    if read.rows.is_empty() {
+        return Err("reads no line fragment inside the viewport".to_owned());
+    }
+    if !read.stray.is_empty() || read.rows.iter().any(|row| row.drawn != row.first.then_some(row.line)) {
+        return Err(format!("disagrees with its text: {line}"));
+    }
+    let first = |n: u32| read.rows.iter().any(|row| row.first && row.line == n);
+    let ok = match clause {
+        GutterClause::Off | GutterClause::On => true,
+        GutterClause::Shows(n) => first(n),
+        GutterClause::Hides(n) => !read.rows.iter().any(|row| row.line == n),
+        GutterClause::Wraps(n) => first(n) && read.rows.iter().any(|row| !row.first && row.line == n),
+    };
+    let said = match clause {
+        GutterClause::Off | GutterClause::On => "on".to_owned(),
+        GutterClause::Shows(n) => format!("shows {n}"),
+        GutterClause::Hides(n) => format!("hides {n}"),
+        GutterClause::Wraps(n) => format!("wraps {n}"),
+    };
+    if ok {
+        Ok(format!("{said}: {line}"))
+    } else {
+        Err(format!("reads {line}, wanted {said}"))
+    }
 }
 
 /// A reading whose first word is the verdict and whose rest is what the
@@ -2766,6 +2926,28 @@ pub trait Stage: Send + 'static {
     /// `visible` when the byte range is inside the widget's viewport,
     /// `offscreen` when it is not.
     fn revealed(&self, target: Target, range: TextRange) -> String;
+    /// The textarea's gutter as drawn: `None` when it draws none, else one
+    /// row per line fragment of the text inside the viewport, top to bottom,
+    /// with the number the gutter drew beside it (docs/code-surface-plan.md
+    /// G5). The fragments come from the text's own layout and the numbers
+    /// from the gutter's last drawing pass, never from kaya's model.
+    fn gutter(&self, target: Target) -> Result<Option<GutterRead>, String> {
+        let _ = target;
+        Err("expect_gutter is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
+    /// The face the toolkit resolved for a text kind, read off the font the
+    /// widget holds, and the family the app asked for, "" for none
+    /// (docs/code-surface-plan.md M4).
+    fn face(&self, target: Target) -> Result<FaceRead, String> {
+        let _ = target;
+        Err("expect_face is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
+    /// The size of the widget's resolved font and the size the platform
+    /// gives its kind and role now, in one unit (docs/code-surface-plan.md S3).
+    fn text_size(&self, target: Target) -> Result<(f64, f64), String> {
+        let _ = target;
+        Err("expect_scaled is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
     /// Start an input-method composition in the target, leaving `text`
     /// MARKED — displayed, uncommitted, invisible to the app. The platform's
     /// own composition entry point (`setMarkedText:`, `IMM`/`TSF`,
@@ -4666,6 +4848,58 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
                     state.to_owned(),
                 )
+            }
+            "expect_gutter" => {
+                let mut parts = rest.split_whitespace();
+                let target = parts.next().ok_or_else(|| format!("expect_gutter wants a target: {line:?}"))?;
+                let word = parts.next().unwrap_or("");
+                let number = parts.next();
+                let clause = match (word, number) {
+                    ("on", None) => GutterClause::On,
+                    ("off", None) => GutterClause::Off,
+                    (word, Some(n)) if GUTTER_LINE_WORDS.contains(&word) => {
+                        let n: u32 = n
+                            .parse()
+                            .ok()
+                            .filter(|n| *n >= 1)
+                            .ok_or_else(|| format!("expect_gutter's line is a whole number from 1: {line:?}"))?;
+                        let clause: [fn(u32) -> GutterClause; 3] =
+                            [GutterClause::Shows, GutterClause::Hides, GutterClause::Wraps];
+                        let at = GUTTER_LINE_WORDS.iter().position(|w| *w == word).unwrap_or(0);
+                        clause[at](n)
+                    }
+                    _ => {
+                        return Err(format!(
+                            "expect_gutter wants on, off, shows N, hides N or wraps N: {line:?}"
+                        ))
+                    }
+                };
+                if parts.next().is_some() {
+                    return Err(format!("expect_gutter takes one clause: {line:?}"));
+                }
+                Step::ExpectGutter(parse_target(target)?, clause)
+            }
+            "expect_face" => {
+                let (target, word) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_face wants a target and a face: {line:?}"))?;
+                let word = word.trim();
+                if !FACES.contains(&word) {
+                    return Err(format!("expect_face's face is one of {}, got {word:?}", FACES.join(", ")));
+                }
+                Step::ExpectFace(parse_target(target.trim())?, word.to_owned())
+            }
+            "expect_scaled" => {
+                let (target, multiple) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_scaled wants a target and a multiple: {line:?}"))?;
+                let multiple: f64 = multiple
+                    .trim()
+                    .parse()
+                    .ok()
+                    .filter(|m: &f64| m.is_finite() && *m > 0.0)
+                    .ok_or_else(|| format!("expect_scaled's multiple is a positive number: {line:?}"))?;
+                Step::ExpectScaled(parse_target(target.trim())?, multiple)
             }
             "compose" => {
                 let (target, text) = rest.split_once(char::is_whitespace).ok_or_else(|| {
@@ -7895,6 +8129,31 @@ fn run_with_log(
                         "{}:{} is {got}, wanted {want}",
                         range.start, range.stop
                     ))
+                }
+            })),
+            Step::ExpectGutter(target, clause) => Some(poll(|| {
+                let what = target_spec(target);
+                match stage.gutter(*target) {
+                    Err(why) => Err(format!("{what} gutter: {why}")),
+                    Ok(read) => gutter_verdict(read.as_ref(), *clause).map_err(|why| format!("{what} gutter {why}")),
+                }
+            })),
+            Step::ExpectFace(target, want) => Some(poll(|| {
+                let what = format!("{} face", target_spec(target));
+                let read = stage.face(*target).map_err(|why| format!("{what}: {why}"))?;
+                face_verdict(&read, want).map_err(|why| format!("{what} {why}"))
+            })),
+            Step::ExpectScaled(target, want) => Some(poll(|| {
+                let what = format!("{} size", target_spec(target));
+                let (size, base) = stage.text_size(*target).map_err(|why| format!("{what}: {why}"))?;
+                if base <= 0.0 {
+                    return Err(format!("{what}: the platform's size reads {base}"));
+                }
+                let ratio = size / base;
+                if (ratio - want).abs() <= want * SCALED_TOLERANCE {
+                    Ok(format!("{what} {size:.2} of {base:.2}, {ratio:.3}x"))
+                } else {
+                    Err(format!("{what} reads {size:.2} of the platform's {base:.2}, {ratio:.3}x, wanted {want}x"))
                 }
             })),
             Step::Compose(target, text) => {
@@ -11780,6 +12039,69 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("splits"), "{verdict}");
+    }
+
+    /// docs/code-surface-plan.md G5: the column check, each disagreement
+    /// marked, and the four clauses.
+    #[test]
+    fn expect_gutter_holds_every_row_to_its_number() {
+        let read = pair_gutter(
+            &[(0.0, 10.0, 1, true), (10.0, 20.0, 2, true), (20.0, 30.0, 2, false), (30.0, 40.0, 3, true)],
+            &[(1, 5.0), (2, 15.0), (3, 35.0)],
+        );
+        assert_eq!(gutter_line(&read), "1 2 · 3");
+        assert!(gutter_verdict(Some(&read), GutterClause::On).is_ok());
+        assert!(gutter_verdict(Some(&read), GutterClause::Shows(3)).is_ok());
+        assert!(gutter_verdict(Some(&read), GutterClause::Wraps(2)).is_ok());
+        assert!(gutter_verdict(Some(&read), GutterClause::Hides(4)).is_ok());
+        assert!(gutter_verdict(Some(&read), GutterClause::Wraps(3)).is_err());
+        assert!(gutter_verdict(Some(&read), GutterClause::Hides(2)).is_err());
+        assert_eq!(gutter_verdict(Some(&read), GutterClause::Off).unwrap_err(), "is drawn: 1 2 · 3");
+        assert!(gutter_verdict(None, GutterClause::Off).is_ok());
+        assert_eq!(gutter_verdict(None, GutterClause::On).unwrap_err(), "draws no gutter");
+        // A number beside a continuation, a missing number, a wrong one, a stray.
+        let bad = pair_gutter(
+            &[(0.0, 10.0, 1, true), (10.0, 20.0, 1, false), (20.0, 30.0, 2, true), (30.0, 40.0, 3, true)],
+            &[(1, 5.0), (2, 15.0), (4, 35.0), (9, 38.0), (7, 50.0)],
+        );
+        assert_eq!(
+            gutter_verdict(Some(&bad), GutterClause::On).unwrap_err(),
+            "disagrees with its text: 1 ·!2 2!- 3!4 (beside no line: 9)"
+        );
+        assert!(parse("expect_gutter textarea@code shows 0").is_err());
+        assert!(parse("expect_gutter textarea@code wraps").is_err());
+        assert!(parse("expect_gutter textarea@code on 3").is_err());
+        assert_eq!(
+            parse("expect_gutter textarea@code hides 40").unwrap()[0],
+            Step::ExpectGutter(parse_target("textarea@code").unwrap(), GutterClause::Hides(40))
+        );
+    }
+
+    /// docs/code-surface-plan.md M4, S3.
+    #[test]
+    fn expect_face_reads_the_resolved_family() {
+        let read = |monospaced, family: &str, asked: &str| FaceRead {
+            monospaced,
+            family: family.into(),
+            asked: asked.into(),
+        };
+        assert_eq!(face_verdict(&read(true, "SF Mono", ""), "monospaced").unwrap(), "monospaced SF Mono");
+        assert_eq!(
+            face_verdict(&read(false, "Helvetica", ""), "monospaced").unwrap_err(),
+            "reads proportional Helvetica, wanted monospaced"
+        );
+        assert!(face_verdict(&read(false, "Georgia", "georgia"), "named").is_ok());
+        assert_eq!(
+            face_verdict(&read(false, "Helvetica", "Georgia"), "named").unwrap_err(),
+            "reads proportional Helvetica, wanted the family \"Georgia\""
+        );
+        assert!(face_verdict(&read(false, "Helvetica", ""), "named").unwrap_err().contains("asked for no family"));
+        assert!(parse("expect_face label@x serif").is_err());
+        assert!(parse("expect_scaled label@x 0").is_err());
+        assert_eq!(
+            parse("expect_scaled label@x 1.5").unwrap()[0],
+            Step::ExpectScaled(parse_target("label@x").unwrap(), 1.5)
+        );
     }
 
     /// expect_typeface puts the RESOLVED family in its failure text

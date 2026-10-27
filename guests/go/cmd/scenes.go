@@ -53,6 +53,7 @@ import (
 	"dev.kaya/guests/go/ranges"
 	"dev.kaya/guests/go/reorder"
 	"dev.kaya/guests/go/reveal"
+	"dev.kaya/guests/go/codesurface"
 	"dev.kaya/guests/go/richlabel"
 	"dev.kaya/guests/go/richrows"
 	"dev.kaya/guests/go/richtext"
@@ -161,6 +162,7 @@ var scenes = map[string]func() *kaya.App{
 	"richtext":         richtext.App,
 	"reorder":          reorder.App,
 	"reveal":           reveal.App,
+	"codesurface":      codesurface.App,
 	"table":            table.App,
 	"save":             save.App,
 	"scroll":           scroll.App,

@@ -51,6 +51,8 @@ SWIFT_ENTRIES = [
     "netimage", "netimage_http",
     # The skin (docs/styling-pass-plan.md §5).
     "grounds", "shapes", "cards", "tracks", "dock",
+    # The code surface (docs/code-surface-plan.md §5).
+    "codesurface",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -76,6 +78,7 @@ GO_SCENES = [
     "safearea",
     "netimage", "netimage_http",
     "grounds", "shapes", "cards", "tracks", "dock",
+    "codesurface",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
@@ -146,6 +149,9 @@ RUST_SCENES = [
     "secure",
     # The reveal toggle (docs/reveal-plan.md §5).
     "reveal",
+    # The code surface, and at twice the text size (docs/code-surface-plan.md
+    # §5; SCENE_TEXT_SCALE).
+    "codesurface", "codesurfacebig",
     # The segmented control (docs/segmented-plan.md §6).
     "segmented",
     # The expander (docs/expander-plan.md §5).
@@ -297,6 +303,9 @@ MODS = {
     ("rust-swiftui", "formatbig"): {"drop": ("expect_text_scale", "2"),
                                     "keep": "expect_no_clipping",
                                     "extra": "expect_text_scale 1.94"},
+    ("rust-swiftui", "codesurfacebig"): {"drop": ("expect_text_scale", "2"),
+                                         "keep": "expect_scaled",
+                                         "extra": "expect_text_scale 1.94"},
     # THE PLATFORM'S RETURN ON A SINGLE-LINE FIELD ENDS EDITING
     # (docs/submit-plan.md S3, §7.1): SwiftUI's TextField resigns on
     # Return, so the entry publishes and the keyboard goes with the focus;
@@ -481,6 +490,7 @@ def swift_scene(entry):
 RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "links": "tasks", "formatde": "format", "formatar": "format",
                 "tasksrtl": "tasks", "tasksbig": "tasks", "formatbig": "format",
+                "codesurfacebig": "codesurface",
                 "clock24": "format", "scrollrtl": "scroll",
                 "numberfieldde": "numberfield", "numberfieldar": "numberfield",
                 "rangertl": "range",
@@ -506,7 +516,7 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # window's content size category nearest the factor.
-SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2"}
+SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2", "codesurfacebig": "2"}
 
 # The clock a scene runs under (docs/compliance-plan.md §4): the core writes
 # Apple's own key into the process's volatile argument domain from

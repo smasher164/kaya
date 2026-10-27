@@ -135,7 +135,7 @@ CALLS = [
     ("a click presses an activatable container through its composition",
      "kayaContainerTarget(parts[1])\n?.let { kayaActivators[it.id] }\n?.also { it() } != null"),
     ("the bare image takes the shape", ".then(kayaFrame(node.id)).then(kayaImageShape(node)).onGloballyPositioned {"),
-    ("the plain label wears its tint", "color = kayaLabelTintColor(node),\nmaxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),\nonTextLayout = { kayaTypefaceSites[\"label\"] = it;"),
+    ("the plain label wears its tint", "color = kayaLabelTintColor(node),\nmaxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),\nonTextLayout = {\nif (!kayaNodeFontSet(node)) kayaTypefaceSites[\"label\"] = it"),
     ("the dock rides above the section bar", "Column {\nKayaDockBar(consumesBottom = false)\nNavigationBar("),
     ("the dock is a mount target", "KayaSceneModel.dockRoot = KayaSceneModel.nodes[root]"),
     ("the dock keeps the player the core names (M17)",

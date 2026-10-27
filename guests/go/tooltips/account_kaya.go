@@ -190,6 +190,9 @@ func (r accountRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary
 func (r accountRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r accountRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
 func (r accountRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
+func (r accountRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
+func (r accountRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }
+func (r accountRow) SetTextScale(n kaya.Node, scale float64)           { r.t.SetTextScale(n, scale) }
 
 func (r accountRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r accountRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

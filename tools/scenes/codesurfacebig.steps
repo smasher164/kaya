@@ -1,0 +1,12 @@
+# The code surface under KAYA_TEXT_SCALE=2 (docs/code-surface-plan.md S1, S3):
+# text_scale is a multiple of the size the platform gives a text kind NOW, so
+# at the user's doubled text size the scaled label is still twice the
+# platform's (larger) size and the rest are the platform's own. macOS has no
+# text size (tools/lib/lanes/mac.py's OFF_SCENES).
+expect_title "codesurface"
+expect_text_scale 2
+expect_scaled label@big 2
+expect_scaled label@plain_label 1
+expect_scaled textarea@code 1
+expect_gutter textarea@code on
+expect_gutter textarea@code shows 1

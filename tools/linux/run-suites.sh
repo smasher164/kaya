@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -1651,6 +1651,26 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin reveal)"
     run "$proto" reveal-java env KAYA_SELFTEST=reveal KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE CODE SURFACE (docs/code-surface-plan.md §5): the gutter, the face,
+    # the family list and the scale, and at twice the user's text size.
+    run "$proto" codesurface-rust env KAYA_SELFTEST=codesurface \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/codesurface"
+    run "$proto" codesurface-python env KAYA_SELFTEST=codesurface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/codesurface.py
+    run "$proto" codesurface-js env KAYA_SELFTEST=codesurface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/codesurface.ts
+    run "$proto" codesurface-go env KAYA_SELFTEST=codesurface \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" codesurface-csharp env KAYA_SELFTEST=codesurface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" codesurface-ocaml env KAYA_SELFTEST=codesurface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/codesurface.exe
+    run "$proto" codesurface-haskell env KAYA_SELFTEST=codesurface \
+        tools/linux/a11y-leg.sh "$(hs_bin codesurface)"
+    run "$proto" codesurface-java env KAYA_SELFTEST=codesurface KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" codesurfacebig-rust env KAYA_TEXT_SCALE=2 KAYA_SELFTEST=codesurfacebig \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/codesurface"
     # THE SEGMENTED CONTROL (docs/segmented-plan.md), through a11y-leg.sh for
     # its expect_ax.
     run "$proto" segmented-rust env KAYA_SELFTEST=segmented \

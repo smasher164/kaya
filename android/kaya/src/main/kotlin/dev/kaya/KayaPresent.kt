@@ -201,6 +201,8 @@ object KayaPresent {
     )
     @JvmStatic external fun captureOverdue(capture: Long): Int
     @JvmStatic external fun capturePermission(kind: Int, permission: Int, detail: String)
+    /** docs/code-surface-plan.md M3: the installed families, `\n`-joined. */
+    @JvmStatic external fun fontFamilies(names: String)
     @JvmStatic external fun captureDevicesBegin()
     @JvmStatic external fun captureDevice(id: String, name: String, kind: Int, facing: Int, preferred: Boolean)
     @JvmStatic external fun captureDevicesEnd()

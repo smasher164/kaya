@@ -782,6 +782,14 @@ type align = Start | Center | End | Stretch | Baseline
    (docs/grow-lines-plan.md). *)
 val set_max_lines : widget -> int -> unit
 
+(* docs/code-surface-plan.md G1, M1, M2, S1, M3: the gutter, the face, the
+   size and the installed families. *)
+val set_line_numbers : widget -> bool -> unit
+val set_monospaced : widget -> bool -> unit
+val set_family : widget -> string -> unit
+val set_text_scale : widget -> float -> unit
+val list_font_families : unit -> unit
+
 (* An image's bound in points (docs/photo-attach-plan.md §2). *)
 val set_max_width : widget -> float -> unit
 val set_max_height : widget -> float -> unit
@@ -960,7 +968,11 @@ val textarea :
   ?submits:bool ->
   ?own_undo:bool ->
   ?on_edit:(edit -> unit) ->
-  ?on_format:(format_act -> unit) -> unit -> widget
+  ?on_format:(format_act -> unit) ->
+  ?line_numbers:bool ->
+  ?monospaced:bool ->
+  ?family:string ->
+  ?text_scale:float -> unit -> widget
 
 val label :
   ?grow:float ->
@@ -977,7 +989,10 @@ val label :
   ?href_bind:string signal ->
   ?tint:Tint.t ->
   ?tint_bind:Tint.t signal ->
-  ?text:string -> ?bind:string signal -> unit -> widget
+  ?text:string -> ?bind:string signal ->
+  ?monospaced:bool ->
+  ?family:string ->
+  ?text_scale:float -> unit -> widget
 
 val heading :
   ?grow:float ->
@@ -1018,7 +1033,10 @@ val entry :
   ?placeholder_bind:string signal ->
   ?content_type:Content_type.t ->
   ?on_change:(string -> unit) ->
-  ?on_submit:(string -> unit) -> unit -> widget
+  ?on_submit:(string -> unit) ->
+  ?monospaced:bool ->
+  ?family:string ->
+  ?text_scale:float -> unit -> widget
 
 val search :
   ?grow:float ->
@@ -2222,6 +2240,9 @@ module Tpl : sig
   (* A stamped label's most lines, the rest truncated with the platform's
      ellipsis (docs/media-player-plan.md M16 (2)). *)
   val set_max_lines : node -> int -> unit
+  val set_monospaced : node -> bool -> unit
+  val set_family : node -> string -> unit
+  val set_text_scale : node -> float -> unit
   val bind_tint_field : ?level:int -> node -> ('e, Tint.t) field -> unit
   val set_selected : node -> bool -> unit
   val bind_selected_field : ?level:int -> node -> ('e, bool) field -> unit
@@ -3072,6 +3093,7 @@ val on_permission : app -> (Capture_kind.t -> Permission.t -> unit) -> unit
 
 (* The device list, as watching starts and whenever it changes. *)
 val on_capture_devices : app -> (Capture_device.t list -> unit) -> unit
+val on_font_families : app -> (string list -> unit) -> unit
 
 (* Run [f] on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame of
    the capture, the next frame dropped while [f] still runs

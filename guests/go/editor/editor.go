@@ -188,7 +188,14 @@ func App() *kaya.App {
 		findRows kaya.Collection
 		// TEMPLATE NODES, not widgets: their handlers register below Build.
 		query, prev, next, done kaya.Node
+		// The View menu's state (docs/code-surface-plan.md §4): the gutter,
+		// the zoom step, and the face, "" for the platform's monospaced one.
+		numbersOn   kaya.Signal[bool]
+		fontGroup   kaya.MenuItem
+		fontChoice  kaya.Signal[float64]
+		fontOptions = []string{""}
 	)
+	zoom := 4
 
 	mark := func(tx *kaya.Tx) { tx.Window(0).Dirty(text != saved) }
 
@@ -289,6 +296,32 @@ func App() *kaya.App {
 			})
 		}()
 	}
+
+	// The editors' zoom steps, a multiple of the platform's size.
+	zooms := []float64{0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3}
+	setZoom := func(tx *kaya.Tx, step int) {
+		zoom = min(max(step, 0), len(zooms)-1)
+		tx.SetTextScale(buffer, zooms[zoom])
+		tx.Write(status, fmt.Sprintf("zoom %d%%", int(zooms[zoom]*100+0.5)))
+	}
+
+	// The code fonts editors offer, in this order, kept to the ones this
+	// device has; the first option is the platform's own monospaced face.
+	codeFonts := []string{"SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Consolas", "Adwaita Mono",
+		"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Droid Sans Mono", "Courier New", "monospace"}
+	app.OnFontFamilies(func(tx *kaya.Tx, families []string) {
+		have := map[string]bool{}
+		for _, f := range families {
+			have[f] = true
+		}
+		group := tx.Menu(fontGroup)
+		for _, f := range codeFonts {
+			if have[f] && len(fontOptions) < 6 {
+				fontOptions = append(fontOptions, f)
+				group.Option(f)
+			}
+		}
+	})
 
 	app.Build(func(tx *kaya.Tx) {
 		// Before anything mounts (the set-once wall); a REQUEST, not a rule.
@@ -418,6 +451,32 @@ func App() *kaya.App {
 		style.Item("Quote").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Quote) })
 		style.Item("Body").Shortcut("primary+alt+0").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Body) })
 
+		// The code editors' View menu (Sublime Text, VS Code, Zed): the
+		// gutter, the zoom chords, and the face.
+		numbersOn = tx.Signal(true)
+		fontChoice = tx.Signal(0.0)
+		view := win.Menu("View")
+		view.Toggle("Line Numbers").BindChecked(numbersOn).OnToggle(func(tx *kaya.Tx, on bool) {
+			tx.Write(numbersOn, on)
+			tx.SetLineNumbers(buffer, on)
+		})
+		view.Separator()
+		view.Item("Zoom In").Shortcut("primary+equal").OnActivate(func(tx *kaya.Tx) { setZoom(tx, zoom+1) })
+		view.Item("Zoom Out").Shortcut("primary+minus").OnActivate(func(tx *kaya.Tx) { setZoom(tx, zoom-1) })
+		view.Item("Actual Size").Shortcut("primary+0").OnActivate(func(tx *kaya.Tx) { setZoom(tx, 4) })
+		view.Separator()
+		fontGroup = view.RadioGroup("Font")
+		fontGroup.Option("System Monospaced")
+		fontGroup.BindValue(fontChoice).OnSelect(func(tx *kaya.Tx, index int) {
+			tx.Write(fontChoice, float64(index))
+			tx.SetFamily(buffer, fontOptions[index])
+			name := fontOptions[index]
+			if name == "" {
+				name = "System Monospaced"
+			}
+			tx.Write(status, "font "+name)
+		})
+
 		// grow divides the MAIN axis and align owns the cross one: a
 		// full-window buffer needs both.
 		tx.Mount(tx.Column(func() {
@@ -428,7 +487,7 @@ func App() *kaya.App {
 				text = s
 				mark(tx)
 				refind(tx)
-			}).Grow(1).A11yID("buffer").A11yLabel("Document").Rich() // textarea#0
+			}).Grow(1).A11yID("buffer").A11yLabel("Document").Rich().LineNumbers(true).Monospaced(true) // textarea#0
 
 			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
 			// (editor.steps reads it). SetInset rides the STAMPED row.
@@ -462,6 +521,7 @@ func App() *kaya.App {
 		}).Align(kaya.AlignStretch))
 
 		tx.Focus(buffer)
+		tx.ListFontFamilies()
 	})
 
 	// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever

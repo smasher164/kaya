@@ -65,6 +65,7 @@ object GuestStart : KayaGuestStart {
             "secure" -> Secure::app
             "autofill" -> Autofill::app
             "reveal" -> Reveal::app
+            "codesurface" -> Codesurface::app
             "segmented" -> Segmented::app
             "expander" -> Expander::app
             "safearea" -> Safearea::app

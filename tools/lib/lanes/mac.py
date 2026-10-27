@@ -54,6 +54,8 @@ SCENES = [
     "secure", "autofill", "reveal", "segmented", "toast", "expander",
     "safearea", "netimage", "netimage_http",
     "grounds", "shapes", "cards", "tracks", "dock",
+    # docs/code-surface-plan.md §5.
+    "codesurface",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -125,6 +127,7 @@ CUTS = {"reveal": {"cut": "press tab", "keep": "expect_unmasked expect_masked"}}
 # R4) and the two scale scenes run on the other four lanes.
 OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
               "formatbig": "macOS has no text size (docs/compliance-plan.md R4)",
+              "codesurfacebig": "macOS has no text size (docs/compliance-plan.md R4)",
               "chatkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "taskskeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "autofillkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
@@ -310,6 +313,7 @@ ORDER = [
     ("listrow", ("rust",)),
     # The platform tints on a filled container (docs/tints-plan.md).
     ("tints", ("rust",)),
+    ("codesurface", LANGS),
     # The skin (docs/styling-pass-plan.md §5): grounds, shapes, cards, the
     # track table and the dock.
     ("grounds", LANGS + ("c",)),

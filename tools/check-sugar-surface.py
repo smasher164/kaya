@@ -2504,7 +2504,8 @@ CONTENT_TYPE_SURFACES = [
         r"^  {0} :: ContentType -> Attr 'LeafW$",
         r"^applyAttr \({0} c\) w = setContentType w c$"]),
     ("ocaml", "bindings/ocaml/kaya_app.ml", [
-        r"\?placeholder_bind \?{0} \?on_change \?on_submit \(\) =\n  let tx = the_tx \(\) in\n"
+        r"\?placeholder_bind \?{0} \?on_change \?on_submit(?: \?[a-z_]+)* \(\) =\n"
+        r"  let tx = the_tx \(\) in\n"
         r"  let w = widget Kaya_wire\.kind_entry in",
         r"\?placeholder_bind \?{0} \?revealed \?\(revealable = false\) \?on_change \?on_submit"
         r" \?on_toggle \(\) =\n  let tx = the_tx \(\) in\n"
@@ -2657,6 +2658,135 @@ for _lang, _rel, _templates in REVEAL_SURFACES:
             selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the reveal cut")
         _rv_cuts += 1
 print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
+
+# --- THE CODE SURFACE, live zone, in all nine (docs/code-surface-plan.md §4)
+# The textarea's gutter, the text kinds' face and size, and the family list's
+# request and handler; tpl-surfaces holds the template zone's three.
+APP_RS, PY_INIT = "crates/kaya/src/app.rs", "bindings/python/kaya/__init__.py"
+GO_APP, CS_APP = "bindings/go/app.go", "bindings/csharp/KayaApp.cs"
+JAVA_APP, SW_APP = "bindings/java/dev/kaya/KayaApp.java", "bindings/swift/KayaApp.swift"
+SW_CAP, HS_APP = "bindings/swift/KayaCapture.swift", "bindings/haskell/KayaApp.hs"
+ML_APP, JS_APP = "bindings/ocaml/kaya_app.ml", "bindings/js/kaya/index.ts"
+CODE_SURFACES = [
+    ("rust", [(APP_RS, r"pub fn {0}\(self, on: bool\) -> Self"),
+              (APP_RS, r"pub fn {1}\(self, on: bool\) -> Self"),
+              (APP_RS, r"pub fn {2}\(self, name: impl Into<LiveSource<StrKind>>\) -> Self"),
+              (APP_RS, r"pub fn {3}\(self, scale: impl Into<LiveSource<F64Kind>>\) -> Self"),
+              (APP_RS, r"pub fn {4}\(&mut self\) \{{"),
+              (APP_RS, r"pub fn {5}\(&self, f: impl Fn\(&\[String\]\) -> M \+ 'static\)")]),
+    ("python", [(PY_INIT, r"^    def {0}\(self, on: bool = True\) -> Widget:"),
+                (PY_INIT, r"^    def {1}\(self: H, on: bool = True\) -> H:"),
+                (PY_INIT, r"^    def {2}\(self: H, name: TextSource\) -> H:"),
+                (PY_INIT, r"^    def {3}\(self: H, scale: float\) -> H:"),
+                (PY_INIT, r"^def {4}\(\) -> None:"),
+                (PY_INIT, r"^def {5}\(f: Callable\[\[tuple\[str, \.\.\.\]\], object\]\)"
+                          r" -> None:")]),
+    ("go", [(GO_APP, r"^func \(w Widget\) {0}\(on bool\) Widget"),
+            (GO_APP, r"^func \(w Widget\) {1}\(on bool\) Widget"),
+            (GO_APP, r"^func \(w Widget\) {2}\(name string\) Widget"),
+            (GO_APP, r"^func \(w Widget\) {3}\(scale float64\) Widget"),
+            (GO_APP, r"^func \(tx \*Tx\) {4}\(\) \{{"),
+            (GO_APP, r"^func \(a \*App\) {5}\(fn func\(\*Tx, \[\]string\)\)")]),
+    ("csharp", [(CS_APP, r"public void Set{0}\(Widget w, bool on\)"),
+                (CS_APP, r"public void Set{1}\(Widget w, bool on\)"),
+                (CS_APP, r"public void Set{2}\(Widget w, string name\)"),
+                (CS_APP, r"public void Set{3}\(Widget w, double scale\)"),
+                (CS_APP, r"public void {4}\(\) =>"),
+                (CS_APP, r"public void {5}\(Action<Tx, IReadOnlyList<string>> handler\)")]),
+    ("java", [(JAVA_APP, r"public Widget {0}\(boolean on\)"),
+              (JAVA_APP, r"public Widget {1}\(boolean on\)"),
+              (JAVA_APP, r"public Widget {2}\(String name\)"),
+              (JAVA_APP, r"public Widget {3}\(double scale\)"),
+              (JAVA_APP, r"public void {4}\(\) \{{"),
+              (JAVA_APP, r"public void {5}\(BiConsumer<Tx, List<String>> handler\)")]),
+    ("swift", [(SW_APP, r"public func {0}\(_ w: KayaWidget, _ on: Bool\)"),
+               (SW_APP, r"public func {1}\(_ w: KayaWidget, _ on: Bool\)"),
+               (SW_APP, r"public func {2}\(_ w: KayaWidget, _ name: String\)"),
+               (SW_APP, r"public func {3}\(_ w: KayaWidget, _ scale: Double\)"),
+               (SW_APP, r"public func {4}\(\) \{{"),
+               (SW_CAP, r"public func {5}\(_ handler: @escaping \(KayaAppTx, \[String\]\)"
+                        r" throws -> Void\)")]),
+    ("haskell", [(HS_APP, r"^  {0} :: Bool -> Attr 'LeafW"),
+                 (HS_APP, r"^  {1} :: Bool -> Attr 'LeafW"),
+                 (HS_APP, r"^  {2} :: Text -> Attr 'LeafW"),
+                 (HS_APP, r"^  {3} :: Double -> Attr 'LeafW"),
+                 (HS_APP, r"^{4} :: Build \(\)"),
+                 (HS_APP, r"^{5} :: App -> \(\[Text\] -> IO \(\)\) -> IO \(\)")]),
+    ("ocaml", [(ML_APP, r"\?on_format \?{0} \?{1} \?{2} \?{3} \(\) ="),
+               (ML_APP, r"\?tint_bind \?text \?bind \?{1} \?{2} \?{3} \(\) ="),
+               (ML_APP, r"\?content_type \?on_change \?on_submit \?{1} \?{2} \?{3} \(\) ="),
+               (ML_APP, r"^let {4} \(\) ="),
+               (ML_APP, r"^let {5} app \(f : string list -> unit\) =")]),
+    ("js", [(JS_APP, r"^  {0}\(on = true\): this \{{"),
+            (JS_APP, r"^  {1}\(on = true\): this \{{"),
+            (JS_APP, r"^  {2}\(name: Bindable \| string\): this \{{"),
+            (JS_APP, r"^  {3}\(scale: number\): this \{{"),
+            (JS_APP, r"^export function {4}\(\): void \{{"),
+            (JS_APP, r"^export function {5}\(f: \(families: readonly string\[\]\) => void\)"
+                     r": void \{{")]),
+]
+_SNAKE = ("line_numbers", "monospaced", "family", "text_scale", "list_font_families",
+          "on_font_families")
+_CAMEL = ("lineNumbers", "monospaced", "family", "textScale", "listFontFamilies", "onFontFamilies")
+_PASCAL = ("LineNumbers", "Monospaced", "Family", "TextScale", "ListFontFamilies", "OnFontFamilies")
+CODE_NAMES = {"rust": _SNAKE, "python": _SNAKE, "ocaml": _SNAKE, "go": _PASCAL,
+              "csharp": _PASCAL, "java": _CAMEL, "js": _CAMEL,
+              "swift": ("setLineNumbers", "setMonospaced", "setFamily", "setTextScale",
+                        "listFontFamilies", "onFontFamilies"),
+              "haskell": ("LineNumbers", "Monospaced", "Family", "TextScale",
+                          "listFontFamilies", "onFontFamilies")}
+
+
+def check_code_surface(fake=None, text_for=None):
+    out = []
+    for lang, rows in CODE_SURFACES:
+        names = fake or CODE_NAMES[lang]
+        for rel, template in rows:
+            text = text_for(lang, rel) if text_for else read_rel(rel)
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell the code "
+                           f"surface (docs/code-surface-plan.md §4; wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_code_surface():
+    print(_line)
+    status = 1
+_cs_want = sum(len(rows) for _, rows in CODE_SURFACES)
+_cs_fake = check_code_surface(tuple(f"kayaFakeCode{i}" for i in range(6)))
+print(f"check-sugar-surface: fake code-surface spellings fired {len(_cs_fake)}/{_cs_want}")
+if len(_cs_fake) != _cs_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_cs_fake)}/{_cs_want} "
+                  f"code-surface patterns fired for names that exist nowhere)")
+_cs_cuts = 0
+for _lang, _rows in CODE_SURFACES:
+    for _rel, _template in _rows:
+        _real = read_rel(_rel)
+        _pat = _template.format(*CODE_NAMES[_lang])
+        _n = 0
+
+        def _cs_mangle(m):
+            global _n
+            _inner, _k = sub_count(
+                r"(?i)(list_?font_?families|on_?font_?families|line_?numbers"
+                r"|monospaced|family|text_?scale)",
+                r"kayaCut", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _cs_mangle, _real, flags=re.M)
+        print(f"check-sugar-surface: code-surface cut {_lang} /{_template[:34]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_code_surface(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} code-surface cut "
+                          f"/{_template[:34]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the "
+                          f"code-surface cut")
+        _cs_cuts += 1
+print(f"check-sugar-surface: code-surface cuts watched red {_cs_cuts}/{_cs_want}")
 
 # --- THE EXPANDER'S HEADER PROPS, live zone, in all nine (docs/expander-plan.md
 # K3, K4, K18). The kind census holds `expander` in both zones and tpl-surfaces

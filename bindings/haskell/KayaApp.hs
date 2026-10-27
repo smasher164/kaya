@@ -240,6 +240,12 @@ module KayaApp
     setAlign,
     setFilled,
     setMaxLines,
+    setLineNumbers,
+    setMonospaced,
+    setFamily,
+    bindFamily,
+    setTextScale,
+    listFontFamilies,
     within,
     setAxis,
     stackWhen,
@@ -379,6 +385,7 @@ module KayaApp
     onCaptureOverrun,
     onPermission,
     onCaptureDevices,
+    onFontFamilies,
     onCaptureFrame,
     onCaptureSamples,
     forChecksClaimAppThread,
@@ -2911,6 +2918,35 @@ setFilled (Widget w) t = emitB (W.txSetFilled w (tintWire t))
 setMaxLines :: Widget -> Int -> Build ()
 setMaxLines (Widget w) n = emitB (W.txSetMaxLines w (fromIntegral n))
 
+-- | A textarea that numbers its logical lines in a gutter beside the text
+-- (docs\/code-surface-plan.md G1).
+setLineNumbers :: Widget -> Bool -> Build ()
+setLineNumbers (Widget w) on = emitB (W.txSetLineNumbers w on)
+
+-- | A label, entry or textarea in the platform's own monospaced face, the
+-- family and never the size (docs\/code-surface-plan.md M1).
+setMonospaced :: Widget -> Bool -> Build ()
+setMonospaced (Widget w) on = emitB (W.txSetMonospaced w on)
+
+-- | A label, entry or textarea in an installed family by name; a family the
+-- platform does not have falls back to the role. Empty unsets it
+-- (docs\/code-surface-plan.md M2).
+setFamily :: Widget -> Text -> Build ()
+setFamily (Widget w) name = emitB (W.txSetFamily w (T.unpack name))
+
+bindFamily :: Widget -> Signal Text -> Build ()
+bindFamily (Widget w) (Signal s) = emitB (W.txBindFamily w s)
+
+-- | A label, entry or textarea at that multiple of the size the platform
+-- gives it, 0.5 to 3 (docs\/code-surface-plan.md S1).
+setTextScale :: Widget -> Double -> Build ()
+setTextScale (Widget w) scale = emitB (W.txSetTextScale w scale)
+
+-- | Ask for the installed font families, answered once by 'onFontFamilies'
+-- (docs\/code-surface-plan.md M3).
+listFontFamilies :: Build ()
+listFontFamilies = emitB W.txListFontFamilies
+
 -- | A container's arrangement direction: row and column are ONE node
 -- this parameterizes, and the creation kind's own is the default
 -- (docs\/adaptive-layout-plan.md D1).
@@ -3229,6 +3265,13 @@ data Attr (c :: WClass) where
   -- inserts the newline (docs\/submit-plan.md S2). Textarea only: an entry
   -- and a search field submit on Return with nothing to declare.
   Submits :: Bool -> Attr 'LeafW
+  -- | docs\/code-surface-plan.md G1, M1, M2, S1: a textarea's line-number
+  -- gutter, and a text kind's face and size.
+  LineNumbers :: Bool -> Attr 'LeafW
+  Monospaced :: Bool -> Attr 'LeafW
+  Family :: Text -> Attr 'LeafW
+  FamilyBound :: Signal Text -> Attr 'LeafW
+  TextScale :: Double -> Attr 'LeafW
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
@@ -3328,6 +3371,11 @@ data Attr (c :: WClass) where
 
 applyAttr :: Attr c -> Widget -> Build ()
 applyAttr (Grow weight) w = setGrow w weight
+applyAttr (LineNumbers on) w = setLineNumbers w on
+applyAttr (Monospaced on) w = setMonospaced w on
+applyAttr (Family name) w = setFamily w name
+applyAttr (FamilyBound s) w = bindFamily w s
+applyAttr (TextScale scale) w = setTextScale w scale
 applyAttr (Fill on) w = setFill w on
 applyAttr (Hidden on) (Widget n) = emitB (W.txSetHidden n on)
 applyAttr (HiddenBound (Signal s)) (Widget n) = emitB (W.txBindHidden n s)
@@ -4776,6 +4824,10 @@ data TplAttr where
   TplTintAs :: Tint -> TplAttr
   -- | A stamped label's most lines, the rest truncated (M16 (2)).
   TplMaxLines :: Int -> TplAttr
+  -- | A stamped text kind's face and size (docs\/code-surface-plan.md M1, M2, S1).
+  TplMonospaced :: Bool -> TplAttr
+  TplFamily :: Text -> TplAttr
+  TplTextScale :: Double -> TplAttr
   TplTintBound :: Signal Tint -> TplAttr
   TplTintField :: KField Tint -> TplAttr
   -- | A stamped video view's box ratio, constant across the copies.
@@ -4827,6 +4879,9 @@ applyTplAttr (TplHiddenField (KField i)) (Node n) = emitT (W.txBindHiddenElement
 applyTplAttr (TplShapeAs sh) (Node n) = emitT (W.txSetShape n (shapeWire sh))
 applyTplAttr (TplTintAs t) (Node n) = emitT (W.txSetTint n (tintWire t))
 applyTplAttr (TplMaxLines k) (Node n) = emitT (W.txSetMaxLines n (fromIntegral k))
+applyTplAttr (TplMonospaced on) (Node n) = emitT (W.txSetMonospaced n on)
+applyTplAttr (TplFamily name) (Node n) = emitT (W.txSetFamily n (T.unpack name))
+applyTplAttr (TplTextScale scale) (Node n) = emitT (W.txSetTextScale n scale)
 applyTplAttr (TplTintBound (Signal s)) (Node n) = emitT (W.txBindTint n s)
 applyTplAttr (TplTintField (KField i)) (Node n) = emitT (W.txBindTintElement n 0 i)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
@@ -5721,6 +5776,11 @@ onPermission app f = writeIORef app.appMedia.permissionHandler (Just f)
 onCaptureDevices :: App -> ([CaptureDevice] -> IO ()) -> IO ()
 onCaptureDevices app f = writeIORef app.appMedia.devicesHandler (Just f)
 
+-- | The installed font families, answering 'listFontFamilies': unique, in
+-- code-point order, the names 'Family' takes (docs\/code-surface-plan.md M3).
+onFontFamilies :: App -> ([Text] -> IO ()) -> IO ()
+onFontFamilies app f = writeIORef app.appMedia.fontFamiliesHandler (Just f)
+
 -- The frame and sample callbacks by capture id: THE ONE TABLE THE CAPTURE
 -- THREAD READS, swapped whole so a read is one atomic load.
 captureFrameSinks :: IORef (Map.Map Word64 (CaptureFrame -> IO ()))
@@ -6019,6 +6079,11 @@ mediaOccurrence app kind ident keys payload tail_
       return True
   | kind `elem` [W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun] =
       captureOccurrence app kind ident payload tail_
+  | kind == W.occKindFontFamilies = do
+      let names = [T.pack name | W.VStr name <- drop 1 tail_]
+      h <- readIORef m.fontFamiliesHandler
+      dispatch (mapM_ ($ names) h)
+      return True
   | kind == W.occKindSessionAction = do
       case tail_ of
         W.VI64 action : W.VI64 atMs : _ -> do
@@ -6160,6 +6225,7 @@ newApp =
             <*> newIORef Map.empty -- captureHandlers
             <*> newIORef Nothing -- permissionHandler
             <*> newIORef Nothing -- devicesHandler
+            <*> newIORef Nothing -- fontFamiliesHandler
         ) -- appMedia
 
 -- | Set up (build the scene, register handlers) and run: occurrences

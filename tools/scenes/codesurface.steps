@@ -1,0 +1,35 @@
+# The code surface (docs/code-surface-plan.md): a textarea that numbers its
+# logical lines, a wrapped line's continuation unnumbered; the platform's
+# monospaced face; a family the app picks from the platform's own list and
+# one the platform lacks; a label at twice the platform's size. Every
+# expect_gutter but `off` also holds each visible row to its number (G5).
+expect_title "codesurface"
+expect_gutter textarea@code on
+expect_gutter textarea@code shows 1
+expect_gutter textarea@code wraps 3
+expect_gutter textarea@code hides 40
+expect_gutter textarea@plain off
+# The end of a document taller than its viewport: the column scrolls with it.
+click button@end
+expect_focused textarea@code
+expect_gutter textarea@code shows 39
+expect_gutter textarea@code hides 1
+# An edit that adds a line: the new line takes the next number.
+press return
+type "x"
+expect_gutter textarea@code shows 41
+expect_face textarea@code monospaced
+expect_face textarea@plain proportional
+expect_face label@mono monospaced
+expect_face entry@mono_entry monospaced
+expect_face label@plain_label proportional
+# A family the platform does not have falls back to the role (M2).
+expect_face label@missing monospaced
+# The platform's own list, and a family picked from it (M3).
+click button@fonts
+expect label@families "families: listed, unique, in order"
+expect_face label@picked named
+# The multiple of the platform's size (S1).
+expect_scaled label@big 2
+expect_scaled label@plain_label 1
+expect_scaled textarea@code 1

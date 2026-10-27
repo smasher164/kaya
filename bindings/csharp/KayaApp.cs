@@ -1485,6 +1485,9 @@ sealed record PermissionHeard(ulong Id, List<object> Keys, CaptureKind Kind, Per
 sealed record DevicesListed(ulong Id, List<object> Keys, IReadOnlyList<CaptureDevice> Devices)
     : Occurrence(Id, Keys);
 
+sealed record FamiliesListed(ulong Id, List<object> Keys, IReadOnlyList<string> Families)
+    : Occurrence(Id, Keys);
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -3085,6 +3088,14 @@ sealed class KayaApp
     public void OnCaptureDevices(Action<Tx, IReadOnlyList<CaptureDevice>> handler) =>
         devicesHandler = handler;
 
+    Action<Tx, IReadOnlyList<string>>? familiesHandler;
+
+    /// The installed font families, answering Tx.ListFontFamilies: unique,
+    /// in code-point order, the names Tx.SetFamily takes
+    /// (docs/code-surface-plan.md M3).
+    public void OnFontFamilies(Action<Tx, IReadOnlyList<string>> handler) =>
+        familiesHandler = handler;
+
     /// Run `callback` ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each
     /// frame of `c`, the next frame dropped while it still runs
     /// (docs/capture-plan.md §4). It holds no transaction: a Build from it is
@@ -3640,6 +3651,15 @@ sealed class KayaApp
                         tail[at + 4] is true));
                 return new DevicesListed(id, keys, devices);
             }
+            case KayaWire.OccKindFontFamilies:
+            {
+                var tail = FlatTail("font_families", payload as List<object>, 1);
+                int count = (int)Int(tail[0]);
+                var families = new List<string>(count);
+                for (int at = 1; at < 1 + count && at < tail.Count; at++)
+                    families.Add(tail[at] as string ?? "");
+                return new FamiliesListed(id, keys, families);
+            }
             case KayaWire.OccKindReaderFrame:
             {
                 var tail = FlatTail("reader_frame", payload as List<object>, 7);
@@ -3951,6 +3971,10 @@ sealed class KayaApp
                     break;
                 case CaptureMoved or CaptureOverran or PermissionHeard or DevicesListed:
                     DispatchCapture(occurrence);
+                    break;
+                case FamiliesListed listedFamilies:
+                    if (familiesHandler is { } onFamilies)
+                        Dispatch(tx => onFamilies(tx, listedFamilies.Families));
                     break;
                 // A paste rides a click tag verbatim, so it arrives on the
                 // ordinary widget/node split. Never empty: a paste that
@@ -4431,6 +4455,32 @@ sealed class Tx : IDisposable
     /// lines, then scrolls (docs/grow-lines-plan.md).
     public void SetMaxLines(Widget w, int lines) =>
         Records.Add(KayaWire.TxSetMaxLines(w.Id, lines));
+
+    /// A textarea that numbers its logical lines in a gutter beside the text
+    /// (docs/code-surface-plan.md G1).
+    public void SetLineNumbers(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetLineNumbers(w.Id, on));
+
+    /// A label, entry or textarea in the platform's own monospaced face, the
+    /// family and never the size (docs/code-surface-plan.md M1).
+    public void SetMonospaced(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetMonospaced(w.Id, on));
+
+    /// A label, entry or textarea in an installed family by name, the user's
+    /// pick from App.OnFontFamilies; a family the platform does not have falls
+    /// back to the role. Empty unsets it (docs/code-surface-plan.md M2).
+    public void SetFamily(Widget w, string name) =>
+        Records.Add(KayaWire.TxSetFamily(w.Id, name));
+
+    /// A label, entry or textarea at that multiple of the size the platform
+    /// gives it, 0.5 to 3 (docs/code-surface-plan.md S1).
+    public void SetTextScale(Widget w, double scale) =>
+        Records.Add(KayaWire.TxSetTextScale(w.Id, scale));
+
+    /// Ask for the installed font families, answered once by
+    /// App.OnFontFamilies (docs/code-surface-plan.md M3).
+    public void ListFontFamilies() =>
+        Records.Add(KayaWire.TxListFontFamilies());
 
     /// An image's bound in points: the picture scales down to fit, its shape
     /// kept, and never up (docs/photo-attach-plan.md §2).
@@ -7215,6 +7265,18 @@ sealed class Tpl
     /// ellipsis (docs/media-player-plan.md M16 (2); Tx.SetMaxLines).
     public void SetMaxLines(Node n, int lines) =>
         tx.Records.Add(KayaWire.TxSetMaxLines(n.Id, lines));
+
+    /// Every stamped copy in the platform's monospaced face (Tx.SetMonospaced).
+    public void SetMonospaced(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetMonospaced(n.Id, on));
+
+    /// Every stamped copy in an installed family (Tx.SetFamily).
+    public void SetFamily(Node n, string name) =>
+        tx.Records.Add(KayaWire.TxSetFamily(n.Id, name));
+
+    /// Every stamped copy at a multiple of the platform's size (Tx.SetTextScale).
+    public void SetTextScale(Node n, double scale) =>
+        tx.Records.Add(KayaWire.TxSetTextScale(n.Id, scale));
 
     public void SetTint(Node n, Signal s) => tx.Records.Add(KayaWire.TxBindTint(n.Id, s.Id));
 

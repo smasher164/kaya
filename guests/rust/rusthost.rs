@@ -179,6 +179,8 @@ mod secure;
 mod autofill;
 #[path = "reveal.rs"]
 mod reveal;
+#[path = "codesurface.rs"]
+mod codesurface;
 #[path = "segmented.rs"]
 mod segmented;
 #[path = "expander.rs"]
@@ -292,6 +294,7 @@ fn app(ctx: kaya::AppCtx) {
         // With the keyboard up (tools/scenes/autofillkeyboard.steps).
         Ok("autofillkeyboard") => autofill::app(ctx),
         Ok("reveal") => reveal::app(ctx),
+        Ok("codesurface") | Ok("codesurfacebig") => codesurface::app(ctx),
         Ok("segmented") => segmented::app(ctx),
         Ok("expander") => expander::app(ctx),
         Ok("safearea") => safearea::app(ctx),

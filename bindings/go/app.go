@@ -282,6 +282,8 @@ type App struct {
 	media mediaState
 	// The captures' mirrors and handlers (capture.go).
 	capture captureState
+	// docs/code-surface-plan.md M3.
+	onFontFamilies func(*Tx, []string)
 	// The network images' handlers and helpers (images.go).
 	images imageState
 	widgetTimes    map[uint64]func(*Tx, Time)
@@ -1035,6 +1037,78 @@ func (w Widget) MaxLines(lines int) Widget {
 	w.tx.SetMaxLines(w, lines)
 	return w
 }
+
+// SetLineNumbers numbers a textarea's logical lines in a gutter beside the
+// text, a wrapped line's continuation unnumbered (docs/code-surface-plan.md G1).
+func (tx *Tx) SetLineNumbers(w Widget, on bool) {
+	tx.emit(TxSetLineNumbers(w.id, on))
+}
+
+// LineNumbers numbers this textarea's lines at construction. Same
+// transaction discipline as Grow.
+func (w Widget) LineNumbers(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: LineNumbers on a widget outside its build transaction — use Tx.SetLineNumbers inside a live transaction")
+	}
+	w.tx.SetLineNumbers(w, on)
+	return w
+}
+
+// SetMonospaced draws a label, entry or textarea in the platform's own
+// monospaced face, the family and never the size (docs/code-surface-plan.md M1).
+func (tx *Tx) SetMonospaced(w Widget, on bool) {
+	tx.emit(TxSetMonospaced(w.id, on))
+}
+
+// Monospaced is SetMonospaced at construction.
+func (w Widget) Monospaced(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Monospaced on a widget outside its build transaction — use Tx.SetMonospaced inside a live transaction")
+	}
+	w.tx.SetMonospaced(w, on)
+	return w
+}
+
+// SetFamily draws a label, entry or textarea in an installed family by name,
+// the user's pick from App.OnFontFamilies' list; a family the platform does
+// not have falls back to the role. Empty unsets it (docs/code-surface-plan.md M2).
+func (tx *Tx) SetFamily(w Widget, name string) {
+	tx.emit(TxSetFamily(w.id, name))
+}
+
+// Family is SetFamily at construction.
+func (w Widget) Family(name string) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Family on a widget outside its build transaction — use Tx.SetFamily inside a live transaction")
+	}
+	w.tx.SetFamily(w, name)
+	return w
+}
+
+// SetTextScale draws a label, entry or textarea at that multiple of the
+// size the platform gives it, 0.5 to 3 (docs/code-surface-plan.md S1).
+func (tx *Tx) SetTextScale(w Widget, scale float64) {
+	tx.emit(TxSetTextScale(w.id, scale))
+}
+
+// TextScale is SetTextScale at construction.
+func (w Widget) TextScale(scale float64) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: TextScale on a widget outside its build transaction — use Tx.SetTextScale inside a live transaction")
+	}
+	w.tx.SetTextScale(w, scale)
+	return w
+}
+
+// ListFontFamilies asks for the installed font families, answered once by
+// App.OnFontFamilies (docs/code-surface-plan.md M3).
+func (tx *Tx) ListFontFamilies() {
+	tx.emit(TxListFontFamilies())
+}
+
+// OnFontFamilies hears the installed font families: unique, in code-point
+// order, the names SetFamily takes.
+func (a *App) OnFontFamilies(fn func(*Tx, []string)) { a.onFontFamilies = fn }
 
 // SetFollowsEnd makes a scroll keep its end in view while its content grows,
 // until the user scrolls away from the end (docs/follow-end-plan.md).
@@ -6269,6 +6343,21 @@ func (t *Tpl) SetMaxLines(n Node, lines int) {
 	t.tx.emit(TxSetMaxLines(n.id, float64(lines)))
 }
 
+// SetMonospaced draws every stamped copy in the platform's monospaced face.
+func (t *Tpl) SetMonospaced(n Node, on bool) {
+	t.tx.emit(TxSetMonospaced(n.id, on))
+}
+
+// SetFamily draws every stamped copy in an installed family.
+func (t *Tpl) SetFamily(n Node, name string) {
+	t.tx.emit(TxSetFamily(n.id, name))
+}
+
+// SetTextScale draws every stamped copy at a multiple of the platform's size.
+func (t *Tpl) SetTextScale(n Node, scale float64) {
+	t.tx.emit(TxSetTextScale(n.id, scale))
+}
+
 // Spacer is an empty grown column in the blueprint, consuming the
 // leftover main-axis space between its siblings.
 func (t *Tpl) Spacer() Node {
@@ -7139,6 +7228,20 @@ func (a *App) Serve() {
 			a.mediaOccurred(kind, id, keys, payload)
 		case captureOccurrence(kind):
 			a.captureOccurred(kind, id, payload)
+		case kind == occFontFamilies:
+			listed, _ := payload.([]any)
+			if len(listed) > 0 {
+				listed = listed[1:]
+			}
+			families := make([]string, 0, len(listed))
+			for _, v := range listed {
+				if name, ok := v.(string); ok {
+					families = append(families, name)
+				}
+			}
+			if fn := a.onFontFamilies; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, families) })
+			}
 		case imageOccurrence(kind):
 			a.imageOccurred(kind, id, keys)
 		case kind == occDrawRequested || kind == occTick:

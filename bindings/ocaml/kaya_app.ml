@@ -1115,6 +1115,8 @@ type media = {
   capture_handlers : (int64 * string, capture_occ -> unit) Hashtbl.t;
   mutable permission_handler : (Capture_kind.t -> Permission.t -> unit) option;
   mutable devices_handler : (Capture_device.t list -> unit) option;
+  (* docs/code-surface-plan.md M3. *)
+  mutable font_families_handler : (string list -> unit) option;
   (* The captures this build has released, dropped once it commits. *)
   mutable released_captures : int64 list;
 }
@@ -1380,6 +1382,7 @@ let create () =
         capture_handlers = Hashtbl.create 8;
         permission_handler = Option.none;
         devices_handler = Option.none;
+        font_families_handler = Option.none;
         released_captures = [];
       };
     post_lock = Mutex.create ();
@@ -2110,6 +2113,27 @@ let bind_hidden (Widget id) (s : bool signal) = emit (the_tx ()) (Kaya_wire.tx_b
 let set_max_lines (Widget id) lines =
   emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int lines))
 
+(* A textarea that numbers its logical lines in a gutter beside the text
+   (docs/code-surface-plan.md G1). *)
+let set_line_numbers (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_line_numbers id on)
+
+(* A label, entry or textarea in the platform's own monospaced face, the
+   family and never the size (docs/code-surface-plan.md M1). *)
+let set_monospaced (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_monospaced id on)
+
+(* A label, entry or textarea in an installed family by name; a family the
+   platform does not have falls back to the role. Empty unsets it
+   (docs/code-surface-plan.md M2). *)
+let set_family (Widget id) name = emit (the_tx ()) (Kaya_wire.tx_set_family id name)
+
+(* A label, entry or textarea at that multiple of the size the platform
+   gives it, 0.5 to 3 (docs/code-surface-plan.md S1). *)
+let set_text_scale (Widget id) scale = emit (the_tx ()) (Kaya_wire.tx_set_text_scale id scale)
+
+(* Ask for the installed font families, answered once by [on_font_families]
+   (docs/code-surface-plan.md M3). *)
+let list_font_families () = emit (the_tx ()) (Kaya_wire.tx_list_font_families ())
+
 (* An image's bound in points: the picture scales down to fit, its shape
    kept, and never up (docs/photo-attach-plan.md §2). *)
 let set_max_width (Widget id) points = emit (the_tx ()) (Kaya_wire.tx_set_max_width id points)
@@ -2725,9 +2749,13 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    the platform's real multi-line editor. [~rich:true] adds the
    attribute-run channel (docs/rich-text-plan.md R1); [~on_edit] and
    [~on_format] answer only on one. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit ?rich ?submits ?own_undo ?on_edit ?on_format () =
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit ?rich ?submits ?own_undo ?on_edit ?on_format ?line_numbers ?monospaced ?family ?text_scale () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
+  Option.iter (fun v -> set_line_numbers w v) line_numbers;
+  Option.iter (fun v -> set_monospaced w v) monospaced;
+  Option.iter (fun v -> set_family w v) family;
+  Option.iter (fun v -> set_text_scale w v) text_scale;
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
@@ -2748,8 +2776,11 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   w
 
 let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?rich ?href ?href_bind ?tint
-    ?tint_bind ?text ?bind () =
+    ?tint_bind ?text ?bind ?monospaced ?family ?text_scale () =
   let w = widget Kaya_wire.kind_label in
+  Option.iter (fun v -> set_monospaced w v) monospaced;
+  Option.iter (fun v -> set_family w v) family;
+  Option.iter (fun v -> set_text_scale w v) text_scale;
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
@@ -2777,9 +2808,12 @@ let heading ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?hel
 let caption ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?tint ?tint_bind ?text ?bind () =
   label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ~role:Caption ?tint ?tint_bind ?text ?bind ()
 
-let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit () =
+let entry ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?content_type ?on_change ?on_submit ?monospaced ?family ?text_scale () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_entry in
+  Option.iter (fun v -> set_monospaced w v) monospaced;
+  Option.iter (fun v -> set_family w v) family;
+  Option.iter (fun v -> set_text_scale w v) text_scale;
   Option.iter (fun g -> set_grow w g) grow;
   Option.iter (fun v -> set_fill w v) fill;
   set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
@@ -5758,6 +5792,9 @@ module Tpl = struct
   let set_shape (Node id) (sh : shape) = emit (the_tx ()) (Kaya_wire.tx_set_shape id (shape_wire sh))
   let set_tint (Node id) t = emit (the_tx ()) (Kaya_wire.tx_set_tint id (pack_tint t))
   let set_max_lines (Node id) n = emit (the_tx ()) (Kaya_wire.tx_set_max_lines id (float_of_int n))
+  let set_monospaced (Node id) on = emit (the_tx ()) (Kaya_wire.tx_set_monospaced id on)
+  let set_family (Node id) name = emit (the_tx ()) (Kaya_wire.tx_set_family id name)
+  let set_text_scale (Node id) scale = emit (the_tx ()) (Kaya_wire.tx_set_text_scale id scale)
 
   let bind_tint_field ?(level = 0) (Node id) (fd : (_, Tint.t) field) =
     emit (the_tx ()) (Kaya_wire.tx_bind_tint_element ~level ~field:fd.fd_index id)
@@ -7053,6 +7090,10 @@ let on_permission app (f : Capture_kind.t -> Permission.t -> unit) = app.media.p
 (* The device list, as watching starts and whenever it changes. *)
 let on_capture_devices app (f : Capture_device.t list -> unit) = app.media.devices_handler <- Some f
 
+(* The installed font families, answering [list_font_families]: unique, in
+   code-point order, the names [set_family] takes (docs/code-surface-plan.md M3). *)
+let on_font_families app (f : string list -> unit) = app.media.font_families_handler <- Some f
+
 (* Run [f] on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame
    of [capture], the next frame dropped while [f] still runs. It holds no
    transaction (a write from it is refused): post to touch the scene. The
@@ -7128,6 +7169,15 @@ let capture_occurrence app kind id payload tail =
     in
     m.capture_devices <- devices (match tail with _count :: values -> values | [] -> []);
     Option.iter (fun f -> dispatch app (fun () -> f m.capture_devices)) m.devices_handler;
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_font_families then begin
+    let names =
+      List.filter_map
+        (function Kaya_wire.Str name -> Some name | _ -> None)
+        (match tail with _count :: values -> values | [] -> [])
+    in
+    Option.iter (fun f -> dispatch app (fun () -> f names)) m.font_families_handler;
     true
   end
   else false

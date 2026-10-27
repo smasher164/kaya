@@ -326,6 +326,21 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // controls space. A hidden widget of any kind is not drawn and takes no
     // extent and no gap (docs/media-player-plan.md M16 (3)); its state stays.
     ("hidden", 68, PropKind::Bool),
+    // docs/code-surface-plan.md G1: a textarea numbers its logical lines in
+    // a gutter beside the text, a wrapped line's continuation unnumbered.
+    ("line_numbers", 69, PropKind::Bool),
+    // docs/code-surface-plan.md M1: a text kind draws in the platform's own
+    // monospaced face, the family and never the size; it wins over the brand
+    // typeface on that widget.
+    ("monospaced", 70, PropKind::Bool),
+    // docs/code-surface-plan.md M2: a text kind draws in this installed
+    // family, the user's pick; a family the platform lacks falls back to
+    // the role (`monospaced`, else the platform's face). Empty is unset.
+    ("family", 71, PropKind::Str),
+    // docs/code-surface-plan.md S1 (RULED 2026-10-27, option b): a text
+    // kind's size as a multiple of the size the platform gives it, so it
+    // composes with the user's text-size setting. 0.5 to 3; 1 is unset.
+    ("text_scale", 72, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2170,6 +2185,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   refuses an item outside the node's catalog, an item that \
                   takes no label, and a field that is not a string.",
         },
+        Record {
+            kind: 88,
+            name: "list_font_families",
+            fields: &[],
+            payload: None,
+            doc: "List the font families installed on this device, answered \
+                  once by font_families (docs/code-surface-plan.md M3): what \
+                  an app's own font setting offers its user.",
+        },
     ],
     apply: &[
         Record {
@@ -3215,6 +3239,14 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   after the copy's context_attach_node and again whenever \
                   the row's field changes.",
         },
+        Record {
+            kind: 76,
+            name: "list_font_families",
+            fields: &[],
+            payload: None,
+            doc: "Enumerate the installed font families and answer through \
+                  kaya_font_families (docs/code-surface-plan.md M3).",
+        },
     ],
     occurrence: &[
         Record {
@@ -4247,6 +4279,16 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   press's activated. activated's encoding. Selection stays the \
                   app's: kaya writes no `selected`.",
         },
+        Record {
+            kind: 60,
+            name: "font_families",
+            fields: &[f("families", FieldTy::Values)],
+            payload: None,
+            doc: "The answer to list_font_families: every installed family \
+                  an app may name in `family`, one Str each, without the \
+                  platform's private ones, unique and in code-point order \
+                  (docs/code-surface-plan.md M3).",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4442,6 +4484,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("tint", 66),
                 ("activatable", 67),
                 ("hidden", 68),
+                ("line_numbers", 69),
+                ("monospaced", 70),
+                ("family", 71),
+                ("text_scale", 72),
             ],
         },
         EnumSpec {
@@ -5117,6 +5163,7 @@ mod tests {
             ("attach_dock", wire::TX_ATTACH_DOCK),
             ("set_dock_player", wire::TX_SET_DOCK_PLAYER),
             ("context_label_node", wire::TX_CONTEXT_LABEL_NODE),
+            ("list_font_families", wire::TX_LIST_FONT_FAMILIES),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5203,6 +5250,7 @@ mod tests {
                 ("attach_dock", wire::APPLY_ATTACH_DOCK),
                 ("set_dock_player", wire::APPLY_SET_DOCK_PLAYER),
                 ("context_label_node", wire::APPLY_CONTEXT_LABEL_NODE),
+                ("list_font_families", wire::APPLY_LIST_FONT_FAMILIES),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -5271,6 +5319,7 @@ mod tests {
                 ("image_released", crate::ring::REC_IMAGE_RELEASED),
                 ("activated", crate::ring::REC_ACTIVATED),
                 ("selection_changed", crate::ring::REC_SELECTION_CHANGED),
+                ("font_families", crate::ring::REC_FONT_FAMILIES),
             ]
         );
     }
@@ -5615,6 +5664,10 @@ mod tests {
                     ("prop", "tint") => wire::PROP_TINT,
                     ("prop", "activatable") => wire::PROP_ACTIVATABLE,
                     ("prop", "hidden") => wire::PROP_HIDDEN,
+                    ("prop", "line_numbers") => wire::PROP_LINE_NUMBERS,
+                    ("prop", "monospaced") => wire::PROP_MONOSPACED,
+                    ("prop", "family") => wire::PROP_FAMILY,
+                    ("prop", "text_scale") => wire::PROP_TEXT_SCALE,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

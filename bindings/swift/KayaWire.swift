@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x7a1263c53af5e0a4
+let kayaSpecHash: UInt64 = 0xcd377e2688e6cb2a
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -924,6 +924,12 @@ struct KayaTx {
         self.u64(item)
         self.u32(level)
         self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
+    mutating func listFontFamilies() {
+        let kayaAt = self.begin(UInt16(KAYA_TX_LIST_FONT_FAMILIES))
         self.end(kayaAt)
     }
 
@@ -3103,6 +3109,134 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant line_numbers value.
+    mutating func setLineNumbers(_ widgetId: UInt64, _ lineNumbers: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LINE_NUMBERS))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(lineNumbers))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound line_numbers value.
+    mutating func bindLineNumbers(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LINE_NUMBERS))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindLineNumbersElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_LINE_NUMBERS))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant monospaced value.
+    mutating func setMonospaced(_ widgetId: UInt64, _ monospaced: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MONOSPACED))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(monospaced))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound monospaced value.
+    mutating func bindMonospaced(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MONOSPACED))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindMonospacedElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_MONOSPACED))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant family value.
+    mutating func setFamily(_ widgetId: UInt64, _ family: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FAMILY))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(family))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound family value.
+    mutating func bindFamily(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FAMILY))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindFamilyElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FAMILY))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant text_scale value.
+    mutating func setTextScale(_ widgetId: UInt64, _ textScale: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT_SCALE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(textScale))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound text_scale value.
+    mutating func bindTextScale(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT_SCALE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindTextScaleElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_TEXT_SCALE))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -3855,6 +3989,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_IMAGE_RELEASED)
             || kind == UInt16(KAYA_OCCURRENCE_ACTIVATED)
             || kind == UInt16(KAYA_OCCURRENCE_SELECTION_CHANGED)
+            || kind == UInt16(KAYA_OCCURRENCE_FONT_FAMILIES)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4228,6 +4363,32 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             return (kind, 0, [], nil, [], nil, nil, tail)
         }
         if kind == UInt16(KAYA_OCCURRENCE_CAPTURE_DEVICES) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            do {
+                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+                at += 8
+                tail.append(.i64(Int64(count)))
+                for _ in 0..<count { tail.append(value()) }
+            }
+            return (kind, 0, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_FONT_FAMILIES) {
             // A flat record: its fields in order, into the tail.
             var at = 8
             var tail: [KayaValue] = []

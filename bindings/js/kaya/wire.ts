@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x7a1263c53af5e0a4n;
+export const SPEC_HASH = 0xcd377e2688e6cb2an;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -143,6 +143,10 @@ export const PROP_SELECTED = 65;
 export const PROP_TINT = 66;
 export const PROP_ACTIVATABLE = 67;
 export const PROP_HIDDEN = 68;
+export const PROP_LINE_NUMBERS = 69;
+export const PROP_MONOSPACED = 70;
+export const PROP_FAMILY = 71;
+export const PROP_TEXT_SCALE = 72;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -490,6 +494,7 @@ export const TX_COLLECTION_PATCH_IF = 84;
 export const TX_ATTACH_DOCK = 85;
 export const TX_SET_DOCK_PLAYER = 86;
 export const TX_CONTEXT_LABEL_NODE = 87;
+export const TX_LIST_FONT_FAMILIES = 88;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -563,6 +568,7 @@ export const APPLY_WITHDRAW_TOAST = 72;
 export const APPLY_ATTACH_DOCK = 73;
 export const APPLY_SET_DOCK_PLAYER = 74;
 export const APPLY_CONTEXT_LABEL_NODE = 75;
+export const APPLY_LIST_FONT_FAMILIES = 76;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -622,6 +628,7 @@ export const OCC_IMAGE_NEEDED = 56;
 export const OCC_IMAGE_RELEASED = 57;
 export const OCC_ACTIVATED = 58;
 export const OCC_SELECTION_CHANGED = 59;
+export const OCC_FONT_FAMILIES = 60;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1540,6 +1547,12 @@ export function tx_context_label_node(node: number, item: number, level: number,
   enc.u32(level);
   enc.u32(field);
   return enc.end(TX_CONTEXT_LABEL_NODE);
+}
+
+/** List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. */
+export function tx_list_font_families(): Uint8Array {
+  enc.begin();
+  return enc.end(TX_LIST_FONT_FAMILIES);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2796,6 +2809,78 @@ export function tx_bind_hidden_element(widget_id: number, level = 0, field = 0):
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant line_numbers value. */
+export function tx_set_line_numbers(widget_id: number, line_numbers: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LINE_NUMBERS); enc.u32(SOURCE_CONST); enc.value(line_numbers);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound line_numbers value. */
+export function tx_bind_line_numbers(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LINE_NUMBERS); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_line_numbers_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_LINE_NUMBERS); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant monospaced value. */
+export function tx_set_monospaced(widget_id: number, monospaced: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MONOSPACED); enc.u32(SOURCE_CONST); enc.value(monospaced);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound monospaced value. */
+export function tx_bind_monospaced(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MONOSPACED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_monospaced_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_MONOSPACED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant family value. */
+export function tx_set_family(widget_id: number, family: string): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FAMILY); enc.u32(SOURCE_CONST); enc.value(family);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound family value. */
+export function tx_bind_family(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FAMILY); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_family_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FAMILY); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant text_scale value. */
+export function tx_set_text_scale(widget_id: number, text_scale: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT_SCALE); enc.u32(SOURCE_CONST); enc.value(text_scale);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound text_scale value. */
+export function tx_bind_text_scale(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT_SCALE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_text_scale_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TEXT_SCALE); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -3242,7 +3327,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -3463,6 +3548,22 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     return { kind, id: 0, keys: [], payload: tail };
   }
   if (kind === OCC_CAPTURE_DEVICES) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: 0, keys: [], payload: tail };
+  }
+  if (kind === OCC_FONT_FAMILIES) {
     // A flat record: its fields in order, into the tail.
     let at = 8;
     const tail: Decoded[] = [];

@@ -30,6 +30,8 @@ SCENES = [
     "progress", "select", "radio", "grid", "textarea", "search", "submit", "scrollto", "fullscreen",
     "numberfield", "timecode", "colorpicker", "range", "secure", "autofill", "reveal",
     "segmented",
+    # docs/code-surface-plan.md §5.
+    "codesurface",
     "expander",
     "safearea",
     "toast",
@@ -79,7 +81,7 @@ EXCLUSIVE = {"dnd_rust", "dnd_python", "dnd_js", "dnd_go", "dnd_csharp", "dnd_ja
              # THE TEXT-SCALE LEGS (docs/compliance-plan.md R5, U3): the
              # setting is the user's, written before and deleted after, so
              # nothing else may be running under it.
-             "tasksbig_rust", "formatbig_rust",
+             "tasksbig_rust", "formatbig_rust", "codesurfacebig_rust",
              # THE 24-HOUR CLOCK LEG: the Region keys are the user's
              # (CLOCK24_LEGS), written before and restored after.
              "clock24_rust",
@@ -109,7 +111,7 @@ CLOCK24_LEGS = {"clock24_rust"}
 # The user's text scale a leg runs under, as HKCU\Software\Microsoft\
 # Accessibility's TextScaleFactor percentage, written by deploy-win before
 # the leg and deleted after (R5; a fresh process reads it, U3).
-TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200}
+TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_rust": 200}
 
 # Depth-slice scenes: a rust example + steps exist, the language
 # sweep has not landed. Built, shipped and run RUST-ONLY — the
@@ -557,6 +559,9 @@ ORDER = [
     [
      "formatbig_rust",
     ],
+    [
+     "codesurfacebig_rust",
+    ],
     # THE 24-HOUR CLOCK LEG, alone: the Region keys are the user's
     # (CLOCK24_LEGS).
     [
@@ -647,6 +652,12 @@ ORDER = [
     ],
     [
      "submit_rust", "submit_python", "submit_js", "submit_go", "submit_csharp", "submit_java",
+    ],
+    # The code surface (docs/code-surface-plan.md §5): `type` and `press
+    # return` post to each guest's own window, as search's and submit's do.
+    [
+     "codesurface_rust", "codesurface_python", "codesurface_js", "codesurface_go",
+     "codesurface_csharp", "codesurface_java",
     ],
     # The secure field (docs/secure-entry-plan.md): type_secret posts to the
     # guest's own input site, as `type` does.
@@ -943,7 +954,7 @@ def launcher(leg):
 # GUEST_STEM one platform over): the launcher runs the guest's own file.
 GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
-              "tasksbig": "tasks", "formatbig": "format", "clock24": "format",
+              "tasksbig": "tasks", "formatbig": "format", "codesurfacebig": "codesurface", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "numberfieldar": "numberfield",
               "rangertl": "range",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",

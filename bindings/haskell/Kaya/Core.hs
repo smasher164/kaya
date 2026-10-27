@@ -2108,7 +2108,10 @@ data MediaState = MediaState
     -- Per (capture, occurrence name): the newest registration wins.
     captureHandlers :: IORef (Map.Map (Word64, Text) (CaptureOcc -> IO ())),
     permissionHandler :: IORef (Maybe (CaptureKind -> Permission -> IO ())),
-    devicesHandler :: IORef (Maybe ([CaptureDevice] -> IO ()))
+    devicesHandler :: IORef (Maybe ([CaptureDevice] -> IO ())),
+    -- | docs\/code-surface-plan.md M3: the font family list rides the
+    -- capture arm's record.
+    fontFamiliesHandler :: IORef (Maybe ([Text] -> IO ()))
   }
 
 -- | Players get their OWN id space (docs\/media-plan.md §2).

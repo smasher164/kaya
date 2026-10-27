@@ -653,6 +653,36 @@ class _Handle:
             wire.tx_bind_placeholder, wire.tx_bind_placeholder_element))
         return self
 
+    def monospaced(self: H, on: bool = True) -> H:
+        """Draw this label, entry or textarea in the platform's own
+        monospaced face, the family and never the size
+        (docs/code-surface-plan.md M1). Returns the handle."""
+        if not isinstance(on, bool):
+            raise KayaTypeError(f"kaya: monospaced takes True or False, not {on!r}")
+        _records().append(wire.tx_set_monospaced(self.id, on))
+        return self
+
+    def family(self: H, name: TextSource) -> H:
+        """Draw this label, entry or textarea in an INSTALLED family by
+        name, the user's pick from `kaya.on_font_families`; a family the
+        platform does not have falls back to the role (`monospaced`, else
+        the platform's face). Empty unsets it (docs/code-surface-plan.md
+        M2). Returns the handle."""
+        _records().append(_prop_source(
+            "family", self, name, wire.tx_set_family,
+            wire.tx_bind_family, wire.tx_bind_family_element))
+        return self
+
+    def text_scale(self: H, scale: float) -> H:
+        """Draw this label, entry or textarea at that multiple of the size
+        the platform gives it, so it follows the user's text-size setting:
+        0.5 to 3, 1 the platform's own (docs/code-surface-plan.md S1).
+        Returns the handle."""
+        if isinstance(scale, bool) or not isinstance(scale, (int, float)):
+            raise KayaTypeError(f"kaya: text_scale takes a number, not {scale!r}")
+        _records().append(wire.tx_set_text_scale(self.id, float(scale)))
+        return self
+
     def content_type(self: H, content: ContentType | str) -> H:
         """Say what this entry or secure field holds (kaya.ContentType or
         its name), so the platform's password manager, one-time-code
@@ -1259,6 +1289,15 @@ class Widget(_Handle):
         kaya.Symbol; names accepted), the title kept as its accessible name
         (docs/composer-plan.md §2). Returns the handle."""
         _records().append(wire.tx_set_symbol(self.id, _symbol_value(symbol)))
+        return self
+
+    def line_numbers(self, on: bool = True) -> Widget:
+        """Number this textarea's logical lines in a gutter beside the
+        text, a wrapped line's continuation unnumbered
+        (docs/code-surface-plan.md G1). Returns the handle."""
+        if not isinstance(on, bool):
+            raise KayaTypeError(f"kaya: line_numbers takes True or False, not {on!r}")
+        _records().append(wire.tx_set_line_numbers(self.id, on))
         return self
 
     def max_lines(self, lines: int) -> None:
@@ -7920,6 +7959,18 @@ def on_permission(f: Callable[[CaptureKind, Permission], object]) -> None:
     _app._on_permission = f
 
 
+def list_font_families() -> None:
+    """Ask for the installed font families, answered once by
+    `kaya.on_font_families` (docs/code-surface-plan.md M3)."""
+    _records().append(wire.tx_list_font_families())
+
+
+def on_font_families(f: Callable[[tuple[str, ...]], object]) -> None:
+    """Register the handler for the installed font families: unique, in
+    code-point order, the names `.family()` takes; needs no transaction."""
+    _app._on_font_families = f
+
+
 def on_capture_devices(f: Callable[[tuple[CaptureDevice, ...]], object]) -> None:
     """Register the handler for the device list, as watching starts and
     whenever it changes; needs no transaction."""
@@ -8042,6 +8093,7 @@ class App:
         self._on_permission: Callable[[CaptureKind, Permission], object] | None = None
         self._on_capture_devices: Callable[
             [tuple[CaptureDevice, ...]], object] | None = None
+        self._on_font_families: Callable[[tuple[str, ...]], object] | None = None
         self._post_lock = threading.Lock()
         self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
@@ -8770,6 +8822,11 @@ class App:
                 self._capture_permissions[which] = granted
                 if self._on_permission is not None:
                     self._dispatch(self._on_permission, which, granted)
+                continue
+            if kind == wire.OCC_FONT_FAMILIES:
+                families = tuple(str(name) for name in payload[1:])
+                if self._on_font_families is not None:
+                    self._dispatch(self._on_font_families, families)
                 continue
             if kind == wire.OCC_CAPTURE_DEVICES:
                 flat = payload[1:]

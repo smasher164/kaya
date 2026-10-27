@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x7a1263c53af5e0a4ULL
+#define KAYA_SPEC_HASH 0xcd377e2688e6cb2aULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -992,6 +992,12 @@ static inline void kaya_tx_context_label_node(KayaTx *tx, uint64_t node, uint64_
     kaya_wire_u64(tx, item);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. */
+static inline void kaya_tx_list_font_families(KayaTx *tx) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_LIST_FONT_FAMILIES);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -3203,6 +3209,134 @@ static inline void kaya_tx_bind_hidden_element(KayaTx *tx, uint64_t widget_id, u
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_HIDDEN);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant line_numbers value. */
+static inline void kaya_tx_set_line_numbers(KayaTx *tx, uint64_t widget_id, int line_numbers) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LINE_NUMBERS);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(line_numbers));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound line_numbers value. */
+static inline void kaya_tx_bind_line_numbers(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LINE_NUMBERS);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_line_numbers_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_LINE_NUMBERS);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant monospaced value. */
+static inline void kaya_tx_set_monospaced(KayaTx *tx, uint64_t widget_id, int monospaced) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MONOSPACED);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(monospaced));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound monospaced value. */
+static inline void kaya_tx_bind_monospaced(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MONOSPACED);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_monospaced_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_MONOSPACED);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant family value. */
+static inline void kaya_tx_set_family(KayaTx *tx, uint64_t widget_id, const char *family) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FAMILY);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_str(family));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound family value. */
+static inline void kaya_tx_bind_family(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FAMILY);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_family_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FAMILY);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant text_scale value. */
+static inline void kaya_tx_set_text_scale(KayaTx *tx, uint64_t widget_id, double text_scale) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TEXT_SCALE);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(text_scale));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound text_scale value. */
+static inline void kaya_tx_bind_text_scale(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TEXT_SCALE);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_text_scale_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_TEXT_SCALE);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

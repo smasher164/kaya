@@ -5,6 +5,10 @@ pair take a click: "The taller rows are an issue. Is there a way to
 compensate for that row padding? ... Maybe we make the inner item smaller,
 or make the row padding smaller, or we conditionally change the size".
 
+RULED 2026-10-27 as built, for every list of activatable rows, not only the
+task manager and chat (the maintainer: "i agree with your recommendations");
+a row that sets its own `inset` keeps the spaced look.
+
 ## What made the rows taller
 
 A task list is a plain column of stamped rows, spaced by kaya's normalized

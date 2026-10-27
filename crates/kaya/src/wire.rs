@@ -77,6 +77,7 @@ pub(crate) const TX_COLLECTION_PATCH_IF: u16 = 84;
 pub(crate) const TX_ATTACH_DOCK: u16 = 85;
 pub(crate) const TX_SET_DOCK_PLAYER: u16 = 86;
 pub(crate) const TX_CONTEXT_LABEL_NODE: u16 = 87;
+pub(crate) const TX_LIST_FONT_FAMILIES: u16 = 88;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -200,6 +201,7 @@ pub(crate) const APPLY_WITHDRAW_TOAST: u16 = 72;
 pub(crate) const APPLY_ATTACH_DOCK: u16 = 73;
 pub(crate) const APPLY_SET_DOCK_PLAYER: u16 = 74;
 pub(crate) const APPLY_CONTEXT_LABEL_NODE: u16 = 75;
+pub(crate) const APPLY_LIST_FONT_FAMILIES: u16 = 76;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1015,6 +1017,14 @@ pub(crate) fn capture_devices_body(devices: &[crate::protocol::CaptureDevice]) -
     b
 }
 
+/// FONT_FAMILIES { Values families }.
+pub(crate) fn font_families_body(families: &[String]) -> Vec<u8> {
+    let mut b = Vec::new();
+    let values: Vec<Value> = families.iter().map(|f| Value::from(f.as_str())).collect();
+    write_values(&mut b, &values, &mut Vec::new());
+    b
+}
+
 /// CAPTURE_OVERRUN { u64 capture; u64 behind_ms }.
 pub(crate) fn capture_overrun_body(capture: crate::protocol::CaptureId, behind_ms: u64) -> [u8; 16] {
     let mut b = [0u8; 16];
@@ -1212,6 +1222,10 @@ pub(crate) const PROP_SELECTED: u32 = 65;
 pub(crate) const PROP_TINT: u32 = 66;
 pub(crate) const PROP_ACTIVATABLE: u32 = 67;
 pub(crate) const PROP_HIDDEN: u32 = 68;
+pub(crate) const PROP_LINE_NUMBERS: u32 = 69;
+pub(crate) const PROP_MONOSPACED: u32 = 70;
+pub(crate) const PROP_FAMILY: u32 = 71;
+pub(crate) const PROP_TEXT_SCALE: u32 = 72;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1892,6 +1906,10 @@ fn prop(raw: u32) -> Prop {
         PROP_TINT => Prop::Tint,
         PROP_ACTIVATABLE => Prop::Activatable,
         PROP_HIDDEN => Prop::Hidden,
+        PROP_LINE_NUMBERS => Prop::LineNumbers,
+        PROP_MONOSPACED => Prop::Monospaced,
+        PROP_FAMILY => Prop::Family,
+        PROP_TEXT_SCALE => Prop::TextScale,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -2378,6 +2396,7 @@ pub fn decode_transaction_with_blobs(
                 let _reserved = r.u32();
                 TxOp::RequestPermission { kind }
             }
+            TX_LIST_FONT_FAMILIES => TxOp::ListFontFamilies,
             TX_WATCH_CAPTURE_DEVICES => {
                 let on = match r.u32() {
                     0 => false,
@@ -4611,6 +4630,7 @@ impl Writer {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            ApplyOp::ListFontFamilies => self.record(APPLY_LIST_FONT_FAMILIES, |_, _| {}),
             ApplyOp::WatchCaptureDevices(on) => self.record(APPLY_WATCH_CAPTURE_DEVICES, |b, _| {
                 b.extend_from_slice(&u32::from(*on).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -5339,6 +5359,7 @@ impl Writer {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
             }),
+            TxOp::ListFontFamilies => self.record(TX_LIST_FONT_FAMILIES, |_, _| {}),
             TxOp::WatchCaptureDevices { on } => self.record(TX_WATCH_CAPTURE_DEVICES, |b, _| {
                 b.extend_from_slice(&u32::from(*on).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -5873,6 +5894,10 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Tint => PROP_TINT,
         Prop::Activatable => PROP_ACTIVATABLE,
         Prop::Hidden => PROP_HIDDEN,
+        Prop::LineNumbers => PROP_LINE_NUMBERS,
+        Prop::Monospaced => PROP_MONOSPACED,
+        Prop::Family => PROP_FAMILY,
+        Prop::TextScale => PROP_TEXT_SCALE,
     }
 }
 

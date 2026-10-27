@@ -807,6 +807,31 @@ export class Handle {
     return this;
   }
 
+  /** This label, entry or textarea in the platform's own monospaced face,
+   * the family and never the size (docs/code-surface-plan.md M1). Chains. */
+  monospaced(on = true): this {
+    if (typeof on !== "boolean") throw new TypeError(`kaya: monospaced takes a boolean, got ${typeof on}`);
+    records().push(wire.tx_set_monospaced(this.id, on));
+    return this;
+  }
+
+  /** This label, entry or textarea in an INSTALLED family by name, the
+   * user's pick from `kaya.onFontFamilies`; a family the platform does not
+   * have falls back to the role. Empty unsets it
+   * (docs/code-surface-plan.md M2). Chains. */
+  family(name: Bindable | string): this {
+    records().push(propSource("family", this, name, wire.tx_set_family, wire.tx_bind_family, wire.tx_bind_family_element));
+    return this;
+  }
+
+  /** This label, entry or textarea at that multiple of the size the
+   * platform gives it, 0.5 to 3 (docs/code-surface-plan.md S1). Chains. */
+  textScale(scale: number): this {
+    if (typeof scale !== "number") throw new TypeError(`kaya: textScale takes a number, got ${typeof scale}`);
+    records().push(wire.tx_set_text_scale(this.id, scale));
+    return this;
+  }
+
   /** What this entry or secure field holds, so the platform's password
    * manager, one-time-code autofill and keyboard can act on it
    * (docs/autofill-plan.md A1-A3); "none" takes the hint away. Chains. */
@@ -1365,6 +1390,14 @@ export class Widget extends Handle {
   symbol(symbol: SymbolValue | SymbolName): this {
     this._live("symbol()");
     records().push(wire.tx_set_symbol(this.id, symbolValue(symbol)));
+    return this;
+  }
+
+  /** This textarea numbers its logical lines in a gutter beside the text
+   * (docs/code-surface-plan.md G1). Chains. */
+  lineNumbers(on = true): this {
+    this._live("lineNumbers()");
+    records().push(wire.tx_set_line_numbers(this.id, on));
     return this;
   }
 
@@ -6814,6 +6847,18 @@ export function onPermission(f: (kind: CaptureKind, permission: Permission) => v
   app()._onPermission = f;
 }
 
+/** Ask for the installed font families, answered once by
+ * `kaya.onFontFamilies` (docs/code-surface-plan.md M3). */
+export function listFontFamilies(): void {
+  records().push(wire.tx_list_font_families());
+}
+
+/** The handler for the installed font families: unique, in code-point
+ * order, the names `.family()` takes. */
+export function onFontFamilies(f: (families: readonly string[]) => void): void {
+  app()._onFontFamilies = f;
+}
+
 /** The handler for the device list, as watching starts and whenever it
  * changes. */
 export function onCaptureDevices(f: (devices: readonly CaptureDevice[]) => void): void {
@@ -6920,6 +6965,7 @@ export class App {
   /** @internal */ _captureDevices: readonly CaptureDevice[] = [];
   /** @internal */ _onPermission: ((kind: CaptureKind, permission: Permission) => void) | undefined;
   /** @internal */ _onCaptureDevices: ((devices: readonly CaptureDevice[]) => void) | undefined;
+  /** @internal */ _onFontFamilies: ((families: readonly string[]) => void) | undefined;
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -7546,6 +7592,11 @@ export class App {
       const granted = known(PERMISSIONS, Number(p), "permission");
       this._capturePermissions.set(which, granted);
       if (this._onPermission !== undefined) this._dispatch(this._onPermission as Handler, which, granted);
+      return;
+    }
+    if (kind === wire.OCC_FONT_FAMILIES) {
+      const families = (payload as wire.Decoded[]).slice(1).map(String);
+      if (this._onFontFamilies !== undefined) this._dispatch(this._onFontFamilies as Handler, families);
       return;
     }
     if (kind === wire.OCC_CAPTURE_DEVICES) {

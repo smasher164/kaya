@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x7a1263c53af5e0a4;
+    public const ulong SpecHash = 0xcd377e2688e6cb2a;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -148,6 +148,10 @@ static class KayaWire
     public const uint PropTint = 66;
     public const uint PropActivatable = 67;
     public const uint PropHidden = 68;
+    public const uint PropLineNumbers = 69;
+    public const uint PropMonospaced = 70;
+    public const uint PropFamily = 71;
+    public const uint PropTextScale = 72;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -494,6 +498,7 @@ static class KayaWire
     public const ushort TxKindAttachDock = 85;
     public const ushort TxKindSetDockPlayer = 86;
     public const ushort TxKindContextLabelNode = 87;
+    public const ushort TxKindListFontFamilies = 88;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -567,6 +572,7 @@ static class KayaWire
     public const ushort ApplyKindAttachDock = 73;
     public const ushort ApplyKindSetDockPlayer = 74;
     public const ushort ApplyKindContextLabelNode = 75;
+    public const ushort ApplyKindListFontFamilies = 76;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -626,6 +632,7 @@ static class KayaWire
     public const ushort OccKindImageReleased = 57;
     public const ushort OccKindActivated = 58;
     public const ushort OccKindSelectionChanged = 59;
+    public const ushort OccKindFontFamilies = 60;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1579,6 +1586,13 @@ static class KayaWire
         w.Write(level);
         w.Write(field);
         return Finish(stream, w, TxKindContextLabelNode);
+    }
+
+    /// List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
+    public static byte[] TxListFontFamilies()
+    {
+        var w = Begin(out var stream);
+        return Finish(stream, w, TxKindListFontFamilies);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3317,6 +3331,106 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant line_numbers value.
+    public static byte[] TxSetLineNumbers(ulong widgetId, bool lineNumbers)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLineNumbers); w.Write(SourceConst);
+        EncodeValue(w, lineNumbers);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound line_numbers value.
+    public static byte[] TxBindLineNumbers(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLineNumbers); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindLineNumbersElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropLineNumbers); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant monospaced value.
+    public static byte[] TxSetMonospaced(ulong widgetId, bool monospaced)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMonospaced); w.Write(SourceConst);
+        EncodeValue(w, monospaced);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound monospaced value.
+    public static byte[] TxBindMonospaced(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMonospaced); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindMonospacedElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropMonospaced); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant family value.
+    public static byte[] TxSetFamily(ulong widgetId, string family)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFamily); w.Write(SourceConst);
+        EncodeValue(w, family);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound family value.
+    public static byte[] TxBindFamily(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFamily); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindFamilyElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFamily); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant text_scale value.
+    public static byte[] TxSetTextScale(ulong widgetId, double textScale)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTextScale); w.Write(SourceConst);
+        EncodeValue(w, textScale);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound text_scale value.
+    public static byte[] TxBindTextScale(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTextScale); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindTextScaleElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropTextScale); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -3889,7 +4003,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -4218,6 +4332,33 @@ static class KayaWire
             return true;
         }
         if (kind == OccKindCaptureDevices)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            id = 0;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindFontFamilies)
         {
             // A flat record: its fields in order, into the tail.
             int flatAt = 8;

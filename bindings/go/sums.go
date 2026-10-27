@@ -484,6 +484,12 @@ func (sc SumCase[K, V]) BindSymbol(n Node, f Field[Symbol]) { sc.t.BindSymbol(n,
 // SetMaxLines is Tpl.SetMaxLines for the labels this arm stamps.
 func (sc SumCase[K, V]) SetMaxLines(n Node, lines int) { sc.t.SetMaxLines(n, lines) }
 
+// SetMonospaced, SetFamily and SetTextScale are Tpl's for the text this arm
+// stamps (docs/code-surface-plan.md M1, M2, S1).
+func (sc SumCase[K, V]) SetMonospaced(n Node, on bool)       { sc.t.SetMonospaced(n, on) }
+func (sc SumCase[K, V]) SetFamily(n Node, name string)       { sc.t.SetFamily(n, name) }
+func (sc SumCase[K, V]) SetTextScale(n Node, scale float64) { sc.t.SetTextScale(n, scale) }
+
 // SetAlpha lets a colour picker this arm stamps choose translucency
 // (Tpl.SetAlpha).
 func (sc SumCase[K, V]) SetAlpha(n Node, on bool) { sc.t.SetAlpha(n, on) }

@@ -589,6 +589,9 @@ static class Program
         Set("SetShape", ["Node n", "Shape shape"], "n, shape");
         Set("SetTint", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxLines", ["Node n", "int lines"], "n, lines");
+        Set("SetMonospaced", ["Node n", "bool on"], "n, on");
+        Set("SetFamily", ["Node n", "string name"], "n, name");
+        Set("SetTextScale", ["Node n", "double scale"], "n, scale");
         Set("SetTint", ["Node n", "Signal s"], "n, s");
         Set("SetTint", ["Node n", "Field<Tint> f", "uint level = 0"], "n, f, level");
         Set("SetSelected", ["Node n", "bool on"], "n, on");

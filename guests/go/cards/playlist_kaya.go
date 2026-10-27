@@ -204,6 +204,9 @@ func (r playlistRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummar
 func (r playlistRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r playlistRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
 func (r playlistRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
+func (r playlistRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
+func (r playlistRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }
+func (r playlistRow) SetTextScale(n kaya.Node, scale float64)           { r.t.SetTextScale(n, scale) }
 
 func (r playlistRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r playlistRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

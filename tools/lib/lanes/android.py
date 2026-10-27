@@ -116,6 +116,9 @@ LEGS = {
         "secure-compose",
         # The reveal toggle (docs/reveal-plan.md §5).
         "reveal-compose",
+        # The code surface, and at twice the text size
+        # (docs/code-surface-plan.md §5; SCENE_TEXT_SCALE).
+        "codesurface-compose", "codesurfacebig-compose",
         # The segmented control (docs/segmented-plan.md §6).
         "segmented-compose",
         # The expander (docs/expander-plan.md §5).
@@ -222,6 +225,7 @@ LEGS = {
         "netimage-jvm", "netimage_http-jvm",
         "grounds-jvm", "shapes-jvm", "cards-jvm", "tracks-jvm", "dock-jvm",
         "capture-jvm", "capture_denied-jvm",
+        "codesurface-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -250,6 +254,7 @@ LEGS = {
         "netimage-go", "netimage_http-go",
         "grounds-go", "shapes-go", "cards-go", "tracks-go", "dock-go",
         "capture-go", "capture_denied-go",
+        "codesurface-go",
     ],
     "python": [
         "varied-python", "portfolio-python", "music_home-python", "music_playlist-python",
@@ -274,7 +279,7 @@ SCENE_LOCALE = {"formatde": "de-DE", "formatar": "ar-EG", "tasksrtl": "ar-EG",
 
 # The text-scale knob a scene carries (docs/compliance-plan.md §2.1): the
 # forced Configuration's fontScale and the Density every sp reads.
-SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2"}
+SCENE_TEXT_SCALE = {"tasksbig": "2", "formatbig": "2", "codesurfacebig": "2"}
 
 # THE PLATFORM'S OWN DOOR FOR A SECOND ACT (docs/tasks-s9-plan.md R6, R7),
 # per scene that carries a `relaunch`: this lane's is a real tap on the

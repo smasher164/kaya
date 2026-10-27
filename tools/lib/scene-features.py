@@ -159,6 +159,10 @@ VERB_FEATURE = {
     "expect_content_type": "autofill",
     # docs/reveal-plan.md §5, the same reasoning.
     "expect_unmasked": "reveal",
+    # docs/code-surface-plan.md §5, the same reasoning.
+    "expect_gutter": "codesurface",
+    "expect_face": "codesurface",
+    "expect_scaled": "codesurface",
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",

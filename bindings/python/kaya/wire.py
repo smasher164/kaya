@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0x7a1263c53af5e0a4
+SPEC_HASH = 0xcd377e2688e6cb2a
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -150,6 +150,10 @@ PROP_SELECTED = 65
 PROP_TINT = 66
 PROP_ACTIVATABLE = 67
 PROP_HIDDEN = 68
+PROP_LINE_NUMBERS = 69
+PROP_MONOSPACED = 70
+PROP_FAMILY = 71
+PROP_TEXT_SCALE = 72
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -497,6 +501,7 @@ TX_COLLECTION_PATCH_IF = 84
 TX_ATTACH_DOCK = 85
 TX_SET_DOCK_PLAYER = 86
 TX_CONTEXT_LABEL_NODE = 87
+TX_LIST_FONT_FAMILIES = 88
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -570,6 +575,7 @@ APPLY_WITHDRAW_TOAST = 72
 APPLY_ATTACH_DOCK = 73
 APPLY_SET_DOCK_PLAYER = 74
 APPLY_CONTEXT_LABEL_NODE = 75
+APPLY_LIST_FONT_FAMILIES = 76
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -629,6 +635,7 @@ OCC_IMAGE_NEEDED = 56
 OCC_IMAGE_RELEASED = 57
 OCC_ACTIVATED = 58
 OCC_SELECTION_CHANGED = 59
+OCC_FONT_FAMILIES = 60
 
 
 def _pad(b: bytes) -> bytes:
@@ -1059,6 +1066,10 @@ def tx_set_dock_player(dock: int, player: int) -> bytes:
 def tx_context_label_node(node: int, item: int, level: int, field: int) -> bytes:
     """Inside a template, after the node's context_attach_node: on each stamped copy of `node`, the context item `item` reads the string field `field` of the record `level` Fors up, resolved per copy by the core and followed when the field changes (docs/media-player-plan.md M26). The root refuses an item outside the node's catalog, an item that takes no label, and a field that is not a string."""
     return record(TX_CONTEXT_LABEL_NODE, struct.pack("<Q", node) + struct.pack("<Q", item) + struct.pack("<I", level) + struct.pack("<I", field))
+
+def tx_list_font_families() -> bytes:
+    """List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user."""
+    return record(TX_LIST_FONT_FAMILIES, b"")
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -2081,6 +2092,66 @@ def tx_bind_hidden_element(widget_id: int, level: int = 0, field: int = 0) -> by
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_HIDDEN, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_line_numbers(widget_id: int, line_numbers: bool) -> bytes:
+    """set_property with a constant line_numbers value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_LINE_NUMBERS, SOURCE_CONST) + _enc.value(line_numbers))
+
+
+def tx_bind_line_numbers(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound line_numbers value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_LINE_NUMBERS, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_line_numbers_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_LINE_NUMBERS, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_monospaced(widget_id: int, monospaced: bool) -> bytes:
+    """set_property with a constant monospaced value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_MONOSPACED, SOURCE_CONST) + _enc.value(monospaced))
+
+
+def tx_bind_monospaced(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound monospaced value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_MONOSPACED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_monospaced_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_MONOSPACED, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_family(widget_id: int, family: str) -> bytes:
+    """set_property with a constant family value (str)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FAMILY, SOURCE_CONST) + _enc.value(family))
+
+
+def tx_bind_family(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound family value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FAMILY, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_family_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FAMILY, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_text_scale(widget_id: int, text_scale: float) -> bytes:
+    """set_property with a constant text_scale value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TEXT_SCALE, SOURCE_CONST) + _enc.value(text_scale))
+
+
+def tx_bind_text_scale(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound text_scale value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TEXT_SCALE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_text_scale_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT_SCALE, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2451,7 +2522,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -2650,6 +2721,18 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         tail.append(value)
         return kind, flat_id, [], tail
     if kind == OCC_CAPTURE_DEVICES:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = 0
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_FONT_FAMILIES:
         # A flat record: its fields in order, into the tail.
         at = 8
         tail = []

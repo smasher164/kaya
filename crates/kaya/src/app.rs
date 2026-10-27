@@ -2050,6 +2050,33 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This textarea numbers its lines in a gutter — [`Tx::line_numbers`] chained.
+    pub fn line_numbers(self, on: bool) -> Self {
+        self.tx.line_numbers(self.id, on);
+        self
+    }
+
+    /// This label, entry or textarea draws in the platform's monospaced face
+    /// — [`Tx::monospaced`] chained.
+    pub fn monospaced(self, on: bool) -> Self {
+        self.tx.monospaced(self.id, on);
+        self
+    }
+
+    /// This label, entry or textarea draws in an installed family —
+    /// [`Tx::family`] chained.
+    pub fn family(self, name: impl Into<LiveSource<StrKind>>) -> Self {
+        self.tx.family(self.id, name);
+        self
+    }
+
+    /// This label, entry or textarea at a multiple of the platform's size
+    /// — [`Tx::text_scale`] chained.
+    pub fn text_scale(self, scale: impl Into<LiveSource<F64Kind>>) -> Self {
+        self.tx.text_scale(self.id, scale);
+        self
+    }
+
     /// This scroll keeps its end in view while its content grows —
     /// [`Tx::follows_end`] chained.
     pub fn follows_end(self, on: bool) -> Self {
@@ -3224,6 +3251,39 @@ impl<'a> Tx<'a> {
     /// lines, then scrolls inside itself (docs/grow-lines-plan.md).
     pub fn max_lines(&mut self, widget: WidgetId, lines: u32) {
         self.set(widget, Prop::MaxLines, f64::from(lines));
+    }
+
+    /// A textarea that numbers its logical lines in a gutter beside the text,
+    /// a wrapped line's continuation unnumbered (docs/code-surface-plan.md G1).
+    pub fn line_numbers(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::LineNumbers, on);
+    }
+
+    /// A label, entry or textarea in the platform's own monospaced face, the
+    /// family and never the size (docs/code-surface-plan.md M1).
+    pub fn monospaced(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::Monospaced, on);
+    }
+
+    /// A label, entry or textarea at `scale` times the size the platform
+    /// gives it, so it follows the user's text-size setting: an editor's
+    /// zoom (docs/code-surface-plan.md S1). 0.5 to 3; 1 is the platform's.
+    pub fn text_scale(&mut self, widget: WidgetId, scale: impl Into<LiveSource<F64Kind>>) {
+        self.set_live(widget, Prop::TextScale, scale.into());
+    }
+
+    /// Ask for the installed font families, answered once by
+    /// [`Messages::on_font_families`] (docs/code-surface-plan.md M3).
+    pub fn list_font_families(&mut self) {
+        self.ops.push(TxOp::ListFontFamilies);
+    }
+
+    /// A label, entry or textarea in an INSTALLED family by name, the user's
+    /// pick from [`Messages::on_font_families`]'s list; a family the
+    /// platform does not have falls back to the role (`monospaced`, else the
+    /// platform's own face). Empty unsets it (docs/code-surface-plan.md M2).
+    pub fn family(&mut self, widget: WidgetId, name: impl Into<LiveSource<StrKind>>) {
+        self.set_live(widget, Prop::Family, name.into());
     }
 
     /// A scroll that FOLLOWS ITS END: while the viewport shows the end of its
@@ -5447,6 +5507,18 @@ impl<'b> Row<'_, 'b> {
         self.tpl().max_lines(node, lines)
     }
 
+    pub fn monospaced(&mut self, node: TemplateNodeId, on: bool) {
+        self.tpl().monospaced(node, on)
+    }
+
+    pub fn family(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.tpl().family(node, src)
+    }
+
+    pub fn text_scale(&mut self, node: TemplateNodeId, scale: f64) {
+        self.tpl().text_scale(node, scale)
+    }
+
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.tpl().selected(node, src)
     }
@@ -5685,6 +5757,8 @@ pub struct Messages<M> {
     permission: RefCell<Option<Box<dyn Fn(crate::protocol::CaptureKind, crate::protocol::Permission) -> M>>>,
     #[allow(clippy::type_complexity)]
     capture_devices: RefCell<Option<Box<dyn Fn(&[crate::protocol::CaptureDevice]) -> M>>>,
+    #[allow(clippy::type_complexity)]
+    font_families: RefCell<Option<Box<dyn Fn(&[String]) -> M>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -5819,7 +5893,15 @@ impl<M> Messages<M> {
             captures: RefCell::new(HashMap::new()),
             permission: RefCell::new(None),
             capture_devices: RefCell::new(None),
+            font_families: RefCell::new(None),
         }
+    }
+
+    /// The installed font families, answering [`Tx::list_font_families`]:
+    /// unique, in code-point order, the names [`Tx::family`] takes
+    /// (docs/code-surface-plan.md M3).
+    pub fn on_font_families(&self, f: impl Fn(&[String]) -> M + 'static) {
+        *self.font_families.borrow_mut() = Some(Box::new(f));
     }
 
     /// The registration half of [`Widget::on_draw`] and
@@ -6810,6 +6892,9 @@ impl<M> Messages<M> {
                 | Occurrence::CapturePermission { .. }
                 | Occurrence::CaptureDevices { .. }
                 | Occurrence::CaptureOverrun { .. } => self.dispatch_capture(&occ),
+                Occurrence::FontFamilies { families } => {
+                    self.font_families.borrow().as_ref().map(|f| f(families))
+                }
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
                 // item has exactly one anchor, so its registered mapper
@@ -9146,6 +9231,23 @@ impl<'b> Tpl<'_, 'b> {
         self.set(node, Prop::MaxLines, f64::from(lines));
     }
 
+    /// A stamped label's, entry's or textarea's monospaced face, the
+    /// blueprint twin of [`Tx::monospaced`].
+    pub fn monospaced(&mut self, node: TemplateNodeId, on: bool) {
+        self.set(node, Prop::Monospaced, on);
+    }
+
+    /// A stamped text kind's installed family, the blueprint twin of [`Tx::family`].
+    pub fn family(&mut self, node: TemplateNodeId, src: impl Into<TplSource<StrKind>>) {
+        self.apply_source(node, Prop::Family, src.into().inner);
+    }
+
+    /// A stamped text kind's multiple of the platform's size, the blueprint
+    /// twin of [`Tx::text_scale`].
+    pub fn text_scale(&mut self, node: TemplateNodeId, scale: f64) {
+        self.set(node, Prop::TextScale, scale);
+    }
+
     /// A stamped container's selected surface, the blueprint twin of [`Tx::selected`].
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.apply_source(node, Prop::Selected, src.into().inner);
@@ -10748,6 +10850,7 @@ mod tests {
                     | Occurrence::CapturePermission { .. }
                     | Occurrence::CaptureDevices { .. }
                     | Occurrence::CaptureOverrun { .. } => {}
+                    Occurrence::FontFamilies { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }

@@ -58,6 +58,7 @@ static class Program
             case "secure": SecureScene.Run(); break;
             case "autofill": AutofillScene.Run(); break;
             case "reveal": RevealScene.Run(); break;
+            case "codesurface": CodesurfaceScene.Run(); break;
             case "segmented": SegmentedScene.Run(); break;
             case "expander": ExpanderScene.Run(); break;
             case "safearea": SafeareaScene.Run(); break;

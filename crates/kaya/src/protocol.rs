@@ -1315,6 +1315,9 @@ pub enum Occurrence {
     /// Every camera and microphone, as watching starts and when one comes
     /// or goes.
     CaptureDevices { devices: Vec<CaptureDevice> },
+    /// The installed font families, answering list_font_families
+    /// (docs/code-surface-plan.md M3): unique, code-point order.
+    FontFamilies { families: Vec<String> },
     /// The app's sample callback has fallen this far behind the microphone.
     CaptureOverrun { capture: CaptureId, behind_ms: u64 },
     /// A menu action fired — clicked OR invoked through its shortcut:
@@ -2338,6 +2341,17 @@ pub enum Prop {
     Activatable,
     /// Any widget not drawn, taking no space (Bool; DESIGN.md, Structural operators).
     Hidden,
+    /// A textarea's line-number gutter (Bool; docs/code-surface-plan.md G1).
+    LineNumbers,
+    /// A text kind in the platform's monospaced face (Bool;
+    /// docs/code-surface-plan.md M1).
+    Monospaced,
+    /// A text kind in a named installed family, falling back to the role
+    /// (Str; docs/code-surface-plan.md M2).
+    Family,
+    /// A text kind's size as a multiple of the platform's (F64, 0.5 to 3;
+    /// docs/code-surface-plan.md S1).
+    TextScale,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2861,6 +2875,8 @@ pub enum TxOp {
     /// On each stamped copy of `node`, the context item `item` reads the
     /// string field `field` of the record `level` Fors up.
     ContextLabelNode { node: TemplateNodeId, item: MenuItemId, level: u32, field: u32 },
+    /// Ask for the installed font families (docs/code-surface-plan.md M3).
+    ListFontFamilies,
     /// Bind a menu property (MENU_PROPS). Element sources are rejected at
     /// decode — menu items are not collection elements; `icon`,
     /// `primary`, and `shortcut` reject signal sources at the root.
@@ -3164,6 +3180,8 @@ pub enum ApplyOp {
     ContextAttachNode { widget: WidgetId, item: MenuItemId, path: Path },
     /// The stamped copy's own label for one item of its context menu.
     ContextLabelNode { widget: WidgetId, item: MenuItemId, label: String },
+    /// Enumerate the installed font families (docs/code-surface-plan.md M3).
+    ListFontFamilies,
     /// Set a menu property to an already-resolved value.
     SetMenuProp { item: MenuItemId, prop: MenuProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
@@ -3637,6 +3655,9 @@ impl OccSink {
                         crate::ring::REC_CAPTURE_PERMISSION,
                         &crate::wire::capture_permission_body(kind, permission, &detail),
                     );
+                }
+                Occurrence::FontFamilies { families } => {
+                    ring.push_record(crate::ring::REC_FONT_FAMILIES, &crate::wire::font_families_body(&families));
                 }
                 Occurrence::CaptureDevices { devices } => {
                     ring.push_record(crate::ring::REC_CAPTURE_DEVICES, &crate::wire::capture_devices_body(&devices));

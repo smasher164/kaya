@@ -434,6 +434,15 @@ fn main() {
         // The scroll viewport: ScrollableHeight/VerticalOffset are the
         // observation sources and ChangeView the API scroll_end drives.
         "Microsoft.UI.Xaml.Controls.ScrollViewer".to_string(),
+        // THE LINE-NUMBER GUTTER (docs/code-surface-plan.md G6): the template
+        // scroller's ViewChanged and the box's SizeChanged redraw it, a
+        // Canvas holds its numbers, and TextRangeUnit unlocks ITextRange's
+        // Expand/Move/StartOf/GetIndex (the Window, Paragraph and Line walks).
+        "Microsoft.UI.Xaml.Controls.ScrollViewerViewChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.SizeChangedEventHandler".to_string(),
+        "Microsoft.UI.Xaml.SizeChangedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.Canvas".to_string(),
+        "Microsoft.UI.Text.TextRangeUnit".to_string(),
         "Microsoft.UI.Xaml.Controls.ScrollMode".to_string(),
         "Microsoft.UI.Xaml.Controls.ScrollBarVisibility".to_string(),
         // The alert vocabulary: ContentDialog's three slots ARE the

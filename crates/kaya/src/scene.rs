@@ -803,6 +803,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ReleaseCapture { .. } => UndoVerdict::Refused("release_capture"),
         TxOp::RequestPermission { .. } => UndoVerdict::Refused("request_permission"),
         TxOp::WatchCaptureDevices { .. } => UndoVerdict::Refused("watch_capture_devices"),
+        TxOp::ListFontFamilies => UndoVerdict::Refused("list_font_families"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -1459,6 +1460,10 @@ struct BreakpointState {
     folded: Vec<(WidgetId, WidgetId)>,
 }
 
+/// `text_scale`'s range (docs/code-surface-plan.md S1).
+pub const TEXT_SCALE_MIN: f64 = 0.5;
+pub const TEXT_SCALE_MAX: f64 = 3.0;
+
 fn check_prop(kind: WidgetKind, prop: Prop) {
     let ok = match prop {
         Prop::Text => matches!(
@@ -1543,6 +1548,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Ground | Prop::Selected | Prop::Activatable => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::Shape => kind == WidgetKind::Image,
         Prop::Tint => kind == WidgetKind::Label,
+        // docs/code-surface-plan.md G1, M1.
+        Prop::LineNumbers => kind == WidgetKind::Textarea,
+        Prop::Monospaced | Prop::Family | Prop::TextScale => matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea),
         // Layout weight is kind-agnostic: any child of a row/column may
         // grow, so it applies to every widget kind.
         Prop::Grow => true,
@@ -2197,6 +2205,9 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Phase => ValueType::I64,
         Prop::Ground | Prop::Shape | Prop::Tint => ValueType::I64,
         Prop::Selected | Prop::Activatable | Prop::Hidden => ValueType::Bool,
+        Prop::LineNumbers | Prop::Monospaced => ValueType::Bool,
+        Prop::Family => ValueType::Str,
+        Prop::TextScale => ValueType::F64,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -2909,6 +2920,23 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             !placeholder.is_empty(),
             "kaya: {kind:?} declares an empty placeholder — say what the field takes, or leave \
              the placeholder off"
+        );
+    }
+    // docs/code-surface-plan.md S1: the ruled range.
+    if let (Prop::TextScale, Value::F64(scale)) = (prop, value) {
+        assert!(
+            scale.is_finite() && (TEXT_SCALE_MIN..=TEXT_SCALE_MAX).contains(scale),
+            "kaya: {kind:?} declares text_scale {scale}: a multiple of the platform's size from \
+             {TEXT_SCALE_MIN} to {TEXT_SCALE_MAX}"
+        );
+    }
+    // One family by name (docs/code-surface-plan.md M2): a toolkit's own
+    // fallback list (CSS, XAML) is never smuggled through it.
+    if let (Prop::Family, Value::Str(family)) = (prop, value) {
+        assert!(
+            !family.contains([',', ';', '\n', '"']) && family.trim() == family,
+            "kaya: {kind:?} declares the family {family:?}: one installed family by its name, no list \
+             and no padding"
         );
     }
     // A packed date that is not a date, or a time that is not a time,
@@ -4450,6 +4478,7 @@ impl Scene {
                 TxOp::ReleaseCapture { capture } => self.captures.release(capture, &mut out),
                 TxOp::RequestPermission { kind } => out.push(ApplyOp::RequestPermission(kind)),
                 TxOp::WatchCaptureDevices { on } => out.push(ApplyOp::WatchCaptureDevices(on)),
+                TxOp::ListFontFamilies => out.push(ApplyOp::ListFontFamilies),
                 TxOp::DeclareLinkRoute { route, pattern } => {
                     // NOTHING REACHES THE BACKENDS: the route table is the
                     // core's, and the platform arms hand it URLs
@@ -22488,6 +22517,46 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         tx.extend(props);
         tx.push(TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) });
         tx
+    }
+
+    /// docs/code-surface-plan.md G1, M1, M2, S1: the gutter on the textarea
+    /// alone, the face and size on the three text kinds, one family by name,
+    /// and the ruled scale range, each refused in its own words.
+    #[test]
+    fn the_code_surface_props_are_held_at_the_root() {
+        for kind in [WidgetKind::Textarea] {
+            check_prop(kind, Prop::LineNumbers);
+        }
+        for kind in [WidgetKind::Entry, WidgetKind::Label, WidgetKind::Button] {
+            assert!(std::panic::catch_unwind(|| check_prop(kind, Prop::LineNumbers)).is_err(), "{kind:?}");
+        }
+        for kind in [WidgetKind::Label, WidgetKind::Entry, WidgetKind::Textarea] {
+            for prop in [Prop::Monospaced, Prop::Family, Prop::TextScale] {
+                check_prop(kind, prop);
+            }
+        }
+        for kind in [WidgetKind::Button, WidgetKind::Search, WidgetKind::SecureField] {
+            for prop in [Prop::Monospaced, Prop::Family, Prop::TextScale] {
+                assert!(std::panic::catch_unwind(|| check_prop(kind, prop)).is_err(), "{kind:?} {prop:?}");
+            }
+        }
+        let fine = |prop, value| {
+            Scene::new().apply(skin_root(WidgetKind::Label, vec![set(1, prop, value)]));
+        };
+        fine(Prop::Family, Value::from("Menlo"));
+        fine(Prop::Family, Value::from(""));
+        fine(Prop::TextScale, Value::F64(0.5));
+        fine(Prop::TextScale, Value::F64(3.0));
+        for (prop, value, want) in [
+            (Prop::Family, Value::from("Menlo, Monaco"), "no list"),
+            (Prop::Family, Value::from(" Menlo"), "no padding"),
+            (Prop::TextScale, Value::F64(0.4), "from 0.5 to 3"),
+            (Prop::TextScale, Value::F64(3.5), "from 0.5 to 3"),
+            (Prop::TextScale, Value::F64(f64::NAN), "from 0.5 to 3"),
+        ] {
+            let msg = skin_refusal(skin_root(WidgetKind::Label, vec![set(1, prop, value)]));
+            assert!(msg.contains(want), "{msg}");
+        }
     }
 
     /// Y1: the skin's props live on their kinds and no control takes one.

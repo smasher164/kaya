@@ -29,7 +29,7 @@ expect_fills textarea#0
 
 # Five of Edit's six items are kaya ROLES the app writes no behaviour
 # for at all.
-expect_menus 3
+expect_menus 4
 # Enablement is not a build-time fact and this app computes none of it:
 # the platform's own undo has nothing to offer yet.
 expect_menu "Edit>Undo" disabled
@@ -41,6 +41,10 @@ expect_menu "Edit>Undo" disabled
 expect_focused textarea#0
 type "alpha 1 beta 22"
 expect textarea#0 "alpha 1 beta 22"
+# A code editor's surface (docs/code-surface-plan.md): numbered lines in
+# the platform's monospaced face.
+expect_gutter textarea#0 shows 1
+expect_face textarea#0 monospaced
 # On a phone the keyboard is up now: the buffer owes the room above it and
 # shows whole (docs/safe-area-plan.md A20; docs/traps.md, the grown
 # textarea's one-line floor). Everywhere else, its whole track again.
@@ -232,6 +236,22 @@ expect_order row#0 "block off 1274:1297|"
 # moment deliberately: the find bar's stamped row would shift row
 # ordinals, and here the status row is the only row there is.
 expect_inset row#0 8
+
+# ---- the View menu: the gutter and the zoom ------------------------
+#
+# The zoom is a multiple of the size the platform gives the text, so it
+# composes with the user's own text-size setting (S1).
+shortcut "primary+equal"
+expect label#0 "zoom 110%"
+expect_scaled textarea#0 1.1
+menu_activate "View>Actual Size"
+expect label#0 "zoom 100%"
+expect_scaled textarea#0 1
+menu_activate "View>Line Numbers"
+expect_gutter textarea#0 off
+menu_activate "View>Line Numbers"
+expect_gutter textarea#0 on
+expect_menu "View>Font>System Monospaced" checked
 
 # ---- the unsaved-work guard, from two different doors --------------
 #

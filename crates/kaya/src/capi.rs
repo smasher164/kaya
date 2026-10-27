@@ -165,6 +165,8 @@ pub const KAYA_OCCURRENCE_IMAGE_RELEASED: u16 = 57;
 /// ACTIVATED { button_clicked's layout } (docs/styling-pass-plan.md Y4).
 pub const KAYA_OCCURRENCE_ACTIVATED: u16 = 58;
 pub const KAYA_OCCURRENCE_SELECTION_CHANGED: u16 = 59;
+/// FONT_FAMILIES { Values: one Str a family } (docs/code-surface-plan.md M3).
+pub const KAYA_OCCURRENCE_FONT_FAMILIES: u16 = 60;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -205,6 +207,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_IMAGE_RELEASED == ring::REC_IMAGE_RELEASED
         && KAYA_OCCURRENCE_ACTIVATED == ring::REC_ACTIVATED
         && KAYA_OCCURRENCE_SELECTION_CHANGED == ring::REC_SELECTION_CHANGED
+        && KAYA_OCCURRENCE_FONT_FAMILIES == ring::REC_FONT_FAMILIES
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -354,6 +357,8 @@ pub const KAYA_TX_SET_DOCK_PLAYER: u16 = 86;
 /// CONTEXT_LABEL_NODE { u64 node; u64 item; u32 level; u32 field }
 /// (docs/media-player-plan.md M26).
 pub const KAYA_TX_CONTEXT_LABEL_NODE: u16 = 87;
+/// LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
+pub const KAYA_TX_LIST_FONT_FAMILIES: u16 = 88;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -701,6 +706,7 @@ const _: () = assert!(
         && KAYA_TX_ATTACH_DOCK == wire::TX_ATTACH_DOCK
         && KAYA_TX_SET_DOCK_PLAYER == wire::TX_SET_DOCK_PLAYER
         && KAYA_TX_CONTEXT_LABEL_NODE == wire::TX_CONTEXT_LABEL_NODE
+        && KAYA_TX_LIST_FONT_FAMILIES == wire::TX_LIST_FONT_FAMILIES
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -808,6 +814,8 @@ pub const KAYA_APPLY_ATTACH_DOCK: u16 = 73;
 pub const KAYA_APPLY_SET_DOCK_PLAYER: u16 = 74;
 /// CONTEXT_LABEL_NODE { u64 widget; u64 item; value label }.
 pub const KAYA_APPLY_CONTEXT_LABEL_NODE: u16 = 75;
+/// LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
+pub const KAYA_APPLY_LIST_FONT_FAMILIES: u16 = 76;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -955,6 +963,7 @@ const _: () = assert!(
         && KAYA_APPLY_ATTACH_DOCK == wire::APPLY_ATTACH_DOCK
         && KAYA_APPLY_SET_DOCK_PLAYER == wire::APPLY_SET_DOCK_PLAYER
         && KAYA_APPLY_CONTEXT_LABEL_NODE == wire::APPLY_CONTEXT_LABEL_NODE
+        && KAYA_APPLY_LIST_FONT_FAMILIES == wire::APPLY_LIST_FONT_FAMILIES
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1198,6 +1207,14 @@ pub const KAYA_PROP_TINT: u32 = 66;
 /// A row or column that emits KAYA_OCCURRENCE_ACTIVATED (docs/styling-pass-plan.md Y4).
 pub const KAYA_PROP_ACTIVATABLE: u32 = 67;
 pub const KAYA_PROP_HIDDEN: u32 = 68;
+/// A textarea's line-number gutter (docs/code-surface-plan.md G1).
+pub const KAYA_PROP_LINE_NUMBERS: u32 = 69;
+/// A text kind in the platform's monospaced face (docs/code-surface-plan.md M1).
+pub const KAYA_PROP_MONOSPACED: u32 = 70;
+/// A text kind in a named installed family (docs/code-surface-plan.md M2).
+pub const KAYA_PROP_FAMILY: u32 = 71;
+/// A text kind's size as a multiple of the platform's (docs/code-surface-plan.md S1).
+pub const KAYA_PROP_TEXT_SCALE: u32 = 72;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1363,7 +1380,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 59,
+    crate::spec::SPEC.occurrence.len() == 60,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1480,6 +1497,10 @@ const _: () = assert!(
         && KAYA_PROP_TINT == wire::PROP_TINT
         && KAYA_PROP_ACTIVATABLE == wire::PROP_ACTIVATABLE
         && KAYA_PROP_HIDDEN == wire::PROP_HIDDEN
+        && KAYA_PROP_LINE_NUMBERS == wire::PROP_LINE_NUMBERS
+        && KAYA_PROP_MONOSPACED == wire::PROP_MONOSPACED
+        && KAYA_PROP_FAMILY == wire::PROP_FAMILY
+        && KAYA_PROP_TEXT_SCALE == wire::PROP_TEXT_SCALE
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -2068,7 +2089,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 68,
+    crate::spec::PROPS.len() == 72,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -5503,6 +5524,41 @@ pub unsafe extern "C" fn kaya_capture_permission(kind: u32, permission: u32, det
     send_occurrences(published);
 }
 
+/// Presentation side: the installed font families, answering
+/// list_font_families, as UTF-8 names separated by `\n` in any order; the
+/// core drops empty and private (`.`-led) names, deduplicates and sorts in
+/// code-point order, so every backend's list reads the same way
+/// (docs/code-surface-plan.md M3).
+///
+/// # Safety
+/// `names` must describe `len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_font_families(names: *const u8, len: usize) {
+    let joined = unsafe { lossy(names, len) };
+    send_occurrences(vec![crate::protocol::Occurrence::FontFamilies { families: font_family_list(&joined) }]);
+}
+
+#[cfg(test)]
+#[test]
+fn the_font_family_list_is_one_shape_on_every_backend() {
+    assert_eq!(
+        font_family_list("Zapfino\n.SF NS\nArial\n\n Menlo \nArial\nÉlan\nmonospace"),
+        vec!["Arial", "Menlo", "Zapfino", "monospace", "Élan"]
+    );
+}
+
+pub(crate) fn font_family_list(joined: &str) -> Vec<String> {
+    let mut families: Vec<String> = joined
+        .split('\n')
+        .map(str::trim)
+        .filter(|name| !name.is_empty() && !name.starts_with('.'))
+        .map(str::to_owned)
+        .collect();
+    families.sort();
+    families.dedup();
+    families
+}
+
 /// Presentation side: a device list starts.
 #[unsafe(no_mangle)]
 pub extern "C" fn kaya_capture_devices_begin() {
@@ -6838,6 +6894,7 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CaptureChanged { .. }
             | crate::protocol::Occurrence::CapturePermission { .. }
             | crate::protocol::Occurrence::CaptureDevices { .. }
+            | crate::protocol::Occurrence::FontFamilies { .. }
             | crate::protocol::Occurrence::CaptureOverrun { .. }
             | crate::protocol::Occurrence::ToastResult { .. }
             | crate::protocol::Occurrence::ImageNeeded { .. }
@@ -7494,6 +7551,7 @@ mod tests {
             ("attach_dock", KAYA_TX_ATTACH_DOCK),
             ("set_dock_player", KAYA_TX_SET_DOCK_PLAYER),
             ("context_label_node", KAYA_TX_CONTEXT_LABEL_NODE),
+            ("list_font_families", KAYA_TX_LIST_FONT_FAMILIES),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7569,6 +7627,7 @@ mod tests {
             ("attach_dock", KAYA_APPLY_ATTACH_DOCK),
             ("set_dock_player", KAYA_APPLY_SET_DOCK_PLAYER),
             ("context_label_node", KAYA_APPLY_CONTEXT_LABEL_NODE),
+            ("list_font_families", KAYA_APPLY_LIST_FONT_FAMILIES),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

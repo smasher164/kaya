@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x7a1263c53af5e0a4
+	SpecHash uint64 = 0xcd377e2688e6cb2a
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -150,6 +150,10 @@ const (
 	PropTint = 66
 	PropActivatable = 67
 	PropHidden = 68
+	PropLineNumbers = 69
+	PropMonospaced = 70
+	PropFamily = 71
+	PropTextScale = 72
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -496,6 +500,7 @@ const (
 	txAttachDock = 85
 	txSetDockPlayer = 86
 	txContextLabelNode = 87
+	txListFontFamilies = 88
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -569,6 +574,7 @@ const (
 	applyAttachDock = 73
 	applySetDockPlayer = 74
 	applyContextLabelNode = 75
+	applyListFontFamilies = 76
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -628,6 +634,7 @@ const (
 	occImageReleased = 57
 	occActivated = 58
 	occSelectionChanged = 59
+	occFontFamilies = 60
 )
 
 func (d Detent) String() string {
@@ -1909,6 +1916,12 @@ func TxContextLabelNode(node uint64, item uint64, level uint32, field uint32) []
 	b = binary.LittleEndian.AppendUint64(b, item)
 	b = binary.LittleEndian.AppendUint32(b, level)
 	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxListFontFamilies: List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
+func TxListFontFamilies() []byte {
+	b := beginRecord(txListFontFamilies)
 	return endRecord(b)
 }
 
@@ -4118,6 +4131,134 @@ func TxBindHiddenElement(widgetID uint64, level uint32, field uint32) []byte {
 	return endRecord(b)
 }
 
+// TxSetLineNumbers: set_property with a constant line_numbers value.
+func TxSetLineNumbers(widgetID uint64, lineNumbers bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLineNumbers)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, lineNumbers)
+	return endRecord(b)
+}
+
+// TxBindLineNumbers: set_property with a signal-bound line_numbers value.
+func TxBindLineNumbers(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLineNumbers)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindLineNumbersElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindLineNumbersElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropLineNumbers)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetMonospaced: set_property with a constant monospaced value.
+func TxSetMonospaced(widgetID uint64, monospaced bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMonospaced)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, monospaced)
+	return endRecord(b)
+}
+
+// TxBindMonospaced: set_property with a signal-bound monospaced value.
+func TxBindMonospaced(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMonospaced)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindMonospacedElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindMonospacedElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropMonospaced)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetFamily: set_property with a constant family value.
+func TxSetFamily(widgetID uint64, family string) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFamily)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, family)
+	return endRecord(b)
+}
+
+// TxBindFamily: set_property with a signal-bound family value.
+func TxBindFamily(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFamily)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindFamilyElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindFamilyElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFamily)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetTextScale: set_property with a constant text_scale value.
+func TxSetTextScale(widgetID uint64, textScale float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTextScale)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, textScale)
+	return endRecord(b)
+}
+
+// TxBindTextScale: set_property with a signal-bound text_scale value.
+func TxBindTextScale(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTextScale)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindTextScaleElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindTextScaleElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropTextScale)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -4804,7 +4945,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -5040,6 +5181,24 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		return kind, id, nil, tail, true
 	}
 	if kind == occCaptureDevices {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		id = 0
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occFontFamilies {
 		// A flat record: its fields in order, into the tail.
 		at := 8
 		tail := []any{}

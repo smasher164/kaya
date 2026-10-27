@@ -4440,6 +4440,37 @@ public final class KayaAppTx {
         tx.setMaxLines(w.id, Double(lines))
     }
 
+    /// A textarea that numbers its logical lines in a gutter beside the text
+    /// (docs/code-surface-plan.md G1).
+    public func setLineNumbers(_ w: KayaWidget, _ on: Bool) {
+        tx.setLineNumbers(w.id, on)
+    }
+
+    /// A label, entry or textarea in the platform's own monospaced face, the
+    /// family and never the size (docs/code-surface-plan.md M1).
+    public func setMonospaced(_ w: KayaWidget, _ on: Bool) {
+        tx.setMonospaced(w.id, on)
+    }
+
+    /// A label, entry or textarea in an installed family by name, the user's
+    /// pick from `onFontFamilies`; a family the platform does not have falls
+    /// back to the role. Empty unsets it (docs/code-surface-plan.md M2).
+    public func setFamily(_ w: KayaWidget, _ name: String) {
+        tx.setFamily(w.id, name)
+    }
+
+    /// A label, entry or textarea at that multiple of the size the platform
+    /// gives it, 0.5 to 3 (docs/code-surface-plan.md S1).
+    public func setTextScale(_ w: KayaWidget, _ scale: Double) {
+        tx.setTextScale(w.id, scale)
+    }
+
+    /// Ask for the installed font families, answered once by
+    /// `onFontFamilies` (docs/code-surface-plan.md M3).
+    public func listFontFamilies() {
+        tx.listFontFamilies()
+    }
+
     /// An image's bound in points: the picture scales down to fit, its shape
     /// kept, and never up (docs/photo-attach-plan.md §2).
     public func setMaxWidth(_ w: KayaWidget, _ points: Double) {
@@ -6875,6 +6906,21 @@ public final class KayaTpl {
     /// ellipsis (docs/media-player-plan.md M16 (2)).
     public func setMaxLines(_ n: KayaNodeHandle, _ lines: Int) {
         tx.tx.setMaxLines(n.id, Double(lines))
+    }
+
+    /// Every stamped copy in the platform's monospaced face (`setMonospaced`).
+    public func setMonospaced(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setMonospaced(n.id, on)
+    }
+
+    /// Every stamped copy in an installed family (`setFamily`).
+    public func setFamily(_ n: KayaNodeHandle, _ name: String) {
+        tx.tx.setFamily(n.id, name)
+    }
+
+    /// Every stamped copy at a multiple of the platform's size (`setTextScale`).
+    public func setTextScale(_ n: KayaNodeHandle, _ scale: Double) {
+        tx.tx.setTextScale(n.id, scale)
     }
 
     public func setTint(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTint>) {

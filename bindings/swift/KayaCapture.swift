@@ -269,6 +269,8 @@ final class KayaCaptureMirror {
     var onOverrun: [UInt64: (KayaAppTx, UInt64) throws -> Void] = [:]
     var onPermission: ((KayaAppTx, KayaCaptureKind, KayaPermission) throws -> Void)?
     var onDevices: ((KayaAppTx, [KayaCaptureDevice]) throws -> Void)?
+    /// docs/code-surface-plan.md M3: the font family list rides this arm.
+    var onFontFamilies: ((KayaAppTx, [String]) throws -> Void)?
 }
 
 extension KayaApp {
@@ -318,6 +320,12 @@ extension KayaApp {
     /// The device list, as watching starts and whenever it changes.
     public func onCaptureDevices(_ handler: @escaping (KayaAppTx, [KayaCaptureDevice]) throws -> Void) {
         captures.onDevices = handler
+    }
+
+    /// The installed font families, answering `listFontFamilies`: unique, in
+    /// code-point order, the names `setFamily` takes (docs/code-surface-plan.md M3).
+    public func onFontFamilies(_ handler: @escaping (KayaAppTx, [String]) throws -> Void) {
+        captures.onFontFamilies = handler
     }
 
     /// Run `f` for each frame of `c` (docs/capture-plan.md §4). IT RUNS ON
@@ -393,6 +401,9 @@ extension KayaApp {
             }
             captures.devices = list
             if let h = captures.onDevices { run { tx in try h(tx, list) } }
+        case UInt16(KAYA_OCCURRENCE_FONT_FAMILIES):
+            let list = tail.dropFirst().map(kayaStr)
+            if let h = captures.onFontFamilies { run { tx in try h(tx, Array(list)) } }
         case UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN):
             // The surface-pair class: `id` is behind_ms, the capture rides.
             guard case .i64(let raw) = payload else { return true }

@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x7a1263c53af5e0a4
+let kayaSpecHash: UInt64 = 0xcd377e2688e6cb2a
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -129,6 +129,7 @@ private let applyContextAttach: UInt16 = 21
 private let applyContextAttachNode: UInt16 = 22
 private let applySetMenuProp: UInt16 = 23
 private let applyContextLabelNode: UInt16 = 75
+private let applyListFontFamilies: UInt16 = 76
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -366,6 +367,11 @@ private let propSelected: UInt32 = 65
 private let propTint: UInt32 = 66
 private let propActivatable: UInt32 = 67
 private let propHidden: UInt32 = 68
+// docs/code-surface-plan.md: the gutter, the face and the size.
+private let propLineNumbers: UInt32 = 69
+private let propMonospaced: UInt32 = 70
+private let propFamily: UInt32 = 71
+private let propTextScale: UInt32 = 72
 private let groundNone: Int64 = 0
 private let groundGradient: Int64 = 1
 private let groundImage: Int64 = 2
@@ -846,6 +852,12 @@ final class KayaNode: Identifiable {
     /// A textarea one line tall at rest that grows to this many lines
     /// (docs/grow-lines-plan.md); 0 = unset.
     var maxLines: Double = 0
+    /// docs/code-surface-plan.md G1, M1, M2, S1: a textarea's gutter, and a
+    /// text kind's face and size.
+    var lineNumbers = false
+    var monospaced = false
+    var family = ""
+    var textScale: Double = 1
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -6893,6 +6905,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.activatable = raw[body + 24] != 0
                 case (propHidden, valueBool):
                     kayaScene.nodes[id]!.hidden = raw[body + 24] != 0
+                case (propLineNumbers, valueBool):
+                    kayaScene.nodes[id]!.lineNumbers = raw[body + 24] != 0
+                case (propMonospaced, valueBool):
+                    kayaScene.nodes[id]!.monospaced = raw[body + 24] != 0
+                case (propFamily, valueStr):
+                    let bytes = raw[(body + 24)..<(body + 24 + len)]
+                    kayaScene.nodes[id]!.family = String(decoding: bytes, as: UTF8.self)
+                case (propTextScale, valueF64):
+                    kayaScene.nodes[id]!.textScale =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`. The decode
@@ -7443,6 +7465,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 kayaFollowCaptureAwake()
             case applyRequestPermission:
                 kayaCaptureRequestPermission(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self))
+            case applyListFontFamilies:
+                kayaListFontFamilies()
             case applyWatchCaptureDevices:
                 kayaCaptureWatchDevices(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self) != 0)
             case applySetVideoCapture:
@@ -9481,6 +9505,308 @@ private func kayaAwaitTextView(_ spec: Substring) {
                 .data(using: .utf8)!)
     }
 }
+
+// --- expect_gutter, expect_face, expect_scaled (docs/code-surface-plan.md G5, M4, S3) ---
+
+/// A read that answers a value or the sentence saying why it cannot.
+enum KayaRead<T> {
+    case success(T)
+    case failure(String)
+}
+
+/// One row of a gutter reading: harness.rs's GutterRow, the same words.
+struct KayaGutterRow {
+    let line: Int
+    let first: Bool
+    var drawn: Int?
+}
+
+/// harness.rs's pair_gutter: a label belongs to the fragment its centre
+/// falls in; a label beside no fragment is a stray.
+func kayaPairGutter(_ fragments: [(CGFloat, CGFloat, Int, Bool)], _ labels: [(Int, CGFloat)])
+    -> ([KayaGutterRow], [Int])
+{
+    var used = Array(repeating: false, count: labels.count)
+    var rows: [KayaGutterRow] = []
+    for (top, bottom, line, first) in fragments {
+        var row = KayaGutterRow(line: line, first: first, drawn: nil)
+        for (i, label) in labels.enumerated() where !used[i] && label.1 >= top && label.1 < bottom {
+            used[i] = true
+            row.drawn = label.0
+            break
+        }
+        rows.append(row)
+    }
+    let top = fragments.first?.0 ?? 0
+    let bottom = fragments.last?.1 ?? 0
+    let stray = labels.enumerated()
+        .filter { !used[$0.offset] && $0.element.1 >= top && $0.element.1 < bottom }
+        .map { $0.element.0 }
+    return (rows, stray)
+}
+
+/// harness.rs's gutter_line and gutter_verdict, word for word.
+func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring]) -> (String?, String) {
+    let word = clause.first.map(String.init) ?? ""
+    let n = clause.count > 1 ? Int(clause[1]) ?? 0 : 0
+    guard let (rows, stray) = read else {
+        return word == "off" ? ("off", "") : (nil, "draws no gutter")
+    }
+    var tokens: [String] = rows.map { row in
+        let want = row.first ? row.line : nil
+        let say = { (v: Int?) in v.map(String.init) ?? "·" }
+        return want == row.drawn ? say(want) : "\(say(want))!\(row.drawn.map(String.init) ?? "-")"
+    }
+    if !stray.isEmpty { tokens.append("(beside no line: \(stray.map(String.init).joined(separator: " ")))") }
+    let line = tokens.joined(separator: " ")
+    if word == "off" { return (nil, "is drawn: \(line)") }
+    if rows.isEmpty { return (nil, "reads no line fragment inside the viewport") }
+    if !stray.isEmpty || rows.contains(where: { $0.drawn != ($0.first ? $0.line : nil) }) {
+        return (nil, "disagrees with its text: \(line)")
+    }
+    let starts = { (n: Int) in rows.contains { $0.first && $0.line == n } }
+    let ok: Bool
+    switch word {
+    case "shows": ok = starts(n)
+    case "hides": ok = !rows.contains { $0.line == n }
+    case "wraps": ok = starts(n) && rows.contains { !$0.first && $0.line == n }
+    default: ok = true
+    }
+    let said = word == "on" ? "on" : "\(word) \(n)"
+    return ok ? ("\(said): \(line)", "") : (nil, "reads \(line), wanted \(said)")
+}
+
+#if os(macOS)
+    /// The gutter as drawn beside the text as AppKit lays it out: the rows
+    /// come from the text view's own `firstRect(forCharacterRange:)`, one
+    /// visual line at a time from the first visible character, never from
+    /// the TextKit enumeration the ruler draws from. nil when no gutter is
+    /// shown; a sentence when there is nothing to read.
+    @MainActor func kayaGutterRead(_ node: KayaNode) -> KayaRead<([KayaGutterRow], [Int])?> {
+        guard let view = kayaMacTextViews[node.id]?.view, let scroll = view.enclosingScrollView else {
+            return .failure("no text view on screen")
+        }
+        guard let gutter = scroll.subviews.compactMap({ $0 as? KayaGutterView }).first else {
+            return .success(nil)
+        }
+        gutter.display()
+        let visible = view.visibleRect
+        let text = view.string as NSString
+        let units = Array((view.string).utf16)
+        guard let window = view.window else { return .failure("no window") }
+        // The viewport's first character, from AppKit's own viewport layout
+        // controller; the rows below come from the input-client geometry.
+        guard let layout = view.textLayoutManager, let content = layout.textContentManager,
+            let viewport = layout.textViewportLayoutController.viewportRange
+        else { return .failure("no viewport range laid out") }
+        let start = min(content.offset(from: content.documentRange.location, to: viewport.location), units.count)
+        func paragraphStart(_ at: Int) -> Int {
+            var at = at
+            while at > 0 && units[at - 1] != 10 { at -= 1 }
+            return at
+        }
+        func lineBox(_ index: Int) -> NSRect {
+            let screen = view.firstRect(
+                forCharacterRange: NSRange(location: index, length: index < units.count ? 1 : 0), actualRange: nil)
+            return view.convert(window.convertFromScreen(screen), from: nil)
+        }
+        // The controller's range can lag an edit: step back while the
+        // paragraph above is laid out and still reaches into the viewport.
+        var location = paragraphStart(start)
+        for _ in 0..<64 where location > 0 {
+            let above = paragraphStart(location - 1)
+            let box = lineBox(above)
+            guard box.height > 0, box.maxY > visible.minY else { break }
+            location = above
+        }
+        let initial = location
+        var line = 1 + units.prefix(location).filter { $0 == 10 }.count
+        // firstRect answers the part of a line inside the viewport and an
+        // empty rect for a line outside it (measured), so the rows are read
+        // raw, unclipped to a whole line's height, then taken by their centre.
+        var raw: [(CGFloat, CGFloat, Int, Bool)] = []
+        for _ in 0..<2000 {
+            var actual = NSRange(location: 0, length: 0)
+            let remaining = text.length - location
+            let screen = view.firstRect(
+                forCharacterRange: NSRange(location: location, length: max(remaining, 0)), actualRange: &actual)
+            let first = location == 0 || units[location - 1] == 10
+            if first && location != initial { line += 1 }
+            if screen.height > 0 {
+                let box = view.convert(window.convertFromScreen(screen), from: nil)
+                raw.append((box.minY, box.maxY, line, first))
+            } else if !raw.isEmpty {
+                break
+            }
+            let next = actual.length > 0 ? NSMaxRange(actual) : location + 1
+            if next > text.length || (actual.length == 0 && remaining == 0) { break }
+            location = next
+            if location == text.length {
+                // The empty last line after a final newline, if there is one.
+                if units.last == 10 {
+                    line += 1
+                    let caret = view.firstRect(forCharacterRange: NSRange(location: location, length: 0), actualRange: nil)
+                    if caret.height > 0 {
+                        let box = view.convert(window.convertFromScreen(caret), from: nil)
+                        raw.append((box.minY, box.maxY, line, true))
+                    }
+                }
+                break
+            }
+        }
+        let height = raw.map { $0.1 - $0.0 }.max() ?? 0
+        let fragments = raw.map { row -> (CGFloat, CGFloat, Int, Bool) in
+            if row.1 - row.0 < height - 0.5, row.0 <= visible.minY + 0.5 {
+                return (row.1 - height, row.1, row.2, row.3)
+            }
+            if row.1 - row.0 < height - 0.5, row.1 >= visible.maxY - 0.5 {
+                return (row.0, row.0 + height, row.2, row.3)
+            }
+            return row
+        }.filter { ($0.0 + $0.1) / 2 >= visible.minY && ($0.0 + $0.1) / 2 < visible.maxY }
+        let labels = gutter.drawn.map { ($0.number, $0.mid) }
+        return .success(kayaPairGutter(fragments, labels))
+    }
+#else
+    /// The gutter as drawn beside the text as UIKit lays it out: the rows come
+    /// from the text view's own UITextInput geometry (`firstRect(for:)` and
+    /// the tokenizer's line boundary), one visual line at a time from the
+    /// viewport's first character, never from the TextKit enumeration the
+    /// gutter draws from.
+    @MainActor func kayaGutterRead(_ node: KayaNode) -> KayaRead<([KayaGutterRow], [Int])?> {
+        guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+        guard let gutter = view.subviews.compactMap({ $0 as? KayaUIGutter }).first else { return .success(nil) }
+        gutter.setNeedsDisplay()
+        gutter.layoutIfNeeded()
+        gutter.layer.displayIfNeeded()
+        let visible = CGRect(origin: view.contentOffset, size: view.bounds.size)
+        let units = Array((view.text ?? "").utf16)
+        guard let top = view.closestPosition(to: CGPoint(x: view.textContainerInset.left + 2, y: visible.minY + 1))
+        else { return .failure("no character under the viewport's top") }
+        var location = min(view.offset(from: view.beginningOfDocument, to: top), units.count)
+        while location > 0 && units[location - 1] != 10 { location -= 1 }
+        let initial = location
+        var line = 1 + units.prefix(location).filter { $0 == 10 }.count
+        var fragments: [(CGFloat, CGFloat, Int, Bool)] = []
+        for _ in 0..<2000 {
+            guard let at = view.position(from: view.beginningOfDocument, offset: location) else { break }
+            let first = location == 0 || units[location - 1] == 10
+            if first && location != initial { line += 1 }
+            let end = view.tokenizer.position(from: at, toBoundary: .line, inDirection: .storage(.forward)) ?? view.endOfDocument
+            let endOffset = view.offset(from: view.beginningOfDocument, to: end)
+            let box: CGRect
+            if location == units.count {
+                box = view.caretRect(for: at)
+            } else if let range = view.textRange(from: at, to: endOffset > location ? end : view.endOfDocument) {
+                box = view.firstRect(for: range)
+            } else { break }
+            if box.minY >= visible.maxY { break }
+            if box.midY >= visible.minY && box.midY < visible.maxY && !box.isNull { fragments.append((box.minY, box.maxY, line, first)) }
+            if location == units.count { break }
+            var next = endOffset > location ? endOffset : location + 1
+            if next < units.count && units[next] == 10 && next > location { next += 1 }
+            else if next == units.count && units.last == 10 && next > location {}
+            location = min(next, units.count)
+            if location == units.count && units.last != 10 { break }
+        }
+        let labels = gutter.drawn.map { ($0.number, $0.mid) }
+        return .success(kayaPairGutter(fragments, labels))
+    }
+#endif
+
+
+/// The text style a text kind's size is measured against (S3).
+func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
+    node.kind == kindLabel && node.role == roleHeading ? .headline
+        : node.kind == kindLabel && node.role == roleCaption ? .footnote : .body
+}
+
+/// The size the platform gives a text kind now, before text_scale.
+@MainActor func kayaPlatformSize(_ node: KayaNode) -> CGFloat {
+    let style = kayaNodeStyle(node)
+    #if os(macOS)
+        return (kayaPlatformFont(style) ?? NSFont.preferredFont(forTextStyle: style)).pointSize
+    #else
+        return (kayaPlatformFont(style) ?? UIFont.preferredFont(forTextStyle: style)).pointSize
+    #endif
+}
+
+#if os(macOS)
+    /// The font the toolkit resolved for a text kind: the NSTextView's own for
+    /// a textarea, and for a label or an entry the AXFont the accessibility
+    /// tree publishes over its text, rebuilt into a font to read its trait.
+    @MainActor func kayaResolvedFont(_ node: KayaNode) -> KayaRead<NSFont> {
+        if node.kind == kindTextarea {
+            guard let view = kayaMacTextViews[node.id]?.view, let font = view.font else {
+                return .failure("no text view on screen")
+            }
+            return .success(font)
+        }
+        guard !node.a11yId.isEmpty else { return .failure("no a11y_id authored on this widget") }
+        // An entry is an NSTextField, read off the control: an empty field
+        // publishes no attributed text to read a font from.
+        if node.kind != kindLabel {
+            var field: NSTextField?
+            func walk(_ view: NSView) {
+                if field != nil { return }
+                if let text = view as? NSTextField, text.accessibilityIdentifier() == node.a11yId { field = text }
+                for sub in view.subviews { walk(sub) }
+            }
+            for window in kayaNSWindows.values { if let content = window.contentView { walk(content) } }
+            if let font = field?.font { return .success(font) }
+        }
+        guard let hit = kayaAxFind(kayaPanelAxApp(), node.a11yId) else {
+            return .failure("not in the accessibility tree")
+        }
+        var count: CFTypeRef?
+        AXUIElementCopyAttributeValue(hit, kAXNumberOfCharactersAttribute as CFString, &count)
+        let length = (count as? Int) ?? (node.text as NSString).length
+        var whole = CFRange(location: 0, length: max(1, min(length, 1)))
+        guard let param = AXValueCreate(.cfRange, &whole) else { return .failure("no range") }
+        var out: CFTypeRef?
+        let err = AXUIElementCopyParameterizedAttributeValue(
+            hit, kAXAttributedStringForRangeParameterizedAttribute as CFString, param, &out)
+        guard err == .success, let attributed = out as? NSAttributedString, attributed.length > 0 else {
+            return .failure("publishes no attributed text (\(err.rawValue))")
+        }
+        guard let ax = attributed.attribute(NSAttributedString.Key(rawValue: "AXFont"), at: 0, effectiveRange: nil)
+            as? [String: Any]
+        else { return .failure("publishes no AXFont over its text") }
+        let size = (ax["AXFontSize"] as? NSNumber).map { CGFloat($0.doubleValue) } ?? 0
+        guard let name = ax["AXFontName"] as? String else {
+            return .failure("publishes an AXFont with no name: \(ax)")
+        }
+        if let font = NSFont(name: name, size: size) { return .success(font) }
+        // The system faces publish private, `.`-led names no NSFont(name:)
+        // answers to (measured: ".SFNS-Regular" for the system font).
+        if name.hasPrefix(".") {
+            return .success(name.contains("Mono")
+                ? .monospacedSystemFont(ofSize: size, weight: .regular) : .systemFont(ofSize: size))
+        }
+        return .failure("publishes an AXFont no font answers to: \(ax)")
+    }
+#else
+    /// The font the toolkit resolved for a text kind: the UITextView's or the
+    /// UITextField's own.
+    @MainActor func kayaResolvedFont(_ node: KayaNode) -> KayaRead<UIFont> {
+        var found: UIFont?
+        func walk(_ view: UIView) {
+            if found != nil { return }
+            if let text = view as? UITextView, text.accessibilityIdentifier == node.a11yId { found = text.font }
+            if let field = view as? UITextField, field.accessibilityIdentifier == node.a11yId { found = field.font }
+            for sub in view.subviews { walk(sub) }
+        }
+        guard !node.a11yId.isEmpty else { return .failure("no a11y_id authored on this widget") }
+        for scene in UIApplication.shared.connectedScenes {
+            for window in (scene as? UIWindowScene)?.windows ?? [] { walk(window) }
+        }
+        guard let found else {
+            return .failure(node.kind == kindLabel
+                ? "a SwiftUI label publishes no font on iOS" : "no text view on screen")
+        }
+        return .success(found)
+    }
+#endif
 
 private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
@@ -14600,6 +14926,108 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[0]) \(wantRanges)")
                 } else {
                     failures.append("\(parts[0]) \(gotRanges), wanted \(wantRanges)")
+                }
+            case "expect_gutter":
+                // docs/code-surface-plan.md G5: harness.rs's ExpectGutter.
+                let clause = Array(parts.dropFirst(2))
+                let words = ["on", "off", "shows", "hides", "wraps"]
+                guard parts.count >= 3, words.contains(String(parts[2])),
+                    (["on", "off"].contains(String(parts[2])) ? clause.count == 1
+                        : clause.count == 2 && (Int(clause[1]) ?? 0) >= 1)
+                else {
+                    failures.append("expect_gutter wants on, off, shows N, hides N or wraps N: \(line)")
+                    break
+                }
+                func readGutter() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTarget(parts[1], "textarea", kayaScene.textareas) else {
+                            return (nil, "no such target")
+                        }
+                        switch kayaGutterRead(node) {
+                        case .failure(let why): return (nil, why)
+                        case .success(let read): return kayaGutterVerdict(read, clause)
+                        }
+                    }
+                }
+                var gutter = readGutter()
+                let gutterDeadline = Date().addingTimeInterval(5)
+                while gutter.0 == nil && Date() < gutterDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gutter = readGutter()
+                }
+                if let ok = gutter.0 {
+                    observed.append("\(parts[1]) gutter \(ok)")
+                } else {
+                    failures.append("\(parts[1]) gutter \(gutter.1)")
+                }
+            case "expect_face":
+                // docs/code-surface-plan.md M4: harness.rs's face_verdict.
+                let want = parts.count == 3 ? String(parts[2]) : ""
+                guard ["monospaced", "proportional", "named"].contains(want) else {
+                    failures.append("expect_face's face is one of monospaced, proportional, named: \(line)")
+                    break
+                }
+                func readFace() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTextTarget(parts[1]) else { return (nil, "no such target") }
+                        switch kayaResolvedFont(node) {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let font):
+                            let got = kayaFaceWord(font)
+                            let family = String(got.split(separator: " ", maxSplits: 1).last ?? "")
+                            if want == "named" {
+                                if node.family.isEmpty { return (nil, " reads \(got), and the app asked for no family") }
+                                return family.caseInsensitiveCompare(node.family) == .orderedSame
+                                    ? (got, "") : (nil, " reads \(got), wanted the family \"\(node.family)\"")
+                            }
+                            return got.hasPrefix(want + " ") ? (got, "") : (nil, " reads \(got), wanted \(want)")
+                        }
+                    }
+                }
+                var face = readFace()
+                let faceDeadline = Date().addingTimeInterval(5)
+                while face.0 == nil && Date() < faceDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    face = readFace()
+                }
+                if let ok = face.0 {
+                    observed.append("\(parts[1]) face \(ok)")
+                } else {
+                    failures.append("\(parts[1]) face\(face.1)")
+                }
+            case "expect_scaled":
+                // docs/code-surface-plan.md S3: harness.rs's ExpectScaled.
+                guard parts.count == 3, let want = Double(parts[2]), want > 0 else {
+                    failures.append("expect_scaled's multiple is a positive number: \(line)")
+                    break
+                }
+                func readScaled() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTextTarget(parts[1]) else { return (nil, ": no such target") }
+                        switch kayaResolvedFont(node) {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let font):
+                            let size = Double(font.pointSize)
+                            let base = Double(kayaPlatformSize(node))
+                            let ratio = size / base
+                            let say = { (v: Double) in String(format: "%.2f", v) }
+                            return abs(ratio - want) <= want * 0.02
+                                ? ("\(say(size)) of \(say(base)), \(String(format: "%.3f", ratio))x", "")
+                                : (nil, " reads \(say(size)) of the platform's \(say(base)), "
+                                    + "\(String(format: "%.3f", ratio))x, wanted \(parts[2])x")
+                        }
+                    }
+                }
+                var scaled = readScaled()
+                let scaledDeadline = Date().addingTimeInterval(5)
+                while scaled.0 == nil && Date() < scaledDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    scaled = readScaled()
+                }
+                if let ok = scaled.0 {
+                    observed.append("\(parts[1]) size \(ok)")
+                } else {
+                    failures.append("\(parts[1]) size\(scaled.1)")
                 }
             case "expect_revealed":
                 // CONTAINMENT, never the viewport itself, whose context differs
@@ -23904,6 +24332,7 @@ func kayaFamilyPresent(_ family: String) -> Bool {
 @MainActor func kayaLabelBaseFont(_ node: KayaNode) -> KayaPlatformFont {
     let style: KayaPlatformTextStyle =
         node.role == roleHeading ? .headline : node.role == roleCaption ? .footnote : .body
+    if kayaNodeFontSet(node) { return kayaNodeFont(node, style) }
     // The brand family when one is set; otherwise the platform's own ramp for
     // the STYLE — a plain system font would drop the heading's weight.
     if let font = kayaPlatformFont(style) { return font }
@@ -23957,6 +24386,143 @@ func kayaFamilyPresent(_ family: String) -> Bool {
         // accessibilityXXXL), inherent to substituting a family.
         return UIFontMetrics(forTextStyle: style).scaledFont(for: substituted)
     #endif
+}
+
+/// A line in a TextKit 2 view, as the gutter numbers it: the line fragment's
+/// box in the text view's coordinates, its logical line (1-based) and
+/// whether it begins that line (docs/code-surface-plan.md G2).
+struct KayaGutterLine {
+    let top: CGFloat
+    let bottom: CGFloat
+    let line: Int
+    let first: Bool
+}
+
+/// Every line fragment whose box meets `visible`, top to bottom. The extra
+/// line fragment after a final newline is the empty last line and numbered.
+@MainActor func kayaGutterLines(
+    _ layout: NSTextLayoutManager, _ text: String, _ visible: CGRect, _ origin: CGPoint
+) -> [KayaGutterLine] {
+    guard let content = layout.textContentManager else { return [] }
+    let documentStart = layout.documentRange.location
+    let units = Array(text.utf16)
+    // A paragraph's worth above the viewport's top, so a line it cuts through
+    // is enumerated whatever the fragment lookup answers at the very edge.
+    let startAt =
+        layout.textLayoutFragment(for: CGPoint(x: 0, y: max(0, visible.minY - origin.y - 64)))?
+        .rangeInElement.location ?? documentStart
+    var offset = content.offset(from: documentStart, to: startAt)
+    var line = 1 + units.prefix(offset).filter { $0 == 10 }.count
+    var out: [KayaGutterLine] = []
+    layout.enumerateTextLayoutFragments(from: startAt, options: [.ensuresLayout]) { fragment in
+        let frame = fragment.layoutFragmentFrame
+        if frame.minY + origin.y > visible.maxY { return false }
+        let fragmentStart = content.offset(from: documentStart, to: fragment.rangeInElement.location)
+        offset = fragmentStart
+        for (index, piece) in fragment.textLineFragments.enumerated() {
+            let box = piece.typographicBounds
+            let top = origin.y + frame.minY + box.minY
+            let bottom = origin.y + frame.minY + box.maxY
+            let extra = index > 0 && piece.characterRange.length == 0
+                && fragmentStart + piece.characterRange.location > 0
+                && fragmentStart + piece.characterRange.location <= units.count
+                && units[fragmentStart + piece.characterRange.location - 1] == 10
+            if extra { line += 1 }
+            if bottom > visible.minY && top < visible.maxY {
+                out.append(KayaGutterLine(top: top, bottom: bottom, line: line, first: index == 0 || extra))
+            }
+        }
+        line += 1
+        return true
+    }
+    return out
+}
+
+// --- THE NODE'S OWN FACE AND SIZE (docs/code-surface-plan.md M1, M2, S1) ---
+
+/// The gutter, face and size a textarea asks for, as one value its body
+/// reads so a change to any of them updates the view.
+func kayaSurfaceKey(_ node: KayaNode) -> String {
+    "\(node.lineNumbers) \(node.monospaced) \(node.textScale) \(node.family)"
+}
+
+/// Whether the node asks for a face or a size of its own.
+func kayaNodeFontSet(_ node: KayaNode) -> Bool {
+    node.monospaced || !node.family.isEmpty || node.textScale != 1
+}
+
+/// The font a text kind draws in: the platform's (or the brand's) for the
+/// style, its family swapped for the node's installed `family`, else for the
+/// platform's monospaced face when `monospaced`, and its size the platform's
+/// times `text_scale`, taken AFTER Dynamic Type so the multiple composes.
+@MainActor func kayaNodeFont(_ node: KayaNode, _ style: KayaPlatformTextStyle) -> KayaPlatformFont {
+    #if os(macOS)
+        let base = kayaPlatformFont(style) ?? NSFont.preferredFont(forTextStyle: style)
+    #else
+        let base = kayaPlatformFont(style) ?? UIFont.preferredFont(forTextStyle: style)
+    #endif
+    let size = base.pointSize * CGFloat(node.textScale)
+    let traits =
+        base.fontDescriptor.object(forKey: .traits)
+        as? [KayaPlatformFontDescriptor.TraitKey: Any]
+    let weight = (traits?[.weight] as? NSNumber)?.doubleValue ?? 0
+    if !node.family.isEmpty, kayaFamilyPresent(node.family) {
+        let descriptor = KayaPlatformFontDescriptor(fontAttributes: [
+            .family: node.family,
+            .traits: [KayaPlatformFontDescriptor.TraitKey.weight: weight],
+        ])
+        #if os(macOS)
+            if let font = NSFont(descriptor: descriptor, size: size) { return font }
+        #else
+            return UIFont(descriptor: descriptor, size: size)
+        #endif
+    }
+    if node.monospaced {
+        return KayaPlatformFont.monospacedSystemFont(ofSize: size, weight: KayaPlatformFont.Weight(weight))
+    }
+    return base.withSize(size)
+}
+
+/// The SwiftUI spelling of kayaNodeFont, or nil when the node asks for nothing.
+@MainActor func kayaNodeSwiftFont(_ node: KayaNode, _ style: KayaPlatformTextStyle) -> Font? {
+    kayaNodeFontSet(node) ? Font(kayaNodeFont(node, style) as CTFont) : nil
+}
+
+/// A text kind's own face and size, applied only when it asks for one: a
+/// `.font(nil)` would undo the root's brand font.
+struct KayaNodeFontModifier: ViewModifier {
+    let node: KayaNode
+    let style: KayaPlatformTextStyle
+
+    func body(content: Content) -> some View {
+        if let font = kayaNodeSwiftFont(node, style) { content.font(font) } else { content }
+    }
+}
+
+/// list_font_families, answered through the core (docs/code-surface-plan.md M3).
+func kayaListFontFamilies() {
+    #if os(macOS)
+        let families = NSFontManager.shared.availableFontFamilies
+    #else
+        let families = UIFont.familyNames
+    #endif
+    let joined = Array(families.joined(separator: "\n").utf8)
+    joined.withUnsafeBufferPointer { buffer in
+        KayaHost.api.font_families(buffer.baseAddress, UInt(buffer.count))
+    }
+}
+
+/// expect_face's read: what the toolkit resolved for the font a view holds.
+func kayaFaceWord(_ font: KayaPlatformFont) -> String {
+    #if os(macOS)
+        let fixed = font.isFixedPitch
+            || font.fontDescriptor.symbolicTraits.contains(.monoSpace)
+        let family = font.familyName ?? font.fontName
+    #else
+        let fixed = font.fontDescriptor.symbolicTraits.contains(.traitMonoSpace)
+        let family = font.familyName
+    #endif
+    return (fixed ? "monospaced " : "proportional ") + family
 }
 
 /// The same font as SwiftUI's own type, or nil to leave the platform's in
@@ -27108,8 +27674,9 @@ struct KayaRender: View {
             // OVERRIDES the root font, so a heading in a branded app would
             // be the one label still in the system face (measured). Unroled
             // labels pass nil and inherit the root's.
-            let font: Font? =
-                node.role == roleHeading
+            let font: Font? = kayaNodeFontSet(node)
+                ? kayaNodeSwiftFont(node, kayaNodeStyle(node))
+                : node.role == roleHeading
                     ? (sectionText
                         ? (kayaBrandFont(.footnote) ?? .footnote)
                         : (kayaBrandFont(.headline) ?? .headline))
@@ -33047,6 +33614,7 @@ struct KayaEntry: View {
                 })
         )
         .textFieldStyle(.roundedBorder)
+        .modifier(KayaNodeFontModifier(node: node, style: .body))
         // 200 stands in for the intrinsic width every other toolkit's entry
         // has in a ROW; a grower keeps its track, and IN A COLUMN a text
         // field fills the width — an input region, not content (DESIGN.md
@@ -34007,7 +34575,10 @@ struct KayaTextarea: View {
             revealSeq: node.revealSeq,
             rich: node.rich,
             richRuns: node.richRuns,
-            richSeq: node.richSeq
+            richSeq: node.richSeq,
+            // READ HERE for the text's reason: a gutter, face or zoom change
+            // brings updateNSView around (docs/code-surface-plan.md).
+            surface: kayaSurfaceKey(node)
         )
         .modifier(KayaTextareaPlaceholder(node: node))
         .kayaTextareaFrame(
@@ -34209,6 +34780,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
     let rich: Bool
     let richRuns: [KayaRichRun]
     let richSeq: Int
+    let surface: String
 
     /// The uncontrolled fold, in AppKit's vocabulary: the view tells kaya what it
     /// holds, kaya normalizes it, writes the node and emits with the widget's
@@ -34455,6 +35027,12 @@ private struct KayaMacTextarea: NSViewRepresentable {
         let inset = CGSize(
             width: 2, height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)
         if view.textContainerInset != inset { view.textContainerInset = inset }
+        let font = kayaNodeFontSet(node)
+            ? kayaNodeFont(node, .body) : (kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body))
+        if view.font != font {
+            view.font = font
+            context.coordinator.richDone = -1
+        }
 
         // APPLIED ON EVERY UPDATE, not once at construction: a pin that only ran
         // in makeNSView is lost the day SwiftUI hands back a recycled view or
@@ -34462,6 +35040,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // back, so a breach fails the leg that rendered the widget.
         kayaPinPlainText(view, rich: rich)
         kayaAuditPlainTextPins(view, rich: rich)
+        kayaApplyGutter(scroll, view, on: node.lineNumbers)
 
         // THE PUSH KAYA OWNS, guarded by a comparison: an identical write still
         // rebuilds the storage and throws away the declared runs (measured, G2).
@@ -34577,6 +35156,97 @@ private struct KayaMacTextarea: NSViewRepresentable {
     }
 }
 
+#if os(macOS)
+/// The textarea's line-number gutter on macOS: a view in the scroll view's
+/// own leading inset, drawn from the text's TextKit 2 layout for the visible
+/// rect (docs/code-surface-plan.md G6). NOT an NSRulerView: with the ruler
+/// shown, the window's SwiftUI content published no accessibility children
+/// at all (measured 2026-10-27). `drawn` is what the last pass drew, in the
+/// text view's coordinates, for expect_gutter.
+final class KayaGutterView: NSView {
+    weak var textView: NSTextView?
+    var drawn: [(number: Int, mid: CGFloat)] = []
+    var thickness: CGFloat = 28
+
+    override var isFlipped: Bool { true }
+    override func isAccessibilityElement() -> Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    func numberFont() -> NSFont {
+        let size = (textView?.font?.pointSize ?? NSFont.systemFontSize) * 0.9
+        return .monospacedDigitSystemFont(ofSize: size, weight: .regular)
+    }
+
+    /// Wide enough for the document's last number, at least two digits.
+    func fittedWidth() -> CGFloat {
+        let lines = 1 + (textView?.string ?? "").utf16.filter { $0 == 10 }.count
+        let digits = max(2, String(lines).count)
+        return ceil(("8" as NSString).size(withAttributes: [.font: numberFont()]).width) * CGFloat(digits) + 14
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        (textView?.drawsBackground == false ? NSColor.clear : NSColor.textBackgroundColor).setFill()
+        bounds.fill()
+        drawn = []
+        guard let text = textView, let layout = text.textLayoutManager else { return }
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: numberFont(), .foregroundColor: NSColor.secondaryLabelColor,
+        ]
+        let visible = text.visibleRect
+        for line in kayaGutterLines(layout, text.string, visible, text.textContainerOrigin) where line.first {
+            let label = String(line.line) as NSString
+            let size = label.size(withAttributes: attributes)
+            let mid = (line.top + line.bottom) / 2
+            let at = convert(NSPoint(x: 0, y: mid), from: text)
+            label.draw(
+                at: NSPoint(x: bounds.width - 8 - size.width, y: at.y - size.height / 2),
+                withAttributes: attributes)
+            drawn.append((line.line, mid))
+        }
+    }
+}
+#endif
+
+#if os(macOS)
+/// Shows or hides the gutter, and redraws it on every scroll and edit.
+@MainActor func kayaApplyGutter(_ scroll: NSScrollView, _ view: NSTextView, on: Bool) {
+    let held = scroll.subviews.compactMap { $0 as? KayaGutterView }.first
+    if !on {
+        if let held {
+            held.removeFromSuperview()
+            scroll.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        }
+        return
+    }
+    let gutter = held ?? KayaGutterView(frame: .zero)
+    if held == nil {
+        gutter.textView = view
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.addSubview(gutter)
+        scroll.contentView.postsBoundsChangedNotifications = true
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
+        ) { [weak gutter] _ in gutter?.needsDisplay = true }
+        center.addObserver(forName: NSText.didChangeNotification, object: view, queue: .main) {
+            [weak gutter, weak scroll] _ in
+            MainActor.assumeIsolated {
+                guard let gutter, let scroll else { return }
+                kayaApplyGutter(scroll, view, on: true)
+                gutter.needsDisplay = true
+            }
+        }
+    }
+    let width = gutter.fittedWidth()
+    if abs(scroll.contentInsets.left - width) > 0.5 {
+        scroll.contentInsets = NSEdgeInsets(top: 0, left: width, bottom: 0, right: 0)
+    }
+    gutter.frame = NSRect(x: 0, y: 0, width: width, height: scroll.bounds.height)
+    gutter.autoresizingMask = [.height]
+    gutter.needsDisplay = true
+}
+#endif
+
 /// The widget-id -> text-view map, for the ONE harness verb that cannot go
 /// through accessibility: `compose` reaches `setMarkedText`, which no AX
 /// attribute exposes. The three READS deliberately do not use it, so a leg
@@ -34593,7 +35263,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 /// for uniform text, so a heading-only document would compound its scale
 /// (the iOS arm measured its UIKit twin, docs/traps.md 2026-09-11).
 @MainActor func kayaRichBaseFont(_ view: NSTextView) -> NSFont {
-    _ = view
+    // The textarea's own face and size when it asks for one
+    // (docs/code-surface-plan.md M1, M2, S1); the runs scale from it.
+    if let id = (view as? KayaTextView)?.nodeId, let node = kayaScene.nodes[id], kayaNodeFontSet(node) {
+        return kayaNodeFont(node, .body)
+    }
     return kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
 }
 
@@ -34867,7 +35541,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 rich: node.rich,
                 richRuns: node.richRuns,
                 richSeq: node.richSeq,
-                cap: kayaScene.keyboardFieldCap[node.id]
+                cap: kayaScene.keyboardFieldCap[node.id],
+                surface: kayaSurfaceKey(node)
             )
             .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
@@ -34894,6 +35569,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         let richRuns: [KayaRichRun]
         let richSeq: Int
         let cap: CGFloat?
+        let surface: String
 
         final class Coordinator: NSObject, UITextViewDelegate {
             var node: KayaNode?
@@ -34917,6 +35593,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// change, no emission" true by construction.
             func textViewDidChange(_ textView: UITextView) {
                 kayaKeepCaretShown(textView)
+                if let gutter = (textView as? KayaTextView)?.gutter {
+                    kayaApplyUIGutter(textView, on: true)
+                    gutter.setNeedsDisplay()
+                }
                 guard let node else { return }
                 let strip = returnStrip
                 returnStrip = nil
@@ -35105,6 +35785,15 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 own.nodeId = node.id
                 own.rich = rich
             }
+            kayaApplyUIGutter(view, on: node.lineNumbers)
+            // docs/code-surface-plan.md M1, M2, S1: the node's own face and size.
+            if kayaNodeFontSet(node) {
+                let font = kayaNodeFont(node, .body)
+                if view.font != font {
+                    view.font = font
+                    context.coordinator.richDone = -1
+                }
+            }
             let key: UIReturnKeyType = node.submits ? .send : .default
             if view.returnKeyType != key {
                 view.returnKeyType = key
@@ -35256,6 +35945,17 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         /// docs/traps.md 2026-09-14).
         var undoSuspendedBy: UndoManager?
         var pendingOff: Set<NSAttributedString.Key> = []
+        /// docs/code-surface-plan.md G6: the line-number gutter, when on.
+        var gutter: KayaUIGutter?
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            guard let gutter else { return }
+            gutter.frame = CGRect(
+                x: contentOffset.x, y: contentOffset.y, width: gutter.frame.width, height: bounds.height)
+            gutter.setNeedsDisplay()
+            bringSubviewToFront(gutter)
+        }
 
         /// A composition's start is reported here (its end in
         /// textViewDidChange): `markedTextRange` is the only channel that
@@ -35279,6 +35979,78 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             KayaHost.textEditSource(nodeId, editSourcePaste)
             insertText(string)
         }
+    }
+
+    /// The textarea's line-number gutter on iOS: a view inside the text view,
+    /// pinned to its viewport, the text inset by its width
+    /// (docs/code-surface-plan.md G6). `drawn` is the last pass, in content
+    /// coordinates, for expect_gutter.
+    final class KayaUIGutter: UIView {
+        weak var textView: UITextView?
+        var drawn: [(number: Int, mid: CGFloat)] = []
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isOpaque = false
+            isUserInteractionEnabled = false
+            isAccessibilityElement = false
+            contentMode = .redraw
+        }
+
+        required init?(coder: NSCoder) { fatalError("kaya: KayaUIGutter is built in code") }
+
+        func numberFont() -> UIFont {
+            .monospacedDigitSystemFont(ofSize: (textView?.font?.pointSize ?? 17) * 0.9, weight: .regular)
+        }
+
+        /// Wide enough for the document's last number, at least two digits.
+        func fittedWidth() -> CGFloat {
+            let lines = 1 + (textView?.text ?? "").utf16.filter { $0 == 10 }.count
+            let digits = max(2, String(lines).count)
+            return ceil(("8" as NSString).size(withAttributes: [.font: numberFont()]).width) * CGFloat(digits) + 14
+        }
+
+        override func draw(_ rect: CGRect) {
+            drawn = []
+            guard let text = textView, let layout = text.textLayoutManager else { return }
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: numberFont(), .foregroundColor: UIColor.secondaryLabel,
+            ]
+            let visible = CGRect(origin: text.contentOffset, size: text.bounds.size)
+            let origin = CGPoint(x: text.textContainerInset.left, y: text.textContainerInset.top)
+            for line in kayaGutterLines(layout, text.text ?? "", visible, origin) where line.first {
+                let label = String(line.line) as NSString
+                let size = label.size(withAttributes: attributes)
+                let mid = (line.top + line.bottom) / 2
+                label.draw(
+                    at: CGPoint(x: bounds.width - 8 - size.width, y: mid - text.contentOffset.y - size.height / 2),
+                    withAttributes: attributes)
+                drawn.append((line.line, mid))
+            }
+        }
+    }
+
+    /// Shows or hides the gutter and reserves its width in the text's inset.
+    @MainActor func kayaApplyUIGutter(_ view: UITextView, on: Bool) {
+        guard let own = view as? KayaTextView else { return }
+        if !on {
+            if let gutter = own.gutter {
+                gutter.removeFromSuperview()
+                own.gutter = nil
+                view.textContainerInset.left = 0
+            }
+            return
+        }
+        let gutter = own.gutter ?? KayaUIGutter(frame: .zero)
+        if own.gutter == nil {
+            gutter.textView = view
+            own.gutter = gutter
+            view.addSubview(gutter)
+        }
+        let width = gutter.fittedWidth()
+        if abs(view.textContainerInset.left - width) > 0.5 { view.textContainerInset.left = width }
+        gutter.frame = CGRect(x: view.contentOffset.x, y: view.contentOffset.y, width: width, height: view.bounds.height)
+        gutter.setNeedsDisplay()
     }
 
     /// docs/traps.md, the iOS caret below its text view's estimated content.
@@ -35313,7 +36085,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// way — and the capture is what found it. This is makeUIView's own
     /// expression, so a uniform document reads exactly as it did.
     @MainActor func kayaRichBaseFont(_ view: UITextView) -> UIFont {
-        kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
+        if let id = (view as? KayaTextView)?.nodeId, let node = kayaScene.nodes[id], kayaNodeFontSet(node) {
+            return kayaNodeFont(node, .body)
+        }
+        return kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
     }
 
     /// A font with `trait` added; UIKit answers nil for a face that has no

@@ -374,6 +374,8 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -788,6 +790,12 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     /** A textarea one line tall at rest that grows to this many lines
      * (docs/grow-lines-plan.md); 0 = unset. */
     var maxLines by mutableStateOf(0)
+    /** docs/code-surface-plan.md G1, M1, M2, S1: a textarea's gutter, and a
+     * text kind's face and size. */
+    var lineNumbers by mutableStateOf(false)
+    var monospaced by mutableStateOf(false)
+    var family by mutableStateOf("")
+    var textScale by mutableStateOf(1.0)
     /** A button's glyph in place of its title (docs/composer-plan.md §2); 0 = none. */
     var symbol by mutableStateOf(0L)
     /** An image's bound in dp (docs/photo-attach-plan.md §2); 0 = none. */
@@ -3399,7 +3407,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x7a1263c53af5e0a4uL
+    private const val SPEC_HASH: ULong = 0xcd377e2688e6cb2auL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3541,6 +3549,7 @@ object KayaCompose {
     private const val APPLY_CONTEXT_ATTACH_NODE = 22
     private const val APPLY_SET_MENU_PROP = 23
     private const val APPLY_CONTEXT_LABEL_NODE = 75
+    private const val APPLY_LIST_FONT_FAMILIES = 76
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -3729,6 +3738,11 @@ object KayaCompose {
     private const val PROP_TINT = 66
     private const val PROP_ACTIVATABLE = 67
     private const val PROP_HIDDEN = 68
+    // docs/code-surface-plan.md: the gutter, the face and the size.
+    private const val PROP_LINE_NUMBERS = 69
+    private const val PROP_MONOSPACED = 70
+    private const val PROP_FAMILY = 71
+    private const val PROP_TEXT_SCALE = 72
     // The ground and shape enums' wire values (docs/styling-pass-plan.md Y2, Y6).
     const val GROUND_NONE = 0L
     const val GROUND_GRADIENT = 1L
@@ -4803,6 +4817,10 @@ object KayaCompose {
                         }
                         PROP_ACTIVATABLE -> KayaSceneModel.nodes[id]!!.activatable = readBool(b)
                         PROP_HIDDEN -> KayaSceneModel.nodes[id]!!.hidden = readBool(b)
+                        PROP_LINE_NUMBERS -> KayaSceneModel.nodes[id]!!.lineNumbers = readBool(b)
+                        PROP_MONOSPACED -> KayaSceneModel.nodes[id]!!.monospaced = readBool(b)
+                        PROP_FAMILY -> KayaSceneModel.nodes[id]!!.family = readString(b)
+                        PROP_TEXT_SCALE -> KayaSceneModel.nodes[id]!!.textScale = readF64(b)
                         PROP_TINT -> KayaSceneModel.nodes[id]!!.labelTint = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
@@ -5307,6 +5325,7 @@ object KayaCompose {
                 APPLY_RELEASE_CAPTURE -> kayaCaptureRelease(b.long)
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
+                APPLY_LIST_FONT_FAMILIES -> kayaListFontFamilies()
                 APPLY_PRESENT_TOAST -> {
                     // THE ONE DOOR (docs/toast-plan.md T7): the slot is
                     // REPLACED, never queued. Window 0, the one surface.
@@ -9228,6 +9247,82 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         bitmap.recycle()
         return "$mode $samples"
     }
+
+    /**
+     * expect_gutter's read (docs/code-surface-plan.md G5): the rows come
+     * from the field's own text layout, each line's number counted from the
+     * newlines before it and placed by the field's scroll, against what the
+     * gutter recorded drawing in its own box. A row or a number counts when
+     * its centre is inside the viewport.
+     */
+    private fun kayaGutterReading(activity: ComponentActivity, spec: String, clause: List<String>): Pair<String?, String> =
+        onUi(activity) {
+            val node = target(spec, "textarea", KayaSceneModel.textareas)
+                ?: return@onUi null to "no such target"
+            val layout = kayaTextLayouts[node.id]?.invoke() ?: return@onUi null to "no laid-out text"
+            val drawn = kayaGutterDrawn[node.id] ?: return@onUi kayaGutterVerdict(null, clause)
+            val text = layout.layoutInput.text.text
+            val scroll = node.scrollState.value.toFloat()
+            val fragments = ArrayList<KayaGutterFragment>()
+            for (i in 0 until layout.lineCount) {
+                val start = layout.getLineStart(i)
+                val top = layout.getLineTop(i) - scroll
+                val bottom = layout.getLineBottom(i) - scroll
+                val mid = (top + bottom) / 2f
+                if (mid < 0f || mid >= drawn.height) continue
+                val line = 1 + text.subSequence(0, start).count { it == '\n' }
+                fragments.add(KayaGutterFragment(top, bottom, line, start == 0 || text[start - 1] == '\n'))
+            }
+            val labels = drawn.labels
+            kayaGutterVerdict(kayaPairGutter(fragments, labels), clause)
+        }
+
+    /** The laid-out text of a label, an entry or a textarea. */
+    private fun kayaTextKindLayout(node: KayaNode): androidx.compose.ui.text.TextLayoutResult? =
+        if (node.kind == KayaCompose.KIND_LABEL) kayaLabelLayouts[node.id] else kayaTextLayouts[node.id]?.invoke()
+
+    /**
+     * expect_face's read (M4): the typeface the field's own layout RESOLVED,
+     * named by the shaped font's name table, and judged fixed-pitch by its
+     * own advances; never the request.
+     */
+    private fun kayaFaceReading(activity: ComponentActivity, spec: String, want: String): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
+            val layout = kayaTextKindLayout(node) ?: return@onUi null to ": no laid-out text"
+            val input = layout.layoutInput
+            val typeface = input.fontFamilyResolver.resolve(
+                input.style.fontFamily,
+                input.style.fontWeight ?: FontWeight.Normal,
+                input.style.fontStyle ?: FontStyle.Normal,
+            ).value as? android.graphics.Typeface ?: return@onUi null to ": resolved to no platform typeface"
+            val family = kayaShapedFace(typeface)?.family
+                ?: return@onUi null to ": the shaped font cannot be read on API ${Build.VERSION.SDK_INT}"
+            val paint = android.graphics.Paint().apply { this.typeface = typeface; textSize = 100f }
+            val fixed = Math.abs(paint.measureText("iiiii") - paint.measureText("WWWWW")) < 0.5f
+            val got = (if (fixed) "monospaced " else "proportional ") + family
+            when {
+                want == "named" && node.family.isEmpty() -> null to " reads $got, and the app asked for no family"
+                want == "named" && family.equals(node.family, ignoreCase = true) -> got to ""
+                want == "named" -> null to " reads $got, wanted the family \"${node.family}\""
+                got.startsWith("$want ") -> got to ""
+                else -> null to " reads $got, wanted $want"
+            }
+        }
+
+    /** expect_scaled's read (S3): the size the layout drew in against the
+     *  size the platform's style gave the kind, both in sp. */
+    private fun kayaScaledReading(activity: ComponentActivity, spec: String, want: Double, said: String): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
+            val layout = kayaTextKindLayout(node) ?: return@onUi null to ": no laid-out text"
+            val base = kayaPlatformSizes[node.id]?.toDouble() ?: return@onUi null to ": no platform size recorded"
+            val size = layout.layoutInput.style.fontSize.value.toDouble()
+            val ratio = size / base
+            val text = "%.2f of %.2f, %.3fx".format(java.util.Locale.ROOT, size, base, ratio)
+            if (Math.abs(ratio - want) <= want * 0.02) text to ""
+            else null to " reads %.2f of the platform's %.2f, %.3fx, wanted ${said}x".format(java.util.Locale.ROOT, size, base, ratio)
+        }
 
     private fun kayaTextTarget(spec: String): KayaNode? =
         if (spec.startsWith("textarea")) target(spec, "textarea", KayaSceneModel.textareas)
@@ -14344,6 +14439,58 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             )
                         } else {
                             observed.add("${prefix}title \"$want\"")
+                        }
+                    }
+                    "expect_gutter" -> {
+                        // docs/code-surface-plan.md G5: harness.rs's ExpectGutter.
+                        val clause = parts.drop(2)
+                        val word = clause.firstOrNull() ?: ""
+                        val lineWords = listOf("shows", "hides", "wraps")
+                        val wellFormed = (word == "on" || word == "off") && clause.size == 1 ||
+                            word in lineWords && clause.size == 2 && (clause[1].toIntOrNull() ?: 0) >= 1
+                        if (!wellFormed) {
+                            failures.add("expect_gutter wants on, off, shows N, hides N or wraps N: $line")
+                        } else {
+                            var got = kayaGutterReading(activity, parts[1], clause)
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaGutterReading(activity, parts[1], clause)
+                            }
+                            got.first?.let { observed.add("${parts[1]} gutter $it") }
+                                ?: failures.add("${parts[1]} gutter ${got.second}")
+                        }
+                    }
+                    "expect_face" -> {
+                        // docs/code-surface-plan.md M4: harness.rs's face_verdict.
+                        val want = parts.getOrElse(2) { "" }
+                        if (parts.size != 3 || want !in listOf("monospaced", "proportional", "named")) {
+                            failures.add("expect_face's face is one of monospaced, proportional, named: $line")
+                        } else {
+                            var got = kayaFaceReading(activity, parts[1], want)
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaFaceReading(activity, parts[1], want)
+                            }
+                            got.first?.let { observed.add("${parts[1]} face $it") }
+                                ?: failures.add("${parts[1]} face${got.second}")
+                        }
+                    }
+                    "expect_scaled" -> {
+                        // docs/code-surface-plan.md S3: harness.rs's ExpectScaled.
+                        val want = parts.getOrNull(2)?.toDoubleOrNull()
+                        if (parts.size != 3 || want == null || want <= 0.0) {
+                            failures.add("expect_scaled's multiple is a positive number: $line")
+                        } else {
+                            var got = kayaScaledReading(activity, parts[1], want, parts[2])
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaScaledReading(activity, parts[1], want, parts[2])
+                            }
+                            got.first?.let { observed.add("${parts[1]} size $it") }
+                                ?: failures.add("${parts[1]} size${got.second}")
                         }
                     }
                     "expect_typeface" -> {
@@ -19624,11 +19771,11 @@ private fun KayaRenderCore(
                 else boxFill.then(a11y).then(rectRead)
                 Text(
                     document,
-                    style = when (node.role) {
+                    style = kayaNodeStyle(node, when (node.role) {
                         KayaCompose.ROLE_HEADING -> MaterialTheme.typography.titleLarge
                         KayaCompose.ROLE_CAPTION -> MaterialTheme.typography.bodySmall
                         else -> LocalTextStyle.current
-                    },
+                    }),
                     color = if (node.role == KayaCompose.ROLE_CAPTION)
                         kayaCaptionColor() else kayaLabelTintColor(node),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
@@ -19644,14 +19791,17 @@ private fun KayaRenderCore(
             if (node.role == KayaCompose.ROLE_HEADING) {
                 Text(
                     node.text,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = kayaNodeStyle(node, MaterialTheme.typography.titleLarge),
                     color = kayaLabelTintColor(node),
                     // A SAMPLE OF THE RAMP ROUTE for expect_typeface:
                     // this label takes its style from `typography`, so
                     // it goes on reading the platform face if the
                     // theme's first write is missing.
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
-                    onTextLayout = { kayaTypefaceSites["heading"] = it; kayaLabelLayouts[node.id] = it },
+                    onTextLayout = {
+                        if (!kayaNodeFontSet(node)) kayaTypefaceSites["heading"] = it
+                        kayaLabelLayouts[node.id] = it
+                    },
                     modifier = boxFill.then(a11y).then(kayaTextRectRead(node)).semantics { heading() },
                 )
             } else if (node.role == KayaCompose.ROLE_CAPTION) {
@@ -19661,10 +19811,13 @@ private fun KayaRenderCore(
                 // publish, the carve-out a11yrows.steps records.
                 Text(
                     node.text,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = kayaNodeStyle(node, MaterialTheme.typography.bodySmall),
                     color = kayaCaptionColor(),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
-                    onTextLayout = { kayaTypefaceSites["caption"] = it; kayaLabelLayouts[node.id] = it },
+                    onTextLayout = {
+                        if (!kayaNodeFontSet(node)) kayaTypefaceSites["caption"] = it
+                        kayaLabelLayouts[node.id] = it
+                    },
                     modifier = boxFill.then(a11y).then(kayaTextRectRead(node)),
                 )
             } else if (node.role == KayaCompose.ROLE_LINK) {
@@ -19688,6 +19841,7 @@ private fun KayaRenderCore(
                             append(node.text)
                         }
                     },
+                    style = kayaNodeStyle(node, LocalTextStyle.current),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
                     modifier = boxFill.then(a11y).then(kayaTextRectRead(node))
@@ -19704,9 +19858,13 @@ private fun KayaRenderCore(
                 // LocalTextStyle, the write the ramp cannot stand in for.
                 Text(
                     node.text,
+                    style = kayaNodeStyle(node, LocalTextStyle.current),
                     color = kayaLabelTintColor(node),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
-                    onTextLayout = { kayaTypefaceSites["label"] = it; kayaLabelLayouts[node.id] = it },
+                    onTextLayout = {
+                        if (!kayaNodeFontSet(node)) kayaTypefaceSites["label"] = it
+                        kayaLabelLayouts[node.id] = it
+                    },
                     modifier = boxFill.then(a11y).then(kayaTextRectRead(node)),
                 )
             }
@@ -20053,6 +20211,7 @@ fun KayaTextField(
             }
         }
     }
+    val fieldStyle = kayaNodeStyle(node, LocalTextStyle.current.copy(color = LocalContentColor.current))
     BasicTextField(
         state = node.textState,
         inputTransformation = input,
@@ -20119,7 +20278,7 @@ fun KayaTextField(
         // re-lays-out zero times.
         onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
         interactionSource = interaction,
-        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        textStyle = fieldStyle,
         modifier = a11y
             .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
             .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
@@ -20211,7 +20370,7 @@ fun KayaTextField(
                 // around the decoration: the inner field IS the scrolling
                 // viewport, so a decoration-level draw would sit still
                 // while the text moved under it.
-                innerTextField = { KayaHighlightLayer(node, palette, inner) },
+                innerTextField = { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, inner) } },
                 enabled = true,
                 singleLine = singleLine,
                 visualTransformation = VisualTransformation.None,
@@ -20733,6 +20892,179 @@ internal class KayaFace(val family: String, val file: String, val axes: String) 
     override fun toString(): String = "$family (file=$file axes=[$axes])"
 }
 
+
+// --- THE CODE SURFACE (docs/code-surface-plan.md G1-G6, M1-M4, S1-S3) ---
+
+/** One line fragment inside a textarea's viewport (harness.rs's pair_gutter input). */
+internal class KayaGutterFragment(val top: Float, val bottom: Float, val line: Int, val first: Boolean)
+
+internal class KayaGutterRow(val line: Int, val first: Boolean, var drawn: Int?)
+
+/** harness.rs's pair_gutter: a label belongs to the fragment its centre falls in. */
+internal fun kayaPairGutter(fragments: List<KayaGutterFragment>, labels: List<Pair<Int, Float>>): Pair<List<KayaGutterRow>, List<Int>> {
+    val used = BooleanArray(labels.size)
+    val rows = fragments.map { f ->
+        val row = KayaGutterRow(f.line, f.first, null)
+        for ((i, label) in labels.withIndex()) {
+            if (!used[i] && label.second >= f.top && label.second < f.bottom) {
+                used[i] = true
+                row.drawn = label.first
+                break
+            }
+        }
+        row
+    }
+    val top = fragments.firstOrNull()?.top ?: 0f
+    val bottom = fragments.lastOrNull()?.bottom ?: 0f
+    return rows to labels.filterIndexed { i, l -> !used[i] && l.second >= top && l.second < bottom }.map { it.first }
+}
+
+/** harness.rs's gutter_line and gutter_verdict, word for word. */
+internal fun kayaGutterVerdict(read: Pair<List<KayaGutterRow>, List<Int>>?, clause: List<String>): Pair<String?, String> {
+    val word = clause.firstOrNull() ?: ""
+    val n = clause.getOrNull(1)?.toIntOrNull() ?: 0
+    if (read == null) return if (word == "off") "off" to "" else null to "draws no gutter"
+    val (rows, stray) = read
+    val say = { v: Int? -> v?.toString() ?: "·" }
+    val tokens = rows.map { row ->
+        val want = if (row.first) row.line else null
+        if (want == row.drawn) say(want) else "${say(want)}!${row.drawn?.toString() ?: "-"}"
+    }.toMutableList()
+    if (stray.isNotEmpty()) tokens.add("(beside no line: ${stray.joinToString(" ")})")
+    val line = tokens.joinToString(" ")
+    if (word == "off") return null to "is drawn: $line"
+    if (rows.isEmpty()) return null to "reads no line fragment inside the viewport"
+    if (stray.isNotEmpty() || rows.any { it.drawn != (if (it.first) it.line else null) }) {
+        return null to "disagrees with its text: $line"
+    }
+    val starts = { k: Int -> rows.any { it.first && it.line == k } }
+    val ok = when (word) {
+        "shows" -> starts(n)
+        "hides" -> rows.none { it.line == n }
+        "wraps" -> starts(n) && rows.any { !it.first && it.line == n }
+        else -> true
+    }
+    val said = if (word == "on") "on" else "$word $n"
+    return if (ok) "$said: $line" to "" else null to "reads $line, wanted $said"
+}
+
+/** The families fonts.xml names, which `Typeface.create` resolves as themselves. */
+private val KAYA_GENERIC_FAMILIES = listOf("sans-serif", "serif", "monospace", "serif-monospace", "cursive", "casual")
+
+/** Each installed family's name (from its font file's name table) and the
+ *  face it resolves to: the regular upright file when the family has one. */
+private var kayaInstalledFamilies: Map<String, FontFamily>? = null
+
+internal fun kayaInstalledFamilyMap(): Map<String, FontFamily> {
+    kayaInstalledFamilies?.let { return it }
+    val files = LinkedHashMap<String, android.graphics.fonts.Font>()
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        for (font in android.graphics.fonts.SystemFonts.getAvailableFonts()) {
+            if (font.file == null) continue
+            val name = kayaFontFamilyName(font.buffer, font.ttcIndex) ?: continue
+            val regular = font.style.weight == 400 &&
+                font.style.slant == android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT
+            if (!files.containsKey(name) || regular) files[name] = font
+        }
+    }
+    val out = LinkedHashMap<String, FontFamily>()
+    for ((name, font) in files) {
+        val face = android.graphics.Typeface.Builder(font.file!!).setTtcIndex(font.ttcIndex).build() ?: continue
+        out[name] = FontFamily(face)
+    }
+    for (name in KAYA_GENERIC_FAMILIES) {
+        out[name] = FontFamily(android.graphics.Typeface.create(name, android.graphics.Typeface.NORMAL))
+    }
+    kayaInstalledFamilies = out
+    return out
+}
+
+/** list_font_families, answered through the core (M3). */
+internal fun kayaListFontFamilies() {
+    KayaPresent.fontFamilies(kayaInstalledFamilyMap().keys.joinToString("\n"))
+}
+
+internal fun kayaNodeFontSet(node: KayaNode): Boolean =
+    node.monospaced || node.family.isNotEmpty() || node.textScale != 1.0
+
+/** A text kind's own face and size over [base], the style the platform
+ *  gives it: an installed `family`, else the monospaced role, and the size
+ *  in sp times `text_scale`, so the platform's font scale still applies.
+ *  The base size is recorded for expect_scaled. */
+internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle {
+    val size = if (base.fontSize.isSpecified) base.fontSize else 16.sp
+    kayaPlatformSizes[node.id] = size.value
+    if (!kayaNodeFontSet(node)) return base
+    val family = node.family.takeIf { it.isNotEmpty() }?.let { kayaInstalledFamilyMap()[it] }
+        ?: if (node.monospaced) FontFamily.Monospace else null
+    var style = base
+    if (family != null) style = style.copy(fontFamily = family)
+    if (node.textScale != 1.0) style = style.copy(fontSize = size * node.textScale.toFloat())
+    return style
+}
+
+/** The size in sp the platform gave each text kind, before text_scale. */
+internal val kayaPlatformSizes = HashMap<Long, Float>()
+
+/** What each textarea's gutter drew on its last pass: the number and its
+ *  vertical centre in the gutter's own box, and that box's height. */
+internal class KayaGutterDrawn(val labels: List<Pair<Int, Float>>, val height: Float)
+internal val kayaGutterDrawn = HashMap<Long, KayaGutterDrawn>()
+
+/**
+ * The textarea's line-number gutter (G6): a column at the inner field's
+ * leading edge drawn in the draw phase from the field's own text layout,
+ * offset by the field's scroll, so a scroll redraws without recomposing.
+ * Logical lines only, on their first row; no semantics.
+ */
+@Composable
+internal fun KayaGutter(node: KayaNode, textStyle: androidx.compose.ui.text.TextStyle, inner: @Composable () -> Unit) {
+    if (!node.lineNumbers) {
+        DisposableEffect(node) { kayaGutterDrawn.remove(node.id); onDispose { } }
+        inner()
+        return
+    }
+    val measurer = rememberTextMeasurer()
+    val baseSize = if (textStyle.fontSize.isSpecified) textStyle.fontSize else 16.sp
+    val numberStyle = textStyle.copy(
+        fontSize = baseSize * 0.9f,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontFeatureSettings = "tnum",
+    )
+    val lines = 1 + node.textState.text.count { it == '\n' }
+    val digits = maxOf(2, lines.toString().length)
+    val density = LocalDensity.current
+    val width = with(density) { measurer.measure("8".repeat(digits), numberStyle).size.width.toDp() } + 14.dp
+    DisposableEffect(node) { onDispose { kayaGutterDrawn.remove(node.id) } }
+    Box(
+        Modifier.drawBehind {
+            val layout = kayaTextLayouts[node.id]?.invoke() ?: return@drawBehind
+            val text = layout.layoutInput.text.text
+            val scroll = node.scrollState.value.toFloat()
+            val drawn = ArrayList<Pair<Int, Float>>()
+            var number = 1
+            for (i in 0 until layout.lineCount) {
+                val start = layout.getLineStart(i)
+                val first = start == 0 || text[start - 1] == '\n'
+                if (i > 0 && first) number += 1
+                if (!first) continue
+                val mid = (layout.getLineTop(i) + layout.getLineBottom(i)) / 2f - scroll
+                if (mid < 0f || mid > size.height) continue
+                val label = measurer.measure(number.toString(), numberStyle)
+                drawText(
+                    label,
+                    topLeft = androidx.compose.ui.geometry.Offset(
+                        width.toPx() - 8.dp.toPx() - label.size.width, mid - label.size.height / 2f),
+                )
+                drawn.add(number to mid)
+            }
+            kayaGutterDrawn[node.id] = KayaGutterDrawn(drawn, size.height)
+        },
+    ) {
+        Box(Modifier.padding(start = width)) { inner() }
+    }
+}
+
 /**
  * The FAMILY NAME out of a font file's OpenType `name` table — the link
  * in the read that cannot echo. nameID 16 when the font has one, else
@@ -20998,10 +21330,10 @@ internal fun kayaResolvedTypeface(): String {
     // The two editable kinds read the ambient style as a label does, but
     // through a different composable — and their layout is already
     // published, for the range verbs.
-    for (node in KayaSceneModel.entryWidgets) {
+    for (node in KayaSceneModel.entryWidgets.filterNot(::kayaNodeFontSet)) {
         kayaTextLayouts[node.id]?.invoke()?.let { samples["entry"] = it }
     }
-    for (node in KayaSceneModel.textareas) {
+    for (node in KayaSceneModel.textareas.filterNot(::kayaNodeFontSet)) {
         kayaTextLayouts[node.id]?.invoke()?.let { samples["textarea"] = it }
     }
     if (samples.isEmpty()) {

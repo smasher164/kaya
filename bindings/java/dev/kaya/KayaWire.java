@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x7a1263c53af5e0a4L;
+    public static final long SPEC_HASH = 0xcd377e2688e6cb2aL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -149,6 +149,10 @@ public final class KayaWire {
     public static final int PROP_TINT = 66;
     public static final int PROP_ACTIVATABLE = 67;
     public static final int PROP_HIDDEN = 68;
+    public static final int PROP_LINE_NUMBERS = 69;
+    public static final int PROP_MONOSPACED = 70;
+    public static final int PROP_FAMILY = 71;
+    public static final int PROP_TEXT_SCALE = 72;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -495,6 +499,7 @@ public final class KayaWire {
     public static final short TX_KIND_ATTACH_DOCK = 85;
     public static final short TX_KIND_SET_DOCK_PLAYER = 86;
     public static final short TX_KIND_CONTEXT_LABEL_NODE = 87;
+    public static final short TX_KIND_LIST_FONT_FAMILIES = 88;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -568,6 +573,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_ATTACH_DOCK = 73;
     public static final short APPLY_KIND_SET_DOCK_PLAYER = 74;
     public static final short APPLY_KIND_CONTEXT_LABEL_NODE = 75;
+    public static final short APPLY_KIND_LIST_FONT_FAMILIES = 76;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -627,6 +633,7 @@ public final class KayaWire {
     public static final short OCC_KIND_IMAGE_RELEASED = 57;
     public static final short OCC_KIND_ACTIVATED = 58;
     public static final short OCC_KIND_SELECTION_CHANGED = 59;
+    public static final short OCC_KIND_FONT_FAMILIES = 60;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1519,6 +1526,12 @@ public final class KayaWire {
         b.putLong(item);
         b.putInt(level);
         b.putInt(field);
+        return finish(b);
+    }
+
+    /** List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. */
+    public static byte[] txListFontFamilies() {
+        Enc b = begin(TX_KIND_LIST_FONT_FAMILIES);
         return finish(b);
     }
 
@@ -3127,6 +3140,98 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant line_numbers value. */
+    public static byte[] txSetLineNumbers(long widgetId, boolean lineNumbers) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LINE_NUMBERS).putInt(SOURCE_CONST);
+        encodeValue(b, lineNumbers);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound line_numbers value. */
+    public static byte[] txBindLineNumbers(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LINE_NUMBERS).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindLineNumbersElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_LINE_NUMBERS).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant monospaced value. */
+    public static byte[] txSetMonospaced(long widgetId, boolean monospaced) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MONOSPACED).putInt(SOURCE_CONST);
+        encodeValue(b, monospaced);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound monospaced value. */
+    public static byte[] txBindMonospaced(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MONOSPACED).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindMonospacedElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_MONOSPACED).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant family value. */
+    public static byte[] txSetFamily(long widgetId, String family) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FAMILY).putInt(SOURCE_CONST);
+        encodeValue(b, family);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound family value. */
+    public static byte[] txBindFamily(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FAMILY).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFamilyElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FAMILY).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant text_scale value. */
+    public static byte[] txSetTextScale(long widgetId, double textScale) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TEXT_SCALE).putInt(SOURCE_CONST);
+        encodeValue(b, textScale);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound text_scale value. */
+    public static byte[] txBindTextScale(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TEXT_SCALE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindTextScaleElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_TEXT_SCALE).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -3796,7 +3901,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES) {
             return null;
         }
         long id = b.getLong(8);
@@ -3996,6 +4101,20 @@ public final class KayaWire {
             return new Occ(kind, 0L, java.util.List.of(), tail);
         }
         if (kind == OCC_KIND_CAPTURE_DEVICES) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, 0L, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_FONT_FAMILIES) {
             // A flat record: its fields in order, into the tail.
             int[] at = {8};
             java.util.List<Object> tail = new java.util.ArrayList<>();

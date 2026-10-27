@@ -461,6 +461,7 @@ public final class KayaApp {
     private final Map<Long, BiConsumer<Tx, Long>> captureOverruns = new HashMap<>();
     private PermissionHandler permissionHandler;
     private BiConsumer<Tx, List<CaptureDevice>> captureDevicesHandler;
+    private BiConsumer<Tx, List<String>> fontFamiliesHandler;
     // The capture callbacks by capture id, process-wide as the core's sinks
     // are: written on the app thread, read on kaya's capture thread.
     static final Map<Long, CaptureFrameCallback> captureFrames =
@@ -4663,6 +4664,42 @@ public final class KayaApp {
             return this;
         }
 
+        private void inBuild(String what) {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: " + what + " on a widget outside its build transaction"
+                    + " — use the Tx setter inside a live transaction");
+            }
+        }
+
+        /** This textarea numbers its lines in a gutter (Tx.setLineNumbers). */
+        public Widget lineNumbers(boolean on) {
+            inBuild("lineNumbers");
+            tx.setLineNumbers(this, on);
+            return this;
+        }
+
+        /** This text kind in the platform's monospaced face (Tx.setMonospaced). */
+        public Widget monospaced(boolean on) {
+            inBuild("monospaced");
+            tx.setMonospaced(this, on);
+            return this;
+        }
+
+        /** This text kind in an installed family (Tx.setFamily). */
+        public Widget family(String name) {
+            inBuild("family");
+            tx.setFamily(this, name);
+            return this;
+        }
+
+        /** This text kind at a multiple of the platform's size (Tx.setTextScale). */
+        public Widget textScale(double scale) {
+            inBuild("textScale");
+            tx.setTextScale(this, scale);
+            return this;
+        }
+
         /** This scroll keeps its end in view while its content grows, until
          * the user scrolls away (docs/follow-end-plan.md):
          * tx.scroll(s -> {...}).followsEnd(). */
@@ -6258,6 +6295,21 @@ public final class KayaApp {
             t.setMaxLines(n, lines);
         }
 
+        /** This row's copy in the monospaced face (Tpl.setMonospaced). */
+        public void setMonospaced(Node n, boolean on) {
+            t.setMonospaced(n, on);
+        }
+
+        /** This row's copy in an installed family (Tpl.setFamily). */
+        public void setFamily(Node n, String name) {
+            t.setFamily(n, name);
+        }
+
+        /** This row's copy at a multiple of the platform's size (Tpl.setTextScale). */
+        public void setTextScale(Node n, double scale) {
+            t.setTextScale(n, scale);
+        }
+
         public void setTint(Node n, Signal<Tint> s) {
             t.setTint(n, s);
         }
@@ -7341,6 +7393,38 @@ public final class KayaApp {
          * (docs/grow-lines-plan.md). */
         public void setMaxLines(Widget w, int lines) {
             emit(KayaWire.txSetMaxLines(w.id, lines));
+        }
+
+        /** A textarea that numbers its logical lines in a gutter beside the
+         * text (docs/code-surface-plan.md G1). */
+        public void setLineNumbers(Widget w, boolean on) {
+            emit(KayaWire.txSetLineNumbers(w.id, on));
+        }
+
+        /** A label, entry or textarea in the platform's own monospaced face,
+         * the family and never the size (docs/code-surface-plan.md M1). */
+        public void setMonospaced(Widget w, boolean on) {
+            emit(KayaWire.txSetMonospaced(w.id, on));
+        }
+
+        /** A label, entry or textarea in an installed family by name, the
+         * user's pick from {@link KayaApp#onFontFamilies}; a family the
+         * platform does not have falls back to the role. Empty unsets it
+         * (docs/code-surface-plan.md M2). */
+        public void setFamily(Widget w, String name) {
+            emit(KayaWire.txSetFamily(w.id, name));
+        }
+
+        /** A label, entry or textarea at that multiple of the size the
+         * platform gives it, 0.5 to 3 (docs/code-surface-plan.md S1). */
+        public void setTextScale(Widget w, double scale) {
+            emit(KayaWire.txSetTextScale(w.id, scale));
+        }
+
+        /** Ask for the installed font families, answered once by
+         * {@link KayaApp#onFontFamilies} (docs/code-surface-plan.md M3). */
+        public void listFontFamilies() {
+            emit(KayaWire.txListFontFamilies());
         }
 
         /** A scroll that keeps its end in view while its content grows
@@ -9725,6 +9809,21 @@ public final class KayaApp {
             tx.emit(KayaWire.txSetMaxLines(n.id, lines));
         }
 
+        /** Every stamped copy in the platform's monospaced face (Tx.setMonospaced). */
+        public void setMonospaced(Node n, boolean on) {
+            tx.emit(KayaWire.txSetMonospaced(n.id, on));
+        }
+
+        /** Every stamped copy in an installed family (Tx.setFamily). */
+        public void setFamily(Node n, String name) {
+            tx.emit(KayaWire.txSetFamily(n.id, name));
+        }
+
+        /** Every stamped copy at a multiple of the platform's size (Tx.setTextScale). */
+        public void setTextScale(Node n, double scale) {
+            tx.emit(KayaWire.txSetTextScale(n.id, scale));
+        }
+
         public void setTint(Node n, Signal<Tint> s) {
             tx.emit(KayaWire.txBindTint(n.id, s.id));
         }
@@ -11912,6 +12011,13 @@ public final class KayaApp {
         captureDevicesHandler = handler;
     }
 
+    /** The installed font families, answering {@link Tx#listFontFamilies}:
+     * unique, in code-point order, the names {@link Tx#setFamily} takes
+     * (docs/code-surface-plan.md M3). */
+    public void onFontFamilies(BiConsumer<Tx, List<String>> handler) {
+        fontFamiliesHandler = handler;
+    }
+
     /**
      * Run {@code f} for each frame of {@code c} (docs/capture-plan.md §4).
      * IT RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, and holds no
@@ -12031,6 +12137,18 @@ public final class KayaApp {
                 BiConsumer<Tx, List<CaptureDevice>> handler = captureDevicesHandler;
                 if (handler != null) {
                     List<CaptureDevice> heard = captureDeviceList;
+                    dispatch(tx -> handler.accept(tx, heard));
+                }
+            }
+            case KayaWire.OCC_KIND_FONT_FAMILIES -> {
+                List<?> tail = (List<?>) occ.payload;
+                List<String> families = new ArrayList<>();
+                for (int at = 1; at < tail.size(); at++) {
+                    families.add((String) tail.get(at));
+                }
+                BiConsumer<Tx, List<String>> handler = fontFamiliesHandler;
+                if (handler != null) {
+                    List<String> heard = List.copyOf(families);
                     dispatch(tx -> handler.accept(tx, heard));
                 }
             }

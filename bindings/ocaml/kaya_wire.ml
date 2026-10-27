@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x7a1263c53af5e0a4L
+let spec_hash = 0xcd377e2688e6cb2aL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -166,6 +166,10 @@ let prop_selected = 65
 let prop_tint = 66
 let prop_activatable = 67
 let prop_hidden = 68
+let prop_line_numbers = 69
+let prop_monospaced = 70
+let prop_family = 71
+let prop_text_scale = 72
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -512,6 +516,7 @@ let tx_kind_collection_patch_if = 84
 let tx_kind_attach_dock = 85
 let tx_kind_set_dock_player = 86
 let tx_kind_context_label_node = 87
+let tx_kind_list_font_families = 88
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -585,6 +590,7 @@ let apply_kind_withdraw_toast = 72
 let apply_kind_attach_dock = 73
 let apply_kind_set_dock_player = 74
 let apply_kind_context_label_node = 75
+let apply_kind_list_font_families = 76
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -644,6 +650,7 @@ let occ_kind_image_needed = 56
 let occ_kind_image_released = 57
 let occ_kind_activated = 58
 let occ_kind_selection_changed = 59
+let occ_kind_font_families = 60
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1318,6 +1325,11 @@ let tx_context_label_node node item level field =
       Buffer.add_int64_le b item;
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
+
+(* List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. *)
+let tx_list_font_families () =
+  finish tx_kind_list_font_families (fun b ->
+      ignore b)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -3113,6 +3125,110 @@ let tx_bind_hidden_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant line_numbers value. *)
+let tx_set_line_numbers widget_id line_numbers =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_line_numbers);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool line_numbers))
+
+(* set_property with a signal-bound line_numbers value. *)
+let tx_bind_line_numbers widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_line_numbers);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_line_numbers_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_line_numbers);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant monospaced value. *)
+let tx_set_monospaced widget_id monospaced =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_monospaced);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool monospaced))
+
+(* set_property with a signal-bound monospaced value. *)
+let tx_bind_monospaced widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_monospaced);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_monospaced_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_monospaced);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant family value. *)
+let tx_set_family widget_id family =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_family);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str family))
+
+(* set_property with a signal-bound family value. *)
+let tx_bind_family widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_family);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_family_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_family);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant text_scale value. *)
+let tx_set_text_scale widget_id text_scale =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_text_scale);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 text_scale))
+
+(* set_property with a signal-bound text_scale value. *)
+let tx_bind_text_scale widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_text_scale);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_text_scale_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_text_scale);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -3668,7 +3784,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -3902,6 +4018,21 @@ let parse_occurrence byte =
       Some (kind, 0L, [], None, None, None, List.rev !out)
     end
     else if kind = occ_kind_capture_devices
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, 0L, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_font_families
     then begin
       (* A flat record: its fields in order, into the tail. *)
       let at = ref 8 in

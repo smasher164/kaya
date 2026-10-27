@@ -359,6 +359,10 @@ name = "reveal"
 path = "../../guests/rust/reveal.rs"
 
 [[example]]
+name = "codesurface"
+path = "../../guests/rust/codesurface.rs"
+
+[[example]]
 name = "numberfield"
 path = "../../guests/rust/numberfield.rs"
 

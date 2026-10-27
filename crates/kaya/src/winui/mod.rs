@@ -13,6 +13,7 @@ mod media;
 mod reader;
 mod order;
 mod skin;
+mod code_surface;
 
 use order::{track_of, ChildOrder};
 
@@ -18019,6 +18020,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::ReleaseCapture(capture) => capture::release(core, capture.0),
         ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
+        ApplyOp::ListFontFamilies => code_surface::list_font_families(core),
         ApplyOp::SetVideoCapture { widget, capture } => media::set_video_capture(core, widget.0, capture.map(|c| c.0))?,
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
@@ -18259,6 +18261,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
             }
             if images::set_prop(core, id, prop, &value)? {
+                return Ok(());
+            }
+            if code_surface::set_prop(core, id, prop, &value)? {
                 return Ok(());
             }
             let widget = core.widgets.get(&id).expect("scene validated the id");
@@ -19219,6 +19224,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (_, prop, value) => {
                     panic!("kaya: winui cannot apply {prop:?} = {value:?} here")
                 }
+            }
+            if prop == Prop::Role {
+                code_surface::after_role(core, id)?;
             }
             if let Some(NativeWidget::Expander { expander, .. }) = core.widgets.get(&id) {
                 expander_header_sync(expander)?;
@@ -24409,6 +24417,35 @@ impl crate::harness::Stage for WinUiStage {
             Ok(if inside { "visible" } else { "offscreen" }.to_string())
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
+    }
+
+    /// docs/code-surface-plan.md G5 (winui/code_surface.rs).
+    fn gutter(&self, t: crate::harness::Target) -> Result<Option<crate::harness::GutterRead>, String> {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textarea_ids.len()) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            Ok(Ok(code_surface::read::gutter(core, core.textarea_ids[i])?))
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    /// docs/code-surface-plan.md M4.
+    fn face(&self, t: crate::harness::Target) -> Result<crate::harness::FaceRead, String> {
+        Self::on_ui_read(move |core| match target_widget_id(core, t) {
+            Some(id) => code_surface::read::face(core, id),
+            None => Ok(Err("no such target".to_owned())),
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    /// docs/code-surface-plan.md S3.
+    fn text_size(&self, t: crate::harness::Target) -> Result<(f64, f64), String> {
+        Self::on_ui_read(move |core| match target_widget_id(core, t) {
+            Some(id) => code_surface::read::text_size(core, id),
+            None => Ok(Err("no such target".to_owned())),
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
 
     /// THE WIDGET'S OWN ACT over a byte range (docs/rich-text-plan.md R9):

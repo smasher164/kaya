@@ -800,6 +800,151 @@ mod rich_view {
     }
 }
 
+/// The textarea's line-number gutter (docs/code-surface-plan.md G2-G6): the
+/// widget GtkTextView places in its left border window, numbering logical
+/// lines at their first display line. `drawn` is what the last snapshot drew,
+/// (number, centre y in buffer coordinates), for expect_gutter.
+mod gutter {
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    pub struct KayaGutterInner {
+        pub view: glib::WeakRef<gtk4::TextView>,
+        pub drawn: RefCell<Vec<(u32, f64)>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for KayaGutterInner {
+        const NAME: &'static str = "KayaGutter";
+        type Type = KayaGutter;
+        type ParentType = gtk4::Widget;
+    }
+
+    impl ObjectImpl for KayaGutterInner {}
+
+    impl KayaGutterInner {
+        fn layout(&self, text: &str) -> Option<gtk4::pango::Layout> {
+            let view = self.view.upgrade()?;
+            let layout = self.obj().create_pango_layout(Some(text));
+            let mut desc = view.pango_context().font_description().unwrap_or_default();
+            let size = (f64::from(desc.size()) * 0.9).round() as i32;
+            if desc.is_size_absolute() {
+                desc.set_absolute_size(f64::from(size));
+            } else {
+                desc.set_size(size);
+            }
+            layout.set_font_description(Some(&desc));
+            let attrs = gtk4::pango::AttrList::new();
+            attrs.insert(gtk4::pango::AttrFontFeatures::new("tnum"));
+            layout.set_attributes(Some(&attrs));
+            Some(layout)
+        }
+    }
+
+    impl WidgetImpl for KayaGutterInner {
+        fn measure(&self, orientation: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
+            if orientation == gtk4::Orientation::Vertical {
+                return (0, 0, -1, -1);
+            }
+            let lines = self.view.upgrade().map_or(1, |v| v.buffer().line_count().max(1));
+            let digits = lines.to_string().len().max(2);
+            let width = self.layout(&"8".repeat(digits)).map_or(0, |l| l.pixel_size().0) + 14;
+            (width, width, -1, -1)
+        }
+
+        fn snapshot(&self, snapshot: &gtk4::Snapshot) {
+            self.drawn.borrow_mut().clear();
+            let Some(view) = self.view.upgrade() else { return };
+            let obj = self.obj();
+            let mut colour = obj.color();
+            colour.set_alpha(colour.alpha() * 0.55);
+            let width = obj.width();
+            let band = view.visible_rect();
+            let bottom = band.y() + band.height();
+            let (mut line, _) = view.line_at_y(band.y());
+            loop {
+                let (y, height) = view.line_yrange(&line);
+                if y > bottom {
+                    break;
+                }
+                if height > 0 {
+                    let first = view.iter_location(&line);
+                    let mid = f64::from(first.y()) + f64::from(first.height()) / 2.0;
+                    let number = line.line() as u32 + 1;
+                    if let Some(layout) = self.layout(&number.to_string()) {
+                        let (w, h) = layout.pixel_size();
+                        let (_, wy) = view.buffer_to_window_coords(
+                            gtk4::TextWindowType::Left,
+                            0,
+                            mid.round() as i32,
+                        );
+                        snapshot.save();
+                        snapshot.translate(&gtk4::graphene::Point::new(
+                            (width - 8 - w) as f32,
+                            (wy - h / 2) as f32,
+                        ));
+                        snapshot.append_layout(&layout, &colour);
+                        snapshot.restore();
+                        self.drawn.borrow_mut().push((number, mid));
+                    }
+                }
+                if !line.forward_line() {
+                    break;
+                }
+            }
+        }
+    }
+
+    glib::wrapper! {
+        pub struct KayaGutter(ObjectSubclass<KayaGutterInner>)
+            @extends gtk4::Widget,
+            @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget;
+    }
+
+    impl KayaGutter {
+        pub fn new(view: &gtk4::TextView) -> Self {
+            let gutter: Self = glib::Object::builder()
+                .property("accessible-role", gtk4::AccessibleRole::Presentation)
+                .build();
+            gutter.imp().view.set(Some(view));
+            gutter
+        }
+
+        pub fn drawn(&self) -> Vec<(u32, f64)> {
+            self.imp().drawn.borrow().clone()
+        }
+    }
+}
+
+/// Shows or hides a textarea's gutter, redrawn on every scroll and edit.
+fn set_line_numbers(scroller: &gtk4::ScrolledWindow, view: &gtk4::TextView, on: bool) {
+    if !on {
+        view.set_gutter(gtk4::TextWindowType::Left, None::<&gtk4::Widget>);
+        return;
+    }
+    if view.gutter(gtk4::TextWindowType::Left).is_some() {
+        return;
+    }
+    let gutter = gutter::KayaGutter::new(view);
+    view.set_gutter(gtk4::TextWindowType::Left, Some(&gutter));
+    let weak = gutter.downgrade();
+    scroller.vadjustment().connect_value_changed(move |_| {
+        if let Some(g) = weak.upgrade() {
+            g.queue_draw();
+        }
+    });
+    let weak = gutter.downgrade();
+    view.buffer().connect_changed(move |_| {
+        if let Some(g) = weak.upgrade() {
+            g.queue_resize();
+            g.queue_draw();
+        }
+    });
+}
+
 /// Every kaya rich tag this buffer knows, tag and name.
 fn rich_tags(buffer: &gtk4::TextBuffer) -> Vec<(gtk4::TextTag, String)> {
     use gtk4::prelude::{TextBufferExt, TextTagExt};
@@ -6273,6 +6418,10 @@ struct CoreState {
     /// Separate from `inset_css`, which the window arm rewrites whole.
     container_inset_css: gtk4::CssProvider,
     container_insets: BTreeSet<i64>,
+    /// docs/code-surface-plan.md M1, M2, S1: one `kaya-face-<id>` rule per
+    /// text widget that asks for its own face or size.
+    face_css: gtk4::CssProvider,
+    faces: std::collections::BTreeMap<u64, Face>,
     /// docs/styling-pass-plan.md §3.
     skin: skin::Skin,
     /// THE BRAND ACCENT (docs/styling-plan.md D1): its own provider —
@@ -9862,6 +10011,147 @@ fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
         _ => return,
     };
     widget.add_css_class(class);
+}
+
+/// A text widget's own face and size (docs/code-surface-plan.md M1, M2, S1),
+/// and the size GTK gave it before `text_scale`, measured once it is mapped.
+#[derive(Clone, Debug)]
+struct Face {
+    mono: bool,
+    family: String,
+    scale: f64,
+    base: Option<(f64, bool)>,
+}
+
+impl Default for Face {
+    fn default() -> Self {
+        Face { mono: false, family: String::new(), scale: 1.0, base: None }
+    }
+}
+
+const FACE_CLASS: &str = "kaya-face-";
+const FACE_ASKED_KEY: &str = "kaya-face-asked";
+const FACE_ID_KEY: &str = "kaya-face-id";
+
+thread_local! {
+    static FAMILIES: std::cell::OnceCell<Vec<String>> = const { std::cell::OnceCell::new() };
+}
+
+/// The installed families, as Pango lists them on this display.
+fn installed_families() -> Vec<String> {
+    FAMILIES.with(|f| {
+        f.get_or_init(|| {
+            gtk4::Label::new(None)
+                .pango_context()
+                .list_families()
+                .iter()
+                .map(|family| family.name().to_string())
+                .collect()
+        })
+        .clone()
+    })
+}
+
+/// The font size GTK resolved for this widget, and whether it is absolute
+/// (device units) rather than points.
+fn widget_font_size(widget: &gtk4::Widget) -> Option<(f64, bool)> {
+    let desc = widget.pango_context().font_description()?;
+    let size = f64::from(desc.size()) / f64::from(gtk4::pango::SCALE);
+    (size > 0.0).then_some((size, desc.is_size_absolute()))
+}
+
+/// Records one face edit and rewrites the face sheet. The size rule waits for
+/// the widget's first map, since the size it scales is the one GTK resolves
+/// for it in place (a heading's, a caption's), measured before the rule.
+fn set_face(core: &mut CoreState, id: u64, widget: &gtk4::Widget, edit: impl FnOnce(&mut Face)) {
+    let face = core.faces.entry(id).or_default();
+    edit(face);
+    unsafe {
+        widget.set_data(FACE_ASKED_KEY, face.family.clone());
+        widget.set_data(FACE_ID_KEY, id);
+    }
+    widget.add_css_class(&format!("{FACE_CLASS}{id}"));
+    if face.scale != 1.0 && face.base.is_none() {
+        if widget.is_mapped() {
+            face.base = widget_font_size(widget);
+        } else if unsafe { widget.data::<bool>("kaya-face-waits").is_none() } {
+            unsafe { widget.set_data("kaya-face-waits", true) }
+            widget.connect_map(move |w| {
+                let w = w.clone();
+                glib::idle_add_local_once(move || {
+                    CORE.with_borrow_mut(|core| {
+                        let Some(core) = core.as_mut() else { return };
+                        if let Some(face) = core.faces.get_mut(&id) {
+                            if face.base.is_none() {
+                                face.base = widget_font_size(&w);
+                            }
+                        }
+                        write_face_sheet(core);
+                    });
+                });
+            });
+        }
+    }
+    write_face_sheet(core);
+}
+
+/// One widget's declarations: an installed family by name, else the
+/// fontconfig `monospace` alias for the role, and the scaled size once the
+/// base is measured.
+fn face_rule(face: &Face, present: bool) -> String {
+    let mut rule = Vec::new();
+    if present && !face.family.is_empty() {
+        rule.push(format!("font-family: {};", css_string(&face.family)));
+    } else if face.mono {
+        rule.push("font-family: monospace;".to_owned());
+    }
+    if let (true, Some((size, absolute))) = (face.scale != 1.0, face.base) {
+        let unit = if absolute { "px" } else { "pt" };
+        rule.push(format!("font-size: {:.3}{unit};", size * face.scale));
+    }
+    rule.join(" ")
+}
+
+#[cfg(test)]
+mod face_tests {
+    use super::{face_rule, Face};
+
+    #[test]
+    fn gtk_face_rule_falls_back_to_the_role_and_scales_the_measured_size() {
+        let mut face = Face { mono: true, family: "Menlo".into(), ..Face::default() };
+        assert_eq!(face_rule(&face, true), "font-family: \"Menlo\";");
+        assert_eq!(face_rule(&face, false), "font-family: monospace;");
+        face.mono = false;
+        assert_eq!(face_rule(&face, false), "");
+        face.scale = 2.0;
+        assert_eq!(face_rule(&face, false), "", "no size rule before the base is measured");
+        face.base = Some((11.0, false));
+        assert_eq!(face_rule(&face, false), "font-size: 22.000pt;");
+        face.base = Some((14.0, true));
+        assert_eq!(face_rule(&face, true), "font-family: \"Menlo\"; font-size: 28.000px;");
+    }
+}
+
+fn write_face_sheet(core: &mut CoreState) {
+    let installed = installed_families();
+    let mut sheet = String::new();
+    for (id, face) in &core.faces {
+        let present = installed.iter().any(|f| f.eq_ignore_ascii_case(&face.family));
+        let rule = face_rule(face, present);
+        if !rule.is_empty() {
+            sheet.push_str(&format!(".{FACE_CLASS}{id} {{ {rule} }}\n"));
+        }
+    }
+    load_kaya_css(&core.face_css, "text face", &sheet, &core.css_error);
+}
+
+/// list_font_families (docs/code-surface-plan.md M3), the names the core
+/// normalises for every backend alike.
+fn list_font_families(core: &mut CoreState) {
+    let joined = installed_families().join("\n");
+    core.occurrences.send(crate::protocol::Occurrence::FontFamilies {
+        families: crate::capi::font_family_list(&joined),
+    });
 }
 
 const VACATED_KEY: &str = "kaya-vacated";
@@ -16860,6 +17150,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::ReleaseCapture(capture) => capture::release(core, capture.0),
         ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
+        ApplyOp::ListFontFamilies => list_font_families(core),
         ApplyOp::SetVideoCapture { widget, capture } => capture::set_video_capture(core, widget, capture.map(|c| c.0)),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
@@ -18138,6 +18429,27 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         render_image(picture);
                     }
                     refresh_bleeds(core);
+                }
+                (NativeWidget::Textarea(scroller, view), Prop::LineNumbers, Value::Bool(on)) => {
+                    set_line_numbers(scroller, view, on);
+                }
+                (
+                    NativeWidget::Label(_) | NativeWidget::Link(_) | NativeWidget::Entry(_) | NativeWidget::Textarea(..),
+                    Prop::Monospaced | Prop::Family | Prop::TextScale,
+                    value,
+                ) => {
+                    let target = match widget {
+                        NativeWidget::Textarea(_, view) => view.clone().upcast::<gtk4::Widget>(),
+                        other => other.control(),
+                    };
+                    set_face(core, id.0, &target, |face| match (prop, value) {
+                        (Prop::Monospaced, Value::Bool(on)) => face.mono = on,
+                        (Prop::Family, Value::Str(name)) => face.family = name,
+                        (Prop::TextScale, Value::F64(scale)) => {
+                            face.scale = scale;
+                        }
+                        _ => {}
+                    });
                 }
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
@@ -20196,6 +20508,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
         // rule at all (see set_container_inset).
         let container_inset_css = gtk4::CssProvider::new();
         watch_css_errors(&container_inset_css, &css_error);
+        let face_css = gtk4::CssProvider::new();
+        watch_css_errors(&face_css, &css_error);
         // The table header's rules are STATIC, so this provider is loaded
         // once and never held: the display owns it. Its own provider and
         // never `css`, which the window-inset arm rewrites whole (the
@@ -20283,6 +20597,11 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
             gtk4::style_context_add_provider_for_display(
                 &display,
                 &container_inset_css,
+                gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            );
+            gtk4::style_context_add_provider_for_display(
+                &display,
+                &face_css,
                 gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
             gtk4::style_context_add_provider_for_display(
@@ -20520,6 +20839,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 bled: Vec::new(),
                 container_inset_css,
                 container_insets: BTreeSet::new(),
+                face_css,
+                faces: std::collections::BTreeMap::new(),
                 skin: skin::Skin {
                     grounds,
                     css: ground_css,
@@ -21838,6 +22159,106 @@ impl crate::harness::Stage for GtkStage {
             .unwrap_or_else(|| atspi_miss("<the accessibility tree did not answer>")),
             Err(why) => why,
         }
+    }
+
+    /// docs/code-surface-plan.md G5: the rows from GtkTextView's own display
+    /// lines (forward_display_line and each line's iter_location), the
+    /// numbers from the gutter's last snapshot, both in buffer coordinates.
+    fn gutter(
+        &self, target: crate::harness::Target,
+    ) -> Result<Option<crate::harness::GutterRead>, String> {
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let view = widget.downcast::<gtk4::TextView>().map_err(|_| "not a textarea".to_owned())?;
+            let Some(gutter) = view.gutter(gtk4::TextWindowType::Left) else { return Ok(None) };
+            let gutter = gutter
+                .downcast::<gutter::KayaGutter>()
+                .map_err(|_| "its left gutter is not kaya's".to_owned())?;
+            if !gutter.is_mapped() || gutter.width() == 0 {
+                return Err("the gutter is not on screen yet".to_owned());
+            }
+            let band = view.visible_rect();
+            let (top, bottom) = (f64::from(band.y()), f64::from(band.y() + band.height()));
+            let inside = |mid: f64| mid >= top && mid < bottom;
+            let mut fragments = Vec::new();
+            let (mut at, _) = view.line_at_y(band.y());
+            loop {
+                let r = view.iter_location(&at);
+                if r.y() > band.y() + band.height() {
+                    break;
+                }
+                let (y, h) = (f64::from(r.y()), f64::from(r.height()));
+                if inside(y + h / 2.0) {
+                    fragments.push((y, y + h, at.line() as u32 + 1, at.starts_line()));
+                }
+                let before = at.offset();
+                let moved = view.forward_display_line(&mut at);
+                if !moved {
+                    // The empty last line after a final newline is a line.
+                    if at.is_end() && at.offset() != before && at.starts_line() {
+                        let r = view.iter_location(&at);
+                        let (y, h) = (f64::from(r.y()), f64::from(r.height()));
+                        if inside(y + h / 2.0) {
+                            fragments.push((y, y + h, at.line() as u32 + 1, true));
+                        }
+                    }
+                    break;
+                }
+            }
+            let labels: Vec<(u32, f64)> = gutter.drawn();
+            Ok(Some(crate::harness::pair_gutter(&fragments, &labels)))
+        })
+    }
+
+    /// docs/code-surface-plan.md M4: the font Pango resolved, a label's off
+    /// its own layout's first run (the face that drew it, fallback included),
+    /// an entry's and a textarea's by loading the description the widget's
+    /// context holds.
+    fn face(&self, target: crate::harness::Target) -> Result<crate::harness::FaceRead, String> {
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let asked = unsafe { widget.data::<String>(FACE_ASKED_KEY).map(|p| p.as_ref().clone()) }
+                .unwrap_or_default();
+            let font = match widget.downcast_ref::<gtk4::Label>() {
+                Some(label) => label
+                    .layout()
+                    .iter()
+                    .run()
+                    .map(|run| run.item().analysis().font()),
+                None => {
+                    let context = widget.pango_context();
+                    context.font_description().and_then(|desc| context.load_font(&desc))
+                }
+            }
+            .ok_or("Pango resolved no font for it")?;
+            let desc = font.describe();
+            let face = font.face().ok_or("its font names no face")?;
+            let family = face.family();
+            let name = desc.family().map(|f| f.to_string()).unwrap_or_else(|| family.name().to_string());
+            Ok(crate::harness::FaceRead { monospaced: family.is_monospace(), family: name, asked })
+        })
+    }
+
+    /// docs/code-surface-plan.md S3: the size the widget's context resolved,
+    /// against the size GTK gave it before `text_scale` (measured on its first
+    /// map, before the rule carried a size), in one unit.
+    fn text_size(&self, target: crate::harness::Target) -> Result<(f64, f64), String> {
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let (size, absolute) = widget_font_size(&widget).ok_or("Pango resolved no size for it")?;
+            let id = unsafe { widget.data::<u64>(FACE_ID_KEY).map(|p| *p.as_ref()) };
+            let face = id.and_then(|id| core.faces.get(&id));
+            match face {
+                Some(face) if face.scale != 1.0 => {
+                    let (base, base_absolute) = face.base.ok_or("its size before the scale is not measured yet")?;
+                    if base_absolute != absolute {
+                        return Err("its size and its base are in different units".to_owned());
+                    }
+                    Ok((size, base))
+                }
+                _ => Ok((size, size)),
+            }
+        })
     }
 
     /// `format <target> <start:end> <name>[=<value>] [off]` in BYTES
