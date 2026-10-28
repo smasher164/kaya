@@ -1,7 +1,7 @@
 # Document tabs: one concept, native on every platform
 
-Status: PROPOSED 2026-10-28, waiting on the questions in §9. Nothing in the
-spec, the core, a backend or a binding moves until they are ruled. The
+Status: RULED 2026-10-28 (the maintainer): every §9 question as recommended
+except Q3, which he revised to put shared regions in v1 (§1.7). The
 maintainer, 2026-10-28: "so i guess we should add tabbing support to the text
 editor". The rulings this plan builds on are docs/native-tabs-study.md's four
 (all RULED 2026-10-28: option C, Mac NSWindow tabbing through public API only,
@@ -68,19 +68,7 @@ window, since each tab is one.
 | The body | each document's surface | that tab window's content | the tab view's page | the screen, under the top bar |
 | Undo, focus, selection | each document's | per window, natively | per page | per document |
 
-What the plan leaves out on purpose (question Q3): a SHARED BODY REGION, an
-app-drawn area beside or under the documents that every tab shares, such as a
-sidebar or a status line. In v1 the documents fill the body, and anything the
-app draws (the editor's status line, its find bar) is part of each document.
-The reason is the Mac. A shared region would have to be drawn once per tab
-window and "kept in step", and that is fine for a label but wrong for any
-widget whose state lives in the native control (an entry's text, a textarea's
-undo, a scroll position): kaya's text widgets are uncontrolled, so two native
-copies of one entry have two texts and no one to say which is the entry. Every
-editor surveyed in the study keeps its find bar and status per document
-anyway (GNOME Text Editor's find bar sits inside the page; VS Code's status
-bar shows only the active editor's facts). A sidebar beside documents waits
-for an app that needs one, ledgered with that trigger and with this reason.
+Shared regions (§1.7) are the one part of the body the documents share.
 
 ### 1.4 What the window's own props mean in a window with documents
 
@@ -142,10 +130,85 @@ absence except by never hearing it.
 A phone cannot close its one window. Under Q2's recommendation the last
 document's close leaves the phone showing the window's own mounted root, the
 empty state; the desktops close the window instead. That is a stated
-divergence and needs the maintainer's carve-out (Q2).
+divergence, granted by the maintainer as Q2's ruling (2026-10-28), and it goes
+into DESIGN.md's "Stated platform divergences" when it is built.
 
 iPad (regular width) uses the phone arm in v1. A scene per document is iPadOS's
 idiom, and needs the multi-scene work kaya has not done (the study's §2).
+
+### 1.7 Shared regions: a sidebar beside the documents (Q3, revised)
+
+The maintainer, 2026-10-28: "I'd ideally like a solution where a sidebar could
+be implemented in the same way it would on gnome and windows, but you still use
+the native macos tabs. Basically, the copying/restoring stuff is handled by
+kaya, but the user can still implement the sidebar."
+
+**The declaration.** A window with documents may declare SHARED REGIONS: a
+region is a surface (the shared namespace again), added to the window at an
+EDGE, `leading`, `trailing` or `bottom`, and filled by `mount` with any widgets
+the app likes. There is no sidebar kind; a region is a place, and what goes in
+it is ordinary kaya. The same calls on every platform, and no Mac branch in
+the app. At most one region per edge. Its width (or, at the bottom, its height)
+comes from its root's own layout; a user-draggable divider is not in v1.
+
+**GTK and WinUI** draw the region once per native window, beside the tab view:
+a horizontal GtkBox (vertical for `bottom`) around the AdwTabView inside the
+window's toolbar view, and the matching Grid column or row around the TabView.
+All three edges are the same few lines there.
+
+**The Mac moves one view instead of copying it.** Only the selected tab window
+of a strip is ever on screen, so kaya hosts the region in ONE view per strip
+and, on each selection change (`windowDidBecomeKey` among the kaya window's
+NSWindows, and the strip's `selectedWindow`), moves that view into the newly
+selected tab window. All three edges come free, since the move does not care
+where in the window the view goes. MEASURED 2026-10-28 (an AppKit probe built
+with `kaya_swiftc`, two NSWindows tabbed by `addTabbedWindow`, one
+NSHostingView holding a SwiftUI List, a ScrollView, a TextField and an
+`@StateObject` model, moved with `removeFromSuperview` and `addSubview` on each
+`tabGroup.selectedWindow` change; the probe is in the doctabs agent's
+scratchpad, rebuilt from this description):
+
+| What | After the move |
+|---|---|
+| The List's and the ScrollView's scroll offsets (500 and 300) | kept, read back from their NSScrollViews' clip views |
+| The List's selection and the model's state | kept |
+| The TextField's text, half typed | kept |
+| Focus and the caret | LOST: the old window's first responder resigns, and the new window's first responder is the window itself |
+| Focus and the caret, restored by kaya | kept: kaya records the first responder and the field editor's `selectedRange` before the move, and one runloop turn after it calls `makeFirstResponder` and sets the range again (read back `{6, 0}`, editing). Done in the same turn as the move, `makeFirstResponder` does not take. |
+| SwiftUI's lifecycle | the region's `onDisappear` and `onAppear` fire on every move. The interpreter must not read either as the region leaving the scene (§3). |
+| Where it sits | under the tab strip, which spans the full window width above it; the strip belongs to the title bar's accessories, so a full-height leading sidebar starts below the strip on the Mac, where on GNOME and Windows the tab bar sits beside the sidebar over the documents only. That is the platforms' own geometry and is accepted. |
+
+So the fallback (copies plus kaya-side mirroring of scroll, selection, focus,
+text and caret) is not needed.
+
+UNMEASURED, and accepted in advance as the coordinator proposed: Show All Tabs
+draws a live thumbnail of every tab window, and every one but the selected one
+has no region in it at that moment, so their thumbnails will show an empty
+slot. The probe's overview did not open in an inactive accessory app, and the
+host was in use, so the photograph waits for an idle host in the depth slice.
+
+**A second strip gets a second instance.** A torn-out tab is on screen at the
+same time as its old strip, and per Q1 it is still the same kaya window, so it
+needs the region too. Each strip (on the Mac a tab group, on GTK and WinUI a
+native window) shows ITS OWN INSTANCE of every region, built from the same
+mounted tree: everything the app drives (signals, props, its commands) reaches
+every instance, and the widget-local state of a new instance (scroll, focus,
+half-typed text) starts fresh. That is what GNOME's `create-window` and
+WinUI's `TabTearOutWindowRequested` do anyway, since the new window is built
+anew there. Occurrences carry no instance: the app sees one widget, and the
+harness reads the instance in the active strip.
+
+**Phones.** No phone has room beside a document. A `bottom` region sits under
+the document, above the keyboard's inset, as a status bar would. A `leading` or
+`trailing` region is shown in the open-documents sheet, above the list, which
+is the one place a phone already shows window-level content beside the
+documents. This placement is the plan's proposal and is in the message that
+carries the probe's result.
+
+**The editor** keeps its status line and find bar PER DOCUMENT: each describes
+one buffer (the find bar's matches, the status line's "saved, 15 bytes"), and
+that is where GNOME Text Editor and Sublime Text keep them. It declares no
+region; the conformance scene exercises one (§5).
 
 ## §2 The app-facing API
 
@@ -161,7 +224,7 @@ stance:
 | `dirty` | Bool | Unsaved work: the tab's mark (§3), and the window-level mark while active. Arms nothing. |
 | `intercept_close` | Bool | The veto: the tab's close emits `document_close_requested` and nothing closes until `close_document`. |
 
-One window prop: `new_document` (Bool, default false). True draws the
+The region needs no props of its own in v1. One window prop: `new_document` (Bool, default false). True draws the
 platform's "+" (Mac: answering `newWindowForTab:`; AdwTabBar's action button;
 WinUI `IsAddTabButtonVisible`; the phone list's header), and pressing it emits
 `new_document_requested(window)`. The binding sets it when the app registers
@@ -175,6 +238,7 @@ Records (TX and APPLY, in the add_section family):
 | `select_document` | document | Make it active: select its tab and bring its native window forward. Configuration, never echoes. |
 | `close_document` | document | Close it and forget its mounted tree, as `pop_entry` forgets an entry. Also the answer that agrees to a close request. Never echoes `document_closed`. |
 | `set_document_prop` | document, prop, source | The `set_section_prop` shape. |
+| `add_region` | window, region, edge | A shared region (§1.7) at a `REGION_EDGE` (`leading`, `trailing`, `bottom`); `mount` fills it. Only on a window with documents, one per edge, never removed (the sections' append-only stance). |
 
 Occurrences, every one post-fact or a request, every one the user's act only
 (the echo doctrine):
@@ -253,7 +317,9 @@ A document added twice or to two windows; `select_document`, `close_document`
 or a prop on an unknown or closed id (ids are never reused); sections, a
 window stack or `panes` above 1 on a window with documents, and documents on a
 window with sections (Q8); `dirty` on a window with documents (§1.4); a second
-window with documents in one app, if Q1's sub-question rules v1 to one.
+window with documents in one app (Q1's sub-question); a region on a window
+without documents, a second region at one edge, or a region id reused as a
+document.
 
 ## §3 Each backend's lowering
 
@@ -271,7 +337,11 @@ Selection: `windowDidBecomeKey` between a kaya window's NSWindows emits
 arm observes `tabGroup.windows` (KVO-compliant, visual order) and each
 window's `tabGroup`, and reports `document_moved`. The menu bar follows the key
 window already; the NSWindow-to-kaya-window map grows a document column. The
-toolbar is built per NSWindow from the one catalog. With one document the strip
+toolbar is built per NSWindow from the one catalog. Each region is one
+NSHostingView per strip, moved into the selected tab window on every selection
+change, with the first responder and caret recorded before and restored one
+runloop turn after (§1.7's measurement); the region's SwiftUI `onAppear` and
+`onDisappear` are not lifecycle there. With one document the strip
 follows AppKit's own state (Q7), and a documents window brings back the tab
 items the menu merge drops (Show Tab Bar, Show All Tabs) since they now mean
 something.
@@ -344,6 +414,10 @@ tree, never kaya's model. All verbs in both interpreters' four layers
 | `move_to_new_window "b"` | `moveTabToNewWindow:` on that tab window (the tab menu's own action) | the tab menu's Move to New Window | the tab's flyout item | refused: no windows (the phone prefix cuts at it, the dirty scene's precedent) |
 | `close_native_window` | Close Window on the key window | the native window's close | the native window's close | refused |
 
+Region widgets are read by the existing verbs (`expect`, `expect_scrolled`,
+`expect_focused` and the rest) against the instance in the active strip; the
+SwiftUI interpreter's registry maps a region widget to that strip's view.
+
 A reorder by drag is real pointer input and goes in the EXCLUSIVE set beside
 the drag legs; how each lane drives it is measured in the depth slice.
 
@@ -359,7 +433,7 @@ an armed document must fail the scene).
 
 ## §5 The scene and the editor
 
-**A conformance scene, `tools/scenes/doctabs.steps`,** guests in all nine
+**A conformance scene, `doctabs` (its steps file beside editor.steps),** guests in all nine
 languages and the C floor, Rust first. Three documents, `a`, `b` and `c`, each
 a column with a label and an entry; `b` arms `intercept_close`. The script:
 the strip reads `a|b|c` with `a` active; type into `c` while it is covered and
@@ -370,7 +444,11 @@ strip's end; close `c` (unarmed, gone, `document_closed` heard); close `b`
 `select_document` that does not echo; on the desktops, move `a` into a new
 window and read both strips; then close the native windows' documents until
 the window closes, which ends the desktop legs; the phones end on the empty
-state.
+state. A leading region holds a list of a dozen rows and an entry: type into
+the entry and scroll the list, switch documents, and read the half-typed text,
+the caret's focus and the scroll back (on the Mac this is the move of §1.7, on
+the others it is trivially true); after `move_to_new_window` the new strip's
+region reads fresh while the old one keeps its text.
 
 **The editor (guests/go/editor) grows tabs.** Each document carries its own
 buffer, find bar, status line, destination, saved text and Format state. File >
@@ -401,7 +479,7 @@ Depth then breadth, CLAUDE.md's pattern, one agent in the core at a time.
 | Slice | What | Size |
 |---|---|---|
 | D1 | Spec (DOCUMENT_PROPS, the window prop, four records, six occurrences), regenerate; core: per-window arrangement of strips, the walls in §2.4 with their tests, tree forgetting on close; the Rust surface | M |
-| D2 | SwiftUI on the Mac: the two unknowns in §3 first, then the arm and the eight verbs; the Rust `doctabs` guest and scene green on the Mac with every negative watched | L: the inverted ownership, a native window per document, the key-window map, the close routing, the tear-out observer |
+| D2 | SwiftUI on the Mac: the two unknowns in §3 first, then the arm, the moving regions and the eight verbs; the Rust `doctabs` guest and scene green on the Mac with every negative watched | L: the inverted ownership, a native window per document, the key-window map, the close routing, the tear-out observer |
 | B1 | GTK arm and its AT-SPI reads; tools/check-gtk.py | M |
 | B2 | WinUI arm, winui-bindgen growth, UIA reads, tabs in the TitleBar | M to L |
 | B3 | iOS list sheet and the reads | S to M |
@@ -415,7 +493,7 @@ The study priced the whole L to XL; this agrees.
 ## §7 Guards
 
 - The ruling "public API only" becomes a wall: a new clause (a new gate,
-  tools/check-doctabs.py, or a clause in an existing one, decided in D2) that
+  a check-doctabs gate, or a clause in an existing one, decided in D2) that
   fails if the Mac arm names a private AppKit tab class (`NSTabBar`,
   `NSTabButton`, `NSTitlebarAccessoryClipView`) or sends a private selector,
   with its negative watched. The study's probes read NSTabBar's frame for
@@ -433,7 +511,7 @@ The study priced the whole L to XL; this agrees.
 
 ## §8 Not in v1
 
-A shared body region (Q3); programmatic reorder and tear-out; pinned tabs and
+A draggable divider on a region; programmatic reorder and tear-out; pinned tabs and
 per-tab icons (the Mac cannot draw a leading icon through public API, the
 study's §1); the overview grids (Show All Tabs is AppKit's own and stays,
 AdwTabOverview waits); a scene per document on iPad; restoring open documents
@@ -452,12 +530,12 @@ native window of the same kaya window, with the same menus, toolbar and
 handlers, which the app never has to build again; (b) a torn-out tab becomes a
 new kaya window, which the app must then furnish with its own menu catalog and
 handlers, after the fact on the Mac, so its menu bar is empty until the app
-answers. RECOMMENDED: (a). It is SwiftUI's WindowGroup, it needs nothing from
+answers. RULED 2026-10-28 (the maintainer), as recommended: (a). It is SwiftUI's WindowGroup, it needs nothing from
 the app, and it is the only one of the two that the Mac's after-the-fact
 tear-out fits. Its cost is the idea of a strip (`document_moved` reports which
 native window a document is in). Sub-question: in v1, at most one window with
 documents per app (so AppKit's Merge All Windows can never mix two kaya
-windows' documents)? RECOMMENDED: yes, ledgered until an app wants two.
+windows' documents)? RULED 2026-10-28 (the maintainer), as recommended: yes, ledgered until an app wants two.
 
 **Q2. What happens when the last document closes?** (a) The window closes, as
 TextEdit, Notepad and GNOME Text Editor do and as AppKit does on its own when
@@ -467,7 +545,8 @@ close its window, so there the window shows its own mounted root as an empty
 state: a stated divergence, like `aux_windows`, which needs your carve-out.
 (b) An empty window everywhere, as Sublime Text and VS Code do: one semantics,
 no carve-out, but then nothing lets an app agree to close the primary, and the
-Mac must keep a window AppKit would close. RECOMMENDED: (a).
+Mac must keep a window AppKit would close. RULED 2026-10-28 (the maintainer), as recommended: (a), and the phones'
+empty state is the maintainer's carve-out.
 
 **Q3. Is anything in the window's body shared across tabs?** "Shared chrome"
 here means the parts every tab shows the same: the menus, the toolbar.
@@ -475,10 +554,14 @@ RECOMMENDED: in v1 only the window's chrome is shared and the body is all
 per-document; the editor's status line and find bar move inside each
 document. A shared sidebar or status bar beside the documents waits for an
 app that needs one, because on the Mac it would be drawn once per tab window,
-and a text field drawn twice has two texts (§1.3).
+and a text field drawn twice has two texts (§1.3). REVISED 2026-10-28 (the
+maintainer: "I'd ideally like a solution where a sidebar could be implemented
+in the same way it would on gnome and windows, but you still use the native
+macos tabs. Basically, the copying/restoring stuff is handled by kaya, but the
+user can still implement the sidebar"): shared regions are in v1, §1.7.
 
 **Q4. On a phone, where does the list of open documents open, and does a row
-show the unsaved mark?** RECOMMENDED: a button in the top bar (iOS: Safari's
+show the unsaved mark?** RULED 2026-10-28 (the maintainer), as recommended: a button in the top bar (iOS: Safari's
 two-squares symbol; Android: Chrome's square with the count) opening a sheet
 from the bottom (iOS `.sheet`, Android ModalBottomSheet), rows with the title,
 a dot when unsaved, a check on the active one and a close button, and a "+" in
@@ -488,10 +571,10 @@ kaya's own drawing, not platform chrome, so a mark there invents nothing.
 
 **Q5. May the user reorder documents on a phone?** iOS's List has reorder
 built in; Compose has none, so Android needs a long-press drag written by hand
-(about the size of a dnd arm). RECOMMENDED: build both, so reordering means
+(about the size of a dnd arm). RULED 2026-10-28 (the maintainer), as recommended: build both, so reordering means
 the same everywhere; the alternative is a stated divergence.
 
-**Q6. Do open documents come back after a relaunch?** RECOMMENDED: not by
+**Q6. Do open documents come back after a relaunch?** RULED 2026-10-28 (the maintainer), as recommended: not by
 kaya. The app knows its documents (their files) and can store the list in its
 own preferences; kaya keeps restoring the window frame as today. AppKit's own
 restoration of a tab group stays off (Ghostty's maintainers found it restores
@@ -500,15 +583,15 @@ tabs as separate windows, the study's §3).
 **Q7. With a single document, is the tab strip shown?** Platforms differ: a
 Mac shows no strip for one tab unless the user chose Show Tab Bar (and that
 choice persists); GNOME's AdwTabBar hides itself with one tab by default;
-WinUI always shows it, as Notepad does. RECOMMENDED: each platform's default,
+WinUI always shows it, as Notepad does. RULED 2026-10-28 (the maintainer), as recommended: each platform's default,
 since presentation is advisory, with Show Tab Bar and Show All Tabs back in
 the Mac's View menu for a documents window so the user can choose.
 
 **Q8. Can one window have documents and sections, or documents and a
-navigation stack?** RECOMMENDED: not in v1, refused at the root with a
+navigation stack?** RULED 2026-10-28 (the maintainer), as recommended: not in v1, refused at the root with a
 message saying so, and ledgered. Each is a different way of filling the same
 body; no app asks for both yet.
 
 **Q9. On Windows, do the tabs go in the title bar?** Notepad, Terminal and
 File Explorer put them there; kaya's WinUI windows already draw their own
-title bar, so it costs little. RECOMMENDED: yes, with the menu bar below.
+title bar, so it costs little. RULED 2026-10-28 (the maintainer), as recommended: yes, with the menu bar below.
