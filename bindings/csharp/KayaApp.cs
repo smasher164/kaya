@@ -855,6 +855,7 @@ enum Symbol : long
     Italic = KayaWire.SymbolItalic,
     Underline = KayaWire.SymbolUnderline,
     Strikethrough = KayaWire.SymbolStrikethrough,
+    Save = KayaWire.SymbolSave,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's

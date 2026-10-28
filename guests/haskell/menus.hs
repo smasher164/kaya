@@ -30,9 +30,7 @@ main = kayaMain $ \app -> do
         [IEnabledBy canExport]
         [ item
             "Save"
-            -- No `save` in the symbol vocabulary; `done` is the checkmark
-            -- idiom (docs/styling-plan.md D6).
-            [ ISymbol SymbolDone,
+            [ ISymbol SymbolSave,
               IShortcut "primary+s",
               IOnActivate (submitTx app (writeSignal status "saved"))
             ],

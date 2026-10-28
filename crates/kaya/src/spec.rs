@@ -4739,7 +4739,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // THE IDS ARE APPEND-ONLY, FOREVER: wire values in eight
             // generated bindings and four backends' lowering tables, so
             // a renumber would silently redraw every shipped app's menus.
-            // A new concept takes 37.
+            // A new concept takes 42.
             name: "symbol",
             variants: &[
                 ("add", 1),
@@ -4782,6 +4782,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("italic", 38),
                 ("underline", 39),
                 ("strikethrough", 40),
+                ("save", 41),
             ],
         },
         EnumSpec {
@@ -5849,6 +5850,7 @@ mod tests {
                     ("symbol", "italic") => wire::SYMBOL_ITALIC,
                     ("symbol", "underline") => wire::SYMBOL_UNDERLINE,
                     ("symbol", "strikethrough") => wire::SYMBOL_STRIKETHROUGH,
+                    ("symbol", "save") => wire::SYMBOL_SAVE,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -6193,7 +6195,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(41), None);
+        assert_eq!(wire::symbol_name(42), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

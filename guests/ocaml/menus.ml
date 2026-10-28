@@ -19,9 +19,7 @@ let () =
        let file =
          menu ~label:"File" ~bind_enabled:can_export
            [
-             (* No `save` in the symbol vocabulary; [Done] is the checkmark
-                idiom (docs/styling-plan.md D6). *)
-             item ~label:"Save" ~symbol:Done ~shortcut:"primary+s"
+             item ~label:"Save" ~symbol:Save ~shortcut:"primary+s"
                ~on_activate:(fun () -> write status ("saved"));
              item ~label:"Export" ~bind_enabled:can_export ~symbol:Forward;
              w share;

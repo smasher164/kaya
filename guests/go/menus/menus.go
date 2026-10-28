@@ -26,8 +26,7 @@ func App() *kaya.App {
 
 		win := tx.Window(0).Title("menus")
 		file := win.Menu("File").BindEnabled(canExport)
-		// The vocabulary has no save glyph, so `done` is the spelling.
-		file.Item("Save").Symbol(kaya.SymbolDone).Shortcut("primary+s").
+		file.Item("Save").Symbol(kaya.SymbolSave).Shortcut("primary+s").
 			OnActivate(func(tx *kaya.Tx) {
 				tx.Write(status, "saved")
 			})

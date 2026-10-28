@@ -24,10 +24,8 @@ public final class Menus {
 
             KayaApp.WindowRef win = tx.window(0).title("menus");
             KayaApp.MenuItem file = win.menu("File").enabled(canExport);
-            // No `save` in the symbol vocabulary; DONE is the checkmark idiom
-            // (docs/styling-plan.md D6).
             file.item("Save")
-                    .symbol(KayaApp.Symbol.DONE)
+                    .symbol(KayaApp.Symbol.SAVE)
                     .shortcut("primary+s")
                     .onActivate(t -> t.write(status, "saved"));
             file.item("Export").enabled(canExport).symbol(KayaApp.Symbol.FORWARD);

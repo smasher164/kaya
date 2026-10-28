@@ -1820,6 +1820,8 @@
 
 #define KAYA_SYMBOL_STRIKETHROUGH 40
 
+#define KAYA_SYMBOL_SAVE 41
+
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",
  * "edit_source"; docs/rich-text-plan.md R3/R4). A name rides as a string.

@@ -1479,6 +1479,7 @@ data Symbol
   | SymbolItalic
   | SymbolUnderline
   | SymbolStrikethrough
+  | SymbolSave
   deriving (Eq, Show, Enum, Bounded)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1525,6 +1526,7 @@ symbolWire s = fromIntegral $ case s of
   SymbolItalic -> W.symbolItalic
   SymbolUnderline -> W.symbolUnderline
   SymbolStrikethrough -> W.symbolStrikethrough
+  SymbolSave -> W.symbolSave
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 

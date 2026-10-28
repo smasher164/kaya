@@ -4460,6 +4460,7 @@ export const Symbol_ = Object.freeze({
   ITALIC: wire.SYMBOL_ITALIC,
   UNDERLINE: wire.SYMBOL_UNDERLINE,
   STRIKETHROUGH: wire.SYMBOL_STRIKETHROUGH,
+  SAVE: wire.SYMBOL_SAVE,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.

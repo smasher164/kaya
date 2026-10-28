@@ -277,6 +277,88 @@ impl MenuState {
     }
 }
 
+/// One menu of the real bar, for `expect_menu_bar`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BarMenu {
+    pub title: String,
+    pub items: Vec<BarItem>,
+}
+
+/// One visible command of a bar menu: its label, the chord the host shows
+/// in its canonical spelling (empty for none), and its standard-command
+/// role (empty for none, and for every item the host put there itself).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BarItem {
+    pub label: String,
+    pub chord: String,
+    pub role: String,
+}
+
+fn quoted_list(titles: &[String]) -> String {
+    titles.iter().map(|t| format!("{t:?}")).collect::<Vec<_>>().join(" ")
+}
+
+/// The verdict of `expect_menu_bar`, shared by the Rust backends; the two
+/// interpreters carry it word for word (tools/check-verbs.py).
+pub fn menu_bar_verdict(want: &[String], bar: &[BarMenu], chords: bool) -> Result<String, String> {
+    let titles: Vec<String> = bar.iter().map(|m| m.title.clone()).collect();
+    for title in &titles {
+        let n = titles.iter().filter(|t| *t == title).count();
+        if n > 1 {
+            return Err(format!(
+                "the menu bar shows {title:?} {n} times: {}",
+                quoted_list(&titles)
+            ));
+        }
+    }
+    let mut last: Option<(usize, &String)> = None;
+    for title in want {
+        let Some(at) = titles.iter().position(|t| t == title) else {
+            return Err(format!("the menu bar has no {title:?}: {}", quoted_list(&titles)));
+        };
+        if let Some((before, prev)) = last {
+            if at < before {
+                return Err(format!(
+                    "the menu bar puts {title:?} before {prev:?}: {}",
+                    quoted_list(&titles)
+                ));
+            }
+        }
+        last = Some((at, title));
+    }
+    let mut seen: Vec<(&str, &str, &str)> = Vec::new();
+    for menu in bar {
+        for item in &menu.items {
+            let n = menu.items.iter().filter(|i| i.label == item.label).count();
+            if n > 1 {
+                return Err(format!(
+                    "menu {:?} shows {:?} {n} times",
+                    menu.title, item.label
+                ));
+            }
+            if chords && !item.role.is_empty() && item.chord.is_empty() {
+                return Err(format!(
+                    "menu {:?} item {:?} (the {} command) carries no chord",
+                    menu.title, item.label, item.role
+                ));
+            }
+            if item.chord.is_empty() {
+                continue;
+            }
+            if let Some((_, other_menu, other)) =
+                seen.iter().find(|(chord, _, _)| *chord == item.chord)
+            {
+                return Err(format!(
+                    "the menu bar gives {} to {other_menu:?}>{other:?} and {:?}>{:?}",
+                    item.chord, menu.title, item.label
+                ));
+            }
+            seen.push((&item.chord, &menu.title, &item.label));
+        }
+    }
+    Ok(format!("menu bar {} each once", quoted_list(want)))
+}
+
 /// `expect_video_box`'s two readings (docs/media-plan.md §3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VideoBox {
@@ -1040,6 +1122,11 @@ pub enum Step {
     /// The tooltip the platform draws at the target's centre (docs/tooltip-plan.md §6).
     ExpectTooltip(Target, String),
     ExpectMenus(usize),
+    /// The REAL menu bar (docs/deferred.md, the Mac bar's doubled File, Edit
+    /// and View): no title on it twice, the listed catalog menus on it in
+    /// this order, no command or chord twice, and on a host whose menus draw
+    /// chords every standard-command role item carrying one.
+    ExpectMenuBar(Vec<String>),
     /// How the window catalog is CURRENTLY presented, spelled
     /// `<size class>/<presentation>`. THE PAIR is the assertion on purpose:
     /// neither half alone catches a regular-width window wearing the
@@ -1370,6 +1457,7 @@ impl Step {
             | Step::ExpectMenu(..)
             | Step::ExpectMenuSymbol(..)
             | Step::ExpectMenus(..)
+            | Step::ExpectMenuBar(..)
             | Step::ExpectMenuPresentation(..)
             | Step::ExpectToolbar
             | Step::ExpectToolbarItem(..)
@@ -1584,6 +1672,7 @@ impl Step {
             Step::ExpectHelp { .. } => true,
             Step::ExpectTooltip { .. } => true,
             Step::ExpectMenus { .. } => true,
+            Step::ExpectMenuBar { .. } => true,
             Step::ExpectMenuPresentation { .. } => true,
             Step::ExpectToolbar => true,
             Step::ExpectToolbarItem { .. } => true,
@@ -2853,6 +2942,11 @@ pub trait Stage: Send + 'static {
     /// The top-level catalog count, read from the REAL materialized bar (or
     /// the phone overflow's group list) — never the scene model's copy.
     fn menu_count(&self) -> usize;
+    /// The REAL menu bar's menus in bar order, dress included, and whether
+    /// this host's menus draw chords; Err names why it could not be read.
+    fn menu_bar(&self) -> Result<(Vec<BarMenu>, bool), String> {
+        Err("this stage reads no menu bar".to_owned())
+    }
     /// The target's accessibility ROLE and spoken LABEL as `<role>/<label>`,
     /// read from the PLATFORM'S OWN accessibility peer — never the scene
     /// model and never kaya's memory of what it set, which would make this
@@ -4676,6 +4770,21 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_menu_symbol wants a quoted path and a quoted symbol name: {e}")
                 })?;
                 Step::ExpectMenuSymbol(path, parse_string(want)?)
+            }
+            "expect_menu_bar" => {
+                let mut titles = Vec::new();
+                let mut tail = rest.trim();
+                while !tail.is_empty() {
+                    let (title, next) = parse_quoted_prefix(tail).map_err(|e| {
+                        format!("expect_menu_bar wants quoted menu titles: {e}: {line:?}")
+                    })?;
+                    titles.push(title);
+                    tail = next;
+                }
+                if titles.is_empty() {
+                    return Err(format!("expect_menu_bar wants quoted menu titles: {line:?}"));
+                }
+                Step::ExpectMenuBar(titles)
             }
             "expect_menus" => Step::ExpectMenus(
                 rest.trim()
@@ -8310,6 +8419,10 @@ fn run_with_log(
                     Err(format!("ax hint {got:?}, wanted {want:?}"))
                 }
             })),
+            Step::ExpectMenuBar(want) => Some(poll(|| {
+                let (bar, chords) = stage.menu_bar()?;
+                menu_bar_verdict(want, &bar, chords)
+            })),
             Step::ExpectMenus(n) => Some(poll(|| {
                 let got = stage.menu_count();
                 if got == *n {
@@ -9697,6 +9810,58 @@ pub fn resolve(index: isize, len: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    fn bar_menu(title: &str, items: &[(&str, &str, &str)]) -> BarMenu {
+        BarMenu {
+            title: title.to_owned(),
+            items: items
+                .iter()
+                .map(|(label, chord, role)| BarItem {
+                    label: (*label).to_owned(),
+                    chord: (*chord).to_owned(),
+                    role: (*role).to_owned(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn expect_menu_bar_parses_titles_and_refuses_none() {
+        let steps = parse("expect_menu_bar \"File\" \"Edit\"").unwrap();
+        assert_eq!(steps, vec![Step::ExpectMenuBar(vec!["File".into(), "Edit".into()])]);
+        assert!(parse("expect_menu_bar").is_err());
+        assert!(parse("expect_menu_bar File").is_err());
+    }
+
+    #[test]
+    fn menu_bar_verdict_names_each_defect() {
+        let want = vec!["File".to_owned(), "Edit".to_owned()];
+        let good = vec![
+            bar_menu("kaya", &[]),
+            bar_menu("File", &[("Save", "primary+s", ""), ("Close", "primary+w", "")]),
+            bar_menu("Edit", &[("Copy", "primary+c", "copy")]),
+        ];
+        assert_eq!(
+            menu_bar_verdict(&want, &good, true),
+            Ok("menu bar \"File\" \"Edit\" each once".to_owned())
+        );
+        let mut doubled = good.clone();
+        doubled.push(bar_menu("File", &[]));
+        assert!(menu_bar_verdict(&want, &doubled, true).unwrap_err().contains("\"File\" 2 times"));
+        let reversed = vec![good[0].clone(), good[2].clone(), good[1].clone()];
+        assert!(menu_bar_verdict(&want, &reversed, true).unwrap_err().contains("puts \"Edit\" before"));
+        assert!(menu_bar_verdict(&["Sort".to_owned()], &good, true).unwrap_err().contains("has no \"Sort\""));
+        let twice = vec![bar_menu("Edit", &[("Copy", "primary+c", "copy"), ("Copy", "primary+c", "")])];
+        assert!(menu_bar_verdict(&[], &twice, true).unwrap_err().contains("shows \"Copy\" 2 times"));
+        let chord = vec![
+            bar_menu("File", &[("New", "primary+n", "")]),
+            bar_menu("Window", &[("New Window", "primary+n", "")]),
+        ];
+        assert!(menu_bar_verdict(&[], &chord, true).unwrap_err().contains("gives primary+n"));
+        let bare = vec![bar_menu("Edit", &[("Copy", "", "copy")])];
+        assert!(menu_bar_verdict(&[], &bare, true).unwrap_err().contains("carries no chord"));
+        assert!(menu_bar_verdict(&[], &bare, false).is_ok());
+    }
+
     #[test]
     fn an_empty_record_variable_does_not_linger() {
         use super::lingers;

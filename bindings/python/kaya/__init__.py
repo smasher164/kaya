@@ -5084,6 +5084,7 @@ class Symbol(enum.IntEnum):
     ITALIC = wire.SYMBOL_ITALIC
     UNDERLINE = wire.SYMBOL_UNDERLINE
     STRIKETHROUGH = wire.SYMBOL_STRIKETHROUGH
+    SAVE = wire.SYMBOL_SAVE
 
     @classmethod
     def _missing_(cls, value: object) -> Any:

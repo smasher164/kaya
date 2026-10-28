@@ -26,9 +26,7 @@ static class MenusScene
             var share = tx.Item("Share", primary: true, onActivate: onShare);
             var file = tx.Menu("File", enabled: canExport, items: new[]
             {
-                // No `save` in the symbol vocabulary; Done is the checkmark
-                // idiom (docs/styling-plan.md D6).
-                tx.Item("Save", shortcut: "primary+s", symbol: Symbol.Done,
+                tx.Item("Save", shortcut: "primary+s", symbol: Symbol.Save,
                     onActivate: t => t.Write(status, "saved")),
                 tx.Item("Export", enabled: canExport, symbol: Symbol.Forward),
                 share,

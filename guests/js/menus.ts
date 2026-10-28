@@ -61,8 +61,7 @@ const { status, canExport, details, sort, file, share, items, groups } = app.win
   const sort = kaya.signal(0);
 
   const { file, share } = app.menu("File", { enabled: canExport }, (file) => {
-    // The vocabulary has no `save` glyph, so `done` is the spelling.
-    kaya.item("Save", { symbol: kaya.Symbol.DONE, shortcut: "primary+s", onActivate: onSave });
+    kaya.item("Save", { symbol: kaya.Symbol.SAVE, shortcut: "primary+s", onActivate: onSave });
     kaya.item("Export", { enabled: canExport, symbol: kaya.Symbol.FORWARD });
     const share = kaya.item("Share", { primary: true, onActivate: onShare });
     return { file, share };

@@ -3883,6 +3883,36 @@ for pattern, repl, label, which in (
     if not found:
         fail(f"check-verbs SELF-TEST: the art tolerance passed with {label}")
 
+# THE MENU BAR VERDICT (harness.rs's menu_bar_verdict): the two interpreters
+# carry their own copy, and every sentence must read the same on five lanes.
+MENU_BAR_WORDS = ("the menu bar shows ", " times: ", "the menu bar has no ",
+                  "the menu bar puts ", " before ", " command) carries no chord",
+                  "the menu bar gives ", " each once")
+
+
+def menu_bar_sentences(harness_src=None, swift_src=None, kotlin_src=None):
+    bad = []
+    for label, src in (("harness.rs", harness_src or real(HARNESS)),
+                       ("KayaSwiftUI.swift", swift_src or real(SWIFT)),
+                       ("KayaCompose.kt", kotlin_src or real(KOTLIN))):
+        for words in MENU_BAR_WORDS:
+            if words not in src:
+                bad.append(f"{label}'s expect_menu_bar verdict does not say {words!r}")
+    return bad
+
+
+menu_bar_out = menu_bar_sentences()
+if menu_bar_out:
+    media_status = 1
+    print("check-verbs: the expect_menu_bar verdicts disagree:", file=sys.stderr)
+    print("\n".join(menu_bar_out), file=sys.stderr)
+print(f"check-verbs: expect_menu_bar's {len(MENU_BAR_WORDS)} sentence parts in three harnesses")
+mb_cut = g.doctor("menu bar verdict: the Compose chord sentence reworded", real(KOTLIN),
+                  r"command\) carries no chord", "command) has no chord")
+if not menu_bar_sentences(kotlin_src=mb_cut):
+    fail("check-verbs SELF-TEST: the menu bar verdict passed with Compose's chord sentence "
+         "reworded")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its

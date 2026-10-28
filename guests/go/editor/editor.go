@@ -414,9 +414,8 @@ func App() *kaya.App {
 		file.Item("Open…").Shortcut("primary+o").OnActivate(func(tx *kaya.Tx) {
 			ask(tx, openDoc)
 		})
-		// The host promotes the first k primaries in catalog preorder;
-		// SymbolDone is the save idiom, the set has no save glyph.
-		file.Item("Save").Symbol(kaya.SymbolDone).Primary(true).
+		// The host promotes the first k primaries in catalog preorder.
+		file.Item("Save").Symbol(kaya.SymbolSave).Primary(true).
 			Shortcut("primary+s").OnActivate(save)
 		file.Item("Save As…").Shortcut("primary+shift+s").OnActivate(saveAs)
 

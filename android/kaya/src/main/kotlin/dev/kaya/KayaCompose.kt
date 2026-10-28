@@ -178,6 +178,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.FormatBold
 import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
@@ -2253,6 +2254,62 @@ class KayaSheet(val id: Long, val parent: Long) {
  * USER-STATE MIRROR: a user toggle/radio pick lands in checked/value
  * here (and emits), the guest may not echo it back, and an unrelated
  * prop write must not clobber it. */
+/** One menu of the bar for expect_menu_bar: title and (label, chord, role). */
+class KayaBarMenu(val title: String, val items: List<Triple<String, String, String>>)
+
+/** The overflow's groups in catalog order, as the overflow composes them. */
+fun kayaMenuBarRead(): List<KayaBarMenu> = KayaSceneModel.menubar.map { top ->
+    val items = ArrayList<Triple<String, String, String>>()
+    val children = if (top.kind == KayaCompose.MENU_KIND_RADIO_GROUP) listOf(top) else top.children.toList()
+    for (child in children) {
+        when (child.kind) {
+            KayaCompose.MENU_KIND_SEPARATOR -> {}
+            KayaCompose.MENU_KIND_RADIO_GROUP -> child.children.forEach { items.add(Triple(it.label, "", "")) }
+            else -> items.add(Triple(child.label, child.shortcut, child.role))
+        }
+    }
+    KayaBarMenu(top.label, items)
+}
+
+private fun kayaQuotedList(titles: List<String>) = titles.joinToString(" ") { "\"$it\"" }
+
+/** harness.rs's menu_bar_verdict, word for word (tools/check-verbs.py). */
+fun kayaMenuBarVerdict(want: List<String>, bar: List<KayaBarMenu>, chords: Boolean): Pair<Boolean, String> {
+    val titles = bar.map { it.title }
+    for (title in titles) {
+        val n = titles.count { it == title }
+        if (n > 1) return false to "the menu bar shows \"$title\" $n times: ${kayaQuotedList(titles)}"
+    }
+    var last: Pair<Int, String>? = null
+    for (title in want) {
+        val at = titles.indexOf(title)
+        if (at < 0) return false to "the menu bar has no \"$title\": ${kayaQuotedList(titles)}"
+        val prev = last
+        if (prev != null && at < prev.first) {
+            return false to "the menu bar puts \"$title\" before \"${prev.second}\": ${kayaQuotedList(titles)}"
+        }
+        last = at to title
+    }
+    val seen = ArrayList<Triple<String, String, String>>()
+    for (menu in bar) {
+        for ((label, chord, role) in menu.items) {
+            val n = menu.items.count { it.first == label }
+            if (n > 1) return false to "menu \"${menu.title}\" shows \"$label\" $n times"
+            if (chords && role.isNotEmpty() && chord.isEmpty()) {
+                return false to "menu \"${menu.title}\" item \"$label\" (the $role command) carries no chord"
+            }
+            if (chord.isEmpty()) continue
+            val other = seen.firstOrNull { it.first == chord }
+            if (other != null) {
+                return false to "the menu bar gives $chord to \"${other.second}\">\"${other.third}\" " +
+                    "and \"${menu.title}\">\"$label\""
+            }
+            seen.add(Triple(chord, menu.title, label))
+        }
+    }
+    return true to "menu bar ${kayaQuotedList(want)} each once"
+}
+
 class KayaMenuItem(val id: Long, val kind: Int) {
     var label by mutableStateOf("")
     // Own enablement only; what a row shows is the EFFECTIVE state —
@@ -3419,7 +3476,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x8a7752967302f191uL
+    private const val SPEC_HASH: ULong = 0xc31d87678a5929d1uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3858,6 +3915,7 @@ object KayaCompose {
     const val SYMBOL_ITALIC = 38L
     const val SYMBOL_UNDERLINE = 39L
     const val SYMBOL_STRIKETHROUGH = 40L
+    const val SYMBOL_SAVE = 41L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -3907,6 +3965,7 @@ object KayaCompose {
         Triple(SYMBOL_ITALIC, "italic", Icons.Default.FormatItalic),
         Triple(SYMBOL_UNDERLINE, "underline", Icons.Default.FormatUnderlined),
         Triple(SYMBOL_STRIKETHROUGH, "strikethrough", Icons.Default.FormatStrikethrough),
+        Triple(SYMBOL_SAVE, "save", Icons.Default.Save),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -15535,6 +15594,25 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 failures.add("${parts[1]} leaves leftover ($slack)")
                             else ->
                                 failures.add("${parts[1]} is short of its track ($slack)")
+                        }
+                    }
+                    "expect_menu_bar" -> {
+                        val want = ArrayList<String>()
+                        var tail = line.substring(parts[0].length).trim()
+                        var malformed = false
+                        while (tail.isNotEmpty()) {
+                            val head = quotedHead(tail)
+                            if (head == null) { malformed = true; break }
+                            want.add(head.first)
+                            tail = head.second.trim()
+                        }
+                        if (malformed || want.isEmpty()) {
+                            failures.add("expect_menu_bar wants quoted menu titles: $line")
+                        } else {
+                            // The overflow IS the bar here: Android has no
+                            // system menus to merge with, and draws no chords.
+                            val got = onUi(activity) { kayaMenuBarVerdict(want, kayaMenuBarRead(), false) }
+                            if (got.first) observed.add(got.second) else failures.add(got.second)
                         }
                     }
                     "expect_menus" -> {

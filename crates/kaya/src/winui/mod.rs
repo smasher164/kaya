@@ -1122,6 +1122,7 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Italic => FluentIcon::Member(Fluent::Italic),
         S::Underline => FluentIcon::Member(Fluent::Underline),
         S::Strikethrough => FluentIcon::Glyph("\u{EDE0}"),
+        S::Save => FluentIcon::Member(Fluent::Save),
     }
 }
 
@@ -1170,11 +1171,12 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Italic => crate::wire::SYMBOL_ITALIC,
         S::Underline => crate::wire::SYMBOL_UNDERLINE,
         S::Strikethrough => crate::wire::SYMBOL_STRIKETHROUGH,
+        S::Save => crate::wire::SYMBOL_SAVE,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 40] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 41] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
@@ -1182,7 +1184,7 @@ const SYMBOL_ORDER: [crate::app::Symbol; 40] = {
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
         S::ImageMissing, S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat,
         S::RepeatOne, S::Volume, S::Queue, S::Favorite, S::Muted, S::Bold, S::Italic,
-        S::Underline, S::Strikethrough,
+        S::Underline, S::Strikethrough, S::Save,
     ]
 };
 
@@ -9492,6 +9494,58 @@ fn accelerator_chord(spelling: &str) -> Option<(VirtualKey, VirtualKeyModifiers)
     Some((key?, mods))
 }
 
+/// The chord a Windows text control answers for a standard command, in the
+/// canonical spelling and as WinUI writes it; `settings` has none.
+fn role_chord(role: &str) -> Option<(&'static str, &'static str)> {
+    match role {
+        "undo" => Some(("primary+z", "Ctrl+Z")),
+        "redo" => Some(("primary+y", "Ctrl+Y")),
+        "cut" => Some(("primary+x", "Ctrl+X")),
+        "copy" => Some(("primary+c", "Ctrl+C")),
+        "paste" => Some(("primary+v", "Ctrl+V")),
+        _ => None,
+    }
+}
+
+/// A native item's chord in the canonical spelling, for the bar read: its
+/// accelerator, else the text a standard command shows.
+fn item_chord(item: &MenuFlyoutItem) -> windows_core::Result<String> {
+    let accels = item.KeyboardAccelerators()?;
+    if accels.Size()? > 0 {
+        let accel = accels.GetAt(0)?;
+        let (key, mods) = (accel.Key()?, accel.Modifiers()?);
+        let mut names: Vec<String> = ["enter", "delete", "left", "up", "right", "down", "minus",
+            "equal", "comma", "period", "slash", "backslash", "leftbracket", "rightbracket"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+        names.extend((1..=12).map(|n| format!("f{n}")));
+        names.extend(('a'..='z').chain('0'..='9').map(String::from));
+        let Some(name) = names.into_iter().find(|n| virtual_key(n) == Some(key)) else {
+            return Ok(format!("key {}", key.0));
+        };
+        let mut parts = Vec::new();
+        if mods.0 & VirtualKeyModifiers::Control.0 != 0 {
+            parts.push("primary".to_owned());
+        }
+        if mods.0 & VirtualKeyModifiers::Shift.0 != 0 {
+            parts.push("shift".to_owned());
+        }
+        if mods.0 & VirtualKeyModifiers::Menu.0 != 0 {
+            parts.push("alt".to_owned());
+        }
+        parts.push(name);
+        return Ok(parts.join("+"));
+    }
+    let text = item.KeyboardAcceleratorTextOverride()?.to_string();
+    Ok(["undo", "redo", "cut", "copy", "paste"]
+        .iter()
+        .filter_map(|r| role_chord(r))
+        .find(|(_, shown)| *shown == text)
+        .map(|(canonical, _)| canonical.to_owned())
+        .unwrap_or(if text.is_empty() { String::new() } else { format!("text {text:?}") }))
+}
+
 /// One closed key floor (DESIGN.md, Menus) onto Windows.System VirtualKey
 /// values. `escape` never arrives — the root rejects every spelling of it.
 fn virtual_key(name: &str) -> Option<VirtualKey> {
@@ -9646,7 +9700,7 @@ fn build_menu_items(
 ) -> windows_core::Result<()> {
     use windows_core::Interface as _;
     for &id in ids {
-        let (kind, label, checked, value, shortcut, symbol, children) = {
+        let (kind, label, checked, value, shortcut, symbol, children, role) = {
             let m = &core.menu_models[&id];
             (
                 m.kind,
@@ -9656,6 +9710,7 @@ fn build_menu_items(
                 m.shortcut.clone(),
                 m.symbol,
                 m.children.clone(),
+                m.role.clone(),
             )
         };
         let enabled = menu_effective_enabled(core, id);
@@ -9669,6 +9724,14 @@ fn build_menu_items(
                 item.SetIsEnabled(enabled)?;
                 apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
+                // A standard command shows the chord its text control answers
+                // (DESIGN.md, Standard commands): text only, so the control
+                // keeps the key.
+                if shortcut.is_empty() {
+                    if let Some((_, text)) = role_chord(&role) {
+                        item.SetKeyboardAcceleratorTextOverride(&HSTRING::from(text))?;
+                    }
+                }
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
                     Ok(())
@@ -24261,6 +24324,59 @@ impl crate::harness::Stage for WinUiStage {
     fn context_open(&self, t: crate::harness::Target) {
         let widget = Self::on_ui_mut(move |core| Ok(widget_id_for_target(core, t)));
         self.open_context_flyout(widget, &format!("{t:?}"));
+    }
+
+    fn menu_bar(&self) -> Result<(Vec<crate::harness::BarMenu>, bool), String> {
+        Self::on_ui_read(|core| {
+            let Some(bar) = core.menubars.get(&0) else {
+                return Ok(Err("the window has no menu bar".to_owned()));
+            };
+            let mut roles: Vec<(MenuFlyoutItem, String)> = Vec::new();
+            for ((attachment, id), native) in &core.menu_natives {
+                if *attachment != MenuAttachment::Window(0) {
+                    continue;
+                }
+                let item = match native {
+                    MenuNative::Action(n) => n.clone(),
+                    MenuNative::Toggle(n) => n.cast::<MenuFlyoutItem>()?,
+                    MenuNative::Option(n) => n.cast::<MenuFlyoutItem>()?,
+                    _ => continue,
+                };
+                let role = core.menu_models.get(id).map(|m| m.role.clone()).unwrap_or_default();
+                roles.push((item, role));
+            }
+            let mut out = Vec::new();
+            let tops = bar.Items()?;
+            for i in 0..tops.Size()? {
+                let top = tops.GetAt(i)?;
+                let mut items = Vec::new();
+                let children = top.Items()?;
+                for j in 0..children.Size()? {
+                    let child = children.GetAt(j)?;
+                    if let Ok(item) = child.cast::<MenuFlyoutItem>() {
+                        let role = roles
+                            .iter()
+                            .find(|(native, _)| *native == item)
+                            .map(|(_, r)| r.clone())
+                            .unwrap_or_default();
+                        items.push(crate::harness::BarItem {
+                            label: item.Text()?.to_string(),
+                            chord: item_chord(&item)?,
+                            role,
+                        });
+                    } else if let Ok(sub) = child.cast::<MenuFlyoutSubItem>() {
+                        items.push(crate::harness::BarItem {
+                            label: sub.Text()?.to_string(),
+                            chord: String::new(),
+                            role: String::new(),
+                        });
+                    }
+                }
+                out.push(crate::harness::BarMenu { title: top.Title()?.to_string(), items });
+            }
+            Ok(Ok((out, true)))
+        })
+        .unwrap_or_else(|e| Err(format!("the menu bar could not be read: {e}")))
     }
 
     fn menu_count(&self) -> usize {

@@ -19493,8 +19493,59 @@ full-screen shot shows whichever app owns the bar. With
 the same click opens the menu (tools/mac/menu-shot.py). The first look at a
 kaya app WITH its bar showed SwiftUI's own File, Edit and View beside kaya's
 menus of the same titles ("File Edit File Edit Format View View Window
-Help"): kayaSyncMacMenuBar keeps SwiftUI's menus as dress and inserts kaya's
-segment beside them (docs/deferred.md, the duplicate mac menus entry).
+Help"): kayaSyncMacMenuBar kept SwiftUI's menus as dress and inserted kaya's
+beside them (docs/deferred.md, the duplicate mac menus entry; since
+2026-10-27 they merge, held by `expect_menu_bar`).
+
+## AppKit empties a key equivalent that another item in the menu holds (measured 2026-10-27)
+
+Merging the editor's Edit into SwiftUI's, with SwiftUI's Undo, Cut, Copy and
+Paste hidden, left kaya's Undo, Cut, Copy and Paste (and File's New, against
+the hidden New Window) with `keyEquivalent` empty and the modifier mask kept:
+AppKit clears the key of an item inserted into a menu where another item,
+hidden or not, already holds it, and setting it again after the insert does
+not stick. In a merged menu the system's duplicate now stays in SwiftUI's
+menu, off the bar (the entry below); elsewhere on the bar kayaHideDress takes
+the chord off a hidden system item and puts it back when it shows again. `expect_menu_bar` reports it as
+`(the undo command) carries no chord`.
+
+## A merged SwiftUI menu: SwiftUI rebuilds it as it opens (measured 2026-10-27)
+
+kaya's items inserted into SwiftUI's own File, Edit and View menus (class
+SwiftUIMenu) did not survive: SwiftUI's menuNeedsUpdate rebuilds the menu as
+it opens and drops them, and re-merging a turn later mutated a menu already on
+screen (a second "Line Numbers" drawn over Show Tab Bar, "Save As…" cut to
+"Sav…s…" because the menu kept the width of SwiftUI's own items). So the bar
+item shows a menu kaya owns (KayaMergedMenu): as it opens it runs SwiftUI's
+update of SwiftUI's menu, then fills itself with the catalog's items and moves
+SwiftUI's remaining items over; what the catalog supplies stays behind in
+SwiftUI's menu, off the bar, so its chords are not live. AppKit adds Show Tab
+Bar, Show All Tabs and Enter Full Screen to SwiftUI's View menu as THAT menu
+opens, which it no longer does; a merged View carries Enter Full Screen
+(toggleFullScreen:, fn-F) as Xcode's main menu does, and the tab items are
+gone. Neither shows in any read; the menu-shot captures are the check.
+
+## The iOS main menu is built lazily and no API returns it (measured 2026-10-27)
+
+`buildMenu(with:)` runs at launch, before the guest has declared a catalog,
+and `UIMenuSystem.main.setNeedsRebuild()` builds again only when something
+asks (a hardware keyboard's HUD, the iPad's bar shown); there is no getter for
+the built menu. So `expect_menu_bar` on iOS runs the same lowering
+(kayaLowerCatalogMenus) over the system's own root as UIKit handed it to the
+last build, in KayaMenuTreeBuilder, and reads that. It sees the real system
+menus (the application menu's Settings… on Command-comma was what doubled the
+commands scene's chord) but not a UIKit that would treat the merge
+differently.
+
+## The iOS keyboard frame includes the input accessory view (measured 2026-10-27)
+
+`keyboardFrameEndUserInfoKey` spans the keyboard AND the text view's
+`inputAccessoryView`, which for the editor is kaya's own formatting bar. The
+red-leg picture hatched both as "keyboard", which read as the keyboard
+covering the bar. KayaFailShot now draws the bar from its own view and
+hatches from its bottom edge down (check-flightrec, NP9). Android's band is
+the IME inset alone; the keyboard bar there is the app's own composition above
+it, so its picture was already right.
 
 ## A synthesized monospaced bold is faint on the 1x emulator (measured 2026-10-27)
 

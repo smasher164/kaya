@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x8a7752967302f191
+specHash = 0xc31d87678a5929d1
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -590,6 +590,8 @@ symbolUnderline :: Word32
 symbolUnderline = 39
 symbolStrikethrough :: Word32
 symbolStrikethrough = 40
+symbolSave :: Word32
+symbolSave = 41
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32

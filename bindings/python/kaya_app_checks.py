@@ -2187,7 +2187,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         if name.isupper()
     }
     check("kaya.Symbol is exactly the generated vocabulary, name for name",
-          authored == generated and len(authored) == 40)
+          authored == generated and len(authored) == 41)
     check("and the name spelling is derived from it, not typed twice",
           kaya._SYMBOL_NAMES == generated)
 
@@ -2282,8 +2282,8 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     with app_style.menu("File3"):
         bad_item = kaya.item("Save")
         for what, value, kind, fragment in (
-            ("an unknown name", "save", ValueError, "must be one of"),
-            ("a number past the vocabulary", 41, ValueError,
+            ("an unknown name", "floppy", ValueError, "must be one of"),
+            ("a number past the vocabulary", 42, ValueError,
              "is not a symbol"),
             ("zero", 0, ValueError, "is not a symbol"),
             ("a bool", True, TypeError, "not bool"),
@@ -2301,7 +2301,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
         # AND THE REFUSAL NAMES THE VOCABULARY: there is no enum here to
         # read it off.
         try:
-            bad_item.symbol("save")
+            bad_item.symbol("floppy")
             named = False
         except ValueError as exc:
             named = all(f"'{n}'" in str(exc)
@@ -2313,7 +2313,7 @@ with app_style.window(title="styling", width=480.0, height=360.0, inset=0.0):
     # at the word.
     before_bad = len(kaya._tx)
     try:
-        app_style.add_section(4243, title="Nope", symbol="save")
+        app_style.add_section(4243, title="Nope", symbol="floppy")
         ok = False
     except ValueError as exc:
         ok = "must be one of" in str(exc)

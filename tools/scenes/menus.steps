@@ -3,12 +3,15 @@
 expect_title "menus"
 expect label#0 "ready"
 expect_menus 3
+# One File and one View: the catalog merges into the system menus of its
+# titles (docs/deferred.md, the Mac bar's doubled menus).
+expect_menu_bar "File" "View" "Sort"
 expect_menu "File>Save" disabled
 expect_menu "File>Export" disabled
 # THE SYMBOL VOCABULARY (docs/styling-plan.md D6), read off the REAL
 # tree. ITEMS ONLY, never a top-level grouping: Windows' MenuBarItem has
 # no icon slot, so a top-level symbol is not the 4/4 intersection.
-expect_menu_symbol "File>Save" "done"
+expect_menu_symbol "File>Save" "save"
 expect_menu_symbol "File>Export" "forward"
 expect_menu_symbol "View>Details" "info"
 # The transport symbols (docs/media-player-plan.md M8).

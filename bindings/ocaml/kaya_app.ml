@@ -2254,6 +2254,7 @@ type symbol =
   | Italic
   | Underline
   | Strikethrough
+  | Save
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2296,6 +2297,7 @@ let symbol_wire = function
   | Italic -> Int64.of_int Kaya_wire.symbol_italic
   | Underline -> Int64.of_int Kaya_wire.symbol_underline
   | Strikethrough -> Int64.of_int Kaya_wire.symbol_strikethrough
+  | Save -> Int64.of_int Kaya_wire.symbol_save
 
 (* A [symbol] row field's wire form, for the ppx's generated code
    (docs/media-player-plan.md M16 (21)). Every constructor, in wire order;
@@ -2304,7 +2306,7 @@ let all_symbols =
   [ Add; Remove; Delete; Edit; Done; Close; Search; Settings; Refresh; Info; Warning; Back;
     Forward; More; Copy; Paste; Star; Lock; Person; Home; Emoji; Send; Attach; Mic;
     ImageMissing; Play; Pause; Next; Previous; Shuffle; Repeat; RepeatOne; Volume; Queue;
-    Favorite; Muted; Bold; Italic; Underline; Strikethrough ]
+    Favorite; Muted; Bold; Italic; Underline; Strikethrough; Save ]
 
 let pack_symbol = symbol_wire
 

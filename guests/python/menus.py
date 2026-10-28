@@ -68,8 +68,7 @@ with app.window(title="menus"):
     sort = kaya.signal(0.0)
 
     with app.menu("File", enabled=can_export) as file:
-        # The vocabulary has no `save` glyph, so `done` is the spelling.
-        kaya.item("Save", symbol=kaya.Symbol.DONE, shortcut="primary+s",
+        kaya.item("Save", symbol=kaya.Symbol.SAVE, shortcut="primary+s",
                   on_activate=on_save)
         kaya.item("Export", enabled=can_export, symbol=kaya.Symbol.FORWARD)
         share = kaya.item("Share", primary=True, on_activate=on_share)

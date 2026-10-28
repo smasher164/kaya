@@ -106,6 +106,7 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_ITALIC, "format-text-italic-symbolic"),
     (crate::wire::SYMBOL_UNDERLINE, "format-text-underline-symbolic"),
     (crate::wire::SYMBOL_STRIKETHROUGH, "format-text-strikethrough-symbolic"),
+    (crate::wire::SYMBOL_SAVE, "document-save-symbolic"),
 ];
 
 const _: () = assert!(
@@ -11242,6 +11243,14 @@ fn build_menu_items(
                     Some(&format!("{prefix}.kmi-{child}")),
                 );
                 set_row_symbol(&row, item.symbol);
+                // A standard command shows the chord its text control answers
+                // (DESIGN.md, Standard commands); the attribute is drawn, not
+                // bound, so the control keeps the key.
+                if item.shortcut.is_empty() {
+                    if let Some(accel) = menu_accel(role_chord(&item.role)) {
+                        row.set_attribute_value("accel", Some(&accel.to_variant()));
+                    }
+                }
                 section.append_item(&row);
             }
             MenuItemKind::Menu => {
@@ -11736,6 +11745,42 @@ fn rebuild_menu_anchors(core: &CoreState, id: u64) {
     for widget in contexts {
         rebuild_context(core, widget);
     }
+}
+
+/// The chord GTK's text controls answer for a standard command; `settings`
+/// has none.
+fn role_chord(role: &str) -> &'static str {
+    match role {
+        "undo" => "primary+z",
+        "redo" => "primary+shift+z",
+        "cut" => "primary+x",
+        "copy" => "primary+c",
+        "paste" => "primary+v",
+        _ => "",
+    }
+}
+
+/// GTK's accelerator syntax back to the canonical spelling, for the bar read.
+fn accel_spelling(accel: &str) -> String {
+    let mut parts = Vec::new();
+    let mut rest = accel;
+    while let Some(tail) = rest.strip_prefix('<') {
+        let Some((modifier, after)) = tail.split_once('>') else { break };
+        parts.push(match modifier {
+            "Primary" | "Control" | "Ctrl" => "primary".to_owned(),
+            "Shift" => "shift".to_owned(),
+            "Alt" => "alt".to_owned(),
+            other => other.to_lowercase(),
+        });
+        rest = after;
+    }
+    parts.push(match rest {
+        "Return" => "enter".to_owned(),
+        "bracketleft" => "leftbracket".to_owned(),
+        "bracketright" => "rightbracket".to_owned(),
+        other => other.to_lowercase(),
+    });
+    parts.join("+")
 }
 
 /// The canonical shortcut spelling onto GTK's accelerator syntax:
@@ -22047,6 +22092,64 @@ impl crate::harness::Stage for GtkStage {
             note_claim(&core.context_trail, "harness context_open", Some(anchor));
             attachment.popover.popup();
         });
+    }
+
+    fn menu_bar(&self) -> Result<(Vec<crate::harness::BarMenu>, bool), String> {
+        Self::on_main(|core| {
+            let Some(model) = core.menu_models.get(&0) else {
+                return Err("the window has no menu model".to_owned());
+            };
+            let reg = core.menus.borrow();
+            fn attr(model: &gio::MenuModel, i: i32, name: &str) -> String {
+                model
+                    .item_attribute_value(i, name, Some(glib::VariantTy::STRING))
+                    .and_then(|v| v.get::<String>())
+                    .unwrap_or_default()
+            }
+            fn items(
+                model: &gio::MenuModel,
+                reg: &MenuRegistry,
+                app: Option<&gtk4::Application>,
+                out: &mut Vec<crate::harness::BarItem>,
+            ) {
+                for i in 0..model.n_items() {
+                    if let Some(section) = model.item_link(i, "section") {
+                        items(&section, reg, app, out);
+                        continue;
+                    }
+                    let label = attr(model, i, "label");
+                    let action = attr(model, i, "action");
+                    let id = action
+                        .rsplit_once("kmi-")
+                        .and_then(|(_, n)| n.parse::<u64>().ok());
+                    let role = id
+                        .and_then(|id| reg.items.get(&id))
+                        .map(|item| item.role.clone())
+                        .unwrap_or_default();
+                    let mut accel = attr(model, i, "accel");
+                    if accel.is_empty() && !action.is_empty() {
+                        if let Some(app) = app {
+                            accel = app
+                                .accels_for_action(&action)
+                                .first()
+                                .map(|a| a.to_string())
+                                .unwrap_or_default();
+                        }
+                    }
+                    let chord = if accel.is_empty() { String::new() } else { accel_spelling(&accel) };
+                    out.push(crate::harness::BarItem { label, chord, role });
+                }
+            }
+            let mut bar = Vec::new();
+            for i in 0..model.n_items() {
+                let mut menu_items = Vec::new();
+                if let Some(submenu) = model.item_link(i, "submenu") {
+                    items(&submenu, &reg, core.app.as_ref(), &mut menu_items);
+                }
+                bar.push(crate::harness::BarMenu { title: attr(model.upcast_ref::<gio::MenuModel>(), i, "label"), items: menu_items });
+            }
+            Ok((bar, true))
+        })
     }
 
     fn menu_count(&self) -> usize {

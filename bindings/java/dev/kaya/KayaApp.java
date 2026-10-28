@@ -286,7 +286,8 @@ public final class KayaApp {
         BOLD(KayaWire.SYMBOL_BOLD),
         ITALIC(KayaWire.SYMBOL_ITALIC),
         UNDERLINE(KayaWire.SYMBOL_UNDERLINE),
-        STRIKETHROUGH(KayaWire.SYMBOL_STRIKETHROUGH);
+        STRIKETHROUGH(KayaWire.SYMBOL_STRIKETHROUGH),
+        SAVE(KayaWire.SYMBOL_SAVE);
 
         final long wire;
 

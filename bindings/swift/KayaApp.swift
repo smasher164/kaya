@@ -633,6 +633,7 @@ public enum KayaSymbol: Int64, Sendable {
     case italic = 38
     case underline = 39
     case strikethrough = 40
+    case save = 41
 }
 
 public struct KayaWidget {

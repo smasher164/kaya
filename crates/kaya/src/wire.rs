@@ -1599,6 +1599,7 @@ pub(crate) const SYMBOL_BOLD: u32 = 37;
 pub(crate) const SYMBOL_ITALIC: u32 = 38;
 pub(crate) const SYMBOL_UNDERLINE: u32 = 39;
 pub(crate) const SYMBOL_STRIKETHROUGH: u32 = 40;
+pub(crate) const SYMBOL_SAVE: u32 = 41;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1644,6 +1645,7 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_ITALIC, "italic"),
     (SYMBOL_UNDERLINE, "underline"),
     (SYMBOL_STRIKETHROUGH, "strikethrough"),
+    (SYMBOL_SAVE, "save"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside

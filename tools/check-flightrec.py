@@ -230,6 +230,11 @@ def census_ios_app_shot(src):
         found.append("iOS: KayaFailShot no longer hatches the keyboard's band — a shot without "
                      "it reads as an app that fills half the screen (docs/traps.md, the iOS "
                      "shot's missing keyboard)")
+    if ("x: keyboard.minX, y: rect.maxY, width: keyboard.width" not in ios
+            or "bar.drawHierarchy(in: rect" not in ios):
+        found.append("iOS: KayaFailShot hatches the keyboard bar with the keyboard — the "
+                     "notification's frame includes the input accessory view, the app's own "
+                     "(docs/traps.md, the iOS shot's keyboard band over the formatting bar)")
     if "kayaTempDir()" not in ios:
         found.append("iOS: KayaFailShot no longer resolves a relative KAYA_FAIL_SHOT under "
                      "Documents, where the runner pulls it")
@@ -2739,6 +2744,11 @@ gate.negative("NP7 a red iOS leg adopting an earlier leg's picture",
 np8 = doctored(SWIFTUI, r"cg\.fill\(keyboard\)", "_ = keyboard", "NP8 cut the keyboard band's fill")
 gate.negative("NP8 an iOS shot with the keyboard's band left out",
               lambda: census_ios_app_shot(np8), want="no longer hatches the keyboard's band")
+np9 = doctored(SWIFTUI, r"x: keyboard\.minX, y: rect\.maxY, width: keyboard\.width",
+               "x: keyboard.minX, y: keyboard.minY, width: keyboard.width",
+               "NP9 hatch from the notification's top, over the keyboard bar")
+gate.negative("NP9 an iOS shot whose keyboard band covers the app's keyboard bar",
+              lambda: census_ios_app_shot(np9), want="hatches the keyboard bar with the keyboard")
 
 # The desktop shot's two idle refusals, each cut from a copy.
 nd1 = doctored(LANE_PY,
@@ -3663,6 +3673,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(265 + (5 if DRIVES else 0))
+gate.negatives_ran(266 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

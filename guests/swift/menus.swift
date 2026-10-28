@@ -17,9 +17,7 @@ KayaApp.run { app in
         let file = tx.menu(
             "File", enabled: canExport,
             items: [
-                // No `save` in the symbol vocabulary; `done` is the checkmark
-                // idiom (docs/styling-plan.md D6).
-                tx.item("Save", shortcut: "primary+s", symbol: .done) { t in
+                tx.item("Save", shortcut: "primary+s", symbol: .save) { t in
                     t.write(status, .str("saved"))
                 },
                 tx.item("Export", enabled: canExport, symbol: .forward),

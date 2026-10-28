@@ -69,7 +69,7 @@ static void build_scene(void) {
     kaya_tx_bind_menu_enabled(&tx, M_FILE, SIG_CAN_EXPORT);
     kaya_tx_menu_item_create(&tx, M_SAVE, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_SAVE, "Save");
-    kaya_tx_set_menu_symbol(&tx, M_SAVE, KAYA_SYMBOL_DONE);
+    kaya_tx_set_menu_symbol(&tx, M_SAVE, KAYA_SYMBOL_SAVE);
     kaya_tx_set_menu_shortcut(&tx, M_SAVE, "primary+s");
     kaya_tx_menu_item_create(&tx, M_EXPORT, KAYA_MENU_KIND_ACTION);
     kaya_tx_set_menu_label(&tx, M_EXPORT, "Export");

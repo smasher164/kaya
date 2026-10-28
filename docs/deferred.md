@@ -4581,7 +4581,9 @@ unpicked.
   runs on BOTH iOS form factors, and on iPhone it feeds the
   hardware-keyboard HUD; only the VISIBLE arm keys on size class. What
   is actually missing is the CHORD: the generated `UIAction`s carry no
-  `input:`/`modifierFlags`, so nothing is bound to a key. (The macOS
+  `input:`/`modifierFlags`, so nothing is bound to a key. (Since
+  2026-10-27 a chorded action or toggle is a `UIKeyCommand`, built with the
+  menu merge; a radio option is still a `UIAction` with no chord.) (The macOS
   lowering is NSMenu rather than SwiftUI `.commands`, which is why
   neither side goes through CommandsBuilder.) TRIGGER (SUPERSEDED 2026-07-24 — see the iPad
   DEFECT entry at the top; iPadOS 26's menu bar is not keyboard-gated,
@@ -16609,7 +16611,7 @@ KEY: outer .help wins, kayaA11yProps, helped container, tooltips scene column he
   text on the Mac, held by a step that reads the drawn tooltip rather than AXHelp.
 
 
-## RULING — the Mac menu bar shows SwiftUI's File, Edit and View beside kaya's own (seen 2026-10-27, docs/traps.md, an accessory guest has no menu bar to photograph)
+## ~~RULING — the Mac menu bar shows SwiftUI's File, Edit and View beside kaya's own (seen 2026-10-27, docs/traps.md, an accessory guest has no menu bar to photograph)~~ CLOSED 2026-10-27, ruled and built (the maintainer: "yes go ahead with the merge", option (a)): a catalog menu whose title names a system menu merges into it on macOS and iOS, kaya's items first and the system's own after, less any the catalog supplies by title, role or chord; the five editing roles show the host's own chord (DESIGN.md, Standard commands); File>Save draws the new `save` symbol (SF square.and.arrow.down, what Tahoe's own Save shows); `expect_menu_bar` reads the real bar in menus.steps, commands.steps and editor.steps
 
 KEY: kayaSyncMacMenuBar, kayaOwnedMenuItems, dress, duplicate mac menus, KAYA_WINDOW_FRONT=regular, menu-shot
 - An app that declares an identity runs `.regular` and gets a menu bar, and

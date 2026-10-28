@@ -33,10 +33,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .window(kaya::DEFAULT_WINDOW)
             .title("menus")
             .menu("File", |m| {
-                // The vocabulary has no `save` glyph, so `done` is it.
                 let save = m
                     .item("Save")
-                    .symbol(kaya::Symbol::Done)
+                    .symbol(kaya::Symbol::Save)
                     .shortcut("primary+s")
                     .id();
                 msgs.on_menu_item(save, Msg::Save);

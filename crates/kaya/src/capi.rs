@@ -1692,6 +1692,7 @@ pub const KAYA_SYMBOL_BOLD: u32 = 37;
 pub const KAYA_SYMBOL_ITALIC: u32 = 38;
 pub const KAYA_SYMBOL_UNDERLINE: u32 = 39;
 pub const KAYA_SYMBOL_STRIKETHROUGH: u32 = 40;
+pub const KAYA_SYMBOL_SAVE: u32 = 41;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1733,6 +1734,7 @@ const _: () = assert!(
         && KAYA_SYMBOL_ITALIC == wire::SYMBOL_ITALIC
         && KAYA_SYMBOL_UNDERLINE == wire::SYMBOL_UNDERLINE
         && KAYA_SYMBOL_STRIKETHROUGH == wire::SYMBOL_STRIKETHROUGH
+        && KAYA_SYMBOL_SAVE == wire::SYMBOL_SAVE
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1750,7 +1752,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 40,
+        variants == 41,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );

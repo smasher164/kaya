@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x8a7752967302f191
+let kayaSpecHash: UInt64 = 0xc31d87678a5929d1
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -315,6 +315,7 @@ private let symbolBold: Int64 = 37
 private let symbolItalic: Int64 = 38
 private let symbolUnderline: Int64 = 39
 private let symbolStrikethrough: Int64 = 40
+private let symbolSave: Int64 = 41
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -512,6 +513,7 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolItalic, "italic", "italic", nil),
     (symbolUnderline, "underline", "underline", nil),
     (symbolStrikethrough, "strikethrough", "strikethrough", nil),
+    (symbolSave, "save", "square.and.arrow.down", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -1913,11 +1915,45 @@ enum KayaVTrace {
                 // does: the keyboard is another process's window, and a shot
                 // without it read as an app that filled half the screen
                 // (docs/traps.md, the iOS shot's missing keyboard).
-                let keyboard = MainActor.assumeIsolated { kayaKeyboardScreenFrame }
+                var keyboard = MainActor.assumeIsolated { kayaKeyboardScreenFrame }
                     .intersection(screen.bounds)
+                // The notification's frame includes the input accessory view,
+                // which is the app's own keyboard bar: it is drawn, and only
+                // the keyboard under it is hatched (docs/traps.md, the iOS
+                // shot's keyboard band over the formatting bar).
+                let accessory = MainActor.assumeIsolated { () -> (UIView, CGRect)? in
+                    guard let window = kayaHarnessWindow(),
+                        let text = kayaFirstResponderText(window),
+                        let bar = text.inputAccessoryView, let barWindow = bar.window
+                    else { return nil }
+                    let inWindow = bar.convert(bar.bounds, to: barWindow)
+                    return (bar, barWindow.convert(inWindow, to: screen.coordinateSpace))
+                }
+                var strip = ""
+                if let (_, rect) = accessory, !keyboard.isNull, keyboard.height > 0,
+                    rect.maxY > keyboard.minY, rect.minY < keyboard.maxY
+                {
+                    keyboard = CGRect(
+                        x: keyboard.minX, y: rect.maxY, width: keyboard.width,
+                        height: max(0, keyboard.maxY - rect.maxY))
+                }
                 let data = UIGraphicsImageRenderer(bounds: screen.bounds, format: format).pngData { context in
                     for window in windows {
                         window.drawHierarchy(in: window.frame, afterScreenUpdates: false)
+                    }
+                    if let (bar, rect) = accessory {
+                        let drew = bar.drawHierarchy(in: rect, afterScreenUpdates: false)
+                        strip =
+                            "; the app's keyboard bar (\(type(of: bar))) at y \(Int(rect.minY))..\(Int(rect.maxY)) pt "
+                            + (drew ? "drawn from its own view" : "could not be drawn and is labelled")
+                        if !drew {
+                            let cg = context.cgContext
+                            cg.setFillColor(UIColor(white: 0.5, alpha: 0.6).cgColor)
+                            cg.fill(rect)
+                            ("keyboard bar (the app's own, not drawn)" as NSString).draw(
+                                at: CGPoint(x: rect.minX + 8, y: rect.minY + 4),
+                                withAttributes: [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 14)])
+                        }
                     }
                     guard !keyboard.isNull, keyboard.height > 0 else { return }
                     let cg = context.cgContext
@@ -1939,10 +1975,11 @@ enum KayaVTrace {
                         at: CGPoint(x: keyboard.minX + 8, y: keyboard.minY + 8),
                         withAttributes: [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 14)])
                 }
-                let band = keyboard.isNull || keyboard.height <= 0
+                let band = (keyboard.isNull || keyboard.height <= 0
                     ? "; no keyboard up"
                     : "; the keyboard covered y \(Int(keyboard.minY))..\(Int(keyboard.maxY)) pt, hatched over "
-                        + "what the app drew under it since the keyboard's window is another process's"
+                        + "what the app drew under it since the keyboard's window is another process's")
+                    + strip
                 return (data, windows.count, census, band)
             }
             var wrote = "no PNG was rendered"
@@ -15002,6 +15039,37 @@ private func kayaRunScript(_ script: String) {
                 case nil:
                     failures.append("no such target \(parts[1])")
                 }
+            case "expect_menu_bar":
+                var want: [String] = []
+                var tail = String(line.dropFirst(parts[0].count))
+                var malformed = false
+                while !tail.trimmingCharacters(in: .whitespaces).isEmpty {
+                    guard let (title, next) = kayaQuotedPrefix(tail) else {
+                        malformed = true
+                        break
+                    }
+                    want.append(title)
+                    tail = next
+                }
+                if malformed || want.isEmpty {
+                    failures.append("expect_menu_bar wants quoted menu titles: \(line)")
+                    break
+                }
+                var verdict: Result<String, KayaBarFailure> = .failure(KayaBarFailure("unread"))
+                for attempt in 0..<40 {
+                    if attempt > 0 { Thread.sleep(forTimeInterval: 0.1) }
+                    verdict = DispatchQueue.main.sync { () -> Result<String, KayaBarFailure> in
+                        switch kayaMenuBarRead() {
+                        case .failure(let why): return .failure(why)
+                        case .success(let (bar, chords)): return kayaMenuBarVerdict(want, bar, chords)
+                        }
+                    }
+                    if case .success = verdict { break }
+                }
+                switch verdict {
+                case .success(let said): observed.append(said)
+                case .failure(let why): failures.append(why.said)
+                }
             case "expect_menus":
                 // The top-level catalog count from the REAL materialized bar
                 // on macOS (the owned NSMenu segment actually sitting in
@@ -15010,8 +15078,7 @@ private func kayaRunScript(_ script: String) {
                 let got = DispatchQueue.main.sync { () -> Int in
                     #if os(macOS)
                         kayaEnsureMenuSegment()
-                        guard let mainMenu = NSApp.mainMenu else { return 0 }
-                        return kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
+                        return kayaPresentedBarCount()
                     #else
                         return kayaScene.windows[0]?.menubar.count ?? 0
                     #endif
@@ -15724,11 +15791,7 @@ private func kayaRunScript(_ script: String) {
                 let gotPresentation = DispatchQueue.main.sync { () -> String in
                     #if os(macOS)
                         kayaEnsureMenuSegment()
-                        let owned =
-                            NSApp.mainMenu.map { mainMenu in
-                                kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
-                            } ?? 0
-                        return "regular/" + (owned > 0 ? "bar" : "none")
+                        return "regular/" + (kayaPresentedBarCount() > 0 ? "bar" : "none")
                     #else
                         guard let window = kayaScene.windows[0] else {
                             return "unknown/none"
@@ -29693,6 +29756,113 @@ func kayaPromotedActions(_ window: KayaWindowModel) -> [KayaMenuItemModel] {
 
 /// The catalog the chrome presents: the key kaya window's on macOS
 /// (key-window changes swap it), the primary's on iOS.
+/// The chord an Apple host gives a standard command, which the role item
+/// takes in place of the system item it replaces (DESIGN.md, Standard
+/// commands); `settings` has none.
+func kayaRoleChord(_ role: String) -> String {
+    switch role {
+    case "undo": return "primary+z"
+    case "redo": return "primary+shift+z"
+    case "cut": return "primary+x"
+    case "copy": return "primary+c"
+    case "paste": return "primary+v"
+    default: return ""
+    }
+}
+
+/// One menu of the real bar for expect_menu_bar: its title and its visible
+/// commands as (label, chord in the canonical spelling, role).
+struct KayaBarMenu {
+    let title: String
+    let items: [(label: String, chord: String, role: String)]
+}
+
+struct KayaBarFailure: Error {
+    let said: String
+    init(_ said: String) { self.said = said }
+}
+
+private func kayaQuotedList(_ titles: [String]) -> String {
+    titles.map { "\"\($0)\"" }.joined(separator: " ")
+}
+
+/// harness.rs's menu_bar_verdict, word for word (tools/check-verbs.py).
+func kayaMenuBarVerdict(_ want: [String], _ bar: [KayaBarMenu], _ chords: Bool)
+    -> Result<String, KayaBarFailure>
+{
+    let titles = bar.map(\.title)
+    for title in titles {
+        let n = titles.filter { $0 == title }.count
+        if n > 1 {
+            return .failure(KayaBarFailure(
+                "the menu bar shows \"\(title)\" \(n) times: \(kayaQuotedList(titles))"))
+        }
+    }
+    var last: (Int, String)?
+    for title in want {
+        guard let at = titles.firstIndex(of: title) else {
+            return .failure(KayaBarFailure(
+                "the menu bar has no \"\(title)\": \(kayaQuotedList(titles))"))
+        }
+        if let (before, prev) = last, at < before {
+            return .failure(KayaBarFailure(
+                "the menu bar puts \"\(title)\" before \"\(prev)\": \(kayaQuotedList(titles))"))
+        }
+        last = (at, title)
+    }
+    var seen: [(chord: String, menu: String, label: String)] = []
+    for menu in bar {
+        for item in menu.items {
+            let n = menu.items.filter { $0.label == item.label }.count
+            if n > 1 {
+                return .failure(KayaBarFailure(
+                    "menu \"\(menu.title)\" shows \"\(item.label)\" \(n) times"))
+            }
+            if chords && !item.role.isEmpty && item.chord.isEmpty {
+                return .failure(KayaBarFailure(
+                    "menu \"\(menu.title)\" item \"\(item.label)\" (the \(item.role) command) carries no chord"))
+            }
+            if item.chord.isEmpty { continue }
+            if let other = seen.first(where: { $0.chord == item.chord }) {
+                return .failure(KayaBarFailure(
+                    "the menu bar gives \(item.chord) to \"\(other.menu)\">\"\(other.label)\" "
+                        + "and \"\(menu.title)\">\"\(item.label)\""))
+            }
+            seen.append((item.chord, menu.title, item.label))
+        }
+    }
+    return .success("menu bar \(kayaQuotedList(want)) each once")
+}
+
+/// The REAL bar, dress included, and whether this host's menus draw chords.
+func kayaMenuBarRead() -> Result<([KayaBarMenu], Bool), KayaBarFailure> {
+    #if os(macOS)
+        kayaEnsureMenuSegment()
+        guard let mainMenu = NSApp.mainMenu else {
+            return .failure(KayaBarFailure("the application has no main menu"))
+        }
+        let bar = mainMenu.items.filter { !$0.isHidden }.map { top in
+            KayaBarMenu(
+                title: top.title,
+                items: (top.submenu?.items ?? []).filter { !$0.isHidden && !$0.isSeparatorItem }
+                    .map { item in
+                        let id = (item.representedObject as? NSNumber)?.uint64Value
+                        let role =
+                            item.target === kayaMenuDispatch
+                            ? id.flatMap { kayaScene.menuItems[$0]?.role } ?? "" : ""
+                        return (item.title, kayaChordSpelling(item), role)
+                    })
+        }
+        return .success((bar, true))
+    #else
+        guard let bar = kayaBuiltMenuBar() else {
+            return .failure(KayaBarFailure(
+                "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system)"))
+        }
+        return .success((bar, false))
+    #endif
+}
+
 func kayaPresentedCatalog() -> [KayaMenuItemModel] {
     #if os(macOS)
         return kayaScene.windows[kayaPresentedMenuWindow]?.menubar ?? []
@@ -29916,12 +30086,8 @@ func kayaToolbarChromeFits(_ spelling: String) -> String? {
             matched += 1
         }
         kayaEnsureMenuSegment()
-        let owned =
-            NSApp.mainMenu.map { mainMenu in
-                kayaOwnedMenuItems.filter { $0.menu === mainMenu }.count
-            } ?? 0
         return "\(matched)/\(promoted.count)/\(kayaToolbarItems(windowId).count)/"
-            + (owned > 0 ? "menubar" : "none")
+            + (kayaPresentedBarCount() > 0 ? "menubar" : "none")
     }
 
     /// THE expect_toolbar_item READ on macOS: one aspect of the real toolbar
@@ -31504,9 +31670,8 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// kaya window takes key (accessory-policy suite runs never grant key
     /// status, which correctly leaves the primary's catalog presented).
     var kayaPresentedMenuWindow: UInt64 = 0
-    /// The Kaya-owned SEGMENT of NSApp.mainMenu, in catalog order. Everything
-    /// outside it — application menu, Edit, Window, Help — is dress and never
-    /// touched.
+    /// Every NSMenuItem kaya put on the bar: its own menus' holders, and the
+    /// items and separators it merged into the system menus of their titles.
     var kayaOwnedMenuItems: [NSMenuItem] = []
     var kayaMenuObserversInstalled = false
     /// Re-entrancy guard: our own inserts/removals fire the same NSMenu
@@ -31656,10 +31821,17 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                     nsItem.state = child.checked ? .on : .off
                 }
                 kayaApplySymbol(nsItem, child.symbol)
+                // A standard command draws the glyph macOS 26 gives the
+                // system item it replaces; AppKit assigns those by action,
+                // and a role item's action is the dispatcher's.
+                if child.symbol == 0, #available(macOS 26, *), let glyph = kayaRoleGlyph(child.role) {
+                    nsItem.image = NSImage(systemSymbolName: glyph, accessibilityDescription: child.role)
+                }
                 // A chord rides any leaf command: "Show Sidebar" wants its
                 // checkmark AND its key, and AppKit has never cared which kind
                 // of item carries a key equivalent.
-                kayaApplyKeyEquivalent(nsItem, child.shortcut)
+                kayaApplyKeyEquivalent(
+                    nsItem, child.shortcut.isEmpty ? kayaRoleChord(child.role) : child.shortcut)
                 menu.addItem(nsItem)
             default:
                 break  // radio_option outside its group: the closed grammar forbids it
@@ -31684,10 +31856,10 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         nsItem.keyEquivalentModifierMask = mask
     }
 
-    /// The segment's insertion point among DRESS items: after the Edit dress,
-    /// before Window/Help. Anchors are locale-independent — Edit by its native
-    /// actions (copy:/paste: survive localization), Window/Help by NSApp's own
-    /// menu handles.
+    /// The insertion point after the dress Edit, before Window/Help, for a
+    /// catalog menu no system menu of its title receives. Anchors are
+    /// locale-independent: Edit by its native actions (copy:/paste: survive
+    /// localization), Window/Help by NSApp's own menu handles.
     private func kayaMenuInsertionIndex(_ items: [NSMenuItem]) -> Int {
         let editActions = [#selector(NSText.copy(_:)), #selector(NSText.paste(_:))]
         let editByAction = items.firstIndex(where: { item in
@@ -31713,18 +31885,134 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         return items.count
     }
 
-    /// Rebuild and re-insert the owned segment from the presented window's
-    /// catalog — always from the model (docs/traps.md, "A native menu rebuild
-    /// must start from the post-user mirror").
+    /// The SF Symbol macOS 26 draws beside the system's own command.
+    private func kayaRoleGlyph(_ role: String) -> String? {
+        switch role {
+        case "undo": return "arrow.uturn.backward"
+        case "redo": return "arrow.uturn.forward"
+        case "cut": return "scissors"
+        case "copy": return kayaSFSymbol(symbolCopy)
+        case "paste": return kayaSFSymbol(symbolPaste)
+        default: return nil
+        }
+    }
+
+    /// The AppKit action of the system item a role replaces.
+    private func kayaRoleAction(_ role: String) -> Selector? {
+        switch role {
+        case "undo": return Selector(("undo:"))
+        case "redo": return Selector(("redo:"))
+        case "cut": return #selector(NSText.cut(_:))
+        case "copy": return #selector(NSText.copy(_:))
+        case "paste": return #selector(NSText.paste(_:))
+        default: return nil
+        }
+    }
+
+    /// One merged bar menu: the bar item of the system's menu, SwiftUI's own
+    /// submenu under it, and kaya's menu shown in its place, which holds the
+    /// catalog's items and then the system's own, moved over. kaya owns the
+    /// menu it shows because SwiftUI rebuilds its menus as they open and
+    /// AppKit empties a key equivalent another item holds (docs/traps.md, a
+    /// merged SwiftUI menu).
+    struct KayaMergedMenu {
+        let carrier: NSMenuItem
+        let dress: NSMenu
+        let shown: NSMenu
+        let top: UInt64
+        let delegate: KayaMergedMenuDelegate
+    }
+    var kayaMerged: [KayaMergedMenu] = []
+    var kayaMergedMenus: [NSMenu] { kayaMerged.map(\.shown) }
+    var kayaHiddenDressItems: [NSMenuItem] = []
+    var kayaHiddenDressKeys: [ObjectIdentifier: (String, NSEvent.ModifierFlags)] = [:]
+    var kayaMenuChords = Set<String>()
+    var kayaMergedLeftovers: [ObjectIdentifier: [ObjectIdentifier]] = [:]
+    var kayaMergedOrder: [ObjectIdentifier: [NSMenuItem]] = [:]
+
+    /// Hide a system item outside the merged menus whose chord the catalog
+    /// claims, and take its chord while it is hidden: AppKit empties the key
+    /// equivalent of an item put beside one holding the same chord, hidden or
+    /// not (docs/traps.md).
+    func kayaHideDress(_ item: NSMenuItem) {
+        item.isHidden = true
+        if !item.keyEquivalent.isEmpty {
+            kayaHiddenDressKeys[ObjectIdentifier(item)] = (item.keyEquivalent, item.keyEquivalentModifierMask)
+            item.keyEquivalent = ""
+        }
+        kayaHiddenDressItems.append(item)
+    }
+    var kayaCatalogCarriers: [NSMenuItem] = []
+    var kayaMenuSignature: [ObjectIdentifier] = []
+
+    /// Fills a merged menu as it opens, after SwiftUI's own update of the
+    /// menu it stands in for.
+    final class KayaMergedMenuDelegate: NSObject, NSMenuDelegate {
+        func menuNeedsUpdate(_ menu: NSMenu) {
+            guard !kayaMenuSyncing, let merged = kayaMerged.first(where: { $0.shown === menu }) else {
+                return
+            }
+            merged.dress.delegate?.menuNeedsUpdate?(merged.dress)
+            // Unchanged since the last fill: the items read and activated
+            // through stay the ones on screen.
+            if merged.dress.items.map(ObjectIdentifier.init) == kayaMergedLeftovers[ObjectIdentifier(menu)] {
+                return
+            }
+            kayaFillMerged(merged, refreshDress: false)
+        }
+    }
+
+    /// The bar's shape as identities, so a dress rebuild that replaced a bar
+    /// item or put SwiftUI's submenu back is seen (kayaEnsureMenuSegment).
+    private func kayaMenuShape() -> [ObjectIdentifier] {
+        guard let mainMenu = NSApp.mainMenu else { return [] }
+        var shape = [ObjectIdentifier(mainMenu)] + mainMenu.items.map(ObjectIdentifier.init)
+        for merged in kayaMerged {
+            shape.append(merged.carrier.submenu.map(ObjectIdentifier.init) ?? ObjectIdentifier(merged.carrier))
+        }
+        return shape
+    }
+
+    /// How many catalog menus the real bar carries.
+    func kayaPresentedBarCount() -> Int {
+        guard let mainMenu = NSApp.mainMenu else { return 0 }
+        return kayaCatalogCarriers.filter { $0.menu === mainMenu }.count
+    }
+
+    /// Rebuild the catalog's place in the bar from the presented window's
+    /// catalog, always from the model (docs/traps.md, "A native menu rebuild
+    /// must start from the post-user mirror"). A catalog menu whose title
+    /// names a system menu already on the bar (File, Edit, View, Window,
+    /// Help) MERGES into it: kaya's items first, then the system's own,
+    /// minus any the catalog supplies by role, title or chord. Any other
+    /// catalog menu is a menu of kaya's own, after Edit.
     func kayaSyncMacMenuBar() {
         kayaMenuSyncing = true
-        defer { kayaMenuSyncing = false }
+        defer {
+            kayaMenuSyncing = false
+            kayaMenuSignature = kayaMenuShape()
+        }
+        for merged in kayaMerged {
+            kayaUnmerge(merged)
+            if merged.carrier.submenu === merged.shown { merged.carrier.submenu = merged.dress }
+        }
+        kayaMerged.removeAll()
         for old in kayaOwnedMenuItems { old.menu?.removeItem(old) }
         kayaOwnedMenuItems.removeAll()
+        for hidden in kayaHiddenDressItems {
+            hidden.isHidden = false
+            if let (key, mask) = kayaHiddenDressKeys[ObjectIdentifier(hidden)] {
+                hidden.keyEquivalent = key
+                hidden.keyEquivalentModifierMask = mask
+            }
+        }
+        kayaHiddenDressItems.removeAll()
+        kayaHiddenDressKeys.removeAll()
+        kayaCatalogCarriers.removeAll()
         let catalog = kayaPresentedCatalog()
         guard !catalog.isEmpty else { return }
         // Accessory-policy processes still carry a SwiftUI-built main menu; if
-        // none exists yet there is no dress to preserve and the segment IS the
+        // none exists yet there is no dress to preserve and the catalog IS the
         // bar.
         let mainMenu = NSApp.mainMenu ?? {
             let menu = NSMenu()
@@ -31733,10 +32021,35 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             NSApp.mainMenu = menu
             return menu
         }()
-        // Owned items are already removed above, so this list is the dress alone
-        // — the insertion index's required view.
-        var index = kayaMenuInsertionIndex(mainMenu.items)
+        var chords = Set<String>()
+        func collect(_ items: [KayaMenuItemModel]) {
+            for item in items {
+                let chord = item.shortcut.isEmpty ? kayaRoleChord(item.role) : item.shortcut
+                if !chord.isEmpty { chords.insert(chord) }
+                collect(item.children)
+            }
+        }
+        collect(catalog)
+        kayaMenuChords = chords
+        var last = -1
         for top in catalog {
+            let dress = mainMenu.items.enumerated().first(where: { index, item in
+                index > 0 && item.submenu != nil && item.title == top.label
+                    && !kayaOwnedMenuItems.contains(where: { $0 === item })
+            })
+            if let (index, carrier) = dress, let submenu = carrier.submenu {
+                let shown = NSMenu(title: submenu.title)
+                let delegate = KayaMergedMenuDelegate()
+                shown.delegate = delegate
+                let merged = KayaMergedMenu(
+                    carrier: carrier, dress: submenu, shown: shown, top: top.id, delegate: delegate)
+                kayaMerged.append(merged)
+                kayaFillMerged(merged)
+                carrier.submenu = shown
+                kayaCatalogCarriers.append(carrier)
+                last = max(last, index)
+                continue
+            }
             let holder = NSMenuItem(title: top.label, action: nil, keyEquivalent: "")
             holder.representedObject = NSNumber(value: top.id)
             holder.isEnabled = kayaMenuEffectiveEnabled(top)
@@ -31750,9 +32063,24 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 into: submenu,
                 children: top.kind == menuKindRadioGroup ? [top] : top.children)
             holder.submenu = submenu
-            mainMenu.insertItem(holder, at: min(index, mainMenu.items.count))
+            let at = min(max(last + 1, kayaMenuInsertionIndex(mainMenu.items)), mainMenu.items.count)
+            mainMenu.insertItem(holder, at: at)
             kayaOwnedMenuItems.append(holder)
-            index += 1
+            kayaCatalogCarriers.append(holder)
+            last = at
+        }
+        // A system item elsewhere on the bar holding a chord the catalog
+        // claims goes too: one key, one command.
+        func hideChords(_ items: [NSMenuItem]) {
+            for item in items where !item.isHidden {
+                if kayaOwnedMenuItems.contains(where: { $0 === item }) { continue }
+                if let submenu = item.submenu { hideChords(submenu.items) }
+                let chord = kayaChordSpelling(item)
+                if !chord.isEmpty && chords.contains(chord) { kayaHideDress(item) }
+            }
+        }
+        for top in mainMenu.items where !kayaCatalogCarriers.contains(where: { $0 === top }) {
+            if let submenu = top.submenu { hideChords(submenu.items) }
         }
         // The one place a role may enter dress-owned chrome. macOS expects
         // Settings in the application menu, so the item MOVES there; the model
@@ -31776,6 +32104,111 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         }
     }
 
+    /// The system's items go back to SwiftUI's menu in their own order,
+    /// kaya's leave. If SwiftUI rebuilt its menu meanwhile, the moved items
+    /// are stale and are dropped.
+    func kayaUnmerge(_ merged: KayaMergedMenu) {
+        let key = ObjectIdentifier(merged.shown)
+        let untouched = merged.dress.items.map(ObjectIdentifier.init) == kayaMergedLeftovers[key]
+        merged.shown.removeAllItems()
+        if untouched, let order = kayaMergedOrder[key] {
+            merged.dress.removeAllItems()
+            for item in order { merged.dress.addItem(item) }
+        }
+    }
+
+    /// The catalog menu's items, a separator, then the system's own items
+    /// less any the catalog supplies by title, role or chord, after SwiftUI's
+    /// own update of its menu. What the catalog supplies stays in SwiftUI's
+    /// menu, which is off the bar, so its chords are not live.
+    func kayaFillMerged(_ merged: KayaMergedMenu, refreshDress: Bool = true) {
+        guard let top = kayaScene.menuItems[merged.top] else { return }
+        let wasSyncing = kayaMenuSyncing
+        kayaMenuSyncing = true
+        defer { kayaMenuSyncing = wasSyncing }
+        let ownedHere = merged.shown.items.filter { item in kayaOwnedMenuItems.contains(where: { $0 === item }) }
+        kayaOwnedMenuItems.removeAll { item in ownedHere.contains(where: { $0 === item }) }
+        kayaUnmerge(merged)
+        if refreshDress { merged.dress.delegate?.menuNeedsUpdate?(merged.dress) }
+        kayaMergedOrder[ObjectIdentifier(merged.shown)] = merged.dress.items
+        defer {
+            kayaMergedLeftovers[ObjectIdentifier(merged.shown)] = merged.dress.items.map(ObjectIdentifier.init)
+        }
+        kayaBuildNSMenuItems(
+            into: merged.shown, children: top.kind == menuKindRadioGroup ? [top] : top.children)
+        kayaOwnedMenuItems += merged.shown.items
+        let labels = Set(merged.shown.items.filter { !$0.isSeparatorItem }.map(\.title))
+        var roleActions: [Selector] = []
+        func roles(_ items: [KayaMenuItemModel]) {
+            for item in items {
+                if let action = kayaRoleAction(item.role) { roleActions.append(action) }
+                roles(item.children)
+            }
+        }
+        roles(top.children)
+        var kept: [NSMenuItem] = []
+        for item in merged.dress.items where !item.isHidden {
+            if item.isSeparatorItem {
+                if !kept.isEmpty && !(kept.last?.isSeparatorItem ?? true) { kept.append(item) }
+                continue
+            }
+            let chord = kayaChordSpelling(item)
+            if labels.contains(item.title)
+                || item.action.map({ roleActions.contains($0) }) == true
+                || (!chord.isEmpty && kayaMenuChords.contains(chord))
+            {
+                continue
+            }
+            kept.append(item)
+        }
+        while kept.last?.isSeparatorItem == true { kept.removeLast() }
+        if !kept.isEmpty {
+            let separator = NSMenuItem.separator()
+            merged.shown.addItem(separator)
+            kayaOwnedMenuItems.append(separator)
+            for item in kept {
+                merged.dress.removeItem(item)
+                merged.shown.addItem(item)
+            }
+        }
+        // AppKit adds Enter Full Screen to the menu titled View as SwiftUI's
+        // menu opens, and SwiftUI's menu no longer opens; the item is the one
+        // Xcode's own main menu carries, which NSWindow retitles and enables.
+        let fullScreen = #selector(NSWindow.toggleFullScreen(_:))
+        if merged.carrier.title == "View", !merged.shown.items.contains(where: { $0.action == fullScreen }) {
+            let separator = NSMenuItem.separator()
+            let item = NSMenuItem(title: "Enter Full Screen", action: fullScreen, keyEquivalent: "f")
+            item.keyEquivalentModifierMask = [.function]
+            merged.shown.addItem(separator)
+            merged.shown.addItem(item)
+            kayaOwnedMenuItems += [separator, item]
+        }
+    }
+
+    /// An NSMenuItem's chord in the canonical spelling: Command is `primary`,
+    /// an uppercase key equivalent carries Shift.
+    func kayaChordSpelling(_ item: NSMenuItem) -> String {
+        guard !item.keyEquivalent.isEmpty else { return "" }
+        var key = item.keyEquivalent
+        var mask = item.keyEquivalentModifierMask
+        if key.count == 1, let c = key.first, c.isLetter, c.isUppercase {
+            mask.insert(.shift)
+            key = key.lowercased()
+        }
+        var parts: [String] = []
+        if mask.contains(.command) { parts.append("primary") }
+        if mask.contains(.shift) { parts.append("shift") }
+        if mask.contains(.option) { parts.append("alt") }
+        if mask.contains(.control) { parts.append("ctrl") }
+        let named: [String: String] = [
+            "\r": "enter", "\u{08}": "delete", ",": "comma", ".": "period", "/": "slash",
+            "\\": "backslash", "-": "minus", "=": "equal", "[": "leftbracket",
+            "]": "rightbracket",
+        ]
+        parts.append(named[key] ?? key)
+        return parts.joined(separator: "+")
+    }
+
     /// The catalog item claiming a role, if any (the root allows one).
     private func kayaCatalogRoleItem(
         _ role: String, _ roots: [KayaMenuItemModel]
@@ -31797,32 +32230,19 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         return items.count
     }
 
-    /// Idempotent segment assert — the kayaEnsureOpen shape: belt, not the fix
-    /// (the observers below are the event-driven re-assert docs/traps.md
-    /// requires); free when the segment already sits in the current main menu.
+    /// Idempotent assert — the kayaEnsureOpen shape: belt, not the fix (the
+    /// observers below are the event-driven re-assert docs/traps.md
+    /// requires); free while the bar keeps the shape the last sync left.
     func kayaEnsureMenuSegment() {
-        if let mainMenu = NSApp.mainMenu, !kayaOwnedMenuItems.isEmpty {
-            // Membership alone is not placement: a dress mutation can displace
-            // or split the owned run. The segment must sit CONTIGUOUSLY, in
-            // catalog order, at the insertion index the remaining dress
-            // computes — anything else re-syncs.
-            let items = mainMenu.items
-            let dress = items.filter { item in
-                !kayaOwnedMenuItems.contains(where: { $0 === item })
-            }
-            let start = kayaMenuInsertionIndex(dress)
-            if items.count == dress.count + kayaOwnedMenuItems.count,
-                start + kayaOwnedMenuItems.count <= items.count,
-                kayaOwnedMenuItems.enumerated().allSatisfy({ offset, owned in
-                    items[start + offset] === owned
-                })
+        if !kayaCatalogCarriers.isEmpty || !kayaOwnedMenuItems.isEmpty {
+            if kayaMenuShape() != kayaMenuSignature
+                || kayaHiddenDressItems.contains(where: { !$0.isHidden })
             {
-                return
+                kayaSyncMacMenuBar()
             }
-            kayaSyncMacMenuBar()
             return
         }
-        if kayaPresentedCatalog().isEmpty && kayaOwnedMenuItems.isEmpty { return }
+        if kayaPresentedCatalog().isEmpty { return }
         kayaSyncMacMenuBar()
     }
 
@@ -31871,10 +32291,13 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 kayaScheduleMenuResync()
             }
         }
-        for name in [NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification] {
+        for name in [
+            NSMenu.didAddItemNotification, NSMenu.didRemoveItemNotification,
+            NSMenu.didChangeItemNotification,
+        ] {
             center.addObserver(forName: name, object: nil, queue: .main) { note in
                 guard !kayaMenuSyncing, let menu = note.object as? NSMenu,
-                    menu === NSApp.mainMenu
+                    menu === NSApp.mainMenu || kayaMergedMenus.contains(where: { $0 === menu })
                 else { return }
                 kayaScheduleMenuResync()
             }
@@ -32318,6 +32741,39 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
     /// buildMenu also runs on iPhone, feeding the hardware-keyboard HUD, so
     /// building is unconditional; only the VISIBLE arm keys on size class.
     func kayaBuildCatalogMenus(_ builder: UIMenuBuilder) {
+        kayaSystemMenuRoot = builder.menu(for: .root)
+        kayaLowerCatalogMenus(KayaUIKitMenus(builder: builder))
+    }
+
+    /// The four UIMenuBuilder calls the lowering makes, so the bar read can
+    /// run the same lowering over a tree of its own.
+    protocol KayaMenuEditing {
+        func menu(for identifier: UIMenu.Identifier) -> UIMenu?
+        func replaceChildren(
+            ofMenu parentIdentifier: UIMenu.Identifier,
+            from childrenBlock: ([UIMenuElement]) -> [UIMenuElement])
+        func insertSibling(_ siblingMenu: UIMenu, afterMenu siblingIdentifier: UIMenu.Identifier)
+        func insertChild(_ childMenu: UIMenu, atEndOfMenu parentIdentifier: UIMenu.Identifier)
+    }
+
+    struct KayaUIKitMenus: KayaMenuEditing {
+        let builder: UIMenuBuilder
+        func menu(for identifier: UIMenu.Identifier) -> UIMenu? { builder.menu(for: identifier) }
+        func replaceChildren(
+            ofMenu parentIdentifier: UIMenu.Identifier,
+            from childrenBlock: ([UIMenuElement]) -> [UIMenuElement]
+        ) {
+            builder.replaceChildren(ofMenu: parentIdentifier, from: childrenBlock)
+        }
+        func insertSibling(_ siblingMenu: UIMenu, afterMenu siblingIdentifier: UIMenu.Identifier) {
+            builder.insertSibling(siblingMenu, afterMenu: siblingIdentifier)
+        }
+        func insertChild(_ childMenu: UIMenu, atEndOfMenu parentIdentifier: UIMenu.Identifier) {
+            builder.insertChild(childMenu, atEndOfMenu: parentIdentifier)
+        }
+    }
+
+    func kayaLowerCatalogMenus(_ builder: KayaMenuEditing) {
         if ProcessInfo.processInfo.environment["KAYA_MENU_TRACE"] != nil {
             FileHandle.standardError.write(
                 Data("KAYA_MENU_TRACE: buildMenu roots=\(kayaScene.windows[0]?.menubar.count ?? -1)\n".utf8))
@@ -32325,13 +32781,71 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         guard let window = kayaScene.windows[0], !window.menubar.isEmpty else {
             return
         }
-        // Reversed: each insert lands immediately after .view, so going back to
-        // front leaves catalog order reading left to right.
+        var chords = Set<String>()
+        func collect(_ items: [KayaMenuItemModel]) {
+            for item in items {
+                let chord = item.shortcut.isEmpty ? kayaRoleChord(item.role) : item.shortcut
+                if !chord.isEmpty { chords.insert(chord) }
+                collect(item.children)
+            }
+        }
+        collect(window.menubar)
+        // A catalog menu whose title names a system menu (File, Edit, Format,
+        // View, Window, Help) MERGES into it, kaya's items first, the
+        // system's own after minus any the catalog supplies by title, role or
+        // chord; any other goes after the last catalog menu placed, and never
+        // before Edit, as on the Mac.
         var inserted = 0
-        for root in window.menubar.reversed() {
+        var merged: [UIMenu.Identifier] = []
+        var anchor: UIMenu.Identifier? =
+            builder.menu(for: .edit) != nil ? .edit : builder.menu(for: .view) != nil ? .view : nil
+        func position(_ id: UIMenu.Identifier?) -> Int {
+            guard let id else { return -1 }
+            return builder.menu(for: .root)?.children.firstIndex(where: {
+                ($0 as? UIMenu)?.identifier == id
+            }) ?? -1
+        }
+        for root in window.menubar {
+            let system = builder.menu(for: .root)?.children.compactMap { $0 as? UIMenu }
+                .first(where: { $0.title == root.label && !$0.identifier.rawValue.hasPrefix("dev.kaya.") })
+            if let system {
+                let ours = root.kind == menuKindRadioGroup
+                    ? [kayaCatalogRadio(root)] : kayaCatalogChildren(root.children)
+                let labels = Set(kayaElementTitles(ours))
+                var roleActions: [Selector] = []
+                func roles(_ items: [KayaMenuItemModel]) {
+                    for item in items {
+                        if let action = kayaIOSRoleAction(item.role) { roleActions.append(action) }
+                        roles(item.children)
+                    }
+                }
+                roles(root.children)
+                builder.replaceChildren(ofMenu: system.identifier) { old in
+                    let kept = kayaFilterSystem(old, labels: labels, actions: roleActions, chords: chords)
+                    let mine = UIMenu(title: "", options: .displayInline, children: ours)
+                    return kept.isEmpty ? [mine] : [mine, UIMenu(title: "", options: .displayInline, children: kept)]
+                }
+                if position(system.identifier) > position(anchor) { anchor = system.identifier }
+                merged.append(system.identifier)
+                inserted += 1
+                continue
+            }
             guard let menu = kayaCatalogTopLevel(root) else { continue }
-            builder.insertSibling(menu, afterMenu: .view)
+            if let anchor {
+                builder.insertSibling(menu, afterMenu: anchor)
+            } else {
+                builder.insertChild(menu, atEndOfMenu: .root)
+            }
+            anchor = menu.identifier
             inserted += 1
+        }
+        // A system command elsewhere on the bar holding a chord the catalog
+        // claims goes too (the application menu's Settings… on primary+comma).
+        for system in builder.menu(for: .root)?.children.compactMap({ $0 as? UIMenu }) ?? []
+        where !merged.contains(system.identifier) && !system.identifier.rawValue.hasPrefix("dev.kaya.") {
+            builder.replaceChildren(ofMenu: system.identifier) { old in
+                kayaFilterSystem(old, labels: [], actions: [], chords: chords)
+            }
         }
         // Stamped where the bar is REALLY built, never from the size class: a
         // build that silently produced nothing must not be able to report `bar`
@@ -32343,17 +32857,227 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         }
     }
 
+    /// The system's own main menu as UIKit handed it to the last build.
+    var kayaSystemMenuRoot: UIMenu?
+
+    /// THE iOS BAR READ: UIKit builds the main menu lazily (once at launch,
+    /// before the catalog exists, and then only when a keyboard or the iPad
+    /// bar asks), and no API returns the built menu. So the read runs the
+    /// lowering itself over the system's real menus from the last build, in
+    /// a builder of kaya's own (docs/traps.md, the iOS menu bar no API reads).
+    func kayaBuiltMenuBar() -> [KayaBarMenu]? {
+        guard let root = kayaSystemMenuRoot else { return nil }
+        let builder = KayaMenuTreeBuilder(root: root)
+        kayaLowerCatalogMenus(builder)
+        return kayaBarSnapshot(builder)
+    }
+
+    /// A UIMenuBuilder over a plain UIMenu tree, for the read above.
+    final class KayaMenuTreeBuilder: KayaMenuEditing {
+        private(set) var root: UIMenu
+        init(root: UIMenu) { self.root = root }
+
+        private func find(_ id: UIMenu.Identifier, in menu: UIMenu) -> UIMenu? {
+            if menu.identifier == id { return menu }
+            for child in menu.children.compactMap({ $0 as? UIMenu }) {
+                if let hit = find(id, in: child) { return hit }
+            }
+            return nil
+        }
+
+        /// The tree with `transform` applied to each menu's children list.
+        private func rewrite(_ menu: UIMenu, _ transform: (UIMenu, [UIMenuElement]) -> [UIMenuElement]) -> UIMenu {
+            let children = menu.children.map { element -> UIMenuElement in
+                guard let sub = element as? UIMenu else { return element }
+                return rewrite(sub, transform)
+            }
+            return menu.replacingChildren(transform(menu, children))
+        }
+
+        func menu(for identifier: UIMenu.Identifier) -> UIMenu? { find(identifier, in: root) }
+        func replaceChildren(
+            ofMenu parentIdentifier: UIMenu.Identifier,
+            from childrenBlock: ([UIMenuElement]) -> [UIMenuElement]
+        ) {
+            root = rewrite(root) { menu, children in
+                menu.identifier == parentIdentifier ? childrenBlock(children) : children
+            }
+        }
+        func insertSibling(_ siblingMenu: UIMenu, afterMenu siblingIdentifier: UIMenu.Identifier) {
+            place(siblingMenu, siblingIdentifier, offset: 1)
+        }
+        private func place(_ sibling: UIMenu, _ anchor: UIMenu.Identifier, offset: Int) {
+            root = rewrite(root) { _, children in
+                guard let at = children.firstIndex(where: { ($0 as? UIMenu)?.identifier == anchor })
+                else { return children }
+                var out = children
+                out.insert(sibling, at: at + offset)
+                return out
+            }
+        }
+        func insertChild(_ childMenu: UIMenu, atEndOfMenu parentIdentifier: UIMenu.Identifier) {
+            root = rewrite(root) { menu, children in
+                menu.identifier == parentIdentifier ? children + [childMenu] : children
+            }
+        }
+    }
+
+    private func kayaBarSnapshot(_ builder: KayaMenuEditing) -> [KayaBarMenu] {
+        let tops = builder.menu(for: .root)?.children.compactMap { $0 as? UIMenu } ?? []
+        return tops.map { top in
+            KayaBarMenu(title: top.title, items: kayaFlatCommands(top.children))
+        }
+    }
+
+    /// A menu's commands with its inline groups flattened, as one list the
+    /// way the menu shows them; a submenu is one entry.
+    private func kayaFlatCommands(_ elements: [UIMenuElement])
+        -> [(label: String, chord: String, role: String)]
+    {
+        var out: [(label: String, chord: String, role: String)] = []
+        for element in elements {
+            if let menu = element as? UIMenu, menu.options.contains(.displayInline) {
+                out += kayaFlatCommands(menu.children)
+            } else if let menu = element as? UIMenu {
+                out.append((menu.title, "", ""))
+            } else if let key = element as? UIKeyCommand {
+                let id = (key.propertyList as? NSNumber)?.uint64Value
+                out.append((key.title, kayaIOSChordSpelling(key), id.flatMap { kayaScene.menuItems[$0]?.role } ?? ""))
+            } else if let command = element as? UICommand {
+                out.append((command.title, "", ""))
+            } else if let action = element as? UIAction {
+                out.append((action.title, "", ""))
+            }
+        }
+        return out
+    }
+
+    private func kayaElementTitles(_ elements: [UIMenuElement]) -> [String] {
+        kayaFlatCommands(elements).map(\.label)
+    }
+
+    private func kayaIOSRoleAction(_ role: String) -> Selector? {
+        switch role {
+        case "undo": return Selector(("undo:"))
+        case "redo": return Selector(("redo:"))
+        case "cut": return #selector(UIResponderStandardEditActions.cut(_:))
+        case "copy": return #selector(UIResponderStandardEditActions.copy(_:))
+        case "paste": return #selector(UIResponderStandardEditActions.paste(_:))
+        default: return nil
+        }
+    }
+
+    /// The system's own elements less those the catalog supplies by title,
+    /// role or chord; an inline group left empty goes with them.
+    private func kayaFilterSystem(
+        _ elements: [UIMenuElement], labels: Set<String>, actions: [Selector], chords: Set<String>
+    ) -> [UIMenuElement] {
+        elements.compactMap { element -> UIMenuElement? in
+            if let menu = element as? UIMenu {
+                if !menu.options.contains(.displayInline) && labels.contains(menu.title) {
+                    return nil
+                }
+                let kept = kayaFilterSystem(menu.children, labels: labels, actions: actions, chords: chords)
+                return kept.isEmpty ? nil : menu.replacingChildren(kept)
+            }
+            if let key = element as? UIKeyCommand {
+                let chord = kayaIOSChordSpelling(key)
+                if !chord.isEmpty && chords.contains(chord) { return nil }
+            }
+            if let command = element as? UICommand {
+                if labels.contains(command.title) || actions.contains(command.action) { return nil }
+                return command
+            }
+            if let action = element as? UIAction {
+                return labels.contains(action.title) ? nil : action
+            }
+            return element
+        }
+    }
+
+    /// The canonical spelling onto a UIKeyCommand's input and flags.
+    func kayaUIKeyChord(_ spelling: String) -> (String, UIKeyModifierFlags)? {
+        var flags: UIKeyModifierFlags = []
+        var key: String?
+        for part in spelling.split(separator: "+").map(String.init) {
+            switch part {
+            case "primary": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "alt": flags.insert(.alternate)
+            default:
+                switch part {
+                case "enter": key = "\r"
+                case "delete": key = "\u{8}"
+                case "left": key = UIKeyCommand.inputLeftArrow
+                case "right": key = UIKeyCommand.inputRightArrow
+                case "up": key = UIKeyCommand.inputUpArrow
+                case "down": key = UIKeyCommand.inputDownArrow
+                case "comma": key = ","
+                case "period": key = "."
+                case "slash": key = "/"
+                case "backslash": key = "\\"
+                case "minus": key = "-"
+                case "equal": key = "="
+                case "leftbracket": key = "["
+                case "rightbracket": key = "]"
+                default:
+                    if part.hasPrefix("f"), let n = Int(part.dropFirst()), (1...12).contains(n) {
+                        key = [UIKeyCommand.f1, UIKeyCommand.f2, UIKeyCommand.f3, UIKeyCommand.f4,
+                            UIKeyCommand.f5, UIKeyCommand.f6, UIKeyCommand.f7, UIKeyCommand.f8,
+                            UIKeyCommand.f9, UIKeyCommand.f10, UIKeyCommand.f11, UIKeyCommand.f12][n - 1]
+                    } else if part.count == 1 {
+                        key = part
+                    }
+                }
+            }
+        }
+        guard let key else { return nil }
+        return (key, flags)
+    }
+
+    /// A UIKeyCommand's chord in the canonical spelling.
+    func kayaIOSChordSpelling(_ key: UIKeyCommand) -> String {
+        guard let input = key.input, !input.isEmpty else { return "" }
+        var parts: [String] = []
+        if key.modifierFlags.contains(.command) { parts.append("primary") }
+        if key.modifierFlags.contains(.shift) { parts.append("shift") }
+        if key.modifierFlags.contains(.alternate) { parts.append("alt") }
+        if key.modifierFlags.contains(.control) { parts.append("ctrl") }
+        let named: [String: String] = [
+            "\r": "enter", "\u{8}": "delete", UIKeyCommand.inputLeftArrow: "left",
+            UIKeyCommand.inputRightArrow: "right", UIKeyCommand.inputUpArrow: "up",
+            UIKeyCommand.inputDownArrow: "down", ",": "comma", ".": "period", "/": "slash",
+            "\\": "backslash", "-": "minus", "=": "equal", "[": "leftbracket", "]": "rightbracket",
+        ]
+        parts.append(named[input] ?? input.lowercased())
+        return parts.joined(separator: "+")
+    }
+
     /// A top-level catalog node. Grouping nodes become real menus; a top-level
     /// radio group becomes a menu holding its inline options.
     private func kayaCatalogTopLevel(_ item: KayaMenuItemModel) -> UIMenu? {
         switch item.kind {
         case menuKindMenu:
             return UIMenu(
-                title: item.label, children: kayaCatalogChildren(item.children))
+                title: item.label, identifier: UIMenu.Identifier("dev.kaya.menu.\(item.id)"),
+                children: kayaCatalogChildren(item.children))
         case menuKindRadioGroup:
-            return UIMenu(title: item.label, children: [kayaCatalogRadio(item)])
+            return UIMenu(
+                title: item.label, identifier: UIMenu.Identifier("dev.kaya.menu.\(item.id)"),
+                children: [kayaCatalogRadio(item)])
         default:
             return nil
+        }
+    }
+
+    extension UIApplication {
+        /// A catalog key command's one action: the responder chain carries it
+        /// here from whatever holds focus.
+        @objc func kayaMenuKey(_ sender: UIKeyCommand) {
+            guard let id = (sender.propertyList as? NSNumber)?.uint64Value,
+                let item = kayaScene.menuItems[id]
+            else { return }
+            kayaMenuUserActivate(item)
         }
     }
 
@@ -32390,6 +33114,21 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         case menuKindRadioGroup:
             return kayaCatalogRadio(item)
         case menuKindAction, menuKindToggle:
+            // A chorded leaf is a key command, so a hardware keyboard reaches
+            // it and the bar shows its chord; a role takes the chord of the
+            // system command it replaces.
+            let chord = item.shortcut.isEmpty ? kayaRoleChord(item.role) : item.shortcut
+            if let (input, flags) = kayaUIKeyChord(chord) {
+                let key = UIKeyCommand(
+                    title: item.label, action: #selector(UIApplication.kayaMenuKey(_:)),
+                    input: input, modifierFlags: flags, propertyList: NSNumber(value: item.id))
+                key.wantsPriorityOverSystemBehavior = true
+                if !kayaMenuEffectiveEnabled(item) { key.attributes = .disabled }
+                if item.kind == menuKindToggle {
+                    key.state = item.checked ? .on : .off
+                }
+                return key
+            }
             let action = UIAction(title: item.label) { _ in
                 // The one dispatch path, shared with every other arm.
                 kayaMenuUserActivate(item)

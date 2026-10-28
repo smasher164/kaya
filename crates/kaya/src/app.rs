@@ -8361,11 +8361,13 @@ pub enum Symbol {
     Italic = 38,
     Underline = 39,
     Strikethrough = 40,
+    /// Write the document out, the platform's own save glyph.
+    Save = 41,
 }
 
 impl Symbol {
     /// The vocabulary in wire order; the pin below holds it to wire::SYMBOLS.
-    pub(crate) const ALL: [Symbol; 40] = {
+    pub(crate) const ALL: [Symbol; 41] = {
         use Symbol as S;
         [
             S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
@@ -8373,6 +8375,7 @@ impl Symbol {
             S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic, S::ImageMissing,
             S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat, S::RepeatOne, S::Volume,
             S::Queue, S::Favorite, S::Muted, S::Bold, S::Italic, S::Underline, S::Strikethrough,
+            S::Save,
         ]
     };
 

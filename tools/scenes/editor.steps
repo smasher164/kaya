@@ -30,6 +30,7 @@ expect_fills textarea#0
 # Five of Edit's six items are kaya ROLES the app writes no behaviour
 # for at all.
 expect_menus 4
+expect_menu_bar "File" "Edit" "Format" "View"
 # Enablement is not a build-time fact and this app computes none of it:
 # the platform's own undo has nothing to offer yet.
 expect_menu "Edit>Undo" disabled

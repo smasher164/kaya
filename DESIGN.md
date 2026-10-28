@@ -2342,10 +2342,10 @@ The window lowering is deliberately platform-shaped:
 
 | Host | Native lowering |
 |------|-----------------|
-| macOS | The key Kaya window's catalog occupies the process-global menu bar; changing key Kaya windows changes the presented catalog and shortcut target. The SwiftUI interpreter materializes a Kaya-owned native `NSMenu` segment through its AppKit bridge: the pinned SDK's `CommandsBuilder` has fixed-arity `buildBlock` plus conditional builders but no `buildArray`, so it cannot express append-at-any-time top-level catalogs. The bridge owns only the segment after Edit and before Window/Help; application, Edit, Window, and Help dress remain untouched. |
+| macOS | The key Kaya window's catalog occupies the process-global menu bar; changing key Kaya windows changes the presented catalog and shortcut target. The SwiftUI interpreter materializes Kaya-owned native `NSMenu` items through its AppKit bridge: the pinned SDK's `CommandsBuilder` has fixed-arity `buildBlock` plus conditional builders but no `buildArray`, so it cannot express append-at-any-time top-level catalogs. A catalog menu whose title names a system menu already on the bar (File, Edit, View, Window, Help) MERGES into it: the catalog's items first, then a separator and the system's own items, less any the catalog supplies by title, by standard-command role or by chord; a system item anywhere on the bar holding a chord the catalog claims is hidden too. Every other catalog menu is a menu of kaya's own, placed after the last catalog menu and never before Edit. One title appears on the bar once (ruled 2026-10-27, docs/deferred.md). |
 | Windows | The catalog is a real in-window `MenuBar` in window chrome. |
 | Linux | The catalog is a real window menu bar backed by the platform menu/action model. |
-| iOS | Two arms on the size class. REGULAR (iPad): the platform's own system menu bar, built through `UIMenuBuilder` — SwiftUI's `.commands` cannot express an append-at-any-time number of top-level menus, since CommandsBuilder has no `buildArray`. COMPACT: the entire catalog from an adaptive trailing More/ellipsis menu in the existing top/navigation bar, with promoted actions as trailing bar actions. The build runs on both — on iPhone it feeds the hardware-keyboard HUD — and only the VISIBLE arm keys on the size class. |
+| iOS | Two arms on the size class. REGULAR (iPad): the platform's own system menu bar, built through `UIMenuBuilder` — SwiftUI's `.commands` cannot express an append-at-any-time number of top-level menus, since CommandsBuilder has no `buildArray`. Same-titled menus merge into the system's as on macOS, and a chorded leaf is a `UIKeyCommand`, so a hardware keyboard reaches it. COMPACT: the entire catalog from an adaptive trailing More/ellipsis menu in the existing top/navigation bar, with promoted actions as trailing bar actions. The build runs on both — on iPhone it feeds the hardware-keyboard HUD — and only the VISIBLE arm keys on the size class. |
 | Android | The entire catalog is available from the top app bar's overflow; promoted actions become app-bar actions. |
 
 The glyph, exact capacity, grouping chrome, and whether a nested menu
@@ -2357,7 +2357,8 @@ Android's vertical ellipsis on iOS or otherwise style the trigger.
 
 macOS's About and Quit entries and the standard Edit menu are also
 dress: the backend supplies them with zero Kaya API, preserving native
-responder behavior such as Command-C in text controls. Kaya declares
+responder behavior such as Command-C in text controls, until the app
+declares an Edit of its own, which merges into it (the table above). Kaya declares
 no SwiftUI Settings scene, so no phantom native Settings item appears.
 Settings/Preferences has no placement role in v1. An app may author an
 ordinary `Settings…` action in its own catalog, but native
@@ -2535,9 +2536,16 @@ question, which is why they are roles and not app-authored actions.
 
 Two rules keep the vocabulary from becoming a placement grammar. One
 item per role per app, judged at the root: the host that relocates a
-role has exactly one slot to put it in. And a role never invents a
+role has exactly one slot to put it in. And `settings` never invents a
 chord — an app that wants Command-comma spells the shortcut too, so
-every host answers the same key. A role is the only thing that can move
+every host answers the same key. The five editing roles are the other
+case: they ARE the platform's command, and the platform's command has
+a chord its text controls already answer, so an item that spells none
+shows the host's own (Command-Z and Shift-Command-Z on Apple hosts,
+Ctrl+Y for redo on Windows, Ctrl+Shift+Z on GTK). On macOS and iOS the
+item binds it, since it replaces the system item that held it; GTK and
+WinUI only draw it, and the focused control keeps the key (ruled with
+the menu merge, 2026-10-27). A role is the only thing that can move
 an authored item into dress-owned chrome, which is why it stays this
 small; roles beyond those six wait for the trigger recorded under the
 deliberate cuts.
