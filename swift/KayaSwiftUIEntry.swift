@@ -63,6 +63,8 @@ final class KayaAppDelegate: NSObject, NSApplicationDelegate {
         // first frame is drawn in the host's mode (tools/check-appearance.py).
         kayaApplyAppearance()
         kayaApplyTextScale()
+        // docs/native-tabs-study.md, option A; expect_menu_bar refuses while it is on.
+        NSWindow.allowsAutomaticWindowTabbing = false
         let forgot = kayaForgetAppKitFrames(.standard)
         if forgot > 0 { kayaDiag("appkit frames forgotten \(forgot)") }
         // The notification centre's delegate, before launching finishes, so

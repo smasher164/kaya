@@ -357,12 +357,12 @@ name = 'Document tabs (dynamic, closable)'
 group = 'Presentation'
 need = 3
 parity = 4
-cost = 'M'
+cost = 'XL'
 lanes = 'NNNNN'
 need_why = "VS Code, Notion, Obsidian, Postman; MAUI tabbed windows (30 votes); kaya's sections cover the fixed-set half"
 parity_why = 'NSWindow tabbing, AdwTabBar, WinUI TabView, Material tabs; egui and iced compose their own'
 shape = 'window prop: a tab strip over pushed roots'
-kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them. Study 2026-10-28 (docs/native-tabs-study.md): a Mac tab is a window, a GNOME or WinUI tab is a view in one window, phones have none; native per platform is larger than M.'
+kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them. Study 2026-10-28 (docs/native-tabs-study.md): a Mac tab is a window, a GNOME or WinUI tab is a view in one window, phones have none. RULED 2026-10-28 (the maintainer: "I agree with your recommendations"): option C, one document-tabs concept over surfaces, native everywhere (Mac NSWindow tabs through public API only, AdwTabView, WinUI TabView, a list of open documents on phones); re-priced L to XL from M because each Mac tab is a whole window, so shared chrome (toolbar, sidebar) is duplicated per tab window there; built when the editor needs documents in tabs (docs/editor-plan.md). Until then AppKit automatic tabbing is off (option A).'
 
 [[feature]]
 slug = 'safe_area'

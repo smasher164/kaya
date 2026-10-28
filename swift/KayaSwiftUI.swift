@@ -29841,6 +29841,11 @@ func kayaMenuBarRead() -> Result<([KayaBarMenu], Bool), KayaBarFailure> {
         guard let mainMenu = NSApp.mainMenu else {
             return .failure(KayaBarFailure("the application has no main menu"))
         }
+        if NSWindow.allowsAutomaticWindowTabbing {
+            return .failure(KayaBarFailure(
+                "NSWindow.allowsAutomaticWindowTabbing reads true, so a user who prefers tabs "
+                    + "gets kaya windows tabbed with no Show Tab Bar on the bar (docs/native-tabs-study.md)"))
+        }
         let bar = mainMenu.items.filter { !$0.isHidden }.map { top in
             KayaBarMenu(
                 title: top.title,

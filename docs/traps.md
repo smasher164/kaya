@@ -19524,6 +19524,8 @@ Bar, Show All Tabs and Enter Full Screen to SwiftUI's View menu as THAT menu
 opens, which it no longer does; a merged View carries Enter Full Screen
 (toggleFullScreen:, fn-F) as Xcode's main menu does, and the tab items are
 gone. Neither shows in any read; the menu-shot captures are the check.
+Since 2026-10-28 AppKit's automatic window tabbing is off as well, so no kaya
+window tabs without them (docs/native-tabs-study.md, option A).
 
 ## The iOS main menu is built lazily and no API returns it (measured 2026-10-27)
 

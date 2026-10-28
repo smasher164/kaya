@@ -1,7 +1,10 @@
 # Native window tabs: what the platforms give, what other toolkits expose, and how much of it kaya should want
 
-Status: STUDY, 2026-10-28. Nothing is built; the questions at the end are the
-maintainer's. The maintainer, 2026-10-28: "what is the extent to which you can
+Status: RULED 2026-10-28 (the maintainer, on the four questions at the end: "I
+agree with your recommendations"): native Mac window tabs through public API
+only, one document-tabs concept native everywhere (C), automatic tabbing off
+until C exists (A, built), a list of open documents on phones. C is unbuilt;
+the editor is its forcing app. The maintainer, 2026-10-28: "what is the extent to which you can
 style a native macos tab? what is the extent to which we want control over
 native tabs in the first place for a gui toolkit that provides
 platform-specific features? i feel like if someone sees native tabs, they're
@@ -98,7 +101,8 @@ that is set to 'always' in the user preferences, otherwise it will be a
 separate window" (developer.apple.com/forums/thread/782548).
 
 **What this means for kaya today.** kaya's SwiftUI interpreter contains no
-tabbing code, so every kaya Mac app has AppKit's automatic tabbing on: a user
+tabbing code, so every kaya Mac app had AppKit's automatic tabbing on (until
+option A, 2026-10-28): a user
 with "Prefer tabs: Always" may see kaya windows tab together, with the tab
 context menu, while the merged View menu no longer offers Show Tab Bar.
 UNMEASURED: which of kaya's two WindowGroups' windows tab with which (they
@@ -314,14 +318,28 @@ are drawn. Lowerings:
 - Windows: WinUI TabView in the title bar, `CanTearOutTabs`.
 - iPad: a scene per document is the platform's idiom but needs the scene
   work kaya has not done; until then the phone arm.
-- Phones: no strip; a switcher list or an overview grid (Chrome's and
-  Safari's switchers, AdwTabOverview's shape).
+- Phones: no strip; a switcher listing the open documents (ruled over a
+  thumbnail grid, question 4).
 Cost: L to XL across the five backends and nine bindings (the roadmap prices
 it M, which this study finds too low because of the Mac's inverted
 ownership). The invariant holds: one semantics (a set of documents, one
 selected, each closable with a veto, reorderable, movable to a new window
 where windows exist), with the presentation advisory as `sections_presentation`
 already is.
+
+Shared chrome versus per-document content (the maintainer, 2026-10-28: "I
+believe kaya treats the body of a window and a view the same way, so it
+shouldn't be a big deal for this to work portably"). The body is portable: a
+document is a surface, mounted the same whether it is a window's root or a
+tab's content. The Mac's cost is in what the window owns. Each Mac tab is a
+whole NSWindow, so the window-level parts (the toolbar, the title bar, and any
+sidebar or panel beside the documents) belong to EACH tab on the Mac, while on
+GNOME and Windows they are one set shared by every tab inside one window. So
+the design has to say what an app declares as shared chrome (one toolbar, one
+sidebar, the window's title pattern) and what is per-document content (the
+surface, its title, its dirty mark, its undo), and how the Mac lowers shared
+chrome: duplicated into each tab window and kept in step, the way Finder gives
+each tab its own sidebar showing the same places.
 
 **C without the Mac lowering** (draw the strip in SwiftUI on the Mac) is the
 cheaper variant of C, and Zed's hybrid (native grouping, own strip) sits
@@ -342,16 +360,22 @@ menu items that control them). Never private API on the strip.
    cannot be skinned (colour only through the content behind a full-size
    title bar; text, a tooltip and one small trailing view per tab, and
    nothing else)?
+   RULED 2026-10-28: yes, accepting that limit; public API only.
 2. If yes: one document-tabs concept that is native everywhere (C: Mac
    window tabs, GNOME's AdwTabView, WinUI's TabView, a switcher on phones),
    or a Mac-only window-tab capability that leaves other platforms with
    separate windows (B)?
+   RULED 2026-10-28: C, one concept native everywhere.
 3. Until either exists, should kaya turn AppKit's automatic tabbing off now
    (A)? Today a user whose Mac is set to "Prefer tabs: Always" can get kaya
    windows tabbed together, while the menu merge has already removed Show
    Tab Bar.
+   RULED 2026-10-28: yes, A now. Built: KayaAppDelegate sets
+   `NSWindow.allowsAutomaticWindowTabbing = false` before any window exists,
+   and the Mac's `expect_menu_bar` fails while it reads true.
 4. On a phone, what should a document-tabs app show: a list of open
    documents, or an overview grid of thumbnails?
+   RULED 2026-10-28: a list of open documents.
 
 ## §6 Re-running the probes
 
