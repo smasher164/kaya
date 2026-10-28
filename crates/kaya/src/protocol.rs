@@ -1200,6 +1200,25 @@ pub enum Occurrence {
     /// informational and post-fact. A programmatic SelectSection is
     /// configuration and stays silent (the echo doctrine).
     SectionSelected { window: WindowId, section: WindowId },
+    /// The active document changed through the user's act
+    /// (docs/doctabs-plan.md §2.1); select_document never echoes.
+    DocumentSelected { window: WindowId, document: WindowId },
+    /// The user closed an intercept_close-armed document. Nothing has
+    /// closed; the app answers with close_document if it agrees.
+    DocumentCloseRequested { document: WindowId },
+    /// The user closed a native window showing at least one armed
+    /// document; `documents` is everything it shows, in strip order.
+    DocumentsCloseRequested { window: WindowId, documents: Vec<WindowId> },
+    /// An unarmed document closed through the user's act, post-fact.
+    DocumentClosed { document: WindowId },
+    /// The window's "+".
+    NewDocumentRequested { window: WindowId },
+    /// The user reordered a document or dragged it into another existing
+    /// window: `window` holds it now, at `index`.
+    DocumentMoved { document: WindowId, window: WindowId, index: u32 },
+    /// The user tore documents out of `source` into a new window kaya made,
+    /// `window` (docs/doctabs-plan.md §1.2).
+    DocumentsDetached { source: WindowId, window: WindowId, documents: Vec<WindowId> },
     /// The user took a window into or out of fullscreen through the
     /// platform's own door (docs/fullscreen-plan.md): post-fact, and an
     /// app's own write never echoes.
@@ -2534,6 +2553,34 @@ pub enum WindowProp {
     /// Whether the window fills its screen (Bool-valued; default false;
     /// docs/fullscreen-plan.md).
     Fullscreen,
+    /// Whether a window with documents draws the platform's "+"
+    /// (Bool-valued; docs/doctabs-plan.md §2.1).
+    NewDocument,
+}
+
+/// Document property keys (spec::DOCUMENT_PROPS; docs/doctabs-plan.md
+/// §2.1). Documents share the surface-id namespace, so [`WindowId`]
+/// carries document ids too.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DocumentProp {
+    /// The tab's label and the chrome title while active (Str-valued).
+    Title,
+    /// The tab's tooltip (Str-valued).
+    Tooltip,
+    /// Unsaved work (Bool-valued): the tab's mark, and the window-level
+    /// mark while active. Arms nothing.
+    Dirty,
+    /// The close-veto class (Bool-valued; default false).
+    InterceptClose,
+}
+
+/// Where a shared region sits beside the documents (spec enum
+/// "region_edge"; docs/doctabs-plan.md §1.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RegionEdge {
+    Leading,
+    Trailing,
+    Bottom,
 }
 
 /// The presentation hint's closed set (spec enum
@@ -2870,6 +2917,17 @@ pub enum TxOp {
     /// Bind a section property. Element sources are rejected at
     /// decode — sections are not collection elements.
     SetSectionProp { section: WindowId, prop: SectionProp, value: PropValue },
+    /// Append a document to the window's active strip
+    /// (docs/doctabs-plan.md §2.1); the first added becomes active.
+    AddDocument { window: WindowId, document: WindowId },
+    /// Make a document active: configuration, never echoes.
+    SelectDocument { document: WindowId },
+    /// Close a document and forget its tree; the veto's agreement too.
+    CloseDocument { document: WindowId },
+    /// Bind a document property. Element sources are rejected at decode.
+    SetDocumentProp { document: WindowId, prop: DocumentProp, value: PropValue },
+    /// Declare a shared region at an edge of a window with documents.
+    AddRegion { window: WindowId, region: WindowId, edge: RegionEdge },
     /// Create a menu item of `kind` in the menu-item id space. Items
     /// are live, append-only, and never removed in v1 (DESIGN.md,
     /// Menus).
@@ -3181,6 +3239,15 @@ pub enum ApplyOp {
     /// section_selected.
     SelectSection { window: WindowId, section: WindowId },
     SetSectionProp { section: WindowId, prop: SectionProp, value: Value },
+    /// Add a document to the window's active strip, hidden until a mount.
+    AddDocument { window: WindowId, document: WindowId },
+    /// Make the document active, quietly.
+    SelectDocument { window: WindowId, document: WindowId },
+    /// Close the document and release its views, quietly.
+    CloseDocument { window: WindowId, document: WindowId },
+    SetDocumentProp { document: WindowId, prop: DocumentProp, value: Value },
+    /// Declare a shared region, hidden until a mount fills it.
+    AddRegion { window: WindowId, region: WindowId, edge: RegionEdge },
     /// Create a presentation-side menu item; the backend keys its
     /// dispatch by item id and emits menu occurrences carrying that id.
     MenuItemCreate { item: MenuItemId, kind: MenuItemKind },
@@ -3558,6 +3625,39 @@ impl OccSink {
                     body[..8].copy_from_slice(&window.0.to_le_bytes());
                     body[8..].copy_from_slice(&section.0.to_le_bytes());
                     ring.push_record(crate::ring::REC_SECTION_SELECTED, &body);
+                }
+                Occurrence::DocumentSelected { window, document } => {
+                    let mut body = [0u8; 16];
+                    body[..8].copy_from_slice(&window.0.to_le_bytes());
+                    body[8..].copy_from_slice(&document.0.to_le_bytes());
+                    ring.push_record(crate::ring::REC_DOCUMENT_SELECTED, &body);
+                }
+                Occurrence::DocumentCloseRequested { document } => {
+                    ring.push_record(crate::ring::REC_DOCUMENT_CLOSE_REQUESTED, &document.0.to_le_bytes());
+                }
+                Occurrence::DocumentsCloseRequested { window, documents } => {
+                    ring.push_record(
+                        crate::ring::REC_DOCUMENTS_CLOSE_REQUESTED,
+                        &crate::wire::documents_close_requested_body(window, &documents),
+                    );
+                }
+                Occurrence::DocumentClosed { document } => {
+                    ring.push_record(crate::ring::REC_DOCUMENT_CLOSED, &document.0.to_le_bytes());
+                }
+                Occurrence::NewDocumentRequested { window } => {
+                    ring.push_record(crate::ring::REC_NEW_DOCUMENT_REQUESTED, &window.0.to_le_bytes());
+                }
+                Occurrence::DocumentMoved { document, window, index } => {
+                    ring.push_record(
+                        crate::ring::REC_DOCUMENT_MOVED,
+                        &crate::wire::document_moved_body(document, window, index),
+                    );
+                }
+                Occurrence::DocumentsDetached { source, window, documents } => {
+                    ring.push_record(
+                        crate::ring::REC_DOCUMENTS_DETACHED,
+                        &crate::wire::documents_detached_body(source, window, &documents),
+                    );
                 }
                 Occurrence::PlayerChanged { player, state, failure, duration_ms, width, height, detail } => {
                     ring.push_record(

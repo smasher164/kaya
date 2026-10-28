@@ -2284,11 +2284,55 @@ The ratified shape:
   sections idiom.
 
 Deliberately excluded, reaffirmed: DOCUMENT tabs (browser/editor
-user-created, closable, reorderable tabs). Those are window
-management — their verb is CLOSE, their count is dynamic, they drag
-between windows — and belong to the windows grammar if kaya ever
-wants them; conflating them with sections would poison both grammars
-the way window-as-push would have poisoned navigation.
+user-created, closable, reorderable tabs) are not sections. Their verb
+is CLOSE, their count is dynamic and they drag between windows, so they
+are their own grammar, below.
+
+### Documents (document tabs) — ruled 2026-10-28 (docs/doctabs-plan.md)
+
+A window may hold DOCUMENTS: an ordered set of surfaces, one ACTIVE, each
+closable through a veto the app may arm, reordered by the user, and moved
+by the user into a native window of its own where windows exist. The
+presentation is each platform's own (AppKit's window tabs on the Mac,
+AdwTabView and AdwTabBar on GNOME, WinUI's TabView, a list of open
+documents on the phones) and the app never says which.
+
+- **Documents are surfaces.** `add_document(window, document)` appends one
+  in the shared surface namespace and `mount` fills it; the first added is
+  active, `select_document` makes another active and never echoes, and
+  `close_document` forgets the tree, as `pop_entry` does. DOCUMENT_PROPS
+  are `title`, `tooltip`, `dirty` and `intercept_close`; the window's
+  `new_document` draws the platform's "+".
+- **A torn-out tab is a new kaya window** (Q1, ruled 2026-10-28 as option
+  C). The platform makes the native window (AppKit after the fact, GNOME's
+  `create-window` and WinUI's tear-out during the drag); the core names it
+  with an id in the internal range, the documents move into it keeping
+  their ids, and `documents_detached(source, window, documents)` tells the
+  app, which declares that window's chrome and regions with the code it
+  used for the first and binds its handlers there. A drag into another
+  existing window reports `document_moved(document, window, index)`. So a
+  window with documents is one native window with one strip, and its
+  active document is its selected tab.
+- **Close has two forms** (docs/doctabs-plan.md §1.5): a document's own
+  close (its tab, Close Tab, a phone row) emits `document_close_requested`
+  when armed; a native window's close emits ONE `documents_close_requested`
+  listing what it shows when any of them is armed, so the app asks one
+  dialog at a time. A window left with no documents closes (Q2); the
+  process ends when no window holds documents, which is how an app agrees
+  to quit by closing its last document.
+- **Shared regions** (§1.7, the maintainer's revision of Q3): a window with
+  documents may declare a region at an edge (`leading`, `trailing`,
+  `bottom`) that every document shares, filled like any surface, one
+  instance per window. On the Mac kaya MOVES the one view into the
+  selected tab window, restoring focus and the caret a turn later
+  (measured); elsewhere it sits beside the tab view.
+- **Walls**: a window has sections or documents, not both, and no stack
+  or panes with documents (Q8); `dirty` is the documents', never the
+  window's.
+- **Observations**: `expect_documents`, `expect_document`,
+  `expect_document_dirty`, and the drives `select_document`,
+  `close_document`, `new_document`, `move_to_new_window`,
+  `close_native_window`, all off the platform's tabs or list.
 
 ### Protocol shape
 

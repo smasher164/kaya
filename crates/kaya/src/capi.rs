@@ -170,6 +170,19 @@ pub const KAYA_OCCURRENCE_FONT_FAMILIES: u16 = 60;
 /// TEXT_SELECTED { the copy's tag; bare values: I64 start, I64 stop, then
 /// Str name, Str value pairs } (docs/phone-format-plan.md §3).
 pub const KAYA_OCCURRENCE_TEXT_SELECTED: u16 = 61;
+/// The document grammar (docs/doctabs-plan.md §2.1): DOCUMENT_SELECTED {
+/// u64 window; u64 document }; DOCUMENT_CLOSE_REQUESTED, DOCUMENT_CLOSED {
+/// u64 document }; DOCUMENTS_CLOSE_REQUESTED { u64 window; Values: I64
+/// document ids }; NEW_DOCUMENT_REQUESTED { u64 window }; DOCUMENT_MOVED {
+/// u64 document; u32 strip; u32 index }.
+pub const KAYA_OCCURRENCE_DOCUMENT_SELECTED: u16 = 62;
+pub const KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED: u16 = 63;
+pub const KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED: u16 = 64;
+pub const KAYA_OCCURRENCE_DOCUMENT_CLOSED: u16 = 65;
+pub const KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED: u16 = 66;
+pub const KAYA_OCCURRENCE_DOCUMENT_MOVED: u16 = 67;
+/// DOCUMENTS_DETACHED { u64 source; u64 window; Values: I64 document ids }.
+pub const KAYA_OCCURRENCE_DOCUMENTS_DETACHED: u16 = 68;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -212,6 +225,13 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_SELECTION_CHANGED == ring::REC_SELECTION_CHANGED
         && KAYA_OCCURRENCE_FONT_FAMILIES == ring::REC_FONT_FAMILIES
         && KAYA_OCCURRENCE_TEXT_SELECTED == ring::REC_TEXT_SELECTED
+        && KAYA_OCCURRENCE_DOCUMENT_SELECTED == ring::REC_DOCUMENT_SELECTED
+        && KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED == ring::REC_DOCUMENT_CLOSE_REQUESTED
+        && KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED == ring::REC_DOCUMENTS_CLOSE_REQUESTED
+        && KAYA_OCCURRENCE_DOCUMENT_CLOSED == ring::REC_DOCUMENT_CLOSED
+        && KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED == ring::REC_NEW_DOCUMENT_REQUESTED
+        && KAYA_OCCURRENCE_DOCUMENT_MOVED == ring::REC_DOCUMENT_MOVED
+        && KAYA_OCCURRENCE_DOCUMENTS_DETACHED == ring::REC_DOCUMENTS_DETACHED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -363,6 +383,15 @@ pub const KAYA_TX_SET_DOCK_PLAYER: u16 = 86;
 pub const KAYA_TX_CONTEXT_LABEL_NODE: u16 = 87;
 /// LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
 pub const KAYA_TX_LIST_FONT_FAMILIES: u16 = 88;
+/// ADD_DOCUMENT { u64 window; u64 document }; SELECT_DOCUMENT and
+/// CLOSE_DOCUMENT { u64 document }; SET_DOCUMENT_PROP { u64 document; u32
+/// prop; u32 source; tail as SET_PROPERTY }; ADD_REGION { u64 window; u64
+/// region; u32 edge; u32 pad } (docs/doctabs-plan.md §2.1).
+pub const KAYA_TX_ADD_DOCUMENT: u16 = 89;
+pub const KAYA_TX_SELECT_DOCUMENT: u16 = 90;
+pub const KAYA_TX_CLOSE_DOCUMENT: u16 = 91;
+pub const KAYA_TX_SET_DOCUMENT_PROP: u16 = 92;
+pub const KAYA_TX_ADD_REGION: u16 = 93;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -711,6 +740,11 @@ const _: () = assert!(
         && KAYA_TX_SET_DOCK_PLAYER == wire::TX_SET_DOCK_PLAYER
         && KAYA_TX_CONTEXT_LABEL_NODE == wire::TX_CONTEXT_LABEL_NODE
         && KAYA_TX_LIST_FONT_FAMILIES == wire::TX_LIST_FONT_FAMILIES
+        && KAYA_TX_ADD_DOCUMENT == wire::TX_ADD_DOCUMENT
+        && KAYA_TX_SELECT_DOCUMENT == wire::TX_SELECT_DOCUMENT
+        && KAYA_TX_CLOSE_DOCUMENT == wire::TX_CLOSE_DOCUMENT
+        && KAYA_TX_SET_DOCUMENT_PROP == wire::TX_SET_DOCUMENT_PROP
+        && KAYA_TX_ADD_REGION == wire::TX_ADD_REGION
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -820,6 +854,14 @@ pub const KAYA_APPLY_SET_DOCK_PLAYER: u16 = 74;
 pub const KAYA_APPLY_CONTEXT_LABEL_NODE: u16 = 75;
 /// LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
 pub const KAYA_APPLY_LIST_FONT_FAMILIES: u16 = 76;
+/// ADD_DOCUMENT, SELECT_DOCUMENT, CLOSE_DOCUMENT { u64 window; u64
+/// document }; SET_DOCUMENT_PROP { u64 document; u32 prop; u32 pad; value };
+/// ADD_REGION { u64 window; u64 region; u32 edge; u32 pad }.
+pub const KAYA_APPLY_ADD_DOCUMENT: u16 = 77;
+pub const KAYA_APPLY_SELECT_DOCUMENT: u16 = 78;
+pub const KAYA_APPLY_CLOSE_DOCUMENT: u16 = 79;
+pub const KAYA_APPLY_SET_DOCUMENT_PROP: u16 = 80;
+pub const KAYA_APPLY_ADD_REGION: u16 = 81;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -968,6 +1010,11 @@ const _: () = assert!(
         && KAYA_APPLY_SET_DOCK_PLAYER == wire::APPLY_SET_DOCK_PLAYER
         && KAYA_APPLY_CONTEXT_LABEL_NODE == wire::APPLY_CONTEXT_LABEL_NODE
         && KAYA_APPLY_LIST_FONT_FAMILIES == wire::APPLY_LIST_FONT_FAMILIES
+        && KAYA_APPLY_ADD_DOCUMENT == wire::APPLY_ADD_DOCUMENT
+        && KAYA_APPLY_SELECT_DOCUMENT == wire::APPLY_SELECT_DOCUMENT
+        && KAYA_APPLY_CLOSE_DOCUMENT == wire::APPLY_CLOSE_DOCUMENT
+        && KAYA_APPLY_SET_DOCUMENT_PROP == wire::APPLY_SET_DOCUMENT_PROP
+        && KAYA_APPLY_ADD_REGION == wire::APPLY_ADD_REGION
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1247,6 +1294,18 @@ pub const KAYA_WPROP_INSET: u32 = 8;
 pub const KAYA_WPROP_APPEARANCE: u32 = 9;
 pub const KAYA_WPROP_REMEMBER_FRAME: u32 = 10;
 pub const KAYA_WPROP_FULLSCREEN: u32 = 11;
+/// Draws the platform's "+" on a window with documents (docs/doctabs-plan.md).
+pub const KAYA_WPROP_NEW_DOCUMENT: u32 = 12;
+
+/// Document properties (spec::DOCUMENT_PROPS; docs/doctabs-plan.md §2.1)
+/// and the region edges (spec enum "region_edge", §1.7).
+pub const KAYA_DPROP_TITLE: u32 = 1;
+pub const KAYA_DPROP_TOOLTIP: u32 = 2;
+pub const KAYA_DPROP_DIRTY: u32 = 3;
+pub const KAYA_DPROP_INTERCEPT_CLOSE: u32 = 4;
+pub const KAYA_REGION_EDGE_LEADING: u32 = 1;
+pub const KAYA_REGION_EDGE_TRAILING: u32 = 2;
+pub const KAYA_REGION_EDGE_BOTTOM: u32 = 3;
 
 /// Navigation-entry properties (spec::ENTRY_PROPS): their own typed
 /// table (DESIGN.md, Navigation). `intercept_back` is the close-veto
@@ -1386,7 +1445,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 61,
+    crate::spec::SPEC.occurrence.len() == 68,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1520,6 +1579,7 @@ const _: () = assert!(
         && KAYA_WPROP_APPEARANCE == wire::WPROP_APPEARANCE
         && KAYA_WPROP_REMEMBER_FRAME == wire::WPROP_REMEMBER_FRAME
         && KAYA_WPROP_FULLSCREEN == wire::WPROP_FULLSCREEN
+        && KAYA_WPROP_NEW_DOCUMENT == wire::WPROP_NEW_DOCUMENT
         && KAYA_EPROP_TITLE == wire::EPROP_TITLE
         && KAYA_EPROP_INTERCEPT_BACK == wire::EPROP_INTERCEPT_BACK
 );
@@ -2109,7 +2169,7 @@ const _: () = assert!(
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
-    crate::spec::WINDOW_PROPS.len() == 11,
+    crate::spec::WINDOW_PROPS.len() == 12,
     "spec::WINDOW_PROPS grew: export the new KAYA_WPROP_* above, extend the pin, and bump \
      this count"
 );
@@ -2117,6 +2177,18 @@ const _: () = assert!(
     crate::spec::ENTRY_PROPS.len() == 2,
     "spec::ENTRY_PROPS grew: export the new KAYA_EPROP_* above, extend the pin, and bump \
      this count"
+);
+const _: () = assert!(
+    crate::spec::DOCUMENT_PROPS.len() == 4
+        && KAYA_DPROP_TITLE == wire::DPROP_TITLE
+        && KAYA_DPROP_TOOLTIP == wire::DPROP_TOOLTIP
+        && KAYA_DPROP_DIRTY == wire::DPROP_DIRTY
+        && KAYA_DPROP_INTERCEPT_CLOSE == wire::DPROP_INTERCEPT_CLOSE
+        && KAYA_REGION_EDGE_LEADING == wire::REGION_EDGE_LEADING
+        && KAYA_REGION_EDGE_TRAILING == wire::REGION_EDGE_TRAILING
+        && KAYA_REGION_EDGE_BOTTOM == wire::REGION_EDGE_BOTTOM,
+    "spec::DOCUMENT_PROPS grew or moved: export the new KAYA_DPROP_* above, extend the pin, \
+     and bump this count"
 );
 const _: () = assert!(
     crate::spec::SHEET_PROPS.len() == 3
@@ -3536,6 +3608,150 @@ pub extern "C" fn kaya_emit_section_selected(window: u64, section: u64) {
     body[..8].copy_from_slice(&window.to_le_bytes());
     body[8..].copy_from_slice(&section.to_le_bytes());
     state().ring.push_record(ring::REC_SECTION_SELECTED, &body);
+}
+
+fn emit_presentation(occ: crate::protocol::Occurrence, kind: u16, body: &[u8]) {
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(occ);
+        return;
+    }
+    state().ring.push_record(kind, body);
+}
+
+fn with_presentation_scene(what: &str, f: impl FnOnce(&mut crate::scene::Scene)) {
+    let mut scene = PRESENTATION_SCENE.lock().unwrap();
+    let scene = scene
+        .as_mut()
+        .unwrap_or_else(|| panic!("kaya: {what} before any transaction was applied"));
+    f(scene);
+}
+
+/// Presentation side: the user made a document active (post-fact;
+/// docs/doctabs-plan.md §2.1). select_document never arrives here.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_document_selected(window: u64, document: u64) {
+    let (w, d) = (crate::protocol::WindowId(window), crate::protocol::WindowId(document));
+    with_presentation_scene("document selected", |s| s.user_selected_document(w, d));
+    let mut body = [0u8; 16];
+    body[..8].copy_from_slice(&window.to_le_bytes());
+    body[8..].copy_from_slice(&document.to_le_bytes());
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentSelected { window: w, document: d },
+        ring::REC_DOCUMENT_SELECTED,
+        &body,
+    );
+}
+
+/// Presentation side: the user closed an intercept_close-armed document.
+/// Nothing has closed.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_document_close_requested(document: u64) {
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentCloseRequested {
+            document: crate::protocol::WindowId(document),
+        },
+        ring::REC_DOCUMENT_CLOSE_REQUESTED,
+        &document.to_le_bytes(),
+    );
+}
+
+/// Presentation side: the user closed a native window showing at least one
+/// armed document; `documents` (`count` ids) is all it shows, in strip order.
+/// Nothing has closed.
+///
+/// # Safety
+/// `documents` points at `count` readable u64s (or `count` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_documents_close_requested(
+    window: u64,
+    documents: *const u64,
+    count: usize,
+) {
+    let ids: Vec<crate::protocol::WindowId> = if count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: the caller's contract above.
+        unsafe { std::slice::from_raw_parts(documents, count) }
+            .iter()
+            .map(|d| crate::protocol::WindowId(*d))
+            .collect()
+    };
+    let w = crate::protocol::WindowId(window);
+    let body = crate::wire::documents_close_requested_body(w, &ids);
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentsCloseRequested { window: w, documents: ids },
+        ring::REC_DOCUMENTS_CLOSE_REQUESTED,
+        &body,
+    );
+}
+
+/// Presentation side: an unarmed document closed through the user's act
+/// (post-fact); the core forgets its tree inside this call.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_document_closed(document: u64) {
+    let d = crate::protocol::WindowId(document);
+    with_presentation_scene("document closed", |s| s.user_closed_document(d));
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentClosed { document: d },
+        ring::REC_DOCUMENT_CLOSED,
+        &document.to_le_bytes(),
+    );
+}
+
+/// Presentation side: the user pressed the window's "+".
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_new_document_requested(window: u64) {
+    emit_presentation(
+        crate::protocol::Occurrence::NewDocumentRequested {
+            window: crate::protocol::WindowId(window),
+        },
+        ring::REC_NEW_DOCUMENT_REQUESTED,
+        &window.to_le_bytes(),
+    );
+}
+
+/// Presentation side: the user reordered a document or dragged it into
+/// another existing window; the core reconciles inside this call.
+#[unsafe(no_mangle)]
+pub extern "C" fn kaya_emit_document_moved(document: u64, window: u64, index: u32) {
+    let (d, w) = (crate::protocol::WindowId(document), crate::protocol::WindowId(window));
+    with_presentation_scene("document moved", |s| s.user_moved_document(d, w, index));
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentMoved { document: d, window: w, index },
+        ring::REC_DOCUMENT_MOVED,
+        &crate::wire::document_moved_body(d, w, index),
+    );
+}
+
+/// Presentation side: the user tore documents out of `source` into a native
+/// window the platform made (docs/doctabs-plan.md §1.2). The core gives that
+/// window its fresh id, moves the documents into it, and reports
+/// documents_detached; the id is returned so the interpreter can key the
+/// native window by it.
+///
+/// # Safety
+/// `documents` points at `count` readable u64s (or `count` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_detach_documents(source: u64, documents: *const u64, count: usize) -> u64 {
+    let ids: Vec<crate::protocol::WindowId> = if count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: the caller's contract above.
+        unsafe { std::slice::from_raw_parts(documents, count) }
+            .iter()
+            .map(|d| crate::protocol::WindowId(*d))
+            .collect()
+    };
+    let source = crate::protocol::WindowId(source);
+    let mut window = crate::protocol::WindowId(0);
+    with_presentation_scene("documents detached", |s| window = s.user_detached_documents(source, &ids));
+    let body = crate::wire::documents_detached_body(source, window, &ids);
+    emit_presentation(
+        crate::protocol::Occurrence::DocumentsDetached { source, window, documents: ids },
+        ring::REC_DOCUMENTS_DETACHED,
+        &body,
+    );
+    window.0
 }
 
 /// Presentation side: the user took a window into or out of fullscreen
@@ -7580,6 +7796,11 @@ mod tests {
             ("set_dock_player", KAYA_TX_SET_DOCK_PLAYER),
             ("context_label_node", KAYA_TX_CONTEXT_LABEL_NODE),
             ("list_font_families", KAYA_TX_LIST_FONT_FAMILIES),
+            ("add_document", KAYA_TX_ADD_DOCUMENT),
+            ("select_document", KAYA_TX_SELECT_DOCUMENT),
+            ("close_document", KAYA_TX_CLOSE_DOCUMENT),
+            ("set_document_prop", KAYA_TX_SET_DOCUMENT_PROP),
+            ("add_region", KAYA_TX_ADD_REGION),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7656,6 +7877,11 @@ mod tests {
             ("set_dock_player", KAYA_APPLY_SET_DOCK_PLAYER),
             ("context_label_node", KAYA_APPLY_CONTEXT_LABEL_NODE),
             ("list_font_families", KAYA_APPLY_LIST_FONT_FAMILIES),
+            ("add_document", KAYA_APPLY_ADD_DOCUMENT),
+            ("select_document", KAYA_APPLY_SELECT_DOCUMENT),
+            ("close_document", KAYA_APPLY_CLOSE_DOCUMENT),
+            ("set_document_prop", KAYA_APPLY_SET_DOCUMENT_PROP),
+            ("add_region", KAYA_APPLY_ADD_REGION),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

@@ -17343,6 +17343,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
+                (WindowProp::NewDocument, _) => crate::depth_stub("doctabs"),
                 (WindowProp::Fullscreen, Value::Bool(on)) => {
                     let now = presenter_fullscreen(&target)?;
                     let request =
@@ -18111,6 +18112,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
         ApplyOp::ListFontFamilies => code_surface::list_font_families(core),
+        ApplyOp::AddDocument { .. }
+        | ApplyOp::SelectDocument { .. }
+        | ApplyOp::CloseDocument { .. }
+        | ApplyOp::SetDocumentProp { .. }
+        | ApplyOp::AddRegion { .. } => crate::depth_stub("doctabs"),
         ApplyOp::SetVideoCapture { widget, capture } => media::set_video_capture(core, widget.0, capture.map(|c| c.0))?,
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
@@ -29113,6 +29119,30 @@ impl crate::harness::Stage for WinUiStage {
             Ok(true)
         })
         .unwrap_or(false)
+    }
+    fn document_titles(&self) -> Option<Vec<String>> {
+        crate::depth_stub("doctabs")
+    }
+    fn active_document(&self) -> Option<String> {
+        crate::depth_stub("doctabs")
+    }
+    fn document_dirty(&self, _: &str) -> Result<bool, String> {
+        crate::depth_stub("doctabs")
+    }
+    fn select_document(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn close_document(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn new_document(&self) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn move_to_new_window(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn close_native_window(&self) -> Result<(), String> {
+        crate::depth_stub("doctabs")
     }
     fn dismiss_sheet(&self) {
         // The close button's own route (the ContentDialog Hide precedent):

@@ -154,6 +154,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::SheetDismissed { .. }
             | Occurrence::DismissRequested { .. }
             | Occurrence::SectionSelected { .. }
+            | Occurrence::DocumentSelected { .. }
+            | Occurrence::DocumentCloseRequested { .. }
+            | Occurrence::DocumentsCloseRequested { .. }
+            | Occurrence::DocumentClosed { .. }
+            | Occurrence::NewDocumentRequested { .. }
+            | Occurrence::DocumentMoved { .. }
+            | Occurrence::DocumentsDetached { .. }
             | Occurrence::FullscreenChanged { .. } => {}
             Occurrence::MenuActivated { .. }
             | Occurrence::InstanceMenuActivated { .. }

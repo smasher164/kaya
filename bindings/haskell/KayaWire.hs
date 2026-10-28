@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc31d87678a5929d1
+specHash = 0xa37dca454ad9d6cc
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -324,6 +324,8 @@ wpropRememberFrame :: Word32
 wpropRememberFrame = 10
 wpropFullscreen :: Word32
 wpropFullscreen = 11
+wpropNewDocument :: Word32
+wpropNewDocument = 12
 epropTitle :: Word32
 epropTitle = 1
 epropInterceptBack :: Word32
@@ -346,6 +348,20 @@ spropSymbol :: Word32
 spropSymbol = 3
 spropBadge :: Word32
 spropBadge = 4
+dpropTitle :: Word32
+dpropTitle = 1
+dpropTooltip :: Word32
+dpropTooltip = 2
+dpropDirty :: Word32
+dpropDirty = 3
+dpropInterceptClose :: Word32
+dpropInterceptClose = 4
+regionEdgeLeading :: Word32
+regionEdgeLeading = 1
+regionEdgeTrailing :: Word32
+regionEdgeTrailing = 2
+regionEdgeBottom :: Word32
+regionEdgeBottom = 3
 menuKindMenu :: Word32
 menuKindMenu = 1
 menuKindAction :: Word32
@@ -1008,6 +1024,16 @@ txKindContextLabelNode :: Word16
 txKindContextLabelNode = 87
 txKindListFontFamilies :: Word16
 txKindListFontFamilies = 88
+txKindAddDocument :: Word16
+txKindAddDocument = 89
+txKindSelectDocument :: Word16
+txKindSelectDocument = 90
+txKindCloseDocument :: Word16
+txKindCloseDocument = 91
+txKindSetDocumentProp :: Word16
+txKindSetDocumentProp = 92
+txKindAddRegion :: Word16
+txKindAddRegion = 93
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1156,6 +1182,16 @@ applyKindContextLabelNode :: Word16
 applyKindContextLabelNode = 75
 applyKindListFontFamilies :: Word16
 applyKindListFontFamilies = 76
+applyKindAddDocument :: Word16
+applyKindAddDocument = 77
+applyKindSelectDocument :: Word16
+applyKindSelectDocument = 78
+applyKindCloseDocument :: Word16
+applyKindCloseDocument = 79
+applyKindSetDocumentProp :: Word16
+applyKindSetDocumentProp = 80
+applyKindAddRegion :: Word16
+applyKindAddRegion = 81
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1278,6 +1314,20 @@ occKindFontFamilies :: Word16
 occKindFontFamilies = 60
 occKindTextSelected :: Word16
 occKindTextSelected = 61
+occKindDocumentSelected :: Word16
+occKindDocumentSelected = 62
+occKindDocumentCloseRequested :: Word16
+occKindDocumentCloseRequested = 63
+occKindDocumentsCloseRequested :: Word16
+occKindDocumentsCloseRequested = 64
+occKindDocumentClosed :: Word16
+occKindDocumentClosed = 65
+occKindNewDocumentRequested :: Word16
+occKindNewDocumentRequested = 66
+occKindDocumentMoved :: Word16
+occKindDocumentMoved = 67
+occKindDocumentsDetached :: Word16
+occKindDocumentsDetached = 68
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1661,6 +1711,26 @@ txContextLabelNode node item level field = wireRecord txKindContextLabelNode (wo
 -- List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
 txListFontFamilies :: Builder
 txListFontFamilies = wireRecord txKindListFontFamilies (mempty)
+
+-- Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes.
+txAddDocument :: Word64 -> Word64 -> Builder
+txAddDocument window document = wireRecord txKindAddDocument (word64LE window <> word64LE document)
+
+-- Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected.
+txSelectDocument :: Word64 -> Builder
+txSelectDocument document = wireRecord txKindSelectDocument (word64LE document)
+
+-- Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state.
+txCloseDocument :: Word64 -> Builder
+txCloseDocument document = wireRecord txKindCloseDocument (word64LE document)
+
+-- Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements.
+txSetDocumentProp :: Word64 -> Word32 -> Word32 -> Builder
+txSetDocumentProp document prop source = wireRecord txKindSetDocumentProp (word64LE document <> word32LE prop <> word32LE source)
+
+-- Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed.
+txAddRegion :: Word64 -> Word64 -> Word32 -> Builder
+txAddRegion window region edge = wireRecord txKindAddRegion (word64LE window <> word64LE region <> word32LE edge <> word32LE 0)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -3192,6 +3262,18 @@ txBindWindowFullscreen window signalId = wireRecord txKindSetWindowProp
   (word64LE window <> word32LE wpropFullscreen <> word32LE sourceSignal
     <> word64LE signalId)
 
+-- set_window_prop with a constant new_document value (window 0, the primary surface).
+txSetWindowNewDocument :: Word64 -> Bool -> Builder
+txSetWindowNewDocument window newDocument = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropNewDocument <> word32LE sourceConst
+    <> encodeValue (VBool newDocument))
+
+-- set_window_prop with a signal-bound new_document value (window 0, the primary surface).
+txBindWindowNewDocument :: Word64 -> Word64 -> Builder
+txBindWindowNewDocument window signalId = wireRecord txKindSetWindowProp
+  (word64LE window <> word32LE wpropNewDocument <> word32LE sourceSignal
+    <> word64LE signalId)
+
 -- set_entry_prop with a constant title value.
 txSetEntryTitle :: Word64 -> String -> Builder
 txSetEntryTitle entry title = wireRecord txKindSetEntryProp
@@ -3250,6 +3332,54 @@ txSetSheetDetent sheet detent = wireRecord txKindSetSheetProp
 txBindSheetDetent :: Word64 -> Word64 -> Builder
 txBindSheetDetent sheet signalId = wireRecord txKindSetSheetProp
   (word64LE sheet <> word32LE shpropDetent <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_document_prop with a constant title value.
+txSetDocumentTitle :: Word64 -> String -> Builder
+txSetDocumentTitle document title = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropTitle <> word32LE sourceConst
+    <> encodeValue (VStr title))
+
+-- set_document_prop with a signal-bound title value.
+txBindDocumentTitle :: Word64 -> Word64 -> Builder
+txBindDocumentTitle document signalId = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropTitle <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_document_prop with a constant tooltip value.
+txSetDocumentTooltip :: Word64 -> String -> Builder
+txSetDocumentTooltip document tooltip = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropTooltip <> word32LE sourceConst
+    <> encodeValue (VStr tooltip))
+
+-- set_document_prop with a signal-bound tooltip value.
+txBindDocumentTooltip :: Word64 -> Word64 -> Builder
+txBindDocumentTooltip document signalId = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropTooltip <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_document_prop with a constant dirty value.
+txSetDocumentDirty :: Word64 -> Bool -> Builder
+txSetDocumentDirty document dirty = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropDirty <> word32LE sourceConst
+    <> encodeValue (VBool dirty))
+
+-- set_document_prop with a signal-bound dirty value.
+txBindDocumentDirty :: Word64 -> Word64 -> Builder
+txBindDocumentDirty document signalId = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropDirty <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_document_prop with a constant intercept_close value.
+txSetDocumentInterceptClose :: Word64 -> Bool -> Builder
+txSetDocumentInterceptClose document interceptClose = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropInterceptClose <> word32LE sourceConst
+    <> encodeValue (VBool interceptClose))
+
+-- set_document_prop with a signal-bound intercept_close value.
+txBindDocumentInterceptClose :: Word64 -> Word64 -> Builder
+txBindDocumentInterceptClose document signalId = wireRecord txKindSetDocumentProp
+  (word64LE document <> word32LE dpropInterceptClose <> word32LE sourceSignal
     <> word64LE signalId)
 
 -- set_section_prop with a constant title value.
@@ -3542,7 +3672,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies && kind /= occKindTextSelected
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies && kind /= occKindTextSelected && kind /= occKindDocumentSelected && kind /= occKindDocumentCloseRequested && kind /= occKindDocumentsCloseRequested && kind /= occKindDocumentClosed && kind /= occKindNewDocumentRequested && kind /= occKindDocumentMoved && kind /= occKindDocumentsDetached
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -3736,6 +3866,39 @@ parseOccurrence redeem rec = do
           n0 <- peekByteOff rec at0 :: IO Word32
           (vs0, _) <- readN (fromIntegral n0) (at0 + 8) []
           return (Just (kind, 0, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral n0)], vs0]))
+      else if kind == occKindDocumentsCloseRequested
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let readN 0 at acc = return (reverse acc, at)
+              readN n at acc = do
+                (v, next) <- parseValue rec at
+                readN (n - 1 :: Int) next (v : acc)
+          let at0 = 16 :: Int
+          n0 <- peekByteOff rec at0 :: IO Word32
+          (vs0, _) <- readN (fromIntegral n0) (at0 + 8) []
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral n0)], vs0]))
+      else if kind == occKindDocumentMoved
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          w1 <- peekByteOff rec at1 :: IO Word32
+          let at2 = at1 + 4
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral w1)]]))
+      else if kind == occKindDocumentsDetached
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let readN 0 at acc = return (reverse acc, at)
+              readN n at acc = do
+                (v, next) <- parseValue rec at
+                readN (n - 1 :: Int) next (v : acc)
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word64
+          let at1 = at0 + 8
+          n1 <- peekByteOff rec at1 :: IO Word32
+          (vs1, _) <- readN (fromIntegral n1) (at1 + 8) []
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [VI64 (fromIntegral n1)], vs1]))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,
@@ -3764,11 +3927,11 @@ parseOccurrence redeem rec = do
           return (Just (kind, ident, [], Nothing, Just clip, Nothing, []))
         -- Surface lifecycle records carry the surface id alone
         -- (derived from the record shapes).
-        else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested || kind == occKindSheetDismissed || kind == occKindDismissRequested
+        else if kind == occKindCloseRequested || kind == occKindWindowClosed || kind == occKindEntryPopped || kind == occKindBackRequested || kind == occKindSheetDismissed || kind == occKindDismissRequested || kind == occKindDocumentCloseRequested || kind == occKindDocumentClosed || kind == occKindNewDocumentRequested
           then return (Just (kind, ident, [], Nothing, Nothing, Nothing, []))
         -- Surface-pair records (window, section): the SECOND id
         -- keys the handler; the first rides as the payload.
-        else if kind == occKindSectionSelected || kind == occKindPlayerPosition || kind == occKindSeekCompleted || kind == occKindCaptureOverrun
+        else if kind == occKindSectionSelected || kind == occKindPlayerPosition || kind == occKindSeekCompleted || kind == occKindCaptureOverrun || kind == occKindDocumentSelected
           then do
             second <- peekByteOff rec 16 :: IO Word64
             return (Just (kind, second, [], Just (VI64 (fromIntegral ident)), Nothing, Nothing, []))

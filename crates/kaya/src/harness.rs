@@ -979,6 +979,25 @@ pub enum Step {
     /// intercept_dismiss sheet emits dismiss_requested and stays; an
     /// unarmed one goes and reports sheet_dismissed. An action, silent.
     DismissSheet,
+    /// The titles of the active strip's documents in order, read off the
+    /// platform's tabs or the phone's list (docs/doctabs-plan.md §4).
+    ExpectDocuments(Vec<String>),
+    /// The active document's title, from the platform's own selection.
+    ExpectDocument(String),
+    /// Whether the titled document's tab shows the unsaved mark.
+    ExpectDocumentDirty(String, bool),
+    /// Drive the titled document's tab (a phone's row): it becomes active.
+    SelectDocument(String),
+    /// Drive the titled document's own close affordance.
+    CloseDocument(String),
+    /// Press the window's "+".
+    NewDocument,
+    /// Move the titled document into a new native window through the
+    /// platform's own tab command; refused where there are no windows.
+    MoveToNewWindow(String),
+    /// Close the native window holding the active document through its
+    /// own chrome close.
+    CloseNativeWindow,
     /// Expect the scroll viewport's content to exceed its visible
     /// extent — the observation that pins "there is something to
     /// scroll" (both readings are geometry from the toolkit).
@@ -1441,6 +1460,14 @@ impl Step {
             | Step::ExpectLocale(..)
             | Step::ExpectHourCycle(..)
             | Step::DismissSheet
+            | Step::ExpectDocuments(..)
+            | Step::ExpectDocument(..)
+            | Step::ExpectDocumentDirty(..)
+            | Step::SelectDocument(..)
+            | Step::CloseDocument(..)
+            | Step::NewDocument
+            | Step::MoveToNewWindow(..)
+            | Step::CloseNativeWindow
             | Step::ExpectToast(..)
             | Step::ExpectNoToast
             | Step::ExpectKeyboard(_)
@@ -1626,6 +1653,14 @@ impl Step {
             Step::ExpectSheet { .. } => true,
             Step::ExpectSheetDetent { .. } => true,
             Step::DismissSheet => false,
+            Step::ExpectDocuments(..) => true,
+            Step::ExpectDocument(..) => true,
+            Step::ExpectDocumentDirty(..) => true,
+            Step::SelectDocument(..) => false,
+            Step::CloseDocument(..) => false,
+            Step::NewDocument => false,
+            Step::MoveToNewWindow(..) => false,
+            Step::CloseNativeWindow => false,
             Step::ExpectToast(..) => true,
             Step::ExpectNoToast => true,
             Step::ExpectToastAnnounced(..) => true,
@@ -2719,6 +2754,24 @@ pub trait Stage: Send + 'static {
     fn sheet_detent(&self) -> String;
     /// Drive the platform's own cancel path on the topmost sheet.
     fn dismiss_sheet(&self);
+    /// The active strip's document titles in order, off the platform's tabs
+    /// (docs/doctabs-plan.md §4), None when no window holds documents.
+    fn document_titles(&self) -> Option<Vec<String>>;
+    /// The active document's title from the platform's selection state.
+    fn active_document(&self) -> Option<String>;
+    /// Whether the titled document's tab shows the unsaved mark; Err names
+    /// what could not be read.
+    fn document_dirty(&self, title: &str) -> Result<bool, String>;
+    /// Drive the titled document's tab; Err when there is no such tab.
+    fn select_document(&self, title: &str) -> Result<(), String>;
+    /// Drive the titled document's own close affordance.
+    fn close_document(&self, title: &str) -> Result<(), String>;
+    /// Press the window's "+"; Err when none is drawn.
+    fn new_document(&self) -> Result<(), String>;
+    /// Move the titled document into a new native window.
+    fn move_to_new_window(&self, title: &str) -> Result<(), String>;
+    /// Close the native window holding the active document.
+    fn close_native_window(&self) -> Result<(), String>;
     /// The toast the platform shows (docs/toast-plan.md T13): its text and
     /// its action's label ("" for none) read off the platform's own surface,
     /// None when none is on screen. Never the scene model.
@@ -4422,6 +4475,33 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("dismiss_sheet takes no argument: {line:?}"));
                 }
                 Step::DismissSheet
+            }
+            "expect_documents" => {
+                let titles = parse_string(rest)?;
+                Step::ExpectDocuments(if titles.is_empty() {
+                    Vec::new()
+                } else {
+                    titles.split('|').map(str::to_owned).collect()
+                })
+            }
+            "expect_document" => Step::ExpectDocument(parse_string(rest)?),
+            "expect_document_dirty" => {
+                let (title, want) = parse_quoted_prefix(rest).map_err(|e| {
+                    format!("expect_document_dirty wants a quoted title and true or false: {e}")
+                })?;
+                let dirty = want.trim().parse::<bool>().map_err(|_| {
+                    format!("expect_document_dirty wants true or false: {line:?}")
+                })?;
+                Step::ExpectDocumentDirty(title, dirty)
+            }
+            "select_document" => Step::SelectDocument(parse_string(rest)?),
+            "close_document" => Step::CloseDocument(parse_string(rest)?),
+            "move_to_new_window" => Step::MoveToNewWindow(parse_string(rest)?),
+            "new_document" | "close_native_window" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("{op} takes no argument: {line:?}"));
+                }
+                if op == "new_document" { Step::NewDocument } else { Step::CloseNativeWindow }
             }
             "choose" => {
                 let (target, index) = rest
@@ -7027,6 +7107,28 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::SelectDocument(_)
+            | Step::CloseDocument(_)
+            | Step::NewDocument
+            | Step::MoveToNewWindow(_)
+            | Step::CloseNativeWindow => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                let done = match step {
+                    Step::SelectDocument(title) => stage.select_document(title),
+                    Step::CloseDocument(title) => stage.close_document(title),
+                    Step::NewDocument => stage.new_document(),
+                    Step::MoveToNewWindow(title) => stage.move_to_new_window(title),
+                    _ => stage.close_native_window(),
+                };
+                match done {
+                    Ok(()) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(why)),
+                }
+            }
             Step::KeyboardBarPress(label) => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -7710,6 +7812,21 @@ fn run_with_log(
                     Ok(()) => Ok(format!("toast announced {want:?}")),
                     Err(heard) => Err(format!("toast {want:?} not announced; heard {heard:?}")),
                 }
+            })),
+            Step::ExpectDocuments(want) => Some(poll(|| match stage.document_titles() {
+                Some(got) if got == *want => Ok(format!("documents {:?}", want.join("|"))),
+                Some(got) => Err(format!("documents {:?}, wanted {:?}", got.join("|"), want.join("|"))),
+                None => Err(format!("no window holds documents, wanted {:?}", want.join("|"))),
+            })),
+            Step::ExpectDocument(want) => Some(poll(|| match stage.active_document() {
+                Some(got) if got == *want => Ok(format!("document {want:?}")),
+                Some(got) => Err(format!("document {got:?}, wanted {want:?}")),
+                None => Err(format!("no active document, wanted {want:?}")),
+            })),
+            Step::ExpectDocumentDirty(title, want) => Some(poll(|| match stage.document_dirty(title) {
+                Ok(got) if got == *want => Ok(format!("document {title:?} dirty {want}")),
+                Ok(got) => Err(format!("document {title:?} dirty {got}, wanted {want}")),
+                Err(why) => Err(format!("document {title:?}: {why}")),
             })),
             Step::ExpectSheet(want) => Some(poll(|| match stage.sheet_title() {
                 Some(got) if got == *want => Ok(format!("sheet {want:?}")),
@@ -11235,6 +11352,30 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn document_titles(&self) -> Option<Vec<String>> {
+            None
+        }
+        fn active_document(&self) -> Option<String> {
+            None
+        }
+        fn document_dirty(&self, _: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+        fn select_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn new_document(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn move_to_new_window(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_native_window(&self) -> Result<(), String> {
+            Ok(())
+        }
         fn toast(&self) -> Option<(String, String)> {
             MOCK_TOAST_READS.with(|c| {
                 let left = c.get();
@@ -12579,6 +12720,30 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn document_titles(&self) -> Option<Vec<String>> {
+            None
+        }
+        fn active_document(&self) -> Option<String> {
+            None
+        }
+        fn document_dirty(&self, _: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+        fn select_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn new_document(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn move_to_new_window(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_native_window(&self) -> Result<(), String> {
+            Ok(())
+        }
         fn toast(&self) -> Option<(String, String)> {
             None
         }
@@ -13138,6 +13303,30 @@ mod tests {
             "none".to_owned()
         }
         fn dismiss_sheet(&self) {}
+        fn document_titles(&self) -> Option<Vec<String>> {
+            None
+        }
+        fn active_document(&self) -> Option<String> {
+            None
+        }
+        fn document_dirty(&self, _: &str) -> Result<bool, String> {
+            Ok(false)
+        }
+        fn select_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_document(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn new_document(&self) -> Result<(), String> {
+            Ok(())
+        }
+        fn move_to_new_window(&self, _: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close_native_window(&self) -> Result<(), String> {
+            Ok(())
+        }
         fn toast(&self) -> Option<(String, String)> {
             None
         }

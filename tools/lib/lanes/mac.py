@@ -63,7 +63,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # docs/doctabs-plan.md §6 D2.
+                "doctabs"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -379,6 +381,8 @@ ORDER = [
     ("richrows", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("sheet", LANGS),
+    # docs/doctabs-plan.md §6 D2: rust-only at depth.
+    ("doctabs", ("rust",)),
     # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): every
     # binding's guest under the everyday locale, then under de-DE and ar-EG
     # through the KAYA_LOCALE knob (SCENE_LOCALE).

@@ -9,7 +9,8 @@
 use std::sync::Arc;
 
 use crate::protocol::{
-    EntryProp, MenuItemId, MenuItemKind, MenuProp, SectionProp, SheetProp, WindowProp,
+    DocumentProp, EntryProp, MenuItemId, MenuItemKind, MenuProp, RegionEdge, SectionProp, SheetProp,
+    WindowProp,
     AlertChoice, AlertId, AlertSpec,
     ApplyOp, Blob, CollectionId, CommandKind, Occurrence, Path, Prop, PropValue, Record, SignalId,
     NativeRun, TemplateNodeId, TextRange, TextRun, Transaction, TxOp, Value, ValueType,
@@ -78,6 +79,11 @@ pub(crate) const TX_ATTACH_DOCK: u16 = 85;
 pub(crate) const TX_SET_DOCK_PLAYER: u16 = 86;
 pub(crate) const TX_CONTEXT_LABEL_NODE: u16 = 87;
 pub(crate) const TX_LIST_FONT_FAMILIES: u16 = 88;
+pub(crate) const TX_ADD_DOCUMENT: u16 = 89;
+pub(crate) const TX_SELECT_DOCUMENT: u16 = 90;
+pub(crate) const TX_CLOSE_DOCUMENT: u16 = 91;
+pub(crate) const TX_SET_DOCUMENT_PROP: u16 = 92;
+pub(crate) const TX_ADD_REGION: u16 = 93;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -202,6 +208,11 @@ pub(crate) const APPLY_ATTACH_DOCK: u16 = 73;
 pub(crate) const APPLY_SET_DOCK_PLAYER: u16 = 74;
 pub(crate) const APPLY_CONTEXT_LABEL_NODE: u16 = 75;
 pub(crate) const APPLY_LIST_FONT_FAMILIES: u16 = 76;
+pub(crate) const APPLY_ADD_DOCUMENT: u16 = 77;
+pub(crate) const APPLY_SELECT_DOCUMENT: u16 = 78;
+pub(crate) const APPLY_CLOSE_DOCUMENT: u16 = 79;
+pub(crate) const APPLY_SET_DOCUMENT_PROP: u16 = 80;
+pub(crate) const APPLY_ADD_REGION: u16 = 81;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1258,6 +1269,17 @@ pub(crate) const WPROP_INSET: u32 = 8;
 pub(crate) const WPROP_APPEARANCE: u32 = 9;
 pub(crate) const WPROP_REMEMBER_FRAME: u32 = 10;
 pub(crate) const WPROP_FULLSCREEN: u32 = 11;
+pub(crate) const WPROP_NEW_DOCUMENT: u32 = 12;
+
+/// Document property ids (spec::DOCUMENT_PROPS) and the region edges
+/// (spec enum "region_edge"; docs/doctabs-plan.md §2.1, §1.7).
+pub(crate) const DPROP_TITLE: u32 = 1;
+pub(crate) const DPROP_TOOLTIP: u32 = 2;
+pub(crate) const DPROP_DIRTY: u32 = 3;
+pub(crate) const DPROP_INTERCEPT_CLOSE: u32 = 4;
+pub(crate) const REGION_EDGE_LEADING: u32 = 1;
+pub(crate) const REGION_EDGE_TRAILING: u32 = 2;
+pub(crate) const REGION_EDGE_BOTTOM: u32 = 3;
 
 /// Section property ids (spec::SECTION_PROPS) — the third typed
 /// surface table (see DESIGN.md, Sections).
@@ -1938,6 +1960,7 @@ fn window_prop(raw: u32) -> WindowProp {
         WPROP_APPEARANCE => WindowProp::Appearance,
         WPROP_REMEMBER_FRAME => WindowProp::RememberFrame,
         WPROP_FULLSCREEN => WindowProp::Fullscreen,
+        WPROP_NEW_DOCUMENT => WindowProp::NewDocument,
         other => panic!("kaya: unknown window property {other}"),
     }
 }
@@ -1955,7 +1978,72 @@ fn window_prop_raw(p: WindowProp) -> u32 {
         WindowProp::Appearance => WPROP_APPEARANCE,
         WindowProp::RememberFrame => WPROP_REMEMBER_FRAME,
         WindowProp::Fullscreen => WPROP_FULLSCREEN,
+        WindowProp::NewDocument => WPROP_NEW_DOCUMENT,
     }
+}
+
+fn document_prop(raw: u32) -> DocumentProp {
+    match raw {
+        DPROP_TITLE => DocumentProp::Title,
+        DPROP_TOOLTIP => DocumentProp::Tooltip,
+        DPROP_DIRTY => DocumentProp::Dirty,
+        DPROP_INTERCEPT_CLOSE => DocumentProp::InterceptClose,
+        other => panic!("kaya: unknown document property {other}"),
+    }
+}
+
+fn document_prop_raw(p: DocumentProp) -> u32 {
+    match p {
+        DocumentProp::Title => DPROP_TITLE,
+        DocumentProp::Tooltip => DPROP_TOOLTIP,
+        DocumentProp::Dirty => DPROP_DIRTY,
+        DocumentProp::InterceptClose => DPROP_INTERCEPT_CLOSE,
+    }
+}
+
+fn region_edge(raw: u32) -> RegionEdge {
+    match raw {
+        REGION_EDGE_LEADING => RegionEdge::Leading,
+        REGION_EDGE_TRAILING => RegionEdge::Trailing,
+        REGION_EDGE_BOTTOM => RegionEdge::Bottom,
+        other => panic!("kaya: unknown region edge {other} (leading 1, trailing 2, bottom 3)"),
+    }
+}
+
+fn region_edge_raw(e: RegionEdge) -> u32 {
+    match e {
+        RegionEdge::Leading => REGION_EDGE_LEADING,
+        RegionEdge::Trailing => REGION_EDGE_TRAILING,
+        RegionEdge::Bottom => REGION_EDGE_BOTTOM,
+    }
+}
+
+/// DOCUMENTS_CLOSE_REQUESTED { u64 window; Values documents (I64) }.
+pub(crate) fn documents_close_requested_body(window: WindowId, documents: &[WindowId]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&window.0.to_le_bytes());
+    let values: Vec<Value> = documents.iter().map(|d| Value::I64(d.0 as i64)).collect();
+    write_values(&mut b, &values, &mut Vec::new());
+    b
+}
+
+/// DOCUMENT_MOVED { u64 document; u64 window; u32 index; u32 reserved }.
+pub(crate) fn document_moved_body(document: WindowId, window: WindowId, index: u32) -> [u8; 24] {
+    let mut b = [0u8; 24];
+    b[..8].copy_from_slice(&document.0.to_le_bytes());
+    b[8..16].copy_from_slice(&window.0.to_le_bytes());
+    b[16..20].copy_from_slice(&index.to_le_bytes());
+    b
+}
+
+/// DOCUMENTS_DETACHED { u64 source; u64 window; Values documents (I64) }.
+pub(crate) fn documents_detached_body(source: WindowId, window: WindowId, documents: &[WindowId]) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&source.0.to_le_bytes());
+    b.extend_from_slice(&window.0.to_le_bytes());
+    let values: Vec<Value> = documents.iter().map(|d| Value::I64(d.0 as i64)).collect();
+    write_values(&mut b, &values, &mut Vec::new());
+    b
 }
 
 fn section_prop(raw: u32) -> SectionProp {
@@ -2943,6 +3031,37 @@ pub fn decode_transaction_with_blobs(
                     prop: p,
                     value,
                 }
+            }
+            TX_ADD_DOCUMENT => TxOp::AddDocument {
+                window: WindowId(r.u64()),
+                document: WindowId(r.u64()),
+            },
+            TX_SELECT_DOCUMENT => TxOp::SelectDocument {
+                document: WindowId(r.u64()),
+            },
+            TX_CLOSE_DOCUMENT => TxOp::CloseDocument {
+                document: WindowId(r.u64()),
+            },
+            TX_SET_DOCUMENT_PROP => {
+                let document = WindowId(r.u64());
+                let p = document_prop(r.u32());
+                let source = r.u32();
+                let value = match source {
+                    SOURCE_CONST => PropValue::Const(r.value()),
+                    SOURCE_SIGNAL => PropValue::Signal(SignalId(r.u64())),
+                    SOURCE_ELEMENT => {
+                        panic!("kaya: document properties cannot bind element sources")
+                    }
+                    other => panic!("kaya: unknown property source {other}"),
+                };
+                TxOp::SetDocumentProp { document, prop: p, value }
+            }
+            TX_ADD_REGION => {
+                let window = WindowId(r.u64());
+                let region = WindowId(r.u64());
+                let edge = region_edge(r.u32());
+                let _reserved = r.u32();
+                TxOp::AddRegion { window, region, edge }
             }
             TX_MENU_ITEM_CREATE => TxOp::MenuItemCreate {
                 item: MenuItemId(r.u64()),
@@ -4793,6 +4912,36 @@ impl Writer {
                     write_value(b, value, blobs);
                 })
             }
+            ApplyOp::AddDocument { window, document } => self.record(APPLY_ADD_DOCUMENT, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&document.0.to_le_bytes());
+            }),
+            ApplyOp::SelectDocument { window, document } => {
+                self.record(APPLY_SELECT_DOCUMENT, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&document.0.to_le_bytes());
+                })
+            }
+            ApplyOp::CloseDocument { window, document } => {
+                self.record(APPLY_CLOSE_DOCUMENT, |b, _| {
+                    b.extend_from_slice(&window.0.to_le_bytes());
+                    b.extend_from_slice(&document.0.to_le_bytes());
+                })
+            }
+            ApplyOp::SetDocumentProp { document, prop, value } => {
+                self.record(APPLY_SET_DOCUMENT_PROP, |b, blobs| {
+                    b.extend_from_slice(&document.0.to_le_bytes());
+                    b.extend_from_slice(&document_prop_raw(*prop).to_le_bytes());
+                    b.extend_from_slice(&0u32.to_le_bytes());
+                    write_value(b, value, blobs);
+                })
+            }
+            ApplyOp::AddRegion { window, region, edge } => self.record(APPLY_ADD_REGION, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&region.0.to_le_bytes());
+                b.extend_from_slice(&region_edge_raw(*edge).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
             // MENU_ITEM_CREATE: u64 item, u32 kind, u32 pad.
             ApplyOp::MenuItemCreate { item, kind } => {
                 self.record(APPLY_MENU_ITEM_CREATE, |b, _| {
@@ -5487,6 +5636,41 @@ impl Writer {
                     }
                 })
             }
+            TxOp::AddDocument { window, document } => self.record(TX_ADD_DOCUMENT, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&document.0.to_le_bytes());
+            }),
+            TxOp::SelectDocument { document } => self.record(TX_SELECT_DOCUMENT, |b, _| {
+                b.extend_from_slice(&document.0.to_le_bytes());
+            }),
+            TxOp::CloseDocument { document } => self.record(TX_CLOSE_DOCUMENT, |b, _| {
+                b.extend_from_slice(&document.0.to_le_bytes());
+            }),
+            TxOp::SetDocumentProp { document, prop, value } => {
+                self.record(TX_SET_DOCUMENT_PROP, |b, blobs| {
+                    b.extend_from_slice(&document.0.to_le_bytes());
+                    b.extend_from_slice(&document_prop_raw(*prop).to_le_bytes());
+                    match value {
+                        PropValue::Const(v) => {
+                            b.extend_from_slice(&SOURCE_CONST.to_le_bytes());
+                            write_value(b, v, blobs);
+                        }
+                        PropValue::Signal(id) => {
+                            b.extend_from_slice(&SOURCE_SIGNAL.to_le_bytes());
+                            b.extend_from_slice(&id.0.to_le_bytes());
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: document properties cannot bind element sources")
+                        }
+                    }
+                })
+            }
+            TxOp::AddRegion { window, region, edge } => self.record(TX_ADD_REGION, |b, _| {
+                b.extend_from_slice(&window.0.to_le_bytes());
+                b.extend_from_slice(&region.0.to_le_bytes());
+                b.extend_from_slice(&region_edge_raw(*edge).to_le_bytes());
+                b.extend_from_slice(&0u32.to_le_bytes());
+            }),
             TxOp::MenuItemCreate { item, kind } => self.record(TX_MENU_ITEM_CREATE, |b, _| {
                 b.extend_from_slice(&item.0.to_le_bytes());
                 b.extend_from_slice(&menu_kind_raw(*kind).to_le_bytes());

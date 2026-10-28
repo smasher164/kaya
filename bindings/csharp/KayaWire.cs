@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc31d87678a5929d1;
+    public const ulong SpecHash = 0xa37dca454ad9d6cc;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -163,6 +163,7 @@ static class KayaWire
     public const uint WpropAppearance = 9;
     public const uint WpropRememberFrame = 10;
     public const uint WpropFullscreen = 11;
+    public const uint WpropNewDocument = 12;
     public const uint EpropTitle = 1;
     public const uint EpropInterceptBack = 2;
     public const uint ShpropTitle = 1;
@@ -174,6 +175,13 @@ static class KayaWire
     public const uint SpropIcon = 2;
     public const uint SpropSymbol = 3;
     public const uint SpropBadge = 4;
+    public const uint DpropTitle = 1;
+    public const uint DpropTooltip = 2;
+    public const uint DpropDirty = 3;
+    public const uint DpropInterceptClose = 4;
+    public const uint RegionEdgeLeading = 1;
+    public const uint RegionEdgeTrailing = 2;
+    public const uint RegionEdgeBottom = 3;
     public const uint MenuKindMenu = 1;
     public const uint MenuKindAction = 2;
     public const uint MenuKindToggle = 3;
@@ -505,6 +513,11 @@ static class KayaWire
     public const ushort TxKindSetDockPlayer = 86;
     public const ushort TxKindContextLabelNode = 87;
     public const ushort TxKindListFontFamilies = 88;
+    public const ushort TxKindAddDocument = 89;
+    public const ushort TxKindSelectDocument = 90;
+    public const ushort TxKindCloseDocument = 91;
+    public const ushort TxKindSetDocumentProp = 92;
+    public const ushort TxKindAddRegion = 93;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -579,6 +592,11 @@ static class KayaWire
     public const ushort ApplyKindSetDockPlayer = 74;
     public const ushort ApplyKindContextLabelNode = 75;
     public const ushort ApplyKindListFontFamilies = 76;
+    public const ushort ApplyKindAddDocument = 77;
+    public const ushort ApplyKindSelectDocument = 78;
+    public const ushort ApplyKindCloseDocument = 79;
+    public const ushort ApplyKindSetDocumentProp = 80;
+    public const ushort ApplyKindAddRegion = 81;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -640,6 +658,13 @@ static class KayaWire
     public const ushort OccKindSelectionChanged = 59;
     public const ushort OccKindFontFamilies = 60;
     public const ushort OccKindTextSelected = 61;
+    public const ushort OccKindDocumentSelected = 62;
+    public const ushort OccKindDocumentCloseRequested = 63;
+    public const ushort OccKindDocumentsCloseRequested = 64;
+    public const ushort OccKindDocumentClosed = 65;
+    public const ushort OccKindNewDocumentRequested = 66;
+    public const ushort OccKindDocumentMoved = 67;
+    public const ushort OccKindDocumentsDetached = 68;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1600,6 +1625,52 @@ static class KayaWire
     {
         var w = Begin(out var stream);
         return Finish(stream, w, TxKindListFontFamilies);
+    }
+
+    /// Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes.
+    public static byte[] TxAddDocument(ulong window, ulong document)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(document);
+        return Finish(stream, w, TxKindAddDocument);
+    }
+
+    /// Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected.
+    public static byte[] TxSelectDocument(ulong document)
+    {
+        var w = Begin(out var stream);
+        w.Write(document);
+        return Finish(stream, w, TxKindSelectDocument);
+    }
+
+    /// Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state.
+    public static byte[] TxCloseDocument(ulong document)
+    {
+        var w = Begin(out var stream);
+        w.Write(document);
+        return Finish(stream, w, TxKindCloseDocument);
+    }
+
+    /// Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements.
+    public static byte[] TxSetDocumentProp(ulong document, uint prop, uint source)
+    {
+        var w = Begin(out var stream);
+        w.Write(document);
+        w.Write(prop);
+        w.Write(source);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed.
+    public static byte[] TxAddRegion(ulong window, ulong region, uint edge)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(region);
+        w.Write(edge);
+        w.Write(0u);
+        return Finish(stream, w, TxKindAddRegion);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3625,6 +3696,23 @@ static class KayaWire
         return Finish(stream, w, TxKindSetWindowProp);
     }
 
+    /// set_window_prop with a constant new_document value (window 0, the primary surface).
+    public static byte[] TxSetWindowNewDocument(ulong window, bool newDocument)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropNewDocument); w.Write(SourceConst);
+        EncodeValue(w, newDocument);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
+    /// set_window_prop with a signal-bound new_document value (window 0, the primary surface).
+    public static byte[] TxBindWindowNewDocument(ulong window, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(window); w.Write(WpropNewDocument); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetWindowProp);
+    }
+
     /// set_entry_prop with a constant title value.
     public static byte[] TxSetEntryTitle(ulong entry, string title)
     {
@@ -3708,6 +3796,74 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(sheet); w.Write(ShpropDetent); w.Write(SourceSignal); w.Write(signalId);
         return Finish(stream, w, TxKindSetSheetProp);
+    }
+
+    /// set_document_prop with a constant title value.
+    public static byte[] TxSetDocumentTitle(ulong document, string title)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropTitle); w.Write(SourceConst);
+        EncodeValue(w, title);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a signal-bound title value.
+    public static byte[] TxBindDocumentTitle(ulong document, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropTitle); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a constant tooltip value.
+    public static byte[] TxSetDocumentTooltip(ulong document, string tooltip)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropTooltip); w.Write(SourceConst);
+        EncodeValue(w, tooltip);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a signal-bound tooltip value.
+    public static byte[] TxBindDocumentTooltip(ulong document, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropTooltip); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a constant dirty value.
+    public static byte[] TxSetDocumentDirty(ulong document, bool dirty)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropDirty); w.Write(SourceConst);
+        EncodeValue(w, dirty);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a signal-bound dirty value.
+    public static byte[] TxBindDocumentDirty(ulong document, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropDirty); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a constant intercept_close value.
+    public static byte[] TxSetDocumentInterceptClose(ulong document, bool interceptClose)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropInterceptClose); w.Write(SourceConst);
+        EncodeValue(w, interceptClose);
+        return Finish(stream, w, TxKindSetDocumentProp);
+    }
+
+    /// set_document_prop with a signal-bound intercept_close value.
+    public static byte[] TxBindDocumentInterceptClose(ulong document, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(document); w.Write(DpropInterceptClose); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetDocumentProp);
     }
 
     /// set_section_prop with a constant title value.
@@ -4019,7 +4175,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected && kind != OccKindDocumentSelected && kind != OccKindDocumentCloseRequested && kind != OccKindDocumentsCloseRequested && kind != OccKindDocumentClosed && kind != OccKindNewDocumentRequested && kind != OccKindDocumentMoved && kind != OccKindDocumentsDetached)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -4401,6 +4557,76 @@ static class KayaWire
             payload = tail;
             return true;
         }
+        if (kind == OccKindDocumentsCloseRequested)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindDocumentMoved)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindDocumentsDetached)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add(BitConverter.ToInt64(rec, flatAt));
+            flatAt += 8;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
         if (kind == OccKindFileDialogResult)
         {
             // id, a count, then three Values per file
@@ -4446,11 +4672,11 @@ static class KayaWire
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
-        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested || kind == OccKindSheetDismissed || kind == OccKindDismissRequested)
+        if (kind == OccKindCloseRequested || kind == OccKindWindowClosed || kind == OccKindEntryPopped || kind == OccKindBackRequested || kind == OccKindSheetDismissed || kind == OccKindDismissRequested || kind == OccKindDocumentCloseRequested || kind == OccKindDocumentClosed || kind == OccKindNewDocumentRequested)
             return true;
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OccKindSectionSelected || kind == OccKindPlayerPosition || kind == OccKindSeekCompleted || kind == OccKindCaptureOverrun)
+        if (kind == OccKindSectionSelected || kind == OccKindPlayerPosition || kind == OccKindSeekCompleted || kind == OccKindCaptureOverrun || kind == OccKindDocumentSelected)
         {
             payload = id;
             id = BitConverter.ToUInt64(rec, 16);

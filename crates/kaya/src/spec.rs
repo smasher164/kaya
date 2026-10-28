@@ -390,6 +390,9 @@ pub const WINDOW_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("remember_frame", 10, PropKind::Bool),
     // docs/fullscreen-plan.md §1.
     ("fullscreen", 11, PropKind::Bool),
+    // docs/doctabs-plan.md §2.1: draws the platform's "+" for a window with
+    // documents; pressing it emits new_document_requested.
+    ("new_document", 12, PropKind::Bool),
 ];
 
 /// Navigation-entry properties: their own typed table, deliberately
@@ -424,6 +427,15 @@ pub const SECTION_PROPS: &[(&'static str, u32, PropKind)] = &[
     ("symbol", 3, PropKind::Enum("symbol")),
     // docs/tasks-s2-plan.md T2; the prop kinds have no integer.
     ("badge", 4, PropKind::F64),
+];
+
+/// Document properties (docs/doctabs-plan.md §2.1): the fourth typed
+/// surface table. `intercept_close` is the close-veto class.
+pub const DOCUMENT_PROPS: &[(&'static str, u32, PropKind)] = &[
+    ("title", 1, PropKind::Str),
+    ("tooltip", 2, PropKind::Str),
+    ("dirty", 3, PropKind::Bool),
+    ("intercept_close", 4, PropKind::Bool),
 ];
 
 /// Menu-item properties (DESIGN.md, Menus), a flat spec fact: the scene
@@ -545,6 +557,12 @@ pub fn hash() -> u64 {
     }
     eat(b"window_props");
     for (name, id, kind) in WINDOW_PROPS {
+        eat(name.as_bytes());
+        eat(&id.to_le_bytes());
+        eat(format!("{kind:?}").as_bytes());
+    }
+    eat(b"document_props");
+    for (name, id, kind) in DOCUMENT_PROPS {
         eat(name.as_bytes());
         eat(&id.to_le_bytes());
         eat(format!("{kind:?}").as_bytes());
@@ -2198,6 +2216,64 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   once by font_families (docs/code-surface-plan.md M3): what \
                   an app's own font setting offers its user.",
         },
+        Record {
+            kind: 89,
+            name: "add_document",
+            fields: &[f("window", FieldTy::U64), f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Append a document to `window`'s active strip (docs/doctabs-plan.md \
+                  §2.1). Document ids share the surface namespace; mount fills \
+                  one. The first document added becomes the active one; any \
+                  other stays behind until select_document. The root refuses a \
+                  document on a window with sections, a stack or panes.",
+        },
+        Record {
+            kind: 90,
+            name: "select_document",
+            fields: &[f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Make a document the active one: its tab selected and its \
+                  native window brought forward. Configuration: it never \
+                  echoes document_selected.",
+        },
+        Record {
+            kind: 91,
+            name: "close_document",
+            fields: &[f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Close a document and forget its tree, as pop_entry does; also \
+                  the answer that agrees to a close request. Never echoes \
+                  document_closed. A window left with no documents closes \
+                  (docs/doctabs-plan.md §1.5); a phone shows its empty state.",
+        },
+        Record {
+            kind: 92,
+            name: "set_document_prop",
+            fields: &[
+                f("document", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("source", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Bind a document property (DOCUMENT_PROPS). Same tail \
+                  convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is \
+                  rejected: documents are not collection elements.",
+        },
+        Record {
+            kind: 93,
+            name: "add_region",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("region", FieldTy::U64),
+                f("edge", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Declare a shared region of a window with documents at an \
+                  edge (enum region_edge; docs/doctabs-plan.md §1.7): a \
+                  surface every document's tab shares, filled by mount. One \
+                  per edge, never removed.",
+        },
     ],
     apply: &[
         Record {
@@ -3250,6 +3326,54 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Enumerate the installed font families and answer through \
                   kaya_font_families (docs/code-surface-plan.md M3).",
+        },
+        Record {
+            kind: 77,
+            name: "add_document",
+            fields: &[f("window", FieldTy::U64), f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Add a document to the window's active strip, its root hidden \
+                  until a mount fills it; the first added becomes active.",
+        },
+        Record {
+            kind: 78,
+            name: "select_document",
+            fields: &[f("window", FieldTy::U64), f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Make the document active; echoes nothing.",
+        },
+        Record {
+            kind: 79,
+            name: "close_document",
+            fields: &[f("window", FieldTy::U64), f("document", FieldTy::U64)],
+            payload: None,
+            doc: "Close the document and release its views; echoes nothing. A \
+                  native window left with none closes.",
+        },
+        Record {
+            kind: 80,
+            name: "set_document_prop",
+            fields: &[
+                f("document", FieldTy::U64),
+                f("prop", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("value", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Set a document property to an already-resolved value.",
+        },
+        Record {
+            kind: 81,
+            name: "add_region",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("region", FieldTy::U64),
+                f("edge", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "Declare a shared region at an edge of the window, hidden \
+                  until a mount fills it; one instance per strip.",
         },
     ],
     occurrence: &[
@@ -4315,6 +4439,82 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   shares one kind. Sent whenever the pair changes, the app's \
                   own selection and format acts included.",
         },
+        Record {
+            kind: 62,
+            name: "document_selected",
+            fields: &[f("window", FieldTy::U64), f("document", FieldTy::U64)],
+            payload: None,
+            doc: "The active document changed through the user's act: a tab, a \
+                  key-window change between the window's native windows, a \
+                  phone's list row. Post-fact; select_document never echoes.",
+        },
+        Record {
+            kind: 63,
+            name: "document_close_requested",
+            fields: &[f("document", FieldTy::U64)],
+            payload: None,
+            doc: "The user closed a document whose intercept_close is armed \
+                  (its tab, Close Tab, a phone row). Nothing has closed; the \
+                  app answers with close_document if it agrees.",
+        },
+        Record {
+            kind: 64,
+            name: "documents_close_requested",
+            fields: &[f("window", FieldTy::U64), f("documents", FieldTy::Values)],
+            payload: None,
+            doc: "The user closed a native window of `window` that shows at \
+                  least one armed document: nothing has closed, and \
+                  `documents` lists every document that native window shows, \
+                  as I64 ids in strip order, so the app asks one dialog at a \
+                  time and answers with close_document for each it agrees to.",
+        },
+        Record {
+            kind: 65,
+            name: "document_closed",
+            fields: &[f("document", FieldTy::U64)],
+            payload: None,
+            doc: "An unarmed document closed through the user's act. \
+                  Post-fact: the core has already forgotten its tree.",
+        },
+        Record {
+            kind: 66,
+            name: "new_document_requested",
+            fields: &[f("window", FieldTy::U64)],
+            payload: None,
+            doc: "The user pressed the window's \"+\" (armed by the window's \
+                  new_document prop).",
+        },
+        Record {
+            kind: 67,
+            name: "document_moved",
+            fields: &[
+                f("document", FieldTy::U64),
+                f("window", FieldTy::U64),
+                f("index", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+            ],
+            payload: None,
+            doc: "The user reordered a document, or dragged it into another \
+                  existing window (Merge All Windows included): `window` holds \
+                  it now and `index` is its place in that window's tabs \
+                  (docs/doctabs-plan.md §1.2).",
+        },
+        Record {
+            kind: 68,
+            name: "documents_detached",
+            fields: &[
+                f("source", FieldTy::U64),
+                f("window", FieldTy::U64),
+                f("documents", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "The user tore documents out of `source` into a NEW window \
+                  kaya made (docs/doctabs-plan.md §1.2, Q1 ruled anew): \
+                  `window` is its fresh id, core-allocated in the internal \
+                  range, and `documents` the moved ones as I64 ids in tab \
+                  order. The app declares the new window's chrome and regions \
+                  and binds its handlers.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4530,6 +4730,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("appearance", 9),
                 ("remember_frame", 10),
                 ("fullscreen", 11),
+                ("new_document", 12),
             ],
         },
         EnumSpec {
@@ -4548,6 +4749,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
         EnumSpec {
             name: "sprop",
             variants: &[("title", 1), ("icon", 2), ("symbol", 3), ("badge", 4)],
+        },
+        EnumSpec {
+            name: "dprop",
+            variants: &[("title", 1), ("tooltip", 2), ("dirty", 3), ("intercept_close", 4)],
+        },
+        EnumSpec {
+            // docs/doctabs-plan.md §1.7.
+            name: "region_edge",
+            variants: &[("leading", 1), ("trailing", 2), ("bottom", 3)],
         },
         EnumSpec {
             // The menu item vocabulary (DESIGN.md, Menus). `menu` and
@@ -5196,6 +5406,11 @@ mod tests {
             ("set_dock_player", wire::TX_SET_DOCK_PLAYER),
             ("context_label_node", wire::TX_CONTEXT_LABEL_NODE),
             ("list_font_families", wire::TX_LIST_FONT_FAMILIES),
+            ("add_document", wire::TX_ADD_DOCUMENT),
+            ("select_document", wire::TX_SELECT_DOCUMENT),
+            ("close_document", wire::TX_CLOSE_DOCUMENT),
+            ("set_document_prop", wire::TX_SET_DOCUMENT_PROP),
+            ("add_region", wire::TX_ADD_REGION),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5283,6 +5498,11 @@ mod tests {
                 ("set_dock_player", wire::APPLY_SET_DOCK_PLAYER),
                 ("context_label_node", wire::APPLY_CONTEXT_LABEL_NODE),
                 ("list_font_families", wire::APPLY_LIST_FONT_FAMILIES),
+                ("add_document", wire::APPLY_ADD_DOCUMENT),
+                ("select_document", wire::APPLY_SELECT_DOCUMENT),
+                ("close_document", wire::APPLY_CLOSE_DOCUMENT),
+                ("set_document_prop", wire::APPLY_SET_DOCUMENT_PROP),
+                ("add_region", wire::APPLY_ADD_REGION),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -5353,6 +5573,13 @@ mod tests {
                 ("selection_changed", crate::ring::REC_SELECTION_CHANGED),
                 ("font_families", crate::ring::REC_FONT_FAMILIES),
                 ("text_selected", crate::ring::REC_TEXT_SELECTED),
+                ("document_selected", crate::ring::REC_DOCUMENT_SELECTED),
+                ("document_close_requested", crate::ring::REC_DOCUMENT_CLOSE_REQUESTED),
+                ("documents_close_requested", crate::ring::REC_DOCUMENTS_CLOSE_REQUESTED),
+                ("document_closed", crate::ring::REC_DOCUMENT_CLOSED),
+                ("new_document_requested", crate::ring::REC_NEW_DOCUMENT_REQUESTED),
+                ("document_moved", crate::ring::REC_DOCUMENT_MOVED),
+                ("documents_detached", crate::ring::REC_DOCUMENTS_DETACHED),
             ]
         );
     }
@@ -5527,6 +5754,16 @@ mod tests {
             .expect("spec has an sprop enum");
         assert_eq!(SECTION_PROPS.len(), sprop_enum.variants.len());
         for ((name, id, _), (ename, eid)) in SECTION_PROPS.iter().zip(sprop_enum.variants) {
+            assert_eq!(name, ename);
+            assert_eq!(id, eid);
+        }
+        let dprop_enum = SPEC
+            .enums
+            .iter()
+            .find(|e| e.name == "dprop")
+            .expect("spec has a dprop enum");
+        assert_eq!(DOCUMENT_PROPS.len(), dprop_enum.variants.len());
+        for ((name, id, _), (ename, eid)) in DOCUMENT_PROPS.iter().zip(dprop_enum.variants) {
             assert_eq!(name, ename);
             assert_eq!(id, eid);
         }
@@ -5712,6 +5949,14 @@ mod tests {
                     ("wprop", "appearance") => wire::WPROP_APPEARANCE,
                     ("wprop", "remember_frame") => wire::WPROP_REMEMBER_FRAME,
                     ("wprop", "fullscreen") => wire::WPROP_FULLSCREEN,
+                    ("wprop", "new_document") => wire::WPROP_NEW_DOCUMENT,
+                    ("dprop", "title") => wire::DPROP_TITLE,
+                    ("dprop", "tooltip") => wire::DPROP_TOOLTIP,
+                    ("dprop", "dirty") => wire::DPROP_DIRTY,
+                    ("dprop", "intercept_close") => wire::DPROP_INTERCEPT_CLOSE,
+                    ("region_edge", "leading") => wire::REGION_EDGE_LEADING,
+                    ("region_edge", "trailing") => wire::REGION_EDGE_TRAILING,
+                    ("region_edge", "bottom") => wire::REGION_EDGE_BOTTOM,
                     ("eprop", "title") => wire::EPROP_TITLE,
                     ("eprop", "intercept_back") => wire::EPROP_INTERCEPT_BACK,
                     ("shprop", "title") => wire::SHPROP_TITLE,

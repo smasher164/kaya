@@ -9,6 +9,23 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## BUILD — document tabs over surfaces, native on each platform (docs/doctabs-plan.md, ruled 2026-10-28): depth on the Mac and the Rust binding built; GTK, WinUI, Compose, iOS, the eight other bindings, the C floor and the editor open
+KEY: doctabs, document tabs, add_document, select_document, close_document, set_document_prop, add_region, DOCUMENT_PROPS, dprop, region_edge, new_document, document_selected, document_close_requested, documents_close_requested, document_closed, new_document_requested, document_moved, DocumentRef, DocumentProp, RegionEdge, KayaDocumentModel, KayaRegionModel, KayaDocumentRoot, KayaDocumentResponder, KayaRegionSlot, kayaPlaceRegions, kayaMoveRegionHost, expect_documents, expect_document, expect_document_dirty, move_to_new_window, close_native_window, doctabs.steps, check-doctabs, DEPTH STUB doctabs
+
+The depth slice: the spec's records (tx 89 to 93, apply 77 to 81, occurrences
+62 to 67), DOCUMENT_PROPS and the window's `new_document`; the core's walls
+(docs/doctabs-plan.md §2.4) under their unit tests; the Rust surface; the
+SwiftUI arm on the Mac (a document is a WindowGroup window in the window's tab
+group, the "+" answered by a responder kaya puts in front of SwiftUI's window
+controller, a shared region's one hosting view moved into the selected tab
+window with focus and caret restored a turn later); the eight verbs; the
+`doctabs` scene with its Rust guest on the Mac's depth roster.
+
+  - **DEPTH STUB: doctabs on gtk** — the GTK backend refuses the five records, the window's `new_document` and the eight verbs; its arm is AdwTabView and AdwTabBar (docs/doctabs-plan.md §3).
+  - **DEPTH STUB: doctabs on winui** — WinUI refuses the same; its arm is a TabView in the title bar, with winui-bindgen grown for its types.
+  - **DEPTH STUB: doctabs on compose** — Compose refuses the same; its arm is the documents sheet from the top bar with a hand-written reorder (Q4, Q5).
+  - **DEPTH STUB: doctabs on swiftui/ios** — the iOS half of the SwiftUI interpreter refuses the same; its arm is the documents sheet (Q4).
+
 ## BUILD — the styling pass toward an app-skinned look (docs/styling-pass-plan.md), depth on the mac and iOS and breadth on GTK, WinUI, Compose, the eight other bindings and the C floor (2026-10-16); the media player demo and its review page are open
 KEY: styling pass, skin, ground, GROUND_GRADIENT, GROUND_IMAGE, PROP_GROUND, shape, PROP_SHAPE, SHAPE_ROUNDED, SHAPE_CIRCLE, selected, PROP_SELECTED, activatable, PROP_ACTIVATABLE, on_activate, activated, REC_ACTIVATED, kaya_emit_activated, emit_activated, tint, PROP_TINT, TINT_NONE, TINT_OVERLAY, overlay, attach_dock, AttachDock, dock, KayaDockHost, KayaTabAccessory, gradient_tops, image_dominant, kaya_image_dominant, dominant.rs, lower_skin, SkinBox, bare_text_on_image, KayaGroundSurface, KayaImageShape, KayaActivatable, KayaLabelTint, kayaWindowPixels, kayaGroundRead, kayaShapeRead, kayaLabelTintRead, kayaAxSelectedRead, kayaDockRead, kayaHoverTarget, expect_ground, expect_shape, expect_selected, expect_tint, expect_dock, hover, FILL_READINGS, skin_routes, grounds.steps, shapes.steps, cards.steps, tracks.steps, dock.steps, DEPTH STUB grounds, DEPTH STUB shapes, DEPTH STUB cards, DEPTH STUB tracks, DEPTH STUB dock
 

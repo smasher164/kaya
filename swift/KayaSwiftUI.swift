@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc31d87678a5929d1
+let kayaSpecHash: UInt64 = 0xa37dca454ad9d6cc
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -130,6 +130,12 @@ private let applyContextAttachNode: UInt16 = 22
 private let applySetMenuProp: UInt16 = 23
 private let applyContextLabelNode: UInt16 = 75
 private let applyListFontFamilies: UInt16 = 76
+// docs/doctabs-plan.md §2.1.
+private let applyAddDocument: UInt16 = 77
+private let applySelectDocument: UInt16 = 78
+private let applyCloseDocument: UInt16 = 79
+private let applySetDocumentProp: UInt16 = 80
+private let applyAddRegion: UInt16 = 81
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -145,6 +151,14 @@ private let wpropInset: UInt32 = 8
 private let wpropAppearance: UInt32 = 9
 private let wpropRememberFrame: UInt32 = 10
 private let wpropFullscreen: UInt32 = 11
+private let wpropNewDocument: UInt32 = 12
+private let dpropTitle: UInt32 = 1
+private let dpropTooltip: UInt32 = 2
+private let dpropDirty: UInt32 = 3
+private let dpropInterceptClose: UInt32 = 4
+private let regionEdgeLeading: UInt32 = 1
+private let regionEdgeTrailing: UInt32 = 2
+private let regionEdgeBottom: UInt32 = 3
 private let spropTitle: UInt32 = 1
 private let spropIcon: UInt32 = 2
 private let spropSymbol: UInt32 = 3
@@ -1146,6 +1160,12 @@ final class KayaWindowModel: Identifiable {
     /// stamps its own value and nothing derives it from `formFactor`
     /// (the stamped-observation rule).
     var menuPresentation: KayaMenuPresentation = .none
+    /// docs/doctabs-plan.md §2: the window's documents in add order, the
+    /// active one, whether the "+" is armed, and its shared regions.
+    var documents: [KayaDocumentModel] = []
+    var activeDocument: UInt64?
+    var newDocument = false
+    var regions: [KayaRegionModel] = []
 
     init(id: UInt64, title: String = "") {
         self.id = id
@@ -1274,6 +1294,42 @@ final class KayaSheetModel: Identifiable {
     }
 }
 
+/// One document (docs/doctabs-plan.md §2): a surface with a lifecycle. On the
+/// Mac each is its own NSWindow in the window's tab group.
+@Observable
+final class KayaDocumentModel: Identifiable {
+    let id: UInt64
+    /// The window holding it: a tear-out or a drag moves it (§1.2).
+    var window: UInt64
+    var root: KayaNode?
+    var title = ""
+    var tooltip = ""
+    var dirty = false
+    var interceptClose = false
+
+    init(id: UInt64, window: UInt64) {
+        self.id = id
+        self.window = window
+    }
+}
+
+/// One shared region beside a window's documents (docs/doctabs-plan.md §1.7).
+@Observable
+final class KayaRegionModel: Identifiable {
+    let id: UInt64
+    let window: UInt64
+    let edge: UInt32
+    var root: KayaNode?
+    /// The region content's own size, which every tab window's slot takes.
+    var measured: CGSize = .zero
+
+    init(id: UInt64, window: UInt64, edge: UInt32) {
+        self.id = id
+        self.window = window
+        self.edge = edge
+    }
+}
+
 /// One toast on screen. `token` is per present, so a replacement is a new
 /// view with its own timer and its own announcement.
 struct KayaToastShown: Equatable {
@@ -1300,6 +1356,9 @@ final class KayaSceneModel {
     var navEntries: [UInt64: KayaEntryModel] = [:]
     /// Live sheets by surface id, and each parent surface's one child.
     var sheets: [UInt64: KayaSheetModel] = [:]
+    /// Live documents and shared regions by surface id (docs/doctabs-plan.md).
+    var documentsById: [UInt64: KayaDocumentModel] = [:]
+    var regionsById: [UInt64: KayaRegionModel] = [:]
     /// The toast each window shows (docs/toast-plan.md T7), by window id.
     var toasts: [UInt64: KayaToastShown] = [:]
     var childSheet: [UInt64: UInt64] = [:]
@@ -4899,6 +4958,12 @@ var kayaTearingDown: Set<UInt64> = []
 
         private func register(_ view: NSView) {
             guard let window = view.window else { return }
+            // A window with documents IS its documents' NSWindows
+            // (docs/doctabs-plan.md §3); its own root window stays hidden.
+            if kayaScene.windows[windowId]?.documents.isEmpty == false {
+                if window.isVisible { window.orderOut(nil) }
+                return
+            }
             kayaKeepFullscreenDoor(windowId, window)
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
@@ -5333,7 +5398,11 @@ var kayaTearingDown: Set<UInt64> = []
     }
 
     final class KayaWindowDelegate: NSObject, NSWindowDelegate {
-        let windowId: UInt64
+        /// A document's window moves between kaya windows (§1.2).
+        var windowId: UInt64
+        /// Set when this window is one of the window's documents
+        /// (docs/doctabs-plan.md §3): its close is that document's.
+        var documentId: UInt64?
         /// STRONG, not weak (measured 2026-09-09). This proxy VOUCHES for
         /// the original's selectors in `responds(to:)`, and NSWindow reads
         /// that ONCE at `setDelegate:` to register the delegate as an
@@ -5407,7 +5476,22 @@ var kayaTearingDown: Set<UInt64> = []
             self.original = original
         }
 
+        func windowDidBecomeKey(_ notification: Notification) {
+            original?.windowDidBecomeKey?(notification)
+            if let documentId { kayaDocBecameActive(documentId, user: true) }
+        }
+
         func windowShouldClose(_ sender: NSWindow) -> Bool {
+            if let documentId {
+                if kayaDocClosing.contains(documentId) { return true }
+                guard let doc = kayaScene.documentsById[documentId] else { return true }
+                if doc.interceptClose {
+                    KayaHost.emitDocumentCloseRequested(documentId)
+                    return false
+                }
+                kayaDocumentGone(documentId, user: true)
+                return true
+            }
             if kayaTearingDown.contains(windowId) {
                 return true
             }
@@ -5568,6 +5652,41 @@ enum KayaHost {
     /// a transition kaya started for the app's write never comes here.
     static func emitFullscreenChanged(_ window: UInt64, _ on: Bool) {
         api.emit_fullscreen_changed(window, on ? 1 : 0)
+    }
+
+    /// The document grammar's user acts (docs/doctabs-plan.md §2.1).
+    static func emitDocumentSelected(_ window: UInt64, _ document: UInt64) {
+        api.emit_document_selected(window, document)
+    }
+
+    static func emitDocumentCloseRequested(_ document: UInt64) {
+        api.emit_document_close_requested(document)
+    }
+
+    static func emitDocumentsCloseRequested(_ window: UInt64, _ documents: [UInt64]) {
+        documents.withUnsafeBufferPointer {
+            api.emit_documents_close_requested(window, $0.baseAddress, UInt($0.count))
+        }
+    }
+
+    static func emitDocumentClosed(_ document: UInt64) {
+        api.emit_document_closed(document)
+    }
+
+    static func emitNewDocumentRequested(_ window: UInt64) {
+        api.emit_new_document_requested(window)
+    }
+
+    static func emitDocumentMoved(_ document: UInt64, _ window: UInt64, _ index: UInt32) {
+        api.emit_document_moved(document, window, index)
+    }
+
+    /// The user tore documents out into a new native window: the core names
+    /// the new kaya window and reports it (docs/doctabs-plan.md §1.2).
+    static func detachDocuments(_ source: UInt64, _ documents: [UInt64]) -> UInt64 {
+        documents.withUnsafeBufferPointer {
+            api.detach_documents(source, $0.baseAddress, UInt($0.count))
+        }
     }
 
     /// A column-header click: the SET_COLUMNS sort tag verbatim plus
@@ -6229,6 +6348,13 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaApplyWindowDirty(wid)
                 case (wpropRememberFrame, valueBool):
                     model?.rememberFrame = raw[body + 24] != 0
+                case (wpropNewDocument, valueBool):
+                    model?.newDocument = raw[body + 24] != 0
+                    #if os(macOS)
+                        kayaRefreshNewDocument(wid)
+                    #else
+                        kayaDepthStub("doctabs", on: "ios")
+                    #endif
                 case (wpropFullscreen, valueBool):
                     #if os(macOS)
                         kayaAppWroteFullscreen(wid, raw[body + 24] != 0)
@@ -7124,6 +7250,14 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.windows[owner]?.dock = kayaScene.nodes[root]
                     break
                 }
+                if let doc = kayaScene.documentsById[wid] {
+                    doc.root = kayaScene.nodes[root]
+                    break
+                }
+                if let region = kayaScene.regionsById[wid] {
+                    region.root = kayaScene.nodes[root]
+                    break
+                }
                 if let section = kayaScene.sectionsById[wid] {
                     // A section presents in-window: the mount fills its pane.
                     // BUT THE WINDOW IT LIVES IN may be an auxiliary nothing
@@ -7420,6 +7554,78 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
                 }
                 menusTouched = true
+            case applyAddDocument:
+                // docs/doctabs-plan.md §3: on the Mac a document is its own
+                // NSWindow in the window's tab group.
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let did = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                #if os(macOS)
+                    let doc = KayaDocumentModel(id: did, window: wid)
+                    kayaScene.documentsById[did] = doc
+                    let window = kayaScene.windows[wid]!
+                    window.documents.append(doc)
+                    if window.activeDocument == nil { window.activeDocument = did }
+                    kayaOpenDocumentWindow(did)
+                #else
+                    _ = (wid, did)
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case applySelectDocument:
+                // Programmatic and QUIET (the echo doctrine).
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let did = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                #if os(macOS)
+                    kayaScene.windows[wid]?.activeDocument = did
+                    kayaSelectDocumentWindow(did)
+                #else
+                    _ = (wid, did)
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case applyCloseDocument:
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let did = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                #if os(macOS)
+                    kayaCloseDocument(wid, did)
+                #else
+                    _ = (wid, did)
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case applySetDocumentProp:
+                let did = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
+                let dvType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                #if os(macOS)
+                    let doc = kayaScene.documentsById[did]!
+                    switch (prop, dvType) {
+                    case (dpropTitle, valueStr), (dpropTooltip, valueStr):
+                        let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                        let text = String(decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
+                        if prop == dpropTitle { doc.title = text } else { doc.tooltip = text }
+                    case (dpropDirty, valueBool):
+                        doc.dirty = raw[body + 24] != 0
+                    case (dpropInterceptClose, valueBool):
+                        doc.interceptClose = raw[body + 24] != 0
+                    default:
+                        fatalError("kaya: bad document prop \(prop) value type \(dvType)")
+                    }
+                    kayaApplyDocumentTab(did)
+                #else
+                    _ = (did, prop, dvType)
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case applyAddRegion:
+                let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                let rid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let edge = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                #if os(macOS)
+                    let region = KayaRegionModel(id: rid, window: wid, edge: edge)
+                    kayaScene.regionsById[rid] = region
+                    kayaScene.windows[wid]!.regions.append(region)
+                    DispatchQueue.main.async { kayaPlaceRegions(wid) }
+                #else
+                    _ = (wid, rid, edge)
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
             case applyPresentSheet:
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let sid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
@@ -7612,7 +7818,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
 }
 
 private func kayaWindowHasMountedContent(_ window: KayaWindowModel) -> Bool {
-    if window.root != nil || window.entries.contains(where: { $0.root != nil }) {
+    if window.root != nil || window.entries.contains(where: { $0.root != nil })
+        || window.documents.contains(where: { $0.root != nil })
+    {
         return true
     }
     return window.sections.contains { section in
@@ -9135,6 +9343,9 @@ private func kayaLiveIds() -> Set<UInt64> {
     // (the task manager's quick-add read `no such target entry@quick`
     // with the sheet up, 2026-09-21; tools/check-verbs.py holds the walk).
     for sheet in kayaScene.sheets.values { if let root = sheet.root { stack.append(root) } }
+    // Documents and their shared regions are surfaces (docs/doctabs-plan.md §4).
+    for doc in kayaScene.documentsById.values { if let root = doc.root { stack.append(root) } }
+    for region in kayaScene.regionsById.values { if let root = region.root { stack.append(root) } }
     while let node = stack.popLast() {
         if !ids.insert(node.id).inserted { continue }
         stack.append(contentsOf: node.children)
@@ -13990,6 +14201,80 @@ private func kayaRunScript(_ script: String) {
                     #endif
                 }
                 kayaAwaitAnswer(answered)
+            case "expect_documents":
+                // docs/doctabs-plan.md §4: the active strip off the toolkit's
+                // own tab group, never the model.
+                let want = kayaQuoted(Array(parts[1...]))
+                #if os(macOS)
+                    let got = DispatchQueue.main.sync { kayaDocumentTitlesRead() }
+                    if let got, kayaBytesEqual(got.joined(separator: "|"), want) {
+                        observed.append("documents \"\(want)\"")
+                    } else if let got {
+                        failures.append("documents \"\(got.joined(separator: "|"))\", wanted \"\(want)\"")
+                    } else {
+                        failures.append("no window holds documents, wanted \"\(want)\"")
+                    }
+                #else
+                    _ = want
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case "expect_document":
+                let want = kayaQuoted(Array(parts[1...]))
+                #if os(macOS)
+                    let got = DispatchQueue.main.sync { kayaActiveDocumentRead() }
+                    if let got, kayaBytesEqual(got, want) {
+                        observed.append("document \"\(want)\"")
+                    } else if let got {
+                        failures.append("document \"\(got)\", wanted \"\(want)\"")
+                    } else {
+                        failures.append("no active document, wanted \"\(want)\"")
+                    }
+                #else
+                    _ = want
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case "expect_document_dirty":
+                let dirtyRest = String(line.dropFirst(parts[0].count))
+                guard let (dirtyTitle, dirtyWantRaw) = kayaQuotedPrefix(dirtyRest) else {
+                    failures.append("expect_document_dirty wants a quoted title and true or false: \(line)")
+                    break
+                }
+                let dirtyWant = dirtyWantRaw.trimmingCharacters(in: .whitespaces)
+                #if os(macOS)
+                    let gotDirty = DispatchQueue.main.sync { kayaDocumentDirtyRead(dirtyTitle) }
+                    if gotDirty == dirtyWant {
+                        observed.append("document \"\(dirtyTitle)\" dirty \(dirtyWant)")
+                    } else {
+                        failures.append("document \"\(dirtyTitle)\" dirty \(gotDirty), wanted \(dirtyWant)")
+                    }
+                #else
+                    _ = dirtyWant
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
+            case "select_document", "close_document", "move_to_new_window", "new_document",
+                "close_native_window":
+                let docArg = parts.count > 1 ? kayaQuoted(Array(parts[1...])) : ""
+                #if os(macOS)
+                    kayaAwaitQuiet()
+                    let answered = kayaAnswers()
+                    let why = DispatchQueue.main.sync { () -> String? in
+                        switch parts[0] {
+                        case "select_document": return kayaSelectDocumentDrive(docArg)
+                        case "close_document": return kayaCloseDocumentDrive(docArg)
+                        case "move_to_new_window": return kayaMoveToNewWindowDrive(docArg)
+                        case "new_document": return kayaNewDocumentDrive()
+                        default: return kayaCloseNativeWindowDrive()
+                        }
+                    }
+                    if let why {
+                        failures.append("\(parts[0]): \(why)")
+                    } else {
+                        kayaAwaitAnswer(answered)
+                    }
+                #else
+                    _ = docArg
+                    kayaDepthStub("doctabs", on: "ios")
+                #endif
             case "expect_sheets":
                 // The chain's depth off the PLATFORM: sheet windows still
                 // attached to a parent on macOS, presented controllers on
@@ -34051,6 +34336,18 @@ struct KayaAuxRoot: View {
     @State private var scene = kayaScene
 
     var body: some View {
+        #if os(macOS)
+            if scene.documentsById[windowId] != nil {
+                KayaDocumentRoot(documentId: windowId)
+            } else {
+                auxBody
+            }
+        #else
+            auxBody
+        #endif
+    }
+
+    private var auxBody: some View {
         // The stack hosts the window's serial entries; the window's own root is
         // the stack's base. The accessor rides OUTSIDE the stack so its view
         // never detaches under a push.
@@ -38216,6 +38513,754 @@ private func kayaPlaceWindow() {
     window.setFrame(NSRect(x: x, y: y, width: 540, height: 330), display: true)
     #endif
 }
+
+#if os(macOS)
+// MARK: - Documents on the Mac (docs/doctabs-plan.md §3, §1.7)
+//
+// A document is its own NSWindow (the WindowGroup keyed by surface id), grouped
+// into the window's tab group through public NSWindow tabbing only
+// (tools/check-doctabs.py holds that). kayaNSWindows[window] is the ACTIVE
+// document's NSWindow, so every window-keyed reader and the menu bar follow it.
+
+/// Each document's NSWindow by document id, and its delegate proxy.
+var kayaDocNSWindows: [UInt64: NSWindow] = [:]
+var kayaDocDelegates: [UInt64: KayaWindowDelegate] = [:]
+/// Kaya's own selections and closes, so the key changes and closes they cause
+/// are not reported as the user's (the echo doctrine).
+var kayaDocSelecting: Set<UInt64> = []
+var kayaDocClosing: Set<UInt64> = []
+/// Strips (tab groups) in the order they opened, their KVO, and each
+/// document's last reported (strip, index).
+var kayaStripOrder: [ObjectIdentifier] = []
+var kayaStripObservers: [ObjectIdentifier: NSKeyValueObservation] = [:]
+var kayaStripSelectionObservers: [ObjectIdentifier: NSKeyValueObservation] = [:]
+var kayaDocPlace: [UInt64: (UInt64, UInt32)] = [:]
+/// Each kaya window's own tab group: after AppKit's tear-out the ORIGINAL
+/// group keeps the tabs that stayed, which is how the torn-out strip is told
+/// apart (the key window has already moved to it by then).
+var kayaWindowStrips: [UInt64: ObjectIdentifier] = [:]
+/// One hosting view per region (each window has one instance, §1.7), and each
+/// document window's region slot per edge: the view MOVES between the tab
+/// windows of its window, never copies.
+var kayaRegionHosts: [String: NSHostingView<KayaRegionContent>] = [:]
+var kayaRegionSlots: [String: NSView] = [:]
+
+func kayaEnsureDocumentOpen(_ did: UInt64, attempt: Int = 0) {
+    guard kayaScene.documentsById[did] != nil, kayaDocNSWindows[did] == nil else { return }
+    guard let open = kayaOpenWindow else {
+        if !kayaPendingOpens.contains(did) { kayaPendingOpens.append(did) }
+        return
+    }
+    open(did)
+    let delays: [Double] = [0.3, 0.8, 1.5, 2.0]
+    guard attempt < delays.count else {
+        kayaDiag("document open EXHAUSTED did=\(did) \(kayaDiagAppState())")
+        return
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt]) {
+        kayaEnsureDocumentOpen(did, attempt: attempt + 1)
+    }
+}
+
+func kayaOpenDocumentWindow(_ did: UInt64) {
+    kayaEnsureDocumentOpen(did)
+}
+
+/// The window that holds documents (one per app in v1, Q1).
+func kayaDocumentsWindowId() -> UInt64? {
+    kayaScene.windows.values.first(where: { !$0.documents.isEmpty })?.id
+}
+
+func kayaDocumentId(of window: NSWindow) -> UInt64? {
+    kayaDocNSWindows.first(where: { $0.value === window })?.key
+}
+
+func kayaStripKey(_ window: NSWindow) -> ObjectIdentifier {
+    window.tabGroup.map(ObjectIdentifier.init) ?? ObjectIdentifier(window)
+}
+
+/// A document's NSWindow appeared: it joins the window's tab group (or, the
+/// first, takes the hidden primary's place), wears its tab props, and the
+/// active document is put back in front.
+func kayaRegisterDocumentWindow(_ did: UInt64, _ window: NSWindow) {
+    guard kayaDocNSWindows[did] !== window, let doc = kayaScene.documentsById[did] else { return }
+    let wid = doc.window
+    let earlier = kayaScene.windows[wid]?.documents.compactMap { d -> NSWindow? in
+        d.id == did ? nil : kayaDocNSWindows[d.id]
+    } ?? []
+    kayaDocNSWindows[did] = window
+    kayaDiag("document register did=\(did) wid=\(wid) num=\(window.windowNumber)")
+    window.setFrameAutosaveName("")
+    let proxy = KayaWindowDelegate(windowId: wid, original: window.delegate)
+    proxy.documentId = did
+    kayaDocDelegates[did] = proxy
+    window.delegate = proxy
+    kayaInstallDocumentResponder(did, window, wid)
+    if let anchor = kayaNSWindows[wid].flatMap({ kayaDocumentId(of: $0) != nil ? $0 : nil }) ?? earlier.last {
+        // THE TAB GOES WHERE THE DOCUMENT IS IN THE APP'S ORDER, not where
+        // its window happened to register (SwiftUI opens them in any order).
+        let order = kayaScene.windows[wid]?.documents.map(\.id) ?? []
+        let rank = { (w: NSWindow) -> Int in
+            kayaDocumentId(of: w).flatMap { order.firstIndex(of: $0) } ?? Int.max
+        }
+        let mine = order.firstIndex(of: did) ?? Int.max
+        let strip = anchor.tabGroup?.windows ?? [anchor]
+        let at = strip.filter { rank($0) < mine }.count
+        window.setFrame(anchor.frame, display: false)
+        (strip.last ?? anchor).addTabbedWindow(window, ordered: .above)
+        if let group = window.tabGroup, group.windows.firstIndex(of: window) != at {
+            group.removeWindow(window)
+            group.insertWindow(window, at: at)
+        }
+    } else {
+        if let primary = kayaNSWindows[wid] {
+            window.setFrame(primary.frame, display: false)
+            primary.orderOut(nil)
+        }
+        kayaNSWindows[wid] = window
+    }
+    kayaObserveStrips()
+    kayaDocumentsRearranged(report: false)
+    kayaApplyDocumentTab(did)
+    if let active = kayaScene.windows[wid]?.activeDocument, let front = kayaDocNSWindows[active] {
+        kayaNSWindows[wid] = front
+        kayaSelectDocumentWindow(active)
+    }
+    for waiter in kayaWindowWaiters.removeValue(forKey: wid) ?? [] { waiter.signal() }
+    DispatchQueue.main.async {
+        if !window.isVisible, kayaScene.windows[wid]?.activeDocument == did {
+            window.orderFrontRegardless()
+        }
+        kayaPlaceRegions(wid)
+    }
+}
+
+/// Make a document's tab the selected one, and its window the front one.
+func kayaSelectDocumentWindow(_ did: UInt64) {
+    guard let window = kayaDocNSWindows[did], let wid = kayaScene.documentsById[did]?.window else {
+        return
+    }
+    kayaDocSelecting.insert(did)
+    if let group = window.tabGroup, group.selectedWindow !== window {
+        group.selectedWindow = window
+    }
+    if !window.isVisible || NSApp.keyWindow.map({ kayaDocumentId(of: $0) == nil }) ?? true {
+        window.orderFrontRegardless()
+    }
+    kayaDocBecameActive(did, user: false)
+    DispatchQueue.main.async { kayaDocSelecting.remove(did) }
+    _ = wid
+}
+
+/// The active document changed: the window's registry entry follows, the
+/// regions move, and a user's change is reported.
+func kayaDocBecameActive(_ did: UInt64, user: Bool) {
+    guard let doc = kayaScene.documentsById[did], let window = kayaDocNSWindows[did],
+        let model = kayaScene.windows[doc.window]
+    else { return }
+    let changed = model.activeDocument != did
+    model.activeDocument = did
+    kayaNSWindows[doc.window] = window
+    if user && changed && !kayaDocSelecting.contains(did) {
+        KayaHost.emitDocumentSelected(doc.window, did)
+    }
+    kayaPlaceRegions(doc.window)
+}
+
+/// The tab's own props: title (the window's), tooltip, and the unsaved mark,
+/// which never reaches the tab through isDocumentEdited (the study's §1), so
+/// it is an accessory view as well.
+func kayaApplyDocumentTab(_ did: UInt64) {
+    guard let doc = kayaScene.documentsById[did], let window = kayaDocNSWindows[did] else { return }
+    if window.title != doc.title { window.title = doc.title }
+    window.tab.toolTip = doc.tooltip.isEmpty ? nil : doc.tooltip
+    window.isDocumentEdited = doc.dirty
+    if doc.dirty {
+        if !(window.tab.accessoryView is KayaEditedDot) { window.tab.accessoryView = KayaEditedDot() }
+    } else if window.tab.accessoryView != nil {
+        window.tab.accessoryView = nil
+    }
+}
+
+/// THE "+" (the study's §1: drawn iff the responder chain answers
+/// newWindowForTab:). SwiftUI's window controller sits right after the window
+/// in the chain and answers it by opening the FIRST WindowGroup, so a
+/// document's window puts this responder in its place: it answers the "+"
+/// only while the window armed new_document, and hands every other action
+/// to the controller it stands in for.
+final class KayaDocumentResponder: NSResponder {
+    var windowId: UInt64
+    weak var controller: NSResponder?
+
+    init(windowId: UInt64, controller: NSResponder?) {
+        self.windowId = windowId
+        self.controller = controller
+        super.init()
+    }
+
+    required init?(coder: NSCoder) { fatalError("kaya: KayaDocumentResponder is built in code") }
+
+    override func responds(to sel: Selector!) -> Bool {
+        if sel == #selector(NSResponder.newWindowForTab(_:)) {
+            return kayaScene.windows[windowId]?.newDocument == true
+        }
+        return super.responds(to: sel) || (controller?.responds(to: sel) ?? false)
+    }
+
+    override func forwardingTarget(for sel: Selector!) -> Any? {
+        if sel != #selector(NSResponder.newWindowForTab(_:)), controller?.responds(to: sel) == true {
+            return controller
+        }
+        return super.forwardingTarget(for: sel)
+    }
+
+    override func newWindowForTab(_ sender: Any?) {
+        guard kayaScene.windows[windowId]?.newDocument == true else { return }
+        kayaNewTabRequests += 1
+        KayaHost.emitNewDocumentRequested(windowId)
+    }
+}
+
+var kayaDocResponders: [UInt64: KayaDocumentResponder] = [:]
+/// How many "+" presses reached the responder: the press's own answer is not
+/// to be believed (measured: AppKit's "add" cell performs and answers false).
+var kayaNewTabRequests = 0
+
+/// Put the document responder between the window and SwiftUI's controller,
+/// again whenever something else took the slot.
+func kayaInstallDocumentResponder(_ did: UInt64, _ window: NSWindow, _ wid: UInt64) {
+    let responder = kayaDocResponders[did] ?? KayaDocumentResponder(windowId: wid, controller: nil)
+    kayaDocResponders[did] = responder
+    guard window.nextResponder !== responder else { return }
+    let next = window.nextResponder
+    if let controller = window.windowController, next === controller {
+        responder.controller = controller
+        responder.nextResponder = controller.nextResponder
+    } else {
+        responder.controller = window.windowController
+        responder.nextResponder = next
+    }
+    window.nextResponder = responder
+}
+
+/// The unsaved mark on a tab: a dot in the secondary label colour.
+final class KayaEditedDot: NSView {
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 8, height: 8))
+        setAccessibilityElement(true)
+        setAccessibilityRole(.image)
+        setAccessibilityLabel("Edited")
+    }
+    required init?(coder: NSCoder) { fatalError("kaya: KayaEditedDot is built in code") }
+    override var intrinsicContentSize: NSSize { NSSize(width: 8, height: 8) }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.secondaryLabelColor.setFill()
+        NSBezierPath(ovalIn: bounds.insetBy(dx: 0.5, dy: 0.5)).fill()
+    }
+}
+
+/// The "+" is drawn iff the responder chain answers newWindowForTab:
+/// (the study's §1); the delegate proxy answers it only while armed, and
+/// AppKit asks again when the delegate is set.
+func kayaRefreshNewDocument(_ wid: UInt64) {
+    for doc in kayaScene.windows[wid]?.documents ?? [] {
+        guard let window = kayaDocNSWindows[doc.id] else { continue }
+        kayaInstallDocumentResponder(doc.id, window, wid)
+        window.tabGroup?.windows.forEach { $0.invalidateRestorableState() }
+    }
+}
+
+/// A document is gone: the model drops it, a user's close is reported, and a
+/// window left with no documents closes (docs/doctabs-plan.md Q2).
+func kayaDocumentGone(_ did: UInt64, user: Bool) {
+    guard let doc = kayaScene.documentsById.removeValue(forKey: did) else { return }
+    let wid = doc.window
+    let model = kayaScene.windows[wid]
+    model?.documents.removeAll { $0.id == did }
+    let window = kayaDocNSWindows.removeValue(forKey: did)
+    kayaDocDelegates.removeValue(forKey: did)
+    kayaDocResponders.removeValue(forKey: did)
+    kayaDocPlace.removeValue(forKey: did)
+    for key in kayaRegionSlots.keys where key.hasPrefix("\(did)/") {
+        kayaRegionSlots.removeValue(forKey: key)
+    }
+    if user { KayaHost.emitDocumentClosed(did) }
+    if model?.activeDocument == did {
+        model?.activeDocument = model?.documents.first?.id
+    }
+    if model?.documents.isEmpty ?? true {
+        kayaWindowEmptied(wid)
+        return
+    }
+    if let window, kayaNSWindows[wid] === window,
+        let next = model?.activeDocument, let front = kayaDocNSWindows[next]
+    {
+        kayaNSWindows[wid] = front
+    }
+    DispatchQueue.main.async {
+        kayaDocumentsRearranged(report: false)
+        kayaPlaceRegions(wid)
+    }
+}
+
+/// The app closed a document (close_document): no echo.
+func kayaCloseDocument(_ wid: UInt64, _ did: UInt64) {
+    let window = kayaDocNSWindows[did]
+    kayaDocClosing.insert(did)
+    kayaDocumentGone(did, user: false)
+    window?.close()
+    kayaDocClosing.remove(did)
+    _ = wid
+}
+
+/// A native window's own close (§1.5): every document it shows closes, and if
+/// any is armed nothing closes and the app is asked once.
+func kayaCloseNativeWindow(_ window: NSWindow) {
+    let shown = (window.tabGroup?.windows ?? [window]).compactMap(kayaDocumentId(of:))
+    guard let first = shown.first, let wid = kayaScene.documentsById[first]?.window else { return }
+    if shown.contains(where: { kayaScene.documentsById[$0]?.interceptClose == true }) {
+        KayaHost.emitDocumentsCloseRequested(wid, shown)
+        return
+    }
+    for did in shown {
+        let w = kayaDocNSWindows[did]
+        kayaDocClosing.insert(did)
+        kayaDocumentGone(did, user: true)
+        w?.close()
+        kayaDocClosing.remove(did)
+    }
+}
+
+/// Every strip's KVO, so a user's reorder, tear-out or merge is seen (AppKit
+/// tells nobody, the study's §1).
+func kayaObserveStrips() {
+    for window in kayaDocNSWindows.values {
+        guard let group = window.tabGroup else { continue }
+        let key = ObjectIdentifier(group)
+        guard kayaStripObservers[key] == nil else { continue }
+        kayaStripObservers[key] = group.observe(\.windows, options: [.new]) { _, _ in
+            DispatchQueue.main.async { kayaDocumentsRearranged(report: true) }
+        }
+        // A tab chosen in an app that is not active changes the strip's
+        // selection without making its window key, so the selection is
+        // read here as well as at didBecomeKey.
+        kayaStripSelectionObservers[key] = group.observe(\.selectedWindow, options: [.new]) { group, _ in
+            DispatchQueue.main.async {
+                guard let selected = group.selectedWindow, let did = kayaDocumentId(of: selected) else {
+                    return
+                }
+                // Only the strip the user is in: a strip that lost a tab to a
+                // tear-out reselects too, behind the window that went front.
+                if let key = NSApp.keyWindow, kayaDocumentId(of: key) != nil,
+                    kayaStripKey(key) != ObjectIdentifier(group)
+                {
+                    return
+                }
+                kayaDocBecameActive(did, user: true)
+            }
+        }
+    }
+}
+
+/// Recompute each document's (strip, index) and report the ones that moved.
+func kayaDocumentsRearranged(report: Bool) {
+    kayaObserveStrips()
+    // Every strip once, its tabs in order.
+    var strips: [[NSWindow]] = []
+    var seen: Set<ObjectIdentifier> = []
+    for window in kayaDocNSWindows.values {
+        let key = kayaStripKey(window)
+        if seen.insert(key).inserted { strips.append(window.tabGroup?.windows ?? [window]) }
+    }
+    for strip in strips {
+        let docs = strip.compactMap(kayaDocumentId(of:))
+        guard !docs.isEmpty else { continue }
+        let owners = docs.compactMap { kayaScene.documentsById[$0]?.window }
+        // THE STRIP'S WINDOW is the kaya window whose own tab group it is,
+        // else the one whose front NSWindow is in it.
+        let key = kayaStripKey(strip[0])
+        let fronted = owners.first { kayaWindowStrips[$0] == key }
+            ?? owners.first { w in
+                kayaWindowStrips[w].map { own in !strips.contains { kayaStripKey($0[0]) == own } } ?? true
+                    && (kayaNSWindows[w].map { front in strip.contains { $0 === front } } ?? false)
+            }
+        if report, fronted == nil, let source = owners.first, owners.allSatisfy({ $0 == source }) {
+            // A TEAR-OUT (§1.2): a strip of one window's documents with that
+            // window's front elsewhere becomes a new kaya window.
+            let selected = strip.first?.tabGroup?.selectedWindow ?? strip.first
+            let active = selected.flatMap(kayaDocumentId(of:)) ?? docs[0]
+            let window = KayaHost.detachDocuments(source, docs)
+            let model = KayaWindowModel(id: window)
+            kayaScene.windows[window] = model
+            for did in docs {
+                guard let doc = kayaScene.documentsById[did] else { continue }
+                kayaScene.windows[source]?.documents.removeAll { $0.id == did }
+                doc.window = window
+                model.documents.append(doc)
+                kayaDocDelegates[did]?.windowId = window
+                kayaDocResponders[did]?.windowId = window
+            }
+            model.activeDocument = active
+            kayaNSWindows[window] = kayaDocNSWindows[active]
+            kayaWindowStrips[window] = key
+            if let src = kayaScene.windows[source] {
+                if src.activeDocument.map(docs.contains) ?? true {
+                    // The tab the source's group selected after the tear-out.
+                    let own = kayaWindowStrips[source]
+                    let stayed = strips.first { $0.first.map(kayaStripKey) == own }
+                    let selected = stayed?.first?.tabGroup?.selectedWindow ?? stayed?.first
+                    src.activeDocument = selected.flatMap(kayaDocumentId(of:)) ?? src.documents.first?.id
+                }
+                if let front = src.activeDocument.flatMap({ kayaDocNSWindows[$0] }) {
+                    kayaNSWindows[source] = front
+                }
+            }
+            for (at, did) in docs.enumerated() { kayaDocPlace[did] = (window, UInt32(at)) }
+            kayaDiag("documents \(docs) torn out of window \(source) into window \(window)")
+            continue
+        }
+        guard let owner = fronted ?? owners.first else { continue }
+        if !report || fronted != nil || kayaWindowStrips[owner] == nil { kayaWindowStrips[owner] = key }
+        for (at, did) in docs.enumerated() {
+            guard let doc = kayaScene.documentsById[did] else { continue }
+            let now = (owner, UInt32(at))
+            let was = kayaDocPlace[did]
+            kayaDocPlace[did] = now
+            if doc.window != owner {
+                // A DRAG INTO ANOTHER WINDOW (Merge All Windows included).
+                let from = doc.window
+                kayaScene.windows[from]?.documents.removeAll { $0.id == did }
+                doc.window = owner
+                kayaScene.windows[owner]?.documents.insert(doc, at: min(at, kayaScene.windows[owner]?.documents.count ?? 0))
+                kayaDocDelegates[did]?.windowId = owner
+                kayaDocResponders[did]?.windowId = owner
+                if report { KayaHost.emitDocumentMoved(did, owner, UInt32(at)) }
+                if kayaScene.windows[from]?.documents.isEmpty ?? true { kayaWindowEmptied(from) }
+            } else if report, let was, was != now {
+                KayaHost.emitDocumentMoved(did, owner, UInt32(at))
+            }
+        }
+    }
+    for wid in Set(kayaScene.documentsById.values.map(\.window)) { kayaPlaceRegions(wid) }
+}
+
+/// A window left with no documents closes (Q2). The primary's native window
+/// goes, but the process lives on while another window holds documents
+/// (§1.2); it ends when none does.
+func kayaWindowEmptied(_ wid: UInt64) {
+    kayaDiag("documents window \(wid) emptied: it closes")
+    kayaNSWindows.removeValue(forKey: wid)
+    let others = kayaScene.documentsById.values.contains { $0.window != wid }
+    if wid == 0 {
+        if !others {
+            kayaFlushWindowFrames()
+            DispatchQueue.main.async { NSApplication.shared.terminate(nil) }
+        }
+        return
+    }
+    kayaScene.windows.removeValue(forKey: wid)
+    KayaHost.emitWindowClosed(wid)
+}
+
+// MARK: Shared regions (§1.7)
+
+/// A region's own content, hosted ONCE per strip and moved into whichever tab
+/// window of the strip is selected.
+struct KayaRegionContent: View {
+    let regionId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        let region = scene.regionsById[regionId]
+        let bottom = region?.edge == regionEdgeBottom
+        Group {
+            if let root = region?.root {
+                KayaRender(node: root, isRoot: true)
+            }
+        }
+        .padding(scene.windows[region?.window ?? 0]?.inset ?? 16)
+        .fixedSize(horizontal: !bottom, vertical: bottom)
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { region?.measured = geo.size }
+                    .onChange(of: geo.size) { _, size in region?.measured = size }
+            }
+        )
+        .frame(
+            maxWidth: bottom ? .infinity : nil, maxHeight: bottom ? nil : .infinity,
+            alignment: .topLeading)
+        .tint(kayaBrandTint())
+        .font(kayaBrandFont())
+    }
+}
+
+/// One document window's place for a region at an edge: empty until the
+/// strip's region view moves in.
+struct KayaRegionSlot: NSViewRepresentable {
+    let documentId: UInt64
+    let edge: UInt32
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        kayaRegionSlots["\(documentId)/\(edge)"] = view
+        DispatchQueue.main.async {
+            if let wid = kayaScene.documentsById[documentId]?.window { kayaPlaceRegions(wid) }
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        kayaRegionSlots["\(documentId)/\(edge)"] = view
+    }
+}
+
+/// Put each strip's region views into that strip's selected tab window.
+func kayaPlaceRegions(_ wid: UInt64) {
+    guard let model = kayaScene.windows[wid], !model.regions.isEmpty,
+        let front = kayaNSWindows[wid], let shown = kayaDocumentId(of: front.tabGroup?.selectedWindow ?? front)
+    else { return }
+    for region in model.regions {
+        let key = "\(region.id)"
+        let host: NSHostingView<KayaRegionContent>
+        if let made = kayaRegionHosts[key] {
+            host = made
+        } else {
+            host = NSHostingView(rootView: KayaRegionContent(regionId: region.id))
+            kayaRegionHosts[key] = host
+        }
+        guard let slot = kayaRegionSlots["\(shown)/\(region.edge)"], host.superview !== slot else { continue }
+        kayaMoveRegionHost(host, into: slot)
+    }
+}
+
+/// THE MOVE (§1.7, measured): scroll, selection and text ride the view; focus
+/// and the caret do not, so they are recorded before and restored one turn
+/// after, which is when makeFirstResponder takes.
+func kayaMoveRegionHost(_ host: NSView, into slot: NSView) {
+    var focus: NSView?
+    var caret: NSRange?
+    if let responder = host.window?.firstResponder {
+        if let editor = responder as? NSTextView, editor.isFieldEditor,
+            let field = editor.delegate as? NSView, field.isDescendant(of: host)
+        {
+            focus = field
+            caret = editor.selectedRange()
+        } else if let view = responder as? NSView, view.isDescendant(of: host) {
+            focus = view
+            caret = (view as? NSTextView)?.selectedRange()
+        }
+    }
+    host.removeFromSuperview()
+    host.frame = slot.bounds
+    host.autoresizingMask = [.width, .height]
+    slot.addSubview(host)
+    kayaDiag("region moved into \(slot.window?.title ?? "?") focus=\(focus != nil)")
+    guard let focus else { return }
+    DispatchQueue.main.async {
+        guard let window = focus.window else { return }
+        window.makeFirstResponder(focus)
+        if let caret, let editor = window.firstResponder as? NSTextView {
+            editor.setSelectedRange(caret)
+        }
+    }
+}
+
+/// A document's NSWindow content: its root beside the window's regions.
+struct KayaDocumentRoot: View {
+    let documentId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        let doc = scene.documentsById[documentId]
+        let wid = doc?.window ?? 0
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                slot(wid, regionEdgeLeading)
+                Group {
+                    if let root = doc?.root {
+                        KayaRender(node: root, isRoot: true)
+                    }
+                }
+                .padding(scene.windows[wid]?.inset ?? 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                slot(wid, regionEdgeTrailing)
+            }
+            slot(wid, regionEdgeBottom)
+        }
+        .navigationTitle(doc?.title ?? "")
+        .tint(kayaBrandTint())
+        .font(kayaBrandFont())
+        .modifier(KayaMenuChrome(windowId: wid))
+        .background(KayaDocumentAccessor(documentId: documentId))
+    }
+
+    @ViewBuilder
+    private func slot(_ wid: UInt64, _ edge: UInt32) -> some View {
+        if let region = scene.windows[wid]?.regions.first(where: { $0.edge == edge }) {
+            let bottom = edge == regionEdgeBottom
+            KayaRegionSlot(documentId: documentId, edge: edge)
+                .frame(
+                    width: bottom ? nil : max(region.measured.width, 1),
+                    height: bottom ? max(region.measured.height, 1) : nil)
+        }
+    }
+}
+
+/// Registers a document's NSWindow on attachment (the KayaWindowAccessor shape).
+struct KayaDocumentAccessor: NSViewRepresentable {
+    let documentId: UInt64
+
+    final class AttachView: NSView {
+        var onAttach: () -> Void = {}
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window != nil { onAttach() }
+        }
+    }
+
+    func makeNSView(context: Context) -> AttachView {
+        let view = AttachView()
+        let did = documentId
+        view.onAttach = { [weak view] in
+            if let window = view?.window { kayaRegisterDocumentWindow(did, window) }
+        }
+        return view
+    }
+
+    func updateNSView(_ view: AttachView, context: Context) {
+        if let window = view.window { kayaRegisterDocumentWindow(documentId, window) }
+    }
+}
+
+// MARK: Harness reads and drives (docs/doctabs-plan.md §4): the toolkit's tab
+// group and the tab bar's own accessibility elements, never the model.
+
+/// The active strip's NSWindows in tab order.
+func kayaActiveStrip() -> [NSWindow]? {
+    if let key = NSApp.keyWindow, kayaDocumentId(of: key) != nil {
+        return key.tabGroup?.windows ?? [key]
+    }
+    guard let wid = kayaDocumentsWindowId(), let front = kayaNSWindows[wid],
+        kayaDocumentId(of: front) != nil
+    else { return nil }
+    return front.tabGroup?.windows ?? [front]
+}
+
+func kayaDocWindow(titled title: String) -> NSWindow? {
+    kayaDocNSWindows.values.first { $0.tab.title.utf8.elementsEqual(title.utf8) }
+}
+
+/// The tab bar's element for a tab, found by role and title through the
+/// public accessibility protocol.
+func kayaTabElement(_ window: NSWindow, titled title: String) -> NSAccessibilityProtocol? {
+    func search(_ any: Any, depth: Int) -> NSAccessibilityProtocol? {
+        guard depth < 16, let element = any as? NSAccessibilityProtocol else { return nil }
+        if element.accessibilityRole() == .radioButton,
+            (element.accessibilityTitle() ?? "").utf8.elementsEqual(title.utf8),
+            let parent = element.accessibilityParent() as? NSAccessibilityProtocol,
+            parent.accessibilityRole() == .tabGroup
+        {
+            return element
+        }
+        for child in element.accessibilityChildren() ?? [] {
+            if let found = search(child, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+    return search(window, depth: 0)
+}
+
+/// The tab bar's "+" (an AXButton directly under the tab group, beside the tabs).
+func kayaNewTabElement(_ window: NSWindow) -> NSAccessibilityProtocol? {
+    func search(_ any: Any, depth: Int) -> NSAccessibilityProtocol? {
+        guard depth < 16, let element = any as? NSAccessibilityProtocol else { return nil }
+        if element.accessibilityRole() == .tabGroup {
+            for child in element.accessibilityChildren() ?? [] {
+                if let button = child as? NSAccessibilityProtocol, button.accessibilityRole() == .button {
+                    return button
+                }
+            }
+        }
+        for child in element.accessibilityChildren() ?? [] {
+            if let found = search(child, depth: depth + 1) { return found }
+        }
+        return nil
+    }
+    return search(window, depth: 0)
+}
+
+func kayaDocumentTitlesRead() -> [String]? {
+    kayaActiveStrip()?.map { $0.tab.title }
+}
+
+func kayaActiveDocumentRead() -> String? {
+    guard let strip = kayaActiveStrip(), let front = strip.first else { return nil }
+    return (front.tabGroup?.selectedWindow ?? front).tab.title
+}
+
+/// "true" or "false" off the tab's accessory view, or what could not be read.
+func kayaDocumentDirtyRead(_ title: String) -> String {
+    guard let window = kayaDocWindow(titled: title) else {
+        return "no tab titled \(title) (tabs: \(kayaDocNSWindows.values.map { $0.tab.title }))"
+    }
+    guard let mark = window.tab.accessoryView else { return "false" }
+    return mark.isHidden ? "false" : "true"
+}
+
+func kayaSelectDocumentDrive(_ title: String) -> String? {
+    guard let window = kayaDocWindow(titled: title) else { return "no tab titled \(title)" }
+    if let front = kayaActiveStrip()?.first,
+        let tab = kayaTabElement(front.tabGroup?.selectedWindow ?? front, titled: title)
+    {
+        return tab.accessibilityPerformPress() ? nil : "the tab \(title) refused its press"
+    }
+    window.makeKeyAndOrderFront(nil)
+    return nil
+}
+
+/// The tab's own close and Close Tab are both performClose on that tab's
+/// window (the study's §1); the tab's hover "x" refuses an accessibility press.
+func kayaCloseDocumentDrive(_ title: String) -> String? {
+    guard let window = kayaDocWindow(titled: title) else { return "no tab titled \(title)" }
+    window.performClose(nil)
+    return nil
+}
+
+func kayaNewDocumentDrive() -> String? {
+    guard let front = kayaActiveStrip()?.first else { return "no window holds documents" }
+    let shown = front.tabGroup?.selectedWindow ?? front
+    if front.tabGroup?.isTabBarVisible == true, let plus = kayaNewTabElement(shown) {
+        let before = kayaNewTabRequests
+        _ = plus.accessibilityPerformPress()
+        if kayaNewTabRequests > before { return nil }
+        kayaDiag(
+            "new_document: the tab group's button \(plus.accessibilityLabel() ?? "?") "
+                + "(\(type(of: plus))) reached nothing; sending newWindowForTab:")
+    }
+    if let did = kayaDocumentId(of: shown), let wid = kayaScene.documentsById[did]?.window {
+        kayaInstallDocumentResponder(did, shown, wid)
+    }
+    let sel = #selector(NSResponder.newWindowForTab(_:))
+    guard let target = NSApp.target(forAction: sel, to: nil, from: shown) else {
+        return "nothing answers newWindowForTab:, so no + is drawn (is new_document armed?)"
+    }
+    kayaDiag("new_document: newWindowForTab: goes to \(type(of: target))")
+    return NSApp.sendAction(sel, to: target, from: shown) ? nil : "newWindowForTab: was not sent"
+}
+
+func kayaMoveToNewWindowDrive(_ title: String) -> String? {
+    guard let window = kayaDocWindow(titled: title) else { return "no tab titled \(title)" }
+    window.moveTabToNewWindow(nil)
+    return nil
+}
+
+func kayaCloseNativeWindowDrive() -> String? {
+    guard let front = kayaActiveStrip()?.first else { return "no window holds documents" }
+    kayaCloseNativeWindow(front.tabGroup?.selectedWindow ?? front)
+    return nil
+}
+#endif
 
 // MARK: - Media (docs/media-plan.md)
 //

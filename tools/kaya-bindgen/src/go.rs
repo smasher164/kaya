@@ -443,6 +443,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let pc = camel(prop);
+        let (ty, expr) = match kind {
+            crate::PropKind::Str => ("string", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Bool => ("bool", format!("encodeValue(b, {})", param(prop))),
+            crate::PropKind::Enum(_) => ("int64", format!("encodeValue(b, {})", param(prop))),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        let p = param(prop);
+        c.line("");
+        c.line(&format!("// TxSetDocument{pc}: set_document_prop with a constant {prop} value."));
+        c.line(&format!("func TxSetDocument{pc}(document uint64, {p} {ty}) []byte {{"));
+        c.line("\tb := beginRecord(txSetDocumentProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, document)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Dprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceConst)");
+        c.line(&format!("\tb = {expr}"));
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+        c.line("");
+        c.line(&format!("// TxBindDocument{pc}: set_document_prop with a signal-bound {prop} value."));
+        c.line(&format!("func TxBindDocument{pc}(document uint64, signalID uint64) []byte {{"));
+        c.line("\tb := beginRecord(txSetDocumentProp)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, document)");
+        c.line(&format!("\tb = binary.LittleEndian.AppendUint32(b, Dprop{pc})"));
+        c.line("\tb = binary.LittleEndian.AppendUint32(b, SourceSignal)");
+        c.line("\tb = binary.LittleEndian.AppendUint64(b, signalID)");
+        c.line("\treturn endRecord(b)");
+        c.line("}");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

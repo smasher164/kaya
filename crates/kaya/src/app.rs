@@ -28,6 +28,7 @@ use crate::protocol::{
     CollectionId, CommandKind, DEFAULT_WINDOW, Detent, EntryProp, MenuItemId, MenuItemKind, MenuProp,
     Occurrence, Path, Prop, PropValue,
     Record, SectionProp, SheetProp, SignalId, TypefaceRequest, WindowId, WindowProp,
+    DocumentProp, RegionEdge,
     TemplateNodeId, TextRange, Transaction, TxOp, Value, ValueType, WidgetId, WidgetKind,
 };
 
@@ -3055,6 +3056,64 @@ impl<'a> Tx<'a> {
         });
     }
 
+    /// Add a document to the primary window (docs/doctabs-plan.md §2): a
+    /// surface `mount_in` fills, appended to the active strip. The first
+    /// document added becomes the active one; any other waits for
+    /// [`DocumentRef::select`] or [`Tx::select_document`].
+    pub fn add_document(&mut self, document: WindowId) -> DocumentRef<'_, 'a> {
+        self.add_document_in(DEFAULT_WINDOW, document)
+    }
+
+    /// Add a document to another window.
+    pub fn add_document_in(&mut self, window: WindowId, document: WindowId) -> DocumentRef<'_, 'a> {
+        self.ops.push(TxOp::AddDocument { window, document });
+        DocumentRef { tx: self, document }
+    }
+
+    /// Make a document the active one: configuration, never echoes
+    /// document_selected.
+    pub fn select_document(&mut self, document: WindowId) {
+        self.ops.push(TxOp::SelectDocument { document });
+    }
+
+    /// Close a document and forget its tree; also the answer that agrees to
+    /// a close request. Never echoes document_closed. A window left with no
+    /// documents closes (a phone shows its empty state).
+    pub fn close_document(&mut self, document: WindowId) {
+        self.ops.push(TxOp::CloseDocument { document });
+    }
+
+    /// Set a document property to a constant ([`DocumentProp`]; the floor
+    /// [`DocumentRef`] rides).
+    pub fn set_document_prop(&mut self, document: WindowId, prop: DocumentProp, value: impl Into<Value>) {
+        self.ops.push(TxOp::SetDocumentProp {
+            document,
+            prop,
+            value: PropValue::Const(value.into()),
+        });
+    }
+
+    /// A document property driven by a signal.
+    pub fn bind_document_prop(&mut self, document: WindowId, prop: DocumentProp, signal: SignalId) {
+        self.ops.push(TxOp::SetDocumentProp {
+            document,
+            prop,
+            value: PropValue::Signal(signal),
+        });
+    }
+
+    /// Declare a shared region of the primary window at `edge`
+    /// (docs/doctabs-plan.md §1.7): a surface every document shares, filled
+    /// by `mount_in`. The window must already hold a document.
+    pub fn add_region(&mut self, region: WindowId, edge: RegionEdge) -> WindowId {
+        self.add_region_in(DEFAULT_WINDOW, region, edge)
+    }
+
+    pub fn add_region_in(&mut self, window: WindowId, region: WindowId, edge: RegionEdge) -> WindowId {
+        self.ops.push(TxOp::AddRegion { window, region, edge });
+        region
+    }
+
     /// Append a section to the primary surface's section set (ids are
     /// guest-allocated in the shared surface namespace). The first added
     /// becomes selected; the set is append-only. Mounting a root into it
@@ -5736,6 +5795,13 @@ pub struct Messages<M> {
     dismiss_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     sheet_dismissed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     section_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    document_selected: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    document_close_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    document_closed: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
+    document_moved: RefCell<HashMap<u64, Box<dyn Fn(WindowId, u32) -> M>>>,
+    documents_detached: RefCell<HashMap<u64, Box<dyn Fn(WindowId, Vec<WindowId>) -> M>>>,
+    documents_close_requested: RefCell<HashMap<u64, Box<dyn Fn(Vec<WindowId>) -> M>>>,
+    new_document_requested: RefCell<HashMap<u64, Box<dyn Fn() -> M>>>,
     fullscreen_changed: RefCell<HashMap<u64, Box<dyn Fn(bool) -> M>>>,
     alerts: RefCell<HashMap<u64, Box<dyn Fn(AlertChoice) -> M>>>,
     notifications: RefCell<HashMap<u64, Box<dyn Fn(crate::protocol::NotificationOutcome) -> M>>>,
@@ -5906,6 +5972,13 @@ impl<M> Messages<M> {
             dismiss_requested: RefCell::new(HashMap::new()),
             sheet_dismissed: RefCell::new(HashMap::new()),
             section_selected: RefCell::new(HashMap::new()),
+            document_selected: RefCell::new(HashMap::new()),
+            document_close_requested: RefCell::new(HashMap::new()),
+            document_closed: RefCell::new(HashMap::new()),
+            document_moved: RefCell::new(HashMap::new()),
+            documents_detached: RefCell::new(HashMap::new()),
+            documents_close_requested: RefCell::new(HashMap::new()),
+            new_document_requested: RefCell::new(HashMap::new()),
             fullscreen_changed: RefCell::new(HashMap::new()),
             alerts: RefCell::new(HashMap::new()),
             notifications: RefCell::new(HashMap::new()),
@@ -6532,6 +6605,81 @@ impl<M> Messages<M> {
             .insert(section.0, Box::new(move || msg.clone()));
     }
 
+    /// Bind the selected handler to ONE document: fires each time the user
+    /// makes it the active one (a tab, a window, a phone's row).
+    pub fn on_document_selected(&self, document: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.document_selected
+            .borrow_mut()
+            .insert(document.0, Box::new(move || msg.clone()));
+    }
+
+    /// Bind the close-veto handler to ONE document: fires each time the user
+    /// closes it while intercept_close is armed; answer with close_document
+    /// to agree.
+    pub fn on_document_close_requested(&self, document: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.document_close_requested
+            .borrow_mut()
+            .insert(document.0, Box::new(move || msg.clone()));
+    }
+
+    /// Bind the closed handler to ONE document: fires when the user closes
+    /// it unarmed (post-fact), and every registration of the document
+    /// retires with it.
+    pub fn on_document_closed(&self, document: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.document_closed
+            .borrow_mut()
+            .insert(document.0, Box::new(move || msg.clone()));
+    }
+
+    /// Bind the moved handler to ONE document: the window holding it and
+    /// its index there after the user's reorder or drag into another window.
+    pub fn on_document_moved(&self, document: WindowId, f: impl Fn(WindowId, u32) -> M + 'static) {
+        self.document_moved.borrow_mut().insert(document.0, Box::new(f));
+    }
+
+    /// Bind the tear-out handler to a SOURCE window: the user moved these
+    /// documents into a new window kaya made, whose id this hands you;
+    /// declare its chrome and regions and bind its handlers
+    /// (docs/doctabs-plan.md §1.2).
+    pub fn on_documents_detached(
+        &self,
+        source: WindowId,
+        f: impl Fn(WindowId, Vec<WindowId>) -> M + 'static,
+    ) {
+        self.documents_detached.borrow_mut().insert(source.0, Box::new(f));
+    }
+
+    /// Bind the window-close handler of a window with documents: the user
+    /// closed a native window showing an armed document, and these are the
+    /// documents it shows; close_document each one you agree to.
+    pub fn on_documents_close_requested(
+        &self,
+        window: WindowId,
+        f: impl Fn(Vec<WindowId>) -> M + 'static,
+    ) {
+        self.documents_close_requested.borrow_mut().insert(window.0, Box::new(f));
+    }
+
+    /// Bind the "+" handler to one window. The "+" is drawn only while the
+    /// window's [`WindowRef::new_document`] is true.
+    pub fn on_new_document(&self, window: WindowId, msg: M)
+    where
+        M: Clone + 'static,
+    {
+        self.new_document_requested
+            .borrow_mut()
+            .insert(window.0, Box::new(move || msg.clone()));
+    }
+
     /// Bind the fullscreen handler to one window: fires with the new state
     /// each time the USER takes it into or out of fullscreen through the
     /// platform's own door (docs/fullscreen-plan.md). The app's own write
@@ -6930,6 +7078,34 @@ impl<M> Messages<M> {
                 }
                 Occurrence::FullscreenChanged { window, on } => {
                     self.fullscreen_changed.borrow().get(&window.0).map(|f| f(*on))
+                }
+                Occurrence::DocumentSelected { document, .. } => {
+                    self.document_selected.borrow().get(&document.0).map(|f| f())
+                }
+                Occurrence::DocumentCloseRequested { document } => {
+                    self.document_close_requested.borrow().get(&document.0).map(|f| f())
+                }
+                Occurrence::DocumentClosed { document } => {
+                    self.document_selected.borrow_mut().remove(&document.0);
+                    self.document_close_requested.borrow_mut().remove(&document.0);
+                    self.document_moved.borrow_mut().remove(&document.0);
+                    self.document_closed.borrow_mut().remove(&document.0).map(|f| f())
+                }
+                Occurrence::DocumentMoved { document, window, index } => {
+                    self.document_moved.borrow().get(&document.0).map(|f| f(*window, *index))
+                }
+                Occurrence::DocumentsDetached { source, window, documents } => self
+                    .documents_detached
+                    .borrow()
+                    .get(&source.0)
+                    .map(|f| f(*window, documents.clone())),
+                Occurrence::DocumentsCloseRequested { window, documents } => self
+                    .documents_close_requested
+                    .borrow()
+                    .get(&window.0)
+                    .map(|f| f(documents.clone())),
+                Occurrence::NewDocumentRequested { window } => {
+                    self.new_document_requested.borrow().get(&window.0).map(|f| f())
                 }
                 Occurrence::PlayerChanged { .. }
                 | Occurrence::PlayerPosition { .. }
@@ -7692,6 +7868,13 @@ impl WindowRef<'_, '_> {
         self
     }
 
+    /// Draw the platform's "+" on a window with documents; pressing it
+    /// fires [`Messages::on_new_document`] (docs/doctabs-plan.md §2.1).
+    pub fn new_document(self, on: bool) -> Self {
+        self.tx.set_window_prop(self.window, WindowProp::NewDocument, on);
+        self
+    }
+
     /// The player the [`WindowRef::dock`] declared after it shows
     /// (docs/media-player-plan.md M17).
     pub fn dock_player(mut self, player: crate::protocol::PlayerId) -> Self {
@@ -7781,6 +7964,56 @@ impl SheetRef<'_, '_> {
 
     pub fn id(&self) -> WindowId {
         self.sheet
+    }
+}
+
+pub struct DocumentRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    document: WindowId,
+}
+
+impl DocumentRef<'_, '_> {
+    /// The tab's label, the phone list's row, and the chrome title while
+    /// this document is active.
+    pub fn title(self, title: impl Into<LiveSource<StrKind>>) -> Self {
+        match title.into().inner {
+            LiveInner::Const(v) => self.tx.set_document_prop(self.document, DocumentProp::Title, v),
+            LiveInner::Signal(s) => self.tx.bind_document_prop(self.document, DocumentProp::Title, s),
+        }
+        self
+    }
+
+    /// The tab's tooltip; a full path, typically. Phones show none.
+    pub fn tooltip(self, text: &str) -> Self {
+        self.tx.set_document_prop(self.document, DocumentProp::Tooltip, text);
+        self
+    }
+
+    /// Unsaved work: the platform's mark on the tab, and on the window while
+    /// active. Arms nothing.
+    pub fn dirty(self, on: impl Into<LiveSource<BoolKind>>) -> Self {
+        match on.into().inner {
+            LiveInner::Const(v) => self.tx.set_document_prop(self.document, DocumentProp::Dirty, v),
+            LiveInner::Signal(s) => self.tx.bind_document_prop(self.document, DocumentProp::Dirty, s),
+        }
+        self
+    }
+
+    /// The close-veto class: armed, the user's close emits
+    /// document_close_requested and nothing closes until close_document.
+    pub fn intercept_close(self, on: bool) -> Self {
+        self.tx.set_document_prop(self.document, DocumentProp::InterceptClose, on);
+        self
+    }
+
+    /// Make this document the active one, in the same transaction.
+    pub fn select(self) -> Self {
+        self.tx.select_document(self.document);
+        self
+    }
+
+    pub fn id(&self) -> WindowId {
+        self.document
     }
 }
 
@@ -10868,6 +11101,13 @@ mod tests {
                     | Occurrence::SheetDismissed { .. }
                     | Occurrence::DismissRequested { .. }
                     | Occurrence::SectionSelected { .. }
+                    | Occurrence::DocumentSelected { .. }
+                    | Occurrence::DocumentCloseRequested { .. }
+                    | Occurrence::DocumentsCloseRequested { .. }
+                    | Occurrence::DocumentClosed { .. }
+                    | Occurrence::NewDocumentRequested { .. }
+                    | Occurrence::DocumentMoved { .. }
+                    | Occurrence::DocumentsDetached { .. }
                     | Occurrence::FullscreenChanged { .. }
                     | Occurrence::ValueChanged { .. }
                     | Occurrence::InstanceValueChanged { .. }

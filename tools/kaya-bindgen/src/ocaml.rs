@@ -299,6 +299,32 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("      Buffer.add_int64_le b signal_id)");
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let (ctor, param) = match kind {
+            crate::PropKind::Str => ("Str", *prop),
+            crate::PropKind::Bool => ("Bool", *prop),
+            crate::PropKind::Enum(_) => ("I64", *prop),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("(* set_document_prop with a constant {prop} value. *)"));
+        c.line(&format!("let tx_set_document_{prop} document {param} ="));
+        c.line("  finish tx_kind_set_document_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b document;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int dprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_const);");
+        c.line(&format!("      encode_value b ({ctor} {param}))"));
+        c.line("");
+        c.line(&format!("(* set_document_prop with a signal-bound {prop} value. *)"));
+        c.line(&format!("let tx_bind_document_{prop} document signal_id ="));
+        c.line("  finish tx_kind_set_document_prop (fun b ->");
+        c.line("      Buffer.add_int64_le b document;");
+        c.line(&format!("      Buffer.add_int32_le b (Int32.of_int dprop_{prop});"));
+        c.line("      Buffer.add_int32_le b (Int32.of_int source_signal);");
+        c.line("      Buffer.add_int64_le b signal_id)");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

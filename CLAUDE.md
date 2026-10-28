@@ -346,6 +346,8 @@ docs/gates.md.
      derived stops.
    - `tools/check-table-card.py` — a table bounds its own extent with a
      flat, tokened card per platform.
+   - `tools/check-doctabs.py` — document tabs: the Mac strip through public
+     API only, every document prop applied or depth-stubbed per backend.
    - `tools/check-keyed.py` — the gate cache re-runs on input change and
      never caches a failure.
    - `tools/swift-typecheck.sh` — the Swift guests, the Swift bindings and

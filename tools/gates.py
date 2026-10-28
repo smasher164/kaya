@@ -206,6 +206,11 @@ GATES = [
     # card is PIXELS: every table observable answers the same with it
     # gone, so no lane can see a backend that lost it.
     ("check-table-card", ["tools/check-table-card.py"], True, ""),
+    # docs/doctabs-plan.md §7: the Mac strip through public API only, and
+    # every document prop applied or depth-stubbed per backend.
+    ("check-doctabs", ["tools/check-doctabs.py"], False,
+     "no input set is declared for it in build-id.py's GATES; same shape as "
+     "check-tx-liveness above"),
     ("check-verbs", ["tools/check-verbs.py"], True, ""),
     # The file-mode numbers against the spec that owns them: five
     # hand-written sites decode the integer kaya_open_picked takes.

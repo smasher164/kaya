@@ -239,6 +239,19 @@ pub struct KayaHostApi {
     /// The user switched sections through the platform switcher
     /// (post-fact). A programmatic select_section never arrives here.
     pub emit_section_selected: extern "C" fn(u64, u64),
+    /// The document grammar's user acts (docs/doctabs-plan.md §2.1):
+    /// selected (window, document), close requested (document), a native
+    /// window's close (window, ids, count), closed (document), the "+"
+    /// (window), moved (document, strip, index).
+    pub emit_document_selected: extern "C" fn(u64, u64),
+    pub emit_document_close_requested: extern "C" fn(u64),
+    pub emit_documents_close_requested: unsafe extern "C" fn(u64, *const u64, usize),
+    pub emit_document_closed: extern "C" fn(u64),
+    pub emit_new_document_requested: extern "C" fn(u64),
+    pub emit_document_moved: extern "C" fn(u64, u64, u32),
+    /// The user tore documents out into a new native window: the core
+    /// answers with the new window's id (docs/doctabs-plan.md §1.2).
+    pub detach_documents: unsafe extern "C" fn(u64, *const u64, usize) -> u64,
     /// Menu occurrences — ONE dispatch path for chrome clicks, shortcuts
     /// and harness activation (DESIGN.md, Menus). The pointer/length pair
     /// is the noun: the wire path CONTEXT_ATTACH_NODE handed the backend
@@ -658,6 +671,13 @@ pub(crate) fn run() -> i32 {
         emit_sheet_dismissed: crate::capi::kaya_emit_sheet_dismissed,
         emit_dismiss_requested: crate::capi::kaya_emit_dismiss_requested,
         emit_section_selected: crate::capi::kaya_emit_section_selected,
+        emit_document_selected: crate::capi::kaya_emit_document_selected,
+        emit_document_close_requested: crate::capi::kaya_emit_document_close_requested,
+        emit_documents_close_requested: crate::capi::kaya_emit_documents_close_requested,
+        emit_document_closed: crate::capi::kaya_emit_document_closed,
+        emit_new_document_requested: crate::capi::kaya_emit_new_document_requested,
+        emit_document_moved: crate::capi::kaya_emit_document_moved,
+        detach_documents: crate::capi::kaya_detach_documents,
         emit_menu_activated: crate::capi::kaya_emit_menu_activated,
         emit_menu_toggled: crate::capi::kaya_emit_menu_toggled,
         emit_menu_value_changed: crate::capi::kaya_emit_menu_value_changed,

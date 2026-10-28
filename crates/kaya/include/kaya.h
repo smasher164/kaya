@@ -296,6 +296,30 @@
 #define KAYA_OCCURRENCE_TEXT_SELECTED 61
 
 /**
+ * The document grammar (docs/doctabs-plan.md §2.1): DOCUMENT_SELECTED {
+ * u64 window; u64 document }; DOCUMENT_CLOSE_REQUESTED, DOCUMENT_CLOSED {
+ * u64 document }; DOCUMENTS_CLOSE_REQUESTED { u64 window; Values: I64
+ * document ids }; NEW_DOCUMENT_REQUESTED { u64 window }; DOCUMENT_MOVED {
+ * u64 document; u32 strip; u32 index }.
+ */
+#define KAYA_OCCURRENCE_DOCUMENT_SELECTED 62
+
+#define KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED 63
+
+#define KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED 64
+
+#define KAYA_OCCURRENCE_DOCUMENT_CLOSED 65
+
+#define KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED 66
+
+#define KAYA_OCCURRENCE_DOCUMENT_MOVED 67
+
+/**
+ * DOCUMENTS_DETACHED { u64 source; u64 window; Values: I64 document ids }.
+ */
+#define KAYA_OCCURRENCE_DOCUMENTS_DETACHED 68
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -507,6 +531,22 @@
  * LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
  */
 #define KAYA_TX_LIST_FONT_FAMILIES 88
+
+/**
+ * ADD_DOCUMENT { u64 window; u64 document }; SELECT_DOCUMENT and
+ * CLOSE_DOCUMENT { u64 document }; SET_DOCUMENT_PROP { u64 document; u32
+ * prop; u32 source; tail as SET_PROPERTY }; ADD_REGION { u64 window; u64
+ * region; u32 edge; u32 pad } (docs/doctabs-plan.md §2.1).
+ */
+#define KAYA_TX_ADD_DOCUMENT 89
+
+#define KAYA_TX_SELECT_DOCUMENT 90
+
+#define KAYA_TX_CLOSE_DOCUMENT 91
+
+#define KAYA_TX_SET_DOCUMENT_PROP 92
+
+#define KAYA_TX_ADD_REGION 93
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -933,6 +973,21 @@
  * LIST_FONT_FAMILIES {} (docs/code-surface-plan.md M3).
  */
 #define KAYA_APPLY_LIST_FONT_FAMILIES 76
+
+/**
+ * ADD_DOCUMENT, SELECT_DOCUMENT, CLOSE_DOCUMENT { u64 window; u64
+ * document }; SET_DOCUMENT_PROP { u64 document; u32 prop; u32 pad; value };
+ * ADD_REGION { u64 window; u64 region; u32 edge; u32 pad }.
+ */
+#define KAYA_APPLY_ADD_DOCUMENT 77
+
+#define KAYA_APPLY_SELECT_DOCUMENT 78
+
+#define KAYA_APPLY_CLOSE_DOCUMENT 79
+
+#define KAYA_APPLY_SET_DOCUMENT_PROP 80
+
+#define KAYA_APPLY_ADD_REGION 81
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1450,6 +1505,29 @@
 #define KAYA_WPROP_REMEMBER_FRAME 10
 
 #define KAYA_WPROP_FULLSCREEN 11
+
+/**
+ * Draws the platform's "+" on a window with documents (docs/doctabs-plan.md).
+ */
+#define KAYA_WPROP_NEW_DOCUMENT 12
+
+/**
+ * Document properties (spec::DOCUMENT_PROPS; docs/doctabs-plan.md §2.1)
+ * and the region edges (spec enum "region_edge", §1.7).
+ */
+#define KAYA_DPROP_TITLE 1
+
+#define KAYA_DPROP_TOOLTIP 2
+
+#define KAYA_DPROP_DIRTY 3
+
+#define KAYA_DPROP_INTERCEPT_CLOSE 4
+
+#define KAYA_REGION_EDGE_LEADING 1
+
+#define KAYA_REGION_EDGE_TRAILING 2
+
+#define KAYA_REGION_EDGE_BOTTOM 3
 
 /**
  * Navigation-entry properties (spec::ENTRY_PROPS): their own typed
@@ -2521,6 +2599,23 @@ typedef struct KayaHostApi {
    */
   void (*emit_section_selected)(uint64_t, uint64_t);
   /**
+   * The document grammar's user acts (docs/doctabs-plan.md §2.1):
+   * selected (window, document), close requested (document), a native
+   * window's close (window, ids, count), closed (document), the "+"
+   * (window), moved (document, strip, index).
+   */
+  void (*emit_document_selected)(uint64_t, uint64_t);
+  void (*emit_document_close_requested)(uint64_t);
+  void (*emit_documents_close_requested)(uint64_t, const uint64_t*, uintptr_t);
+  void (*emit_document_closed)(uint64_t);
+  void (*emit_new_document_requested)(uint64_t);
+  void (*emit_document_moved)(uint64_t, uint64_t, uint32_t);
+  /**
+   * The user tore documents out into a new native window: the core
+   * answers with the new window's id (docs/doctabs-plan.md §1.2).
+   */
+  uint64_t (*detach_documents)(uint64_t, const uint64_t*, uintptr_t);
+  /**
    * Menu occurrences — ONE dispatch path for chrome clicks, shortcuts
    * and harness activation (DESIGN.md, Menus). The pointer/length pair
    * is the noun: the wire path CONTEXT_ATTACH_NODE handed the backend
@@ -3369,6 +3464,59 @@ void kaya_emit_entry_popped(uint64_t entry);
  * presentation layer exists.
  */
 void kaya_emit_section_selected(uint64_t window, uint64_t section);
+
+/**
+ * Presentation side: the user made a document active (post-fact;
+ * docs/doctabs-plan.md §2.1). select_document never arrives here.
+ */
+void kaya_emit_document_selected(uint64_t window, uint64_t document);
+
+/**
+ * Presentation side: the user closed an intercept_close-armed document.
+ * Nothing has closed.
+ */
+void kaya_emit_document_close_requested(uint64_t document);
+
+/**
+ * Presentation side: the user closed a native window showing at least one
+ * armed document; `documents` (`count` ids) is all it shows, in strip order.
+ * Nothing has closed.
+ *
+ * # Safety
+ * `documents` points at `count` readable u64s (or `count` is 0).
+ */
+void kaya_emit_documents_close_requested(uint64_t window,
+                                         const uint64_t *documents,
+                                         uintptr_t count);
+
+/**
+ * Presentation side: an unarmed document closed through the user's act
+ * (post-fact); the core forgets its tree inside this call.
+ */
+void kaya_emit_document_closed(uint64_t document);
+
+/**
+ * Presentation side: the user pressed the window's "+".
+ */
+void kaya_emit_new_document_requested(uint64_t window);
+
+/**
+ * Presentation side: the user reordered a document or dragged it into
+ * another existing window; the core reconciles inside this call.
+ */
+void kaya_emit_document_moved(uint64_t document, uint64_t window, uint32_t index);
+
+/**
+ * Presentation side: the user tore documents out of `source` into a native
+ * window the platform made (docs/doctabs-plan.md §1.2). The core gives that
+ * window its fresh id, moves the documents into it, and reports
+ * documents_detached; the id is returned so the interpreter can key the
+ * native window by it.
+ *
+ * # Safety
+ * `documents` points at `count` readable u64s (or `count` is 0).
+ */
+uint64_t kaya_detach_documents(uint64_t source, const uint64_t *documents, uintptr_t count);
 
 /**
  * Presentation side: the user took a window into or out of fullscreen

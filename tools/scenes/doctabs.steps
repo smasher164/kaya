@@ -1,0 +1,81 @@
+# DOCUMENT TABS (docs/doctabs-plan.md §5): a set of documents, one active, each
+# closable with a veto, the "+", a shared region beside them, and a move into
+# a native window of its own. Every read is the platform's tabs or list, never
+# kaya's model (§4).
+expect_documents "a|b|c"
+expect_document "a"
+# A WINDOW WITH DOCUMENTS IS TITLED BY ITS ACTIVE ONE (docs/doctabs-plan.md §1.4).
+expect_title "a"
+expect label@status "ready"
+expect_document_dirty "a" false
+expect_document_dirty "b" false
+
+# ---- the user's switch reports; the app's does not -------------------
+select_document "c"
+expect_document "c"
+expect label@status "selected c"
+expect_title "c"
+# THE REGION IS SHARED: its text, typed while c is active, is still there once
+# another document is in front (on the Mac the one view moved, §1.7).
+set_text entry@note "half typed"
+select_document "b"
+expect_document "b"
+expect label@status "selected b"
+expect entry@note "half typed"
+# AND ON SCREEN, not only in the model: the region's widgets are in the front
+# tab's accessibility tree, which they are only if the view moved there.
+expect_ax label@status "label/selected b"
+click button@first
+expect_document "a"
+expect label@status "selected b"
+
+# ---- retention: a covered document keeps its own state ---------------
+set_text entry@field-a "kept"
+select_document "c"
+select_document "a"
+expect entry@field-a "kept"
+
+# ---- the unsaved mark is the document's own --------------------------
+select_document "b"
+click button@mark
+expect label@status "marked b"
+expect_document_dirty "b" true
+expect_document_dirty "a" false
+
+# ---- the "+" ----------------------------------------------------------
+new_document
+expect label@status "new untitled 1"
+expect_documents "a|b|c|untitled 1"
+expect_document "untitled 1"
+
+# ---- an unarmed close goes, and says so ------------------------------
+close_document "c"
+expect label@status "closed c"
+expect_documents "a|b|untitled 1"
+
+# ---- an armed close asks, and nothing goes until the app agrees ------
+close_document "b"
+expect_alert "unsaved changes"
+alert_choose cancel
+expect_alerts 0
+expect label@status "kept b"
+expect_documents "a|b|untitled 1"
+close_document "b"
+expect_alert "unsaved changes"
+alert_choose 0
+expect_alerts 0
+expect label@status "discarded b"
+expect_documents "a|untitled 1"
+
+# ---- a document moves into a native window of its own ---------------
+select_document "a"
+move_to_new_window "a"
+# A TORN-OUT TAB IS A NEW WINDOW (docs/doctabs-plan.md §1.2): the app heard
+# documents_detached and built that window's region with the same code.
+expect label@status "detached a"
+expect_documents "a"
+expect_document "a"
+expect_windows 2
+select_document "untitled 1"
+expect_documents "untitled 1"
+expect_document "untitled 1"

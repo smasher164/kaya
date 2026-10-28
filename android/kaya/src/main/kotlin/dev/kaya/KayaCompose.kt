@@ -3476,7 +3476,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xc31d87678a5929d1uL
+    private const val SPEC_HASH: ULong = 0xa37dca454ad9d6ccuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3619,6 +3619,12 @@ object KayaCompose {
     private const val APPLY_SET_MENU_PROP = 23
     private const val APPLY_CONTEXT_LABEL_NODE = 75
     private const val APPLY_LIST_FONT_FAMILIES = 76
+    // docs/doctabs-plan.md §2.1.
+    private const val APPLY_ADD_DOCUMENT = 77
+    private const val APPLY_SELECT_DOCUMENT = 78
+    private const val APPLY_CLOSE_DOCUMENT = 79
+    private const val APPLY_SET_DOCUMENT_PROP = 80
+    private const val APPLY_ADD_REGION = 81
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -3638,6 +3644,7 @@ object KayaCompose {
     private const val WPROP_APPEARANCE = 9
     private const val WPROP_REMEMBER_FRAME = 10
     private const val WPROP_FULLSCREEN = 11
+    private const val WPROP_NEW_DOCUMENT = 12
     private const val SPROP_TITLE = 1
     private const val SPROP_ICON = 2
     private const val SPROP_SYMBOL = 3
@@ -5062,6 +5069,7 @@ object KayaCompose {
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         WPROP_REMEMBER_FRAME -> readBool(b)
+                        WPROP_NEW_DOCUMENT -> depthStub("doctabs")
                         WPROP_FULLSCREEN -> {
                             KayaSceneModel.windowFullscreen = readBool(b)
                             mountedActivity?.let {
@@ -5410,6 +5418,8 @@ object KayaCompose {
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
                 APPLY_LIST_FONT_FAMILIES -> kayaListFontFamilies()
+                APPLY_ADD_DOCUMENT, APPLY_SELECT_DOCUMENT, APPLY_CLOSE_DOCUMENT,
+                APPLY_SET_DOCUMENT_PROP, APPLY_ADD_REGION -> depthStub("doctabs")
                 APPLY_PRESENT_TOAST -> {
                     // THE ONE DOOR (docs/toast-plan.md T7): the slot is
                     // REPLACED, never queued. Window 0, the one surface.
@@ -14002,6 +14012,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         }
                         kayaAwaitAnswer(answered)
                     }
+                    "expect_documents", "expect_document", "expect_document_dirty", "select_document",
+                    "close_document", "new_document", "move_to_new_window", "close_native_window" ->
+                        depthStub("doctabs")
                     "expect_sheets" -> {
                         // The platform's truth: sheet states visible,
                         // never the model.

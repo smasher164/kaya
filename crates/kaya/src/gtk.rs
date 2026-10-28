@@ -15957,6 +15957,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
                 }
+                (WindowProp::NewDocument, _) => crate::depth_stub("doctabs"),
                 (WindowProp::Fullscreen, Value::Bool(on)) => {
                     let target = gtk_window(core, window.0);
                     let now = target.is_fullscreen();
@@ -17207,6 +17208,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
         ApplyOp::ListFontFamilies => list_font_families(core),
+        ApplyOp::AddDocument { .. }
+        | ApplyOp::SelectDocument { .. }
+        | ApplyOp::CloseDocument { .. }
+        | ApplyOp::SetDocumentProp { .. }
+        | ApplyOp::AddRegion { .. } => crate::depth_stub("doctabs"),
         ApplyOp::SetVideoCapture { widget, capture } => capture::set_video_capture(core, widget, capture.map(|c| c.0)),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
@@ -27228,6 +27234,30 @@ impl crate::harness::Stage for GtkStage {
             let Some(button) = toast_widget_parts(&widget).2 else { return false };
             button.activate()
         })
+    }
+    fn document_titles(&self) -> Option<Vec<String>> {
+        crate::depth_stub("doctabs")
+    }
+    fn active_document(&self) -> Option<String> {
+        crate::depth_stub("doctabs")
+    }
+    fn document_dirty(&self, _: &str) -> Result<bool, String> {
+        crate::depth_stub("doctabs")
+    }
+    fn select_document(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn close_document(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn new_document(&self) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn move_to_new_window(&self, _: &str) -> Result<(), String> {
+        crate::depth_stub("doctabs")
+    }
+    fn close_native_window(&self) -> Result<(), String> {
+        crate::depth_stub("doctabs")
     }
     fn dismiss_sheet(&self) {
         // The platform's own cancel path on the topmost sheet: Esc through

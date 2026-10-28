@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xc31d87678a5929d1L;
+    public static final long SPEC_HASH = 0xa37dca454ad9d6ccL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -164,6 +164,7 @@ public final class KayaWire {
     public static final int WPROP_APPEARANCE = 9;
     public static final int WPROP_REMEMBER_FRAME = 10;
     public static final int WPROP_FULLSCREEN = 11;
+    public static final int WPROP_NEW_DOCUMENT = 12;
     public static final int EPROP_TITLE = 1;
     public static final int EPROP_INTERCEPT_BACK = 2;
     public static final int SHPROP_TITLE = 1;
@@ -175,6 +176,13 @@ public final class KayaWire {
     public static final int SPROP_ICON = 2;
     public static final int SPROP_SYMBOL = 3;
     public static final int SPROP_BADGE = 4;
+    public static final int DPROP_TITLE = 1;
+    public static final int DPROP_TOOLTIP = 2;
+    public static final int DPROP_DIRTY = 3;
+    public static final int DPROP_INTERCEPT_CLOSE = 4;
+    public static final int REGION_EDGE_LEADING = 1;
+    public static final int REGION_EDGE_TRAILING = 2;
+    public static final int REGION_EDGE_BOTTOM = 3;
     public static final int MENU_KIND_MENU = 1;
     public static final int MENU_KIND_ACTION = 2;
     public static final int MENU_KIND_TOGGLE = 3;
@@ -506,6 +514,11 @@ public final class KayaWire {
     public static final short TX_KIND_SET_DOCK_PLAYER = 86;
     public static final short TX_KIND_CONTEXT_LABEL_NODE = 87;
     public static final short TX_KIND_LIST_FONT_FAMILIES = 88;
+    public static final short TX_KIND_ADD_DOCUMENT = 89;
+    public static final short TX_KIND_SELECT_DOCUMENT = 90;
+    public static final short TX_KIND_CLOSE_DOCUMENT = 91;
+    public static final short TX_KIND_SET_DOCUMENT_PROP = 92;
+    public static final short TX_KIND_ADD_REGION = 93;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -580,6 +593,11 @@ public final class KayaWire {
     public static final short APPLY_KIND_SET_DOCK_PLAYER = 74;
     public static final short APPLY_KIND_CONTEXT_LABEL_NODE = 75;
     public static final short APPLY_KIND_LIST_FONT_FAMILIES = 76;
+    public static final short APPLY_KIND_ADD_DOCUMENT = 77;
+    public static final short APPLY_KIND_SELECT_DOCUMENT = 78;
+    public static final short APPLY_KIND_CLOSE_DOCUMENT = 79;
+    public static final short APPLY_KIND_SET_DOCUMENT_PROP = 80;
+    public static final short APPLY_KIND_ADD_REGION = 81;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -641,6 +659,13 @@ public final class KayaWire {
     public static final short OCC_KIND_SELECTION_CHANGED = 59;
     public static final short OCC_KIND_FONT_FAMILIES = 60;
     public static final short OCC_KIND_TEXT_SELECTED = 61;
+    public static final short OCC_KIND_DOCUMENT_SELECTED = 62;
+    public static final short OCC_KIND_DOCUMENT_CLOSE_REQUESTED = 63;
+    public static final short OCC_KIND_DOCUMENTS_CLOSE_REQUESTED = 64;
+    public static final short OCC_KIND_DOCUMENT_CLOSED = 65;
+    public static final short OCC_KIND_NEW_DOCUMENT_REQUESTED = 66;
+    public static final short OCC_KIND_DOCUMENT_MOVED = 67;
+    public static final short OCC_KIND_DOCUMENTS_DETACHED = 68;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1539,6 +1564,47 @@ public final class KayaWire {
     /** List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. */
     public static byte[] txListFontFamilies() {
         Enc b = begin(TX_KIND_LIST_FONT_FAMILIES);
+        return finish(b);
+    }
+
+    /** Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes. */
+    public static byte[] txAddDocument(long window, long document) {
+        Enc b = begin(TX_KIND_ADD_DOCUMENT);
+        b.putLong(window);
+        b.putLong(document);
+        return finish(b);
+    }
+
+    /** Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected. */
+    public static byte[] txSelectDocument(long document) {
+        Enc b = begin(TX_KIND_SELECT_DOCUMENT);
+        b.putLong(document);
+        return finish(b);
+    }
+
+    /** Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state. */
+    public static byte[] txCloseDocument(long document) {
+        Enc b = begin(TX_KIND_CLOSE_DOCUMENT);
+        b.putLong(document);
+        return finish(b);
+    }
+
+    /** Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements. */
+    public static byte[] txSetDocumentProp(long document, int prop, int source) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document);
+        b.putInt(prop);
+        b.putInt(source);
+        return finish(b);
+    }
+
+    /** Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed. */
+    public static byte[] txAddRegion(long window, long region, int edge) {
+        Enc b = begin(TX_KIND_ADD_REGION);
+        b.putLong(window);
+        b.putLong(region);
+        b.putInt(edge);
+        b.putInt(0);
         return finish(b);
     }
 
@@ -3404,6 +3470,21 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_window_prop with a constant new_document value (window 0, the primary surface). */
+    public static byte[] txSetWindowNewDocument(long window, boolean newDocument) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_NEW_DOCUMENT).putInt(SOURCE_CONST);
+        encodeValue(b, newDocument);
+        return finish(b);
+    }
+
+    /** set_window_prop with a signal-bound new_document value (window 0, the primary surface). */
+    public static byte[] txBindWindowNewDocument(long window, long signalId) {
+        Enc b = begin(TX_KIND_SET_WINDOW_PROP);
+        b.putLong(window).putInt(WPROP_NEW_DOCUMENT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
     /** set_entry_prop with a constant title value. */
     public static byte[] txSetEntryTitle(long entry, String title) {
         Enc b = begin(TX_KIND_SET_ENTRY_PROP);
@@ -3476,6 +3557,66 @@ public final class KayaWire {
     public static byte[] txBindSheetDetent(long sheet, long signalId) {
         Enc b = begin(TX_KIND_SET_SHEET_PROP);
         b.putLong(sheet).putInt(SHPROP_DETENT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_document_prop with a constant title value. */
+    public static byte[] txSetDocumentTitle(long document, String title) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_TITLE).putInt(SOURCE_CONST);
+        encodeValue(b, title);
+        return finish(b);
+    }
+
+    /** set_document_prop with a signal-bound title value. */
+    public static byte[] txBindDocumentTitle(long document, long signalId) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_TITLE).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_document_prop with a constant tooltip value. */
+    public static byte[] txSetDocumentTooltip(long document, String tooltip) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_TOOLTIP).putInt(SOURCE_CONST);
+        encodeValue(b, tooltip);
+        return finish(b);
+    }
+
+    /** set_document_prop with a signal-bound tooltip value. */
+    public static byte[] txBindDocumentTooltip(long document, long signalId) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_TOOLTIP).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_document_prop with a constant dirty value. */
+    public static byte[] txSetDocumentDirty(long document, boolean dirty) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_DIRTY).putInt(SOURCE_CONST);
+        encodeValue(b, dirty);
+        return finish(b);
+    }
+
+    /** set_document_prop with a signal-bound dirty value. */
+    public static byte[] txBindDocumentDirty(long document, long signalId) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_DIRTY).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_document_prop with a constant intercept_close value. */
+    public static byte[] txSetDocumentInterceptClose(long document, boolean interceptClose) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_INTERCEPT_CLOSE).putInt(SOURCE_CONST);
+        encodeValue(b, interceptClose);
+        return finish(b);
+    }
+
+    /** set_document_prop with a signal-bound intercept_close value. */
+    public static byte[] txBindDocumentInterceptClose(long document, long signalId) {
+        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);
+        b.putLong(document).putInt(DPROP_INTERCEPT_CLOSE).putInt(SOURCE_SIGNAL).putLong(signalId);
         return finish(b);
     }
 
@@ -3916,7 +4057,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED) {
             return null;
         }
         long id = b.getLong(8);
@@ -4143,6 +4284,50 @@ public final class KayaWire {
             }
             return new Occ(kind, 0L, java.util.List.of(), tail);
         }
+        if (kind == OCC_KIND_DOCUMENTS_CLOSE_REQUESTED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_DOCUMENT_MOVED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_DOCUMENTS_DETACHED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(b.getLong(at[0]));
+            at[0] += 8;
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
             // (handle, name, local_path). EMPTY IS CANCEL.
@@ -4186,12 +4371,12 @@ public final class KayaWire {
         }
         // Surface lifecycle records carry the surface id alone
         // (derived from the record shapes).
-        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED || kind == OCC_KIND_SHEET_DISMISSED || kind == OCC_KIND_DISMISS_REQUESTED) {
+        if (kind == OCC_KIND_CLOSE_REQUESTED || kind == OCC_KIND_WINDOW_CLOSED || kind == OCC_KIND_ENTRY_POPPED || kind == OCC_KIND_BACK_REQUESTED || kind == OCC_KIND_SHEET_DISMISSED || kind == OCC_KIND_DISMISS_REQUESTED || kind == OCC_KIND_DOCUMENT_CLOSE_REQUESTED || kind == OCC_KIND_DOCUMENT_CLOSED || kind == OCC_KIND_NEW_DOCUMENT_REQUESTED) {
             return new Occ(kind, id, java.util.List.of(), null);
         }
         // Surface-pair records (window, section): the SECOND id
         // keys the handler; the first rides as the payload.
-        if (kind == OCC_KIND_SECTION_SELECTED || kind == OCC_KIND_PLAYER_POSITION || kind == OCC_KIND_SEEK_COMPLETED || kind == OCC_KIND_CAPTURE_OVERRUN) {
+        if (kind == OCC_KIND_SECTION_SELECTED || kind == OCC_KIND_PLAYER_POSITION || kind == OCC_KIND_SEEK_COMPLETED || kind == OCC_KIND_CAPTURE_OVERRUN || kind == OCC_KIND_DOCUMENT_SELECTED) {
             return new Occ(kind, b.getLong(16), java.util.List.of(), id);
         }
         if (kind == OCC_KIND_UNDONE || kind == OCC_KIND_REDONE) {

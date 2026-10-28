@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc31d87678a5929d1n;
+export const SPEC_HASH = 0xa37dca454ad9d6ccn;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -158,6 +158,7 @@ export const WPROP_INSET = 8;
 export const WPROP_APPEARANCE = 9;
 export const WPROP_REMEMBER_FRAME = 10;
 export const WPROP_FULLSCREEN = 11;
+export const WPROP_NEW_DOCUMENT = 12;
 export const EPROP_TITLE = 1;
 export const EPROP_INTERCEPT_BACK = 2;
 export const SHPROP_TITLE = 1;
@@ -169,6 +170,13 @@ export const SPROP_TITLE = 1;
 export const SPROP_ICON = 2;
 export const SPROP_SYMBOL = 3;
 export const SPROP_BADGE = 4;
+export const DPROP_TITLE = 1;
+export const DPROP_TOOLTIP = 2;
+export const DPROP_DIRTY = 3;
+export const DPROP_INTERCEPT_CLOSE = 4;
+export const REGION_EDGE_LEADING = 1;
+export const REGION_EDGE_TRAILING = 2;
+export const REGION_EDGE_BOTTOM = 3;
 export const MENU_KIND_MENU = 1;
 export const MENU_KIND_ACTION = 2;
 export const MENU_KIND_TOGGLE = 3;
@@ -501,6 +509,11 @@ export const TX_ATTACH_DOCK = 85;
 export const TX_SET_DOCK_PLAYER = 86;
 export const TX_CONTEXT_LABEL_NODE = 87;
 export const TX_LIST_FONT_FAMILIES = 88;
+export const TX_ADD_DOCUMENT = 89;
+export const TX_SELECT_DOCUMENT = 90;
+export const TX_CLOSE_DOCUMENT = 91;
+export const TX_SET_DOCUMENT_PROP = 92;
+export const TX_ADD_REGION = 93;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -575,6 +588,11 @@ export const APPLY_ATTACH_DOCK = 73;
 export const APPLY_SET_DOCK_PLAYER = 74;
 export const APPLY_CONTEXT_LABEL_NODE = 75;
 export const APPLY_LIST_FONT_FAMILIES = 76;
+export const APPLY_ADD_DOCUMENT = 77;
+export const APPLY_SELECT_DOCUMENT = 78;
+export const APPLY_CLOSE_DOCUMENT = 79;
+export const APPLY_SET_DOCUMENT_PROP = 80;
+export const APPLY_ADD_REGION = 81;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -636,6 +654,13 @@ export const OCC_ACTIVATED = 58;
 export const OCC_SELECTION_CHANGED = 59;
 export const OCC_FONT_FAMILIES = 60;
 export const OCC_TEXT_SELECTED = 61;
+export const OCC_DOCUMENT_SELECTED = 62;
+export const OCC_DOCUMENT_CLOSE_REQUESTED = 63;
+export const OCC_DOCUMENTS_CLOSE_REQUESTED = 64;
+export const OCC_DOCUMENT_CLOSED = 65;
+export const OCC_NEW_DOCUMENT_REQUESTED = 66;
+export const OCC_DOCUMENT_MOVED = 67;
+export const OCC_DOCUMENTS_DETACHED = 68;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1560,6 +1585,47 @@ export function tx_context_label_node(node: number, item: number, level: number,
 export function tx_list_font_families(): Uint8Array {
   enc.begin();
   return enc.end(TX_LIST_FONT_FAMILIES);
+}
+
+/** Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes. */
+export function tx_add_document(window: number, document: number): Uint8Array {
+  enc.begin();
+  enc.u64(window);
+  enc.u64(document);
+  return enc.end(TX_ADD_DOCUMENT);
+}
+
+/** Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected. */
+export function tx_select_document(document: number): Uint8Array {
+  enc.begin();
+  enc.u64(document);
+  return enc.end(TX_SELECT_DOCUMENT);
+}
+
+/** Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state. */
+export function tx_close_document(document: number): Uint8Array {
+  enc.begin();
+  enc.u64(document);
+  return enc.end(TX_CLOSE_DOCUMENT);
+}
+
+/** Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements. */
+export function tx_set_document_prop(document: number, prop: number, source: number): Uint8Array {
+  enc.begin();
+  enc.u64(document);
+  enc.u32(prop);
+  enc.u32(source);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed. */
+export function tx_add_region(window: number, region: number, edge: number): Uint8Array {
+  enc.begin();
+  enc.u64(window);
+  enc.u64(region);
+  enc.u32(edge);
+  enc.u32(0);
+  return enc.end(TX_ADD_REGION);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -3020,6 +3086,18 @@ export function tx_bind_window_fullscreen(window: number, signal_id: number): Ui
   return enc.end(TX_SET_WINDOW_PROP);
 }
 
+/** set_window_prop with a constant new_document value; window 0, the primary surface. */
+export function tx_set_window_new_document(window: number, new_document: boolean): Uint8Array {
+  enc.begin(); enc.u64(window); enc.u32(WPROP_NEW_DOCUMENT); enc.u32(SOURCE_CONST); enc.value(new_document);
+  return enc.end(TX_SET_WINDOW_PROP);
+}
+
+/** set_window_prop with a signal-bound new_document value; window 0, the primary surface. */
+export function tx_bind_window_new_document(window: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(window); enc.u32(WPROP_NEW_DOCUMENT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_WINDOW_PROP);
+}
+
 /** set_entry_prop with a constant title value. */
 export function tx_set_entry_title(entry: number, title: string): Uint8Array {
   enc.begin(); enc.u64(entry); enc.u32(EPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -3078,6 +3156,54 @@ export function tx_set_sheet_detent(sheet: number, detent: number): Uint8Array {
 export function tx_bind_sheet_detent(sheet: number, signal_id: number): Uint8Array {
   enc.begin(); enc.u64(sheet); enc.u32(SHPROP_DETENT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
   return enc.end(TX_SET_SHEET_PROP);
+}
+
+/** set_document_prop with a constant title value. */
+export function tx_set_document_title(document: number, title: string): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a signal-bound title value. */
+export function tx_bind_document_title(document: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_TITLE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a constant tooltip value. */
+export function tx_set_document_tooltip(document: number, tooltip: string): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_TOOLTIP); enc.u32(SOURCE_CONST); enc.value(tooltip);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a signal-bound tooltip value. */
+export function tx_bind_document_tooltip(document: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_TOOLTIP); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a constant dirty value. */
+export function tx_set_document_dirty(document: number, dirty: boolean): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_DIRTY); enc.u32(SOURCE_CONST); enc.value(dirty);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a signal-bound dirty value. */
+export function tx_bind_document_dirty(document: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_DIRTY); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a constant intercept_close value. */
+export function tx_set_document_intercept_close(document: number, intercept_close: boolean): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_INTERCEPT_CLOSE); enc.u32(SOURCE_CONST); enc.value(intercept_close);
+  return enc.end(TX_SET_DOCUMENT_PROP);
+}
+
+/** set_document_prop with a signal-bound intercept_close value. */
+export function tx_bind_document_intercept_close(document: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(document); enc.u32(DPROP_INTERCEPT_CLOSE); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_DOCUMENT_PROP);
 }
 
 /** set_section_prop with a constant title value. */
@@ -3340,7 +3466,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -3592,6 +3718,54 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     }
     return { kind, id: 0, keys: [], payload: tail };
   }
+  if (kind === OCC_DOCUMENTS_CLOSE_REQUESTED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_DOCUMENT_MOVED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_DOCUMENTS_DETACHED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u64(buf, at));
+    at += 8;
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);
     const count = read_u32(buf, 16);
@@ -3625,11 +3799,11 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     const [clip] = parse_clip(buf, 16);
     return { kind, id: request, keys: [], payload: clip };
   }
-  if ([OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED].includes(kind)) {
+  if ([OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED].includes(kind)) {
     // Surface lifecycle records carry the surface id alone.
     return { kind, id: read_u64(buf, 8), keys: [], payload: null };
   }
-  if ([OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN].includes(kind)) {
+  if ([OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN, OCC_DOCUMENT_SELECTED].includes(kind)) {
     // Surface-pair records (window, section): the SECOND id keys the
     // handler; the first rides as the payload.
     return { kind, id: read_u64(buf, 16), keys: [], payload: read_u64(buf, 8) };

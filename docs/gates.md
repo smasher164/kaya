@@ -2117,6 +2117,19 @@ arm's pin, its drawing order, the ground under the pinned segment and the
 position recorders inside the pin, and `expect_header_shown` is its scene
 step. 67 watched negatives, counts printed, red demanded on every run)
 
+## tools/check-doctabs.py
+
+`tools/check-doctabs.py` (DOCUMENT TABS, docs/doctabs-plan.md §7. The Mac's
+native strip is PUBLIC API ONLY, the maintainer's ruling
+(docs/native-tabs-study.md Q1): the SwiftUI interpreter's document block may
+not name AppKit's private strip classes or reach private API through
+selectors or key-value coding, because a private read works until the next
+macOS and Ghostty's issue list is what follows. And every DOCUMENT_PROPS key
+has an apply ARM on each backend (the arm, never the constant every
+interpreter declares) or that backend's `depth_stub("doctabs")`, so a dropped
+tooltip or mark is caught before a review page. Two watched negatives,
+perturbed in memory with their counts printed, red on every run)
+
 ## tools/check-keyed.py
 
 `tools/check-keyed.py` (the gate cache is honest: a change inside a

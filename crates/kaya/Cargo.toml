@@ -583,6 +583,10 @@ name = "sheet"
 path = "../../guests/rust/sheet.rs"
 
 [[example]]
+name = "doctabs"
+path = "../../guests/rust/doctabs.rs"
+
+[[example]]
 name = "toast"
 path = "../../guests/rust/toast.rs"
 

@@ -16,6 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::protocol::{
     ApplyOp, CollectionId, CommandKind, EntryProp, SheetProp, Key, MenuItemId, MenuItemKind, MenuProp,
     NativeRange, NativeRun, Occurrence, Prop, PropValue, Record, SectionProp, SignalId,
+    DocumentProp,
     TextRange, TextRun,
     Transaction, TxOp, UndoDelta, UndoEntry, UndoOrder, Value, ValueType, WidgetId, WidgetKind,
     WindowId, WindowProp,
@@ -825,6 +826,11 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::AddSection { .. } => UndoVerdict::Refused("add_section"),
         TxOp::SelectSection { .. } => UndoVerdict::Refused("select_section"),
         TxOp::SetSectionProp { .. } => UndoVerdict::Refused("set_section_prop"),
+        TxOp::AddDocument { .. } => UndoVerdict::Refused("add_document"),
+        TxOp::SelectDocument { .. } => UndoVerdict::Refused("select_document"),
+        TxOp::CloseDocument { .. } => UndoVerdict::Refused("close_document"),
+        TxOp::SetDocumentProp { .. } => UndoVerdict::Refused("set_document_prop"),
+        TxOp::AddRegion { .. } => UndoVerdict::Refused("add_region"),
         TxOp::MenuItemCreate { .. } => UndoVerdict::Refused("menu_item_create"),
         TxOp::MenuItemAppend { .. } => UndoVerdict::Refused("menu_item_append"),
         TxOp::MenubarAppend { .. } => UndoVerdict::Refused("menubar_append"),
@@ -916,6 +922,21 @@ pub(crate) struct Scene {
     /// both move (docs/fullscreen-plan.md §1); absent is false.
     fullscreen: HashMap<WindowId, bool>,
     section_bindings: HashMap<SignalId, Vec<(WindowId, SectionProp)>>,
+    /// Live documents (docs/doctabs-plan.md §2): document -> its window,
+    /// each window's documents in add order, and its active one. Documents
+    /// share the surface namespace and die by close_document, the user's
+    /// close, or their window.
+    document_of: HashMap<WindowId, WindowId>,
+    documents: HashMap<WindowId, Vec<WindowId>>,
+    active_document: HashMap<WindowId, WindowId>,
+    document_bindings: HashMap<SignalId, Vec<(WindowId, DocumentProp)>>,
+    /// Shared regions (§1.7): region -> its window, and each window's
+    /// edges taken.
+    region_of: HashMap<WindowId, WindowId>,
+    window_regions: HashMap<WindowId, Vec<crate::protocol::RegionEdge>>,
+    /// The window props the documents' root walls read (§2.4).
+    window_dirty: HashMap<WindowId, bool>,
+    window_panes: HashMap<WindowId, i64>,
     /// Live docks (docs/styling-pass-plan.md Y8): dock -> its window, and each
     /// window's one dock. Docks share the surface namespace and die with
     /// their window.
@@ -2334,7 +2355,7 @@ fn check_window_prop_value(prop: WindowProp, value: &Value) {
                  entries — {n} is not one (docs/multicolumn-plan.md)"
             );
         }
-        (WindowProp::Dirty | WindowProp::RememberFrame | WindowProp::Fullscreen, Value::Bool(_)) => {}
+        (WindowProp::Dirty | WindowProp::RememberFrame | WindowProp::Fullscreen | WindowProp::NewDocument, Value::Bool(_)) => {}
         (WindowProp::Width | WindowProp::Height, Value::F64(v)) => {
             assert!(
                 v.is_finite() && *v > 0.0,
@@ -2388,6 +2409,14 @@ fn check_sheet_prop_value(prop: SheetProp, value: &Value) {
             "kaya: sheet property Detent rejects value {v:?} — medium or large"
         ),
         (p, v) => panic!("kaya: sheet property {p:?} rejects value {v:?}"),
+    }
+}
+
+fn check_document_prop_value(prop: DocumentProp, value: &Value) {
+    match (prop, value) {
+        (DocumentProp::Title | DocumentProp::Tooltip, Value::Str(_)) => {}
+        (DocumentProp::Dirty | DocumentProp::InterceptClose, Value::Bool(_)) => {}
+        (p, v) => panic!("kaya: document property {p:?} rejects value {v:?}"),
     }
 }
 
@@ -4445,6 +4474,20 @@ impl Scene {
                         }
                     }
                     self.selected_section.remove(&window);
+                    for document in self.documents.remove(&window).unwrap_or_default() {
+                        self.document_of.remove(&document);
+                        self.mounted_windows.remove(&document);
+                    }
+                    self.active_document.remove(&window);
+                    self.region_of.retain(|region, w| {
+                        if *w == window {
+                            self.mounted_windows.remove(region);
+                        }
+                        *w != window
+                    });
+                    self.window_regions.remove(&window);
+                    self.window_dirty.remove(&window);
+                    self.window_panes.remove(&window);
                     self.fullscreen.remove(&window);
                     if let Some(dock) = self.window_dock.remove(&window) {
                         self.dock_of.remove(&dock);
@@ -4858,6 +4901,11 @@ impl Scene {
                          create_window or add_section first (0 is the primary)"
                     );
                     assert!(
+                        !self.documents.contains_key(&window),
+                        "kaya: push_entry onto window {window:?}, which holds documents: \
+                         a window with documents has no stack in v1 (docs/doctabs-plan.md Q8)"
+                    );
+                    assert!(
                         entry.0 != 0,
                         "kaya: surface id 0 is the primary window, not an entry"
                     );
@@ -5032,6 +5080,12 @@ impl Scene {
                          create_window first (0 is the primary)"
                     );
                     assert!(
+                        !self.documents.contains_key(&window),
+                        "kaya: add_section onto window {window:?}, which holds documents: \
+                         a window has sections or documents, not both, in v1 \
+                         (docs/doctabs-plan.md Q8)"
+                    );
+                    assert!(
                         section.0 != 0,
                         "kaya: surface id 0 is the primary window, not a section"
                     );
@@ -5099,6 +5153,112 @@ impl Scene {
                             panic!("kaya: section properties cannot bind element sources")
                         }
                     }
+                }
+                TxOp::AddDocument { window, document } => {
+                    assert!(
+                        window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&window),
+                        "kaya: add_document onto unknown window {window:?} — create_window \
+                         first (0 is the primary)"
+                    );
+                    assert!(document.0 != 0, "kaya: surface id 0 is the primary window, not a document");
+                    assert!(
+                        document.0 & INTERNAL_BIT == 0,
+                        "kaya: document id {document:?} uses the reserved internal bit"
+                    );
+                    assert!(!self.surface_exists(document), "kaya: surface id {document:?} already exists");
+                    assert!(
+                        !self.sections.contains_key(&window),
+                        "kaya: add_document onto window {window:?}, which has sections: a \
+                         window has sections or documents, not both, in v1 \
+                         (docs/doctabs-plan.md Q8)"
+                    );
+                    assert!(
+                        self.nav_stacks.get(&window).is_none_or(|s| s.is_empty()),
+                        "kaya: add_document onto window {window:?}, which has a navigation \
+                         stack: a window with documents has none in v1 (docs/doctabs-plan.md Q8)"
+                    );
+                    assert!(
+                        self.window_panes.get(&window).copied().unwrap_or(1) <= 1,
+                        "kaya: add_document onto window {window:?}, which declares panes above \
+                         1: documents fill the body (docs/doctabs-plan.md Q8)"
+                    );
+                    assert!(
+                        !self.window_dirty.get(&window).copied().unwrap_or(false),
+                        "kaya: add_document onto window {window:?}, whose own `dirty` is set: the \
+                         documents carry the unsaved mark (docs/doctabs-plan.md §1.4)"
+                    );
+                    self.document_of.insert(document, window);
+                    self.documents.entry(window).or_default().push(document);
+                    self.active_document.entry(window).or_insert(document);
+                    out.push(ApplyOp::AddDocument { window, document });
+                }
+                TxOp::SelectDocument { document } => {
+                    let window = *self.document_of.get(&document).unwrap_or_else(|| {
+                        panic!(
+                            "kaya: select_document of unknown document {document:?} — \
+                             add_document first (ids are never reused)"
+                        )
+                    });
+                    self.active_document.insert(window, document);
+                    out.push(ApplyOp::SelectDocument { window, document });
+                }
+                TxOp::CloseDocument { document } => {
+                    assert!(
+                        self.document_of.contains_key(&document),
+                        "kaya: close_document of unknown document {document:?} (ids are \
+                         never reused)"
+                    );
+                    let window = self.forget_document(document);
+                    out.push(ApplyOp::CloseDocument { window, document });
+                }
+                TxOp::SetDocumentProp { document, prop, value } => {
+                    assert!(
+                        self.document_of.contains_key(&document),
+                        "kaya: document prop on unknown document {document:?} — add_document \
+                         first (ids are never reused)"
+                    );
+                    match value {
+                        PropValue::Const(v) => {
+                            check_document_prop_value(prop, &v);
+                            out.push(ApplyOp::SetDocumentProp { document, prop, value: v })
+                        }
+                        PropValue::Signal(id) => {
+                            let current = self
+                                .signals
+                                .get(&id)
+                                .unwrap_or_else(|| panic!("kaya: binding to unknown signal {id:?}"))
+                                .clone();
+                            check_document_prop_value(prop, &current);
+                            self.document_bindings.entry(id).or_default().push((document, prop));
+                            out.push(ApplyOp::SetDocumentProp { document, prop, value: current });
+                        }
+                        PropValue::Element { .. } => {
+                            panic!("kaya: document properties cannot bind element sources")
+                        }
+                    }
+                }
+                TxOp::AddRegion { window, region, edge } => {
+                    assert!(
+                        self.documents.contains_key(&window),
+                        "kaya: add_region onto window {window:?}, which holds no documents: a \
+                         region is shared by a window's documents, so add_document first \
+                         (docs/doctabs-plan.md §1.7)"
+                    );
+                    assert!(region.0 != 0, "kaya: surface id 0 is the primary window, not a region");
+                    assert!(
+                        region.0 & INTERNAL_BIT == 0,
+                        "kaya: region id {region:?} uses the reserved internal bit"
+                    );
+                    assert!(!self.surface_exists(region), "kaya: surface id {region:?} already exists");
+                    let edges = self.window_regions.entry(window).or_default();
+                    assert!(
+                        !edges.contains(&edge),
+                        "kaya: window {window:?} already has a {edge:?} region: one per edge \
+                         (docs/doctabs-plan.md §1.7)"
+                    );
+                    edges.push(edge);
+                    self.region_of.insert(region, window);
+                    out.push(ApplyOp::AddRegion { window, region, edge });
                 }
                 TxOp::SetEntryProp { entry, prop, value } => {
                     assert!(
@@ -5316,10 +5476,12 @@ impl Scene {
                             || self.nav_entries.contains_key(&window)
                             || self.section_of.contains_key(&window)
                             || self.sheets.contains_key(&window)
-                            || self.dock_of.contains_key(&window),
+                            || self.dock_of.contains_key(&window)
+                            || self.document_of.contains_key(&window)
+                            || self.region_of.contains_key(&window),
                         "kaya: mount into unknown surface {window:?} — \
-                         create_window, push_entry, add_section, present_sheet or \
-                         attach_dock first (0 is the primary)"
+                         create_window, push_entry, add_section, present_sheet, \
+                         attach_dock, add_document or add_region first (0 is the primary)"
                     );
                     assert!(
                         self.widgets.contains_key(&root),
@@ -6385,6 +6547,17 @@ impl Scene {
                         prop: *prop,
                         value: value.clone(),
                     });
+                }
+            }
+            if let Some(bound) = self.document_bindings.get(&id) {
+                for (document, prop) in bound {
+                    if self.document_of.contains_key(document) {
+                        out.push(ApplyOp::SetDocumentProp {
+                            document: *document,
+                            prop: *prop,
+                            value: value.clone(),
+                        });
+                    }
                 }
             }
             if let Some(bound) = self.sheet_bindings.get(&id) {
@@ -8006,9 +8179,140 @@ impl Scene {
     }
 
     fn mirror_window_prop(&mut self, window: WindowId, prop: WindowProp, value: &Value) {
-        if let (WindowProp::Fullscreen, Value::Bool(on)) = (prop, value) {
-            self.fullscreen.insert(window, *on);
+        match (prop, value) {
+            (WindowProp::Fullscreen, Value::Bool(on)) => {
+                self.fullscreen.insert(window, *on);
+            }
+            (WindowProp::Dirty, Value::Bool(on)) => {
+                assert!(
+                    !*on || !self.documents.contains_key(&window),
+                    "kaya: window {window:?} holds documents, so its documents carry the \
+                     unsaved mark: set `dirty` on the document, not the window \
+                     (docs/doctabs-plan.md §1.4)"
+                );
+                self.window_dirty.insert(window, *on);
+            }
+            (WindowProp::Panes, Value::I64(n)) => {
+                assert!(
+                    *n <= 1 || !self.documents.contains_key(&window),
+                    "kaya: window {window:?} holds documents, which fill its body: panes \
+                     above 1 are refused there in v1 (docs/doctabs-plan.md Q8)"
+                );
+                self.window_panes.insert(window, *n);
+            }
+            _ => {}
         }
+    }
+
+    /// Any live surface id, of every kind: the one namespace's freshness test.
+    fn surface_exists(&self, id: WindowId) -> bool {
+        self.windows.contains(&id)
+            || self.nav_entries.contains_key(&id)
+            || self.section_of.contains_key(&id)
+            || self.sheets.contains_key(&id)
+            || self.dock_of.contains_key(&id)
+            || self.document_of.contains_key(&id)
+            || self.region_of.contains_key(&id)
+    }
+
+    /// Forget a document: its tree goes the way a popped entry's does.
+    fn forget_document(&mut self, document: WindowId) -> WindowId {
+        let window = self
+            .document_of
+            .remove(&document)
+            .unwrap_or_else(|| panic!("kaya: close of unknown document {document:?}"));
+        if let Some(set) = self.documents.get_mut(&window) {
+            set.retain(|d| *d != document);
+        }
+        if self.active_document.get(&window) == Some(&document) {
+            match self.documents.get(&window).and_then(|s| s.first()).copied() {
+                Some(next) => {
+                    self.active_document.insert(window, next);
+                }
+                None => {
+                    self.active_document.remove(&window);
+                }
+            }
+        }
+        self.mounted_windows.remove(&document);
+        window
+    }
+
+    /// The user made a document active (post-fact).
+    pub(crate) fn user_selected_document(&mut self, window: WindowId, document: WindowId) {
+        assert!(
+            self.document_of.get(&document) == Some(&window),
+            "kaya: user selected {document:?} which is not a document of {window:?}"
+        );
+        self.active_document.insert(window, document);
+    }
+
+    /// The user reordered a document or dragged it into another existing
+    /// window (post-fact; docs/doctabs-plan.md §1.2).
+    pub(crate) fn user_moved_document(&mut self, document: WindowId, window: WindowId, index: u32) {
+        let from = *self
+            .document_of
+            .get(&document)
+            .unwrap_or_else(|| panic!("kaya: user moved unknown document {document:?}"));
+        assert!(
+            window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&window),
+            "kaya: user moved {document:?} into unknown window {window:?}"
+        );
+        if let Some(set) = self.documents.get_mut(&from) {
+            set.retain(|d| *d != document);
+        }
+        if self.active_document.get(&from) == Some(&document) {
+            match self.documents.get(&from).and_then(|s| s.first()).copied() {
+                Some(next) => {
+                    self.active_document.insert(from, next);
+                }
+                None => {
+                    self.active_document.remove(&from);
+                }
+            }
+        }
+        let set = self.documents.entry(window).or_default();
+        let at = (index as usize).min(set.len());
+        set.insert(at, document);
+        self.document_of.insert(document, window);
+        if from != window {
+            self.active_document.insert(window, document);
+        }
+    }
+
+    /// The user tore documents out of `source` into a native window the
+    /// platform made: the core names that window (an id in the internal
+    /// range, which no guest id uses) and moves the documents into it.
+    pub(crate) fn user_detached_documents(&mut self, source: WindowId, documents: &[WindowId]) -> WindowId {
+        self.next_internal += 1;
+        let window = WindowId(INTERNAL_BIT | self.next_internal);
+        self.windows.insert(window);
+        for (at, document) in documents.iter().enumerate() {
+            assert!(
+                self.document_of.get(document) == Some(&source),
+                "kaya: user detached {document:?} which is not a document of {source:?}"
+            );
+            self.user_moved_document(*document, window, at as u32);
+        }
+        if let Some(first) = documents.first() {
+            self.active_document.insert(window, *first);
+        }
+        window
+    }
+
+    /// An unarmed document closed through the user's act (post-fact).
+    pub(crate) fn user_closed_document(&mut self, document: WindowId) {
+        self.forget_document(document);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn documents_of(&self, window: WindowId) -> Vec<WindowId> {
+        self.documents.get(&window).cloned().unwrap_or_default()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn active_document_of(&self, window: WindowId) -> Option<WindowId> {
+        self.active_document.get(&window).copied()
     }
 
     #[cfg(test)]
@@ -14499,6 +14803,277 @@ mod tests {
             prop: WindowProp::Fullscreen,
             value: PropValue::Const(Value::I64(1)),
         }]);
+    }
+
+    /// docs/doctabs-plan.md §2: documents are surfaces with a lifecycle.
+    /// The first added becomes active, select and close move the mirror,
+    /// a close forgets the tree, a bound prop follows its signal, regions
+    /// mount, and the user's acts reconcile.
+    #[test]
+    fn documents_are_surfaces_that_close() {
+        let mut scene = Scene::new();
+        let ops = scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(7) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(9) },
+            TxOp::CreateSignal { id: SignalId(3), initial: Value::Bool(false) },
+            TxOp::SetDocumentProp {
+                document: WindowId(8),
+                prop: DocumentProp::Dirty,
+                value: PropValue::Signal(SignalId(3)),
+            },
+            TxOp::SetDocumentProp {
+                document: WindowId(7),
+                prop: DocumentProp::Title,
+                value: PropValue::Const(Value::from("notes")),
+            },
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::Mount { window: WindowId(7), root: WidgetId(1) },
+            TxOp::AddRegion {
+                window: DEFAULT_WINDOW,
+                region: WindowId(20),
+                edge: crate::protocol::RegionEdge::Leading,
+            },
+            TxOp::CreateWidget { id: WidgetId(2), kind: WidgetKind::Column },
+            TxOp::Mount { window: WindowId(20), root: WidgetId(2) },
+        ]);
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::AddRegion { region, .. } if region.0 == 20)));
+        assert_eq!(scene.active_document_of(DEFAULT_WINDOW), Some(WindowId(7)));
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(7), WindowId(8), WindowId(9)]);
+        let ops = scene.apply(vec![
+            TxOp::SelectDocument { document: WindowId(8) },
+            TxOp::WriteSignal { id: SignalId(3), value: Value::Bool(true) },
+        ]);
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SelectDocument { window, document } if *window == DEFAULT_WINDOW && document.0 == 8
+        )));
+        assert!(ops.iter().any(|op| matches!(
+            op,
+            ApplyOp::SetDocumentProp { document, prop: DocumentProp::Dirty, value: Value::Bool(true) }
+                if document.0 == 8
+        )));
+        assert_eq!(scene.active_document_of(DEFAULT_WINDOW), Some(WindowId(8)));
+        let ops = scene.apply(vec![TxOp::CloseDocument { document: WindowId(8) }]);
+        assert!(ops.iter().any(|op| matches!(op, ApplyOp::CloseDocument { document, .. } if document.0 == 8)));
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(7), WindowId(9)]);
+        assert_eq!(scene.active_document_of(DEFAULT_WINDOW), Some(WindowId(7)));
+        // A closed document's binding no longer reaches the backend.
+        let ops = scene.apply(vec![TxOp::WriteSignal { id: SignalId(3), value: Value::Bool(false) }]);
+        assert!(!ops.iter().any(|op| matches!(op, ApplyOp::SetDocumentProp { .. })));
+        scene.user_selected_document(DEFAULT_WINDOW, WindowId(9));
+        assert_eq!(scene.active_document_of(DEFAULT_WINDOW), Some(WindowId(9)));
+        scene.user_closed_document(WindowId(7));
+        assert!(!scene.mounted_windows.contains_key(&WindowId(7)));
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(9)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "close_document of unknown document")]
+    fn a_closed_document_cannot_close_again() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(7) },
+            TxOp::CloseDocument { document: WindowId(7) },
+            TxOp::CloseDocument { document: WindowId(7) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "select_document of unknown document")]
+    fn selecting_an_unknown_document_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SelectDocument { document: WindowId(7) }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "document prop on unknown document")]
+    fn a_prop_on_an_unknown_document_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::SetDocumentProp {
+            document: WindowId(7),
+            prop: DocumentProp::Dirty,
+            value: PropValue::Const(Value::Bool(true)),
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "rejects value")]
+    fn a_document_title_is_a_string() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(7) },
+            TxOp::SetDocumentProp {
+                document: WindowId(7),
+                prop: DocumentProp::Title,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already exists")]
+    fn document_ids_share_the_surface_namespace() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: WindowId(0), section: WindowId(7) },
+        ]);
+        scene.apply(vec![TxOp::AddDocument { window: WindowId(0), document: WindowId(7) }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "sections or documents, not both")]
+    fn a_window_with_sections_refuses_documents() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "sections or documents, not both")]
+    fn a_window_with_documents_refuses_sections() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddSection { window: DEFAULT_WINDOW, section: WindowId(7) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "has no stack in v1")]
+    fn a_window_with_documents_refuses_a_stack() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(9) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "which has a navigation stack")]
+    fn a_window_with_a_stack_refuses_documents() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::PushEntry { window: DEFAULT_WINDOW, entry: WindowId(9) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "panes above 1")]
+    fn a_window_with_documents_refuses_panes() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::SetWindowProp {
+                window: DEFAULT_WINDOW,
+                prop: WindowProp::Panes,
+                value: PropValue::Const(Value::I64(2)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "set `dirty` on the document")]
+    fn a_window_with_documents_refuses_its_own_dirty() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::SetWindowProp {
+                window: DEFAULT_WINDOW,
+                prop: WindowProp::Dirty,
+                value: PropValue::Const(Value::Bool(true)),
+            },
+        ]);
+    }
+
+    /// docs/doctabs-plan.md §1.2 (Q1 ruled anew): a tear-out is a new window
+    /// the core names, the documents keep their ids and move into it, and a
+    /// drag into another window moves one document between existing windows.
+    #[test]
+    fn a_tear_out_is_a_new_window() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(9) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(10) },
+        ]);
+        let torn = scene.user_detached_documents(DEFAULT_WINDOW, &[WindowId(9)]);
+        assert!(torn.0 & INTERNAL_BIT != 0, "a core-made window id is in the internal range");
+        assert_eq!(scene.documents_of(torn), vec![WindowId(9)]);
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(8), WindowId(10)]);
+        assert_eq!(scene.active_document_of(torn), Some(WindowId(9)));
+        // The app declares the new window's chrome and regions like any other.
+        scene.apply(vec![
+            TxOp::AddRegion {
+                window: torn,
+                region: WindowId(30),
+                edge: crate::protocol::RegionEdge::Leading,
+            },
+            TxOp::SetDocumentProp {
+                document: WindowId(9),
+                prop: DocumentProp::Title,
+                value: PropValue::Const(Value::from("b")),
+            },
+        ]);
+        scene.user_moved_document(WindowId(9), DEFAULT_WINDOW, 0);
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(9), WindowId(8), WindowId(10)]);
+        assert!(scene.documents_of(torn).is_empty());
+        scene.user_moved_document(WindowId(10), DEFAULT_WINDOW, 0);
+        assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(10), WindowId(9), WindowId(8)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "user moved unknown document")]
+    fn a_move_of_an_unknown_document_fails_loudly() {
+        let mut scene = Scene::new();
+        scene.user_moved_document(WindowId(9), DEFAULT_WINDOW, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "holds no documents")]
+    fn a_region_needs_documents() {
+        let mut scene = Scene::new();
+        scene.apply(vec![TxOp::AddRegion {
+            window: DEFAULT_WINDOW,
+            region: WindowId(20),
+            edge: crate::protocol::RegionEdge::Leading,
+        }]);
+    }
+
+    #[test]
+    #[should_panic(expected = "one per edge")]
+    fn one_region_per_edge() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddRegion {
+                window: DEFAULT_WINDOW,
+                region: WindowId(20),
+                edge: crate::protocol::RegionEdge::Bottom,
+            },
+            TxOp::AddRegion {
+                window: DEFAULT_WINDOW,
+                region: WindowId(21),
+                edge: crate::protocol::RegionEdge::Bottom,
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "already exists")]
+    fn a_region_id_cannot_be_a_document() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddRegion {
+                window: DEFAULT_WINDOW,
+                region: WindowId(8),
+                edge: crate::protocol::RegionEdge::Leading,
+            },
+        ]);
     }
 
     #[test]

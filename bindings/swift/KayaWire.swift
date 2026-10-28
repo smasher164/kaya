@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xc31d87678a5929d1
+let kayaSpecHash: UInt64 = 0xa37dca454ad9d6cc
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -930,6 +930,47 @@ struct KayaTx {
     /// List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
     mutating func listFontFamilies() {
         let kayaAt = self.begin(UInt16(KAYA_TX_LIST_FONT_FAMILIES))
+        self.end(kayaAt)
+    }
+
+    /// Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes.
+    mutating func addDocument(_ window: UInt64, _ document: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_ADD_DOCUMENT))
+        self.u64(window)
+        self.u64(document)
+        self.end(kayaAt)
+    }
+
+    /// Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected.
+    mutating func selectDocument(_ document: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SELECT_DOCUMENT))
+        self.u64(document)
+        self.end(kayaAt)
+    }
+
+    /// Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state.
+    mutating func closeDocument(_ document: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CLOSE_DOCUMENT))
+        self.u64(document)
+        self.end(kayaAt)
+    }
+
+    /// Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements.
+    mutating func setDocumentProp(_ document: UInt64, _ prop: UInt32, _ source: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(prop)
+        self.u32(source)
+        self.end(kayaAt)
+    }
+
+    /// Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed.
+    mutating func addRegion(_ window: UInt64, _ region: UInt64, _ edge: UInt32) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_ADD_REGION))
+        self.u64(window)
+        self.u64(region)
+        self.u32(edge)
+        self.u32(0)
         self.end(kayaAt)
     }
 
@@ -3457,6 +3498,26 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_window_prop with a constant new_document value (window 0, the primary surface).
+    mutating func setWindowNewDocument(_ window: UInt64, _ newDocument: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_NEW_DOCUMENT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(newDocument))
+        self.end(kayaAt)
+    }
+
+    /// set_window_prop with a signal-bound new_document value (window 0, the primary surface).
+    mutating func bindWindowNewDocument(_ window: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
+        self.u64(window)
+        self.u32(UInt32(KAYA_WPROP_NEW_DOCUMENT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
     /// set_entry_prop with a constant title value.
     mutating func setEntryTitle(_ entry: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_ENTRY_PROP))
@@ -3552,6 +3613,86 @@ struct KayaTx {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_SHEET_PROP))
         self.u64(sheet)
         self.u32(UInt32(KAYA_SHPROP_DETENT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a constant title value.
+    mutating func setDocumentTitle(_ document: UInt64, _ title: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(title))
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a signal-bound title value.
+    mutating func bindDocumentTitle(_ document: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_TITLE))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a constant tooltip value.
+    mutating func setDocumentTooltip(_ document: UInt64, _ tooltip: String) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_TOOLTIP))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.str(tooltip))
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a signal-bound tooltip value.
+    mutating func bindDocumentTooltip(_ document: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_TOOLTIP))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a constant dirty value.
+    mutating func setDocumentDirty(_ document: UInt64, _ dirty: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_DIRTY))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(dirty))
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a signal-bound dirty value.
+    mutating func bindDocumentDirty(_ document: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_DIRTY))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a constant intercept_close value.
+    mutating func setDocumentInterceptClose(_ document: UInt64, _ interceptClose: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_INTERCEPT_CLOSE))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(interceptClose))
+        self.end(kayaAt)
+    }
+
+    /// set_document_prop with a signal-bound intercept_close value.
+    mutating func bindDocumentInterceptClose(_ document: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))
+        self.u64(document)
+        self.u32(UInt32(KAYA_DPROP_INTERCEPT_CLOSE))
         self.u32(UInt32(KAYA_SOURCE_SIGNAL))
         self.u64(signalId)
         self.end(kayaAt)
@@ -4001,6 +4142,13 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_SELECTION_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_FONT_FAMILIES)
             || kind == UInt16(KAYA_OCCURRENCE_TEXT_SELECTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_SELECTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSED)
+            || kind == UInt16(KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_MOVED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_DETACHED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4425,6 +4573,88 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             }
             return (kind, 0, [], nil, [], nil, nil, tail)
         }
+        if kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            do {
+                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+                at += 8
+                tail.append(.i64(Int64(count)))
+                for _ in 0..<count { tail.append(value()) }
+            }
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_MOVED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            at += 4
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_DETACHED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at, as: UInt64.self))))
+            at += 8
+            do {
+                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+                at += 8
+                tail.append(.i64(Int64(count)))
+                for _ in 0..<count { tail.append(value()) }
+            }
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file
             // (handle, name, local_path). EMPTY IS CANCEL.
@@ -4474,6 +4704,9 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_BACK_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_SHEET_DISMISSED)
             || kind == UInt16(KAYA_OCCURRENCE_DISMISS_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSED)
+            || kind == UInt16(KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED)
         {
             return (kind, id, [], nil, [], nil, nil, [])
         }
@@ -4483,6 +4716,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_PLAYER_POSITION)
             || kind == UInt16(KAYA_OCCURRENCE_SEEK_COMPLETED)
             || kind == UInt16(KAYA_OCCURRENCE_CAPTURE_OVERRUN)
+            || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_SELECTED)
         {
             let section = raw.loadUnaligned(fromByteOffset: 16, as: UInt64.self)
             return (kind, section, [], .i64(Int64(bitPattern: id)), [], nil, nil, [])

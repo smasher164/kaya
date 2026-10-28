@@ -102,6 +102,14 @@ pub(crate) const REC_ACTIVATED: u16 = 58;
 pub(crate) const REC_SELECTION_CHANGED: u16 = 59;
 pub(crate) const REC_FONT_FAMILIES: u16 = 60;
 pub(crate) const REC_TEXT_SELECTED: u16 = 61;
+/// docs/doctabs-plan.md §2.1.
+pub(crate) const REC_DOCUMENT_SELECTED: u16 = 62;
+pub(crate) const REC_DOCUMENT_CLOSE_REQUESTED: u16 = 63;
+pub(crate) const REC_DOCUMENTS_CLOSE_REQUESTED: u16 = 64;
+pub(crate) const REC_DOCUMENT_CLOSED: u16 = 65;
+pub(crate) const REC_NEW_DOCUMENT_REQUESTED: u16 = 66;
+pub(crate) const REC_DOCUMENT_MOVED: u16 = 67;
+pub(crate) const REC_DOCUMENTS_DETACHED: u16 = 68;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

@@ -307,6 +307,12 @@ def appkit_frames(interp, entry, gtk):
         bad.append("KayaWindowAccessor.register no longer clears the window's "
                    "frame autosave name: AppKit then writes the frame into "
                    "the host binary's domain, shared by every app it runs")
+    # A document's window is a WindowGroup window too (docs/doctabs-plan.md §3).
+    docs = braced(interp, r"func kayaRegisterDocumentWindow\(_ did: UInt64, _ window: NSWindow\)")
+    if docs is None or not re.search(r'window\.setFrameAutosaveName\(""\)', docs):
+        bad.append("kayaRegisterDocumentWindow no longer clears the document window's "
+                   "frame autosave name: AppKit then writes the frame into "
+                   "the host binary's domain, shared by every app it runs")
     groups = len(re.findall(
         r"\n *\.defaultSize\(width: kayaUndeclaredWindowSize\.width, "
         r"height: kayaUndeclaredWindowSize\.height\)", entry))
@@ -346,7 +352,7 @@ for line in appkit_frames(real, real_entry, real_gtk_rs):
 gate.negative("a window still autosaving into the host's domain",
               lambda: appkit_frames(gate.doctor(
                   "the autosave perturbation", real,
-                  r' *window\.setFrameAutosaveName\(""\)\n', ""), real_entry, real_gtk_rs),
+                  r' *window\.setFrameAutosaveName\(""\)\n', "", want=2), real_entry, real_gtk_rs),
               want="no longer clears the window's frame autosave name")
 gate.negative("a launch that restores another app's frame",
               lambda: appkit_frames(real, gate.doctor(

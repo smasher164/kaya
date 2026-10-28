@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xc31d87678a5929d1ULL
+#define KAYA_SPEC_HASH 0xa37dca454ad9d6ccULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -998,6 +998,47 @@ static inline void kaya_tx_context_label_node(KayaTx *tx, uint64_t node, uint64_
 /* List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user. */
 static inline void kaya_tx_list_font_families(KayaTx *tx) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_LIST_FONT_FAMILIES);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes. */
+static inline void kaya_tx_add_document(KayaTx *tx, uint64_t window, uint64_t document) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_ADD_DOCUMENT);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, document);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected. */
+static inline void kaya_tx_select_document(KayaTx *tx, uint64_t document) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SELECT_DOCUMENT);
+    kaya_wire_u64(tx, document);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state. */
+static inline void kaya_tx_close_document(KayaTx *tx, uint64_t document) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CLOSE_DOCUMENT);
+    kaya_wire_u64(tx, document);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements. */
+static inline void kaya_tx_set_document_prop(KayaTx *tx, uint64_t document, uint32_t prop, uint32_t source) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_DOCUMENT_PROP);
+    kaya_wire_u64(tx, document);
+    kaya_wire_u32(tx, prop);
+    kaya_wire_u32(tx, source);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed. */
+static inline void kaya_tx_add_region(KayaTx *tx, uint64_t window, uint64_t region, uint32_t edge) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_ADD_REGION);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, region);
+    kaya_wire_u32(tx, edge);
+    kaya_wire_u32(tx, 0);
     kaya_wire_end(tx, kaya_at);
 }
 

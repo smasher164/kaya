@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc31d87678a5929d1L
+let spec_hash = 0xa37dca454ad9d6ccL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -181,6 +181,7 @@ let wprop_inset = 8
 let wprop_appearance = 9
 let wprop_remember_frame = 10
 let wprop_fullscreen = 11
+let wprop_new_document = 12
 let eprop_title = 1
 let eprop_intercept_back = 2
 let shprop_title = 1
@@ -192,6 +193,13 @@ let sprop_title = 1
 let sprop_icon = 2
 let sprop_symbol = 3
 let sprop_badge = 4
+let dprop_title = 1
+let dprop_tooltip = 2
+let dprop_dirty = 3
+let dprop_intercept_close = 4
+let region_edge_leading = 1
+let region_edge_trailing = 2
+let region_edge_bottom = 3
 let menu_kind_menu = 1
 let menu_kind_action = 2
 let menu_kind_toggle = 3
@@ -523,6 +531,11 @@ let tx_kind_attach_dock = 85
 let tx_kind_set_dock_player = 86
 let tx_kind_context_label_node = 87
 let tx_kind_list_font_families = 88
+let tx_kind_add_document = 89
+let tx_kind_select_document = 90
+let tx_kind_close_document = 91
+let tx_kind_set_document_prop = 92
+let tx_kind_add_region = 93
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -597,6 +610,11 @@ let apply_kind_attach_dock = 73
 let apply_kind_set_dock_player = 74
 let apply_kind_context_label_node = 75
 let apply_kind_list_font_families = 76
+let apply_kind_add_document = 77
+let apply_kind_select_document = 78
+let apply_kind_close_document = 79
+let apply_kind_set_document_prop = 80
+let apply_kind_add_region = 81
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -658,6 +676,13 @@ let occ_kind_activated = 58
 let occ_kind_selection_changed = 59
 let occ_kind_font_families = 60
 let occ_kind_text_selected = 61
+let occ_kind_document_selected = 62
+let occ_kind_document_close_requested = 63
+let occ_kind_documents_close_requested = 64
+let occ_kind_document_closed = 65
+let occ_kind_new_document_requested = 66
+let occ_kind_document_moved = 67
+let occ_kind_documents_detached = 68
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1337,6 +1362,37 @@ let tx_context_label_node node item level field =
 let tx_list_font_families () =
   finish tx_kind_list_font_families (fun b ->
       ignore b)
+
+(* Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes. *)
+let tx_add_document window document =
+  finish tx_kind_add_document (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b document)
+
+(* Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected. *)
+let tx_select_document document =
+  finish tx_kind_select_document (fun b ->
+      Buffer.add_int64_le b document)
+
+(* Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state. *)
+let tx_close_document document =
+  finish tx_kind_close_document (fun b ->
+      Buffer.add_int64_le b document)
+
+(* Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements. *)
+let tx_set_document_prop document prop source =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int prop);
+      Buffer.add_int32_le b (Int32.of_int source))
+
+(* Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed. *)
+let tx_add_region window region edge =
+  finish tx_kind_add_region (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b region;
+      Buffer.add_int32_le b (Int32.of_int edge);
+      Buffer.add_int32_le b 0l)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -3412,6 +3468,22 @@ let tx_bind_window_fullscreen window signal_id =
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
+(* set_window_prop with a constant new_document value (window 0, the primary surface). *)
+let tx_set_window_new_document window new_document =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_new_document);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool new_document))
+
+(* set_window_prop with a signal-bound new_document value (window 0, the primary surface). *)
+let tx_bind_window_new_document window signal_id =
+  finish tx_kind_set_window_prop (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int32_le b (Int32.of_int wprop_new_document);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
 (* set_entry_prop with a constant title value. *)
 let tx_set_entry_title entry title =
   finish tx_kind_set_entry_prop (fun b ->
@@ -3489,6 +3561,70 @@ let tx_bind_sheet_detent sheet signal_id =
   finish tx_kind_set_sheet_prop (fun b ->
       Buffer.add_int64_le b sheet;
       Buffer.add_int32_le b (Int32.of_int shprop_detent);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_document_prop with a constant title value. *)
+let tx_set_document_title document title =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str title))
+
+(* set_document_prop with a signal-bound title value. *)
+let tx_bind_document_title document signal_id =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_title);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_document_prop with a constant tooltip value. *)
+let tx_set_document_tooltip document tooltip =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_tooltip);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Str tooltip))
+
+(* set_document_prop with a signal-bound tooltip value. *)
+let tx_bind_document_tooltip document signal_id =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_tooltip);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_document_prop with a constant dirty value. *)
+let tx_set_document_dirty document dirty =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_dirty);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool dirty))
+
+(* set_document_prop with a signal-bound dirty value. *)
+let tx_bind_document_dirty document signal_id =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_dirty);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_document_prop with a constant intercept_close value. *)
+let tx_set_document_intercept_close document intercept_close =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_intercept_close);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool intercept_close))
+
+(* set_document_prop with a signal-bound intercept_close value. *)
+let tx_bind_document_intercept_close document signal_id =
+  finish tx_kind_set_document_prop (fun b ->
+      Buffer.add_int64_le b document;
+      Buffer.add_int32_le b (Int32.of_int dprop_intercept_close);
       Buffer.add_int32_le b (Int32.of_int source_signal);
       Buffer.add_int64_le b signal_id)
 
@@ -3799,7 +3935,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached then None
   else begin
     (* ids are guest-allocated and small; the low u32 is the story. *)
     let id = u32_at byte 8 in
@@ -4062,6 +4198,55 @@ let parse_occurrence byte =
        done);
       Some (kind, 0L, [], None, None, None, List.rev !out)
     end
+    else if kind = occ_kind_documents_close_requested
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_document_moved
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_documents_detached
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.logor (Int64.of_int (u32_at byte !at))
+        (Int64.shift_left (Int64.of_int (u32_at byte (!at + 4))) 32)) :: !out;
+      at := !at + 8;
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
     else if kind = occ_kind_file_dialog_result
     then begin
       (* id, a count, then three Values per file (handle, name,
@@ -4097,11 +4282,11 @@ let parse_occurrence byte =
     end
     (* Surface lifecycle records carry the surface id alone
        ( derived from the record shapes ). *)
-    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested || kind = occ_kind_sheet_dismissed || kind = occ_kind_dismiss_requested
+    else if kind = occ_kind_close_requested || kind = occ_kind_window_closed || kind = occ_kind_entry_popped || kind = occ_kind_back_requested || kind = occ_kind_sheet_dismissed || kind = occ_kind_dismiss_requested || kind = occ_kind_document_close_requested || kind = occ_kind_document_closed || kind = occ_kind_new_document_requested
     then Some (kind, Int64.of_int id, [], None, None, None, [])
     (* Surface-pair records (window, section): the SECOND id
        keys the handler; the first rides as the payload. *)
-    else if kind = occ_kind_section_selected || kind = occ_kind_player_position || kind = occ_kind_seek_completed || kind = occ_kind_capture_overrun
+    else if kind = occ_kind_section_selected || kind = occ_kind_player_position || kind = occ_kind_seek_completed || kind = occ_kind_capture_overrun || kind = occ_kind_document_selected
     then
       Some
         ( kind,

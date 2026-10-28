@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xc31d87678a5929d1
+SPEC_HASH = 0xa37dca454ad9d6cc
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -165,6 +165,7 @@ WPROP_INSET = 8
 WPROP_APPEARANCE = 9
 WPROP_REMEMBER_FRAME = 10
 WPROP_FULLSCREEN = 11
+WPROP_NEW_DOCUMENT = 12
 EPROP_TITLE = 1
 EPROP_INTERCEPT_BACK = 2
 SHPROP_TITLE = 1
@@ -176,6 +177,13 @@ SPROP_TITLE = 1
 SPROP_ICON = 2
 SPROP_SYMBOL = 3
 SPROP_BADGE = 4
+DPROP_TITLE = 1
+DPROP_TOOLTIP = 2
+DPROP_DIRTY = 3
+DPROP_INTERCEPT_CLOSE = 4
+REGION_EDGE_LEADING = 1
+REGION_EDGE_TRAILING = 2
+REGION_EDGE_BOTTOM = 3
 MENU_KIND_MENU = 1
 MENU_KIND_ACTION = 2
 MENU_KIND_TOGGLE = 3
@@ -508,6 +516,11 @@ TX_ATTACH_DOCK = 85
 TX_SET_DOCK_PLAYER = 86
 TX_CONTEXT_LABEL_NODE = 87
 TX_LIST_FONT_FAMILIES = 88
+TX_ADD_DOCUMENT = 89
+TX_SELECT_DOCUMENT = 90
+TX_CLOSE_DOCUMENT = 91
+TX_SET_DOCUMENT_PROP = 92
+TX_ADD_REGION = 93
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -582,6 +595,11 @@ APPLY_ATTACH_DOCK = 73
 APPLY_SET_DOCK_PLAYER = 74
 APPLY_CONTEXT_LABEL_NODE = 75
 APPLY_LIST_FONT_FAMILIES = 76
+APPLY_ADD_DOCUMENT = 77
+APPLY_SELECT_DOCUMENT = 78
+APPLY_CLOSE_DOCUMENT = 79
+APPLY_SET_DOCUMENT_PROP = 80
+APPLY_ADD_REGION = 81
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -643,6 +661,13 @@ OCC_ACTIVATED = 58
 OCC_SELECTION_CHANGED = 59
 OCC_FONT_FAMILIES = 60
 OCC_TEXT_SELECTED = 61
+OCC_DOCUMENT_SELECTED = 62
+OCC_DOCUMENT_CLOSE_REQUESTED = 63
+OCC_DOCUMENTS_CLOSE_REQUESTED = 64
+OCC_DOCUMENT_CLOSED = 65
+OCC_NEW_DOCUMENT_REQUESTED = 66
+OCC_DOCUMENT_MOVED = 67
+OCC_DOCUMENTS_DETACHED = 68
 
 
 def _pad(b: bytes) -> bytes:
@@ -1077,6 +1102,26 @@ def tx_context_label_node(node: int, item: int, level: int, field: int) -> bytes
 def tx_list_font_families() -> bytes:
     """List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user."""
     return record(TX_LIST_FONT_FAMILIES, b"")
+
+def tx_add_document(window: int, document: int) -> bytes:
+    """Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes."""
+    return record(TX_ADD_DOCUMENT, struct.pack("<Q", window) + struct.pack("<Q", document))
+
+def tx_select_document(document: int) -> bytes:
+    """Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected."""
+    return record(TX_SELECT_DOCUMENT, struct.pack("<Q", document))
+
+def tx_close_document(document: int) -> bytes:
+    """Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state."""
+    return record(TX_CLOSE_DOCUMENT, struct.pack("<Q", document))
+
+def tx_set_document_prop(document: int, prop: int, source: int) -> bytes:
+    """Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<Q", document) + struct.pack("<I", prop) + struct.pack("<I", source))
+
+def tx_add_region(window: int, region: int, edge: int) -> bytes:
+    """Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed."""
+    return record(TX_ADD_REGION, struct.pack("<Q", window) + struct.pack("<Q", region) + struct.pack("<I", edge) + struct.pack("<I", 0))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -2269,6 +2314,16 @@ def tx_bind_window_fullscreen(window: int, signal_id: int) -> bytes:
     return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_FULLSCREEN, SOURCE_SIGNAL, signal_id))
 
 
+def tx_set_window_new_document(window: int, new_document: bool) -> bytes:
+    """set_window_prop with a constant new_document value (bool); window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_NEW_DOCUMENT, SOURCE_CONST) + _enc.value(new_document))
+
+
+def tx_bind_window_new_document(window: int, signal_id: int) -> bytes:
+    """set_window_prop with a signal-bound new_document value; window 0, the primary surface."""
+    return record(TX_SET_WINDOW_PROP, struct.pack("<QIIQ", window, WPROP_NEW_DOCUMENT, SOURCE_SIGNAL, signal_id))
+
+
 def tx_set_entry_title(entry: int, title: str) -> bytes:
     """set_entry_prop with a constant title value (str)."""
     return record(TX_SET_ENTRY_PROP, struct.pack("<QII", entry, EPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2317,6 +2372,46 @@ def tx_set_sheet_detent(sheet: int, detent: int) -> bytes:
 def tx_bind_sheet_detent(sheet: int, signal_id: int) -> bytes:
     """set_sheet_prop with a signal-bound detent value."""
     return record(TX_SET_SHEET_PROP, struct.pack("<QIIQ", sheet, SHPROP_DETENT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_document_title(document: int, title: str) -> bytes:
+    """set_document_prop with a constant title value (str)."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QII", document, DPROP_TITLE, SOURCE_CONST) + _enc.value(title))
+
+
+def tx_bind_document_title(document: int, signal_id: int) -> bytes:
+    """set_document_prop with a signal-bound title value."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QIIQ", document, DPROP_TITLE, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_document_tooltip(document: int, tooltip: str) -> bytes:
+    """set_document_prop with a constant tooltip value (str)."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QII", document, DPROP_TOOLTIP, SOURCE_CONST) + _enc.value(tooltip))
+
+
+def tx_bind_document_tooltip(document: int, signal_id: int) -> bytes:
+    """set_document_prop with a signal-bound tooltip value."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QIIQ", document, DPROP_TOOLTIP, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_document_dirty(document: int, dirty: bool) -> bytes:
+    """set_document_prop with a constant dirty value (bool)."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QII", document, DPROP_DIRTY, SOURCE_CONST) + _enc.value(dirty))
+
+
+def tx_bind_document_dirty(document: int, signal_id: int) -> bytes:
+    """set_document_prop with a signal-bound dirty value."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QIIQ", document, DPROP_DIRTY, SOURCE_SIGNAL, signal_id))
+
+
+def tx_set_document_intercept_close(document: int, intercept_close: bool) -> bytes:
+    """set_document_prop with a constant intercept_close value (bool)."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QII", document, DPROP_INTERCEPT_CLOSE, SOURCE_CONST) + _enc.value(intercept_close))
+
+
+def tx_bind_document_intercept_close(document: int, signal_id: int) -> bytes:
+    """set_document_prop with a signal-bound intercept_close value."""
+    return record(TX_SET_DOCUMENT_PROP, struct.pack("<QIIQ", document, DPROP_INTERCEPT_CLOSE, SOURCE_SIGNAL, signal_id))
 
 
 def tx_set_section_title(section: int, title: str) -> bytes:
@@ -2534,7 +2629,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -2756,6 +2851,46 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
             value, at = parse_value(buf, at)
             tail.append(value)
         return kind, flat_id, [], tail
+    if kind == OCC_DOCUMENTS_CLOSE_REQUESTED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_DOCUMENT_MOVED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        at += 4
+        return kind, flat_id, [], tail
+    if kind == OCC_DOCUMENTS_DETACHED:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<Q", buf, at)[0])
+        at += 8
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
     if kind == OCC_FILE_DIALOG_RESULT:
         dialog, count = struct.unpack_from("<QI", buf, 8)
         at = 32  # past dialog, count, pad, values count, reserved
@@ -2780,12 +2915,12 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         (request,) = struct.unpack_from("<Q", buf, 8)
         clip, values, _at = parse_clip(buf, 16)
         return kind, request, [], (clip, values)
-    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED):
+    if kind in (OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED):
         # Surface lifecycle records carry the surface id alone —
         # no key path, no payload (derived from the record shapes).
         (surface_id,) = struct.unpack_from("<Q", buf, 8)
         return kind, surface_id, [], None
-    if kind in (OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN,):
+    if kind in (OCC_SECTION_SELECTED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_CAPTURE_OVERRUN, OCC_DOCUMENT_SELECTED,):
         # Surface-pair records (window, section): the SECOND id
         # keys the handler (they scope to the section); the
         # first rides as the payload.

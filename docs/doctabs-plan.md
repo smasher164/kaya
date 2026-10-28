@@ -1,7 +1,9 @@
 # Document tabs: one concept, native on every platform
 
 Status: RULED 2026-10-28 (the maintainer): every §9 question as recommended
-except Q3, which he revised to put shared regions in v1 (§1.7). The
+except Q3, which he revised to put shared regions in v1 (§1.7). The depth
+slice (spec, core, the Rust surface, the Mac arm, the scene) is BUILT; the
+breadth is open (docs/deferred.md, the document tabs entry). The
 maintainer, 2026-10-28: "so i guess we should add tabbing support to the text
 editor". The rulings this plan builds on are docs/native-tabs-study.md's four
 (all RULED 2026-10-28: option C, Mac NSWindow tabbing through public API only,
@@ -33,7 +35,7 @@ windows exist the user may move one to a new window. How the set is drawn is
 the platform's (a tab strip, a list), and the app never says which, as
 `sections_presentation` already works.
 
-### 1.2 One kaya window, one or more native windows
+### 1.2 A torn-out tab is a new kaya window (Q1, ruled anew)
 
 The Mac decides the shape. On the Mac each tab IS a native window, and AppKit
 lets the user tear a tab out into its own window, or merge windows back,
@@ -41,21 +43,34 @@ without telling the app first (the study's §1: "the app was told nothing").
 GTK and WinUI also let a tab be dragged out, and both ask the app for the new
 window synchronously, inside the drag.
 
-The proposal (question Q1): a kaya window that holds documents is a
-DECLARATION, presented as one or more native windows. Tearing a tab out makes
-another native window of the SAME kaya window. Every native window of it shows
-the same shared chrome, the kaya window's (its menu catalog, its toolbar, its
-title rule), because that chrome is the kaya window's and there is only one of
-it. This is SwiftUI's WindowGroup, and it is the only shape in which the Mac's
-post-fact tear-out needs no new id, no new handlers and no new catalog from
-the app: the menu items stay one command identity each (DESIGN.md, "One menu
-item is one command identity"), and a handler that acts on "the active
-document" acts on whichever native window the user is in.
+RULED 2026-10-28 (the maintainer, choosing option C over the plan's first
+recommendation: "A seems like it's unintuitive no? Like most text editors only
+have the sidebar on the [w]hole screen?", then "yes"): a torn-out tab, or Move
+Tab to New Window, becomes a NEW kaya window. kaya makes the native window the
+platform asks for, gives it a fresh window id (core-allocated, in the internal
+range no guest id uses), moves the documents into it with their identity kept,
+and reports `documents_detached(source, window, documents)`. The app builds
+that window's chrome and regions with the same code it built the first
+window's with, and its handlers bind to the new window at declaration
+(handlers scope to their creator). That is GNOME's `create-window` and WinUI's
+tear-out, where the app builds the new window; on the Mac kaya sees AppKit's
+own tear-out in the tab group's `windows` and turns that strip into a new kaya
+window the same way. A tab dragged into another window, or AppKit's Merge All
+Windows, moves the document between existing windows and reports
+`document_moved(document, window, index)`.
 
-Each native window shows a STRIP: its own ordered run of the kaya window's
-documents. The ACTIVE document is the one the user is working in: the selected
-tab of the native window that has focus. On the Mac that is literally the key
-window, since each tab is one.
+So every kaya window with documents is exactly ONE native window with one
+strip, and the ACTIVE document of a window is its selected tab. The menu bar
+follows the key window as it always has; until the app answers a
+`documents_detached`, the new window's catalog is empty.
+
+The sub-ruling "one window with documents per app in v1" goes with the first
+design: under C a tear-out creates more windows with documents, and an app
+may also create one itself (File > New Window). And Q2 needs one more
+sentence: a window left with no documents closes, and when that is the
+primary while other windows still hold documents, the primary's native window
+closes and the process lives on; the process ends when no window holds
+documents.
 
 ### 1.3 Shared chrome and per-document content
 
@@ -189,16 +204,13 @@ is in the selected tab's window at that moment. Accepted, as the coordinator
 proposed; the overview is a moment's picker and the region returns with the
 selection.
 
-**A second strip gets a second instance.** A torn-out tab is on screen at the
-same time as its old strip, and per Q1 it is still the same kaya window, so it
-needs the region too. Each strip (on the Mac a tab group, on GTK and WinUI a
-native window) shows ITS OWN INSTANCE of every region, built from the same
-mounted tree: everything the app drives (signals, props, its commands) reaches
-every instance, and the widget-local state of a new instance (scroll, focus,
-half-typed text) starts fresh. That is what GNOME's `create-window` and
-WinUI's `TabTearOutWindowRequested` do anyway, since the new window is built
-anew there. Occurrences carry no instance: the app sees one widget, and the
-harness reads the instance in the active strip.
+**One instance per window** (RULED 2026-10-28 with Q1's C): every kaya window
+has exactly one instance of each of its regions. A torn-out tab is a new kaya
+window (§1.2), and the app declares that window's regions with the same code,
+so there is no second instance and no move between windows; the move above is
+within one window's tab group on the Mac. A second instance was measured
+impossible on GTK and WinUI anyway, whose widgets are concrete: one native
+widget per kaya node.
 
 **Phones.** No phone has room beside a document. A `bottom` region sits under
 the document, above the keyboard's inset, as a status bar would. A `leading` or
@@ -228,8 +240,10 @@ stance:
 The region needs no props of its own in v1. One window prop: `new_document` (Bool, default false). True draws the
 platform's "+" (Mac: answering `newWindowForTab:`; AdwTabBar's action button;
 WinUI `IsAddTabButtonVisible`; the phone list's header), and pressing it emits
-`new_document_requested(window)`. The binding sets it when the app registers
-the handler, so no app spells it by hand.
+`new_document_requested(window)`. A closure binding sets it when the app
+registers the handler, so no app spells it by hand; Rust, whose handlers
+register on `Messages` away from the transaction, spells it on the window,
+as it spells `veto_close`.
 
 Records (TX and APPLY, in the add_section family):
 
@@ -251,7 +265,8 @@ Occurrences, every one post-fact or a request, every one the user's act only
 | `documents_close_requested` | window, documents | A native window's close, listing what it shows, when any of them is armed. |
 | `document_closed` | document | An unarmed document closed through the user's act. |
 | `new_document_requested` | window | The "+". |
-| `document_moved` | document, strip, index | The user reordered, tore out, or merged. `strip` is the native window's position among the kaya window's native windows in the order they opened (0 is the first), and `index` is the document's place in that strip afterwards. Informational; no app has to read it. |
+| `document_moved` | document, window, index | The user reordered a document, or dragged it into another existing window (Merge All Windows included): `window` holds it now and `index` is its place there. |
+| `documents_detached` | source, window, documents | The user tore documents out of `source` into a NEW window kaya made (§1.2): `window` is its fresh id, `documents` the moved ones in tab order. The app declares the new window's chrome and regions and registers its handlers. Bound on the source window. |
 
 No programmatic reorder or tear-out in v1: no forcing app asks for one.
 
@@ -266,8 +281,8 @@ enum Msg { New, AskClose(WindowId), Closed(WindowId), Active(WindowId) }
 
 let msgs = kaya::Messages::new();
 ctx.apply(|tx| {
-    tx.window(kaya::DEFAULT_WINDOW).title("notes");
-    msgs.on_new_document(kaya::DEFAULT_WINDOW, Msg::New); // draws the "+"
+    tx.window(kaya::DEFAULT_WINDOW).title("notes").new_document(true); // the "+"
+    msgs.on_new_document(kaya::DEFAULT_WINDOW, Msg::New);
     let doc = tx
         .add_document(next_doc())
         .title("draft")
@@ -317,8 +332,7 @@ itself once DOCUMENT_PROPS exists.
 A document added twice or to two windows; `select_document`, `close_document`
 or a prop on an unknown or closed id (ids are never reused); sections, a
 window stack or `panes` above 1 on a window with documents, and documents on a
-window with sections (Q8); `dirty` on a window with documents (§1.4); a second
-window with documents in one app (Q1's sub-question); a region on a window
+window with sections (Q8); `dirty` on a window with documents (§1.4); a region on a window
 without documents, a second region at one edge, or a region id reused as a
 document.
 
@@ -443,13 +457,14 @@ tab and, while active, on the window; `new_document` adds `untitled 1` at the
 strip's end; close `c` (unarmed, gone, `document_closed` heard); close `b`
 (armed: the dialog, cancel, still there; again, agree, gone); a programmatic
 `select_document` that does not echo; on the desktops, move `a` into a new
-window and read both strips; then close the native windows' documents until
+window and read both windows; then close the native windows' documents until
 the window closes, which ends the desktop legs; the phones end on the empty
 state. A leading region holds a list of a dozen rows and an entry: type into
 the entry and scroll the list, switch documents, and read the half-typed text,
 the caret's focus and the scroll back (on the Mac this is the move of §1.7, on
-the others it is trivially true); after `move_to_new_window` the new strip's
-region reads fresh while the old one keeps its text.
+the others it is trivially true); after `move_to_new_window` the app hears
+`documents_detached`, builds the new window's region with the same code, and
+the new window reads its own documents.
 
 **The editor (guests/go/editor) grows tabs.** Each document carries its own
 buffer, find bar, status line, destination, saved text and Format state. File >
@@ -479,7 +494,7 @@ Depth then breadth, CLAUDE.md's pattern, one agent in the core at a time.
 
 | Slice | What | Size |
 |---|---|---|
-| D1 | Spec (DOCUMENT_PROPS, the window prop, four records, six occurrences), regenerate; core: per-window arrangement of strips, the walls in §2.4 with their tests, tree forgetting on close; the Rust surface | M |
+| D1 | Spec (DOCUMENT_PROPS, the window prop, five records, seven occurrences), regenerate; core: per-window document order, the tear-out's new window, the walls in §2.4 with their tests, tree forgetting on close; the Rust surface | M |
 | D2 | SwiftUI on the Mac: the two unknowns in §3 first, then the arm, the moving regions and the eight verbs; the Rust `doctabs` guest and scene green on the Mac with every negative watched | L: the inverted ownership, a native window per document, the key-window map, the close routing, the tear-out observer |
 | B1 | GTK arm and its AT-SPI reads; tools/check-gtk.py | M |
 | B2 | WinUI arm, winui-bindgen growth, UIA reads, tabs in the TitleBar | M to L |
@@ -531,12 +546,12 @@ native window of the same kaya window, with the same menus, toolbar and
 handlers, which the app never has to build again; (b) a torn-out tab becomes a
 new kaya window, which the app must then furnish with its own menu catalog and
 handlers, after the fact on the Mac, so its menu bar is empty until the app
-answers. RULED 2026-10-28 (the maintainer), as recommended: (a). It is SwiftUI's WindowGroup, it needs nothing from
+answers. RULED ANEW 2026-10-28 (the maintainer): (b), option C in §1.2, replacing a first ruling of (a). It is SwiftUI's WindowGroup, it needs nothing from
 the app, and it is the only one of the two that the Mac's after-the-fact
 tear-out fits. Its cost is the idea of a strip (`document_moved` reports which
 native window a document is in). Sub-question: in v1, at most one window with
 documents per app (so AppKit's Merge All Windows can never mix two kaya
-windows' documents)? RULED 2026-10-28 (the maintainer), as recommended: yes, ledgered until an app wants two.
+windows' documents)? WITHDRAWN 2026-10-28 with (a): under C a tear-out makes more windows with documents (§1.2).
 
 **Q2. What happens when the last document closes?** (a) The window closes, as
 TextEdit, Notepad and GNOME Text Editor do and as AppKit does on its own when

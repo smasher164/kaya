@@ -157,6 +157,8 @@ mod capture;
 
 #[path = "sheet.rs"]
 mod sheet;
+#[path = "doctabs.rs"]
+mod doctabs;
 #[path = "toast.rs"]
 mod toast;
 #[path = "format.rs"]
@@ -279,6 +281,7 @@ fn app(ctx: kaya::AppCtx) {
         }
         Ok("capture") | Ok("capture_denied") => capture::app(ctx),
         Ok("sheet") => sheet::app(ctx),
+        Ok("doctabs") => doctabs::app(ctx),
         Ok("toast") => toast::app(ctx),
         // One guest under three locales (tools/lib/lanes/android.py's
         // SCENE_LOCALE): a scene selects a SCRIPT, never an app.

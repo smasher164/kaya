@@ -313,6 +313,27 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line(&format!("    return record(TX_SET_SHEET_PROP, struct.pack(\"<QIIQ\", sheet, SHPROP_{up}, SOURCE_SIGNAL, signal_id))"));
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let up = prop.to_uppercase();
+        let (ty, expr) = match kind {
+            PropKind::Str => ("str", format!("_enc.value({prop})")),
+            PropKind::Bool => ("bool", format!("_enc.value({prop})")),
+            PropKind::Enum(_) => ("int", format!("_enc.value(int({prop}))")),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_set_document_{prop}(document: int, {prop}: {ty}) -> bytes:"));
+        c.line(&format!("    \"\"\"set_document_prop with a constant {prop} value ({ty}).\"\"\""));
+        c.line(&format!("    return record(TX_SET_DOCUMENT_PROP, struct.pack(\"<QII\", document, DPROP_{up}, SOURCE_CONST) + {expr})"));
+        c.line("");
+        c.line("");
+        c.line(&format!("def tx_bind_document_{prop}(document: int, signal_id: int) -> bytes:"));
+        c.line(&format!("    \"\"\"set_document_prop with a signal-bound {prop} value.\"\"\""));
+        c.line(&format!("    return record(TX_SET_DOCUMENT_PROP, struct.pack(\"<QIIQ\", document, DPROP_{up}, SOURCE_SIGNAL, signal_id))"));
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

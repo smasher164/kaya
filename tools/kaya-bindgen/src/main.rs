@@ -282,6 +282,12 @@ pub(crate) fn sheet_prop_variants(
     kaya::spec::SHEET_PROPS
 }
 
+pub(crate) fn document_prop_variants(
+    _spec: &ProtocolSpec,
+) -> &'static [(&'static str, u32, PropKind)] {
+    kaya::spec::DOCUMENT_PROPS
+}
+
 /// Section properties (DESIGN.md, Sections).
 pub(crate) fn section_prop_variants(
     _spec: &ProtocolSpec,

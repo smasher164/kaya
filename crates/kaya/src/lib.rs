@@ -171,7 +171,7 @@ pub use app::{Draw, FillRule, Paint, TextAlign, TextBaseline, Viewbox};
 pub use kaya_derive::KayaGen;
 pub use protocol::{
     AlertChoice, AlertId, Aspect, CollectionId, Color, ContentType, DEFAULT_WINDOW, Date, Detent, EntryProp, MenuItemId, MenuItemKind,
-    SheetProp,
+    SheetProp, DocumentProp, RegionEdge,
     Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
     FileContent, FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,

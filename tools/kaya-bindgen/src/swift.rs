@@ -384,6 +384,38 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "str"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "bool"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "i64"),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /// set_document_prop with a constant {prop} value."));
+        c.line(&format!("    mutating func setDocument{pc}(_ document: UInt64, _ {p}: {ty}) {{"));
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))");
+        c.line("        self.u64(document)");
+        c.line(&format!("        self.u32(UInt32(KAYA_DPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_CONST))");
+        c.line(&format!("        self.value(.{ctor}({p}))"));
+        c.line("        self.end(kayaAt)");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /// set_document_prop with a signal-bound {prop} value."));
+        c.line(&format!("    mutating func bindDocument{pc}(_ document: UInt64, _ signalId: UInt64) {{"));
+        c.line("        let kayaAt = self.begin(UInt16(KAYA_TX_SET_DOCUMENT_PROP))");
+        c.line("        self.u64(document)");
+        c.line(&format!("        self.u32(UInt32(KAYA_DPROP_{up}))"));
+        c.line("        self.u32(UInt32(KAYA_SOURCE_SIGNAL))");
+        c.line("        self.u64(signalId)");
+        c.line("        self.end(kayaAt)");
+        c.line("    }");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

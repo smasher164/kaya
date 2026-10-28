@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc31d87678a5929d1
+	SpecHash uint64 = 0xa37dca454ad9d6cc
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -165,6 +165,7 @@ const (
 	WpropAppearance = 9
 	WpropRememberFrame = 10
 	WpropFullscreen = 11
+	WpropNewDocument = 12
 	EpropTitle = 1
 	EpropInterceptBack = 2
 	ShpropTitle = 1
@@ -176,6 +177,13 @@ const (
 	SpropIcon = 2
 	SpropSymbol = 3
 	SpropBadge = 4
+	DpropTitle = 1
+	DpropTooltip = 2
+	DpropDirty = 3
+	DpropInterceptClose = 4
+	RegionEdgeLeading = 1
+	RegionEdgeTrailing = 2
+	RegionEdgeBottom = 3
 	MenuKindMenu = 1
 	MenuKindAction = 2
 	MenuKindToggle = 3
@@ -507,6 +515,11 @@ const (
 	txSetDockPlayer = 86
 	txContextLabelNode = 87
 	txListFontFamilies = 88
+	txAddDocument = 89
+	txSelectDocument = 90
+	txCloseDocument = 91
+	txSetDocumentProp = 92
+	txAddRegion = 93
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -581,6 +594,11 @@ const (
 	applySetDockPlayer = 74
 	applyContextLabelNode = 75
 	applyListFontFamilies = 76
+	applyAddDocument = 77
+	applySelectDocument = 78
+	applyCloseDocument = 79
+	applySetDocumentProp = 80
+	applyAddRegion = 81
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -642,6 +660,13 @@ const (
 	occSelectionChanged = 59
 	occFontFamilies = 60
 	occTextSelected = 61
+	occDocumentSelected = 62
+	occDocumentCloseRequested = 63
+	occDocumentsCloseRequested = 64
+	occDocumentClosed = 65
+	occNewDocumentRequested = 66
+	occDocumentMoved = 67
+	occDocumentsDetached = 68
 )
 
 func (d Detent) String() string {
@@ -1939,6 +1964,47 @@ func TxContextLabelNode(node uint64, item uint64, level uint32, field uint32) []
 // TxListFontFamilies: List the font families installed on this device, answered once by font_families (docs/code-surface-plan.md M3): what an app's own font setting offers its user.
 func TxListFontFamilies() []byte {
 	b := beginRecord(txListFontFamilies)
+	return endRecord(b)
+}
+
+// TxAddDocument: Append a document to `window`'s active strip (docs/doctabs-plan.md §2.1). Document ids share the surface namespace; mount fills one. The first document added becomes the active one; any other stays behind until select_document. The root refuses a document on a window with sections, a stack or panes.
+func TxAddDocument(window uint64, document uint64) []byte {
+	b := beginRecord(txAddDocument)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	return endRecord(b)
+}
+
+// TxSelectDocument: Make a document the active one: its tab selected and its native window brought forward. Configuration: it never echoes document_selected.
+func TxSelectDocument(document uint64) []byte {
+	b := beginRecord(txSelectDocument)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	return endRecord(b)
+}
+
+// TxCloseDocument: Close a document and forget its tree, as pop_entry does; also the answer that agrees to a close request. Never echoes document_closed. A window left with no documents closes (docs/doctabs-plan.md §1.5); a phone shows its empty state.
+func TxCloseDocument(document uint64) []byte {
+	b := beginRecord(txCloseDocument)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	return endRecord(b)
+}
+
+// TxSetDocumentProp: Bind a document property (DOCUMENT_PROPS). Same tail convention as SET_PROPERTY_NOTE, except SOURCE_ELEMENT is rejected: documents are not collection elements.
+func TxSetDocumentProp(document uint64, prop uint32, source uint32) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, prop)
+	b = binary.LittleEndian.AppendUint32(b, source)
+	return endRecord(b)
+}
+
+// TxAddRegion: Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed.
+func TxAddRegion(window uint64, region uint64, edge uint32) []byte {
+	b := beginRecord(txAddRegion)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, region)
+	b = binary.LittleEndian.AppendUint32(b, edge)
+	b = binary.LittleEndian.AppendUint32(b, 0)
 	return endRecord(b)
 }
 
@@ -4496,6 +4562,26 @@ func TxBindWindowFullscreen(window uint64, signalID uint64) []byte {
 	return endRecord(b)
 }
 
+// TxSetWindowNewDocument: set_window_prop with a constant new_document value (window 0, the primary surface).
+func TxSetWindowNewDocument(window uint64, newDocument bool) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropNewDocument)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, newDocument)
+	return endRecord(b)
+}
+
+// TxBindWindowNewDocument: set_window_prop with a signal-bound new_document value (window 0, the primary surface).
+func TxBindWindowNewDocument(window uint64, signalID uint64) []byte {
+	b := beginRecord(txSetWindowProp)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint32(b, WpropNewDocument)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
 // TxSetEntryTitle: set_entry_prop with a constant title value.
 func TxSetEntryTitle(entry uint64, title string) []byte {
 	b := beginRecord(txSetEntryProp)
@@ -4591,6 +4677,86 @@ func TxBindSheetDetent(sheet uint64, signalID uint64) []byte {
 	b := beginRecord(txSetSheetProp)
 	b = binary.LittleEndian.AppendUint64(b, sheet)
 	b = binary.LittleEndian.AppendUint32(b, ShpropDetent)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetDocumentTitle: set_document_prop with a constant title value.
+func TxSetDocumentTitle(document uint64, title string) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, title)
+	return endRecord(b)
+}
+
+// TxBindDocumentTitle: set_document_prop with a signal-bound title value.
+func TxBindDocumentTitle(document uint64, signalID uint64) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropTitle)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetDocumentTooltip: set_document_prop with a constant tooltip value.
+func TxSetDocumentTooltip(document uint64, tooltip string) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropTooltip)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, tooltip)
+	return endRecord(b)
+}
+
+// TxBindDocumentTooltip: set_document_prop with a signal-bound tooltip value.
+func TxBindDocumentTooltip(document uint64, signalID uint64) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropTooltip)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetDocumentDirty: set_document_prop with a constant dirty value.
+func TxSetDocumentDirty(document uint64, dirty bool) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropDirty)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, dirty)
+	return endRecord(b)
+}
+
+// TxBindDocumentDirty: set_document_prop with a signal-bound dirty value.
+func TxBindDocumentDirty(document uint64, signalID uint64) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropDirty)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxSetDocumentInterceptClose: set_document_prop with a constant intercept_close value.
+func TxSetDocumentInterceptClose(document uint64, interceptClose bool) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropInterceptClose)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, interceptClose)
+	return endRecord(b)
+}
+
+// TxBindDocumentInterceptClose: set_document_prop with a signal-bound intercept_close value.
+func TxBindDocumentInterceptClose(document uint64, signalID uint64) []byte {
+	b := beginRecord(txSetDocumentProp)
+	b = binary.LittleEndian.AppendUint64(b, document)
+	b = binary.LittleEndian.AppendUint32(b, DpropInterceptClose)
 	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
 	b = binary.LittleEndian.AppendUint64(b, signalID)
 	return endRecord(b)
@@ -4972,7 +5138,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected && kind != occDocumentSelected && kind != occDocumentCloseRequested && kind != occDocumentsCloseRequested && kind != occDocumentClosed && kind != occNewDocumentRequested && kind != occDocumentMoved && kind != occDocumentsDetached {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -5243,6 +5409,57 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		_ = at
 		return kind, id, nil, tail, true
 	}
+	if kind == occDocumentsCloseRequested {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occDocumentMoved {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		at += 4
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occDocumentsDetached {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
+		at += 8
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
 	if kind == occFileDialogResult {
 		// The picker's answer: id, a count, then three Values
 		// per file (handle, name, local_path). EMPTY IS CANCEL.
@@ -5374,12 +5591,12 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		name, _ := label.(string)
 		return kind, id, nil, undoReport{label: name, delta: delta}, true
 	}
-	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested || kind == occSheetDismissed || kind == occDismissRequested {
+	if kind == occCloseRequested || kind == occWindowClosed || kind == occEntryPopped || kind == occBackRequested || kind == occSheetDismissed || kind == occDismissRequested || kind == occDocumentCloseRequested || kind == occDocumentClosed || kind == occNewDocumentRequested {
 		// Surface lifecycle records carry the surface id alone —
 		// no key path, no payload (derived from the record shapes).
 		return kind, id, nil, nil, true
 	}
-	if kind == occSectionSelected || kind == occPlayerPosition || kind == occSeekCompleted || kind == occCaptureOverrun {
+	if kind == occSectionSelected || kind == occPlayerPosition || kind == occSeekCompleted || kind == occCaptureOverrun || kind == occDocumentSelected {
 		// Surface-pair records (window, section): the SECOND id
 		// keys the handler; the first rides as the payload.
 		return kind, binary.LittleEndian.Uint64(rec[16:]), nil, id, true

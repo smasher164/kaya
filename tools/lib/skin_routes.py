@@ -390,6 +390,7 @@ PLATFORM_BEHIND = re.compile(r"\.(?:background|overlay)\(\s*(\w+)\(")
 REPRESENTABLE = re.compile(r"struct (\w+): (?:NS|UI)ViewRepresentable")
 BEHIND_EXEMPT = {
     "KayaChoiceAnchor": "under its own control, which answers the choice reads' hit test at its centre",
+    "KayaDocumentAccessor": "reaches its document's window; behind the document root, KayaWindowAccessor's shape",
     "KayaExpanderAnchor": "under its own header or body; the header read's hit test answers the disclosure triangle",
     "KayaMacDragDropSurface": "the drag source and drop target's own view, which must receive the drag",
     "KayaPhoneDragDropSurface": "the drag source and drop target's own view, which must receive the drag",

@@ -405,6 +405,33 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    }");
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let pc = pascal(prop);
+        let up = prop.to_uppercase();
+        let (p, ty, expr) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Bool => (camel(prop), "boolean", format!("encodeValue(b, {});", camel(prop))),
+            crate::PropKind::Enum(_) => (camel(prop), "long", format!("encodeValue(b, {});", camel(prop))),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("    /** set_document_prop with a constant {prop} value. */"));
+        c.line(&format!("    public static byte[] txSetDocument{pc}(long document, {ty} {p}) {{"));
+        c.line("        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);");
+        c.line(&format!("        b.putLong(document).putInt(DPROP_{up}).putInt(SOURCE_CONST);"));
+        c.line(&format!("        {expr}"));
+        c.line("        return finish(b);");
+        c.line("    }");
+        c.line("");
+        c.line(&format!("    /** set_document_prop with a signal-bound {prop} value. */"));
+        c.line(&format!("    public static byte[] txBindDocument{pc}(long document, long signalId) {{"));
+        c.line("        Enc b = begin(TX_KIND_SET_DOCUMENT_PROP);");
+        c.line(&format!("        b.putLong(document).putInt(DPROP_{up}).putInt(SOURCE_SIGNAL).putLong(signalId);"));
+        c.line("        return finish(b);");
+        c.line("    }");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {

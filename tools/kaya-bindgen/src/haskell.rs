@@ -294,6 +294,29 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    <> word64LE signalId)");
     }
 
+    // The document-prop duos (docs/doctabs-plan.md §2.1).
+    for (prop, _, kind) in crate::document_prop_variants(spec) {
+        let pc = pascal(prop);
+        let (p, ty, ctor) = match kind {
+            crate::PropKind::Str => (camel(prop), "String", "VStr"),
+            crate::PropKind::Bool => (camel(prop), "Bool", "VBool"),
+            crate::PropKind::Enum(_) => (camel(prop), "Int64", "VI64"),
+            other => unreachable!("no document prop carries {other:?}"),
+        };
+        c.line("");
+        c.line(&format!("-- set_document_prop with a constant {prop} value."));
+        c.line(&format!("txSetDocument{pc} :: Word64 -> {ty} -> Builder"));
+        c.line(&format!("txSetDocument{pc} document {p} = wireRecord txKindSetDocumentProp"));
+        c.line(&format!("  (word64LE document <> word32LE dprop{pc} <> word32LE sourceConst"));
+        c.line(&format!("    <> encodeValue ({ctor} {p}))"));
+        c.line("");
+        c.line(&format!("-- set_document_prop with a signal-bound {prop} value."));
+        c.line(&format!("txBindDocument{pc} :: Word64 -> Word64 -> Builder"));
+        c.line(&format!("txBindDocument{pc} document signalId = wireRecord txKindSetDocumentProp"));
+        c.line(&format!("  (word64LE document <> word32LE dprop{pc} <> word32LE sourceSignal"));
+        c.line("    <> word64LE signalId)");
+    }
+
     // The section-prop duos; icon rides the blob channel (DESIGN.md,
     // Sections).
     for (prop, _, kind) in crate::section_prop_variants(spec) {
