@@ -181,11 +181,13 @@ scratchpad, rebuilt from this description):
 So the fallback (copies plus kaya-side mirroring of scroll, selection, focus,
 text and caret) is not needed.
 
-UNMEASURED, and accepted in advance as the coordinator proposed: Show All Tabs
-draws a live thumbnail of every tab window, and every one but the selected one
-has no region in it at that moment, so their thumbnails will show an empty
-slot. The probe's overview did not open in an inactive accessory app, and the
-host was in use, so the photograph waits for an idle host in the depth slice.
+MEASURED the same day on an idle host, the probe made active and the group's
+`isOverviewVisible` set (AppKit's `toggleTabOverview:` did not open it from
+code): Show All Tabs is drawn inside the one window, and the thumbnail of
+every tab but the selected one shows the region's slot EMPTY, since the view
+is in the selected tab's window at that moment. Accepted, as the coordinator
+proposed; the overview is a moment's picker and the region returns with the
+selection.
 
 **A second strip gets a second instance.** A torn-out tab is on screen at the
 same time as its old strip, and per Q1 it is still the same kaya window, so it
@@ -202,8 +204,7 @@ harness reads the instance in the active strip.
 the document, above the keyboard's inset, as a status bar would. A `leading` or
 `trailing` region is shown in the open-documents sheet, above the list, which
 is the one place a phone already shows window-level content beside the
-documents. This placement is the plan's proposal and is in the message that
-carries the probe's result.
+documents. RULED 2026-10-28 (the maintainer: "yes").
 
 **The editor** keeps its status line and find bar PER DOCUMENT: each describes
 one buffer (the find bar's matches, the status line's "saved, 15 bytes"), and
