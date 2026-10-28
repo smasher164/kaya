@@ -362,7 +362,7 @@ lanes = 'NNNNN'
 need_why = "VS Code, Notion, Obsidian, Postman; MAUI tabbed windows (30 votes); kaya's sections cover the fixed-set half"
 parity_why = 'NSWindow tabbing, AdwTabBar, WinUI TabView, Material tabs; egui and iced compose their own'
 shape = 'window prop: a tab strip over pushed roots'
-kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them.'
+kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them. Study 2026-10-28 (docs/native-tabs-study.md): a Mac tab is a window, a GNOME or WinUI tab is a view in one window, phones have none; native per platform is larger than M.'
 
 [[feature]]
 slug = 'safe_area'
