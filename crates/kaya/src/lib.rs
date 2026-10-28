@@ -148,7 +148,7 @@ pub use app::{
     MenuItems, MenuRef, MenuSource, Messages, OptionRef, PropToken, RadioGroupRef, RadioOptions,
     CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
-    props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run,
+    props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run, Selection,
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
     // docs/media-plan.md: the player, the video view and the session.
     can_play, MediaSource, PlayerKind, PlayerReading, PlayerRef, SessionRef,

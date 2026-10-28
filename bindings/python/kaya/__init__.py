@@ -3490,6 +3490,54 @@ class Format:
                 f"name={self.name!r}, value={self.value!r})")
 
 
+class Selection:
+    """Where a `rich` textarea's selection is and the attributes that hold
+    over ALL of it, in name order (docs/phone-format-plan.md §3)."""
+
+    __slots__ = ("range", "attrs")
+
+    def __init__(self, start: int, end: int, attrs: Sequence[Run]) -> None:
+        self.range: builtins.range = builtins.range(int(start), int(end))
+        self.attrs: list[Run] = list(attrs)
+
+    def has(self, name: str) -> bool:
+        """Whether `name` holds over the whole selection (at a caret:
+        whether the next typed character takes it)."""
+        return any(a.name == name for a in self.attrs)
+
+    def block(self) -> str:
+        """The paragraph kind every touched paragraph shares; `Block.BODY`
+        for body text and for paragraphs of different kinds."""
+        for a in self.attrs:
+            if a.name == "block" and a.value in _BLOCK_NAMES:
+                return a.value
+        return Block.BODY
+
+    def __eq__(self, other: object) -> bool:
+        return (isinstance(other, Selection)
+                and (self.range, self.attrs) == (other.range, other.attrs))
+
+    def __repr__(self) -> str:
+        return (f"Selection(start={self.range.start!r}, "
+                f"end={self.range.stop!r}, attrs={self.attrs!r})")
+
+
+def _selection_of(tail: Sequence[Any]) -> Selection:
+    if len(tail) < 2 or len(tail) % 2 != 0:
+        raise KayaValueError(
+            f"kaya: a text_selected carries {len(tail)} values, want 2 "
+            "plus two per attribute")
+    start, end = tail[0], tail[1]
+    if not isinstance(start, int) or not isinstance(end, int):
+        raise KayaValueError(
+            f"kaya: a text_selected's offsets are a {type(start).__name__} "
+            f"and a {type(end).__name__}, want two integers")
+    span = _decoded_span("text_selected", start, end)
+    return Selection(span.start, span.stop, [
+        Run(span.start, span.stop, tail[i], tail[i + 1])
+        for i in builtins.range(2, len(tail), 2)])
+
+
 def _normalize_runs(runs: Sequence[Run]) -> list[Run]:
     """The core's normal form (crates/kaya/src/scene.rs, RichDoc::
     normalize), so the mirror and the core's document spell one string."""
@@ -3747,6 +3795,13 @@ class MenuItem:
         the action stays in the context menu, which it always is
         (docs/swipe-actions-plan.md R1-R3). Context actions only. Const-only."""
         _records().append(wire.tx_set_menu_swipe(self.id, int(Swipe(swipe))))
+
+    def keyboard_bar(self, on: bool) -> None:
+        """Put this top-level window menu's items on the bar above a
+        software keyboard while a textarea is edited; inert where there is
+        no software keyboard (docs/phone-format-plan.md §2). Top-level
+        window menus only (root-checked). Const-only."""
+        _records().append(wire.tx_set_menu_keyboard_bar(self.id, bool(on)))
 
     def role(self, name: MenuRole | str) -> None:
         """Declare this action a standard command (actions only).
@@ -5025,6 +5080,10 @@ class Symbol(enum.IntEnum):
     QUEUE = wire.SYMBOL_QUEUE
     FAVORITE = wire.SYMBOL_FAVORITE
     MUTED = wire.SYMBOL_MUTED
+    BOLD = wire.SYMBOL_BOLD
+    ITALIC = wire.SYMBOL_ITALIC
+    UNDERLINE = wire.SYMBOL_UNDERLINE
+    STRIKETHROUGH = wire.SYMBOL_STRIKETHROUGH
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -5821,6 +5880,7 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
              submits: bool = False,
              own_undo: bool = False, on_edit: Handler | None = None,
              on_format: Handler | None = None,
+             on_selection: Handler | None = None,
              document: Document | FieldRef[Any] | None = None) -> Widget:
     """A multi-line text editor: the entry's uncontrolled contract over
     the platform's real multi-line editor.
@@ -5829,7 +5889,9 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
     `set_document`, `apply_edit`, `format`/`unformat`/`set_block`, the
     `document()` this binding folds, and the two deltas — `on_edit(edit)`
     for every user edit, addressed, beside the whole-text `on_change`, and
-    `on_format(act)` for a toolbar act over a range.
+    `on_format(act)` for a toolbar act over a range. `on_selection(sel)`
+    hears a `Selection` whenever the selection or what holds over it moves
+    (docs/phone-format-plan.md §3).
 
     `document=` is the TEMPLATE zone's rich spelling (§19): a Document
     field of the enclosing For's element, which makes the copy rich and
@@ -5865,6 +5927,8 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
         _app._register(handle, wire.OCC_TEXT_EDITED, on_edit)
     if on_format is not None:
         _app._register(handle, wire.OCC_TEXT_FORMATTED, on_format)
+    if on_selection is not None:
+        _app._register(handle, wire.OCC_TEXT_SELECTED, on_selection)
     _set_grow(handle, grow)
     return handle
 
@@ -8896,6 +8960,8 @@ class App:
                 args.append(_operation(payload))
             elif kind in (wire.OCC_RANGE_CHANGED, wire.OCC_RANGE_COMMITTED):
                 args.extend(float(v) for v in payload)
+            elif kind == wire.OCC_TEXT_SELECTED:
+                args.append(_selection_of(payload))
             elif payload is not None:
                 args.append(payload)
             self._dispatch(handler, *args)

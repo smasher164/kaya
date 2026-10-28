@@ -561,6 +561,28 @@ end
 
 type format_act = Format.t
 
+(* Where a [rich] textarea's selection is and the attributes that hold
+   over ALL of it, in name order (docs/phone-format-plan.md §3). *)
+module Selection = struct
+  type t = { range : int * int; attrs : Run.t list }
+
+  let has s name = List.exists (fun (r : Run.t) -> r.name = name) s.attrs
+
+  let block s =
+    match List.find_opt (fun (r : Run.t) -> r.name = "block") s.attrs with
+    | None -> Body
+    | Some r -> (
+        match
+          List.find_opt
+            (fun b -> block_name b = r.value)
+            [ Heading1; Heading2; Heading3; Quote; Code_block ]
+        with
+        | Some b -> b
+        | None -> Body)
+end
+
+type selection = Selection.t
+
 (* Media (docs/media-plan.md): the player the app holds, what it reads,
    the video view's fit and the one session. *)
 module Player_state = struct
@@ -1178,6 +1200,8 @@ type app = {
      (docs/rich-text-plan.md §19). *)
   node_edits : (int64, Kaya_wire.value list -> edit -> unit) Hashtbl.t;
   node_formats : (int64, Kaya_wire.value list -> format_act -> unit) Hashtbl.t;
+  widget_selections : (int64, selection -> unit) Hashtbl.t;
+  node_selections : (int64, Kaya_wire.value list -> selection -> unit) Hashtbl.t;
   widget_toggles : (int64, bool -> unit) Hashtbl.t;
   widget_values : (int64, float -> unit) Hashtbl.t;
   (* The pickers' committed values arrive as the packed I64; the sugar
@@ -1413,6 +1437,8 @@ let create () =
     node_formats = Hashtbl.create 8;
     widget_edits = Hashtbl.create 8;
     widget_formats = Hashtbl.create 8;
+    widget_selections = Hashtbl.create 8;
+    node_selections = Hashtbl.create 8;
     widget_toggles = Hashtbl.create 8;
     widget_values = Hashtbl.create 8;
     widget_dates = Hashtbl.create 8;
@@ -2224,6 +2250,10 @@ type symbol =
   | Queue
   | Favorite
   | Muted
+  | Bold
+  | Italic
+  | Underline
+  | Strikethrough
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2262,6 +2292,10 @@ let symbol_wire = function
   | Queue -> Int64.of_int Kaya_wire.symbol_queue
   | Favorite -> Int64.of_int Kaya_wire.symbol_favorite
   | Muted -> Int64.of_int Kaya_wire.symbol_muted
+  | Bold -> Int64.of_int Kaya_wire.symbol_bold
+  | Italic -> Int64.of_int Kaya_wire.symbol_italic
+  | Underline -> Int64.of_int Kaya_wire.symbol_underline
+  | Strikethrough -> Int64.of_int Kaya_wire.symbol_strikethrough
 
 (* A [symbol] row field's wire form, for the ppx's generated code
    (docs/media-player-plan.md M16 (21)). Every constructor, in wire order;
@@ -2270,7 +2304,7 @@ let all_symbols =
   [ Add; Remove; Delete; Edit; Done; Close; Search; Settings; Refresh; Info; Warning; Back;
     Forward; More; Copy; Paste; Star; Lock; Person; Home; Emoji; Send; Attach; Mic;
     ImageMissing; Play; Pause; Next; Previous; Shuffle; Repeat; RepeatOne; Volume; Queue;
-    Favorite; Muted ]
+    Favorite; Muted; Bold; Italic; Underline; Strikethrough ]
 
 let pack_symbol = symbol_wire
 
@@ -2748,8 +2782,9 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
 (* A multi-line text editor: the entry's uncontrolled contract over
    the platform's real multi-line editor. [~rich:true] adds the
    attribute-run channel (docs/rich-text-plan.md R1); [~on_edit] and
-   [~on_format] answer only on one. *)
-let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit ?rich ?submits ?own_undo ?on_edit ?on_format ?line_numbers ?monospaced ?family ?text_scale () =
+   [~on_format] answer only on one, and so does [~on_selection]
+   (docs/phone-format-plan.md §3). *)
+let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?placeholder ?placeholder_bind ?on_change ?on_submit ?rich ?submits ?own_undo ?on_edit ?on_format ?on_selection ?line_numbers ?monospaced ?family ?text_scale () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_textarea in
   Option.iter (fun v -> set_line_numbers w v) line_numbers;
@@ -2773,6 +2808,7 @@ let textarea ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?he
   | None -> ());
   Option.iter (Hashtbl.replace tx.app.widget_edits id) on_edit;
   Option.iter (Hashtbl.replace tx.app.widget_formats id) on_format;
+  Option.iter (Hashtbl.replace tx.app.widget_selections id) on_selection;
   w
 
 let label ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?role ?rich ?href ?href_bind ?tint
@@ -5038,11 +5074,12 @@ let realize_menu_children tx parent children =
 (* A menu grouping node — a bar root through the window construct's
    [~menus], or nested as a bare partial application in a parent's child
    list (one nested grouping level is the cap, root-checked). *)
-let menu ?enabled ?bind_enabled ?icon ?symbol ~label children () =
+let menu ?enabled ?bind_enabled ?icon ?symbol ?keyboard_bar ~label children () =
   let tx = the_tx () in
   let id = alloc_menu_item Kaya_wire.menu_kind_menu (Some label) in
   realize_menu_children tx id children;
   menu_prop_tail id ?enabled ?bind_enabled ?icon ?symbol ();
+  Option.iter (fun on -> emit tx (Kaya_wire.tx_set_menu_keyboard_bar id on)) keyboard_bar;
   MenuItem id
 
 (* A radio group — the Choice contract with the platform's checkmark
@@ -6772,6 +6809,14 @@ let on_format_node app (Node id)
   Hashtbl.replace app.node_formats id (fun keys act ->
       handler (List.map key_of_wire keys) act)
 
+let on_selection app (Widget id) (handler : selection -> unit) =
+  Hashtbl.replace app.widget_selections id handler
+
+let on_selection_node app (Node id)
+    (handler : key list -> selection -> unit) =
+  Hashtbl.replace app.node_selections id (fun keys sel ->
+      handler (List.map key_of_wire keys) sel)
+
 (* The value a live slider's gesture SETTLED ON -- once per release or key
    move, after that gesture's moves (docs/slider-plan.md S2). *)
 let on_value_committed app (Widget id) (handler : float -> unit) =
@@ -7351,6 +7396,28 @@ let reader_occurrence app kind reader tail =
 (* Absorb a media occurrence into the mirror, THEN hand it on, so a
    handler reads the readings it was told about. True when [kind] was a
    media occurrence. *)
+let selection_of_tail tail =
+  let count = List.length tail in
+  if count < 2 || count mod 2 <> 0 then
+    invalid_arg
+      (Printf.sprintf
+         "kaya: a text_selected carries %d values, want 2 plus two per attribute"
+         count);
+  match tail with
+  | Kaya_wire.I64 start :: Kaya_wire.I64 stop :: values ->
+      let range =
+        decoded_span "text_selected" (Int64.to_int start) (Int64.to_int stop)
+      in
+      let rec attrs = function
+        | Kaya_wire.Str name :: Kaya_wire.Str value :: rest ->
+            { Run.range; name; value } :: attrs rest
+        | [] -> []
+        | _ ->
+            invalid_arg "kaya: a text_selected's attributes are not name/value strings"
+      in
+      { Selection.range; attrs = attrs values }
+  | _ -> invalid_arg "kaya: a text_selected's offsets are not two I64"
+
 let media_occurrence app kind id keys payload tail =
   let m = app.media in
   if kind = Kaya_wire.occ_kind_reader_frame || kind = Kaya_wire.occ_kind_reader_progress
@@ -7588,6 +7655,18 @@ let dispatch_loop app =
                    | Some handler -> dispatch app (fun () -> handler keys act)
                    | None -> ()))
            | _ -> ()
+         else if kind = Kaya_wire.occ_kind_text_selected then begin
+           let sel = selection_of_tail tail in
+           match keys with
+           | [] -> (
+               match Hashtbl.find_opt app.widget_selections id with
+               | Some handler -> dispatch app (fun () -> handler sel)
+               | None -> ())
+           | keys -> (
+               match Hashtbl.find_opt app.node_selections id with
+               | Some handler -> dispatch app (fun () -> handler keys sel)
+               | None -> ())
+         end
          else if kind = Kaya_wire.occ_kind_text_changed then
            match (payload, keys) with
            | Some (Kaya_wire.Str text), [] ->

@@ -109,6 +109,11 @@ the overflow's Format group (DESIGN.md, the window anchor). The document the
 editor opens is a short walking journal in place of the dotted fixture; its
 numbers are the find's matches.
 
+2026-10-27, later (docs/phone-format-plan.md): the Format menu's styles are
+toggles whose check marks are what holds over the selection (the buffer's
+`OnSelection`), so Bold on bold text takes it off, and the menu is marked
+`keyboard_bar`, so a phone carries its items on the bar above the keyboard.
+
 ## §3 — not in v1 (recorded, not forgotten)
 
 Syntax highlighting; tabs and panes; find-and-replace-all across a

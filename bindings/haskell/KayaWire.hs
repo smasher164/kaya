@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xcd377e2688e6cb2a
+specHash = 0x8a7752967302f191
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -378,6 +378,8 @@ mpropSymbol :: Word32
 mpropSymbol = 9
 mpropSwipe :: Word32
 mpropSwipe = 10
+mpropKeyboardBar :: Word32
+mpropKeyboardBar = 11
 swipeLeading :: Word32
 swipeLeading = 1
 swipeTrailing :: Word32
@@ -580,6 +582,14 @@ symbolFavorite :: Word32
 symbolFavorite = 35
 symbolMuted :: Word32
 symbolMuted = 36
+symbolBold :: Word32
+symbolBold = 37
+symbolItalic :: Word32
+symbolItalic = 38
+symbolUnderline :: Word32
+symbolUnderline = 39
+symbolStrikethrough :: Word32
+symbolStrikethrough = 40
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -1264,6 +1274,8 @@ occKindSelectionChanged :: Word16
 occKindSelectionChanged = 59
 occKindFontFamilies :: Word16
 occKindFontFamilies = 60
+occKindTextSelected :: Word16
+occKindTextSelected = 61
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -3429,6 +3441,12 @@ txSetMenuSwipe item swipe = wireRecord txKindSetMenuProp
   (word64LE item <> word32LE mpropSwipe <> word32LE sourceConst
     <> encodeValue (VI64 swipe))
 
+-- set_menu_prop with a constant keyboard_bar value.
+txSetMenuKeyboardBar :: Word64 -> Bool -> Builder
+txSetMenuKeyboardBar item keyboardBar = wireRecord txKindSetMenuProp
+  (word64LE item <> word32LE mpropKeyboardBar <> word32LE sourceConst
+    <> encodeValue (VBool keyboardBar))
+
 -- Decode one value at offset `at` from the record base; returns the
 -- value and the next offset.
 parseValue :: Ptr Word8 -> Int -> IO (Value, Int)
@@ -3522,7 +3540,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies && kind /= occKindTextSelected
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -3807,7 +3825,7 @@ parseOccurrence redeem rec = do
           -- frame time — with no count in front, so they are
           -- read until the record ends (canvas-plan §3.2.1).
           tail_ <-
-            if kind == occKindDrawRequested || kind == occKindTick || kind == occKindRangeChanged || kind == occKindRangeCommitted
+            if kind == occKindDrawRequested || kind == occKindTick || kind == occKindRangeChanged || kind == occKindRangeCommitted || kind == occKindTextSelected
               then do
                 stop <- peekByteOff rec 0 :: IO Word32
                 let rest at acc

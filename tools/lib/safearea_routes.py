@@ -983,7 +983,7 @@ def run(g):
          r"(func textViewDidChange\(_ textView: UITextView\) \{)\n\s+kayaKeepCaretShown\(textView\)", r"\1",
          "the iOS textarea keeps its caret in view"),
         ("SwiftUI's caret kept only while the layout has caught up", SWIFT,
-         r"UIView\.performWithoutAnimation \{ view\.scrollRangeToVisible\(view\.selectedRange\) \}\n(\s+\})",
+         r"UIView\.performWithoutAnimation \{ view\.scrollRangeToVisible\(view\.selectedRange\) \}\n(\s+// The caret's rect)",
          r"if view.contentSize.height < 0 { view.scrollRangeToVisible(view.selectedRange) }\n\1",
          "the caret kept in its text view lacks layout.ensureLayout"),
         ("the wall's refusal without the text view's own scroll, as shipped", SWIFT,

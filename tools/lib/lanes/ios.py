@@ -549,6 +549,7 @@ def suite_legs(suite):
         for scene in GO_SCENES:
             out.append("go" if scene == "milestone2" else f"{scene}-go")
         out.append("editor-go")
+        out.append("editorkeyboard-go")
         out.append("chat-go")
         out.append("chatkeyboard-go")
         out.append("chatkeyboardland-go")
@@ -579,6 +580,7 @@ def wired_scenes():
     out.update(PYTHON_SCENES)
     out.update(RUST_SCENES)
     out.add("editor")
+    out.add("editorkeyboard")
     out.add("chat")
     out.add("chatkeyboard")
     out.add("chatkeyboardland")

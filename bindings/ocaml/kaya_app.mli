@@ -329,6 +329,22 @@ end
 
 type format_act = Format.t
 
+(* Where a [rich] textarea's selection is and the attributes that hold
+   over ALL of it, in name order (docs/phone-format-plan.md §3). *)
+module Selection : sig
+  type t = { range : int * int; attrs : Run.t list }
+
+  (* Whether the attribute holds over the whole selection (at a caret:
+     whether the next typed character takes it). *)
+  val has : t -> string -> bool
+
+  (* The paragraph kind every touched paragraph shares; [Body] for body
+     text and for paragraphs of different kinds. *)
+  val block : t -> block
+end
+
+type selection = Selection.t
+
 (* THE APP AND ITS TRANSACTION, ABSTRACT. The engine — 54 handle
    tables, the id counters, the collection model — is not a guest's to
    reach, and it was transparent here only because the checks
@@ -845,6 +861,10 @@ type symbol =
   | Queue
   | Favorite
   | Muted
+  | Bold
+  | Italic
+  | Underline
+  | Strikethrough
 
 (* An icon-only button (docs/composer-plan.md §2). *)
 val set_symbol : widget -> symbol -> unit
@@ -969,6 +989,7 @@ val textarea :
   ?own_undo:bool ->
   ?on_edit:(edit -> unit) ->
   ?on_format:(format_act -> unit) ->
+  ?on_selection:(selection -> unit) ->
   ?line_numbers:bool ->
   ?monospaced:bool ->
   ?family:string ->
@@ -2087,6 +2108,7 @@ val menu :
   ?bind_enabled:bool signal ->
   ?icon:bytes ->
   ?symbol:symbol ->
+  ?keyboard_bar:bool ->
   label:string -> (unit -> menu_item) list -> unit -> menu_item
 
 (* A radio group — the Choice contract with the platform's checkmark
@@ -3030,6 +3052,13 @@ val on_format : app -> widget -> (format_act -> unit) -> unit
 val on_edit_node : app -> node -> (key list -> edit -> unit) -> unit
 
 val on_format_node : app -> node -> (key list -> format_act -> unit) -> unit
+
+(* Where a rich textarea's selection is and what holds over it, sent
+   whenever either changes (docs/phone-format-plan.md §3); the node
+   flavor receives the copy's key path first. *)
+val on_selection : app -> widget -> (selection -> unit) -> unit
+
+val on_selection_node : app -> node -> (key list -> selection -> unit) -> unit
 
 (* The value a live slider's gesture SETTLED ON -- once per release or
    key move, after that gesture's moves (docs/slider-plan.md S2). *)

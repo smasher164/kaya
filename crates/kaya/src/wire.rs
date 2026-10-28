@@ -1287,6 +1287,7 @@ pub(crate) const MPROP_SHORTCUT: u32 = 7;
 pub(crate) const MPROP_ROLE: u32 = 8;
 pub(crate) const MPROP_SYMBOL: u32 = 9;
 pub(crate) const MPROP_SWIPE: u32 = 10;
+pub(crate) const MPROP_KEYBOARD_BAR: u32 = 11;
 pub(crate) const SWIPE_LEADING: u32 = 1;
 pub(crate) const SWIPE_TRAILING: u32 = 2;
 pub(crate) const SWIPE_LEADING_FULL: u32 = 3;
@@ -1594,6 +1595,10 @@ pub(crate) const SYMBOL_VOLUME: u32 = 33;
 pub(crate) const SYMBOL_QUEUE: u32 = 34;
 pub(crate) const SYMBOL_FAVORITE: u32 = 35;
 pub(crate) const SYMBOL_MUTED: u32 = 36;
+pub(crate) const SYMBOL_BOLD: u32 = 37;
+pub(crate) const SYMBOL_ITALIC: u32 = 38;
+pub(crate) const SYMBOL_UNDERLINE: u32 = 39;
+pub(crate) const SYMBOL_STRIKETHROUGH: u32 = 40;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1635,6 +1640,10 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_QUEUE, "queue"),
     (SYMBOL_FAVORITE, "favorite"),
     (SYMBOL_MUTED, "muted"),
+    (SYMBOL_BOLD, "bold"),
+    (SYMBOL_ITALIC, "italic"),
+    (SYMBOL_UNDERLINE, "underline"),
+    (SYMBOL_STRIKETHROUGH, "strikethrough"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside
@@ -2001,6 +2010,7 @@ fn menu_prop(raw: u32) -> MenuProp {
         MPROP_ROLE => MenuProp::Role,
         MPROP_SYMBOL => MenuProp::Symbol,
         MPROP_SWIPE => MenuProp::Swipe,
+        MPROP_KEYBOARD_BAR => MenuProp::KeyboardBar,
         other => panic!("kaya: unknown menu property {other}"),
     }
 }
@@ -2017,6 +2027,7 @@ fn menu_prop_raw(p: MenuProp) -> u32 {
         MenuProp::Role => MPROP_ROLE,
         MenuProp::Symbol => MPROP_SYMBOL,
         MenuProp::Swipe => MPROP_SWIPE,
+        MenuProp::KeyboardBar => MPROP_KEYBOARD_BAR,
     }
 }
 
@@ -3892,6 +3903,20 @@ pub fn text_formatted_body(
     let mut blobs = Vec::new();
     write_value(&mut b, &Value::Str(name.to_owned()), &mut blobs);
     write_value(&mut b, &Value::Str(value.unwrap_or_default().to_owned()), &mut blobs);
+    b
+}
+
+/// TEXT_SELECTED: the click identity, then bare values — start, stop, and
+/// each attribute's name and value (docs/phone-format-plan.md §3).
+pub fn text_selected_body(id: u64, path: &[Value], range: TextRange, attrs: &[(String, String)]) -> Vec<u8> {
+    let mut b = click_tag(id, path);
+    let mut blobs = Vec::new();
+    write_value(&mut b, &Value::I64(range.start as i64), &mut blobs);
+    write_value(&mut b, &Value::I64(range.stop as i64), &mut blobs);
+    for (name, value) in attrs {
+        write_value(&mut b, &Value::Str(name.clone()), &mut blobs);
+        write_value(&mut b, &Value::Str(value.clone()), &mut blobs);
+    }
     b
 }
 

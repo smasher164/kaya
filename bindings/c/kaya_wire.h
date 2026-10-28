@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xcd377e2688e6cb2aULL
+#define KAYA_SPEC_HASH 0x8a7752967302f191ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -3488,6 +3488,16 @@ static inline void kaya_tx_set_menu_swipe(KayaTx *tx, uint64_t item, int64_t swi
     kaya_wire_end(tx, kaya_at);
 }
 
+/* set_menu_prop with a constant keyboard_bar value. */
+static inline void kaya_tx_set_menu_keyboard_bar(KayaTx *tx, uint64_t item, int keyboard_bar) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_MENU_PROP);
+    kaya_wire_u64(tx, item);
+    kaya_wire_u32(tx, KAYA_MPROP_KEYBOARD_BAR);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(keyboard_bar));
+    kaya_wire_end(tx, kaya_at);
+}
+
 /* Decode one value at `at`; returns the next offset. */
 static inline size_t kaya_parse_value(const uint8_t *buf, size_t at, KayaVal *out) {
     memcpy(&out->type, buf + at, 4);
@@ -3944,6 +3954,35 @@ static inline int kaya_parse_range_committed(const uint8_t *rec, uint64_t *id,
                                               uint32_t max_vals, uint32_t *n_vals) {
     const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
     if (r->header.kind != KAYA_OCCURRENCE_RANGE_COMMITTED)
+        return 0;
+    *id = r->id;
+    *n_keys = r->path_len;
+    *n_vals = 0;
+    size_t at = sizeof(KayaRecordButtonClicked);
+    for (uint32_t k = 0; k < r->path_len; k++) {
+        KayaVal scratch;
+        at = kaya_parse_value(rec, at, k < max_keys ? &keys[k] : &scratch);
+    }
+    while (at < r->header.size) {
+        KayaVal scratch;
+        int room = *n_vals < max_vals;
+        at = kaya_parse_value(rec, at, room ? &vals[*n_vals] : &scratch);
+        (*n_vals)++;
+    }
+    return 1;
+}
+
+/* Decode a text_selected occurrence: id plus path_len key-path values,
+ * then the trailing run of bare values (width and height in
+ * points, and a tick's frame time in seconds) — read to the end
+ * of the record, since the run carries no count. Returns 1 and
+ * fills the outputs, or 0 for other kinds. */
+static inline int kaya_parse_text_selected(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *keys, uint32_t max_keys,
+                                            uint32_t *n_keys, KayaVal *vals,
+                                            uint32_t max_vals, uint32_t *n_vals) {
+    const KayaRecordButtonClicked *r = (const KayaRecordButtonClicked *)rec;
+    if (r->header.kind != KAYA_OCCURRENCE_TEXT_SELECTED)
         return 0;
     *id = r->id;
     *n_keys = r->path_len;

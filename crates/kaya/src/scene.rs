@@ -621,6 +621,8 @@ struct MenuItem {
     /// The swipe this context item runs (docs/swipe-actions-plan.md §1),
     /// kept for the same subtree walk: a bar is no row to swipe.
     swipe: Option<i64>,
+    /// docs/phone-format-plan.md §2: a top-level window menu only.
+    keyboard_bar: bool,
 }
 
 // --- The undo ledger (docs/undo-plan.md D2, D3, §3) ---------------------
@@ -1899,6 +1901,8 @@ pub(crate) struct RichDoc {
     reported: Option<(u64, u64, u64)>,
     /// The last text_edited published, in the harness's spelling (R9).
     last_edit: Option<String>,
+    /// The last text_selected published (docs/phone-format-plan.md §3).
+    published: Option<(TextRange, Vec<(String, String)>)>,
 }
 
 fn spell_runs(runs: &[TextRun]) -> String {
@@ -2061,6 +2065,95 @@ impl RichDoc {
 }
 
 impl RichDoc {
+    /// The value of `name` when every byte of `start..end` that is not a
+    /// newline carries it with one value; None when a byte lacks it.
+    fn holds_over(&self, name: &str, start: usize, end: usize) -> Option<String> {
+        let bytes = self.text.as_bytes();
+        let first = (start..end).find(|&i| bytes[i] != b'\n')?;
+        let value = self
+            .runs
+            .iter()
+            .find(|r| r.name == name && r.range.start as usize <= first && first < r.range.end as usize)?
+            .value
+            .clone();
+        let mut spans: Vec<(usize, usize)> = self
+            .runs
+            .iter()
+            .filter(|r| r.name == name && r.value == value)
+            .map(|r| (r.range.start as usize, r.range.end as usize))
+            .collect();
+        spans.sort_unstable();
+        let mut at = first;
+        for (a, b) in spans {
+            if b <= at {
+                continue;
+            }
+            if a > at {
+                if bytes[at..a.min(end)].iter().any(|c| *c != b'\n') {
+                    return None;
+                }
+            }
+            at = b;
+            if at >= end {
+                return Some(value);
+            }
+        }
+        bytes[at..end].iter().all(|c| *c == b'\n').then_some(value)
+    }
+
+    /// The paragraph kind at `byte`'s paragraph; None for body or an empty one.
+    fn block_at(&self, byte: usize) -> Option<String> {
+        let text = &self.text;
+        let start = text[..byte.min(text.len())].rfind('\n').map_or(0, |i| i + 1);
+        let end = text[start..].find('\n').map_or(text.len(), |i| start + i);
+        if end == start {
+            return None;
+        }
+        self.attrs_at(start).get("block").cloned()
+    }
+
+    /// docs/phone-format-plan.md §3: the attributes holding over the whole
+    /// selection, in name order.
+    fn selection_attrs(&self) -> Vec<(String, String)> {
+        let len = self.text.len();
+        let start = (self.selection.start as usize).min(len);
+        let end = (self.selection.stop as usize).min(len);
+        let bytes = self.text.as_bytes();
+        let content = (start..end).any(|i| bytes[i] != b'\n');
+        let mut out: BTreeMap<String, String> = BTreeMap::new();
+        if content {
+            let names: BTreeSet<&str> =
+                self.runs.iter().map(|r| r.name.as_str()).filter(|n| *n != "block").collect();
+            for name in names {
+                if let Some(value) = self.holds_over(name, start, end) {
+                    out.insert(name.to_owned(), value);
+                }
+            }
+        } else {
+            for run in self.typed_runs(start, "x") {
+                if run.name != "block" {
+                    out.insert(run.name, run.value);
+                }
+            }
+        }
+        let last = if end > start { end - 1 } else { start };
+        let mut kinds = Vec::new();
+        let mut at = start;
+        loop {
+            kinds.push(self.block_at(at));
+            match self.text[at.min(len)..].find('\n') {
+                Some(i) if at + i < last => at = at + i + 1,
+                _ => break,
+            }
+        }
+        if let Some(Some(kind)) = kinds.first() {
+            if kinds.iter().all(|k| k.as_deref() == Some(kind.as_str())) {
+                out.insert("block".to_owned(), kind.clone());
+            }
+        }
+        out.into_iter().collect()
+    }
+
     /// Splice, then move the selection by R5's transform; answers where it ended.
     fn apply_edit(&mut self, range: TextRange, inserted: &str, runs: &[TextRun]) -> TextRange {
         let ins = inserted.len() as u64;
@@ -2371,6 +2464,7 @@ fn check_menu_prop(kind: MenuItemKind, prop: MenuProp) {
         MenuProp::Primary | MenuProp::Role | MenuProp::Swipe => {
             matches!(kind, MenuItemKind::Action)
         }
+        MenuProp::KeyboardBar => matches!(kind, MenuItemKind::Menu),
         MenuProp::Shortcut => kind.takes_shortcut(),
     };
     assert!(ok, "kaya: a {kind:?} menu item has no property {prop:?}");
@@ -2400,7 +2494,9 @@ fn check_menu_role(value: &Value) {
 fn menu_prop_value_type(prop: MenuProp) -> ValueType {
     match prop {
         MenuProp::Label | MenuProp::Shortcut | MenuProp::Role => ValueType::Str,
-        MenuProp::Enabled | MenuProp::Checked | MenuProp::Primary => ValueType::Bool,
+        MenuProp::Enabled | MenuProp::Checked | MenuProp::Primary | MenuProp::KeyboardBar => {
+            ValueType::Bool
+        }
         MenuProp::Value => ValueType::F64,
         MenuProp::Icon => ValueType::Blob,
         // The semantic icon vocabulary rides I64 like every other
@@ -5057,6 +5153,7 @@ impl Scene {
                                 shortcut: None,
                                 role: None,
                                 swipe: None,
+                                keyboard_bar: false,
                             },
                         )
                         .is_some();
@@ -5786,6 +5883,7 @@ impl Scene {
                     doc.normalize();
                     doc.queued.clear();
                     doc.selection = TextRange::new(0, 0);
+                    self.refresh_selected(widget);
                     out.push(ApplyOp::SetRichText { id: widget, text, runs: native });
                 }
                 TxOp::ApplyEdit { widget, range, inserted, runs } => {
@@ -5811,6 +5909,7 @@ impl Scene {
                             runs: native_runs,
                             selection: native_selection,
                         });
+                        self.refresh_selected(widget);
                     }
                 }
                 TxOp::FormatText { widget, name, value, range } => {
@@ -5855,6 +5954,9 @@ impl Scene {
                         doc.format(range.start as usize, range.stop as usize, &name, value);
                         native
                     });
+                    if native.is_some() {
+                        self.refresh_selected(widget);
+                    }
                     out.push(ApplyOp::FormatText { id: widget, name, value, range: native });
                 }
                 TxOp::VariantCase { .. } => {
@@ -6578,6 +6680,7 @@ impl Scene {
                     doc.runs.clear();
                     doc.queued.clear();
                     doc.selection = TextRange::new(0, 0);
+                    self.refresh_selected(id);
                 }
             }
             if !editable {
@@ -6788,6 +6891,7 @@ impl Scene {
         }
         let source = doc.source.take().unwrap_or(crate::wire::EDIT_SOURCE_USER as u32);
         doc.last_edit = Some(spell_edit(range, &inserted, &runs, source));
+        self.refresh_selected(widget);
         Some(RichEdit { range, inserted, runs, source })
     }
 
@@ -6844,6 +6948,7 @@ impl Scene {
         }
         let text = doc.text.clone();
         self.field_text.insert(widget, text);
+        self.refresh_selected(widget);
         out
     }
 
@@ -6875,6 +6980,7 @@ impl Scene {
             doc.pending_on.remove(name);
             doc.pending_off.insert(name.to_owned());
         }
+        self.refresh_selected(widget);
     }
 
     /// What provoked the next report (wire::EDIT_SOURCES); one-shot, default `user`.
@@ -6907,6 +7013,34 @@ impl Scene {
         if let Some(doc) = self.rich.get_mut(&widget) {
             doc.selection = TextRange::new(start, end);
         }
+        self.refresh_selected(widget);
+    }
+
+    /// Queue a text_selected when the selection or what holds over it moved
+    /// since the last one (docs/phone-format-plan.md §3).
+    fn refresh_selected(&mut self, widget: WidgetId) {
+        let Some(doc) = self.rich.get(&widget) else {
+            return;
+        };
+        if self.widgets.get(&widget) == Some(&WidgetKind::Label) {
+            return;
+        }
+        let len = doc.text.len() as u64;
+        let range = TextRange::new(doc.selection.start.min(len), doc.selection.stop.min(len));
+        let now = (range, doc.selection_attrs());
+        if doc.published.as_ref() == Some(&now) {
+            return;
+        }
+        let Some((id, path)) = self.field_identity(widget) else {
+            return;
+        };
+        let (range, attrs) = now.clone();
+        self.rich.get_mut(&widget).expect("just read").published = Some(now);
+        self.asks.push(if path.is_empty() {
+            Occurrence::TextSelected { id: WidgetId(id), range, attrs }
+        } else {
+            Occurrence::InstanceTextSelected { node: crate::protocol::TemplateNodeId(id), path, range, attrs }
+        });
     }
 
     /// Moves the mirror and answers the occurrence to publish; a collapsed
@@ -6938,6 +7072,7 @@ impl Scene {
         }
         let doc = self.rich.get_mut(&widget).expect("just read");
         doc.format(range.start as usize, range.stop as usize, name, value);
+        self.refresh_selected(widget);
         Some((range, name.to_owned(), value.map(str::to_owned)))
     }
 
@@ -8475,6 +8610,13 @@ impl Scene {
         shortcuts: &mut Vec<String>,
     ) {
         let it = &self.menu_items[&item];
+        if it.keyboard_bar {
+            assert!(
+                is_bar && depth == 1,
+                "kaya: keyboard_bar on menu item {item:?}, which is not a top-level \
+                 menu of a window's catalog (docs/phone-format-plan.md §2)"
+            );
+        }
         if is_menu_group(it.kind) {
             assert!(
                 depth <= 2,
@@ -8548,6 +8690,11 @@ impl Scene {
             .kind;
         assert!(parent != child, "kaya: a menu item cannot be its own parent");
         self.assert_menu_root_free(child);
+        assert!(
+            !self.menu_items[&child].keyboard_bar,
+            "kaya: keyboard_bar on menu item {child:?}, which is not a top-level menu of \
+             a window's catalog (docs/phone-format-plan.md §2)"
+        );
         assert!(
             menu_accepts(parent_kind, child_kind),
             "kaya: a {parent_kind:?} menu item cannot contain a {child_kind:?}"
@@ -8651,6 +8798,19 @@ impl Scene {
         self.menu_items.get_mut(&item).unwrap().role = Some(role.clone());
     }
 
+    /// docs/phone-format-plan.md §2: a top-level menu of a window catalog,
+    /// judged now if the item is placed and again wherever it is placed later.
+    fn claim_keyboard_bar(&mut self, item: MenuItemId, on: bool) {
+        let it = &self.menu_items[&item];
+        let top = it.parent.is_none() && !matches!(it.anchor, Some(MenuAnchor::Context));
+        assert!(
+            !on || top,
+            "kaya: keyboard_bar on menu item {item:?}, which is not a top-level menu of \
+             a window's catalog (docs/phone-format-plan.md §2)"
+        );
+        self.menu_items.get_mut(&item).unwrap().keyboard_bar = on;
+    }
+
     /// A context item's swipe: never on a bar, and at most one FULL swipe per
     /// edge among the items sharing its root (docs/swipe-actions-plan.md §1).
     fn claim_swipe(&mut self, item: MenuItemId, edge: i64) {
@@ -8733,13 +8893,17 @@ impl Scene {
                 if let (MenuProp::Swipe, Value::I64(edge)) = (prop, &v) {
                     self.claim_swipe(item, *edge);
                 }
+                if let (MenuProp::KeyboardBar, Value::Bool(on)) = (prop, &v) {
+                    self.claim_keyboard_bar(item, *on);
+                }
                 out.push(ApplyOp::SetMenuProp { item, prop, value: v });
             }
             PropValue::Signal(id) => {
                 assert!(
                     is_bindable_menu_prop(prop),
                     "kaya: menu property {prop:?} is not signal-bindable \
-                     (icon, symbol, primary, shortcut, and role are const-only)"
+                     (icon, symbol, primary, shortcut, role, swipe and keyboard_bar are \
+                     const-only)"
                 );
                 let current = self
                     .signals
@@ -13063,7 +13227,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "37 is not a symbol")]
+    #[should_panic(expected = "41 is not a symbol")]
     fn a_button_symbol_outside_the_vocabulary_dies_at_declare() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -13071,7 +13235,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(1),
                 prop: Prop::Symbol,
-                value: PropValue::Const(Value::I64(37)),
+                value: PropValue::Const(Value::I64(41)),
             },
         ]);
     }
@@ -14539,7 +14703,7 @@ mod tests {
     /// each, and the tab draws with no icon. 21 is the first free id — what a
     /// guest generated against a NEWER spec sends.
     #[test]
-    #[should_panic(expected = "37 is not a symbol")]
+    #[should_panic(expected = "41 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -14547,7 +14711,7 @@ mod tests {
             TxOp::SetSectionProp {
                 section: WindowId(7),
                 prop: SectionProp::Symbol,
-                value: PropValue::Const(Value::I64(37)),
+                value: PropValue::Const(Value::I64(41)),
             },
         ]);
     }
@@ -17238,7 +17402,7 @@ mod tests {
     /// section side, which is the point: one vocabulary, one sentence,
     /// two surfaces that cannot answer differently.
     #[test]
-    #[should_panic(expected = "37 is not a symbol")]
+    #[should_panic(expected = "41 is not a symbol")]
     fn menu_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -17246,7 +17410,7 @@ mod tests {
             TxOp::SetMenuProp {
                 item: MenuItemId(1),
                 prop: MenuProp::Symbol,
-                value: PropValue::Const(Value::I64(37)),
+                value: PropValue::Const(Value::I64(41)),
             },
         ]);
     }
@@ -18606,6 +18770,168 @@ mod tests {
         }]);
         assert_eq!(scene.rich_text(WidgetId(1)), Some("oneX\ntwo"));
         assert_eq!(runs_of(&scene), vec![(0, 5, "block".into(), "heading1".into())]);
+    }
+
+    /// docs/phone-format-plan.md §3: the last text_selected queued, spelled
+    /// `start:stop name=value,...`; None when nothing was queued.
+    fn selected(scene: &mut Scene) -> Option<String> {
+        scene
+            .take_asks()
+            .into_iter()
+            .filter_map(|occ| match occ {
+                Occurrence::TextSelected { range, attrs, .. } => Some(format!(
+                    "{}:{} {}",
+                    range.start,
+                    range.stop,
+                    attrs.iter().map(|(n, v)| format!("{n}={v}")).collect::<Vec<_>>().join(",")
+                )),
+                _ => None,
+            })
+            .last()
+    }
+
+    #[test]
+    fn a_selection_reports_what_holds_over_all_of_it() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document(
+            "bold plain\nmore",
+            vec![run(0, 4, "bold", "true"), run(0, 10, "italic", "true")],
+        )]);
+        scene.take_asks();
+        scene.set_text_selection(WidgetId(1), 0, 4);
+        assert_eq!(selected(&mut scene).as_deref(), Some("0:4 bold=true,italic=true"));
+        scene.set_text_selection(WidgetId(1), 2, 7);
+        assert_eq!(selected(&mut scene).as_deref(), Some("2:7 italic=true"), "a half-bold range is not bold");
+        scene.set_text_selection(WidgetId(1), 2, 7);
+        assert_eq!(selected(&mut scene), None, "an unchanged pair is not sent again");
+        scene.set_text_selection(WidgetId(1), 6, 15);
+        assert_eq!(selected(&mut scene).as_deref(), Some("6:15 "), "more is not italic");
+    }
+
+    #[test]
+    fn a_newline_inside_the_range_does_not_break_an_attribute() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("ab\ncd", vec![run(0, 2, "bold", "true"), run(3, 5, "bold", "true")])]);
+        scene.set_text_selection(WidgetId(1), 0, 5);
+        assert_eq!(selected(&mut scene).as_deref(), Some("0:5 bold=true"));
+    }
+
+    #[test]
+    fn a_caret_reports_what_the_next_character_takes() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("bold plain", vec![run(0, 4, "bold", "true")])]);
+        scene.set_text_selection(WidgetId(1), 4, 4);
+        assert_eq!(selected(&mut scene).as_deref(), Some("4:4 bold=true"), "typing after bold is bold");
+        scene.set_text_pending(WidgetId(1), "bold", "true", false, 4);
+        assert_eq!(selected(&mut scene).as_deref(), Some("4:4 "), "bold armed off at the caret");
+        scene.set_text_pending(WidgetId(1), "italic", "true", true, 4);
+        assert_eq!(selected(&mut scene).as_deref(), Some("4:4 italic=true"));
+        scene.set_text_selection(WidgetId(1), 7, 7);
+        assert_eq!(selected(&mut scene).as_deref(), Some("7:7 "), "pending state is the armed caret's only");
+    }
+
+    #[test]
+    fn a_block_counts_when_every_touched_paragraph_shares_it() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document(
+            "one\ntwo\nbody",
+            vec![run(0, 3, "block", "heading1"), run(4, 7, "block", "heading1")],
+        )]);
+        scene.set_text_selection(WidgetId(1), 1, 6);
+        assert_eq!(selected(&mut scene).as_deref(), Some("1:6 block=heading1"));
+        scene.set_text_selection(WidgetId(1), 1, 8);
+        assert_eq!(selected(&mut scene).as_deref(), Some("1:8 block=heading1"), "a range ending at a paragraph's start does not touch it");
+        scene.set_text_selection(WidgetId(1), 1, 9);
+        assert_eq!(selected(&mut scene).as_deref(), Some("1:9 "), "a heading and a body paragraph share no kind");
+        scene.set_text_selection(WidgetId(1), 5, 5);
+        assert_eq!(selected(&mut scene).as_deref(), Some("5:5 block=heading1"));
+    }
+
+    #[test]
+    fn a_format_act_and_an_edit_move_the_report() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![set_document("word", vec![])]);
+        scene.set_text_selection(WidgetId(1), 0, 4);
+        assert_eq!(selected(&mut scene).as_deref(), Some("0:4 "));
+        scene.note_text_formatted(WidgetId(1), TextRange::new(0, 4), "bold", Some("true"));
+        assert_eq!(selected(&mut scene).as_deref(), Some("0:4 bold=true"));
+        scene.note_text_formatted(WidgetId(1), TextRange::new(0, 4), "bold", None);
+        assert_eq!(selected(&mut scene).as_deref(), Some("0:4 "), "Bold on bold text takes it off");
+        scene.note_rich_text(WidgetId(1), "words");
+        assert_eq!(selected(&mut scene).as_deref(), Some("5:5 "));
+    }
+
+    #[test]
+    fn a_keyboard_bar_menu_is_accepted_at_the_top_of_a_window_catalog() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "Format"),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            keyboard_bar(1),
+        ]);
+    }
+
+    fn keyboard_bar(id: u64) -> TxOp {
+        TxOp::SetMenuProp {
+            item: MenuItemId(id),
+            prop: MenuProp::KeyboardBar,
+            value: PropValue::Const(Value::Bool(true)),
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "has no property KeyboardBar")]
+    fn a_keyboard_bar_on_an_action_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![item(1, MenuItemKind::Action), label(1, "Bold"), keyboard_bar(1)]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not a top-level menu of a window's catalog")]
+    fn a_keyboard_bar_on_a_nested_menu_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "Format"),
+            item(2, MenuItemKind::Menu),
+            label(2, "Style"),
+            append(1, 2),
+            TxOp::MenubarAppend { window: DEFAULT_WINDOW, item: MenuItemId(1) },
+            keyboard_bar(2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not a top-level menu of a window's catalog")]
+    fn a_keyboard_bar_menu_nested_later_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            item(1, MenuItemKind::Menu),
+            label(1, "Format"),
+            item(2, MenuItemKind::Menu),
+            label(2, "Style"),
+            keyboard_bar(2),
+            append(1, 2),
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "not a top-level menu of a window's catalog")]
+    fn a_keyboard_bar_menu_in_a_context_catalog_is_refused() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Label },
+            item(1, MenuItemKind::Menu),
+            label(1, "Format"),
+            keyboard_bar(1),
+            TxOp::ContextAttach { widget: WidgetId(1), item: MenuItemId(1) },
+        ]);
     }
 
     #[test]

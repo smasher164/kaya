@@ -185,19 +185,48 @@ expect label#1 "4 of 4"
 # widget's, never the file's, so `dirty` does not move. Each act is reached
 # both ways a person reaches it: Bold and Body by their chords, the rest by
 # their menu paths (on a phone, the overflow's Format group).
+# EACH STYLE TOGGLES, and its check is what holds over the selection
+# (docs/phone-format-plan.md §3): the platform's own check mark, read off
+# the real menu.
 expect_menu "Format>Bold" enabled
+expect_menu "Format>Bold" unchecked
 shortcut "primary+b"
 expect label#0 "bold 1295:1297"
 expect_runs textarea#0 "1295:1297 bold"
+expect_menu "Format>Bold" checked
 menu_activate "Format>Italic"
 expect label#0 "italic 1295:1297"
 expect_runs textarea#0 "1295:1297 bold|1295:1297 italic"
+expect_menu "Format>Italic" checked
+# BOLD ON BOLD TEXT TAKES IT OFF.
+shortcut "primary+b"
+expect label#0 "bold off 1295:1297"
+expect_runs textarea#0 "1295:1297 italic"
+expect_menu "Format>Bold" unchecked
+expect_menu "Format>Italic" checked
+shortcut "primary+b"
+expect label#0 "bold 1295:1297"
+# A HALF-BOLD SELECTION IS NOT BOLD, and Bold on it bolds all of it (Word's
+# and Pages' rule). `format` selects the range through the widget; taking
+# off an underline nobody put on changes no run.
+format textarea#0 1294:1297 underline off
+expect label#0 "underline off 1294:1297"
+expect_menu "Format>Bold" unchecked
+expect_menu "Format>Italic" unchecked
+shortcut "primary+b"
+expect label#0 "bold 1294:1297"
+expect_runs textarea#0 "1294:1297 bold|1295:1297 italic"
+expect_menu "Format>Bold" checked
 menu_activate "Format>Paragraph Style>Heading 1"
 expect label#0 "heading1 1274:1297"
-expect_runs textarea#0 "1274:1297 block=heading1|1295:1297 bold|1295:1297 italic"
+expect_runs textarea#0 "1274:1297 block=heading1|1294:1297 bold|1295:1297 italic"
+expect_menu "Format>Paragraph Style>Heading 1" checked
+expect_menu "Format>Paragraph Style>Body" unchecked
 shortcut "primary+alt+0"
 expect label#0 "block off 1274:1297"
-expect_runs textarea#0 "1295:1297 bold|1295:1297 italic"
+expect_runs textarea#0 "1294:1297 bold|1295:1297 italic"
+expect_menu "Format>Paragraph Style>Heading 1" unchecked
+expect_menu "Format>Paragraph Style>Body" checked
 expect_dirty false
 
 # ---- a declared set is bound to the text it was declared against ---

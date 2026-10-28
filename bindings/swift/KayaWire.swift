@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xcd377e2688e6cb2a
+let kayaSpecHash: UInt64 = 0x8a7752967302f191
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3778,6 +3778,16 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_menu_prop with a constant keyboard_bar value.
+    mutating func setMenuKeyboardBar(_ item: UInt64, _ keyboardBar: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_MENU_PROP))
+        self.u64(item)
+        self.u32(UInt32(KAYA_MPROP_KEYBOARD_BAR))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(keyboardBar))
+        self.end(kayaAt)
+    }
+
     func submit() {
         bytes.withUnsafeBytes { raw in
             kaya_submit(raw.bindMemory(to: UInt8.self).baseAddress, UInt(raw.count))
@@ -3990,6 +4000,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_ACTIVATED)
             || kind == UInt16(KAYA_OCCURRENCE_SELECTION_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_FONT_FAMILIES)
+            || kind == UInt16(KAYA_OCCURRENCE_TEXT_SELECTED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4625,6 +4636,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_TICK)
             || kind == UInt16(KAYA_OCCURRENCE_RANGE_CHANGED)
             || kind == UInt16(KAYA_OCCURRENCE_RANGE_COMMITTED)
+            || kind == UInt16(KAYA_OCCURRENCE_TEXT_SELECTED)
         {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time

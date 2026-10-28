@@ -629,6 +629,10 @@ public enum KayaSymbol: Int64, Sendable {
     case queue = 34
     case favorite = 35
     case muted = 36
+    case bold = 37
+    case italic = 38
+    case underline = 39
+    case strikethrough = 40
 }
 
 public struct KayaWidget {
@@ -1043,6 +1047,28 @@ func kayaFormatFromTail(_ tail: [KayaValue]) -> KayaFormat {
     if case .str(let name) = tail[3] { act.name = name }
     if case .str(let value) = tail[4], !removed { act.value = value }
     return act
+}
+
+/// A text_selected tail: start, stop, then a name and a value per
+/// attribute.
+func kayaSelectionFromTail(_ tail: [KayaValue]) -> KayaSelection {
+    guard tail.count >= 2, tail.count % 2 == 0 else {
+        fatalError("kaya: a text_selected carries \(tail.count) values, want 2 plus two per attribute")
+    }
+    guard case .i64(let start) = tail[0], case .i64(let stop) = tail[1] else {
+        fatalError("kaya: a text_selected's offsets are \(tail[0]) and \(tail[1]), want two i64")
+    }
+    let range = kayaDecodedSpan("text_selected", Int(start), Int(stop))
+    var attrs: [KayaRun] = []
+    var at = 2
+    while at < tail.count {
+        guard case .str(let name) = tail[at], case .str(let value) = tail[at + 1] else {
+            fatalError("kaya: a text_selected's attribute \(at / 2 - 1) is \(tail[at]) and \(tail[at + 1]), want two strings")
+        }
+        attrs.append(KayaRun(range: range, name: name, value: value))
+        at += 2
+    }
+    return KayaSelection(range: range, attrs: attrs)
 }
 
 /// The same four, on the way down.
@@ -2269,6 +2295,25 @@ public struct KayaFormat: Equatable {
     var isFlag: Bool { value == kayaFlagValue }
 }
 
+/// Where a `rich` textarea's selection is and the attributes that hold
+/// over ALL of it, in name order (docs/phone-format-plan.md §3).
+public struct KayaSelection: Equatable {
+    public var range: Range<Int>
+    public var attrs: [KayaRun]
+
+    /// Whether `name` holds over the whole selection (at a caret: whether
+    /// the next typed character takes it).
+    public func has(_ name: String) -> Bool {
+        attrs.contains { $0.name == name }
+    }
+
+    /// The paragraph kind every touched paragraph shares; `.body` for body
+    /// text and for paragraphs of different kinds.
+    public var block: KayaBlock {
+        attrs.first { $0.name == "block" }.flatMap { KayaBlock(rawValue: $0.value) } ?? .body
+    }
+}
+
 /// The core's own fold rule over ANY document — a live widget's mirror or
 /// a stamped copy's ROW FIELD (crates/kaya/src/app.rs, `fold_edit`;
 /// docs/rich-text-plan.md §19). EVERY OFFSET IS A UTF-8 BYTE OFFSET, so
@@ -2720,6 +2765,8 @@ public final class KayaApp {
     // that reads and rewrites T's Document field by wire index.
     private var nodeEdits: [UInt64: (KayaAppTx, [KayaValue], KayaEdit) throws -> Void] = [:]
     private var nodeFormats: [UInt64: (KayaAppTx, [KayaValue], KayaFormat) throws -> Void] = [:]
+    private var widgetSelections: [UInt64: (KayaAppTx, KayaSelection) throws -> Void] = [:]
+    private var nodeSelections: [UInt64: (KayaAppTx, [KayaValue], KayaSelection) throws -> Void] = [:]
     private var documentBinds: [UInt64: (collection: UInt64, field: UInt32)] = [:]
     private var documentFields: [UInt64: (
         read: (Any, UInt32) -> KayaDocument?,
@@ -3158,6 +3205,22 @@ public final class KayaApp {
         _ handler: @escaping (KayaAppTx, [KayaValue], KayaFormat) throws -> Void
     ) {
         nodeFormats[n.id] = handler
+    }
+
+    /// Where a rich textarea's selection is and what holds over it, sent
+    /// whenever either changes (docs/phone-format-plan.md §3).
+    func onSelection(
+        _ w: KayaWidget, _ handler: @escaping (KayaAppTx, KayaSelection) throws -> Void
+    ) {
+        widgetSelections[w.id] = handler
+    }
+
+    /// The same for a stamped copy, with its keys, outermost first.
+    public func onSelection(
+        _ n: KayaNodeHandle,
+        _ handler: @escaping (KayaAppTx, [KayaValue], KayaSelection) throws -> Void
+    ) {
+        nodeSelections[n.id] = handler
     }
 
     /// A document-bound template textarea's node, against the For it was
@@ -3923,6 +3986,16 @@ public final class KayaApp {
                 }
                 if let handler = nodeFormats[id] {
                     dispatch { try build { tx in try handler(tx, keys, act) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_SELECTED), true):
+                let selection = kayaSelectionFromTail(tail)
+                if let handler = widgetSelections[id] {
+                    dispatch { try build { tx in try handler(tx, selection) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_TEXT_SELECTED), false):
+                let selection = kayaSelectionFromTail(tail)
+                if let handler = nodeSelections[id] {
+                    dispatch { try build { tx in try handler(tx, keys, selection) } }
                 }
             case (UInt16(KAYA_OCCURRENCE_TOGGLED), true):
                 if let handler = widgetToggles[id] {
@@ -5001,7 +5074,8 @@ public final class KayaAppTx {
 
     /// A multi-line text editor, on the entry's uncontrolled contract.
     /// `rich:` adds the attribute-run channel (docs/rich-text-plan.md R1):
-    /// `onEdit:` and `onFormat:` answer only on one. `ownUndo:` turns the
+    /// `onEdit:`, `onFormat:` and `onSelection:` answer only on one
+    /// (docs/phone-format-plan.md §3). `ownUndo:` turns the
     /// platform's own undo stack off on this widget and routes Edit>Undo
     /// to the app's Undo item (docs/rich-text-plan.md R6, §14). `submits:`
     /// makes Return the send gesture and Shift+Return the newline
@@ -5015,6 +5089,7 @@ public final class KayaAppTx {
         ownUndo: Bool = false,
         onEdit: ((KayaAppTx, KayaEdit) throws -> Void)? = nil,
         onFormat: ((KayaAppTx, KayaFormat) throws -> Void)? = nil,
+        onSelection: ((KayaAppTx, KayaSelection) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_TEXTAREA))
@@ -5025,6 +5100,7 @@ public final class KayaAppTx {
         if ownUndo { tx.setOwnUndo(w.id, true) }
         if let onEdit { app.onEdit(w, onEdit) }
         if let onFormat { app.onFormat(w, onFormat) }
+        if let onSelection { app.onSelection(w, onSelection) }
         if let grow { setGrow(w, grow) }
         return w
     }
@@ -6536,11 +6612,12 @@ public final class KayaAppTx {
     /// menus:) or nested (in a parent's items:).
     public func menu(
         _ label: KayaMenuText, enabled: KayaMenuBool? = nil, icon: Data? = nil,
-        symbol: KayaSymbol? = nil, items: [KayaMenuItem] = []
+        symbol: KayaSymbol? = nil, keyboardBar: Bool = false, items: [KayaMenuItem] = []
     ) -> KayaMenuItem {
         let m = newMenuItem(KAYA_MENU_KIND_MENU, label)
         for child in items { tx.menuItemAppend(m.id, child.id) }
         menuTail(m, enabled, icon, symbol)
+        if keyboardBar { tx.setMenuKeyboardBar(m.id, true) }
         return m
     }
 
@@ -6552,7 +6629,8 @@ public final class KayaAppTx {
         enabled: KayaMenuBool? = nil, checked: KayaMenuBool? = nil,
         value: KayaMenuIndex? = nil, icon: Data? = nil,
         symbol: KayaSymbol? = nil, primary: Bool? = nil,
-        shortcut: String? = nil, role: KayaMenuRole? = nil, items: [KayaMenuItem] = []
+        shortcut: String? = nil, role: KayaMenuRole? = nil, keyboardBar: Bool? = nil,
+        items: [KayaMenuItem] = []
     ) {
         for child in items { tx.menuItemAppend(item.id, child.id) }
         if let label { menuLabel(item, label) }
@@ -6564,6 +6642,7 @@ public final class KayaAppTx {
         if let primary { tx.setMenuPrimary(item.id, primary) }
         if let shortcut { tx.setMenuShortcut(item.id, shortcut) }
         if let role { tx.setMenuRole(item.id, role.rawValue) }
+        if let keyboardBar { tx.setMenuKeyboardBar(item.id, keyboardBar) }
     }
 
     /// A radio group — the Choice contract with the platform's checkmark

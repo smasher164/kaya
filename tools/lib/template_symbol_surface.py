@@ -140,8 +140,8 @@ def run():
     withheld = [row for row in ROWS if row[0] != "python template symbol"]
     gate.negative("a binding's row withheld", lambda: findings(texts, withheld),
                   want="no template symbol row for python")
-    short = gate.doctor("ocaml all_symbols missing Muted", texts[MLI], r"Favorite; Muted \]", "Favorite ]")
-    gate.negative("ocaml all_symbols missing Muted", lambda: findings({**texts, MLI: short}),
+    short = gate.doctor("ocaml all_symbols missing Strikethrough", texts[MLI], r"Underline; Strikethrough \]", "Underline ]")
+    gate.negative("ocaml all_symbols missing Strikethrough", lambda: findings({**texts, MLI: short}),
                   want="is not its type's constructors")
     gate.negatives_ran(len(ROWS) + 3)
     if gate.status == 0:

@@ -1,0 +1,34 @@
+# The editor's Format menu on the bar above a phone's keyboard
+# (docs/phone-format-plan.md §2, §4): the app marks the menu it already has,
+# and the bar's buttons are its items, each toggle showing what holds over
+# the selection. A phone's script: the desktops have no software keyboard
+# (docs/safe-area-plan.md A13), and their menu bar carries the same items.
+expect_title "untitled"
+expect_focused textarea#0
+expect_keyboard on
+expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+type "Walk"
+expect textarea#0 "Walk"
+# `format` selects the range through the widget; taking off an underline
+# nobody put on changes no run.
+format textarea#0 0:4 underline off
+expect label#0 "underline off 0:4"
+keyboard_bar_press "Bold"
+expect label#0 "bold 0:4"
+expect_runs textarea#0 "0:4 bold"
+expect_keyboard_bar "Bold on|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+expect_menu "Format>Bold" checked
+# BOLD ON BOLD TEXT TAKES IT OFF.
+keyboard_bar_press "Bold"
+expect label#0 "bold off 0:4"
+expect_runs textarea#0 ""
+expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
+keyboard_bar_press "Italic"
+expect label#0 "italic 0:4"
+expect_keyboard_bar "Bold|Italic on|Underline|Strikethrough|Code|-|Paragraph Style>"
+# The nested menu's items, through its button.
+keyboard_bar_press "Paragraph Style>Heading 1"
+expect label#0 "heading1 0:4"
+expect_runs textarea#0 "0:4 block=heading1|0:4 italic"
+expect_menu "Format>Paragraph Style>Heading 1" checked
+expect_keyboard on

@@ -102,6 +102,10 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     // Adwaita has no outline heart; its one heart is the love emote.
     (crate::wire::SYMBOL_FAVORITE, "emote-love-symbolic"),
     (crate::wire::SYMBOL_MUTED, "audio-volume-muted-symbolic"),
+    (crate::wire::SYMBOL_BOLD, "format-text-bold-symbolic"),
+    (crate::wire::SYMBOL_ITALIC, "format-text-italic-symbolic"),
+    (crate::wire::SYMBOL_UNDERLINE, "format-text-underline-symbolic"),
+    (crate::wire::SYMBOL_STRIKETHROUGH, "format-text-strikethrough-symbolic"),
 ];
 
 const _: () = assert!(
@@ -1283,6 +1287,7 @@ fn publish_rich_edit(
                     &edit.runs,
                 ));
             }
+            send_asks(core);
         });
     });
 }
@@ -1297,6 +1302,7 @@ fn note_composing(id: u64, live: bool) {
             for op in core.scene.set_text_composing(WidgetId(id), live) {
                 apply(core, op);
             }
+            send_asks(core);
         });
     });
 }
@@ -1309,6 +1315,7 @@ fn note_rich_selection(id: u64, start: u64, end: u64) {
         CORE.with_borrow_mut(|core| {
             let Some(core) = core.as_mut() else { return };
             core.scene.set_text_selection(WidgetId(id), start, end);
+            send_asks(core);
         });
     });
 }
@@ -1380,6 +1387,7 @@ fn rich_format_selection(
         }
         let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
         core.scene.set_text_pending(id, name, value, !removed, guest_byte_of(&raw, from));
+        send_asks(core);
         return None;
     }
     let raw = buffer.text(&buffer.start_iter(), &buffer.end_iter(), false).to_string();
@@ -1411,6 +1419,7 @@ fn rich_format_selection(
             ));
         }
     }
+    send_asks(core);
     None
 }
 
@@ -16492,6 +16501,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("scene validated the item id")
                         .swipe = swipe;
                 }
+                // No software keyboard: the menu bar keeps the items (docs/phone-format-plan.md §2).
+                MenuProp::KeyboardBar => {}
             }
         }
 

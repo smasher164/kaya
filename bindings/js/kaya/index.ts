@@ -3055,6 +3055,45 @@ function shifted(span: Span, by: number): Span {
 /** A toolbar act over a range; `value` null is the attribute taken off. */
 export type Format = { readonly range: Span; readonly name: string; readonly value: string | null; readonly isFlag: boolean };
 
+/** Where a `rich` textarea's selection is and the attributes that hold
+ * over ALL of it, in name order (docs/phone-format-plan.md §3). */
+export class Selection {
+  readonly range: Span;
+  readonly attrs: readonly Run[];
+
+  constructor(range: Span, attrs: readonly Run[]) {
+    this.range = range;
+    this.attrs = attrs;
+  }
+
+  /** Whether `name` holds over the whole selection (at a caret: whether
+   * the next typed character takes it). */
+  has(name: string): boolean {
+    return this.attrs.some((a) => a.name === name);
+  }
+
+  /** The paragraph kind every touched paragraph shares; Block.BODY for
+   * body text and for paragraphs of different kinds. */
+  block(): BlockName {
+    const found = this.attrs.find((a) => a.name === "block" && BLOCK_NAMES.includes(a.value));
+    return found === undefined ? Block.BODY : (found.value as BlockName);
+  }
+}
+
+function selectionOf(tail: readonly wire.Decoded[]): Selection {
+  if (tail.length < 2 || tail.length % 2 !== 0) {
+    throw new Error(`kaya: a text_selected carries ${tail.length} values, want 2 plus two per attribute`);
+  }
+  const [start, stop] = tail;
+  if (typeof start !== "number" || typeof stop !== "number") {
+    throw new Error(`kaya: a text_selected's offsets are a ${runtime.describe(start)} and a ${runtime.describe(stop)}, want two integers`);
+  }
+  const range = decodedSpan("text_selected", start, stop);
+  const attrs: Run[] = [];
+  for (let at = 2; at < tail.length; at += 2) attrs.push(makeRun(range, String(tail[at]), String(tail[at + 1])));
+  return new Selection(range, attrs);
+}
+
 /** A `rich` textarea's text and runs, kept current by the binding from
  * the deltas it delivers (docs/rich-text-plan.md R1). The marks CHAIN:
  * `new kaya.Document(text).bold([0, 6])`; a range is a [start, stop] pair
@@ -3400,6 +3439,14 @@ export class MenuItem {
    * R1-R3). Context actions only. Const-only. */
   swipe(swipe: Swipe): void {
     records().push(wire.tx_set_menu_swipe(this.id, vocab(SWIPES, "swipe", swipe, '"trailing_full"')));
+  }
+
+  /** Put this top-level window menu's items on the bar above a software
+   * keyboard while a textarea is edited; inert where there is no software
+   * keyboard (docs/phone-format-plan.md §2). Top-level window menus only
+   * (root-checked). Const-only. */
+  keyboardBar(on: boolean): void {
+    records().push(wire.tx_set_menu_keyboard_bar(this.id, on));
   }
 
   role(name: MenuRole): void {
@@ -4409,6 +4456,10 @@ export const Symbol_ = Object.freeze({
   QUEUE: wire.SYMBOL_QUEUE,
   FAVORITE: wire.SYMBOL_FAVORITE,
   MUTED: wire.SYMBOL_MUTED,
+  BOLD: wire.SYMBOL_BOLD,
+  ITALIC: wire.SYMBOL_ITALIC,
+  UNDERLINE: wire.SYMBOL_UNDERLINE,
+  STRIKETHROUGH: wire.SYMBOL_STRIKETHROUGH,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.
@@ -5063,7 +5114,7 @@ export function entry(opts: CredentialInputOptions = {}): Widget {
   return handle;
 }
 
-export type TextAreaOptions = TextInputOptions & { rich?: boolean; submits?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler; document?: FieldRef };
+export type TextAreaOptions = TextInputOptions & { rich?: boolean; submits?: boolean; ownUndo?: boolean; onEdit?: Handler; onFormat?: Handler; onSelection?: Handler; document?: FieldRef };
 
 /** A stamped copy's document, bound to a `Document` FIELD of its row
  * (docs/rich-text-plan.md §19): `rich` FIRST — the core refuses
@@ -5094,7 +5145,8 @@ function bindDocument(handle: Widget, field: unknown): void {
  * setDocument, applyEdit, format/unformat/setBlock, the document() this
  * binding folds, and the two deltas — onEdit(edit) for every user edit,
  * addressed, beside the whole-text onChange, and onFormat(act) for a
- * toolbar act over a range.
+ * toolbar act over a range. onSelection(sel) hears a Selection whenever
+ * the selection or what holds over it moves (docs/phone-format-plan.md §3).
  *
  * `document` is the TEMPLATE zone's rich spelling (§19): a Document field
  * of the enclosing For's row, which makes the copy rich and renders that
@@ -5119,6 +5171,7 @@ export function textarea(opts: TextAreaOptions = {}): Widget {
   if (opts.onSubmit !== undefined) app()._register(handle, wire.OCC_SUBMITTED, opts.onSubmit);
   if (opts.onEdit !== undefined) app()._register(handle, wire.OCC_TEXT_EDITED, opts.onEdit);
   if (opts.onFormat !== undefined) app()._register(handle, wire.OCC_TEXT_FORMATTED, opts.onFormat);
+  if (opts.onSelection !== undefined) app()._register(handle, wire.OCC_TEXT_SELECTED, opts.onSelection);
   setGrow(handle, opts);
   return handle;
 }
@@ -7645,6 +7698,7 @@ export class App {
     else if (kind === wire.OCC_DROPPED) args.push(dropped(payload as wire.DroppedPayload));
     else if (kind === wire.OCC_DRAG_ENDED) args.push(operation(payload as number));
     else if (kind === wire.OCC_RANGE_CHANGED || kind === wire.OCC_RANGE_COMMITTED) args.push(...(payload as unknown[]).map(Number));
+    else if (kind === wire.OCC_TEXT_SELECTED) args.push(selectionOf(payload as wire.Decoded[]));
     else if (payload !== null) args.push(payload);
     this._dispatch(handler, ...args);
   }

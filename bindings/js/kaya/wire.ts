@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xcd377e2688e6cb2an;
+export const SPEC_HASH = 0x8a7752967302f191n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -185,6 +185,7 @@ export const MPROP_SHORTCUT = 7;
 export const MPROP_ROLE = 8;
 export const MPROP_SYMBOL = 9;
 export const MPROP_SWIPE = 10;
+export const MPROP_KEYBOARD_BAR = 11;
 export const SWIPE_LEADING = 1;
 export const SWIPE_TRAILING = 2;
 export const SWIPE_LEADING_FULL = 3;
@@ -286,6 +287,10 @@ export const SYMBOL_VOLUME = 33;
 export const SYMBOL_QUEUE = 34;
 export const SYMBOL_FAVORITE = 35;
 export const SYMBOL_MUTED = 36;
+export const SYMBOL_BOLD = 37;
+export const SYMBOL_ITALIC = 38;
+export const SYMBOL_UNDERLINE = 39;
+export const SYMBOL_STRIKETHROUGH = 40;
 export const SOURCE_CONST = 0;
 export const SOURCE_SIGNAL = 1;
 export const SOURCE_ELEMENT = 2;
@@ -629,6 +634,7 @@ export const OCC_IMAGE_RELEASED = 57;
 export const OCC_ACTIVATED = 58;
 export const OCC_SELECTION_CHANGED = 59;
 export const OCC_FONT_FAMILIES = 60;
+export const OCC_TEXT_SELECTED = 61;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -3234,6 +3240,12 @@ export function tx_set_menu_swipe(item: number, swipe: number): Uint8Array {
   return enc.end(TX_SET_MENU_PROP);
 }
 
+/** set_menu_prop with a constant keyboard_bar value. */
+export function tx_set_menu_keyboard_bar(item: number, keyboard_bar: boolean): Uint8Array {
+  enc.begin(); enc.u64(item); enc.u32(MPROP_KEYBOARD_BAR); enc.u32(SOURCE_CONST); enc.value(keyboard_bar);
+  return enc.end(TX_SET_MENU_PROP);
+}
+
 /** A decoded value: an I64 arrives as a plain number, the root having
  * refused anything past 2^53 before it could get here. */
 export type Decoded = boolean | number | string | BlobHandle;
@@ -3327,7 +3339,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -3754,7 +3766,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
     [value, at] = parse_value(buf, at);
     return { kind, id: ident, keys, payload: [removed, start, stop, name, value] };
   }
-  if ([OCC_DRAW_REQUESTED, OCC_TICK, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED].includes(kind)) {
+  if ([OCC_DRAW_REQUESTED, OCC_TICK, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_TEXT_SELECTED].includes(kind)) {
     // The canvas asks carry a run of BARE values after the key path with
     // no count in front, read until the record ends (docs/canvas-plan.md §3.2.1).
     const tail: Decoded[] = [];

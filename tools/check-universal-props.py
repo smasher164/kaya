@@ -66,6 +66,10 @@ BASELINE_LINKS = (
         "lineBox = (rowBaseline - ascent, rowBaseline - ascent + lineHeight)",
         "return (top + bottom) / 2 - dims[i].height / 2",
         "subviews[0].dimensions(in: ProposedViewSize(width: bounds.width, height: ext[0]))",
+        # docs/flex-shrink-plan.md §10, amended 2026-10-27: an unlabeled
+        # checkbox has no baseline on macOS either.
+        "let bs = dims.indices.map { i in textless(i) ? nil : Self.textBaseline(dims[i]) }",
+        "i < nodes.count && nodes[i].kind == kindCheckbox && nodes[i].text.isEmpty",
     )),
     (SWIFTUI, "kayaLabelBaseFont(node), ground: true", 3000, (
         "kayaLineHeights[node.id] = d.height - d[.lastTextBaseline] + d[.firstTextBaseline]",

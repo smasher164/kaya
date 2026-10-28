@@ -2712,7 +2712,7 @@ CODE_SURFACES = [
                  (HS_APP, r"^  {3} :: Double -> Attr 'LeafW"),
                  (HS_APP, r"^{4} :: Build \(\)"),
                  (HS_APP, r"^{5} :: App -> \(\[Text\] -> IO \(\)\) -> IO \(\)")]),
-    ("ocaml", [(ML_APP, r"\?on_format \?{0} \?{1} \?{2} \?{3} \(\) ="),
+    ("ocaml", [(ML_APP, r"\?on_format \?on_selection \?{0} \?{1} \?{2} \?{3} \(\) ="),
                (ML_APP, r"\?tint_bind \?text \?bind \?{1} \?{2} \?{3} \(\) ="),
                (ML_APP, r"\?content_type \?on_change \?on_submit \?{1} \?{2} \?{3} \(\) ="),
                (ML_APP, r"^let {4} \(\) ="),
@@ -2787,6 +2787,93 @@ for _lang, _rows in CODE_SURFACES:
                           f"code-surface cut")
         _cs_cuts += 1
 print(f"check-sugar-surface: code-surface cuts watched red {_cs_cuts}/{_cs_want}")
+
+# --- THE PHONE FORMAT SURFACE, in all nine (docs/phone-format-plan.md §2, §3) ---
+# The keyboard bar's menu prop and the selection's handler, widget and copy.
+PHONE_FORMAT_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs", [
+        r"pub fn {0}\(self, on: bool\) -> Self",
+        r"pub fn {1}\(&self, w: WidgetId, f: impl Fn\(Selection\)",
+        r"pub fn {1}_node\(&self, n: TemplateNodeId"]),
+    ("python", "bindings/python/kaya/__init__.py", [r"def {0}\(self, on: bool\)",
+                                                    r"{1}: Handler \| None = None",
+                                                    r"wire\.OCC_TEXT_SELECTED, {1}\)"]),
+    ("go", "bindings/go/app.go", [
+        r"func \(m MenuItem\) {0}\(on bool\) MenuItem",
+        r"func \(w Widget\) {1}\(fn func\(\*Tx, Selection\)\)",
+        r"func \(n Node\) {1}\(fn func\(\*Tx, \[\]any, Selection\)\)"]),
+    ("csharp", "bindings/csharp/KayaApp.cs", [
+        r"bool {0} = false\)",
+        r"public void {1}\(Widget w, Action<Tx, Selection>",
+        r"public void {1}\(Node n, Action<Tx, List<object>, Selection>"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java", [
+        r"public MenuItem {0}\(boolean on\)",
+        r"public void {1}\(Widget w, BiConsumer<Tx, Selection>",
+        r"public void {1}\(Node n, SelectionHandler"]),
+    ("swift", "bindings/swift/KayaApp.swift", [
+        r"{0}: Bool = false, items:",
+        r"{1}: \(\(KayaAppTx, KayaSelection\) throws -> Void\)\?",
+        r"public func {1}\("]),
+    ("haskell", "bindings/haskell/KayaApp.hs", [
+        r"I{0} :: Bool -> IAttr 'BarM",
+        r"^{1} :: App -> Widget -> \(Selection -> IO \(\)\)",
+        r"^{1}Node :: App -> Node ->"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml", [r"\?{0} ~label children \(\) =",
+                                             r"^let {1} app \(Widget id\)",
+                                             r"^let {1}_node app \(Node id\)"]),
+    ("js", "bindings/js/kaya/index.ts", [r"^  {0}\(on: boolean\): void \{{",
+                                         r"{1}\?: Handler",
+                                         r"wire\.OCC_TEXT_SELECTED, opts\.{1}\)"]),
+]
+_PF_SNAKE = ("keyboard_bar", "on_selection")
+PHONE_FORMAT_NAMES = {
+    "rust": _PF_SNAKE, "python": _PF_SNAKE, "ocaml": _PF_SNAKE,
+    "go": ("KeyboardBar", "OnSelection"), "csharp": ("keyboardBar", "OnSelection"),
+    "java": ("keyboardBar", "onSelection"), "swift": ("keyboardBar", "onSelection"),
+    "haskell": ("KeyboardBar", "onSelection"), "js": ("keyboardBar", "onSelection")}
+
+
+def check_phone_format(fake=None, text_for=None):
+    out = []
+    for lang, rel, rows in PHONE_FORMAT_SURFACES:
+        names = fake or PHONE_FORMAT_NAMES[lang]
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        for template in rows:
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell the "
+                           f"keyboard bar or the selection (docs/phone-format-plan.md §2, "
+                           f"§3; wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_phone_format():
+    print(_line)
+    status = 1
+_pf_want = sum(len(rows) for _, _, rows in PHONE_FORMAT_SURFACES)
+_pf_fake = check_phone_format(("kayaFakeBar", "kayaFakeSelection"))
+print(f"check-sugar-surface: fake phone-format spellings fired {len(_pf_fake)}/{_pf_want}")
+if len(_pf_fake) != _pf_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_pf_fake)}/{_pf_want} "
+                  f"phone-format patterns fired for names that exist nowhere)")
+_pf_cuts = 0
+for _lang, _rel, _rows in PHONE_FORMAT_SURFACES:
+    _real = read_rel(_rel)
+    for _template in _rows:
+        _pat = _template.format(*PHONE_FORMAT_NAMES[_lang])
+        _copy, _n = sub_count(_pat, "kayaCut", _real, flags=re.M)
+        print(f"check-sugar-surface: phone-format cut {_lang} /{_template[:30]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_phone_format(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} "
+                          f"phone-format cut /{_template[:30]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the "
+                          f"phone-format cut")
+        _pf_cuts += 1
+print(f"check-sugar-surface: phone-format cuts watched red {_pf_cuts}/{_pf_want}")
 
 # --- THE EXPANDER'S HEADER PROPS, live zone, in all nine (docs/expander-plan.md
 # K3, K4, K18). The kind census holds `expander` in both zones and tpl-surfaces

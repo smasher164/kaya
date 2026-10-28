@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xcd377e2688e6cb2a;
+    public const ulong SpecHash = 0x8a7752967302f191;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -190,6 +190,7 @@ static class KayaWire
     public const uint MpropRole = 8;
     public const uint MpropSymbol = 9;
     public const uint MpropSwipe = 10;
+    public const uint MpropKeyboardBar = 11;
     public const uint SwipeLeading = 1;
     public const uint SwipeTrailing = 2;
     public const uint SwipeLeadingFull = 3;
@@ -291,6 +292,10 @@ static class KayaWire
     public const uint SymbolQueue = 34;
     public const uint SymbolFavorite = 35;
     public const uint SymbolMuted = 36;
+    public const uint SymbolBold = 37;
+    public const uint SymbolItalic = 38;
+    public const uint SymbolUnderline = 39;
+    public const uint SymbolStrikethrough = 40;
     public const uint SourceConst = 0;
     public const uint SourceSignal = 1;
     public const uint SourceElement = 2;
@@ -633,6 +638,7 @@ static class KayaWire
     public const ushort OccKindActivated = 58;
     public const ushort OccKindSelectionChanged = 59;
     public const ushort OccKindFontFamilies = 60;
+    public const ushort OccKindTextSelected = 61;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -3933,6 +3939,15 @@ static class KayaWire
         return Finish(stream, w, TxKindSetMenuProp);
     }
 
+    /// set_menu_prop with a constant keyboard_bar value.
+    public static byte[] TxSetMenuKeyboardBar(ulong item, bool keyboardBar)
+    {
+        var w = Begin(out var stream);
+        w.Write(item); w.Write(MpropKeyboardBar); w.Write(SourceConst);
+        EncodeValue(w, keyboardBar);
+        return Finish(stream, w, TxKindSetMenuProp);
+    }
+
     /// One representation as the decoder hands it over: the clip
     /// kind, and its values with blobs already redeemed to byte[]. Kind
     /// is a SINGLE member of the clip enum and never a mask (you offer
@@ -4003,7 +4018,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -4549,7 +4564,7 @@ static class KayaWire
             }
             payload = new List<object> { removed, start, stop, pair[0], pair[1] };
         }
-        if (kind == OccKindDrawRequested || kind == OccKindTick || kind == OccKindRangeChanged || kind == OccKindRangeCommitted)
+        if (kind == OccKindDrawRequested || kind == OccKindTick || kind == OccKindRangeChanged || kind == OccKindRangeCommitted || kind == OccKindTextSelected)
         {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time

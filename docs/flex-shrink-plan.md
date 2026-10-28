@@ -317,10 +317,16 @@ node, never by a guide:
   (Forward)` beside `BaselineOffset` (the pointer and the direction enum
   joined tools/winui-bindgen's filter); `baseline_compensate` sets every
   child's top margin from one pass, the overhang shifting all of them.
-- macOS is out of the rule's reach in the task row: the AppKit checkbox
-  is an NSButton with a text baseline, so it is a text cell and meets the
-  baseline like a glyph, which is how AppKit's own forms align a checkbox
-  beside its label.
+- macOS: a checkbox with no label is a textless cell too (AMENDED
+  2026-10-27, docs/phone-format-plan.md's checkbox slice). AppKit's
+  NSButton reports a baseline for its empty title in the middle of the
+  box, so it used to count as a text cell, and the box's centre sat on
+  the title's baseline, about half a cap height (4.5pt) under the title's
+  centre (the maintainer: "the task checkbox sits a few points below its
+  title"). `KayaFlex.textless` now drops that baseline, as WinUI's
+  `baseline_compensate` and GTK's -1 already did, and the box is centred
+  on the title's first line box, as Reminders draws it. A checkbox WITH a
+  label still meets the baseline like a glyph.
 
 AND THE ROW'S HEIGHT IS COMPUTED LAST on SwiftUI: `KayaFlex.sizeThatFits`
 re-measures a row offered less than its cells at the shrunk extents and

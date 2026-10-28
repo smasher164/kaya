@@ -2175,7 +2175,14 @@ no-line-box rules as they are. DEFERRED by the maintainer, who is
 willing to live with the residual for now; measure the offset in pixels
 on each lane against the title's ink before choosing the metric, since
 the mac (an AppKit checkbox with its own text baseline) and GTK read
-right under the current rule and must not move. KEY: first line box,
+right under the current rule and must not move.
+MEASURED 2026-10-27 (docs/phone-format-plan.md's checkbox slice), the
+Inbox row's box centre against the capital B's ink centre, after the
+mac's unlabeled checkbox stopped counting as text: Android 0px, Windows
+0px, iOS 1px at 3x, macOS 2.5px at 2x (1.25pt; it was 9.5px, the box's
+centre on the baseline), GTK 2.5px at 1x, all LOW, not high. The
+cap-height centre would close the mac and GTK residue; still deferred.
+KEY: first line box,
 textless cell, cap height, checkbox too high, kayaFirstLabel,
 baselineLayout, first_line_metrics, text_line, lineCentre.
 

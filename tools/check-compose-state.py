@@ -33,6 +33,9 @@ EXEMPT = {
                     "fields are state",
     "menuItems": "a registry: looked up by menuOverflowDrilled, which IS "
                  "state, and KayaMenuItem's fields are state",
+    "nodes": "a registry: the keyboard bar looks a node up by "
+             "composeFocusedId, which IS state, for its kind, which a node "
+             "never changes (docs/phone-format-plan.md §2)",
 }
 # The file spells the collections both bare and fully qualified
 # (`androidx.compose.runtime.mutableStateListOf`).

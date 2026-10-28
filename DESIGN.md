@@ -2416,6 +2416,7 @@ is:
 | `primary` | Bool | Defaults false; action only; the chrome-promotion hint — the top bar on a compact host, the toolbar on a desktop one (see "Chrome promotion and `primary`"). |
 | `shortcut` | Str | A normalized shortcut spelling; any window-anchored LEAF command — action, toggle, or radio option. |
 | `role` | Str | A standard-command role from the closed vocabulary; action only. |
+| `keyboard_bar` | Bool | Defaults false; a top-level window `menu` only; const-only. Where there is a software keyboard, the bar above it carries the menu's items while a textarea of that window is edited; the menu stays where the catalog puts it everywhere (docs/phone-format-plan.md §2). |
 
 State follows the echo doctrine without a new exception. User
 activation emits; programmatic `checked` and `value` writes are
@@ -2622,7 +2623,9 @@ of being re-decided per binding.
   label above, `context_label` in all nine bindings.
 - **Merging authored items into native text-control menus** — GTK
   extra-menu and UIKit edit-menu APIs — waits for an app that needs
-  both its own command and the native editing commands on one control.
+  both its own command and the native editing commands on one control. The text editor's Format menu is such an app (2026-10-27); the phones
+  carry it on the keyboard bar instead (`keyboard_bar`), and the
+  selection-menu half is a ruling recorded in docs/phone-format-plan.md §5.
 - **A GTK hamburger presentation hint** waits for an artifact showing
   that the default bar is the wrong Linux idiom; if admitted, it is a
   presentation value, not a separate menu grammar.

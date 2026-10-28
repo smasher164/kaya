@@ -131,7 +131,8 @@ OFF_SCENES = {"tasksbig": "macOS has no text size (docs/compliance-plan.md R4)",
               "chatkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "taskskeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
               "autofillkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
-              "chatkeyboardland": "macOS has no software keyboard (docs/safe-area-plan.md A13)"}
+              "chatkeyboardland": "macOS has no software keyboard (docs/safe-area-plan.md A13)",
+              "editorkeyboard": "macOS has no software keyboard (docs/safe-area-plan.md A13)"}
 
 # The clock a scene runs under (docs/compliance-plan.md §4): the core writes
 # Apple's own `AppleICUForce24HourTime` into this process's volatile argument

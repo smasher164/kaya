@@ -170,6 +170,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::InstanceTick { .. } => {}
             // No link route is declared here, and no family list asked for.
             Occurrence::LinkOpened { .. } | Occurrence::FontFamilies { .. } => {}
+            Occurrence::TextSelected { .. } | Occurrence::InstanceTextSelected { .. } => {}
             Occurrence::Shutdown => break,
         }
     }

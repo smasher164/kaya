@@ -216,6 +216,11 @@ module KayaApp
     -- (docs\/rich-text-plan.md §19).
     onEditNode,
     onFormatNode,
+    -- docs\/phone-format-plan.md §3.
+    onSelection,
+    onSelectionNode,
+    selectionHas,
+    selectionBlock,
     onNeeded,
     onReleased,
     RowImages,
@@ -1470,6 +1475,10 @@ data Symbol
   | SymbolQueue
   | SymbolFavorite
   | SymbolMuted
+  | SymbolBold
+  | SymbolItalic
+  | SymbolUnderline
+  | SymbolStrikethrough
   deriving (Eq, Show, Enum, Bounded)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1512,6 +1521,10 @@ symbolWire s = fromIntegral $ case s of
   SymbolQueue -> W.symbolQueue
   SymbolFavorite -> W.symbolFavorite
   SymbolMuted -> W.symbolMuted
+  SymbolBold -> W.symbolBold
+  SymbolItalic -> W.symbolItalic
+  SymbolUnderline -> W.symbolUnderline
+  SymbolStrikethrough -> W.symbolStrikethrough
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -1603,6 +1616,11 @@ data IAttr (s :: MScope) where
   -- §1): at most one item per edge takes the full swipe. Context items
   -- only, and the type carries that rule.
   ISwipe :: Swipe -> IAttr 'CtxM
+  -- | A top-level window menu whose items the bar above a software
+  -- keyboard carries while a textarea is edited; inert where there is no
+  -- software keyboard (docs\/phone-format-plan.md §2). Top-level window
+  -- menus only (root-checked). Const-only.
+  IKeyboardBar :: Bool -> IAttr 'BarM
   IOnActivate :: IO () -> IAttr s
   IOnActivateNode :: ([Key] -> IO ()) -> IAttr 'CtxM
   IOnToggle :: (Bool -> IO ()) -> IAttr s
@@ -1636,6 +1654,7 @@ applyIAttr n attr = case attr of
   ISymbol s -> emitB (W.txSetMenuSymbol n (symbolWire s))
   IPrimary v -> emitB (W.txSetMenuPrimary n v)
   ISwipe edge -> emitB (W.txSetMenuSwipe n (swipeWire edge))
+  IKeyboardBar v -> emitB (W.txSetMenuKeyboardBar n v)
   IShortcut spelling -> emitB (W.txSetMenuShortcut n (T.unpack spelling))
   IRole name -> emitB (W.txSetMenuRole n (T.unpack name))
   IOnActivate handler -> pendB (PMenuActivated n handler)
@@ -2770,6 +2789,48 @@ onReleased app (Node n) f = modifyIORef' (app.appNodeReleased) (Map.insert n f)
 
 onFormatNode :: App -> Node -> ([Key] -> Format -> IO ()) -> IO ()
 onFormatNode app (Node n) f = modifyIORef' (app.appNodeFormats) (Map.insert n f)
+
+-- | Where a rich textarea's selection is and what holds over it, sent
+-- whenever either changes (docs\/phone-format-plan.md §3).
+onSelection :: App -> Widget -> (Selection -> IO ()) -> IO ()
+onSelection app (Widget n) f = modifyIORef' (app.appWidgetSelections) (Map.insert n f)
+
+-- | 'onSelection' for a stamped rich copy, with its row's key path.
+onSelectionNode :: App -> Node -> ([Key] -> Selection -> IO ()) -> IO ()
+onSelectionNode app (Node n) f = modifyIORef' (app.appNodeSelections) (Map.insert n f)
+
+-- | Whether the attribute holds over the whole selection (at a caret:
+-- whether the next typed character takes it).
+selectionHas :: Text -> Selection -> Bool
+selectionHas n sel = any (\r -> r.name == n) sel.attrs
+
+-- | The paragraph kind every touched paragraph shares; 'Body' for body
+-- text and for paragraphs of different kinds.
+selectionBlock :: Selection -> Block
+selectionBlock sel =
+  case [r.value | r <- sel.attrs, r.name == "block"] of
+    (Spelled kind : _) ->
+      fromMaybe Body (List.find (\b -> blockName b == kind) [Heading1, Heading2, Heading3, Quote, CodeBlock])
+    _ -> Body
+
+selectionOfTail :: [W.Value] -> Selection
+selectionOfTail tail_ = case tail_ of
+  (W.VI64 start : W.VI64 stop : values)
+    | even (length values) ->
+        let r = (fromIntegral start, fromIntegral stop)
+         in Selection r (pairs r values)
+  _ ->
+    error
+      ( "kaya: a text_selected carries "
+          ++ show (length tail_)
+          ++ " values ("
+          ++ show tail_
+          ++ "), want two I64 plus two strings per attribute"
+      )
+  where
+    pairs r (W.VStr n : W.VStr v : rest) = Run r (T.pack n) (markValueOf (T.pack v)) : pairs r rest
+    pairs _ [] = []
+    pairs _ rest = error ("kaya: a text_selected's attributes end in " ++ show rest ++ ", want name/value strings")
 
 -- | Write a live widget's text: seed an editor's document, re-caption a
 -- label. LIVE WIDGETS ONLY — the same write on a template Node is the
@@ -6155,6 +6216,8 @@ newApp =
     <*> newIORef Map.empty -- appNodeFormats
     <*> newIORef Map.empty -- appWidgetEdits
     <*> newIORef Map.empty -- appWidgetFormats
+    <*> newIORef Map.empty -- appWidgetSelections
+    <*> newIORef Map.empty -- appNodeSelections
     <*> newIORef Map.empty -- appWidgetToggles
     <*> newIORef Map.empty -- appNodeToggles
     <*> newIORef Map.empty -- appNodeNeeded
@@ -6379,6 +6442,18 @@ dispatchLoop app = do
                   handlers <- readIORef (app.appNodeFormats)
                   dispatch (mapM_ (\h -> h (keyPath keys) act) (Map.lookup ident handlers))
             _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindTextSelected -> do
+          let sel = selectionOfTail askTail
+          if fst sel.range > snd sel.range
+            then error ("kaya: a text_selected carries " ++ show sel.range ++ ", a reversed span")
+            else case keys of
+              [] -> do
+                handlers <- readIORef (app.appWidgetSelections)
+                dispatch (mapM_ ($ sel) (Map.lookup ident handlers))
+              _ -> do
+                handlers <- readIORef (app.appNodeSelections)
+                dispatch (mapM_ (\h -> h (keyPath keys) sel) (Map.lookup ident handlers))
           dispatchLoop app
       | kind == W.occKindTextChanged -> do
           let content = case payload of Just (W.VStr s) -> T.pack s; _ -> ""

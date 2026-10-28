@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xcd377e2688e6cb2a
+	SpecHash uint64 = 0x8a7752967302f191
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -192,6 +192,7 @@ const (
 	MpropRole = 8
 	MpropSymbol = 9
 	MpropSwipe = 10
+	MpropKeyboardBar = 11
 	SwipeLeading Swipe = 1
 	SwipeTrailing Swipe = 2
 	SwipeLeadingFull Swipe = 3
@@ -293,6 +294,10 @@ const (
 	SymbolQueue Symbol = 34
 	SymbolFavorite Symbol = 35
 	SymbolMuted Symbol = 36
+	SymbolBold Symbol = 37
+	SymbolItalic Symbol = 38
+	SymbolUnderline Symbol = 39
+	SymbolStrikethrough Symbol = 40
 	SourceConst = 0
 	SourceSignal = 1
 	SourceElement = 2
@@ -635,6 +640,7 @@ const (
 	occActivated = 58
 	occSelectionChanged = 59
 	occFontFamilies = 60
+	occTextSelected = 61
 )
 
 func (d Detent) String() string {
@@ -919,6 +925,14 @@ func (s Symbol) String() string {
 		return "favorite"
 	case SymbolMuted:
 		return "muted"
+	case SymbolBold:
+		return "bold"
+	case SymbolItalic:
+		return "italic"
+	case SymbolUnderline:
+		return "underline"
+	case SymbolStrikethrough:
+		return "strikethrough"
 	}
 	return "Symbol(" + strconv.FormatInt(int64(s), 10) + ")"
 }
@@ -4857,6 +4871,16 @@ func TxSetMenuSwipe(item uint64, swipe int64) []byte {
 	return endRecord(b)
 }
 
+// TxSetMenuKeyboardBar: set_menu_prop with a constant keyboard_bar value.
+func TxSetMenuKeyboardBar(item uint64, keyboardBar bool) []byte {
+	b := beginRecord(txSetMenuProp)
+	b = binary.LittleEndian.AppendUint64(b, item)
+	b = binary.LittleEndian.AppendUint32(b, MpropKeyboardBar)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, keyboardBar)
+	return endRecord(b)
+}
+
 // ClipValues is one representation as the decoder hands it over:
 // the clip kind, and its values with blobs already redeemed to
 // bytes. Kind is a SINGLE member of the clip enum and never a mask
@@ -4945,7 +4969,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -5447,7 +5471,7 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		value, at = parseValue(rec, at)
 		payload = []any{removed, start, stop, attr, value}
 	}
-	if kind == occDrawRequested || kind == occTick || kind == occRangeChanged || kind == occRangeCommitted {
+	if kind == occDrawRequested || kind == occTick || kind == occRangeChanged || kind == occRangeCommitted || kind == occTextSelected {
 		// The canvas asks carry a run of BARE values after the key
 		// path — the assigned size, and a tick's frame time — with
 		// no count in front, so they are read until the record ends

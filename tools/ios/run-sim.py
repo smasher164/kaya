@@ -3600,6 +3600,9 @@ if SUITE in ("go", "all"):
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "editor", "editor-go", app, "dev.kaya.editorgo",
                     "editor", "editor")
+    # The Format menu on the bar above the keyboard (docs/phone-format-plan.md §4).
+    queue_scene_leg("go", "editorkeyboard", "editorkeyboard-go", app, "dev.kaya.editorgo",
+                    "editorkeyboard", "editorkeyboard")
     # THE CHAT APP (docs/chat-plan.md): Go alone by R1.
     app = with_dylib(make_bundle("chatgo", "dev.kaya.chatgo",
                                  BUNDLES / "go-bin"))

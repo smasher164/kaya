@@ -1245,6 +1245,37 @@ pub struct Format {
     pub value: Option<String>,
 }
 
+/// A rich textarea's selection and the attributes holding over ALL of it
+/// (docs/phone-format-plan.md §3), in name order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Selection {
+    pub start: u64,
+    pub end: u64,
+    pub attrs: Vec<(String, String)>,
+}
+
+impl Selection {
+    /// Whether `name` holds over the whole selection (at a caret: whether the
+    /// next typed character takes it).
+    pub fn has(&self, name: &str) -> bool {
+        self.attrs.iter().any(|(n, _)| n == name)
+    }
+
+    /// The paragraph kind every touched paragraph shares; Body for body text
+    /// and for paragraphs of different kinds.
+    pub fn block(&self) -> Block {
+        let kind = self.attrs.iter().find(|(n, _)| n == "block").map(|(_, v)| v.as_str());
+        [Block::Heading1, Block::Heading2, Block::Heading3, Block::Quote, Block::CodeBlock]
+            .into_iter()
+            .find(|b| Some(b.name()) == kind)
+            .unwrap_or(Block::Body)
+    }
+
+    fn of(range: &TextRange, attrs: &[(String, String)]) -> Selection {
+        Selection { start: range.start, end: range.stop, attrs: attrs.to_vec() }
+    }
+}
+
 pub struct AppCtx {
     open_transactions: Cell<usize>,
     loop_active: Cell<bool>,
@@ -6047,6 +6078,16 @@ impl<M> Messages<M> {
         );
     }
 
+    /// Where a `rich` textarea's selection is and what holds over it, sent
+    /// whenever either changes (docs/phone-format-plan.md §3).
+    pub fn on_selection(&self, w: WidgetId, f: impl Fn(Selection) -> M + 'static) {
+        self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::TextSelected { range, attrs, .. } => Some(f(Selection::of(range, attrs))),
+                _ => None,
+            }),
+        );
+    }
+
     pub fn on_toggle(&self, w: WidgetId, f: impl Fn(bool) -> M + 'static) {
         self.widgets.borrow_mut().entry(w.0).or_default().push(Box::new(move |occ| match occ {
                 Occurrence::Toggled { checked, .. } => Some(f(*checked)),
@@ -6186,6 +6227,17 @@ impl<M> Messages<M> {
                         name: name.clone(),
                         value: value.clone(),
                     }))
+                }
+                _ => None,
+            }),
+        );
+    }
+
+    /// `on_selection` for a stamped rich copy, with its row's key path.
+    pub fn on_selection_node(&self, n: TemplateNodeId, f: impl Fn(Path, Selection) -> M + 'static) {
+        self.nodes.borrow_mut().entry(n.0).or_default().push(Box::new(move |occ| match occ {
+                Occurrence::InstanceTextSelected { path, range, attrs, .. } => {
+                    Some(f(path.clone(), Selection::of(range, attrs)))
                 }
                 _ => None,
             }),
@@ -6746,6 +6798,7 @@ impl<M> Messages<M> {
                 | Occurrence::DateChanged { id, .. }
                 | Occurrence::TextEdited { id, .. }
                 | Occurrence::TextFormatted { id, .. }
+                | Occurrence::TextSelected { id, .. }
                 | Occurrence::TimeChanged { id, .. }
                 | Occurrence::ColorChanged { id, .. }
                 | Occurrence::RangeChanged { id, .. }
@@ -6770,6 +6823,7 @@ impl<M> Messages<M> {
                 | Occurrence::InstanceDateChanged { node, .. }
                 | Occurrence::InstanceTextEdited { node, .. }
                 | Occurrence::InstanceTextFormatted { node, .. }
+                | Occurrence::InstanceTextSelected { node, .. }
                 | Occurrence::InstanceTimeChanged { node, .. }
                 | Occurrence::InstanceColorChanged { node, .. }
                 | Occurrence::InstanceRangeChanged { node, .. }
@@ -8302,18 +8356,23 @@ pub enum Symbol {
     Favorite = 35,
     /// Sound turned off, the volume glyph struck through (docs/media-player-plan.md M16).
     Muted = 36,
+    /// The editor's formatting tools (docs/phone-format-plan.md §2).
+    Bold = 37,
+    Italic = 38,
+    Underline = 39,
+    Strikethrough = 40,
 }
 
 impl Symbol {
     /// The vocabulary in wire order; the pin below holds it to wire::SYMBOLS.
-    pub(crate) const ALL: [Symbol; 36] = {
+    pub(crate) const ALL: [Symbol; 40] = {
         use Symbol as S;
         [
             S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
             S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
             S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic, S::ImageMissing,
             S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat, S::RepeatOne, S::Volume,
-            S::Queue, S::Favorite, S::Muted,
+            S::Queue, S::Favorite, S::Muted, S::Bold, S::Italic, S::Underline, S::Strikethrough,
         ]
     };
 
@@ -8620,6 +8679,15 @@ impl<R> MenuRef<'_, '_, R> {
     pub fn symbol(self, symbol: crate::Symbol) -> Self {
         self.tx
             .set_menu_prop(self.item, MenuProp::Symbol, symbol as i64);
+        self
+    }
+
+    /// A top-level window menu whose items the bar above a software
+    /// keyboard carries while a textarea is edited; inert where there is no
+    /// software keyboard (docs/phone-format-plan.md §2). Top-level window
+    /// menus only (root-checked). Const-only.
+    pub fn keyboard_bar(self, on: bool) -> Self {
+        self.tx.set_menu_prop(self.item, MenuProp::KeyboardBar, on);
         self
     }
 
@@ -10782,6 +10850,8 @@ mod tests {
                     | Occurrence::InstanceTextEdited { .. }
                     | Occurrence::TextFormatted { .. }
                     | Occurrence::InstanceTextFormatted { .. }
+                    | Occurrence::TextSelected { .. }
+                    | Occurrence::InstanceTextSelected { .. }
                     | Occurrence::Toggled { .. }
                     | Occurrence::InstanceToggled { .. }
                     | Occurrence::CloseRequested { .. }

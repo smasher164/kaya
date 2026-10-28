@@ -946,6 +946,14 @@ pub enum Step {
     /// `expect_keyboard on|off`: the platform's own software keyboard, read
     /// off the window (docs/safe-area-plan.md A9); a desktop answers off.
     ExpectKeyboard(bool),
+    /// `expect_keyboard_bar "<items>"`: the bar above the software keyboard,
+    /// read off the platform's tree: `|`-joined labels, `label on` for a
+    /// checked toggle, `label>` for a nested menu, `-` for a gap; `none` when
+    /// no bar is up (docs/phone-format-plan.md §4).
+    ExpectKeyboardBar(String),
+    /// `keyboard_bar_press "<label>"`: press that button of the keyboard bar
+    /// through the platform's own action route. An action, silent like click.
+    KeyboardBarPress(String),
     /// `expect_safe <target> [safe|bleeds]`: the target's frame lies inside the
     /// platform's safe area and above the keyboard (`safe`), or, for a widget
     /// with `bleed`, reaches the window's edge on its touching sides (`bleeds`);
@@ -1344,6 +1352,8 @@ impl Step {
             | Step::ExpectToast(..)
             | Step::ExpectNoToast
             | Step::ExpectKeyboard(_)
+            | Step::ExpectKeyboardBar(_)
+            | Step::KeyboardBarPress(_)
             | Step::ExpectInsets(_)
             | Step::ExpectSystemBars(_)
             | Step::ExpectToastAnnounced(..)
@@ -1547,6 +1557,8 @@ impl Step {
             Step::ExpectExpanded { .. } => true,
             Step::ExpectOutOfReach { .. } => true,
             Step::ExpectKeyboard(..) => true,
+            Step::ExpectKeyboardBar(..) => true,
+            Step::KeyboardBarPress(..) => false,
             Step::ExpectSafe(..) => true,
             Step::ExpectInsets(..) => true,
             Step::ExpectGroundReach(..) => true,
@@ -2687,6 +2699,17 @@ pub trait Stage: Send + 'static {
     /// Whether the platform's software keyboard is up over this window, or a
     /// sentence saying what was measured instead (docs/safe-area-plan.md A9).
     fn keyboard(&self) -> Result<bool, String>;
+    /// The bar above the software keyboard in `expect_keyboard_bar`'s
+    /// spelling (docs/phone-format-plan.md §4). A host with no software
+    /// keyboard has no such bar.
+    fn keyboard_bar(&self) -> Result<String, String> {
+        Ok("none".to_owned())
+    }
+    /// Press the keyboard bar's button with this label the way a finger does;
+    /// false when no such button is on screen.
+    fn keyboard_bar_press(&self, _label: &str) -> bool {
+        false
+    }
     /// The target's verdict against the platform's safe area and keyboard:
     /// `safe` or `bleeds` as [`SafeWord`] spells them, or a sentence naming the
     /// frames it read (docs/safe-area-plan.md A9).
@@ -4366,6 +4389,8 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 "off" => false,
                 other => return Err(format!("expect_keyboard wants on|off, got {other:?}")),
             }),
+            "expect_keyboard_bar" => Step::ExpectKeyboardBar(parse_string(rest)?),
+            "keyboard_bar_press" => Step::KeyboardBarPress(parse_string(rest)?),
             "expect_safe" => {
                 let (target, word) = match rest.split_once(char::is_whitespace) {
                     Some((t, w)) => (t, w.trim()),
@@ -6863,6 +6888,19 @@ fn run_with_log(
                 await_answer(answered);
                 None
             }
+            Step::KeyboardBarPress(label) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                if stage.keyboard_bar_press(label) {
+                    await_answer(answered);
+                    None
+                } else {
+                    Some(Err(format!(
+                        "keyboard_bar_press: no button {label:?} on the keyboard bar; the bar reads {}",
+                        stage.keyboard_bar().unwrap_or_else(|why| why)
+                    )))
+                }
+            }
             Step::ToastAction | Step::ToastClose => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -6933,6 +6971,11 @@ fn run_with_log(
                     if got { "on" } else { "off" },
                     if *want { "on" } else { "off" }
                 )),
+            })),
+            Step::ExpectKeyboardBar(want) => Some(poll(|| match stage.keyboard_bar() {
+                Err(why) => Err(why),
+                Ok(got) if got == *want => Ok(format!("keyboard bar {got}")),
+                Ok(got) => Err(format!("keyboard bar {got}, wanted {want}")),
             })),
             Step::ExpectSafe(t, want) => Some(poll(|| match stage.safe(*t) {
                 Err(why) => Err(why),
@@ -10526,6 +10569,27 @@ mod tests {
         assert_eq!(code, 1, "{verdict}");
         assert!(verdict.contains("is not a table container target"), "{verdict}");
         assert!(parse("expect_header_shown").is_err());
+    }
+
+    /// docs/phone-format-plan.md §4: a host with no software keyboard reads
+    /// no bar, and a press there names what the bar read.
+    #[test]
+    fn a_keyboard_bar_reads_none_without_a_software_keyboard() {
+        let run = |script: &str| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let code = run_with_log(parse(script).unwrap(), MockStage { seen: &SEEN, verdict: tx }, None, None);
+            let (_, verdict) = rx.recv().unwrap();
+            (code, verdict)
+        };
+        let (code, verdict) = run("expect_keyboard_bar \"none\"");
+        assert_eq!(code, 0, "{verdict}");
+        let (code, verdict) = run("expect_keyboard_bar \"Bold on|Italic\"");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("keyboard bar none, wanted Bold on|Italic"), "{verdict}");
+        let (code, verdict) = run("keyboard_bar_press \"Bold\"\nexpect_keyboard_bar \"none\"");
+        assert_eq!(code, 1, "{verdict}");
+        assert!(verdict.contains("no button \"Bold\" on the keyboard bar; the bar reads none"), "{verdict}");
+        assert!(parse("keyboard_bar_press Bold").is_err());
     }
 
     /// docs/safe-area-plan.md A9: the three readings answer in words, and a

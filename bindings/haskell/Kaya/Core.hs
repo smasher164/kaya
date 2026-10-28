@@ -111,6 +111,7 @@ module Kaya.Core
     Edit (..),
     EditSource (..),
     Format (..),
+    Selection (..),
     Representation (..),
     PickedFile (..),
     Op (..),
@@ -1118,6 +1119,14 @@ data Format = Format
   { range :: !(Int, Int),
     name :: !Text,
     value :: !(Maybe MarkValue)
+  }
+  deriving (Eq, Show)
+
+-- | Where a @rich@ textarea's selection is and the attributes that hold
+-- over ALL of it, in name order (docs\/phone-format-plan.md §3).
+data Selection = Selection
+  { range :: !(Int, Int),
+    attrs :: ![Run]
   }
   deriving (Eq, Show)
 
@@ -2320,6 +2329,8 @@ data App = App
     appNodeFormats :: IORef (Map.Map Word64 ([Key] -> Format -> IO ())),
     appWidgetEdits :: IORef (Map.Map Word64 (Edit -> IO ())),
     appWidgetFormats :: IORef (Map.Map Word64 (Format -> IO ())),
+    appWidgetSelections :: IORef (Map.Map Word64 (Selection -> IO ())),
+    appNodeSelections :: IORef (Map.Map Word64 ([Key] -> Selection -> IO ())),
     appWidgetToggles :: IORef (Map.Map Word64 (Bool -> IO ())),
     appNodeToggles :: IORef (Map.Map Word64 ([Key] -> Bool -> IO ())),
     -- A loading template image's two realization reports

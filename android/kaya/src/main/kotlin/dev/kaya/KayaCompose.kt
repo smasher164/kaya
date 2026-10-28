@@ -175,6 +175,10 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.FormatBold
+import androidx.compose.material.icons.filled.FormatItalic
+import androidx.compose.material.icons.filled.FormatStrikethrough
+import androidx.compose.material.icons.filled.FormatUnderlined
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -338,6 +342,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.state.ToggleableState
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -1903,6 +1909,9 @@ object KayaSceneModel {
      * before Compose has moved (docs/deferred.md, the android `type` race,
      * 2026-09-16). The type verb waits for the two to agree. */
     var composeFocusedId by mutableStateOf<Long?>(null)
+    /** The keyboard bar's own height while it shows, which the content box
+     * stands above (docs/phone-format-plan.md §2). */
+    var keyboardBarHeight by mutableStateOf(0.dp)
     /** The window content inset (wprop 8, docs/styling-plan.md D3), in
      * DP — layout, not appearance; 0 is full bleed. */
     var windowInset by mutableStateOf(16.0)
@@ -2275,6 +2284,9 @@ class KayaMenuItem(val id: Long, val kind: Int) {
     /// The row swipe this context action is, 0 = none
     /// (docs/swipe-actions-plan.md §1); the FULL ones swipe here (R3).
     var swipe by mutableStateOf(0L)
+    /// docs/phone-format-plan.md §2: the bar above the keyboard carries this
+    /// top-level menu's items.
+    var keyboardBar by mutableStateOf(false)
     // Single-parent (the root validates); set at append. Bar-level
     // items keep null.
     var parent: KayaMenuItem? = null
@@ -3407,7 +3419,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xcd377e2688e6cb2auL
+    private const val SPEC_HASH: ULong = 0x8a7752967302f191uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3606,6 +3618,7 @@ object KayaCompose {
     private const val MPROP_ROLE = 8
     private const val MPROP_SYMBOL = 9
     private const val MPROP_SWIPE = 10
+    private const val MPROP_KEYBOARD_BAR = 11
     const val SWIPE_LEADING = 1L
     const val SWIPE_TRAILING = 2L
     const val SWIPE_LEADING_FULL = 3L
@@ -3627,6 +3640,10 @@ object KayaCompose {
      * backend reports `overflow` and not `more`.
      */
     const val TOOLBAR_TAG = "kaya:toolbar"
+    /** The bar above the keyboard, its buttons and its gaps (docs/phone-format-plan.md §4). */
+    const val KEYBOARD_BAR_TAG = "kaya:keyboardbar"
+    const val KEYBOARD_BAR_ITEM_TAG = "kaya:keyboardbar:item"
+    const val KEYBOARD_BAR_GAP_TAG = "kaya:keyboardbar:gap"
     const val TOOLBAR_MORE_TAG = "kaya:toolbar-more"
 
     /**
@@ -3837,6 +3854,10 @@ object KayaCompose {
     const val SYMBOL_QUEUE = 34L
     const val SYMBOL_FAVORITE = 35L
     const val SYMBOL_MUTED = 36L
+    const val SYMBOL_BOLD = 37L
+    const val SYMBOL_ITALIC = 38L
+    const val SYMBOL_UNDERLINE = 39L
+    const val SYMBOL_STRIKETHROUGH = 40L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -3882,6 +3903,10 @@ object KayaCompose {
         Triple(SYMBOL_QUEUE, "queue", Icons.AutoMirrored.Filled.QueueMusic),
         Triple(SYMBOL_FAVORITE, "favorite", Icons.Default.FavoriteBorder),
         Triple(SYMBOL_MUTED, "muted", Icons.AutoMirrored.Filled.VolumeOff),
+        Triple(SYMBOL_BOLD, "bold", Icons.Default.FormatBold),
+        Triple(SYMBOL_ITALIC, "italic", Icons.Default.FormatItalic),
+        Triple(SYMBOL_UNDERLINE, "underline", Icons.Default.FormatUnderlined),
+        Triple(SYMBOL_STRIKETHROUGH, "strikethrough", Icons.Default.FormatStrikethrough),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -5610,6 +5635,7 @@ object KayaCompose {
                         // (docs/styling-plan.md D6).
                         MPROP_SYMBOL -> item.symbol = readI64(b)
                         MPROP_SWIPE -> item.swipe = readI64(b)
+                        MPROP_KEYBOARD_BAR -> item.keyboardBar = readBool(b)
                         else -> error("kaya: unknown menu prop $prop")
                     }
                 }
@@ -10302,6 +10328,64 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * overflow would be "found" by the wider walk, and WHERE the button
      * is is the whole question.
      */
+    /** The bar above the keyboard as `expect_keyboard_bar` spells it, off
+     * the merged tree (docs/phone-format-plan.md §4). MAIN THREAD ONLY. */
+    private fun kayaKeyboardBarNodes(activity: ComponentActivity): List<SemanticsNode>? {
+        if (!kayaImeShown(activity)) return null
+        val view = kayaComposeRoot(activity.window.decorView) ?: return null
+        val bar = kayaAxFind((view as RootForTest).semanticsOwner.rootSemanticsNode, KEYBOARD_BAR_TAG)
+            ?: return null
+        val out = ArrayList<SemanticsNode>()
+        fun walk(node: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            val tag = node.config.getOrNull(SemanticsProperties.TestTag)
+            if (tag == KEYBOARD_BAR_ITEM_TAG || tag == KEYBOARD_BAR_GAP_TAG) {
+                out.add(node)
+                return
+            }
+            node.children.forEach { walk(it, depth + 1) }
+        }
+        walk(bar, 0)
+        return out
+    }
+
+    private fun kayaKeyboardBarRead(activity: ComponentActivity): String {
+        val nodes = kayaKeyboardBarNodes(activity) ?: return "none"
+        if (nodes.isEmpty()) return "none"
+        return nodes.joinToString("|") { node ->
+            if (node.config.getOrNull(SemanticsProperties.TestTag) == KEYBOARD_BAR_GAP_TAG) return@joinToString "-"
+            val name = node.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ") ?: "?"
+            when {
+                node.config.getOrNull(SemanticsProperties.Role) == Role.DropdownList -> "$name>"
+                node.config.getOrNull(SemanticsProperties.ToggleableState) == ToggleableState.On -> "$name on"
+                else -> name
+            }
+        }
+    }
+
+    /** A finger's press on a leaf button, or `Menu>Item` resolved through the
+     * button's item (the dropdown is a popup a press cannot reach in one
+     * step, DESIGN.md's where-a-platform-cannot-say-it rule). */
+    private fun kayaKeyboardBarPress(activity: ComponentActivity, label: String): Boolean {
+        val nodes = kayaKeyboardBarNodes(activity) ?: return false
+        val path = label.split(">", limit = 2)
+        val node = nodes.firstOrNull {
+            it.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString(" ") == path[0]
+        } ?: return false
+        if (path.size == 1) {
+            if (node.config.getOrNull(SemanticsProperties.Role) == Role.DropdownList) return false
+            val press = node.config.getOrNull(SemanticsActions.OnClick)?.action ?: return false
+            return press()
+        }
+        val item = KayaSceneModel.menubar
+            .filter { it.kind == MENU_KIND_MENU && it.keyboardBar }
+            .flatMap { it.children }
+            .firstOrNull { it.label == path[0] } ?: return false
+        val child = item.children.firstOrNull { it.label == path[1] } ?: return false
+        kayaActivateMenuItem(child, ByteArray(0))
+        return true
+    }
+
     private fun kayaToolbarNode(activity: ComponentActivity): SemanticsNode? {
         val view = kayaComposeRoot(activity.window.decorView) ?: return null
         return kayaAxFind((view as RootForTest).semanticsOwner.rootSemanticsNode, TOOLBAR_TAG)
@@ -12650,6 +12734,36 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             val got = if (up) "on" else "off"
                             if (got == wantKeyboard) observed.add("keyboard $got")
                             else failures.add("keyboard $got, wanted $wantKeyboard")
+                        }
+                    }
+                    "expect_keyboard_bar" -> {
+                        val head = quotedHead(line.substring(parts[0].length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("expect_keyboard_bar wants a quoted spec: $line")
+                        } else {
+                            var got = onUi(activity) { kayaKeyboardBarRead(activity) }
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got != head.first && System.nanoTime() < deadline) {
+                                Thread.sleep(50)
+                                got = onUi(activity) { kayaKeyboardBarRead(activity) }
+                            }
+                            if (got == head.first) observed.add("keyboard bar $got")
+                            else failures.add("keyboard bar $got, wanted ${head.first}")
+                        }
+                    }
+                    "keyboard_bar_press" -> {
+                        val head = quotedHead(line.substring(parts[0].length))
+                        if (head == null || head.second.isNotEmpty()) {
+                            failures.add("keyboard_bar_press wants a quoted label: $line")
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            if (onUi(activity) { kayaKeyboardBarPress(activity, head.first) }) {
+                                kayaAwaitAnswer(answered)
+                            } else {
+                                val read = onUi(activity) { kayaKeyboardBarRead(activity) }
+                                failures.add("keyboard_bar_press: no button \"${head.first}\" on the keyboard bar; the bar reads $read")
+                            }
                         }
                     }
                     "expect_safe" -> {
@@ -22171,6 +22285,7 @@ fun KayaRoot() {
                 Box(modifier = Modifier.weight(1f)) { KayaSurface(topConsumed = true) }
             }
         }
+        KayaKeyboardBar(Modifier.align(Alignment.BottomCenter))
         KayaToastHost(Modifier.align(Alignment.BottomCenter))
         KayaSystemBarIcons()
     }
@@ -22511,6 +22626,7 @@ private fun KayaContentBox(
                     kayaPanSoon()
                 }
                 .then(if (pan > 0f || natural) Modifier.clipToBounds() else Modifier)
+                .padding(bottom = KayaSceneModel.keyboardBarHeight)
                 // An overflowing root keeps its natural height under the
                 // keyboard rather than squeezing its last children to nothing.
                 .then(if (natural) Modifier.layout { measurable, constraints ->
@@ -22533,6 +22649,91 @@ private fun KayaContentBox(
         ) {
             content()
         }
+    }
+}
+
+/**
+ * The bar above the keyboard (docs/phone-format-plan.md §2): the catalog's
+ * `keyboard_bar` menus' items while a textarea is edited, each the SAME item
+ * its menu row is. Android has no system surface for it; Docs draws a row
+ * inside the window's ime insets, and so does this.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun KayaKeyboardBar(modifier: Modifier) {
+    val menus = KayaSceneModel.menubar.filter { it.kind == KayaCompose.MENU_KIND_MENU && it.keyboardBar }
+    val focused = KayaSceneModel.composeFocusedId?.let { KayaSceneModel.nodes[it] }
+    val shown = menus.isNotEmpty() && WindowInsets.isImeVisible && focused?.kind == KayaCompose.KIND_TEXTAREA
+    if (!shown) {
+        SideEffect { if (KayaSceneModel.keyboardBarHeight != 0.dp) KayaSceneModel.keyboardBarHeight = 0.dp }
+        return
+    }
+    val density = LocalDensity.current
+    Surface(
+        tonalElevation = 3.dp,
+        modifier = modifier
+            .fillMaxWidth()
+            .imePadding()
+            .onGloballyPositioned { KayaSceneModel.keyboardBarHeight = with(density) { it.size.height.toDp() } }
+            .testTag(KayaCompose.KEYBOARD_BAR_TAG),
+    ) {
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()).height(48.dp).padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            menus.forEachIndexed { index, menu ->
+                if (index > 0) KayaKeyboardBarGap()
+                menu.children.forEach { KayaKeyboardBarItem(it) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KayaKeyboardBarGap() {
+    Spacer(Modifier.width(12.dp).testTag(KayaCompose.KEYBOARD_BAR_GAP_TAG))
+}
+
+@Composable
+private fun KayaKeyboardBarItem(item: KayaMenuItem) {
+    val enabled = kayaMenuEffectivelyEnabled(item)
+    val label = item.label
+    val glyph: @Composable () -> Unit = {
+        val icon = KayaCompose.symbolIcon(item.symbol)
+        if (icon != null) Icon(icon, contentDescription = null) else Text(label)
+    }
+    val tagged = Modifier.testTag(KayaCompose.KEYBOARD_BAR_ITEM_TAG)
+    when (item.kind) {
+        KayaCompose.MENU_KIND_SEPARATOR -> KayaKeyboardBarGap()
+        KayaCompose.MENU_KIND_TOGGLE -> IconToggleButton(
+            checked = item.checked,
+            onCheckedChange = { kayaActivateMenuItem(item, ByteArray(0)) },
+            enabled = enabled,
+            colors = IconButtonDefaults.iconToggleButtonColors(
+                checkedContainerColor = MaterialTheme.colorScheme.secondaryContainer),
+            modifier = tagged.semantics { contentDescription = label },
+        ) { glyph() }
+        KayaCompose.MENU_KIND_MENU, KayaCompose.MENU_KIND_RADIO_GROUP -> Box {
+            var open by remember { mutableStateOf(false) }
+            TextButton(
+                onClick = { open = true },
+                enabled = enabled,
+                modifier = tagged.semantics { contentDescription = label; role = Role.DropdownList },
+            ) { glyph(); Text(" ▾") }
+            DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                KayaMenuPopupRoot()
+                if (item.kind == KayaCompose.MENU_KIND_RADIO_GROUP) {
+                    KayaRadioRows(item, ByteArray(0)) { open = false }
+                } else {
+                    KayaMenuRows(item.children.toList(), ByteArray(0), onDrill = {}, onClose = { open = false })
+                }
+            }
+        }
+        else -> IconButton(
+            onClick = { kayaActivateMenuItem(item, ByteArray(0)) },
+            enabled = enabled,
+            modifier = tagged.semantics { contentDescription = label },
+        ) { glyph() }
     }
 }
 

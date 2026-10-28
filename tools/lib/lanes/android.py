@@ -244,6 +244,8 @@ LEGS = {
         # The chat app with the keyboard up, upright and pinned to landscape
         # (docs/safe-area-plan.md A5, A17).
         "chatkeyboard-go", "chatkeyboardland-go",
+        # The editor's Format menu above the keyboard (docs/phone-format-plan.md §4).
+        "editorkeyboard-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go",
         "format-go", "formatde-go", "formatar-go",

@@ -445,6 +445,10 @@ pub const MENU_PROPS: &[(&'static str, u32, PropKind)] = &[
     // the edge, and whether a full swipe runs it. Const-only; actions in a
     // context catalog only.
     ("swipe", 10, PropKind::Enum("swipe")),
+    // docs/phone-format-plan.md §2: a top-level window menu whose items the
+    // bar above a software keyboard carries while a textarea is edited;
+    // inert where there is no software keyboard. Const-only.
+    ("keyboard_bar", 11, PropKind::Bool),
 ];
 
 /// Player properties (docs/media-plan.md §2): the fourth typed surface
@@ -4289,6 +4293,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   platform's private ones, unique and in code-point order \
                   (docs/code-surface-plan.md M3).",
         },
+        Record {
+            kind: 61,
+            name: "text_selected",
+            fields: &[
+                f("id", FieldTy::U64),
+                f("path_len", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("selection", FieldTy::Values),
+            ],
+            payload: None,
+            doc: "Where a `rich` textarea's selection is and the formatting \
+                  that holds over ALL of it (docs/phone-format-plan.md §3). \
+                  path_len key values follow, identity as in text_formatted, \
+                  then BARE values to the record's end (draw_requested's \
+                  shape): START and STOP as two I64 UTF-8 byte offsets, then \
+                  each attribute as two Str values, name then value. Over a \
+                  range an inline attribute counts when every byte that is \
+                  not a newline carries it; at a caret, what the next typed \
+                  character takes; `block` when every paragraph touched \
+                  shares one kind. Sent whenever the pair changes, the app's \
+                  own selection and format acts included.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4552,6 +4578,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("role", 8),
                 ("symbol", 9),
                 ("swipe", 10),
+                ("keyboard_bar", 11),
             ],
         },
         EnumSpec {
@@ -4751,6 +4778,10 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("queue", 34),
                 ("favorite", 35),
                 ("muted", 36),
+                ("bold", 37),
+                ("italic", 38),
+                ("underline", 39),
+                ("strikethrough", 40),
             ],
         },
         EnumSpec {
@@ -5320,6 +5351,7 @@ mod tests {
                 ("activated", crate::ring::REC_ACTIVATED),
                 ("selection_changed", crate::ring::REC_SELECTION_CHANGED),
                 ("font_families", crate::ring::REC_FONT_FAMILIES),
+                ("text_selected", crate::ring::REC_TEXT_SELECTED),
             ]
         );
     }
@@ -5706,6 +5738,7 @@ mod tests {
                     ("mprop", "role") => wire::MPROP_ROLE,
                     ("mprop", "symbol") => wire::MPROP_SYMBOL,
                     ("mprop", "swipe") => wire::MPROP_SWIPE,
+                    ("mprop", "keyboard_bar") => wire::MPROP_KEYBOARD_BAR,
                     ("swipe", "leading") => wire::SWIPE_LEADING,
                     ("swipe", "trailing") => wire::SWIPE_TRAILING,
                     ("swipe", "leading_full") => wire::SWIPE_LEADING_FULL,
@@ -5812,6 +5845,10 @@ mod tests {
                     ("symbol", "queue") => wire::SYMBOL_QUEUE,
                     ("symbol", "favorite") => wire::SYMBOL_FAVORITE,
                     ("symbol", "muted") => wire::SYMBOL_MUTED,
+                    ("symbol", "bold") => wire::SYMBOL_BOLD,
+                    ("symbol", "italic") => wire::SYMBOL_ITALIC,
+                    ("symbol", "underline") => wire::SYMBOL_UNDERLINE,
+                    ("symbol", "strikethrough") => wire::SYMBOL_STRIKETHROUGH,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -6156,7 +6193,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(37), None);
+        assert_eq!(wire::symbol_name(41), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

@@ -290,6 +290,12 @@
 #define KAYA_OCCURRENCE_FONT_FAMILIES 60
 
 /**
+ * TEXT_SELECTED { the copy's tag; bare values: I64 start, I64 stop, then
+ * Str name, Str value pairs } (docs/phone-format-plan.md §3).
+ */
+#define KAYA_OCCURRENCE_TEXT_SELECTED 61
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -1534,6 +1540,8 @@
  */
 #define KAYA_MPROP_SWIPE 10
 
+#define KAYA_MPROP_KEYBOARD_BAR 11
+
 #define KAYA_SWIPE_LEADING 1
 
 #define KAYA_SWIPE_TRAILING 2
@@ -1803,6 +1811,14 @@
 #define KAYA_SYMBOL_FAVORITE 35
 
 #define KAYA_SYMBOL_MUTED 36
+
+#define KAYA_SYMBOL_BOLD 37
+
+#define KAYA_SYMBOL_ITALIC 38
+
+#define KAYA_SYMBOL_UNDERLINE 39
+
+#define KAYA_SYMBOL_STRIKETHROUGH 40
 
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",

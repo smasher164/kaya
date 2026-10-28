@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xcd377e2688e6cb2a
+let kayaSpecHash: UInt64 = 0x8a7752967302f191
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -180,6 +180,7 @@ private let mpropShortcut: UInt32 = 7
 private let mpropRole: UInt32 = 8
 private let mpropSymbol: UInt32 = 9
 private let mpropSwipe: UInt32 = 10
+private let mpropKeyboardBar: UInt32 = 11
 private let swipeLeading: Int64 = 1
 private let swipeTrailing: Int64 = 2
 private let swipeLeadingFull: Int64 = 3
@@ -310,6 +311,10 @@ private let symbolVolume: Int64 = 33
 private let symbolQueue: Int64 = 34
 private let symbolFavorite: Int64 = 35
 private let symbolMuted: Int64 = 36
+private let symbolBold: Int64 = 37
+private let symbolItalic: Int64 = 38
+private let symbolUnderline: Int64 = 39
+private let symbolStrikethrough: Int64 = 40
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -503,6 +508,10 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolQueue, "queue", "list.bullet", nil),
     (symbolFavorite, "favorite", "heart", nil),
     (symbolMuted, "muted", "speaker.slash.fill", nil),
+    (symbolBold, "bold", "bold", nil),
+    (symbolItalic, "italic", "italic", nil),
+    (symbolUnderline, "underline", "underline", nil),
+    (symbolStrikethrough, "strikethrough", "strikethrough", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -1192,6 +1201,9 @@ final class KayaMenuItemModel: Identifiable {
     /// (docs/swipe-actions-plan.md §1). Apple has no row swipe outside a List
     /// below the iOS 27 SDK, so the action stays in the context menu (R2).
     var swipe: Int64 = 0
+    /// docs/phone-format-plan.md §2: the bar above the software keyboard
+    /// carries this top-level menu's items; inert on macOS.
+    var keyboardBar = false
     var children: [KayaMenuItemModel] = []
 
     init(id: UInt64, kind: UInt32) {
@@ -7331,6 +7343,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (mpropSwipe, valueI64):
                     item.swipe =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
+                case (mpropKeyboardBar, valueBool):
+                    item.keyboardBar = raw[body + 24] != 0
                 default:
                     fatalError("kaya: bad menu prop \(prop) value type \(mvType)")
                 }
@@ -10740,6 +10754,39 @@ private func kayaRunScript(_ script: String) {
                     observed.append("keyboard \(keyboardWord)")
                 } else {
                     failures.append("keyboard \(keyboardWord), wanted \(parts[1])")
+                }
+            case "expect_keyboard_bar":
+                // harness.rs Step::ExpectKeyboardBar (docs/phone-format-plan.md §4).
+                let barRest = String(line.dropFirst(parts[0].count + 1))
+                guard let (wantBar, barTail) = kayaQuotedPrefix(barRest), barTail.isEmpty else {
+                    failures.append("expect_keyboard_bar wants a quoted spec: \(line)")
+                    break
+                }
+                var gotBar = DispatchQueue.main.sync { kayaKeyboardBarRead() }
+                let barDeadline = Date().addingTimeInterval(5)
+                while gotBar != wantBar && Date() < barDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    gotBar = DispatchQueue.main.sync { kayaKeyboardBarRead() }
+                }
+                if gotBar == wantBar {
+                    observed.append("keyboard bar \(gotBar)")
+                } else {
+                    failures.append("keyboard bar \(gotBar), wanted \(wantBar)")
+                }
+            case "keyboard_bar_press":
+                // harness.rs Step::KeyboardBarPress.
+                let pressRest = String(line.dropFirst(parts[0].count + 1))
+                guard let (label, pressTail) = kayaQuotedPrefix(pressRest), pressTail.isEmpty else {
+                    failures.append("keyboard_bar_press wants a quoted label: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let barAnswered = kayaAnswers()
+                if DispatchQueue.main.sync(execute: { kayaKeyboardBarPress(label) }) {
+                    kayaAwaitAnswer(barAnswered)
+                } else {
+                    let read = DispatchQueue.main.sync { kayaKeyboardBarRead() }
+                    failures.append("keyboard_bar_press: no button \"\(label)\" on the keyboard bar; the bar reads \(read)")
                 }
             case "expect_safe":
                 // harness.rs Step::ExpectSafe.
@@ -22263,7 +22310,7 @@ struct KayaFlex: Layout {
         let dims = subviews.indices.map { i in
             subviews[i].dimensions(in: ProposedViewSize(width: extents[i], height: nil))
         }
-        let bs = dims.map { Self.textBaseline($0) }
+        let bs = dims.indices.map { i in textless(i) ? nil : Self.textBaseline(dims[i]) }
         let rowBaseline = bs.compactMap { $0 }.max() ?? 0
         var lineBox: (CGFloat, CGFloat)? = nil
         if let provider = bs.firstIndex(where: { $0 == rowBaseline }), provider < nodes.count,
@@ -22303,8 +22350,18 @@ struct KayaFlex: Layout {
                 subviews[0].dimensions(in: ProposedViewSize(width: bounds.width, height: ext[0])))
         }
         return subviews.indices.compactMap { i in
-            Self.textBaseline(subviews[i].dimensions(in: ProposedViewSize(width: ext[i], height: nil)))
+            textless(i)
+                ? nil
+                : Self.textBaseline(subviews[i].dimensions(in: ProposedViewSize(width: ext[i], height: nil)))
         }.max()
+    }
+
+    /// A checkbox with no label carries no text, whatever baseline AppKit's
+    /// NSButton reports for its empty title, which sits mid-box and put the
+    /// task row's box half a line under its title (docs/flex-shrink-plan.md
+    /// §10, amended 2026-10-27).
+    private func textless(_ i: Int) -> Bool {
+        i < nodes.count && nodes[i].kind == kindCheckbox && nodes[i].text.isEmpty
     }
 
     /// A CELL WITH NO TEXT HAS NO BASELINE and sits at a baseline row's top,
@@ -27115,6 +27172,9 @@ struct KayaRootFrameReader: View {
 #if os(macOS)
     /// No software keyboard on this platform (docs/safe-area-plan.md A13).
     @MainActor func kayaKeyboardInWindow() -> CGRect? { nil }
+    /// docs/phone-format-plan.md §2: no software keyboard, so no bar.
+    @MainActor func kayaKeyboardBarRead() -> String { "none" }
+    @MainActor func kayaKeyboardBarPress(_ label: String) -> Bool { false }
     @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? { nil }
     @MainActor func kayaFrameMoved() {}
     @MainActor func kayaPanReading() -> String? { nil }
@@ -35663,7 +35723,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 richRuns: node.richRuns,
                 richSeq: node.richSeq,
                 cap: kayaScene.keyboardFieldCap[node.id],
-                surface: kayaSurfaceKey(node) + " \(typeSize)"
+                surface: kayaSurfaceKey(node) + " \(typeSize)",
+                keyboardBar: kayaKeyboardBarSignature()
             )
             .modifier(KayaTextareaPlaceholder(node: node))
             .kayaTextareaFrame(
@@ -35691,6 +35752,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         let richSeq: Int
         let cap: CGFloat?
         let surface: String
+        let keyboardBar: String
 
         final class Coordinator: NSObject, UITextViewDelegate {
             var node: KayaNode?
@@ -35907,6 +35969,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 own.rich = rich
             }
             kayaApplyUIGutter(view, on: node.lineNumbers)
+            kayaApplyKeyboardBar(view, keyboardBar)
             // docs/code-surface-plan.md M1, M2, S1: the node's own face and size.
             if kayaNodeFontSet(node) {
                 let font = kayaNodeFont(node, .body, traits: view.traitCollection)
@@ -36068,9 +36131,36 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var pendingOff: Set<NSAttributedString.Key> = []
         /// docs/code-surface-plan.md G6: the line-number gutter, when on.
         var gutter: KayaUIGutter?
+        /// The height the caret was last kept inside.
+        private var keptHeight: CGFloat = 0
+
+        /// TextKit 2 re-estimates the content's height after the caret was
+        /// kept, and the scroll view clamps the offset to the new one; a caret
+        /// at the document's end is kept again (docs/phone-format-plan.md §2).
+        override var contentSize: CGSize {
+            didSet {
+                guard contentSize.height != oldValue.height, isFirstResponder,
+                    NSMaxRange(selectedRange) == (text as NSString? ?? "").length
+                else { return }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    kayaKeepCaretShown(self)
+                }
+            }
+        }
 
         override func layoutSubviews() {
             super.layoutSubviews()
+            // A view that got shorter while editing (the keyboard bar arriving
+            // above the keyboard, docs/phone-format-plan.md §2) keeps its caret
+            // in view, as a keyboard's own arrival does.
+            if bounds.height < keptHeight, isFirstResponder {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    kayaKeepCaretShown(self)
+                }
+            }
+            keptHeight = bounds.height
             guard let gutter else { return }
             gutter.frame = CGRect(
                 x: contentOffset.x, y: contentOffset.y, width: gutter.frame.width, height: bounds.height)
@@ -36185,6 +36275,23 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         layout.ensureLayout(for: laid)
         view.layoutIfNeeded()
         UIView.performWithoutAnimation { view.scrollRangeToVisible(view.selectedRange) }
+        // The caret's rect runs past the last line fragment (22pt against
+        // 18 on the editor's last line), so a view scrolled to the content's
+        // end clipped it by 4pt, and the scroll view clamps any offset past
+        // the content back; the bottom inset makes room for the caret, kept
+        // because TextKit 2 re-estimates the content after this
+        // (docs/phone-format-plan.md §2, the keyboard bar's shorter view).
+        guard let end = view.selectedTextRange?.end else { return }
+        let line = view.caretRect(for: end)
+        let short = ceil(line.maxY - view.contentSize.height)
+        if short > view.contentInset.bottom {
+            view.contentInset.bottom = short
+            UIView.performWithoutAnimation { view.scrollRangeToVisible(view.selectedRange) }
+        }
+        let over = line.maxY - (view.contentOffset.y + view.bounds.height - view.adjustedContentInset.bottom)
+        if over > 0 {
+            view.contentOffset.y += over
+        }
     }
 
     /// The widget-id -> text-view map, for the apply arms, which reach a
@@ -36196,6 +36303,216 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         init(_ view: UITextView) { self.view = view }
     }
     var kayaUITextViews: [UInt64: KayaWeakTextView] = [:]
+
+    // MARK: - The keyboard bar (docs/phone-format-plan.md §2)
+
+    /// The catalog's `keyboard_bar` menus, in catalog order.
+    @MainActor func kayaKeyboardBarMenus() -> [KayaMenuItemModel] {
+        kayaPresentedCatalog().filter { $0.kind == menuKindMenu && $0.keyboardBar }
+    }
+
+    /// Everything the bar draws, as one value read in a SwiftUI body, so a
+    /// catalog or state change re-renders the text view that carries it.
+    @MainActor func kayaKeyboardBarSignature() -> String {
+        func spell(_ item: KayaMenuItemModel) -> String {
+            let inner = item.children.map(spell).joined(separator: ",")
+            return "\(item.id)/\(item.label)/\(item.checked)/\(item.value)/\(kayaMenuEffectiveEnabled(item))/\(item.symbol)[\(inner)]"
+        }
+        return kayaKeyboardBarMenus().map(spell).joined(separator: ";")
+    }
+
+    /// One nested item of a bar button's menu: the item's own activation.
+    @MainActor func kayaKeyboardBarElement(_ item: KayaMenuItemModel) -> UIMenuElement? {
+        switch item.kind {
+        case menuKindAction, menuKindToggle:
+            let image = kayaSFSymbol(item.symbol).flatMap { UIImage(systemName: $0) }
+            let action = UIAction(
+                title: item.label, image: image,
+                state: item.kind == menuKindToggle && item.checked ? .on : .off
+            ) { _ in kayaMenuUserActivate(item) }
+            if !kayaMenuEffectiveEnabled(item) { action.attributes = .disabled }
+            return action
+        case menuKindRadioGroup:
+            let options = item.children.enumerated().map { index, option in
+                UIAction(title: option.label, state: Int(item.value) == index ? .on : .off) { _ in
+                    kayaMenuUserActivate(option)
+                }
+            }
+            return UIMenu(title: item.label, options: .displayInline, children: options)
+        default:
+            return nil
+        }
+    }
+
+    /// The bar UIKit carries above the keyboard: one button per item of the
+    /// marked menus, a gap between groups.
+    final class KayaKeyboardBar: UIInputView {
+        let scroll = UIScrollView()
+        let stack = UIStackView()
+        /// The item each button is, for a nested press (§4).
+        var models: [ObjectIdentifier: KayaMenuItemModel] = [:]
+        var drawn = ""
+
+        init() {
+            super.init(frame: CGRect(x: 0, y: 0, width: 320, height: 48), inputViewStyle: .keyboard)
+            allowsSelfSizing = true
+            accessibilityIdentifier = "kaya.keyboardbar"
+            stack.axis = .horizontal
+            stack.spacing = 4
+            stack.alignment = .center
+            scroll.showsHorizontalScrollIndicator = false
+            scroll.translatesAutoresizingMaskIntoConstraints = false
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(scroll)
+            scroll.addSubview(stack)
+            NSLayoutConstraint.activate([
+                scroll.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+                scroll.topAnchor.constraint(equalTo: topAnchor),
+                scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+                scroll.heightAnchor.constraint(equalToConstant: 48),
+                stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
+                stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
+                stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
+                stack.heightAnchor.constraint(equalTo: scroll.frameLayoutGuide.heightAnchor),
+            ])
+        }
+
+        required init?(coder: NSCoder) { fatalError("kaya: the keyboard bar is built in code") }
+
+        func rebuild(_ menus: [KayaMenuItemModel], _ signature: String) {
+            guard signature != drawn else { return }
+            drawn = signature
+            stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+            models.removeAll()
+            for (index, menu) in menus.enumerated() {
+                if index > 0 { stack.addArrangedSubview(gap()) }
+                for item in menu.children {
+                    if item.kind == menuKindSeparator {
+                        stack.addArrangedSubview(gap())
+                    } else {
+                        let button = self.button(item)
+                        models[ObjectIdentifier(button)] = item
+                        stack.addArrangedSubview(button)
+                    }
+                }
+            }
+        }
+
+        private func gap() -> UIView {
+            let view = UIView()
+            view.accessibilityIdentifier = "kaya.keyboardbar.gap"
+            view.widthAnchor.constraint(equalToConstant: 12).isActive = true
+            return view
+        }
+
+        private func button(_ item: KayaMenuItemModel) -> UIButton {
+            let on = item.kind == menuKindToggle && item.checked
+            var config: UIButton.Configuration = on ? .tinted() : .plain()
+            if let sf = kayaSFSymbol(item.symbol), let image = UIImage(systemName: sf) {
+                config.image = image
+            } else {
+                config.title = item.label
+            }
+            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+            let button = UIButton(configuration: config)
+            button.accessibilityLabel = item.label
+            button.accessibilityIdentifier = "kaya.keyboardbar.item"
+            button.isEnabled = kayaMenuEffectiveEnabled(item)
+            button.isSelected = on
+            if item.kind == menuKindMenu || item.kind == menuKindRadioGroup {
+                let children = item.kind == menuKindMenu
+                    ? item.children.compactMap(kayaKeyboardBarElement)
+                    : [kayaKeyboardBarElement(item)].compactMap { $0 }
+                button.menu = UIMenu(title: item.label, children: children)
+                button.showsMenuAsPrimaryAction = true
+            } else {
+                button.addAction(UIAction { _ in kayaMenuUserActivate(item) }, for: .primaryActionTriggered)
+            }
+            return button
+        }
+
+        /// The bar as `expect_keyboard_bar` spells it, off its own subviews.
+        func reading() -> String {
+            let words: [String] = stack.arrangedSubviews.compactMap { view in
+                if view.accessibilityIdentifier == "kaya.keyboardbar.gap" { return "-" }
+                guard let button = view as? UIButton else { return nil }
+                let label = button.accessibilityLabel ?? "?"
+                if button.showsMenuAsPrimaryAction { return label + ">" }
+                return button.isSelected ? label + " on" : label
+            }
+            return words.isEmpty ? "none" : words.joined(separator: "|")
+        }
+
+        /// A finger's press: a leaf button's own action, or for `Menu>Item`
+        /// the nested item the button's menu offers, resolved through the
+        /// button's item since UIKit opens no menu programmatically
+        /// (DESIGN.md, Menus: where a platform cannot say it).
+        func press(_ label: String) -> Bool {
+            let path = label.split(separator: ">", maxSplits: 1).map(String.init)
+            for case let button as UIButton in stack.arrangedSubviews
+            where button.accessibilityLabel == path.first && button.isEnabled {
+                if path.count == 1 {
+                    guard !button.showsMenuAsPrimaryAction else { return false }
+                    button.sendActions(for: .primaryActionTriggered)
+                    return true
+                }
+                guard let item = models[ObjectIdentifier(button)],
+                    let child = item.children.first(where: { $0.label == path[1] })
+                else { return false }
+                kayaMenuUserActivate(child)
+                return true
+            }
+            return false
+        }
+    }
+
+    /// The first-responder text view under `view`, found by walking the tree.
+    @MainActor func kayaFirstResponderText(_ view: UIView) -> UITextView? {
+        if let text = view as? UITextView, text.isFirstResponder { return text }
+        for sub in view.subviews {
+            if let found = kayaFirstResponderText(sub) { return found }
+        }
+        return nil
+    }
+
+    /// The bar on screen above the keyboard, read off the editing view.
+    @MainActor func kayaKeyboardBarRead() -> String {
+        guard kayaKeyboardInWindow() != nil, let window = kayaHarnessWindow(),
+            let text = kayaFirstResponderText(window),
+            let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
+        else { return "none" }
+        return bar.reading()
+    }
+
+    @MainActor func kayaKeyboardBarPress(_ label: String) -> Bool {
+        guard kayaKeyboardInWindow() != nil, let window = kayaHarnessWindow(),
+            let text = kayaFirstResponderText(window),
+            let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
+        else { return false }
+        return bar.press(label)
+    }
+
+    /// Put the bar on (or take it off) one text view; reloads the input views
+    /// only when the bar appears or goes, never for a state change.
+    @MainActor func kayaApplyKeyboardBar(_ view: UITextView, _ signature: String) {
+        let menus = kayaKeyboardBarMenus()
+        if menus.isEmpty {
+            guard view.inputAccessoryView is KayaKeyboardBar else { return }
+            view.inputAccessoryView = nil
+            if view.isFirstResponder { view.reloadInputViews() }
+            return
+        }
+        if let bar = view.inputAccessoryView as? KayaKeyboardBar {
+            bar.rebuild(menus, signature)
+            return
+        }
+        let bar = KayaKeyboardBar()
+        bar.rebuild(menus, signature)
+        view.inputAccessoryView = bar
+        if view.isFirstResponder { view.reloadInputViews() }
+    }
 
     // MARK: - Rich text, the iOS arm (docs/rich-text-plan.md §4)
 

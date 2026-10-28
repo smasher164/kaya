@@ -101,6 +101,7 @@ pub(crate) const REC_IMAGE_RELEASED: u16 = 57;
 pub(crate) const REC_ACTIVATED: u16 = 58;
 pub(crate) const REC_SELECTION_CHANGED: u16 = 59;
 pub(crate) const REC_FONT_FAMILIES: u16 = 60;
+pub(crate) const REC_TEXT_SELECTED: u16 = 61;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;

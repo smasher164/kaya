@@ -357,6 +357,31 @@ readonly record struct Format(TextRange Range, string Name, string? Value)
     public bool IsFlag => Value == MarkValue.Flag;
 }
 
+/// Where a `rich` textarea's selection is and the attributes that hold
+/// over ALL of it, in name order (docs/phone-format-plan.md §3).
+sealed record Selection(TextRange Range, IReadOnlyList<TextRun> Attrs)
+{
+    /// Whether name holds over the whole selection (at a caret: whether
+    /// the next typed character takes it).
+    public bool Has(string name)
+    {
+        foreach (var a in Attrs)
+            if (a.Name == name) return true;
+        return false;
+    }
+
+    /// The paragraph kind every touched paragraph shares; Body for body
+    /// text and for paragraphs of different kinds.
+    public BlockKind Block()
+    {
+        foreach (var a in Attrs)
+            if (a.Name == "block")
+                foreach (var kind in Enum.GetValues<BlockKind>())
+                    if (kind.Name() == a.Value) return kind;
+        return BlockKind.Body;
+    }
+}
+
 /// A `rich` textarea's text and runs, kept current by the binding from
 /// every edit it delivers (docs/rich-text-plan.md R1). Read the app's
 /// copy with KayaApp.Document.
@@ -826,6 +851,10 @@ enum Symbol : long
     Queue = KayaWire.SymbolQueue,
     Favorite = KayaWire.SymbolFavorite,
     Muted = KayaWire.SymbolMuted,
+    Bold = KayaWire.SymbolBold,
+    Italic = KayaWire.SymbolItalic,
+    Underline = KayaWire.SymbolUnderline,
+    Strikethrough = KayaWire.SymbolStrikethrough,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
@@ -1377,6 +1406,8 @@ sealed record RangeCommitted(ulong Id, List<object> Keys, double Low, double Hig
 sealed record TextEdited(ulong Id, List<object> Keys, Edit Act) : Occurrence(Id, Keys);
 
 sealed record TextFormatted(ulong Id, List<object> Keys, Format Act) : Occurrence(Id, Keys);
+
+sealed record TextSelected(ulong Id, List<object> Keys, Selection Sel) : Occurrence(Id, Keys);
 
 sealed record SortRequested(ulong Id, List<object> Keys, uint Column) : Occurrence(Id, Keys);
 
@@ -1985,6 +2016,8 @@ sealed class KayaApp
     // document-bound textarea registers so the act folds into its row.
     readonly Dictionary<ulong, Action<Tx, List<object>, Edit>> nodeEdits = new();
     readonly Dictionary<ulong, Action<Tx, List<object>, Format>> nodeFormats = new();
+    readonly Dictionary<ulong, Action<Tx, Selection>> widgetSelections = new();
+    readonly Dictionary<ulong, Action<Tx, List<object>, Selection>> nodeSelections = new();
     internal readonly Dictionary<ulong, (ulong Collection, uint Field)> DocumentBinds = new();
     readonly Dictionary<ulong, Action<Tx, bool>> widgetToggles = new();
     readonly Dictionary<ulong, Action<Tx, double>> widgetValues = new();
@@ -2641,6 +2674,15 @@ sealed class KayaApp
     /// The same for a stamped copy's toolbar act.
     public void OnFormat(Node n, Action<Tx, List<object>, Format> handler) =>
         nodeFormats[n.Id] = handler;
+
+    /// Where a rich textarea's selection is and what holds over it, sent
+    /// whenever either changes (docs/phone-format-plan.md §3).
+    public void OnSelection(Widget w, Action<Tx, Selection> handler) =>
+        widgetSelections[w.Id] = handler;
+
+    /// The same for a stamped copy, with its keys, outermost first.
+    public void OnSelection(Node n, Action<Tx, List<object>, Selection> handler) =>
+        nodeSelections[n.Id] = handler;
 
     /// This app's copy of a rich textarea's content, folded from every
     /// edit and format the core delivered; empty until the first of them
@@ -3431,6 +3473,26 @@ sealed class KayaApp
             tail[3] as string ?? "", removed ? null : tail[4] as string ?? "");
     }
 
+    static Selection SelectionOf(List<object>? tail)
+    {
+        int count = tail?.Count ?? 0;
+        if (tail == null || count < 2 || count % 2 != 0)
+            throw new InvalidOperationException(
+                $"kaya: a text_selected carries {count} values, want 2 plus two per attribute");
+        if (tail[0] is not long start || tail[1] is not long stop)
+            throw new InvalidOperationException(
+                $"kaya: a text_selected's offsets are a {tail[0]?.GetType().Name ?? "null"} "
+                    + $"and a {tail[1]?.GetType().Name ?? "null"}, want two long");
+        if (start < 0 || start > stop)
+            throw new InvalidOperationException(
+                $"kaya: a text_selected carries {start}..{stop}, a reversed span");
+        var range = new TextRange((ulong)start, (ulong)stop);
+        var attrs = new List<TextRun>();
+        for (int at = 2; at < count; at += 2)
+            attrs.Add(new TextRun(range, tail[at] as string ?? "", tail[at + 1] as string ?? ""));
+        return new Selection(range, attrs);
+    }
+
     /// One decoded span. A REVERSED one is refused NAMING BOTH ENDS: the
     /// range type's own constructor would otherwise be the only thing to
     /// notice, and it has no record to name (the C# twin of the Swift
@@ -3550,6 +3612,8 @@ sealed class KayaApp
                 return new TextEdited(id, keys, EditOf(payload as List<object>));
             case KayaWire.OccKindTextFormatted:
                 return new TextFormatted(id, keys, FormatOf(payload as List<object>));
+            case KayaWire.OccKindTextSelected:
+                return new TextSelected(id, keys, SelectionOf(payload as List<object>));
             case KayaWire.OccKindSortRequested: return new SortRequested(id, keys, code);
             // A tick canvas is a redraw canvas too, and both asks are
             // answered the same way (docs/canvas-plan.md §3.2.1).
@@ -3814,6 +3878,14 @@ sealed class KayaApp
                     FoldRowDocument(actRow.Id, actRow.Keys, doc => FoldFormat(doc, actRow.Act));
                     if (nodeFormats.TryGetValue(actRow.Id, out var onActRow))
                         Dispatch(tx => onActRow(tx, actRow.Keys, actRow.Act));
+                    break;
+                case TextSelected { Live: true } selLive
+                    when widgetSelections.TryGetValue(selLive.Id, out var onSelLive):
+                    Dispatch(tx => onSelLive(tx, selLive.Sel));
+                    break;
+                case TextSelected selRow
+                    when nodeSelections.TryGetValue(selRow.Id, out var onSelRow):
+                    Dispatch(tx => onSelRow(tx, selRow.Keys, selRow.Sel));
                     break;
                 case Toggled { Live: true } toggleLive
                     when widgetToggles.TryGetValue(toggleLive.Id, out var onToggle):
@@ -6881,11 +6953,13 @@ sealed class Tx : IDisposable
     /// menu appends them in order. Disabling a menu disables its
     /// subtree (the inherited-disabled contract).
     public MenuItem Menu(TextSource label, BoolSource? enabled = null,
-        byte[]? icon = null, Symbol? symbol = null, MenuItem[]? items = null)
+        byte[]? icon = null, Symbol? symbol = null, MenuItem[]? items = null,
+        bool keyboardBar = false)
     {
         var m = NewMenuItem(KayaWire.MenuKindMenu, label);
         MenuAppendAll(m, items);
         MenuTail(m, enabled, icon, symbol);
+        if (keyboardBar) Records.Add(KayaWire.TxSetMenuKeyboardBar(m.Id, true));
         return m;
     }
 
@@ -6898,7 +6972,7 @@ sealed class Tx : IDisposable
         BoolSource? enabled = null, BoolSource? isChecked = null,
         IndexSource? value = null, byte[]? icon = null, Symbol? symbol = null,
         bool? primary = null, string? shortcut = null, MenuRole? role = null,
-        MenuItem[]? items = null)
+        MenuItem[]? items = null, bool? keyboardBar = null)
     {
         MenuAppendAll(item, items);
         if (label is { } l) MenuLabel(item, l);
@@ -6910,6 +6984,7 @@ sealed class Tx : IDisposable
         if (primary is { } p) Records.Add(KayaWire.TxSetMenuPrimary(item.Id, p));
         if (shortcut != null) Records.Add(KayaWire.TxSetMenuShortcut(item.Id, shortcut));
         if (role is MenuRole named) Records.Add(KayaWire.TxSetMenuRole(item.Id, named.Name()));
+        if (keyboardBar is { } k) Records.Add(KayaWire.TxSetMenuKeyboardBar(item.Id, k));
     }
 
     /// A radio group — the Choice contract with the platform's checkmark

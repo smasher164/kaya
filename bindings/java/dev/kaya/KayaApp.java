@@ -282,7 +282,11 @@ public final class KayaApp {
         VOLUME(KayaWire.SYMBOL_VOLUME),
         QUEUE(KayaWire.SYMBOL_QUEUE),
         FAVORITE(KayaWire.SYMBOL_FAVORITE),
-        MUTED(KayaWire.SYMBOL_MUTED);
+        MUTED(KayaWire.SYMBOL_MUTED),
+        BOLD(KayaWire.SYMBOL_BOLD),
+        ITALIC(KayaWire.SYMBOL_ITALIC),
+        UNDERLINE(KayaWire.SYMBOL_UNDERLINE),
+        STRIKETHROUGH(KayaWire.SYMBOL_STRIKETHROUGH);
 
         final long wire;
 
@@ -376,6 +380,8 @@ public final class KayaApp {
     // document-bound textarea registers so the act folds into its row.
     private final Map<Long, EditHandler> nodeEdits = new HashMap<>();
     private final Map<Long, FormatHandler> nodeFormats = new HashMap<>();
+    private final Map<Long, BiConsumer<Tx, Selection>> widgetSelections = new HashMap<>();
+    private final Map<Long, SelectionHandler> nodeSelections = new HashMap<>();
     private final Map<Long, long[]> documentBinds = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeChanges = new HashMap<>();
     private final Map<Long, ChangeHandler> nodeSubmits = new HashMap<>();
@@ -546,6 +552,12 @@ public final class KayaApp {
     @FunctionalInterface
     public interface FormatHandler {
         void accept(Tx tx, List<Object> keys, Format act);
+    }
+
+    /** A stamped copy's selection handler (docs/phone-format-plan.md §3). */
+    @FunctionalInterface
+    public interface SelectionHandler {
+        void accept(Tx tx, List<Object> keys, Selection selection);
     }
 
     /** A template widget's paste handler: the stamped copy's keys, then
@@ -3916,6 +3928,15 @@ public final class KayaApp {
             return this;
         }
 
+        /** Puts this top-level window menu's items on the bar above a
+         * software keyboard while a textarea is edited; inert where there
+         * is no software keyboard (docs/phone-format-plan.md §2). Top-level
+         * window menus only (root-checked). Const-only. */
+        public MenuItem keyboardBar(boolean on) {
+            chain().emit(KayaWire.txSetMenuKeyboardBar(id, on));
+            return this;
+        }
+
         /** The phone-bar promotion hint (actions only — root-checked).
          * Flipping it recomputes the promoted set deterministically;
          * INERT on desktops — not a toolbar grammar. Const-only. */
@@ -5542,6 +5563,37 @@ public final class KayaApp {
         /** A flag attribute, on. */
         public boolean isFlag() {
             return FLAG_VALUE.equals(value);
+        }
+    }
+
+    /** Where a {@code rich} textarea's selection is and the attributes
+     * that hold over ALL of it, in name order (docs/phone-format-plan.md
+     * §3). */
+    public record Selection(TextRange range, List<TextRun> attrs) {
+        /** Whether {@code name} holds over the whole selection (at a
+         * caret: whether the next typed character takes it). */
+        public boolean has(String name) {
+            for (TextRun a : attrs) {
+                if (a.name().equals(name)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /** The paragraph kind every touched paragraph shares; BODY for
+         * body text and for paragraphs of different kinds. */
+        public Block block() {
+            for (TextRun a : attrs) {
+                if (a.name().equals("block")) {
+                    for (Block kind : Block.values()) {
+                        if (kind.kind.equals(a.value())) {
+                            return kind;
+                        }
+                    }
+                }
+            }
+            return Block.BODY;
         }
     }
 
@@ -11443,6 +11495,18 @@ public final class KayaApp {
         nodeFormats.put(n.id, handler);
     }
 
+    /** Register a handler for where a rich textarea's selection is and
+     * what holds over it, sent whenever either changes
+     * (docs/phone-format-plan.md §3). */
+    public void onSelection(Widget w, BiConsumer<Tx, Selection> handler) {
+        widgetSelections.put(w.id, handler);
+    }
+
+    /** The same for a stamped copy, with its keys, outermost first. */
+    public void onSelection(Node n, SelectionHandler handler) {
+        nodeSelections.put(n.id, handler);
+    }
+
     /**
      * This app's copy of a rich textarea's content, folded from every
      * edit and format the core delivered; empty until the first of them
@@ -11733,6 +11797,25 @@ public final class KayaApp {
         return new Format(
                 decodedSpan("text_formatted", (Long) tail.get(1), (Long) tail.get(2)),
                 (String) tail.get(3), removed ? null : (String) tail.get(4));
+    }
+
+    private static Selection selectionOf(Object payload) {
+        List<?> tail = payload instanceof List<?> l ? l : List.of();
+        if (tail.size() < 2 || tail.size() % 2 != 0) {
+            throw new IllegalStateException("kaya: a text_selected carries " + tail.size()
+                    + " values, want 2 plus two per attribute");
+        }
+        if (!(tail.get(0) instanceof Long start) || !(tail.get(1) instanceof Long stop)) {
+            throw new IllegalStateException("kaya: a text_selected's offsets are a "
+                    + describe(tail.get(0)) + " and a " + describe(tail.get(1))
+                    + ", want two I64");
+        }
+        TextRange range = decodedSpan("text_selected", start, stop);
+        List<TextRun> attrs = new ArrayList<>();
+        for (int at = 2; at < tail.size(); at += 2) {
+            attrs.add(new TextRun(range, (String) tail.get(at), (String) tail.get(at + 1)));
+        }
+        return new Selection(range, List.copyOf(attrs));
     }
 
     private static TextRun runOf(List<?> tail, int at) {
@@ -12914,6 +12997,22 @@ public final class KayaApp {
                 if (handler != null) {
                     dispatch(tx -> {
                         handler.accept(tx, occ.keys, act);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_SELECTED && occ.keys.isEmpty()) {
+                Selection selection = selectionOf(occ.payload);
+                BiConsumer<Tx, Selection> handler = widgetSelections.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, selection);
+                    });
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_TEXT_SELECTED) {
+                Selection selection = selectionOf(occ.payload);
+                SelectionHandler handler = nodeSelections.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> {
+                        handler.accept(tx, occ.keys, selection);
                     });
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_TOGGLED && occ.keys.isEmpty()) {

@@ -194,6 +194,10 @@ func App() *kaya.App {
 		fontGroup   kaya.MenuItem
 		fontChoice  kaya.Signal[float64]
 		fontOptions = []string{""}
+		// The Format menu's check marks: what holds over the selection
+		// (docs/phone-format-plan.md §3), written by the buffer's OnSelection.
+		inline = map[string]kaya.Signal[bool]{}
+		styles = map[kaya.Block]kaya.Signal[bool]{}
 	)
 	zoom := 4
 
@@ -437,19 +441,54 @@ func App() *kaya.App {
 			refind(tx)
 		})
 
-		// Over the widget's own selection (docs/rich-text-plan.md §7).
-		format := win.Menu("Format")
-		format.Item("Bold").Shortcut("primary+b").OnActivate(func(tx *kaya.Tx) { tx.Bold(buffer) })
-		format.Item("Italic").Shortcut("primary+i").OnActivate(func(tx *kaya.Tx) { tx.Italic(buffer) })
-		format.Item("Underline").Shortcut("primary+u").OnActivate(func(tx *kaya.Tx) { tx.Underline(buffer) })
-		format.Item("Strikethrough").Shortcut("primary+shift+x").OnActivate(func(tx *kaya.Tx) { tx.Strike(buffer) })
-		format.Item("Code").Shortcut("primary+e").OnActivate(func(tx *kaya.Tx) { tx.Code(buffer) })
+		// Over the widget's own selection (docs/rich-text-plan.md §7). Each
+		// style toggles: its check is what holds over the selection, and the
+		// toggle's new state picks the act. A phone carries the menu on the bar
+		// above its keyboard (docs/phone-format-plan.md §2).
+		format := win.Menu("Format").KeyboardBar(true)
+		flag := func(label, name, chord string, symbol kaya.Symbol) {
+			on := tx.Signal(false)
+			inline[name] = on
+			item := format.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
+				tx.Write(on, want)
+				if want {
+					tx.FormatFlag(buffer, name, true)
+				} else {
+					tx.Unformat(buffer, name)
+				}
+			}).Shortcut(chord)
+			if symbol != 0 {
+				item.Symbol(symbol)
+			}
+		}
+		flag("Bold", "bold", "primary+b", kaya.SymbolBold)
+		flag("Italic", "italic", "primary+i", kaya.SymbolItalic)
+		flag("Underline", "underline", "primary+u", kaya.SymbolUnderline)
+		flag("Strikethrough", "strike", "primary+shift+x", kaya.SymbolStrikethrough)
+		flag("Code", "code", "primary+e", 0)
 		format.Separator()
 		style := format.Menu("Paragraph Style")
-		style.Item("Heading 1").Shortcut("primary+alt+1").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Heading1) })
-		style.Item("Heading 2").Shortcut("primary+alt+2").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Heading2) })
-		style.Item("Quote").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Quote) })
-		style.Item("Body").Shortcut("primary+alt+0").OnActivate(func(tx *kaya.Tx) { tx.SetBlock(buffer, kaya.Body) })
+		paragraph := func(label string, kind kaya.Block, chord string) {
+			on := tx.Signal(kind == kaya.Body)
+			styles[kind] = on
+			item := style.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
+				// Body cannot be taken off: a paragraph is always some kind.
+				if !want || kind == kaya.Body {
+					tx.SetBlock(buffer, kaya.Body)
+					tx.Write(on, kind == kaya.Body)
+					return
+				}
+				tx.Write(on, true)
+				tx.SetBlock(buffer, kind)
+			})
+			if chord != "" {
+				item.Shortcut(chord)
+			}
+		}
+		paragraph("Heading 1", kaya.Heading1, "primary+alt+1")
+		paragraph("Heading 2", kaya.Heading2, "primary+alt+2")
+		paragraph("Quote", kaya.Quote, "")
+		paragraph("Body", kaya.Body, "primary+alt+0")
 
 		// The code editors' View menu (Sublime Text, VS Code, Zed): the
 		// gutter, the zoom chords, and the face.
@@ -534,6 +573,15 @@ func App() *kaya.App {
 	})
 	prev.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
 	next.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
+
+	buffer.OnSelection(func(tx *kaya.Tx, sel kaya.Selection) {
+		for name, on := range inline {
+			tx.Write(on, sel.Has(name))
+		}
+		for kind, on := range styles {
+			tx.Write(on, sel.Block() == kind)
+		}
+	})
 
 	buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
 		switch {

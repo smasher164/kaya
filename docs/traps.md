@@ -4,6 +4,22 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A UITextView scrolled to its end clips the caret, and TextKit 2 takes the scroll back (measured 2026-10-27)
+
+With the keyboard bar up (docs/phone-format-plan.md §2) the iOS editor's
+buffer was 262pt tall, and `type` at the end of the journal failed A9's wall
+three runs in four: caret (y 1569, 22pt) against content 1587, offset 1325,
+inset 0. Two causes, both traced (PFTRACE lines in the run's app log): the
+caret rect is 4pt taller than the last line fragment, so `scrollRangeToVisible`
+stops 4pt short; and TextKit 2 re-estimates the content height after the
+caret is kept (1437, 1599, 1660, 1587 within one leg), and the scroll view
+clamps the offset to each new height, undoing any correction made earlier.
+`kayaKeepCaretShown` now gives the view a bottom content inset for the
+overshoot, and KayaTextView keeps an end-of-document caret again on every
+content-height change. The bar's taller keyboard is what exposed it; the
+same race stood behind a taller buffer, where the estimates happened to
+land large.
+
 ## An NSRulerView on a SwiftUI-hosted scroll view empties the window's accessibility tree (measured 2026-10-27)
 
 The prior art's line-number gutter is the scroll view's `verticalRulerView`

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xcd377e2688e6cb2aL;
+    public static final long SPEC_HASH = 0x8a7752967302f191L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -191,6 +191,7 @@ public final class KayaWire {
     public static final int MPROP_ROLE = 8;
     public static final int MPROP_SYMBOL = 9;
     public static final int MPROP_SWIPE = 10;
+    public static final int MPROP_KEYBOARD_BAR = 11;
     public static final int SWIPE_LEADING = 1;
     public static final int SWIPE_TRAILING = 2;
     public static final int SWIPE_LEADING_FULL = 3;
@@ -292,6 +293,10 @@ public final class KayaWire {
     public static final int SYMBOL_QUEUE = 34;
     public static final int SYMBOL_FAVORITE = 35;
     public static final int SYMBOL_MUTED = 36;
+    public static final int SYMBOL_BOLD = 37;
+    public static final int SYMBOL_ITALIC = 38;
+    public static final int SYMBOL_UNDERLINE = 39;
+    public static final int SYMBOL_STRIKETHROUGH = 40;
     public static final int SOURCE_CONST = 0;
     public static final int SOURCE_SIGNAL = 1;
     public static final int SOURCE_ELEMENT = 2;
@@ -634,6 +639,7 @@ public final class KayaWire {
     public static final short OCC_KIND_ACTIVATED = 58;
     public static final short OCC_KIND_SELECTION_CHANGED = 59;
     public static final short OCC_KIND_FONT_FAMILIES = 60;
+    public static final short OCC_KIND_TEXT_SELECTED = 61;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -3699,6 +3705,14 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_menu_prop with a constant keyboard_bar value. */
+    public static byte[] txSetMenuKeyboardBar(long item, boolean keyboardBar) {
+        Enc b = begin(TX_KIND_SET_MENU_PROP);
+        b.putLong(item).putInt(MPROP_KEYBOARD_BAR).putInt(SOURCE_CONST);
+        encodeValue(b, keyboardBar);
+        return finish(b);
+    }
+
     /** Concatenate packed records into one transaction. */
     public static byte[] tx(byte[]... records) {
         int len = 0;
@@ -3901,7 +3915,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED) {
             return null;
         }
         long id = b.getLong(8);
@@ -4327,7 +4341,7 @@ public final class KayaWire {
             Object value = parseValue(rec, b, cursor);
             payload = List.of(removed, start, stop, name, value);
         }
-        if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK || kind == OCC_KIND_RANGE_CHANGED || kind == OCC_KIND_RANGE_COMMITTED) {
+        if (kind == OCC_KIND_DRAW_REQUESTED || kind == OCC_KIND_TICK || kind == OCC_KIND_RANGE_CHANGED || kind == OCC_KIND_RANGE_COMMITTED || kind == OCC_KIND_TEXT_SELECTED) {
             // The canvas asks carry a run of BARE values after the
             // key path — the assigned size, and a tick's frame time —
             // with no count in front, so they are read until the

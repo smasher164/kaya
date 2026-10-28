@@ -167,6 +167,9 @@ pub const KAYA_OCCURRENCE_ACTIVATED: u16 = 58;
 pub const KAYA_OCCURRENCE_SELECTION_CHANGED: u16 = 59;
 /// FONT_FAMILIES { Values: one Str a family } (docs/code-surface-plan.md M3).
 pub const KAYA_OCCURRENCE_FONT_FAMILIES: u16 = 60;
+/// TEXT_SELECTED { the copy's tag; bare values: I64 start, I64 stop, then
+/// Str name, Str value pairs } (docs/phone-format-plan.md §3).
+pub const KAYA_OCCURRENCE_TEXT_SELECTED: u16 = 61;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -208,6 +211,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_ACTIVATED == ring::REC_ACTIVATED
         && KAYA_OCCURRENCE_SELECTION_CHANGED == ring::REC_SELECTION_CHANGED
         && KAYA_OCCURRENCE_FONT_FAMILIES == ring::REC_FONT_FAMILIES
+        && KAYA_OCCURRENCE_TEXT_SELECTED == ring::REC_TEXT_SELECTED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -1323,6 +1327,7 @@ pub const KAYA_MPROP_SYMBOL: u32 = 9;
 /// The context item's swipe edge (docs/swipe-actions-plan.md §1): a
 /// KAYA_SWIPE_* value. Const-only; actions in a context catalog only.
 pub const KAYA_MPROP_SWIPE: u32 = 10;
+pub const KAYA_MPROP_KEYBOARD_BAR: u32 = 11;
 pub const KAYA_SWIPE_LEADING: u32 = 1;
 pub const KAYA_SWIPE_TRAILING: u32 = 2;
 pub const KAYA_SWIPE_LEADING_FULL: u32 = 3;
@@ -1344,11 +1349,12 @@ const _: () = assert!(
         && KAYA_MPROP_ROLE == wire::MPROP_ROLE
         && KAYA_MPROP_SYMBOL == wire::MPROP_SYMBOL
         && KAYA_MPROP_SWIPE == wire::MPROP_SWIPE
+        && KAYA_MPROP_KEYBOARD_BAR == wire::MPROP_KEYBOARD_BAR
 );
 // Completeness for the menu-prop exports (docs/traps.md): a new
 // MENU_PROPS row trips this count.
 const _: () = assert!(
-    crate::spec::MENU_PROPS.len() == 10,
+    crate::spec::MENU_PROPS.len() == 11,
     "spec::MENU_PROPS grew: export the new KAYA_MPROP_* above, extend the pin, and bump this \
      count"
 );
@@ -1380,7 +1386,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 60,
+    crate::spec::SPEC.occurrence.len() == 61,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1682,6 +1688,10 @@ pub const KAYA_SYMBOL_VOLUME: u32 = 33;
 pub const KAYA_SYMBOL_QUEUE: u32 = 34;
 pub const KAYA_SYMBOL_FAVORITE: u32 = 35;
 pub const KAYA_SYMBOL_MUTED: u32 = 36;
+pub const KAYA_SYMBOL_BOLD: u32 = 37;
+pub const KAYA_SYMBOL_ITALIC: u32 = 38;
+pub const KAYA_SYMBOL_UNDERLINE: u32 = 39;
+pub const KAYA_SYMBOL_STRIKETHROUGH: u32 = 40;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1719,6 +1729,10 @@ const _: () = assert!(
         && KAYA_SYMBOL_QUEUE == wire::SYMBOL_QUEUE
         && KAYA_SYMBOL_FAVORITE == wire::SYMBOL_FAVORITE
         && KAYA_SYMBOL_MUTED == wire::SYMBOL_MUTED
+        && KAYA_SYMBOL_BOLD == wire::SYMBOL_BOLD
+        && KAYA_SYMBOL_ITALIC == wire::SYMBOL_ITALIC
+        && KAYA_SYMBOL_UNDERLINE == wire::SYMBOL_UNDERLINE
+        && KAYA_SYMBOL_STRIKETHROUGH == wire::SYMBOL_STRIKETHROUGH
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1736,7 +1750,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 36,
+        variants == 40,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );
@@ -6049,7 +6063,7 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
     }
     // On every report, `quiet` included: a native undo is an edit the
     // document hears (docs/rich-text-plan.md R4, docs/undo-plan.md A6).
-    let edit = rich_edit_of(tag, text);
+    let (edit, asks) = rich_edit_of(tag, text);
     if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
         sink.send_text_tag(tag, text);
         if let Some(edit) = edit {
@@ -6061,26 +6075,32 @@ pub unsafe extern "C" fn kaya_emit_text_changed(
                 &edit.runs,
             ));
         }
-        return;
+    } else {
+        state()
+            .ring
+            .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
+        if let Some(edit) = edit {
+            state().ring.push_record(
+                ring::REC_TEXT_EDITED,
+                &wire::text_edited_body(tag, edit.source, edit.range, &edit.inserted, &edit.runs),
+            );
+        }
     }
-    state()
-        .ring
-        .push_record(ring::REC_TEXT_CHANGED, &wire::text_changed_body(tag, text));
-    if let Some(edit) = edit {
-        state().ring.push_record(
-            ring::REC_TEXT_EDITED,
-            &wire::text_edited_body(tag, edit.source, edit.range, &edit.inserted, &edit.runs),
-        );
-    }
+    send_occurrences(asks);
 }
 
 /// The one addressed edit, or None where the widget carries no document
-/// (docs/rich-text-plan.md R4).
-fn rich_edit_of(tag: &[u8], text: &str) -> Option<crate::scene::RichEdit> {
+/// (docs/rich-text-plan.md R4), and the text_selected it moved.
+fn rich_edit_of(
+    tag: &[u8],
+    text: &str,
+) -> (Option<crate::scene::RichEdit>, Vec<crate::protocol::Occurrence>) {
     let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
-    let scene = scene_slot.as_mut()?;
-    let field = scene.text_field_of_tag(tag)?;
-    scene.note_rich_text(field, text)
+    let Some(scene) = scene_slot.as_mut() else {
+        return (None, Vec::new());
+    };
+    let edit = scene.text_field_of_tag(tag).and_then(|field| scene.note_rich_text(field, text));
+    (edit, scene.take_asks())
 }
 
 /// Harness side: the CORE's attribute runs of a `rich` textarea in the
@@ -6205,27 +6225,31 @@ pub unsafe extern "C" fn kaya_text_formatted(
     let value = unsafe { rich_str(value, value_len, "a formatted attribute's value") };
     let want = (removed == 0).then_some(value);
     let range = crate::protocol::TextRange::new(start, end);
-    let published = {
+    let (published, asks) = {
         let mut scene_slot = PRESENTATION_SCENE.lock().unwrap();
         match scene_slot.as_mut() {
-            Some(scene) => match scene.text_field_of_tag(tag) {
-                Some(field) => scene.note_text_formatted(field, range, name, want),
-                None => None,
-            },
-            None => None,
+            Some(scene) => {
+                let published = match scene.text_field_of_tag(tag) {
+                    Some(field) => scene.note_text_formatted(field, range, name, want),
+                    None => None,
+                };
+                (published, scene.take_asks())
+            }
+            None => (None, Vec::new()),
         }
     };
-    let Some((range, name, value)) = published else {
-        return;
-    };
-    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
-        sink.send(wire::decode_text_formatted_tag(tag, range, &name, value.as_deref()));
-        return;
+    if let Some((range, name, value)) = published {
+        if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+            sink.send(wire::decode_text_formatted_tag(tag, range, &name, value.as_deref()));
+        } else {
+            state().ring.push_record(
+                ring::REC_TEXT_FORMATTED,
+                &wire::text_formatted_body(tag, range, &name, value.as_deref()),
+            );
+        }
     }
-    state().ring.push_record(
-        ring::REC_TEXT_FORMATTED,
-        &wire::text_formatted_body(tag, range, &name, value.as_deref()),
-    );
+    // docs/phone-format-plan.md §3: after the act it describes.
+    send_occurrences(asks);
 }
 
 /// One borrowed UTF-8 attribute word; NULL or zero length is the empty string.
@@ -6895,6 +6919,8 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CapturePermission { .. }
             | crate::protocol::Occurrence::CaptureDevices { .. }
             | crate::protocol::Occurrence::FontFamilies { .. }
+            | crate::protocol::Occurrence::TextSelected { .. }
+            | crate::protocol::Occurrence::InstanceTextSelected { .. }
             | crate::protocol::Occurrence::CaptureOverrun { .. }
             | crate::protocol::Occurrence::ToastResult { .. }
             | crate::protocol::Occurrence::ImageNeeded { .. }

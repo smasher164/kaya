@@ -1137,6 +1137,20 @@ pub enum Occurrence {
         name: String,
         value: Option<String>,
     },
+    /// A rich textarea's selection and the attributes holding over all of
+    /// it, name then value (docs/phone-format-plan.md §3).
+    TextSelected {
+        id: WidgetId,
+        range: TextRange,
+        attrs: Vec<(String, String)>,
+    },
+    /// The same for a stamped copy.
+    InstanceTextSelected {
+        node: TemplateNodeId,
+        path: Path,
+        range: TextRange,
+        attrs: Vec<(String, String)>,
+    },
     /// The user toggled a checkbox the guest created directly; carries
     /// the new state. Same ownership stance as TextChanged.
     Toggled { id: WidgetId, checked: bool },
@@ -2193,6 +2207,10 @@ pub enum MenuProp {
     /// whether a full swipe runs it (I64, spec enum `swipe`;
     /// docs/swipe-actions-plan.md §1). Actions in a context catalog only.
     Swipe,
+    /// A top-level window menu the bar above a software keyboard carries
+    /// while a textarea is edited (Bool, const-only;
+    /// docs/phone-format-plan.md §2).
+    KeyboardBar,
 }
 
 /// Which materialized attachment a backend's menu native belongs to:
@@ -3655,6 +3673,14 @@ impl OccSink {
                         crate::ring::REC_CAPTURE_PERMISSION,
                         &crate::wire::capture_permission_body(kind, permission, &detail),
                     );
+                }
+                Occurrence::TextSelected { id, range, attrs } => {
+                    let body = crate::wire::text_selected_body(id.0, &[], range, &attrs);
+                    ring.push_record(crate::ring::REC_TEXT_SELECTED, &body);
+                }
+                Occurrence::InstanceTextSelected { node, path, range, attrs } => {
+                    let body = crate::wire::text_selected_body(node.0, &path, range, &attrs);
+                    ring.push_record(crate::ring::REC_TEXT_SELECTED, &body);
                 }
                 Occurrence::FontFamilies { families } => {
                     ring.push_record(crate::ring::REC_FONT_FAMILIES, &crate::wire::font_families_body(&families));

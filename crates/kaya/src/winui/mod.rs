@@ -1118,6 +1118,10 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Queue => FluentIcon::Member(Fluent::List),
         S::Favorite => FluentIcon::Glyph("\u{EB51}"),
         S::Muted => FluentIcon::Member(Fluent::Mute),
+        S::Bold => FluentIcon::Member(Fluent::Bold),
+        S::Italic => FluentIcon::Member(Fluent::Italic),
+        S::Underline => FluentIcon::Member(Fluent::Underline),
+        S::Strikethrough => FluentIcon::Glyph("\u{EDE0}"),
     }
 }
 
@@ -1162,18 +1166,23 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Queue => crate::wire::SYMBOL_QUEUE,
         S::Favorite => crate::wire::SYMBOL_FAVORITE,
         S::Muted => crate::wire::SYMBOL_MUTED,
+        S::Bold => crate::wire::SYMBOL_BOLD,
+        S::Italic => crate::wire::SYMBOL_ITALIC,
+        S::Underline => crate::wire::SYMBOL_UNDERLINE,
+        S::Strikethrough => crate::wire::SYMBOL_STRIKETHROUGH,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 36] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 40] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
         S::Refresh, S::Info, S::Warning, S::Back, S::Forward, S::More, S::Copy, S::Paste, S::Star,
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
         S::ImageMissing, S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat,
-        S::RepeatOne, S::Volume, S::Queue, S::Favorite, S::Muted,
+        S::RepeatOne, S::Volume, S::Queue, S::Favorite, S::Muted, S::Bold, S::Italic,
+        S::Underline, S::Strikethrough,
     ]
 };
 
@@ -13150,7 +13159,19 @@ fn watch_plain_composition(
 /// ABORTS on a live borrow: `compose` runs TSF's edit session inside
 /// `on_ui`'s borrow, so `TextCompositionStarted` is raised under one. A
 /// refused borrow is DEFERRED onto the dispatcher rather than dropped.
+/// The occurrences the core queued while a report moved it: here the
+/// rich selection's (docs/phone-format-plan.md §3).
+fn send_scene_asks(core: &mut CoreState) {
+    for occ in core.scene.take_asks() {
+        core.occurrences.send(occ);
+    }
+}
+
 fn rich_scene(what: &'static str, f: impl FnOnce(&mut CoreState) + Send + 'static) {
+    let f = move |core: &mut CoreState| {
+        f(core);
+        send_scene_asks(core);
+    };
     let taken = CORE.with(|slot| match slot.try_borrow_mut() {
         Ok(mut borrowed) => match borrowed.as_mut() {
             Some(core) => {
@@ -13192,7 +13213,9 @@ fn rich_note_edit(
     }
     let edit = CORE.with_borrow_mut(|core| {
         let core = core.as_mut()?;
-        core.scene.note_rich_text(WidgetId(widget), text)
+        let edit = core.scene.note_rich_text(WidgetId(widget), text);
+        send_scene_asks(core);
+        edit
     })?;
     rich_take_edit(widget, field, text, &edit);
     Some(edit)
@@ -13299,6 +13322,7 @@ fn rich_format_selection(
                 }
             });
             core.scene.set_text_pending(WidgetId(widget), name, value, !off, start as u64);
+            send_scene_asks(core);
             rich_arm_typing(&field, widget, start)?;
             return Ok(Ok(()));
         }
@@ -13324,6 +13348,7 @@ fn rich_format_selection(
                 value.as_deref(),
             ));
         }
+        send_scene_asks(core);
         Ok(Ok(()))
     })();
     match acted {
@@ -17720,6 +17745,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                         other => unreachable!("kaya: swipe wants I64, the root passed {other:?}"),
                     }
                 }
+                // No software keyboard: the menu bar keeps the items (docs/phone-format-plan.md §2).
+                MenuProp::KeyboardBar => {}
             }
             core.menus_touched = true;
         }
@@ -25956,6 +25983,7 @@ impl crate::harness::Stage for WinUiStage {
             field.set_caret(n)?;
             let end = now.len() as u64;
             core.scene.set_text_selection(WidgetId(id), end, end);
+            send_scene_asks(core);
             if let Editable::Textarea(field) = &field {
                 let selection = field.TextDocument()?.Selection()?;
                 let native = (selection.StartPosition()?, selection.EndPosition()?);
@@ -26216,6 +26244,7 @@ impl crate::harness::Stage for WinUiStage {
                         ));
                     }
                 }
+                send_scene_asks(core);
             }
             Ok(())
         });

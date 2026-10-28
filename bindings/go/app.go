@@ -264,6 +264,9 @@ type App struct {
 	// `document` node writes into (docs/rich-text-plan.md §19).
 	nodeEdits      map[uint64]func(*Tx, []any, Edit)
 	nodeFormats    map[uint64]func(*Tx, []any, Format)
+	// docs/phone-format-plan.md §3.
+	widgetSelections map[uint64]func(*Tx, Selection)
+	nodeSelections   map[uint64]func(*Tx, []any, Selection)
 	documentBinds  map[uint64]documentBind
 	widgetToggles  map[uint64]func(*Tx, bool)
 	widgetValues   map[uint64]func(*Tx, float64)
@@ -423,6 +426,8 @@ func NewApp() *App {
 		documents:      make(map[uint64]Document),
 		nodeEdits:      make(map[uint64]func(*Tx, []any, Edit)),
 		nodeFormats:    make(map[uint64]func(*Tx, []any, Format)),
+		widgetSelections: make(map[uint64]func(*Tx, Selection)),
+		nodeSelections:   make(map[uint64]func(*Tx, []any, Selection)),
 		documentBinds:  make(map[uint64]documentBind),
 		widgetToggles:  make(map[uint64]func(*Tx, bool)),
 		widgetValues:   make(map[uint64]func(*Tx, float64)),
@@ -1942,6 +1947,35 @@ type Format struct {
 
 // IsFlag is whether this act put a flag attribute ON.
 func (f Format) IsFlag() bool { return !f.Removed && f.Value == FlagValue }
+
+// Selection is where a rich textarea's selection is and the attributes that
+// hold over ALL of it, in name order (docs/phone-format-plan.md §3).
+type Selection struct {
+	Range TextRange
+	Attrs []TextRun
+}
+
+// Has is whether name holds over the whole selection (at a caret: whether
+// the next typed character takes it).
+func (s Selection) Has(name string) bool {
+	for _, a := range s.Attrs {
+		if a.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Block is the paragraph kind every touched paragraph shares; Body for body
+// text and for paragraphs of different kinds.
+func (s Selection) Block() Block {
+	for _, a := range s.Attrs {
+		if a.Name == "block" {
+			return Block(a.Value)
+		}
+	}
+	return Body
+}
 
 // Rich declares this textarea attributed: Tx.SetDocument, Tx.ApplyEdit,
 // App.OnEdit, App.OnFormat (docs/rich-text-plan.md R1). A LABEL takes it
@@ -5064,6 +5098,15 @@ func (m MenuItem) Swipe(swipe Swipe) MenuItem {
 	return m
 }
 
+// KeyboardBar puts this top-level window menu's items on the bar above a
+// software keyboard while a textarea is edited; inert where there is no
+// software keyboard (docs/phone-format-plan.md §2). Top-level window menus
+// only, const-only.
+func (m MenuItem) KeyboardBar(on bool) MenuItem {
+	m.chain().emit(TxSetMenuKeyboardBar(m.id, on))
+	return m
+}
+
 // Primary sets the phone-bar promotion hint (actions only). INERT on
 // desktops — not a toolbar grammar. Const-only.
 func (m MenuItem) Primary(on bool) MenuItem {
@@ -6777,6 +6820,20 @@ func (w Widget) OnFormat(fn func(*Tx, Format)) Widget {
 	return w
 }
 
+// OnSelection registers a handler for where a rich textarea's selection is
+// and what holds over it, sent whenever either changes
+// (docs/phone-format-plan.md §3).
+func (w Widget) OnSelection(fn func(*Tx, Selection)) Widget {
+	w.tx.app.widgetSelections[w.id] = fn
+	return w
+}
+
+// OnSelection is OnSelection one zone over, with the copy's key path.
+func (n Node) OnSelection(fn func(*Tx, []any, Selection)) Node {
+	n.tx.app.nodeSelections[n.id] = fn
+	return n
+}
+
 // OnEdit registers a handler for a stamped rich copy's edit, with
 // its row's key path — OnEdit one zone over (docs/rich-text-plan.md
 // §19). The row's Document field has already taken the edit when this
@@ -6986,6 +7043,26 @@ func formatOf(tail []any) Format {
 		Value:   value,
 		Removed: tail[0].(uint32) != 0,
 	}
+}
+
+func selectionOf(tail []any) Selection {
+	if len(tail) < 2 || len(tail)%2 != 0 {
+		panic(fmt.Sprintf("kaya: a text_selected carries %d values, want 2 plus two per attribute",
+			len(tail)))
+	}
+	start, ok := tail[0].(int64)
+	end, alsoOk := tail[1].(int64)
+	if !ok || !alsoOk {
+		panic(fmt.Sprintf("kaya: a text_selected's offsets are a %T and a %T, want two int64",
+			tail[0], tail[1]))
+	}
+	sel := Selection{Range: decodedSpan("text_selected", int(start), int(end))}
+	for at := 2; at < len(tail); at += 2 {
+		name, _ := tail[at].(string)
+		value, _ := tail[at+1].(string)
+		sel.Attrs = append(sel.Attrs, TextRun{Range: sel.Range, Name: name, Value: value})
+	}
+	return sel
 }
 
 func runOf(four []any) TextRun {
@@ -7318,6 +7395,16 @@ func (a *App) Serve() {
 			})
 			if fn := a.nodeFormats[id]; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, keys, act) })
+			}
+		case kind == occTextSelected && len(keys) == 0:
+			sel := selectionOf(tail)
+			if fn := a.widgetSelections[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, sel) })
+			}
+		case kind == occTextSelected:
+			sel := selectionOf(tail)
+			if fn := a.nodeSelections[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, keys, sel) })
 			}
 		case kind == occToggled && len(keys) == 0:
 			if fn := a.widgetToggles[id]; fn != nil {
