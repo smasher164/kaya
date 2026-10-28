@@ -121,7 +121,9 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
                 "listrow", "tints", "badge", "emoji",
-                "ownundo", "richlabel", "notes", "richrows"]
+                "ownundo", "richlabel", "notes", "richrows",
+                # docs/doctabs-plan.md §6 B2: rust-only while the bindings follow.
+                "doctabs"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -350,6 +352,9 @@ ORDER = [
      # The sheet pool: the modal Popup and the close button's own route,
      # no real mouse and no OS-global key (docs/sheet-plan.md U1).
      "sheet_rust", "sheet_python", "sheet_js", "sheet_go", "sheet_csharp", "sheet_java",
+     # Document tabs (docs/doctabs-plan.md §4): the tab row's own items through
+     # the user's route, no real mouse.
+     "doctabs_rust",
      # The toast pool: the InfoBar's own buttons pressed through their
      # peers and Edit>Undo through menu_activate's invoke pipeline, no real
      # mouse and no OS-global key (docs/toast-plan.md T10).

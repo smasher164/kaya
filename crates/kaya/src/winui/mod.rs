@@ -14,6 +14,7 @@ mod reader;
 mod order;
 mod skin;
 mod code_surface;
+mod doctabs;
 
 use order::{track_of, ChildOrder};
 
@@ -465,6 +466,8 @@ impl Editable {
 }
 
 struct CoreState {
+    /// docs/doctabs-plan.md §3: documents, their tab rows and the regions.
+    docs: doctabs::Docs,
     /// The window content inset (wprop 8, docs/styling-plan.md D3): the Mount
     /// arm stamps it as Grid.Padding and the harness's `offer` observation
     /// subtracts it from the root's actual size.
@@ -17343,7 +17346,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (WindowProp::VetoClose, Value::Bool(on)) => {
                     core.window_veto.insert(window.0, *on);
                 }
-                (WindowProp::NewDocument, _) => crate::depth_stub("doctabs"),
+                (WindowProp::NewDocument, Value::Bool(on)) => doctabs::set_new_document(core, window.0, *on)?,
                 (WindowProp::Fullscreen, Value::Bool(on)) => {
                     let now = presenter_fullscreen(&target)?;
                     let request =
@@ -17374,26 +17377,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
             }
         }
-        ApplyOp::CreateWindow { window } => {
-            // Materializes hidden (never Activated until a mount
-            // presents it); the close grammar is installed at birth.
-            let aux = Window::new()?;
-            // The frame a previous process left, BEFORE the mount presents
-            // this window (docs/tasks-s4-plan.md P4).
-            if restore_frame(&aux, window.0).is_some() {
-                core.frame_from_memory.insert(window.0);
-            }
-            watch_frame(&aux, window.0)?;
-            watch_fullscreen(&aux, window.0)?;
-            subclass(&aux, window.0)?;
-            mirror_frame(&aux)?;
-            core.aux_windows.insert(window.0, aux);
-            // A WINDOW BORN AFTER THE DECLARATION still belongs to the
-            // same app (docs/app-identity-plan.md): identity is per-APP,
-            // and this is one of the three orders these objects can
-            // arrive in. A no-op when nothing was declared.
-            apply_identity_to_window(core, window.0)?;
-        }
+        ApplyOp::CreateWindow { window } => create_aux_window(core, window.0)?,
         ApplyOp::DestroyWindow { window } => {
             info_bar_take(window.0);
             INFO_BAR_TOASTS.with_borrow_mut(|bars| bars.remove(&window.0));
@@ -18112,11 +18096,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
         ApplyOp::ListFontFamilies => code_surface::list_font_families(core),
-        ApplyOp::AddDocument { .. }
-        | ApplyOp::SelectDocument { .. }
-        | ApplyOp::CloseDocument { .. }
-        | ApplyOp::SetDocumentProp { .. }
-        | ApplyOp::AddRegion { .. } => crate::depth_stub("doctabs"),
+        ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0)?,
+        ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0)?,
+        ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0)?,
+        ApplyOp::SetDocumentProp { document, prop, value } => doctabs::set_prop(core, document.0, prop, &value)?,
+        ApplyOp::AddRegion { window, region, edge } => {
+            let edge = match edge {
+                crate::protocol::RegionEdge::Leading => 1,
+                crate::protocol::RegionEdge::Trailing => 2,
+                crate::protocol::RegionEdge::Bottom => 3,
+            };
+            doctabs::add_region(core, window.0, region.0, edge)
+        }
         ApplyOp::SetVideoCapture { widget, capture } => media::set_video_capture(core, widget.0, capture.map(|c| c.0))?,
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
@@ -19659,7 +19650,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // The target is a SURFACE: a navigation entry presents
             // in-window, the primary is the window's own root, an auxiliary
             // presents its window.
-            if core.section_panes.contains_key(&window.0) {
+            if doctabs::mount(core, window.0, &element)? {
+                // A document's root or a shared region (docs/doctabs-plan.md).
+            } else if core.section_panes.contains_key(&window.0) {
                 // A section presents in-window, BUT THE WINDOW IT SITS IN MAY BE
                 // AN AUXILIARY NOTHING HAS PRESENTED: a sections window mounts
                 // into its SECTIONS and never into a root, so the "Mounting
@@ -20646,6 +20639,16 @@ unsafe extern "system" fn kaya_wndproc(
         defer_role_refresh();
         return unsafe { CallWindowProcW(original, hwnd, msg, wparam, lparam) };
     }
+    if msg == WM_CLOSE && doctabs::native_close(id) {
+        // A window with documents closes its documents, asked in one go
+        // (docs/doctabs-plan.md §1.5).
+        let tearing = CORE.with(|core| {
+            core.try_borrow().ok().and_then(|c| c.as_ref().map(|c| c.tearing_down.contains(&id))).unwrap_or(false)
+        });
+        if !tearing {
+            return 0;
+        }
+    }
     if msg == WM_CLOSE {
         let tearing = CORE.with_borrow(|core| {
             core.as_ref()
@@ -20910,6 +20913,30 @@ fn live_windows(core: &CoreState) -> String {
 /// five on linux, when a scene asserted on an aux window without a count
 /// barrier). The error is what makes the read RETRYABLE: `on_ui_read` turns
 /// it into a non-match and the harness polls again.
+/// A new auxiliary window, hidden until a mount presents it: the
+/// create_window arm's body, and a tear-out's (docs/doctabs-plan.md §1.2).
+fn create_aux_window(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    // Materializes hidden (never Activated until a mount
+    // presents it); the close grammar is installed at birth.
+    let aux = Window::new()?;
+    // The frame a previous process left, BEFORE the mount presents
+    // this window (docs/tasks-s4-plan.md P4).
+    if restore_frame(&aux, window).is_some() {
+        core.frame_from_memory.insert(window);
+    }
+    watch_frame(&aux, window)?;
+    watch_fullscreen(&aux, window)?;
+    subclass(&aux, window)?;
+    mirror_frame(&aux)?;
+    core.aux_windows.insert(window, aux);
+    // A WINDOW BORN AFTER THE DECLARATION still belongs to the
+    // same app (docs/app-identity-plan.md): identity is per-APP,
+    // and this is one of the three orders these objects can
+    // arrive in. A no-op when nothing was declared.
+    apply_identity_to_window(core, window)?;
+    Ok(())
+}
+
 fn winui_window(core: &CoreState, id: u64) -> windows_core::Result<Window> {
     if id == 0 {
         return Ok(core.window.clone());
@@ -21697,6 +21724,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             sections: HashMap::new(),
             section_panes: HashMap::new(),
             section_navs: HashMap::new(),
+            docs: Default::default(),
             section_items: HashMap::new(),
             section_swallow: HashMap::new(),
             ui_selected_sections: HashMap::new(),
@@ -29120,29 +29148,59 @@ impl crate::harness::Stage for WinUiStage {
         })
         .unwrap_or(false)
     }
+    // docs/doctabs-plan.md §4: off the tab row's own items and selection.
     fn document_titles(&self) -> Option<Vec<String>> {
-        crate::depth_stub("doctabs")
+        Self::on_ui_read(|core| Ok(doctabs::titles(core))).unwrap_or(None)
     }
     fn active_document(&self) -> Option<String> {
-        crate::depth_stub("doctabs")
+        Self::on_ui_read(|core| Ok(doctabs::active_title(core))).unwrap_or(None)
     }
-    fn document_dirty(&self, _: &str) -> Result<bool, String> {
-        crate::depth_stub("doctabs")
+    fn document_dirty(&self, title: &str) -> Result<bool, String> {
+        let title = title.to_owned();
+        Self::on_ui_read(move |core| Ok(doctabs::dirty(core, &title))).unwrap_or_else(|e| Err(e.message()))
     }
-    fn select_document(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn select_document(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self::on_ui_mut(move |core| {
+            let _ = tx.send(doctabs::select(core, &title));
+            Ok(())
+        });
+        rx.recv().unwrap_or_else(|_| Err("the dispatcher dropped the step".into()))
     }
-    fn close_document(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn close_document(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self::on_ui_mut(move |core| {
+            let _ = tx.send(doctabs::close(core, &title));
+            Ok(())
+        });
+        rx.recv().unwrap_or_else(|_| Err("the dispatcher dropped the step".into()))
     }
     fn new_document(&self) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self::on_ui_mut(move |core| {
+            let _ = tx.send(doctabs::press_plus(core));
+            Ok(())
+        });
+        rx.recv().unwrap_or_else(|_| Err("the dispatcher dropped the step".into()))
     }
-    fn move_to_new_window(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn move_to_new_window(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self::on_ui_mut(move |core| {
+            let _ = tx.send(doctabs::move_out(core, &title));
+            Ok(())
+        });
+        rx.recv().unwrap_or_else(|_| Err("the dispatcher dropped the step".into()))
     }
     fn close_native_window(&self) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+        let (tx, rx) = std::sync::mpsc::channel();
+        Self::on_ui_mut(move |core| {
+            let _ = tx.send(doctabs::close_native(core));
+            Ok(())
+        });
+        rx.recv().unwrap_or_else(|_| Err("the dispatcher dropped the step".into()))
     }
     fn dismiss_sheet(&self) {
         // The close button's own route (the ContentDialog Hide precedent):

@@ -919,6 +919,17 @@ fn main() {
         // UIElement.SetRenderTransform is a pad until Transform is named.
         "Microsoft.UI.Xaml.Media.Transform".to_string(),
         "Microsoft.UI.Xaml.Media.ScaleTransform".to_string(),
+        // Document tabs (docs/doctabs-plan.md §3): the tab row, its items,
+        // the close, drop-outside and drag events, the tab's dirty glyph.
+        "Microsoft.UI.Xaml.Controls.TabView".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewItem".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewWidthMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewCloseButtonOverlayMode".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewTabCloseRequestedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewTabDroppedOutsideEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewTabDragStartingEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.TabViewTabDragCompletedEventArgs".to_string(),
+        "Microsoft.UI.Xaml.Controls.FontIconSource".to_string(),
     ];
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     // The returned Warnings are windows-bindgen's own notes about the metadata,

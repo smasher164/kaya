@@ -22,7 +22,8 @@ window with focus and caret restored a turn later); the eight verbs; the
 `doctabs` scene with its Rust guest on the Mac's depth roster.
 
   - ~~**DEPTH STUB: doctabs on gtk**~~ — BUILT 2026-10-28: an AdwTabView and AdwTabBar per window with documents, the regions in boxes beside the view, the "+" in the header bar, the unsaved mark as the page indicator, the two-phase close, a tear-out through `create-window` (and the tab menu's Move to New Window) a new kaya window, every toolkit signal drained on an idle (crates/kaya/src/gtk/doctabs.rs); doctabs-rust green on x11 and wayland, four negatives watched red.
-  - **DEPTH STUB: doctabs on winui** — WinUI refuses the same; its arm is a TabView in the title bar, with winui-bindgen grown for its types.
+  - ~~**DEPTH STUB: doctabs on winui**~~ — BUILT 2026-10-28: a TabView as the window's tab ROW (Windows Terminal's shape) with the active document's root shown under it beside the regions, the dirty glyph as the tab's IconSource, the add-tab button, TabCloseRequested through the veto, a tab dropped outside or the tab menu's Move to New Window a new kaya window, WM_CLOSE asking once for a window's documents (crates/kaya/src/winui/doctabs.rs; winui-bindgen grew the TabView types); doctabs_rust green on the VM, three negatives watched red.
+  - **OPEN: the WinUI tab row into the title bar** (Q9, ruled 2026-10-28). The row sits under the caption today; the ruling puts it in the caption with the menu bar below, which means the TabView in the caption TitleBar's content slot beside kaya's promoted toolbar and its caption walls.
   - **DEPTH STUB: doctabs on compose** — Compose refuses the same; its arm is the documents sheet from the top bar with a hand-written reorder (Q4, Q5).
   - **DEPTH STUB: doctabs on swiftui/ios** — the iOS half of the SwiftUI interpreter refuses the same; its arm is the documents sheet (Q4).
 
