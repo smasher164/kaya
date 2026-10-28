@@ -6135,6 +6135,8 @@ struct GtkSectionPage {
 }
 
 struct CoreState {
+    /// docs/doctabs-plan.md §3: documents, their tabs and the shared regions.
+    docs: doctabs::Docs,
     transactions: Receiver<Transaction>,
     scene: Scene,
     occurrences: OccSink,
@@ -6640,6 +6642,56 @@ fn find_button(widget: &gtk4::Widget, label: &str) -> Option<gtk4::Button> {
     None
 }
 
+/// A new auxiliary window, hidden until a mount presents it: the create_window
+/// arm's body, and a tear-out's (docs/doctabs-plan.md §1.2).
+fn create_aux_window(core: &mut CoreState, window: u64) {
+    // Materializes hidden; mounting a root presents it. The
+    // normalized 540x330 default rides the primary's paths.
+    use gtk4::prelude::GtkWindowExt;
+    // The frame a previous process left, BEFORE the first present
+    // (docs/tasks-s4-plan.md P4).
+    let remembered = remembered_frame(window);
+    let (aux_w, aux_h) = remembered.unwrap_or((540, 330));
+    if remembered.is_some() {
+        core.frame_memory.insert(window, FrameMemory::default());
+    }
+    let aux = adw::Window::builder()
+        .default_width(aux_w)
+        .default_height(aux_h)
+        .build()
+        .upcast::<gtk4::Window>();
+    watch_frame(&aux, window);
+    watch_fullscreen(&aux, window);
+    watch_sidebar_width(&aux, window);
+    // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
+    // (docs/app-identity-plan.md I9). Written into `window_titles`
+    // too, because that map is what navigation fallbacks restore from.
+    if let Some(caption) = identity_caption(core, window) {
+        core.window_titles.insert(window, caption.clone());
+        aux.set_title(Some(&caption));
+    }
+    let chrome = install_nav_chrome(&aux, window);
+    core.toolbar_views.insert(window, chrome.view);
+    core.toast_overlays.insert(window, chrome.toasts);
+    core.header_bars.insert(window, chrome.header);
+    core.toolbar_groups.insert(window, chrome.promoted);
+    core.back_buttons.insert(window, chrome.back);
+    core.dirty_markers.insert(window, chrome.marker);
+    wire_close(
+        &aux,
+        window,
+        core.window_veto.clone(),
+        core.occurrences.clone(),
+    );
+    // Window-scoped menu actions for a PLAIN window: the primary is a
+    // GtkApplicationWindow whose own ActionMap exports "win"; an
+    // auxiliary needs the group inserted by hand under that prefix.
+    let actions = gio::SimpleActionGroup::new();
+    aux.insert_action_group("win", Some(&actions));
+    core.menu_action_groups.insert(window, actions);
+    core.aux_windows.insert(window, aux);
+}
+
 fn wire_close(
     window: &gtk4::Window,
     id: u64,
@@ -6649,6 +6701,11 @@ fn wire_close(
     use gtk4::glib;
     use gtk4::prelude::GtkWindowExt;
     window.connect_close_request(move |_| {
+        // A window with documents closes its documents, asked in one go
+        // (docs/doctabs-plan.md §1.5).
+        if doctabs::native_close(id) {
+            return glib::Propagation::Stop;
+        }
         if veto.borrow().get(&id).copied().unwrap_or(false) {
             sink.send(Occurrence::CloseRequested {
                 window: WindowId(id),
@@ -15957,7 +16014,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         .expect("every kaya window installs its chrome")
                         .set_visible(*on);
                 }
-                (WindowProp::NewDocument, _) => crate::depth_stub("doctabs"),
+                (WindowProp::NewDocument, Value::Bool(on)) => doctabs::set_new_document(core, window.0, *on),
                 (WindowProp::Fullscreen, Value::Bool(on)) => {
                     let target = gtk_window(core, window.0);
                     let now = target.is_fullscreen();
@@ -16010,53 +16067,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (p, v) => unreachable!("scene validated window prop {p:?}/{v:?}"),
             }
         }
-        ApplyOp::CreateWindow { window } => {
-            // Materializes hidden; mounting a root presents it. The
-            // normalized 540x330 default rides the primary's paths.
-            use gtk4::prelude::GtkWindowExt;
-            // The frame a previous process left, BEFORE the first present
-            // (docs/tasks-s4-plan.md P4).
-            let remembered = remembered_frame(window.0);
-            let (aux_w, aux_h) = remembered.unwrap_or((540, 330));
-            if remembered.is_some() {
-                core.frame_memory.insert(window.0, FrameMemory::default());
-            }
-            let aux = adw::Window::builder()
-                .default_width(aux_w)
-                .default_height(aux_h)
-                .build()
-                .upcast::<gtk4::Window>();
-            watch_frame(&aux, window.0);
-            watch_fullscreen(&aux, window.0);
-            watch_sidebar_width(&aux, window.0);
-            // A NEW WINDOW WITH NO TITLE WEARS THE APP'S NAME
-            // (docs/app-identity-plan.md I9). Written into `window_titles`
-            // too, because that map is what navigation fallbacks restore from.
-            if let Some(caption) = identity_caption(core, window.0) {
-                core.window_titles.insert(window.0, caption.clone());
-                aux.set_title(Some(&caption));
-            }
-            let chrome = install_nav_chrome(&aux, window.0);
-            core.toolbar_views.insert(window.0, chrome.view);
-            core.toast_overlays.insert(window.0, chrome.toasts);
-            core.header_bars.insert(window.0, chrome.header);
-            core.toolbar_groups.insert(window.0, chrome.promoted);
-            core.back_buttons.insert(window.0, chrome.back);
-            core.dirty_markers.insert(window.0, chrome.marker);
-            wire_close(
-                &aux,
-                window.0,
-                core.window_veto.clone(),
-                core.occurrences.clone(),
-            );
-            // Window-scoped menu actions for a PLAIN window: the primary is a
-            // GtkApplicationWindow whose own ActionMap exports "win"; an
-            // auxiliary needs the group inserted by hand under that prefix.
-            let actions = gio::SimpleActionGroup::new();
-            aux.insert_action_group("win", Some(&actions));
-            core.menu_action_groups.insert(window.0, actions);
-            core.aux_windows.insert(window.0, aux);
-        }
+        ApplyOp::CreateWindow { window } => create_aux_window(core, window.0),
         ApplyOp::DestroyWindow { window } => {
             use gtk4::prelude::GtkWindowExt;
             if let Some(aux) = core.aux_windows.remove(&window.0) {
@@ -17208,11 +17219,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
         ApplyOp::ListFontFamilies => list_font_families(core),
-        ApplyOp::AddDocument { .. }
-        | ApplyOp::SelectDocument { .. }
-        | ApplyOp::CloseDocument { .. }
-        | ApplyOp::SetDocumentProp { .. }
-        | ApplyOp::AddRegion { .. } => crate::depth_stub("doctabs"),
+        ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0),
+        ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0),
+        ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0),
+        ApplyOp::SetDocumentProp { document, prop, value } => doctabs::set_prop(core, document.0, prop, &value),
+        ApplyOp::AddRegion { window, region, edge } => {
+            let edge = match edge {
+                crate::protocol::RegionEdge::Leading => 1,
+                crate::protocol::RegionEdge::Trailing => 2,
+                crate::protocol::RegionEdge::Bottom => 3,
+            };
+            doctabs::add_region(core, window.0, region.0, edge)
+        }
         ApplyOp::SetVideoCapture { widget, capture } => capture::set_video_capture(core, widget, capture.map(|c| c.0)),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
@@ -18858,7 +18876,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             // The target is a SURFACE: a navigation entry presents in-window,
             // the primary is the window's own root, an auxiliary presents its
             // window.
-            if core.section_pages.contains_key(&window.0) {
+            if doctabs::mount(core, window.0, &root_widget) {
+                // A document's page or a shared region (docs/doctabs-plan.md).
+            } else if core.section_pages.contains_key(&window.0) {
                 // A section presents in-window: added to the set
                 // already; the mount fills its page.
                 core.section_pages.get_mut(&window.0).unwrap().root =
@@ -20863,6 +20883,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 split_views: HashMap::new(),
                 sections: HashMap::new(),
                 section_pages: HashMap::new(),
+                docs: Default::default(),
                 section_stacks: HashMap::new(),
                 section_chrome: HashMap::new(),
                 sections_rendered: HashMap::new(),
@@ -27235,29 +27256,34 @@ impl crate::harness::Stage for GtkStage {
             button.activate()
         })
     }
+    // docs/doctabs-plan.md §4: off the tab view's own pages and selection.
     fn document_titles(&self) -> Option<Vec<String>> {
-        crate::depth_stub("doctabs")
+        Self::on_main(|core| doctabs::titles(core))
     }
     fn active_document(&self) -> Option<String> {
-        crate::depth_stub("doctabs")
+        Self::on_main(|core| doctabs::active_title(core))
     }
-    fn document_dirty(&self, _: &str) -> Result<bool, String> {
-        crate::depth_stub("doctabs")
+    fn document_dirty(&self, title: &str) -> Result<bool, String> {
+        let title = title.to_owned();
+        Self::on_main(move |core| doctabs::dirty(core, &title))
     }
-    fn select_document(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn select_document(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        Self::on_main(move |core| doctabs::select(core, &title))
     }
-    fn close_document(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn close_document(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        Self::on_main(move |core| doctabs::close(core, &title))
     }
     fn new_document(&self) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+        Self::on_main(|core| doctabs::press_plus(core))
     }
-    fn move_to_new_window(&self, _: &str) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+    fn move_to_new_window(&self, title: &str) -> Result<(), String> {
+        let title = title.to_owned();
+        Self::on_main(move |core| doctabs::move_out(core, &title))
     }
     fn close_native_window(&self) -> Result<(), String> {
-        crate::depth_stub("doctabs")
+        Self::on_main(|core| doctabs::close_native(core))
     }
     fn dismiss_sheet(&self) {
         // The platform's own cancel path on the topmost sheet: Esc through
@@ -30303,6 +30329,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
 
 mod capture;
 mod secure_text;
+mod doctabs;
 mod soup_drain;
 
 mod gtk_media {

@@ -360,7 +360,7 @@ ENTRIES = (
      "watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 0);",
      "watch_sidebar_width(window.upcast_ref::<gtk4::Window>(), 1);"),
     ("an aux window's sidebar band re-read on resize",
-     "watch_sidebar_width(&aux, window.0);",
+     "watch_sidebar_width(&aux, window);",
      "watch_sidebar_width(&aux, 0);"),
     # THE LABEL WEIGHTS ARE NOT HELD HERE. Their static half — the ruled
     # wishes, the clamp that lowers them onto the brand font's own named

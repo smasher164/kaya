@@ -17,7 +17,7 @@ import re
 
 SWIFT = "swift/KayaSwiftUI.swift"
 COMPOSE = "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt"
-GTK = "crates/kaya/src/gtk.rs"
+GTK = "crates/kaya/src/gtk/doctabs.rs"
 WINUI = "crates/kaya/src/winui/mod.rs"
 SPEC = "crates/kaya/src/spec.rs"
 

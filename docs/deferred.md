@@ -21,7 +21,7 @@ controller, a shared region's one hosting view moved into the selected tab
 window with focus and caret restored a turn later); the eight verbs; the
 `doctabs` scene with its Rust guest on the Mac's depth roster.
 
-  - **DEPTH STUB: doctabs on gtk** — the GTK backend refuses the five records, the window's `new_document` and the eight verbs; its arm is AdwTabView and AdwTabBar (docs/doctabs-plan.md §3).
+  - ~~**DEPTH STUB: doctabs on gtk**~~ — BUILT 2026-10-28: an AdwTabView and AdwTabBar per window with documents, the regions in boxes beside the view, the "+" in the header bar, the unsaved mark as the page indicator, the two-phase close, a tear-out through `create-window` (and the tab menu's Move to New Window) a new kaya window, every toolkit signal drained on an idle (crates/kaya/src/gtk/doctabs.rs); doctabs-rust green on x11 and wayland, four negatives watched red.
   - **DEPTH STUB: doctabs on winui** — WinUI refuses the same; its arm is a TabView in the title bar, with winui-bindgen grown for its types.
   - **DEPTH STUB: doctabs on compose** — Compose refuses the same; its arm is the documents sheet from the top bar with a hand-written reorder (Q4, Q5).
   - **DEPTH STUB: doctabs on swiftui/ios** — the iOS half of the SwiftUI interpreter refuses the same; its arm is the documents sheet (Q4).

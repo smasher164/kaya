@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge emoji"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge emoji doctabs"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -2006,6 +2006,9 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" sheet-rust env KAYA_SELFTEST=sheet \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sheet"
+    # docs/doctabs-plan.md §6 B1: rust-only while the bindings follow.
+    run "$proto" doctabs-rust env KAYA_SELFTEST=doctabs \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/doctabs"
     # THE FORMATTER DOOR AND THE CATALOG under three locales
     # (docs/compliance-plan.md §6): the knob installs the generated locale
     # (tools/linux/Dockerfile) and the reads ask glibc and GTK back.
