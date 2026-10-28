@@ -4,7 +4,7 @@ Status: RULED 2026-10-28 (the maintainer, on the four questions at the end: "I
 agree with your recommendations"): native Mac window tabs through public API
 only, one document-tabs concept native everywhere (C), automatic tabbing off
 until C exists (A, built), a list of open documents on phones. C is unbuilt;
-the editor is its forcing app. The maintainer, 2026-10-28: "what is the extent to which you can
+the editor is its forcing app; its plan is docs/doctabs-plan.md. The maintainer, 2026-10-28: "what is the extent to which you can
 style a native macos tab? what is the extent to which we want control over
 native tabs in the first place for a gui toolkit that provides
 platform-specific features? i feel like if someone sees native tabs, they're
