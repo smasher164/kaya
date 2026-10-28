@@ -225,6 +225,11 @@ def census_ios_app_shot(src):
     ios = sw[ios_at:sw.find("\n#endif\n", ios_at)] if ios_at >= 0 else ""
     if "window.drawHierarchy(in: window.frame" not in ios:
         found.append("iOS: KayaFailShot no longer draws the app's windows (drawHierarchy)")
+    if ("MainActor.assumeIsolated { kayaKeyboardScreenFrame }" not in ios
+            or "cg.fill(keyboard)" not in ios):
+        found.append("iOS: KayaFailShot no longer hatches the keyboard's band — a shot without "
+                     "it reads as an app that fills half the screen (docs/traps.md, the iOS "
+                     "shot's missing keyboard)")
     if "kayaTempDir()" not in ios:
         found.append("iOS: KayaFailShot no longer resolves a relative KAYA_FAIL_SHOT under "
                      "Documents, where the runner pulls it")
@@ -2731,6 +2736,9 @@ np7 = doctored(IOS, r'^ *for stale in \(f"fail-shot-\{name\}\.png", '
                "NP7 cut the pre-launch delete of the last fail shot")
 gate.negative("NP7 a red iOS leg adopting an earlier leg's picture",
               lambda: census_ios_app_shot(np7), want="does not delete the leg's last fail shot")
+np8 = doctored(SWIFTUI, r"cg\.fill\(keyboard\)", "_ = keyboard", "NP8 cut the keyboard band's fill")
+gate.negative("NP8 an iOS shot with the keyboard's band left out",
+              lambda: census_ios_app_shot(np8), want="no longer hatches the keyboard's band")
 
 # The desktop shot's two idle refusals, each cut from a copy.
 nd1 = doctored(LANE_PY,
@@ -3655,6 +3663,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(264 + (5 if DRIVES else 0))
+gate.negatives_ran(265 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

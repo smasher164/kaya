@@ -9336,6 +9336,79 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             }
         }
 
+    /**
+     * expect_weight's read (docs/phone-format-plan.md §6): the range's ink as
+     * the field's own layout PAINTS it, against the same characters laid out
+     * at the regular weight, and the font the run shapes to with minikin's
+     * synthesis flag for the sentence.
+     */
+    private fun kayaWeightReading(activity: ComponentActivity, spec: String, range: String, want: String): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
+            val layout = kayaTextKindLayout(node) ?: return@onUi null to ": no laid-out text"
+            val input = layout.layoutInput
+            val text = input.text
+            val bounds = range.split(":")
+            val from = kayaUtf16Offset(text.text, bounds.getOrNull(0)?.toIntOrNull() ?: -1)
+            val to = kayaUtf16Offset(text.text, bounds.getOrNull(1)?.toIntOrNull() ?: -1)
+            if (bounds.size != 2 || from < 0 || to <= from || to > text.length) {
+                return@onUi null to ": range $range is not inside the laid-out text (${text.length} UTF-16 units)"
+            }
+            var style = input.style.toSpanStyle()
+            for (span in text.spanStyles) if (span.start <= from && span.end >= to) style = style.merge(span.item)
+            val asked = style.fontWeight ?: FontWeight.Normal
+            val typeface = input.fontFamilyResolver.resolve(
+                style.fontFamily, asked, style.fontStyle ?: FontStyle.Normal,
+                style.fontSynthesis ?: androidx.compose.ui.text.font.FontSynthesis.All,
+            ).value as? android.graphics.Typeface ?: return@onUi null to ": resolved to no platform typeface"
+            val shaped = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val paint = android.graphics.Paint().apply { this.typeface = typeface; textSize = 100f }
+                val run = text.text.substring(from, to)
+                val glyphs = android.graphics.text.TextRunShaper.shapeTextRun(run, 0, run.length, 0, run.length, 0f, 0f, false, paint)
+                if (glyphs.glyphCount() == 0) "no glyphs"
+                else {
+                    val font = glyphs.getFont(0)
+                    "${kayaFontFamilyName(font.buffer, font.ttcIndex) ?: "unnamed"} ${font.style.weight}" +
+                        if (glyphs.getFakeBold(0)) " synthesized bold" else ""
+                }
+            } else "shaping unread on API ${Build.VERSION.SDK_INT}"
+            fun ink(l: androidx.compose.ui.text.TextLayoutResult, a: Int, b: Int): Int {
+                val w = l.size.width.coerceAtLeast(1)
+                val h = l.size.height.coerceAtLeast(1)
+                val bitmap = androidx.compose.ui.graphics.ImageBitmap(w, h)
+                l.multiParagraph.paint(androidx.compose.ui.graphics.Canvas(bitmap), Color.Black)
+                var box = l.getBoundingBox(a)
+                for (i in a + 1 until b) {
+                    val r = l.getBoundingBox(i)
+                    box = androidx.compose.ui.geometry.Rect(
+                        minOf(box.left, r.left), minOf(box.top, r.top), maxOf(box.right, r.right), maxOf(box.bottom, r.bottom))
+                }
+                val px = bitmap.asAndroidBitmap()
+                var n = 0
+                for (y in box.top.toInt().coerceIn(0, h - 1) until box.bottom.toInt().coerceIn(0, h)) {
+                    for (x in box.left.toInt().coerceIn(0, w - 1) until box.right.toInt().coerceIn(0, w)) {
+                        if (android.graphics.Color.alpha(px.getPixel(x, y)) >= 128) n++
+                    }
+                }
+                return n
+            }
+            val drawn = ink(layout, from, to)
+            val measurer = androidx.compose.ui.text.TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, 1)
+            val plain = measurer.measure(
+                AnnotatedString(text.text.substring(from, to)),
+                input.style.merge(androidx.compose.ui.text.TextStyle(
+                    fontFamily = style.fontFamily, fontSize = style.fontSize, fontStyle = style.fontStyle,
+                    fontWeight = FontWeight.Normal)),
+                constraints = androidx.compose.ui.unit.Constraints(),
+            )
+            val regular = ink(plain, 0, to - from)
+            if (regular == 0) return@onUi null to ": the regular weight of $range draws no ink"
+            val ratio = drawn.toDouble() / regular
+            val got = if (ratio >= KAYA_WEIGHT_INK_BOLD) "bold" else "regular"
+            val said = "$got (ink ${"%.2f".format(ratio)}x the regular weight; asked ${asked.weight}, shapes to $shaped)"
+            if (got == want) said to "" else null to " reads $said, wanted $want"
+        }
+
     /** expect_scaled's read (S3): the size the layout drew in against the
      *  size the platform's style gave the kind, both in sp. */
     private fun kayaScaledReading(activity: ComponentActivity, spec: String, want: Double, said: String): Pair<String?, String> =
@@ -14590,6 +14663,22 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             }
                             got.first?.let { observed.add("${parts[1]} face $it") }
                                 ?: failures.add("${parts[1]} face${got.second}")
+                        }
+                    }
+                    "expect_weight" -> {
+                        // docs/phone-format-plan.md §6: harness.rs's ExpectWeight.
+                        val want = parts.getOrElse(3) { "" }
+                        if (parts.size != 4 || want !in listOf("bold", "regular")) {
+                            failures.add("expect_weight wants a target, a start:end range and bold or regular: $line")
+                        } else {
+                            var got = kayaWeightReading(activity, parts[1], parts[2], want)
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaWeightReading(activity, parts[1], parts[2], want)
+                            }
+                            got.first?.let { observed.add("${parts[1]} ${parts[2]} weight $it") }
+                                ?: failures.add("${parts[1]} ${parts[2]} weight${got.second}")
                         }
                     }
                     "expect_scaled" -> {
@@ -21121,6 +21210,10 @@ internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextSt
 /** What a text layout draws at when its style names no size: Compose's own
  *  default (foundation's DefaultFontSize). */
 internal val KAYA_COMPOSE_DEFAULT_TEXT_SIZE = 14.sp
+
+/** expect_weight's line: a run whose ink is at least this multiple of its
+ *  regular weight's draws bold (docs/phone-format-plan.md §6). */
+internal const val KAYA_WEIGHT_INK_BOLD = 1.08
 
 /** The size in sp the platform gave each text kind, before text_scale. */
 internal val kayaPlatformSizes = HashMap<Long, Float>()

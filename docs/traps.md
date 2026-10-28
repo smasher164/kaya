@@ -16870,7 +16870,8 @@ the software keyboard, the status bar and system sheets belong to other
 processes. Read back on the 2026-10-14 iOS lane: editor-go's `shot` is its
 editor with "save cancelled" under it, its `desktop-shot` the home screen.
 GUARD: tools/check-flightrec.py's iOS app shot census, seven cuts (NP1-NP7)
-watched red.
+watched red; the keyboard's band since 2026-10-27 (NP8; the entry on the iOS
+shot's missing keyboard).
 
 ## The windows lane slowed by a rebooted VM's Defender (measured 2026-10-14)
 
@@ -19478,3 +19479,59 @@ labelColor is white at about 85% alpha in the dark appearance, and the reader's
 `none` candidate dropped the alpha, so plain text sat nearer a pale accent than
 white. Since 2026-10-26 the label tint reader composites labelColor over the
 window ground (kayaLabelTintRead's `plain`).
+
+## An accessory guest has no menu bar to photograph (measured 2026-10-27)
+
+Three sessions tried to photograph the editor's Format menu drawn open and got
+the desktop or the maintainer's Terminal instead. The guess was a wrong
+process name for System Events; the cause is the activation policy. kaya's
+guests run `.accessory`, and an accessory app has no menu bar at all: System
+Events still lists its `menu bar 1` and `click menu bar item "Format"` returns
+without an error, but no menu window (layer 101) appears for its pid, and a
+full-screen shot shows whichever app owns the bar. With
+`KAYA_WINDOW_FRONT=regular` the interpreter raises itself to `.regular` and
+the same click opens the menu (tools/mac/menu-shot.py). The first look at a
+kaya app WITH its bar showed SwiftUI's own File, Edit and View beside kaya's
+menus of the same titles ("File Edit File Edit Format View View Window
+Help"): kayaSyncMacMenuBar keeps SwiftUI's menus as dress and inserts kaya's
+segment beside them (docs/deferred.md, the duplicate mac menus entry).
+
+## A synthesized monospaced bold is faint on the 1x emulator (measured 2026-10-27)
+
+Android's `monospace` family is DroidSansMono.ttf at weight 400 alone
+(/system/etc/fonts.xml on the API 35 image; `serif-monospace`, Cutive Mono,
+is 400 alone too), so a bold run in the editor's monospaced face is
+synthesized by minikin. The lane emulator is mdpi (`wm density` 160, 360x800
+px), where 14 sp is 14 px and the synthesis adds about half a pixel: the
+review capture read as regular to the eye while expect_weight measured the
+range's ink at 1.43x the regular weight, shaped as "Droid Sans Mono 400
+synthesized bold". A span's `fontSynthesis = FontSynthesis.None` does not stop
+it (watched: still 1.43x), since minikin fakes the platform typeface and
+Compose's synthesis applies to fonts it loads. A heavier bold on Android needs
+a bundled monospaced face with a bold weight.
+
+## The mac gutter's number drew above the textarea (measured 2026-10-27)
+
+After the find walk scrolled the last line in, the line cut by the viewport's
+top had its number drawn above the textarea's border. kayaGutterLines takes a
+line partly inside the visible rect, the number is drawn at the line's centre
+(above the viewport), and the gutter is a floating subview of the scroll view:
+its own `clipsToBounds` clips to its frame, which spans the document, and the
+floating container does not clip (macOS 14). The gutter now clips its drawing
+to the clip view's bounds, and the mac gutter reader compares each number's
+inked box (the drawing context's clip at draw time) with the clip view's
+frame, so an unclipped number fails expect_gutter with "inks y ..., outside
+the text's viewport".
+
+## The iOS shot's missing keyboard read as a half-height editor (measured 2026-10-27)
+
+The code surface review page showed the editor's textarea filling the top
+half of an iPhone with white below the status line, and it was taken for a
+layout defect. It was the keyboard: the iOS lane keeps the software keyboard
+up (A10), and KayaFailShot draws the app's windows with drawHierarchy, while
+the keyboard is another process's window and draws nothing there. A
+simctl screenshot held at the same step showed the keyboard and its bar under
+the status line, with the textarea filling the room above them, as it should.
+Since 2026-10-27 the iOS shot hatches and names the keyboard's band from
+UIKit's keyboardWillChangeFrame end frame, as Compose's keyboardBand already
+did, and shot.when says where it covered (tools/check-flightrec.py, NP8).

@@ -1120,6 +1120,10 @@ pub enum Step {
     /// A text kind's resolved size against the size the platform gives it
     /// now, as a multiple (docs/code-surface-plan.md S3).
     ExpectScaled(Target, f64),
+    /// The weight a text kind DRAWS a range at, `bold` or `regular`: a bold
+    /// face and a synthesized emboldening both draw bold
+    /// (docs/phone-format-plan.md §6).
+    ExpectWeight(Target, TextRange, String),
     /// Start an input-method COMPOSITION in the target with this marked
     /// text — the mid-word IME state no other verb can reach (`type` is
     /// printable ASCII by contract). The text is MARKED, not committed:
@@ -1279,6 +1283,7 @@ impl Step {
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectGutter(t, _) | Step::ExpectFace(t, _) | Step::ExpectScaled(t, _) => vec![t],
+            Step::ExpectWeight(t, _, _) => vec![t],
             Step::ExpectWindow(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
             Step::Settle(..)
@@ -1592,6 +1597,7 @@ impl Step {
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
             Step::ExpectGutter { .. } | Step::ExpectFace { .. } | Step::ExpectScaled { .. } => true,
+            Step::ExpectWeight { .. } => true,
             Step::Compose { .. } => false,
             Step::Format { .. } => false,
             Step::ExpectRuns { .. } => true,
@@ -2964,6 +2970,12 @@ pub trait Stage: Send + 'static {
     fn face(&self, target: Target) -> Result<FaceRead, String> {
         let _ = target;
         Err("expect_face is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
+    /// The weight the widget draws `range` at, as `bold ...` or `regular ...`
+    /// followed by what the reading measured (docs/phone-format-plan.md §6).
+    fn drawn_weight(&self, target: Target, range: TextRange) -> Result<String, String> {
+        let _ = (target, range);
+        Err("expect_weight is a depth slice on this backend (docs/phone-format-plan.md §6)".to_owned())
     }
     /// The size of the widget's resolved font and the size the platform
     /// gives its kind and role now, in one unit (docs/code-surface-plan.md S3).
@@ -4913,6 +4925,24 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_face's face is one of {}, got {word:?}", FACES.join(", ")));
                 }
                 Step::ExpectFace(parse_target(target.trim())?, word.to_owned())
+            }
+            "expect_weight" => {
+                let mut parts = rest.split_whitespace();
+                let (Some(target), Some(range), Some(word), None) =
+                    (parts.next(), parts.next(), parts.next(), parts.next())
+                else {
+                    return Err(format!(
+                        "expect_weight wants a target, a start:end range and bold or regular: {line:?}"
+                    ));
+                };
+                if word != "bold" && word != "regular" {
+                    return Err(format!("expect_weight's weight is bold or regular, got {word:?}: {line:?}"));
+                }
+                Step::ExpectWeight(
+                    parse_target(target)?,
+                    parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
+                    word.to_owned(),
+                )
             }
             "expect_scaled" => {
                 let (target, multiple) = rest
@@ -8185,6 +8215,15 @@ fn run_with_log(
                 let what = format!("{} face", target_spec(target));
                 let read = stage.face(*target).map_err(|why| format!("{what}: {why}"))?;
                 face_verdict(&read, want).map_err(|why| format!("{what} {why}"))
+            })),
+            Step::ExpectWeight(target, range, want) => Some(poll(|| {
+                let what = format!("{} {}:{} weight", target_spec(target), range.start, range.stop);
+                let got = stage.drawn_weight(*target, *range).map_err(|why| format!("{what}: {why}"))?;
+                if got.split_whitespace().next() == Some(want.as_str()) {
+                    Ok(format!("{what} {got}"))
+                } else {
+                    Err(format!("{what} reads {got}, wanted {want}"))
+                }
             })),
             Step::ExpectScaled(target, want) => Some(poll(|| {
                 let what = format!("{} size", target_spec(target));
@@ -12161,6 +12200,13 @@ mod tests {
         );
         assert!(face_verdict(&read(false, "Helvetica", ""), "named").unwrap_err().contains("asked for no family"));
         assert!(parse("expect_face label@x serif").is_err());
+        assert!(parse("expect_weight textarea#0 0:4 heavy").is_err());
+        assert!(parse("expect_weight textarea#0 4:0 bold").is_err());
+        assert!(parse("expect_weight textarea#0 bold").is_err());
+        assert_eq!(
+            parse("expect_weight textarea#0 0:4 bold").unwrap()[0],
+            Step::ExpectWeight(parse_target("textarea#0").unwrap(), TextRange { start: 0, stop: 4 }, "bold".into())
+        );
         assert!(parse("expect_scaled label@x 0").is_err());
         assert_eq!(
             parse("expect_scaled label@x 1.5").unwrap()[0],

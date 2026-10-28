@@ -887,7 +887,8 @@ AND A RED iOS LEG'S PICTURE IS THE APP'S OWN since 2026-10-14: `simctl
 launch --console-pty` returns at exit, so the runner's screenshot was
 SpringBoard's; KayaFailShot draws the app's windows before the verdict is
 published, the runner pulls it out of the container as `shot` and files
-the device's screen as `desktop-shot` (docs/traps.md); seven cuts watched.
+the device's screen as `desktop-shot` (docs/traps.md), and since 2026-10-27
+the keyboard's band is hatched and named over it (NP8); eight cuts watched.
 AND A RED LINUX LEG'S PICTURE IS THE GUEST'S OWN since 2026-10-17: GTK
 renders its window offscreen at the first failed step to
 `<leg>-failshot.png` beside the verb trace, adopted as `fail-shot`, and

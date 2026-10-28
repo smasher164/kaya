@@ -1896,7 +1896,7 @@ enum KayaVTrace {
             taken = true
             let named =
                 raw.hasPrefix("/") ? raw : (kayaTempDir() as NSString).appendingPathComponent(raw)
-            let (png, drawn, census) = DispatchQueue.main.sync { () -> (Data?, Int, String) in
+            let (png, drawn, census, band) = DispatchQueue.main.sync { () -> (Data?, Int, String, String) in
                 let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
                 let windows = scenes.flatMap { $0.windows }
                     .filter { !$0.isHidden && $0.bounds.width > 0 && $0.bounds.height > 0 }
@@ -1906,15 +1906,44 @@ enum KayaVTrace {
                     + "], \(windows.count) visible window(s) ["
                     + windows.map { "\(type(of: $0)) \(Int($0.frame.width))x\(Int($0.frame.height))" }
                         .joined(separator: ", ") + "]"
-                guard let screen = windows.first?.windowScene?.screen else { return (nil, 0, census) }
+                guard let screen = windows.first?.windowScene?.screen else { return (nil, 0, census, "") }
                 let format = UIGraphicsImageRendererFormat()
                 format.scale = screen.scale
-                let data = UIGraphicsImageRenderer(bounds: screen.bounds, format: format).pngData { _ in
+                // THE KEYBOARD'S BAND, hatched and named as Compose's keyboardBand
+                // does: the keyboard is another process's window, and a shot
+                // without it read as an app that filled half the screen
+                // (docs/traps.md, the iOS shot's missing keyboard).
+                let keyboard = MainActor.assumeIsolated { kayaKeyboardScreenFrame }
+                    .intersection(screen.bounds)
+                let data = UIGraphicsImageRenderer(bounds: screen.bounds, format: format).pngData { context in
                     for window in windows {
                         window.drawHierarchy(in: window.frame, afterScreenUpdates: false)
                     }
+                    guard !keyboard.isNull, keyboard.height > 0 else { return }
+                    let cg = context.cgContext
+                    cg.setFillColor(UIColor(red: 0.235, green: 0.25, blue: 0.263, alpha: 0.69).cgColor)
+                    cg.fill(keyboard)
+                    cg.saveGState()
+                    cg.clip(to: keyboard)
+                    cg.setStrokeColor(UIColor(white: 1, alpha: 0.5).cgColor)
+                    cg.setLineWidth(1)
+                    var x = keyboard.minX - keyboard.height
+                    while x < keyboard.maxX {
+                        cg.move(to: CGPoint(x: x, y: keyboard.maxY))
+                        cg.addLine(to: CGPoint(x: x + keyboard.height, y: keyboard.minY))
+                        x += 24
+                    }
+                    cg.strokePath()
+                    cg.restoreGState()
+                    ("keyboard" as NSString).draw(
+                        at: CGPoint(x: keyboard.minX + 8, y: keyboard.minY + 8),
+                        withAttributes: [.foregroundColor: UIColor.white, .font: UIFont.systemFont(ofSize: 14)])
                 }
-                return (data, windows.count, census)
+                let band = keyboard.isNull || keyboard.height <= 0
+                    ? "; no keyboard up"
+                    : "; the keyboard covered y \(Int(keyboard.minY))..\(Int(keyboard.maxY)) pt, hatched over "
+                        + "what the app drew under it since the keyboard's window is another process's"
+                return (data, windows.count, census, band)
             }
             var wrote = "no PNG was rendered"
             if let png {
@@ -1929,8 +1958,8 @@ enum KayaVTrace {
             let said =
                 size > 0
                 ? "\(drawn) window(s) of this app drawn in process by drawHierarchy at \(why); "
-                    + "the software keyboard and system sheets are other processes and draw "
-                    + "nothing here (desktop-shot is the device's screen); \(census)"
+                    + "system sheets are other processes and draw nothing here (desktop-shot is the "
+                    + "device's screen)\(band); \(census)"
                 : "no picture: \(wrote) at \(why); \(census)"
             try? (said + "\n").write(toFile: named + ".when", atomically: true, encoding: .utf8)
             FileHandle.standardError.write(Data("KAYA_HARNESS: fail shot: \(said)\n".utf8))
@@ -4841,8 +4870,13 @@ var kayaTearingDown: Set<UInt64> = []
                 // THE HAND RUN'S KNOB (tools/mac/dragwitness/run.py --hand): an
                 // accessory app's window opens behind the terminal that launched
                 // it, and a person cannot drag onto what they cannot see. The
-                // lanes never set it.
-                if ProcessInfo.processInfo.environment["KAYA_WINDOW_FRONT"] == "1" {
+                // lanes never set it. `regular` also gives the app the menu bar
+                // an accessory app does not have (tools/mac/menu-shot.py).
+                let front = ProcessInfo.processInfo.environment["KAYA_WINDOW_FRONT"]
+                if front == "1" || front == "regular" {
+                    if front == "regular" && NSApp.activationPolicy() != .regular {
+                        _ = NSApp.setActivationPolicy(.regular)
+                    }
                     NSApp.activate(ignoringOtherApps: true)
                     window.level = .floating
                     window.orderFrontRegardless()
@@ -9678,6 +9712,14 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
             }
             return row
         }.filter { ($0.0 + $0.1) / 2 >= visible.minY && ($0.0 + $0.1) / 2 < visible.maxY }
+        // THE INK AGAINST THE BOX THE TEXT IS CLIPPED TO, two different
+        // sources: the context's clip at draw time and the clip view's frame.
+        let box = gutter.convert(scroll.contentView.bounds, from: scroll.contentView).insetBy(dx: -0.5, dy: -0.5)
+        if let out = gutter.inked.first(where: { !$0.box.isEmpty && !box.contains($0.box) }) {
+            return .failure(
+                "the number \(out.number) inks y \(Int(out.box.minY))..\(Int(out.box.maxY)), outside the "
+                    + "text's viewport y \(Int(box.minY + 0.5))..\(Int(box.maxY - 0.5))")
+        }
         let labels = gutter.drawn.map { ($0.number, $0.mid) }
         return .success(kayaPairGutter(fragments, labels))
     }
@@ -9848,6 +9890,36 @@ func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
         return .failure("its attributed label names a font no UIFont answers to: \(name)")
     }
 #endif
+
+/// expect_weight's read (docs/phone-format-plan.md §6): the font the text
+/// view's own storage draws the range's first character with, judged by the
+/// font's weight trait; Core Text synthesizes no bold, so the face is the
+/// drawing.
+@MainActor func kayaDrawnWeight(_ node: KayaNode, _ range: Substring) -> KayaRead<String> {
+    #if os(macOS)
+        guard let view = kayaMacTextViews[node.id]?.view, let storage = view.textStorage else {
+            return .failure("no text view on screen")
+        }
+    #else
+        guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+        let storage = view.textStorage
+    #endif
+    let bounds = range.split(separator: ":")
+    let from = bounds.count == 2 ? kayaUtf16Offset(storage.string, Int(bounds[0]) ?? -1) : -1
+    let to = bounds.count == 2 ? kayaUtf16Offset(storage.string, Int(bounds[1]) ?? -1) : -1
+    guard from >= 0, to > from, to <= storage.length else {
+        return .failure("range \(range) is not inside the text view's \(storage.length) UTF-16 units")
+    }
+    guard let font = storage.attribute(.font, at: from, effectiveRange: nil) as? KayaPlatformFont else {
+        return .failure("the text view's storage carries no font at \(from)")
+    }
+    let traits = CTFontCopyTraits(font as CTFont) as? [String: Any] ?? [:]
+    let weight = (traits[kCTFontWeightTrait as String] as? NSNumber)?.doubleValue ?? 0
+    let symbolic = CTFontGetSymbolicTraits(font as CTFont)
+    let bold = symbolic.contains(.traitBold) || weight >= 0.3
+    let name = CTFontCopyPostScriptName(font as CTFont) as String
+    return .success("\(bold ? "bold" : "regular") (\(name), weight trait \(String(format: "%.2f", weight)))")
+}
 
 private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
@@ -15068,6 +15140,34 @@ private func kayaRunScript(_ script: String) {
                     observed.append("\(parts[1]) face \(ok)")
                 } else {
                     failures.append("\(parts[1]) face\(face.1)")
+                }
+            case "expect_weight":
+                // docs/phone-format-plan.md §6: harness.rs's ExpectWeight.
+                let want = parts.count == 4 ? String(parts[3]) : ""
+                guard ["bold", "regular"].contains(want) else {
+                    failures.append("expect_weight wants a target, a start:end range and bold or regular: \(line)")
+                    break
+                }
+                func readWeight() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTextTarget(parts[1]) else { return (nil, ": no such target") }
+                        switch kayaDrawnWeight(node, parts[2]) {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let got):
+                            return got.hasPrefix(want + " ") ? (got, "") : (nil, " reads \(got), wanted \(want)")
+                        }
+                    }
+                }
+                var weight = readWeight()
+                let weightDeadline = Date().addingTimeInterval(5)
+                while weight.0 == nil && Date() < weightDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    weight = readWeight()
+                }
+                if let ok = weight.0 {
+                    observed.append("\(parts[1]) \(parts[2]) weight \(ok)")
+                } else {
+                    failures.append("\(parts[1]) \(parts[2]) weight\(weight.1)")
                 }
             case "expect_scaled":
                 // docs/code-surface-plan.md S3: harness.rs's ExpectScaled.
@@ -35318,6 +35418,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
 final class KayaGutterView: NSView {
     weak var textView: NSTextView?
     var drawn: [(number: Int, mid: CGFloat)] = []
+    /// Each number's box as the context's clip let it ink, in this view's
+    /// coordinates, for the reader's viewport check.
+    var inked: [(number: Int, box: NSRect)] = []
     var thickness: CGFloat = 28
 
     override var isFlipped: Bool { true }
@@ -35337,11 +35440,18 @@ final class KayaGutterView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        // The floating container does not clip (macOS 14), so a line cut by
+        // the viewport's top drew its number above the box (docs/traps.md).
+        if let clip = textView?.enclosingScrollView?.contentView {
+            convert(clip.bounds, from: clip).intersection(bounds).clip()
+        }
         (textView?.drawsBackground == false ? NSColor.clear : NSColor.textBackgroundColor).setFill()
         bounds.fill()
         drawn = []
+        inked = []
         guard let text = textView, let layout = text.textLayoutManager else { return }
         layout.textViewportLayoutController.layoutViewport()
+        let clipBox = NSGraphicsContext.current?.cgContext.boundingBoxOfClipPath ?? bounds
         let attributes: [NSAttributedString.Key: Any] = [
             .font: numberFont(), .foregroundColor: NSColor.secondaryLabelColor,
         ]
@@ -35351,10 +35461,10 @@ final class KayaGutterView: NSView {
             let size = label.size(withAttributes: attributes)
             let mid = (line.top + line.bottom) / 2
             let at = convert(NSPoint(x: 0, y: mid), from: text)
-            label.draw(
-                at: NSPoint(x: bounds.width - 8 - size.width, y: at.y - size.height / 2),
-                withAttributes: attributes)
+            let origin = NSPoint(x: bounds.width - 8 - size.width, y: at.y - size.height / 2)
+            label.draw(at: origin, withAttributes: attributes)
             drawn.append((line.line, mid))
+            inked.append((line.line, NSRect(origin: origin, size: size).intersection(clipBox)))
         }
     }
 }

@@ -16608,3 +16608,22 @@ KEY: outer .help wins, kayaA11yProps, helped container, tooltips scene column he
   means the bubble over a helped child of a helped container shows the child's
   text on the Mac, held by a step that reads the drawn tooltip rather than AXHelp.
 
+
+## RULING — the Mac menu bar shows SwiftUI's File, Edit and View beside kaya's own (seen 2026-10-27, docs/traps.md, an accessory guest has no menu bar to photograph)
+
+KEY: kayaSyncMacMenuBar, kayaOwnedMenuItems, dress, duplicate mac menus, KAYA_WINDOW_FRONT=regular, menu-shot
+- An app that declares an identity runs `.regular` and gets a menu bar, and
+  the editor's reads "File Edit File Edit Format View View Window Help":
+  SwiftUI's File (New Window, Close), Edit (Undo Typing ... Writing Tools,
+  AutoFill, Dictation, Emoji & Symbols) and View (Show Tab Bar, Show All
+  Tabs) stay as dress, and kayaSyncMacMenuBar inserts kaya's File, Edit and
+  View beside them. kaya's Edit carries no chords on Undo, Cut, Copy and
+  Paste while the dress's does. The options: (a) merge a kaya top-level menu
+  into the dress menu of the same title (kaya's items first, the dress's
+  system items after a separator, as TextEdit's Edit carries both); (b)
+  remove the dress menus a kaya menu replaces, and give kaya's Edit roles
+  their platform chords. Lanes never see this, since they run `.accessory`;
+  tools/mac/menu-shot.py shows it. Also for the maintainer: the editor's
+  File>Save carries SymbolDone, which an AppKit menu draws as a check mark
+  beside "Save", where it reads as a checked toggle. Closing this means
+  choosing (a) or (b), building it, and a menu-shot capture of the bar.

@@ -177,8 +177,8 @@ INTERPRETER = "swift/KayaSwiftUI.swift"
 # keyboard (docs/traps.md, the emoji leg took the maintainer's keystrokes).
 FOREGROUND_CALLS = {
     "NSApp.activate(": (2, ("pick_emoji",),
-                        "the other site is KAYA_WINDOW_FRONT, tools/mac/dragwitness's hand "
-                        "run knob, which no lane sets"),
+                        "the other site is KAYA_WINDOW_FRONT, the hand knob of "
+                        "tools/mac/dragwitness and tools/mac/menu-shot.py, which no lane sets"),
     "orderFrontCharacterPalette(": (1, ("pick_emoji",), ""),
     "toggleFullScreen(": (1, ("user_fullscreen", "expect_fullscreen"), ""),
     "NSWorkspace.shared.open(": (1, ("open_link",), ""),

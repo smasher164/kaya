@@ -129,3 +129,14 @@ per style can (none checked).
   the editor's check marks.
 - check-sugar-surface demands `keyboard_bar` and `on_selection` in all nine
   bindings; check-verbs demands both verbs in both interpreters.
+- `expect_weight <target> <start:end> bold|regular` reads the weight a range
+  is DRAWN at, never the model's runs (added 2026-10-27 after the Android
+  review capture looked regular): Compose paints the field's own layout into
+  a bitmap and compares the range's ink with the same characters laid out at
+  weight 400, naming the shaped font and minikin's synthesis flag; SwiftUI
+  reads the text storage's font weight trait. editorkeyboard.steps reads it
+  bold and then regular on both phones; GTK and WinUI answer the depth-slice
+  refusal. Watched red: the span's weight cut on Compose, the bold trait cut
+  on iOS, each while `expect_runs` still passed. Android's monospace has no
+  bold face, so the bold is synthesized (docs/traps.md, the synthesized
+  monospaced bold on a 1x emulator).

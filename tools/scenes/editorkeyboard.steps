@@ -16,12 +16,16 @@ expect label#0 "underline off 0:4"
 keyboard_bar_press "Bold"
 expect label#0 "bold 0:4"
 expect_runs textarea#0 "0:4 bold"
+# DRAWN bold, real face or synthesized: a monospaced face may have no bold
+# (docs/phone-format-plan.md §6).
+expect_weight textarea#0 0:4 bold
 expect_keyboard_bar "Bold on|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
 expect_menu "Format>Bold" checked
 # BOLD ON BOLD TEXT TAKES IT OFF.
 keyboard_bar_press "Bold"
 expect label#0 "bold off 0:4"
 expect_runs textarea#0 ""
+expect_weight textarea#0 0:4 regular
 expect_keyboard_bar "Bold|Italic|Underline|Strikethrough|Code|-|Paragraph Style>"
 keyboard_bar_press "Italic"
 expect label#0 "italic 0:4"

@@ -171,6 +171,9 @@ click button#1
 expect label#1 "4 of 4"
 expect_selection textarea#0 "1295:1297=99"
 expect_revealed textarea#0 1295:1297 visible
+# The walk scrolled the last line in, so a line is cut by the viewport's top:
+# its number is clipped with its text, never drawn outside the box.
+expect_gutter textarea#0 shows 52
 # AND THE WALK WRAPS, both ways.
 click button#1
 expect label#1 "1 of 4"
