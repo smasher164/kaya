@@ -1,6 +1,6 @@
 # Formatting on the phones, and a Bold that toggles
 
-Status: BUILT 2026-10-27 (§5's selection menu is a ruling for the maintainer) (the maintainer, 2026-10-27: "yes you understood
+Status: BUILT 2026-10-27; §5's selection menu RULED 2026-10-27 as a later slice (the maintainer, 2026-10-27: "yes you understood
 me correctly on the iphone proposal"). Two asks from the editor's review
 (docs/editor-plan.md §2b): on a phone the Format menu sits below the fold of
 the overflow while the keyboard is up, and every Format command only turns a
@@ -113,7 +113,7 @@ per style can (none checked).
   Google's do not. DESIGN.md's deliberate cut ("merging authored items into
   native text-control menus waits for an app that needs both its own command
   and the native editing commands on one control") is the trigger, and the
-  editor is now that app. RECOMMENDATION (a ruling, the maintainer's): build
+  editor is now that app. RULED 2026-10-27 as recommended (the maintainer: "yeah go ahead that way"; docs/deferred.md's selection-menu entry): build
   it as a second slice on all five hosts at once (NSTextView's `menu(for:)`,
   UIKit's edit menu, GTK's `extra-menu`, WinUI's `SelectionFlyout`, Compose's
   `appendTextContextMenuComponents`), declared by the same `keyboard_bar`

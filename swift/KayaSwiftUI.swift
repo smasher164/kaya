@@ -36283,8 +36283,12 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         // (docs/phone-format-plan.md §2, the keyboard bar's shorter view).
         guard let end = view.selectedTextRange?.end else { return }
         let line = view.caretRect(for: end)
+        // ONLY AN OVERSHOOT SMALLER THAN THE CARET: a content height TextKit 2
+        // has only estimated can sit hundreds of points short of the caret,
+        // and an inset that large left the codesurface view scrolled to
+        // lines 18-21 when it wanted 39 (iOS lane, 2026-10-27).
         let short = ceil(line.maxY - view.contentSize.height)
-        if short > view.contentInset.bottom {
+        if short > view.contentInset.bottom, short <= ceil(line.height) {
             view.contentInset.bottom = short
             UIView.performWithoutAnimation { view.scrollRangeToVisible(view.selectedRange) }
         }

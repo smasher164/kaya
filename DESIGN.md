@@ -2625,7 +2625,7 @@ of being re-decided per binding.
   extra-menu and UIKit edit-menu APIs — waits for an app that needs
   both its own command and the native editing commands on one control. The text editor's Format menu is such an app (2026-10-27); the phones
   carry it on the keyboard bar instead (`keyboard_bar`), and the
-  selection-menu half is a ruling recorded in docs/phone-format-plan.md §5.
+  selection-menu half is RULED a later slice on all five hosts (docs/phone-format-plan.md §5).
 - **A GTK hamburger presentation hint** waits for an artifact showing
   that the default bar is the wrong Linux idiom; if admitted, it is a
   presentation value, not a separate menu grammar.

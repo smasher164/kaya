@@ -2155,6 +2155,22 @@ new clause refuses any `func (a *App) On…` that names a Widget or a Node,
 with the census printed and one watched negative that moves OnClick back
 onto the app.
 
+## DEFER — Format in the text selection menu, on all five hosts at once (the maintainer, 2026-10-27: "yeah go ahead that way")
+
+The editor's Format items reach the phones on the bar above the keyboard
+(`keyboard_bar`, docs/phone-format-plan.md §2). Apple's own apps also put
+Format in the menu over selected text; Google Docs does not. RULED as a later
+slice, built on every host in one go: NSTextView's `menu(for:)`, UIKit's
+`textView(_:editMenuForTextIn:suggestedActions:)`, GTK's `extra-menu`,
+WinUI's `SelectionFlyout`, Compose's `appendTextContextMenuComponents`
+(foundation 1.9 on; kaya pins 1.11.4), declared by the same marked menu or a
+bit of its own, read on every lane. It is DESIGN.md's deliberate cut
+"merging authored items into native text-control menus", whose trigger the
+editor now meets (docs/phone-format-plan.md §5).
+KEY: selection menu, edit menu, extra-menu, SelectionFlyout,
+appendTextContextMenuComponents, editMenuForTextIn, keyboard_bar,
+merging authored items into native text-control menus.
+
 ## DEFER — the checkbox reads a touch high beside the title's first line on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page)
 
 The first-line-box rule (docs/flex-shrink-plan.md §10, landed 24ae2bdc)
