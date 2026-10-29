@@ -1898,6 +1898,27 @@ enum KayaVTrace {
 }
 
 #if os(macOS)
+    /// docs/traps.md, `screencapture -l` gives up after one second of window
+    /// lookup: concurrent lookups on one host time each other out, so every
+    /// screencapture(1) this interpreter starts holds the host's one turn
+    /// (an flock, released when `fd` closes).
+    let kayaScreencaptureLock = "/tmp/kaya-screencapture.lock"
+
+    func kayaScreencaptureTurn(_ bound: TimeInterval) -> (fd: Int32, said: String) {
+        let fd = open(kayaScreencaptureLock, O_CREAT | O_RDWR, 0o666)
+        guard fd >= 0 else { return (-1, "could not open \(kayaScreencaptureLock): errno \(errno)") }
+        let from = Date()
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            if Date().timeIntervalSince(from) > bound {
+                close(fd)
+                return (-1, "the host's screencapture turn (\(kayaScreencaptureLock)) was held for \(Int(bound)) s")
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        let waited = Date().timeIntervalSince(from)
+        return (fd, waited < 0.05 ? "" : String(format: ", after %.2f s waiting for the host's screencapture turn", waited))
+    }
+
     /// A red leg's picture of its own windows, taken in process at the first
     /// final failure into the file `KAYA_FAIL_SHOT` names, with a `.when`
     /// sentence beside it: the guest leaves within the grace of its verdict,
@@ -1920,18 +1941,24 @@ enum KayaVTrace {
                 shot.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                 shot.arguments = ["-x", "-o", "-l\(num)", named]
                 var ran = "screencapture would not start"
-                do {
-                    try shot.run()
-                    let deadline = Date().addingTimeInterval(5)
-                    while shot.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-                    if shot.isRunning {
-                        shot.terminate()
-                        ran = "screencapture was still running after 5s"
-                    } else {
-                        ran = "screencapture exited \(shot.terminationStatus)"
+                let turn = kayaScreencaptureTurn(5)
+                if turn.fd < 0 {
+                    ran = turn.said
+                } else {
+                    defer { close(turn.fd) }
+                    do {
+                        try shot.run()
+                        let deadline = Date().addingTimeInterval(5)
+                        while shot.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+                        if shot.isRunning {
+                            shot.terminate()
+                            ran = "screencapture was still running after 5s\(turn.said)"
+                        } else {
+                            ran = "screencapture exited \(shot.terminationStatus)\(turn.said)"
+                        }
+                    } catch {
+                        ran = "screencapture would not start: \(error)"
                     }
-                } catch {
-                    ran = "screencapture would not start: \(error)"
                 }
                 let size = (try? FileManager.default.attributesOfItem(atPath: named)[.size] as? Int) ?? 0
                 said =
@@ -42064,14 +42091,17 @@ func kayaMediaRefusal(_ item: String) -> String? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
         task.arguments = ["-x", "-o", "-t", "png", "-l\(wid)", out.path]
+        let turn = kayaScreencaptureTurn(10)
+        guard turn.fd >= 0 else { return (nil, turn.said) }
+        defer { close(turn.fd) }
         do { try task.run() } catch { return (nil, "could not start: \(error.localizedDescription)") }
         let until = Date().addingTimeInterval(5)
         while task.isRunning, Date() < until { Thread.sleep(forTimeInterval: 0.02) }
         if task.isRunning {
             task.terminate()
-            return (nil, "no picture within 5 s")
+            return (nil, "no picture within 5 s\(turn.said)")
         }
-        guard task.terminationStatus == 0 else { return (nil, "exited \(task.terminationStatus)") }
+        guard task.terminationStatus == 0 else { return (nil, "exited \(task.terminationStatus)\(turn.said)") }
         // Read into memory first: the image decodes lazily, and the file is
         // removed on return.
         guard let data = try? Data(contentsOf: out), let source = CGImageSourceCreateWithData(data as CFData, nil),

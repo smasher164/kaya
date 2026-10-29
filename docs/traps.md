@@ -3946,8 +3946,15 @@ deadline is 1.0 s. Over 80 s of that run 109 lookups answered (median
 0.475 s, max 0.999 s) and 69 timed out at 1.000-1.012 s; each timeout prints
 "could not create image from window". Not the disk and not the frontmost
 Terminal: neither enters that lookup. The mac bundle carries screencapture's
-error lines since (tools/lib/flightrec_lane.py). OPEN: a read that does not
-hang on a one-second window lookup under host load (docs/deferred.md).
+error lines since (tools/lib/flightrec_lane.py). THE TRIGGER IS CONCURRENCY,
+measured 2026-10-29 with a process photographing its own window: 8
+screencapture processes at once failed 97 of 218 lookups with no load and 2
+at once failed none, while CPU load alone (load 49) failed none. Holding one
+host-wide flock around each run (kayaScreencaptureTurn) failed 0 of 176
+under load 67. CGWindowListCreateImage, reached through dlsym since the
+macOS 15 SDK marks it unavailable, read the same window in 4 ms with 0 of
+2212 failed, also from two processes of one executable; not adopted, as it
+is an API Apple has obsoleted (docs/deferred.md).
 
 ## The diagnostic that named a cause nobody had measured
 

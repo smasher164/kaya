@@ -3502,6 +3502,14 @@ def media_arms(swift_src=None, harness_src=None, helper_src=None):
                        f"replayd client for the guest's life, and two guests of one "
                        f"executable cut each other's off in a loop (docs/traps.md, the "
                        f"pooled ink read that never answered)")
+    starts = r'URL\(fileURLWithPath: "/usr/sbin/screencapture"\)'
+    for at in [m.end() for m in re.finditer(starts, code)]:
+        start = code.find(".run()", at)
+        if start < 0 or "kayaScreencaptureTurn(" not in code[at:start]:
+            line = code.count("\n", 0, at) + 1
+            bad.append(f"KayaSwiftUI.swift starts screencapture(1) near line {line} without the "
+                       f"host's turn — concurrent window lookups time each other out at 1 s "
+                       f"(docs/traps.md, `screencapture -l` gives up after ONE SECOND)")
     if 'dlsym(mr, "MRMediaRemoteSendCommandWithReply")' not in helper:
         bad.append(f"{MEDIAREMOTE} does not send through MRMediaRemoteSendCommandWithReply — "
                    f"the plain send is asynchronous and perl exits before it leaves "
@@ -3616,6 +3624,13 @@ for pattern, repl, label, rel, want in (
      "the picked scope kept past release", SWIFT, 1),
     (r"(// Out of process only[^\n]*\n)", "        _ = SCShareableContent.self\n",
      "an in-process ScreenCaptureKit read", SWIFT, 1),
+    (r"(\n)        let turn = kayaScreencaptureTurn\(10\)\n"
+     r"        guard turn\.fd >= 0 else \{ return \(nil, turn\.said\) \}\n"
+     r"        defer \{ close\(turn\.fd\) \}\n",
+     "", "a window read's screencapture without the host's turn", SWIFT, 1),
+    (r"(\n)                let turn = kayaScreencaptureTurn\(5\)\n",
+     "                let turn = (fd: Int32(0), said: \"\")\n",
+     "the fail shot's screencapture without the host's turn", SWIFT, 1),
     (r"(\n {16}self\.player\.seek\(to: \.zero\)\n) {16}if \w+ \{ self\.player\.play\(\) \}",
      " " * 16 + "self.player.play()", "the loop restarting a paused player (as shipped)",
      SWIFT, 1),

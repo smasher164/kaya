@@ -657,7 +657,7 @@ bindings were not read. Settle with a census of the template grow spelling in al
 app needs it.
 KEY: template grow, SetGrow, Tpl grow, tasks.rs Details.
 
-## OPEN — the mac capture legs' video reads lose to `screencapture -l`'s one-second window lookup under host load (measured 2026-10-29)
+## ~~OPEN — the mac capture legs' video reads lose to `screencapture -l`'s one-second window lookup under host load (measured 2026-10-29)~~ FIXED 2026-10-29: the cause is CONCURRENT lookups (8 screencapture processes at once failed 44% with no load, 2 failed none), so every screencapture(1) the interpreter starts holds one host-wide flock (kayaScreencaptureTurn, /tmp/kaya-screencapture.lock; 8 serialized probes under load 67: 0 of 176 failed against 178 of 297 unserialized). The in-process ScreenCaptureKit read was measured and refused: two processes of one executable with SCShareableContent fetched once each hung in captureImage for over two minutes (the replayd loop, docs/traps.md). A filtered capture,media_ run under a bounded 24-spinner load (one-minute load 120 to 145): mac 74 of 74, and the unified log held no "could not create image from window" in 25 minutes. check-verbs' media arms hold the turn at both starts (two cuts watched); the bundle still carries screencapture's error lines
 
 The capture scene's `expect_video_corner` and `expect_video_ink` read the
 window through `/usr/sbin/screencapture -l<window>` (kayaScreencaptureWindow
