@@ -127,6 +127,9 @@ RUST_SCENES = [
     "dirty", "dnd", "pickers", "sliders", "tooltips", "sheet",
     # docs/doctabs-plan.md §1.6: the list of open documents.
     "doctabs",
+    # docs/font-picker-plan.md §7: UIFontPickerViewController through the
+    # resident XCUITest driver.
+    "fontpick",
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6); SCENE_LOCALE carries the knob.
     "format", "formatde", "formatar",

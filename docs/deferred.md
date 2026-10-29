@@ -26,7 +26,7 @@ watched red (an echoed prop, a matcher rounding down, the shear dropped, the
 collection not chosen).
 
   - ~~**DEPTH STUB: fontpick on gtk**~~ — BUILT 2026-10-29: the face through the face sheet's CSS, asking fontconfig for the installed face the core's CSS rule matched (fontconfig matches by distance: 550 on IBM Plex Sans answered its 500, measured), a missing slope or bold left to fontconfig's shear and embolden; Bold at least 700 and a Code run in the document's own fixed-pitch family; GtkFontDialog with choose_family or choose_font (its size row ignored, Q6); the code-only filter adding Latin coverage to Pango's monospace flag, which passed Noto Color Emoji; the reads off Pango's resolved font (a synthesized slope resolves to no face, measured); fontpick-rust green on x11 and wayland, five negatives watched red.
-  - **DEPTH STUB: fontpick on swiftui/ios** — UIFontPickerViewController through the XCUITest driver, the Italic-over-Light weight fix.
+  - ~~**DEPTH STUB: fontpick on swiftui/ios**~~ — BUILT 2026-10-29: UIFontPickerViewController with includeFaces and the monospace trait filter, dismissed by kaya after its pick (it stays presented, measured), its close button and a swipe down the cancel; the remote picker read and tapped through the resident XCUITest driver (fontstate, fontchoose_b64, fontcancel), each listed family's fixed pitch measured in the app; Italic over Light now keeps Light (275 italic on Avenir Next, where the symbolic trait answered 400); fontpick-swiftui green, two negatives watched red (the old trait route, the filter dropped).
   - **DEPTH STUB: fontpick on winui** — the kaya-drawn ContentDialog over DirectWrite's faces.
   - **DEPTH STUB: fontpick on compose** — the kaya-drawn bottom sheet over SystemFonts.
   - **The eight other bindings and the C floor** — the three props, the request and its two handlers.
@@ -183,7 +183,7 @@ colour); kaya's gutter numbers every line in the secondary colour alone.
 Each lowering already redraws on the text's change; the caret's moves are
 the missing trigger. Trigger: the editor's next styling pass.
 
-## DEFER — fonts the user installed are not in iOS's family list (docs/code-surface-plan.md M3; 2026-10-27)
+## ~~DEFER — fonts the user installed are not in iOS's family list (docs/code-surface-plan.md M3; 2026-10-27)~~ CLOSED 2026-10-29 by the font picker: choose_font on iOS is UIFontPickerViewController, the door Apple gives an app to fonts a user installed; list_font_families stays the system's list, as M3 records.
 KEY: list_font_families, font_families, UIFont.familyNames, CTFontManagerRequestFonts, UIFontPickerViewController
 
 UIFont.familyNames lists the system's families and the app's own; a font a

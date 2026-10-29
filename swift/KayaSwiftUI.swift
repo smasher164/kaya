@@ -10498,13 +10498,43 @@ func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
 }
 
 #if !os(macOS)
-    /// iOS reads the remote picker through the resident XCUITest driver.
+    /// iOS reads the remote picker through the resident XCUITest driver; a
+    /// family's fixed pitch is measured here, i against M in its first face.
     func kayaIOSFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
-        kayaDepthStub("fontpick", on: "ios")
+        if DispatchQueue.main.sync(execute: { kayaFontPickerDelegate == nil }) { return .success(nil) }
+        let (ok, lines) = KayaSimdrive.ask("fontstate")
+        guard ok else { return .failure(lines.first ?? "simdrive refused fontstate without saying why") }
+        guard lines.first == "Fonts" else { return .failure("the font picker is not on screen yet") }
+        return .success(lines.dropFirst().map { ($0, kayaMeasuredFixedPitch($0)) })
+    }
+
+    /// Whether a family draws i and M at one advance, in its own face.
+    func kayaMeasuredFixedPitch(_ family: String) -> Bool {
+        guard let name = UIFont.fontNames(forFamilyName: family).first else { return false }
+        let font = CTFontCreateWithName(name as CFString, 17, nil)
+        var chars: [UniChar] = Array("iM".utf16)
+        var glyphs = [CGGlyph](repeating: 0, count: 2)
+        guard CTFontGetGlyphsForCharacters(font, &chars, &glyphs, 2), !glyphs.contains(0) else { return false }
+        var advances = [CGSize](repeating: .zero, count: 2)
+        CTFontGetAdvancesForGlyphs(font, .horizontal, glyphs, &advances, 2)
+        return abs(advances[0].width - advances[1].width) < 0.01
     }
 
     func kayaIOSPickFont(_ choice: (String, KayaFace)?) -> String? {
-        kayaDepthStub("fontpick", on: "ios")
+        guard let (family, face) = choice else {
+            let (ok, lines) = KayaSimdrive.ask("fontcancel")
+            return ok ? nil : (lines.first ?? "simdrive refused fontcancel without saying why")
+        }
+        let faces = DispatchQueue.main.sync { kayaFontPickerDelegate?.faces ?? false }
+        var arg = family
+        if faces {
+            guard let hit = kayaFamilyFaces(family).first(where: { $0.face == face }) else {
+                return "\(family) has no face \(face.words) among \(kayaFamilyFaces(family).map(\.face.words))"
+            }
+            arg += "\t" + hit.name
+        }
+        let (ok, lines) = KayaSimdrive.ask("fontchoose_b64 " + Data(arg.utf8).base64EncodedString())
+        return ok ? nil : (lines.first ?? "simdrive refused fontchoose without saying why")
     }
 #endif
 
@@ -38429,6 +38459,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 }
             } else if view.text != text, view.markedTextRange == nil {
                 view.text = text
+            }
+            if !rich, view.markedTextRange == nil {
+                var typing = view.typingAttributes
+                kayaPlainSyntheticBold(
+                    view.textStorage, typing: &typing, on: kayaNodeFaceResolution(node, .body)?.synthBold ?? false)
+                if (typing[.strokeWidth] as? CGFloat) != (view.typingAttributes[.strokeWidth] as? CGFloat) {
+                    view.typingAttributes = typing
+                }
             }
             // APPLIED ON EVERY UPDATE, not once at construction: a pin that only
             // ran in makeUIView would be quietly lost the day SwiftUI hands back

@@ -355,6 +355,31 @@ final class KayaDrive: XCTestCase {
     /// What SpringBoard is showing that could be a notification: every cell
     /// with its frame and label, and each cell's own subtree, for a refusal's
     /// sentence and for the `shade` verb.
+
+    /// The font picker's navigation bar, "Choose Font" (measured on iOS 26.5),
+    /// or the style list a family drills into.
+    func fontPickerUp(_ a: XCUIApplication) -> Bool {
+        a.navigationBars["Choose Font"].exists || styleUp(a)
+    }
+
+    func styleUp(_ a: XCUIApplication) -> Bool {
+        a.navigationBars["Choose Style"].exists
+    }
+
+    /// The picker's rows, each the text it shows and its frame, in order:
+    /// its Recents repeat families and its "Manage Fonts" row opens an app,
+    /// so both are left out.
+    func fontRows(_ a: XCUIApplication) -> [(String, CGRect)] {
+        var out: [(String, CGRect)] = []
+        let cells = a.tables.firstMatch.cells.allElementsBoundByIndex
+        for cell in cells {
+            guard let text = cell.staticTexts.allElementsBoundByIndex.first?.label, !text.isEmpty,
+                  text != "Manage Fonts", !out.contains(where: { $0.0 == text }) else { continue }
+            out.append((text, cell.frame))
+        }
+        return out
+    }
+
     func shadeSummary(_ sb: XCUIApplication) -> String {
         guard let root = try? sb.snapshot() else { return "SpringBoard published no snapshot" }
         var cells: [String] = []
@@ -759,6 +784,45 @@ final class KayaDrive: XCTestCase {
         case "cancel":
             guard waitForPicker(a) else { return (false, "no picker is up to cancel") }
             return cancelSheet(a, "picker")
+        // ---- the font picker (docs/font-picker-plan.md §7): UIFontPickerViewController
+        // is a remote view, so its rows are read and tapped here.
+        case "fontstate":
+            guard fontPickerUp(a) else { return (true, "") }
+            return (true, (["Fonts"] + fontRows(a).map { $0.0 }).joined(separator: "\n"))
+        case "fontchoose_b64":
+            // "<family>\t<face>": the family's row, then with faces the style's.
+            guard words.count == 2, let data = Data(base64Encoded: words[1]),
+                  let text = String(data: data, encoding: .utf8) else { return (false, "fontchoose_b64 <base64>") }
+            let parts = text.components(separatedBy: "\t")
+            let family = parts[0]
+            let face = parts.count > 1 ? parts[1] : ""
+            guard waitFor("the font picker", nil, { fontPickerUp(a) }) else { return (false, "no font picker is up") }
+            guard let row = fontRows(a).first(where: { $0.0 == family }) else {
+                return (false, "the font picker lists no \(family); it lists \(fontRows(a).map { $0.0 })")
+            }
+            tapCentre(a, row.1)
+            if !face.isEmpty {
+                guard waitFor("the styles of \(family)", min(5, budgetNow()), { a.navigationBars[family].exists || styleUp(a) })
+                else {
+                    failShot(a, "fontchoose")
+                    return (false, "tapping \(family) opened no list of its styles")
+                }
+                _ = waitFor("the style \(face)", min(5, budgetNow())) { fontRows(a).contains { $0.0 == face } }
+                guard let style = fontRows(a).first(where: { $0.0 == face }) else {
+                    return (false, "\(family)'s styles hold no \(face); they list \(fontRows(a).map { $0.0 })")
+                }
+                tapCentre(a, style.1)
+            }
+            return waitFor("the font picker gone", min(8, budgetNow())) { !fontPickerUp(a) }
+                ? (true, "chose \(family) \(face)")
+                : (false, "the font picker was still up after choosing \(family) \(face); it lists \(fontRows(a).map { $0.0 })")
+        case "fontcancel":
+            guard fontPickerUp(a) else { return (false, "no font picker is up to cancel") }
+            let close = a.navigationBars.buttons["close"].firstMatch
+            guard close.exists else { return (false, "the font picker shows no close button") }
+            close.tap()
+            return waitFor("the font picker gone", min(8, budgetNow())) { !fontPickerUp(a) }
+                ? (true, "cancelled the font picker") : (false, "the font picker was still up after close")
         case "photostate":
             guard waitFor("the photo picker", nil, { photoPickerUp(a) }) else { return (true, "") }
             return (true, (["Photos"] + photoCells(a).map { $0.label }).joined(separator: "\n"))

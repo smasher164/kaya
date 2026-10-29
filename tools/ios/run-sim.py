@@ -1490,6 +1490,9 @@ BRIDGE_VERBS = frozenset((
     "expect_video_ink", "expect_video_corner", "session_send",
     # The held press is the driver's touch (docs/media-player-plan.md M10).
     "hold", "release",
+    # The font picker is a remote view the driver reads and taps
+    # (docs/font-picker-plan.md §7).
+    "pick_font", "expect_font_dialog",
 ))
 
 
