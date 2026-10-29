@@ -181,6 +181,9 @@ public final class Main {
             case "dirty":
                 app = Dirty::app;
                 break;
+            case "doctabs":
+                app = Doctabs::app;
+                break;
             case "fullscreen":
                 app = Fullscreen::app;
                 break;

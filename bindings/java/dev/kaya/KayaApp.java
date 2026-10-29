@@ -409,6 +409,14 @@ public final class KayaApp {
     final java.util.Map<Long, Consumer<Tx>> sheetDismissed = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> dismissRequested = new java.util.HashMap<>();
     final java.util.Map<Long, Consumer<Tx>> sectionSelected = new java.util.HashMap<>();
+    // Per document and per window (docs/doctabs-plan.md §2.3).
+    final Map<Long, Consumer<Tx>> documentSelected = new HashMap<>();
+    final Map<Long, Consumer<Tx>> documentCloseRequested = new HashMap<>();
+    final Map<Long, Consumer<Tx>> documentClosed = new HashMap<>();
+    final Map<Long, DocumentMove> documentMoved = new HashMap<>();
+    final Map<Long, Consumer<Tx>> newDocument = new HashMap<>();
+    final Map<Long, BiConsumer<Tx, List<Long>>> documentsCloseRequested = new HashMap<>();
+    final Map<Long, DocumentsDetach> documentsDetached = new HashMap<>();
     // NOT one-shot (docs/fullscreen-plan.md).
     final java.util.Map<Long, BiConsumer<Tx, Boolean>> fullscreenChanged = new java.util.HashMap<>();
     private final java.util.Map<Long, BiConsumer<Tx, java.util.List<PickedFile>>> fileDialogs =
@@ -617,6 +625,18 @@ public final class KayaApp {
     @FunctionalInterface
     public interface RangeChange {
         void accept(Tx tx, double low, double high);
+    }
+
+    /** A document the user dragged: the window and index it landed at
+     * (docs/doctabs-plan.md §2.3). */
+    public interface DocumentMove {
+        void accept(Tx tx, long window, int index);
+    }
+
+    /** Documents the user moved out into a new native window, which kaya
+     * names (docs/doctabs-plan.md §1.2). */
+    public interface DocumentsDetach {
+        void accept(Tx tx, long window, List<Long> documents);
     }
 
     /** A template range's handler: the stamped copy's keys, then both
@@ -3568,6 +3588,118 @@ public final class KayaApp {
         }
     }
 
+    /** Where a window's shared region sits beside its documents
+     * (docs/doctabs-plan.md §1.7). */
+    public enum RegionEdge {
+        LEADING(KayaWire.REGION_EDGE_LEADING),
+        TRAILING(KayaWire.REGION_EDGE_TRAILING),
+        BOTTOM(KayaWire.REGION_EDGE_BOTTOM);
+
+        final int wire;
+
+        RegionEdge(int wire) {
+            this.wire = wire;
+        }
+    }
+
+    /** Chains document props, the construction-sugar tier:
+     * tx.addDocument(10).title("a").onSelected(tx -> …). */
+    public static final class DocumentRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+
+        DocumentRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** The document's title: its tab's, and the window's while active. */
+        public DocumentRef title(String title) {
+            tx.emit(KayaWire.txSetDocumentTitle(id, title));
+            return this;
+        }
+
+        public DocumentRef title(Signal<String> s) {
+            tx.emit(KayaWire.txBindDocumentTitle(id, s.id));
+            return this;
+        }
+
+        /** The tab's tooltip, typically the document's full path. */
+        public DocumentRef tooltip(String text) {
+            tx.emit(KayaWire.txSetDocumentTooltip(id, text));
+            return this;
+        }
+
+        /** The document holds unsaved work; its tab shows the mark. */
+        public DocumentRef dirty(boolean on) {
+            tx.emit(KayaWire.txSetDocumentDirty(id, on));
+            return this;
+        }
+
+        public DocumentRef dirty(Signal<Boolean> s) {
+            tx.emit(KayaWire.txBindDocumentDirty(id, s.id));
+            return this;
+        }
+
+        /** Arms the close veto: a user close asks onCloseRequested and
+         * nothing closes until the app calls closeDocument. */
+        public DocumentRef interceptClose(boolean on) {
+            tx.emit(KayaWire.txSetDocumentInterceptClose(id, on));
+            return this;
+        }
+
+        /** Makes this document the active one, as selectDocument does. */
+        public DocumentRef select() {
+            tx.selectDocument(id);
+            return this;
+        }
+
+        /** Fires each time the USER makes THIS document active; NOT
+         * one-shot, and selectDocument never fires it. */
+        public DocumentRef onSelected(Consumer<Tx> handler) {
+            app.documentSelected.put(id, handler);
+            return this;
+        }
+
+        /** Fires per user close while interceptClose is armed, and NOTHING
+         * HAS CLOSED — answer with closeDocument to agree. */
+        public DocumentRef onCloseRequested(Consumer<Tx> handler) {
+            app.documentCloseRequested.put(id, handler);
+            return this;
+        }
+
+        /** Fires when the user closed THIS document unarmed, and retires
+         * with it; closeDocument never fires it. */
+        public DocumentRef onClosed(Consumer<Tx> handler) {
+            app.documentClosed.put(id, handler);
+            return this;
+        }
+
+        /** Fires when the user drags THIS document to another place or
+         * window. */
+        public DocumentRef onMoved(DocumentMove handler) {
+            app.documentMoved.put(id, handler);
+            return this;
+        }
+
+        /** The document's surface id, for mountIn. */
+        public long id() {
+            return id;
+        }
+    }
+
+    static List<Long> surfaceIds(List<?> tail, int from) {
+        List<Long> ids = new ArrayList<>();
+        for (int i = from; i < tail.size(); i++) {
+            if (tail.get(i) instanceof Long id) {
+                ids.add(id);
+            }
+        }
+        return ids;
+    }
+
     public static final class WindowRef {
         private final Tx tx;
         private final KayaApp app;
@@ -3743,6 +3875,35 @@ public final class KayaApp {
          * knob and then the OS; LIGHT and DARK win over both. */
         public WindowRef appearance(long mode) {
             tx.emit(KayaWire.txSetWindowAppearance(id, mode));
+            return this;
+        }
+
+        /** Draws the platform's "+" beside this window's documents
+         * (docs/doctabs-plan.md §2); onNewDocument hears each press. */
+        public WindowRef newDocument(boolean on) {
+            tx.emit(KayaWire.txSetWindowNewDocument(id, on));
+            return this;
+        }
+
+        /** Binds the "+" handler to THIS window. NOT one-shot. */
+        public WindowRef onNewDocument(Consumer<Tx> handler) {
+            app.newDocument.put(id, handler);
+            return this;
+        }
+
+        /** Fires when the user closes THIS native window while a document
+         * it shows arms interceptClose, with the documents it shows, and
+         * NOTHING HAS CLOSED. NOT one-shot. */
+        public WindowRef onDocumentsCloseRequested(BiConsumer<Tx, List<Long>> handler) {
+            app.documentsCloseRequested.put(id, handler);
+            return this;
+        }
+
+        /** Fires when the user moves documents out of THIS window into a
+         * new native window, which kaya names; the app declares its chrome
+         * and regions as it did this one's. NOT one-shot. */
+        public WindowRef onDocumentsDetached(DocumentsDetach handler) {
+            app.documentsDetached.put(id, handler);
             return this;
         }
 
@@ -9651,6 +9812,47 @@ public final class KayaApp {
             emit(KayaWire.txSelectSection(window, id));
         }
 
+        /** Add a document to the primary window (docs/doctabs-plan.md §2);
+         * mountIn fills it, and the first a window gets is active. */
+        public DocumentRef addDocument(long id) {
+            return addDocumentIn(0, id);
+        }
+
+        public DocumentRef addDocumentIn(long window, long id) {
+            emit(KayaWire.txAddDocument(window, id));
+            return new DocumentRef(this, KayaApp.this, id);
+        }
+
+        /** The prop chain of a document already added. */
+        public DocumentRef document(long id) {
+            return new DocumentRef(this, KayaApp.this, id);
+        }
+
+        /** Make a document the active one: configuration, never echoes
+         * onSelected. */
+        public void selectDocument(long id) {
+            emit(KayaWire.txSelectDocument(id));
+        }
+
+        /** Close a document and forget its tree — also the close-veto
+         * grammar's confirmation after onCloseRequested. Never echoes
+         * onClosed. A window left with no documents closes. */
+        public void closeDocument(long id) {
+            emit(KayaWire.txCloseDocument(id));
+        }
+
+        /** A shared region of the primary window at edge
+         * (docs/doctabs-plan.md §1.7), a surface every document shares;
+         * mountIn fills it. One per edge, after a document. */
+        public long addRegion(long id, RegionEdge edge) {
+            return addRegionIn(0, id, edge);
+        }
+
+        public long addRegionIn(long window, long id, RegionEdge edge) {
+            emit(KayaWire.txAddRegion(window, id, edge.wire));
+            return id;
+        }
+
         // --- Menus: the command vocabulary (DESIGN.md, Menus) --------
 
         /** Create one item in the menu-item id space. Menu records are
@@ -13136,6 +13338,49 @@ public final class KayaApp {
                 }
             } else if (occ.kind == KayaWire.OCC_KIND_FULLSCREEN_CHANGED) {
                 fullscreenChangedTo(occ.id, Boolean.TRUE.equals(occ.payload));
+            } else if (occ.kind == KayaWire.OCC_KIND_DOCUMENT_SELECTED
+                    || occ.kind == KayaWire.OCC_KIND_DOCUMENT_CLOSE_REQUESTED
+                    || occ.kind == KayaWire.OCC_KIND_NEW_DOCUMENT_REQUESTED) {
+                // NOT one-shot (docs/doctabs-plan.md §2.3); id is the
+                // document, or the window for the "+".
+                Map<Long, Consumer<Tx>> table = occ.kind == KayaWire.OCC_KIND_DOCUMENT_SELECTED
+                        ? documentSelected
+                        : occ.kind == KayaWire.OCC_KIND_DOCUMENT_CLOSE_REQUESTED
+                                ? documentCloseRequested
+                                : newDocument;
+                Consumer<Tx> handler = table.get(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DOCUMENT_CLOSED) {
+                // One-shot: the document is gone; its registrations retire.
+                documentSelected.remove(occ.id);
+                documentCloseRequested.remove(occ.id);
+                documentMoved.remove(occ.id);
+                Consumer<Tx> handler = documentClosed.remove(occ.id);
+                if (handler != null) {
+                    dispatch(handler);
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DOCUMENT_MOVED) {
+                DocumentMove handler = documentMoved.get(occ.id);
+                if (handler != null && occ.payload instanceof List<?> tail && tail.size() == 2) {
+                    long window = (Long) tail.get(0);
+                    int index = (int) (long) (Long) tail.get(1);
+                    dispatch(tx -> handler.accept(tx, window, index));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DOCUMENTS_CLOSE_REQUESTED) {
+                BiConsumer<Tx, List<Long>> handler = documentsCloseRequested.get(occ.id);
+                if (handler != null && occ.payload instanceof List<?> tail) {
+                    List<Long> documents = surfaceIds(tail, 1);
+                    dispatch(tx -> handler.accept(tx, documents));
+                }
+            } else if (occ.kind == KayaWire.OCC_KIND_DOCUMENTS_DETACHED) {
+                DocumentsDetach handler = documentsDetached.get(occ.id);
+                if (handler != null && occ.payload instanceof List<?> tail && tail.size() >= 2) {
+                    long window = (Long) tail.get(0);
+                    List<Long> documents = surfaceIds(tail, 2);
+                    dispatch(tx -> handler.accept(tx, window, documents));
+                }
             } else if (occ.kind == KayaWire.OCC_KIND_SECTION_SELECTED) {
                 // NOT one-shot: sections never die, and the user can
                 // return any number of times (id is the section; the

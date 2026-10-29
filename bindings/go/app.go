@@ -301,6 +301,14 @@ type App struct {
 	sheetDismissed   map[uint64]func(*Tx)
 	dismissRequested map[uint64]func(*Tx)
 	sectionSelected map[uint64]func(*Tx)
+	// Per document and per window (docs/doctabs-plan.md §2.3).
+	documentSelected         map[uint64]func(*Tx)
+	documentCloseRequested   map[uint64]func(*Tx)
+	documentClosed           map[uint64]func(*Tx)
+	documentMoved            map[uint64]func(*Tx, uint64, uint32)
+	newDocument              map[uint64]func(*Tx)
+	documentsCloseRequested  map[uint64]func(*Tx, []uint64)
+	documentsDetached        map[uint64]func(*Tx, uint64, []uint64)
 	alerts         map[uint64]func(*Tx, AlertChoice)
 	toasts         map[uint64]func(*Tx, ToastOutcome)
 	// One-shot, keyed by the GUEST's notification id (the alert's
@@ -409,6 +417,13 @@ func NewApp() *App {
 		sheetDismissed:   make(map[uint64]func(*Tx)),
 		dismissRequested: make(map[uint64]func(*Tx)),
 		sectionSelected: make(map[uint64]func(*Tx)),
+		documentSelected:        make(map[uint64]func(*Tx)),
+		documentCloseRequested:  make(map[uint64]func(*Tx)),
+		documentClosed:          make(map[uint64]func(*Tx)),
+		documentMoved:           make(map[uint64]func(*Tx, uint64, uint32)),
+		newDocument:             make(map[uint64]func(*Tx)),
+		documentsCloseRequested: make(map[uint64]func(*Tx, []uint64)),
+		documentsDetached:       make(map[uint64]func(*Tx, uint64, []uint64)),
 		closeRequested: make(map[uint64]func(*Tx)),
 		windowClosed:   make(map[uint64]func(*Tx)),
 		fullscreenChanged: make(map[uint64]func(*Tx, bool)),
@@ -3579,6 +3594,49 @@ func (tx *Tx) SelectSectionIn(window, id uint64) {
 	tx.emit(TxSelectSection(window, id))
 }
 
+// AddDocument adds a document to the primary window (docs/doctabs-plan.md
+// §2); a MountIn fills it. The first a window gets is active.
+func (tx *Tx) AddDocument(id uint64) DocumentRef {
+	return tx.AddDocumentIn(0, id)
+}
+
+// AddDocumentIn adds a document to another window.
+func (tx *Tx) AddDocumentIn(window, id uint64) DocumentRef {
+	tx.emit(TxAddDocument(window, id))
+	return DocumentRef{tx: tx, id: id}
+}
+
+// Document is the prop chain of a document already added.
+func (tx *Tx) Document(id uint64) DocumentRef {
+	return DocumentRef{tx: tx, id: id}
+}
+
+// SelectDocument makes a document the active one: configuration, never
+// echoes OnSelected.
+func (tx *Tx) SelectDocument(id uint64) {
+	tx.emit(TxSelectDocument(id))
+}
+
+// CloseDocument closes a document and forgets its tree — also the
+// close-veto grammar's confirmation after OnCloseRequested. Never echoes
+// OnClosed. A window left with no documents closes.
+func (tx *Tx) CloseDocument(id uint64) {
+	tx.emit(TxCloseDocument(id))
+}
+
+// AddRegion declares a shared region of the primary window at edge
+// (docs/doctabs-plan.md §1.7), a surface every document shares; a MountIn
+// fills it. One per edge, after a document.
+func (tx *Tx) AddRegion(id uint64, edge RegionEdge) uint64 {
+	return tx.AddRegionIn(0, id, edge)
+}
+
+// AddRegionIn declares a region of another window.
+func (tx *Tx) AddRegionIn(window, id uint64, edge RegionEdge) uint64 {
+	tx.emit(TxAddRegion(window, id, uint32(edge)))
+	return id
+}
+
 // ShowAlert requests a modal alert: a chain ending in Show, which sends
 // the one atomic record. The result handler rides the REQUEST and
 // retires with its one answer. Up to two actions (the platform floor);
@@ -4610,6 +4668,11 @@ type Appearance int64
 // DetentLarge (docs/sheet-plan.md §1.4); the desktops ignore it.
 type Detent int64
 
+// RegionEdge is where a window's shared region sits beside its documents:
+// RegionEdgeLeading, RegionEdgeTrailing or RegionEdgeBottom
+// (docs/doctabs-plan.md §1.7).
+type RegionEdge int64
+
 // AlertChoice is an alert's answer: the action the user pressed, by its
 // slot (AlertChoiceAction0/Action1), or AlertChoiceCancel, which is
 // every platform-native dismissal.
@@ -4764,6 +4827,35 @@ func (w WindowRef) OnUndone(fn func(*Tx, string, UndoDelta)) WindowRef {
 // does not arrive here.
 func (w WindowRef) OnRedone(fn func(*Tx, string, UndoDelta)) WindowRef {
 	w.tx.app.redone[w.id] = fn
+	return w
+}
+
+// NewDocument draws the platform's "+" beside this window's documents
+// (docs/doctabs-plan.md §2); OnNewDocument hears each press.
+func (w WindowRef) NewDocument(on bool) WindowRef {
+	w.tx.emit(TxSetWindowNewDocument(w.id, on))
+	return w
+}
+
+// OnNewDocument binds the "+" handler to THIS window. NOT one-shot.
+func (w WindowRef) OnNewDocument(fn func(*Tx)) WindowRef {
+	w.tx.app.newDocument[w.id] = fn
+	return w
+}
+
+// OnDocumentsCloseRequested fires when the user closes THIS native window
+// while a document it shows arms InterceptClose, with the documents it
+// shows, and NOTHING HAS CLOSED. NOT one-shot.
+func (w WindowRef) OnDocumentsCloseRequested(fn func(*Tx, []uint64)) WindowRef {
+	w.tx.app.documentsCloseRequested[w.id] = fn
+	return w
+}
+
+// OnDocumentsDetached fires when the user moves documents out of THIS
+// window into a new native window, which kaya names; the app declares its
+// chrome and regions as it did this one's. NOT one-shot.
+func (w WindowRef) OnDocumentsDetached(fn func(*Tx, uint64, []uint64)) WindowRef {
+	w.tx.app.documentsDetached[w.id] = fn
 	return w
 }
 
@@ -4929,6 +5021,102 @@ func (r SectionRef) OnSelected(fn func(*Tx)) SectionRef {
 // Id returns the section's surface id, for MountIn.
 func (r SectionRef) Id() uint64 {
 	return r.id
+}
+
+// DocumentRef is the prop chain an AddDocument rides.
+type DocumentRef struct {
+	tx *Tx
+	id uint64
+}
+
+// Title names the document: its tab's title, and the window's while it
+// is active.
+func (r DocumentRef) Title(title string) DocumentRef {
+	r.tx.emit(TxSetDocumentTitle(r.id, title))
+	return r
+}
+
+// TitleBound takes the title from a signal.
+func (r DocumentRef) TitleBound(s Signal[string]) DocumentRef {
+	r.tx.emit(TxBindDocumentTitle(r.id, s.id))
+	return r
+}
+
+// Tooltip is the tab's tooltip, typically the document's full path.
+func (r DocumentRef) Tooltip(text string) DocumentRef {
+	r.tx.emit(TxSetDocumentTooltip(r.id, text))
+	return r
+}
+
+// Dirty says the document holds unsaved work; its tab shows the mark.
+func (r DocumentRef) Dirty(on bool) DocumentRef {
+	r.tx.emit(TxSetDocumentDirty(r.id, on))
+	return r
+}
+
+// DirtyBound takes the mark from a signal.
+func (r DocumentRef) DirtyBound(s Signal[bool]) DocumentRef {
+	r.tx.emit(TxBindDocumentDirty(r.id, s.id))
+	return r
+}
+
+// InterceptClose arms the close veto: a user close asks OnCloseRequested
+// and nothing closes until the app calls CloseDocument.
+func (r DocumentRef) InterceptClose(on bool) DocumentRef {
+	r.tx.emit(TxSetDocumentInterceptClose(r.id, on))
+	return r
+}
+
+// Select makes this document the active one, as SelectDocument does.
+func (r DocumentRef) Select() DocumentRef {
+	r.tx.SelectDocument(r.id)
+	return r
+}
+
+// OnSelected fires each time the USER makes THIS document active. NOT
+// one-shot; SelectDocument never fires it.
+func (r DocumentRef) OnSelected(fn func(*Tx)) DocumentRef {
+	r.tx.app.documentSelected[r.id] = fn
+	return r
+}
+
+// OnCloseRequested fires per user close while InterceptClose is armed,
+// and NOTHING HAS CLOSED — answer with CloseDocument to agree.
+func (r DocumentRef) OnCloseRequested(fn func(*Tx)) DocumentRef {
+	r.tx.app.documentCloseRequested[r.id] = fn
+	return r
+}
+
+// OnClosed fires when the user closed THIS document unarmed, and retires
+// with it; CloseDocument never fires it.
+func (r DocumentRef) OnClosed(fn func(*Tx)) DocumentRef {
+	r.tx.app.documentClosed[r.id] = fn
+	return r
+}
+
+// OnMoved fires with the window and index when the user drags THIS
+// document to another place or window.
+func (r DocumentRef) OnMoved(fn func(*Tx, uint64, uint32)) DocumentRef {
+	r.tx.app.documentMoved[r.id] = fn
+	return r
+}
+
+// Id returns the document's surface id, for MountIn.
+func (r DocumentRef) Id() uint64 {
+	return r.id
+}
+
+func surfaceIds(values []any) []uint64 {
+	out := make([]uint64, 0, len(values))
+	for _, v := range values {
+		switch n := v.(type) {
+		case uint64:
+			out = append(out, n)
+		case int64:
+			out = append(out, uint64(n))
+		}
+	}
+	return out
 }
 
 // --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
@@ -7504,6 +7692,47 @@ func (a *App) Serve() {
 			}
 		case kind == occFullscreenChanged:
 			a.fullscreenChangedTo(id, checked)
+		case kind == occDocumentSelected:
+			if fn := a.documentSelected[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occDocumentCloseRequested:
+			if fn := a.documentCloseRequested[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occNewDocumentRequested:
+			if fn := a.newDocument[id]; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occDocumentClosed:
+			// One-shot: the document is gone; its registrations retire.
+			delete(a.documentSelected, id)
+			delete(a.documentCloseRequested, id)
+			delete(a.documentMoved, id)
+			if fn := a.documentClosed[id]; fn != nil {
+				delete(a.documentClosed, id)
+				a.dispatch(func(tx *Tx) { fn(tx) })
+			}
+		case kind == occDocumentMoved:
+			tail, _ := payload.([]any)
+			if fn := a.documentMoved[id]; fn != nil && len(tail) == 2 {
+				window, _ := tail[0].(int64)
+				index, _ := tail[1].(int64)
+				a.dispatch(func(tx *Tx) { fn(tx, uint64(window), uint32(index)) })
+			}
+		case kind == occDocumentsCloseRequested:
+			tail, _ := payload.([]any)
+			if fn := a.documentsCloseRequested[id]; fn != nil && len(tail) >= 1 {
+				documents := surfaceIds(tail[1:])
+				a.dispatch(func(tx *Tx) { fn(tx, documents) })
+			}
+		case kind == occDocumentsDetached:
+			tail, _ := payload.([]any)
+			if fn := a.documentsDetached[id]; fn != nil && len(tail) >= 2 {
+				window, _ := tail[0].(int64)
+				documents := surfaceIds(tail[2:])
+				a.dispatch(func(tx *Tx) { fn(tx, uint64(window), documents) })
+			}
 		case kind == occSectionSelected:
 			// NOT one-shot: sections never die. A programmatic
 			// SelectSection never lands here (the echo doctrine).

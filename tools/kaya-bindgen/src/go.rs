@@ -61,6 +61,8 @@ fn enum_go_type(name: &str) -> Option<&'static str> {
         "sections_presentation" => Some("SectionsPresentation"),
         // The sheet's detent (docs/sheet-plan.md §1.4).
         "detent" => Some("Detent"),
+        // docs/doctabs-plan.md §1.7.
+        "region_edge" => Some("RegionEdge"),
         // The media vocabularies (docs/media-plan.md §2, §5).
         "player_state" => Some("PlayerState"),
         "media_failure" => Some("MediaFailure"),

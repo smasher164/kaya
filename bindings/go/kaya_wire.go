@@ -181,9 +181,9 @@ const (
 	DpropTooltip = 2
 	DpropDirty = 3
 	DpropInterceptClose = 4
-	RegionEdgeLeading = 1
-	RegionEdgeTrailing = 2
-	RegionEdgeBottom = 3
+	RegionEdgeLeading RegionEdge = 1
+	RegionEdgeTrailing RegionEdge = 2
+	RegionEdgeBottom RegionEdge = 3
 	MenuKindMenu = 1
 	MenuKindAction = 2
 	MenuKindToggle = 3
@@ -677,6 +677,18 @@ func (d Detent) String() string {
 		return "large"
 	}
 	return "Detent(" + strconv.FormatInt(int64(d), 10) + ")"
+}
+
+func (r RegionEdge) String() string {
+	switch r {
+	case RegionEdgeLeading:
+		return "leading"
+	case RegionEdgeTrailing:
+		return "trailing"
+	case RegionEdgeBottom:
+		return "bottom"
+	}
+	return "RegionEdge(" + strconv.FormatInt(int64(r), 10) + ")"
 }
 
 func (s Swipe) String() string {

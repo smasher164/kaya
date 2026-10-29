@@ -253,6 +253,15 @@ enum Detent : long
     Large = KayaWire.DetentLarge,
 }
 
+/// Where a window's shared region sits beside its documents
+/// (docs/doctabs-plan.md §1.7).
+enum RegionEdge : uint
+{
+    Leading = KayaWire.RegionEdgeLeading,
+    Trailing = KayaWire.RegionEdgeTrailing,
+    Bottom = KayaWire.RegionEdgeBottom,
+}
+
 /// THE CLOSED MENU-ROLE VOCABULARY (DESIGN.md, Menus;
 /// crates/kaya/src/scene.rs MENU_ROLES). Settings: macOS places it in the
 /// application menu and every other host leaves the item where the app
@@ -1420,6 +1429,25 @@ sealed record WindowClosed(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
 sealed record SectionSelected(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
 
+/// The document occurrences (docs/doctabs-plan.md §2.3): Id is the
+/// document, or the window for the "+" and the two window-level ones.
+sealed record DocumentSelected(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record DocumentCloseRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record DocumentClosed(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record NewDocumentRequested(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
+
+sealed record DocumentMoved(ulong Id, List<object> Keys, ulong Window, uint Index)
+    : Occurrence(Id, Keys);
+
+sealed record DocumentsCloseRequested(ulong Id, List<object> Keys, List<ulong> Documents)
+    : Occurrence(Id, Keys);
+
+sealed record DocumentsDetached(ulong Id, List<object> Keys, ulong Window, List<ulong> Documents)
+    : Occurrence(Id, Keys);
+
 sealed record FullscreenChanged(ulong Id, List<object> Keys, bool On) : Occurrence(Id, Keys);
 
 sealed record EntryPopped(ulong Id, List<object> Keys) : Occurrence(Id, Keys);
@@ -2073,6 +2101,14 @@ sealed class KayaApp
     internal readonly Dictionary<ulong, Action<Tx>> sheetDismissed = new();
     internal readonly Dictionary<ulong, Action<Tx>> dismissRequested = new();
     internal readonly Dictionary<ulong, Action<Tx>> sectionSelected = new();
+    // Per document and per window (docs/doctabs-plan.md §2.3).
+    internal readonly Dictionary<ulong, Action<Tx>> documentSelected = new();
+    internal readonly Dictionary<ulong, Action<Tx>> documentCloseRequested = new();
+    internal readonly Dictionary<ulong, Action<Tx>> documentClosed = new();
+    internal readonly Dictionary<ulong, Action<Tx, ulong, uint>> documentMoved = new();
+    internal readonly Dictionary<ulong, Action<Tx>> newDocument = new();
+    internal readonly Dictionary<ulong, Action<Tx, List<ulong>>> documentsCloseRequested = new();
+    internal readonly Dictionary<ulong, Action<Tx, ulong, List<ulong>>> documentsDetached = new();
     internal readonly Dictionary<ulong, Action<Tx>> windowClosed = new();
     // NOT one-shot (docs/fullscreen-plan.md).
     internal readonly Dictionary<ulong, Action<Tx, bool>> fullscreenChanged = new();
@@ -3559,6 +3595,14 @@ sealed class KayaApp
         return new PlayerTracks(audio, captions, Selected(tail[0]), Selected(tail[1]));
     }
 
+    static List<ulong> SurfaceIds(List<object> tail, int from)
+    {
+        var ids = new List<ulong>();
+        for (int i = from; i < tail.Count; i++)
+            if (tail[i] is long id) ids.Add((ulong)id);
+        return ids;
+    }
+
     static TextRun RunOf(List<object> tail, int at)
     {
         if (tail[at] is not long start || tail[at + 1] is not long stop)
@@ -3624,6 +3668,27 @@ sealed class KayaApp
             case KayaWire.OccKindCloseRequested: return new CloseRequested(id, keys);
             case KayaWire.OccKindWindowClosed: return new WindowClosed(id, keys);
             case KayaWire.OccKindSectionSelected: return new SectionSelected(id, keys);
+            case KayaWire.OccKindDocumentSelected: return new DocumentSelected(id, keys);
+            case KayaWire.OccKindDocumentCloseRequested: return new DocumentCloseRequested(id, keys);
+            case KayaWire.OccKindDocumentClosed: return new DocumentClosed(id, keys);
+            case KayaWire.OccKindNewDocumentRequested: return new NewDocumentRequested(id, keys);
+            case KayaWire.OccKindDocumentMoved:
+            {
+                var tail = payload as List<object> ?? new List<object>();
+                return new DocumentMoved(id, keys, tail is [long w, ..] ? (ulong)w : 0,
+                    tail is [_, long at, ..] ? (uint)at : 0);
+            }
+            case KayaWire.OccKindDocumentsCloseRequested:
+            {
+                var tail = payload as List<object> ?? new List<object>();
+                return new DocumentsCloseRequested(id, keys, SurfaceIds(tail, 1));
+            }
+            case KayaWire.OccKindDocumentsDetached:
+            {
+                var tail = payload as List<object> ?? new List<object>();
+                return new DocumentsDetached(id, keys, tail is [long w, ..] ? (ulong)w : 0,
+                    SurfaceIds(tail, 2));
+            }
             case KayaWire.OccKindFullscreenChanged: return new FullscreenChanged(id, keys, flag);
             case KayaWire.OccKindEntryPopped: return new EntryPopped(id, keys);
             case KayaWire.OccKindBackRequested: return new BackRequested(id, keys);
@@ -3966,6 +4031,38 @@ sealed class KayaApp
                 case SectionSelected section
                     when sectionSelected.TryGetValue(section.Id, out var onSection):
                     Dispatch(onSection);
+                    break;
+                // NOT one-shot (docs/doctabs-plan.md §2.3); a programmatic
+                // select or close never lands here.
+                case DocumentSelected picked
+                    when documentSelected.TryGetValue(picked.Id, out var onPicked):
+                    Dispatch(onPicked);
+                    break;
+                case DocumentCloseRequested asked
+                    when documentCloseRequested.TryGetValue(asked.Id, out var onAsked):
+                    Dispatch(onAsked);
+                    break;
+                case NewDocumentRequested plus
+                    when newDocument.TryGetValue(plus.Id, out var onPlus):
+                    Dispatch(onPlus);
+                    break;
+                case DocumentClosed closedDoc:
+                    // One-shot: the document is gone; its registrations retire.
+                    documentSelected.Remove(closedDoc.Id);
+                    documentCloseRequested.Remove(closedDoc.Id);
+                    documentMoved.Remove(closedDoc.Id);
+                    if (documentClosed.Remove(closedDoc.Id, out var onClosedDoc))
+                        Dispatch(onClosedDoc);
+                    break;
+                case DocumentMoved moved when documentMoved.TryGetValue(moved.Id, out var onMoved):
+                    Dispatch(tx => onMoved(tx, moved.Window, moved.Index));
+                    break;
+                case DocumentsCloseRequested closing
+                    when documentsCloseRequested.TryGetValue(closing.Id, out var onClosing):
+                    Dispatch(tx => onClosing(tx, closing.Documents));
+                    break;
+                case DocumentsDetached torn when documentsDetached.TryGetValue(torn.Id, out var onTorn):
+                    Dispatch(tx => onTorn(tx, torn.Window, torn.Documents));
                     break;
                 case FullscreenChanged fullscreen:
                     FullscreenChangedTo(fullscreen.Id, fullscreen.On);
@@ -6341,7 +6438,10 @@ sealed class Tx : IDisposable
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
         Action<Tx, bool>? onFullscreenChanged = null,
-        MenuItem[]? menus = null, ulong id = 0)
+        MenuItem[]? menus = null, ulong id = 0,
+        bool? newDocument = null, Action<Tx>? onNewDocument = null,
+        Action<Tx, List<ulong>>? onDocumentsCloseRequested = null,
+        Action<Tx, ulong, List<ulong>>? onDocumentsDetached = null)
     {
         if (title is { } t) Records.Add(KayaWire.TxSetWindowTitle(id, t));
         if (width is { } w) Records.Add(KayaWire.TxSetWindowWidth(id, w));
@@ -6361,6 +6461,12 @@ sealed class Tx : IDisposable
         if (appearance is { } ap)
             Records.Add(KayaWire.TxSetWindowAppearance(id, (long)ap));
         if (fullscreen is { } fs) Records.Add(KayaWire.TxSetWindowFullscreen(id, fs));
+        // The "+" and the three window-level document handlers
+        // (docs/doctabs-plan.md §2.3), NOT one-shot.
+        if (newDocument is { } nd) Records.Add(KayaWire.TxSetWindowNewDocument(id, nd));
+        if (onNewDocument is { } plus) App.newDocument[id] = plus;
+        if (onDocumentsCloseRequested is { } closing) App.documentsCloseRequested[id] = closing;
+        if (onDocumentsDetached is { } torn) App.documentsDetached[id] = torn;
         if (onCloseRequested is { } r) App.closeRequested[id] = r;
         if (onClosed is { } c) App.windowClosed[id] = c;
         if (onFullscreenChanged is { } fc) App.fullscreenChanged[id] = fc;
@@ -6396,13 +6502,17 @@ sealed class Tx : IDisposable
         Action<Tx, string, UndoDelta>? onUndone = null,
         Action<Tx, string, UndoDelta>? onRedone = null,
         Action<Tx, bool>? onFullscreenChanged = null,
-        MenuItem[]? menus = null)
+        MenuItem[]? menus = null,
+        bool? newDocument = null, Action<Tx>? onNewDocument = null,
+        Action<Tx, List<ulong>>? onDocumentsCloseRequested = null,
+        Action<Tx, ulong, List<ulong>>? onDocumentsDetached = null)
     {
         Records.Add(KayaWire.TxCreateWindow(id));
         Window(title, width, height, vetoClose, panes, dirty, rememberFrame, inset,
             sectionsPresentation,
             appearance, fullscreen, onCloseRequested, onClosed, onUndone, onRedone,
-            onFullscreenChanged, menus, id);
+            onFullscreenChanged, menus, id, newDocument, onNewDocument,
+            onDocumentsCloseRequested, onDocumentsDetached);
     }
 
     /// Request a modal alert (the request/result grammar). The result
@@ -6791,6 +6901,58 @@ sealed class Tx : IDisposable
     /// onSelected (the echo doctrine).
     public void SelectSection(ulong id, ulong window = 0) =>
         Records.Add(KayaWire.TxSelectSection(window, id));
+
+    /// Add a document to a window (docs/doctabs-plan.md §2; ids
+    /// guest-allocated in the shared surface namespace); MountIn fills it,
+    /// and the first a window gets is active. onSelected fires each time the
+    /// USER makes it active; onCloseRequested per user close while
+    /// interceptClose is armed, with nothing closed — answer with
+    /// CloseDocument; onClosed when the user closed it unarmed, one-shot;
+    /// onMoved(window, index) when the user drags it. A programmatic select
+    /// or close fires none of them. The props are UpdateDocument's.
+    public void AddDocument(
+        ulong id, string? title = null, Signal? titleSignal = null,
+        string? tooltip = null, bool? dirty = null, Signal? dirtySignal = null,
+        bool? interceptClose = null,
+        Action<Tx>? onSelected = null, Action<Tx>? onCloseRequested = null,
+        Action<Tx>? onClosed = null, Action<Tx, ulong, uint>? onMoved = null,
+        ulong window = 0)
+    {
+        Records.Add(KayaWire.TxAddDocument(window, id));
+        UpdateDocument(id, title, titleSignal, tooltip, dirty, dirtySignal, interceptClose);
+        if (onSelected is { } s) App.documentSelected[id] = s;
+        if (onCloseRequested is { } r) App.documentCloseRequested[id] = r;
+        if (onClosed is { } c) App.documentClosed[id] = c;
+        if (onMoved is { } m) App.documentMoved[id] = m;
+    }
+
+    /// A document's props after its AddDocument: a constant or a Signal.
+    public void UpdateDocument(
+        ulong id, string? title = null, Signal? titleSignal = null,
+        string? tooltip = null, bool? dirty = null, Signal? dirtySignal = null,
+        bool? interceptClose = null)
+    {
+        if (title is { } t) Records.Add(KayaWire.TxSetDocumentTitle(id, t));
+        if (titleSignal is { } ts) Records.Add(KayaWire.TxBindDocumentTitle(id, ts.Id));
+        if (tooltip is { } tip) Records.Add(KayaWire.TxSetDocumentTooltip(id, tip));
+        if (dirty is { } d) Records.Add(KayaWire.TxSetDocumentDirty(id, d));
+        if (dirtySignal is { } ds) Records.Add(KayaWire.TxBindDocumentDirty(id, ds.Id));
+        if (interceptClose is { } i) Records.Add(KayaWire.TxSetDocumentInterceptClose(id, i));
+    }
+
+    /// Make a document the active one: configuration, never echoes onSelected.
+    public void SelectDocument(ulong id) => Records.Add(KayaWire.TxSelectDocument(id));
+
+    /// Close a document and forget its tree — also the close-veto grammar's
+    /// confirmation after onCloseRequested. Never echoes onClosed. A window
+    /// left with no documents closes.
+    public void CloseDocument(ulong id) => Records.Add(KayaWire.TxCloseDocument(id));
+
+    /// Declare a shared region of a window at `edge` (docs/doctabs-plan.md
+    /// §1.7): a surface every document shares, filled by MountIn. One per
+    /// edge, after a document.
+    public void AddRegion(ulong id, RegionEdge edge, ulong window = 0) =>
+        Records.Add(KayaWire.TxAddRegion(window, id, (uint)edge));
 
     // --- Menus: the command vocabulary (DESIGN.md, Menus). Children are
     // arguments (evaluated first, unanchored), the grouping construct

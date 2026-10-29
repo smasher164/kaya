@@ -84,6 +84,7 @@ static class Program
             case "clipboard": ClipboardScene.Run(); break;
             case "undo": UndoScene.Run(); break;
             case "dirty": DirtyScene.Run(); break;
+            case "doctabs": DoctabsScene.Run(); break;
             case "fullscreen": FullscreenScene.Run(); break;
             case "dnd": DndScene.Run(); break;
             case "ranges": RangesScene.Run(); break;
