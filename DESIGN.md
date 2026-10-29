@@ -2313,7 +2313,8 @@ documents on the phones) and the app never says which.
 - **A torn-out tab is a new kaya window** (Q1, ruled 2026-10-28 as option
   C). The platform makes the native window (AppKit after the fact, GNOME's
   `create-window` and WinUI's tear-out during the drag); the core names it
-  with an id in the internal range, the documents move into it keeping
+  with the highest free id below the safe-integer bound (an id every
+  binding can hold), the documents move into it keeping
   their ids, and `documents_detached(source, window, documents)` tells the
   app, which declares that window's chrome and regions with the code it
   used for the first and binds its handlers there. A drag into another

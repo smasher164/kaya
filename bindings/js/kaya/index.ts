@@ -2391,6 +2391,44 @@ export function selectSection(sectionId: number, window = 0): void {
   records().push(wire.tx_select_section(window, sectionId));
 }
 
+/** Make a document the active one (docs/doctabs-plan.md §2):
+ * configuration, never echoes onSelected. */
+export function selectDocument(documentId: number): void {
+  records().push(wire.tx_select_document(documentId));
+}
+
+/** Close a document and forget its tree — also the close-veto grammar's
+ * confirmation after onCloseRequested. Never echoes onClosed. A window
+ * left with no documents closes. */
+export function closeDocument(documentId: number): void {
+  records().push(wire.tx_close_document(documentId));
+}
+
+/** A document's properties (docs/doctabs-plan.md §2.2). */
+export type DocumentPropName = "title" | "tooltip" | "dirty" | "interceptClose";
+
+/** A document property after its addDocument: a constant or a Signal. */
+export function setDocumentProp(documentId: number, prop: DocumentPropName, value: string | boolean | Signal<string> | Signal<boolean>): void {
+  records().push(documentPropRecord(documentId, prop, value));
+}
+
+function documentPropRecord(document: number, prop: DocumentPropName, value: unknown): Uint8Array {
+  const text = prop === "title" || prop === "tooltip";
+  if (value instanceof Signal) {
+    const bind = { title: wire.tx_bind_document_title, tooltip: wire.tx_bind_document_tooltip, dirty: wire.tx_bind_document_dirty, interceptClose: wire.tx_bind_document_intercept_close }[prop];
+    if (bind === undefined) throw new TypeError(`kaya: ${String(prop)} is not a document prop — the vocabulary is title, tooltip, dirty, interceptClose`);
+    return bind(document, value.id);
+  }
+  if (text) {
+    if (typeof value !== "string") throw new TypeError(`kaya: a document's ${prop} is a string or a Signal, got ${typeof value}`);
+    return prop === "title" ? wire.tx_set_document_title(document, value) : wire.tx_set_document_tooltip(document, value);
+  }
+  if (typeof value !== "boolean") throw new TypeError(`kaya: a document's ${String(prop)} is a boolean or a Signal, got ${typeof value}`);
+  if (prop === "dirty") return wire.tx_set_document_dirty(document, value);
+  if (prop === "interceptClose") return wire.tx_set_document_intercept_close(document, value);
+  throw new TypeError(`kaya: ${String(prop)} is not a document prop — the vocabulary is title, tooltip, dirty, interceptClose`);
+}
+
 /** An alert's three outcomes: the action the user pressed, by its slot,
  * or the cancel every native dismissal answers. */
 export type AlertChoice = "action0" | "action1" | "cancel";
@@ -4501,6 +4539,15 @@ function sectionsPresentationValue(value: unknown): number {
   return vocab(SECTIONS_PRESENTATION_NAMES, "sectionsPresentation", value, '"sidebar"');
 }
 
+/** Where a window's shared region sits beside its documents
+ * (docs/doctabs-plan.md §1.7). */
+export type RegionEdgeName = "leading" | "trailing" | "bottom";
+const REGION_EDGE_NAMES: Record<RegionEdgeName, number> = {
+  leading: wire.REGION_EDGE_LEADING,
+  trailing: wire.REGION_EDGE_TRAILING,
+  bottom: wire.REGION_EDGE_BOTTOM,
+};
+
 /** The app's own light/dark choice (docs/tasks-s2b-plan.md R1-R3). */
 export type AppearanceName = "system" | "light" | "dark";
 const APPEARANCE_NAMES: Record<AppearanceName, number> = {
@@ -5679,6 +5726,9 @@ export type WindowProps = {
   inset?: number;
   /** Whether the window fills its screen (docs/fullscreen-plan.md). */
   fullscreen?: boolean;
+  /** Draws the platform's "+" beside this window's documents
+   * (docs/doctabs-plan.md §2). */
+  newDocument?: boolean;
 };
 
 export type WindowOptions = WindowProps & {
@@ -5689,7 +5739,34 @@ export type WindowOptions = WindowProps & {
   /** Fires when the USER changes fullscreen through the platform's own
    * door; the app's own write never echoes (docs/fullscreen-plan.md). */
   onFullscreenChanged?: (on: boolean) => void;
+  /** Fires per press of the "+" (docs/doctabs-plan.md §2.3). */
+  onNewDocument?: () => void;
+  /** Fires when the user closes the native window while a document it
+   * shows arms interceptClose; nothing has closed. */
+  onDocumentsCloseRequested?: (documents: number[]) => void;
+  /** Fires when the user moves documents out into a new native window,
+   * which kaya names; the app builds its chrome and regions as it did
+   * this one's. */
+  onDocumentsDetached?: (window: number, documents: number[]) => void;
   windowId?: number;
+};
+
+export type DocumentOptions = {
+  title?: string | Signal<string>;
+  tooltip?: string | Signal<string>;
+  dirty?: boolean | Signal<boolean>;
+  interceptClose?: boolean | Signal<boolean>;
+  /** Fires each time the USER makes this document active, never for
+   * selectDocument. */
+  onSelected?: () => void;
+  /** Fires per user close while interceptClose is armed; nothing has
+   * closed — answer with closeDocument to agree. */
+  onCloseRequested?: () => void;
+  /** Fires when the user closed it unarmed, never for closeDocument. */
+  onClosed?: () => void;
+  /** Fires when the user drags it to another place or window. */
+  onMoved?: (window: number, index: number) => void;
+  window?: number;
 };
 
 /** The window construct's props, emitted into the ambient transaction —
@@ -5705,6 +5782,7 @@ function windowProps(window: number, p: WindowProps): void {
   if (p.appearance !== undefined) recs.push(wire.tx_set_window_appearance(window, appearanceValue(p.appearance)));
   if (p.inset !== undefined) recs.push(wire.tx_set_window_inset(window, Number(p.inset)));
   if (p.fullscreen !== undefined) recs.push(wire.tx_set_window_fullscreen(window, Boolean(p.fullscreen)));
+  if (p.newDocument !== undefined) recs.push(wire.tx_set_window_new_document(window, Boolean(p.newDocument)));
   if (p.width !== undefined || p.height !== undefined) {
     if (p.width === undefined || p.height === undefined) throw new Error("kaya: window width and height travel together");
     recs.push(wire.tx_set_window_width(window, Number(p.width)));
@@ -5712,7 +5790,7 @@ function windowProps(window: number, p: WindowProps): void {
   }
 }
 
-type ScopeKind = "window" | "build" | "push" | "section" | "sheet" | "dock";
+type ScopeKind = "window" | "build" | "push" | "section" | "sheet" | "dock" | "document";
 
 /** One scene scope: a transaction with a mount on exit (window, entry,
  * section) or without one (build). Entries and sections NEST inside an
@@ -5727,7 +5805,7 @@ function runScope<T>(
   open: () => void,
 ): T | undefined {
   requireAppThread();
-  if (kind === "push" || kind === "section" || kind === "sheet" || kind === "dock") {
+  if (kind === "push" || kind === "section" || kind === "sheet" || kind === "dock" || kind === "document") {
     const nested = _tx !== null;
     if (!nested) {
       _tx = [];
@@ -5758,7 +5836,7 @@ function runScope<T>(
             _tx = null;
             _journal = null;
           }
-          throw new Error("kaya: pushEntry()/addSection()/sheet()/dock() body declared no root container");
+          throw new Error("kaya: pushEntry()/addSection()/sheet()/dock()/addDocument()/addRegion() body declared no root container");
         }
         _tx!.push(wire.tx_mount(surface, root.id));
         if (!nested) {
@@ -6991,6 +7069,14 @@ export class App {
   /** @internal */ readonly _sheetDismissed = new Map<number, () => void>();
   /** @internal */ readonly _dismissRequested = new Map<number, () => void>();
   /** @internal */ readonly _sectionSelected = new Map<number, () => void>();
+  /** @internal Per document and per window (docs/doctabs-plan.md §2.3). */
+  readonly _documentSelected = new Map<number, () => void>();
+  /** @internal */ readonly _documentCloseRequested = new Map<number, () => void>();
+  /** @internal */ readonly _documentClosed = new Map<number, () => void>();
+  /** @internal */ readonly _documentMoved = new Map<number, (window: number, index: number) => void>();
+  /** @internal */ readonly _newDocument = new Map<number, () => void>();
+  /** @internal */ readonly _documentsCloseRequested = new Map<number, (documents: number[]) => void>();
+  /** @internal */ readonly _documentsDetached = new Map<number, (window: number, documents: number[]) => void>();
   /** @internal */ readonly _closeRequested = new Map<number, () => void>();
   /** @internal */ readonly _windowClosed = new Map<number, () => void>();
   /** @internal NOT one-shot (docs/fullscreen-plan.md). */
@@ -7094,6 +7180,12 @@ export class App {
     if (onRedone !== undefined) this._redone.set(windowId, onRedone);
   }
 
+  private _registerDocuments(windowId: number, opts: WindowOptions): void {
+    if (opts.onNewDocument !== undefined) this._newDocument.set(windowId, opts.onNewDocument);
+    if (opts.onDocumentsCloseRequested !== undefined) this._documentsCloseRequested.set(windowId, opts.onDocumentsCloseRequested);
+    if (opts.onDocumentsDetached !== undefined) this._documentsDetached.set(windowId, opts.onDocumentsDetached);
+  }
+
   /** An auxiliary surface's scene scope: the single top-level container
    * mounts INTO IT on exit. Capability-gated. */
   createWindow<T>(windowId: number, opts: WindowOptions, body: () => T): T {
@@ -7101,6 +7193,7 @@ export class App {
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
     if (opts.onFullscreenChanged !== undefined) this._fullscreenChanged.set(windowId, opts.onFullscreenChanged);
     this._registerHistory(windowId, opts.onUndone, opts.onRedone);
+    this._registerDocuments(windowId, opts);
     return runScope<T>("window", body, windowId, () => {
       records().push(wire.tx_create_window(windowId));
       windowProps(windowId, opts);
@@ -7122,6 +7215,7 @@ export class App {
     if (opts.onClosed !== undefined) this._windowClosed.set(windowId, opts.onClosed);
     if (opts.onFullscreenChanged !== undefined) this._fullscreenChanged.set(windowId, opts.onFullscreenChanged);
     this._registerHistory(windowId, opts.onUndone, opts.onRedone);
+    this._registerDocuments(windowId, opts);
     if (_tx !== null) {
       // THE LIVE FORM: a transaction is already open, so the props join
       // it here and there is nothing to enter.
@@ -7215,6 +7309,35 @@ export class App {
         else records().push(wire.tx_set_section_badge(sectionId, opts.badge));
       }
       if (opts.onSelected !== undefined) this._sectionSelected.set(sectionId, opts.onSelected);
+    });
+  }
+
+  /** A document's scene scope (docs/doctabs-plan.md §2): add_document
+   * plus its props, and the body's root mounts INTO IT on exit. Document
+   * ids are guest-allocated in the shared surface namespace; the first a
+   * window gets is active. Nests inside a handler's transaction. */
+  addDocument<T>(documentId: number, opts: DocumentOptions, body: () => T): T {
+    const props: [DocumentPropName, unknown][] = [["title", opts.title], ["tooltip", opts.tooltip], ["dirty", opts.dirty], ["interceptClose", opts.interceptClose]];
+    const recs = [wire.tx_add_document(opts.window ?? 0, documentId)];
+    for (const [prop, value] of props) if (value !== undefined) recs.push(documentPropRecord(documentId, prop, value));
+    if (opts.onSelected !== undefined) this._documentSelected.set(documentId, opts.onSelected);
+    if (opts.onCloseRequested !== undefined) this._documentCloseRequested.set(documentId, opts.onCloseRequested);
+    if (opts.onClosed !== undefined) this._documentClosed.set(documentId, opts.onClosed);
+    if (opts.onMoved !== undefined) this._documentMoved.set(documentId, opts.onMoved);
+    return runScope<T>("document", body, documentId, () => {
+      records().push(...recs);
+    });
+  }
+
+  /** A window's shared region (docs/doctabs-plan.md §1.7): a surface every
+   * document of the window shares, at `edge`; the body's root mounts INTO
+   * IT on exit. One per edge, after a document. */
+  addRegion<T>(regionId: number, edge: RegionEdgeName, optsOrBody: { window?: number } | (() => T), body?: () => T): T {
+    const [opts, run] = typeof optsOrBody === "function" ? [{} as { window?: number }, optsOrBody] : [optsOrBody, body];
+    if (run === undefined) throw new TypeError("kaya: addRegion(id, edge, opts, body) declares the region's root in its body");
+    const value = vocab(REGION_EDGE_NAMES, "edge", edge, '"leading"');
+    return runScope<T>("document", run, regionId, () => {
+      records().push(wire.tx_add_region(opts.window ?? 0, regionId, value));
     });
   }
 
@@ -7483,6 +7606,41 @@ export class App {
     if (kind === wire.OCC_SECTION_SELECTED) {
       const handler = this._sectionSelected.get(ident);
       if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_DOCUMENT_SELECTED || kind === wire.OCC_DOCUMENT_CLOSE_REQUESTED || kind === wire.OCC_NEW_DOCUMENT_REQUESTED) {
+      // NOT one-shot: ident is the document, or the window for the "+".
+      const table = kind === wire.OCC_DOCUMENT_SELECTED ? this._documentSelected : kind === wire.OCC_DOCUMENT_CLOSE_REQUESTED ? this._documentCloseRequested : this._newDocument;
+      const handler = table.get(ident);
+      if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_DOCUMENT_CLOSED) {
+      // One-shot: the document is gone; its registrations retire.
+      this._documentSelected.delete(ident);
+      this._documentCloseRequested.delete(ident);
+      this._documentMoved.delete(ident);
+      const handler = this._documentClosed.get(ident);
+      this._documentClosed.delete(ident);
+      if (handler !== undefined) this._dispatch(handler);
+      return;
+    }
+    if (kind === wire.OCC_DOCUMENT_MOVED) {
+      const tail = payload as wire.Decoded[];
+      const handler = this._documentMoved.get(ident);
+      if (handler !== undefined) this._dispatch(handler as Handler, Number(tail[0]), Number(tail[1]));
+      return;
+    }
+    if (kind === wire.OCC_DOCUMENTS_CLOSE_REQUESTED) {
+      const tail = payload as wire.Decoded[];
+      const handler = this._documentsCloseRequested.get(ident);
+      if (handler !== undefined) this._dispatch(handler as Handler, tail.slice(1).map(Number));
+      return;
+    }
+    if (kind === wire.OCC_DOCUMENTS_DETACHED) {
+      const tail = payload as wire.Decoded[];
+      const handler = this._documentsDetached.get(ident);
+      if (handler !== undefined) this._dispatch(handler as Handler, Number(tail[0]), tail.slice(2).map(Number));
       return;
     }
     if (kind === wire.OCC_BACK_REQUESTED) {

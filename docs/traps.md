@@ -19588,3 +19588,24 @@ the status line, with the textarea filling the room above them, as it should.
 Since 2026-10-27 the iOS shot hatches and names the keyboard's band from
 UIKit's keyboardWillChangeFrame end frame, as Compose's keyboardBand already
 did, and shot.when says where it covered (tools/check-flightrec.py, NP8).
+
+## The torn-out window JS could not hold (measured 2026-10-28)
+
+The core first named a torn-out tab's window with the internal bit set
+(1 << 63 | n), the range kaya's own widget ids use. The JS binding read the
+documents_detached window as the number 9223372036854776000, and the guest's
+next write to that window refused with "9223372036854776000 is not a u64 the
+wire carries"; the doctabs leg then failed at "detached a". OCaml's native int
+cannot hold it either. An id the core names and hands to the app is a guest
+id, so it comes from the top of the safe-integer range down
+(Scene::core_named_window), skipping any id a guest already holds.
+
+## A Mac guest has no key window (measured 2026-10-28)
+
+The lanes run every Mac guest as an accessory app that never activates, so
+NSApp.keyWindow is nil for the whole leg, and any read that starts from the
+key window falls through to its fallback every time. The document strip's
+fallback took the documents window by a dictionary's order and read back the
+window a tab had just left; it is the frontmost document window by
+NSApp.orderedWindows now, and the read's failure prints the app's activity,
+its key window and the document windows front to back.

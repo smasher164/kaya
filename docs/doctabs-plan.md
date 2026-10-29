@@ -47,8 +47,8 @@ RULED 2026-10-28 (the maintainer, choosing option C over the plan's first
 recommendation: "A seems like it's unintuitive no? Like most text editors only
 have the sidebar on the [w]hole screen?", then "yes"): a torn-out tab, or Move
 Tab to New Window, becomes a NEW kaya window. kaya makes the native window the
-platform asks for, gives it a fresh window id (core-allocated, in the internal
-range no guest id uses), moves the documents into it with their identity kept,
+platform asks for, gives it a fresh window id (core-allocated, the highest free
+id below the safe-integer bound, since JS and OCaml carry no wider), moves the documents into it with their identity kept,
 and reports `documents_detached(source, window, documents)`. The app builds
 that window's chrome and regions with the same code it built the first
 window's with, and its handlers bind to the new window at declaration

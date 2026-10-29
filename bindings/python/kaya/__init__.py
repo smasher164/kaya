@@ -2436,6 +2436,47 @@ def select_section(section_id: int, *, window: int = 0) -> None:
     _records().append(wire.tx_select_section(int(window), int(section_id)))
 
 
+def select_document(document_id: int) -> None:
+    """Make a document the active one (docs/doctabs-plan.md §2):
+    configuration, never echoes on_selected."""
+    _records().append(wire.tx_select_document(int(document_id)))
+
+
+def close_document(document_id: int) -> None:
+    """Close a document and forget its tree — also the close-veto
+    grammar's confirmation after on_close_requested. Never echoes
+    on_closed. A window left with no documents closes."""
+    _records().append(wire.tx_close_document(int(document_id)))
+
+
+def set_document_prop(document_id: int, prop: DocumentProp | str | int,
+                      value: str | bool | Signal[Any]) -> None:
+    """A document property after its add_document: a constant or a
+    Signal (the floor add_document's keywords ride)."""
+    _records().append(_document_prop(int(document_id), DocumentProp(prop), value))
+
+
+def _document_prop(document: int, prop: DocumentProp,
+                   value: str | bool | Signal[Any]) -> bytes:
+    if isinstance(value, Signal):
+        bind = {DocumentProp.TITLE: wire.tx_bind_document_title,
+                DocumentProp.TOOLTIP: wire.tx_bind_document_tooltip,
+                DocumentProp.DIRTY: wire.tx_bind_document_dirty,
+                DocumentProp.INTERCEPT_CLOSE: wire.tx_bind_document_intercept_close}[prop]
+        return bind(document, value.id)
+    if prop in (DocumentProp.TITLE, DocumentProp.TOOLTIP):
+        if not isinstance(value, str):
+            raise TypeError(f"kaya: a document's {prop.name.lower()} is a str or a Signal, "
+                            f"got {type(value).__name__}")
+        return (wire.tx_set_document_title if prop == DocumentProp.TITLE
+                else wire.tx_set_document_tooltip)(document, value)
+    if not isinstance(value, bool):
+        raise TypeError(f"kaya: a document's {prop.name.lower()} is a bool or a Signal, "
+                        f"got {type(value).__name__}")
+    return (wire.tx_set_document_dirty if prop == DocumentProp.DIRTY
+            else wire.tx_set_document_intercept_close)(document, value)
+
+
 def _vocab_missing(cls: Any, value: Any, what: str, hint: str) -> Any:
     """Every closed vocabulary's `_missing_`, once: a plain name is
     accepted, anything else is refused NAMING the vocabulary."""
@@ -2465,6 +2506,33 @@ class SectionsPresentation(enum.IntEnum):
     def _missing_(cls, value: object) -> Any:
         return _vocab_missing(cls, value, "a sections presentation",
                               "kaya.SectionsPresentation.BAR")
+
+
+class DocumentProp(enum.IntEnum):
+    """A document's properties (docs/doctabs-plan.md §2.2). Plain names
+    accepted too — `"dirty"`."""
+
+    TITLE = wire.DPROP_TITLE
+    TOOLTIP = wire.DPROP_TOOLTIP
+    DIRTY = wire.DPROP_DIRTY
+    INTERCEPT_CLOSE = wire.DPROP_INTERCEPT_CLOSE
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a document prop", "kaya.DocumentProp.DIRTY")
+
+
+class RegionEdge(enum.IntEnum):
+    """Where a window's shared region sits beside its documents
+    (docs/doctabs-plan.md §1.7). Plain names accepted too — `"leading"`."""
+
+    LEADING = wire.REGION_EDGE_LEADING
+    TRAILING = wire.REGION_EDGE_TRAILING
+    BOTTOM = wire.REGION_EDGE_BOTTOM
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a region edge", "kaya.RegionEdge.LEADING")
 
 
 class Appearance(enum.IntEnum):
@@ -6379,7 +6447,7 @@ def _window_props(window: int, title: str | None, width: float | None,
                   sections_presentation: SectionsPresentation | str | int | None,
                   appearance: Appearance | str | int | None,
                   inset: float | None, remember_frame: bool | None,
-                  fullscreen: bool | None = None) -> None:
+                  fullscreen: bool | None = None, new_document: bool | None = None) -> None:
     """The window construct's props — ONE place, so the scene scope and
     the live call cannot drift apart."""
     records = _records()
@@ -6396,6 +6464,8 @@ def _window_props(window: int, title: str | None, width: float | None,
             window, bool(remember_frame)))
     if fullscreen is not None:
         records.append(wire.tx_set_window_fullscreen(window, bool(fullscreen)))
+    if new_document is not None:
+        records.append(wire.tx_set_window_new_document(window, bool(new_document)))
     if panes is not None:
         records.append(wire.tx_set_window_panes(window, int(panes)))
     if sections_presentation is not None:
@@ -6462,7 +6532,9 @@ class _TxScope:
                  detent: Detent | str | int | None = None,
                  on_dismissed: Callable[[], object] | None = None,
                  on_dismiss_requested: Callable[[], object] | None = None,
-                 dock: bool = False, dock_player: Player | None = None) -> None:
+                 dock: bool = False, dock_player: Player | None = None,
+                 new_document: bool | None = None,
+                 surface_records: list[bytes] | None = None) -> None:
         # FIRST, so __del__ below can read them even if this __init__
         # raises on one of its own conversions.
         self._entered = False
@@ -6502,6 +6574,10 @@ class _TxScope:
         self._on_dismiss_requested = on_dismiss_requested
         self._dock = dock
         self._dock_player = dock_player
+        self._new_document = new_document
+        # A document's or a region's opening records (docs/doctabs-plan.md
+        # §2): the scope nests like a dock's and mounts into it on exit.
+        self._surface_records = surface_records
 
     def __del__(self) -> None:
         # A construct BUILT AND NEVER ENTERED emits nothing and says
@@ -6583,6 +6659,16 @@ class _TxScope:
                 self._app._dismiss_requested[self._window] = (
                     self._on_dismiss_requested)
             return self
+        if self._surface_records is not None:
+            self._nested = _tx is not None
+            if not self._nested:
+                _tx = []
+                _journal = {}
+            self._outer = (_recording, _pending_root)
+            _recording = True
+            _pending_root = None
+            _records().extend(self._surface_records)
+            return self
         if self._dock:
             # A dock's scene scope (docs/styling-pass-plan.md Y8): the body's
             # root mounts INTO the dock on exit.
@@ -6635,13 +6721,14 @@ class _TxScope:
             self._window, self._title, self._width, self._height,
             self._veto_close, self._dirty, self._panes,
             self._sections_presentation, self._appearance, self._inset,
-            self._remember_frame, self._fullscreen)
+            self._remember_frame, self._fullscreen, self._new_document)
         return self
 
     def __exit__(self, exc_type: Any, exc: Any,
                  tb: Any) -> Literal[False]:
         global _tx, _recording, _journal, _pending_root
-        if self._section or self._push or self._sheet or self._dock:
+        if (self._section or self._push or self._sheet or self._dock
+                or self._surface_records is not None):
             # Submit only if this scope opened its own transaction:
             # inside a handler the ambient build owns commit and
             # rollback.
@@ -6654,8 +6741,8 @@ class _TxScope:
                 return False
             if root is None:
                 raise KayaStateError(
-                    "kaya: push_entry()/add_section()/sheet()/dock() body declared "
-                    "no root container")
+                    "kaya: push_entry()/add_section()/sheet()/dock()/add_document()/"
+                    "add_region() body declared no root container")
             _records().append(wire.tx_mount(self._window, root.id))
             if not self._nested:
                 records, _tx = cast("list[bytes]", _tx), None
@@ -8111,6 +8198,15 @@ class App:
         self._sheet_dismissed: dict[int, Callable[[], object]] = {}
         self._dismiss_requested: dict[int, Callable[[], object]] = {}
         self._section_selected: dict[int, Callable[[], object]] = {}
+        # Per-document handlers, keyed by document id, and the window-level
+        # document handlers, keyed by window id (docs/doctabs-plan.md §2.3).
+        self._document_selected: dict[int, Callable[[], object]] = {}
+        self._document_close_requested: dict[int, Callable[[], object]] = {}
+        self._document_closed: dict[int, Callable[[], object]] = {}
+        self._document_moved: dict[int, Callable[[int, int], object]] = {}
+        self._new_document: dict[int, Callable[[], object]] = {}
+        self._documents_close_requested: dict[int, Callable[[list[int]], object]] = {}
+        self._documents_detached: dict[int, Callable[[int, list[int]], object]] = {}
         # Per-window lifecycle handlers, keyed by window id.
         self._close_requested: dict[int, Callable[[], object]] = {}
         self._window_closed: dict[int, Callable[[], object]] = {}
@@ -8257,7 +8353,11 @@ class App:
                       on_closed: Callable[[], object] | None = None,
                       on_undone: Callable[[str, UndoDelta], object] | None = None,
                       on_redone: Callable[[str, UndoDelta], object] | None = None,
-                      on_fullscreen_changed: Callable[[bool], object] | None = None
+                      on_fullscreen_changed: Callable[[bool], object] | None = None,
+                      new_document: bool | None = None,
+                      on_new_document: Callable[[], object] | None = None,
+                      on_documents_close_requested: Callable[[list[int]], object] | None = None,
+                      on_documents_detached: Callable[[int, list[int]], object] | None = None
                       ) -> _TxScope:
         """An auxiliary surface's scene scope: create_window plus its
         props on entry, and the single top-level container mounts INTO IT
@@ -8275,12 +8375,15 @@ class App:
         if on_fullscreen_changed is not None:
             self._fullscreen_changed[int(window_id)] = on_fullscreen_changed
         self._register_history(window_id, on_undone, on_redone)
+        self._register_documents(int(window_id), on_new_document,
+                                 on_documents_close_requested, on_documents_detached)
         return _TxScope(
             self, mount_on_exit=True, window=window_id, create=True,
             title=title, width=width, height=height, veto_close=veto_close,
             dirty=dirty, remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
-            appearance=appearance, inset=inset, fullscreen=fullscreen)
+            appearance=appearance, inset=inset, fullscreen=fullscreen,
+            new_document=new_document)
 
     def window(self, title: str | None = None, *, width: float | None = None,
                height: float | None = None, veto_close: bool | None = None,
@@ -8295,6 +8398,10 @@ class App:
                on_undone: Callable[[str, UndoDelta], object] | None = None,
                on_redone: Callable[[str, UndoDelta], object] | None = None,
                on_fullscreen_changed: Callable[[bool], object] | None = None,
+               new_document: bool | None = None,
+               on_new_document: Callable[[], object] | None = None,
+               on_documents_close_requested: Callable[[list[int]], object] | None = None,
+               on_documents_detached: Callable[[int, list[int]], object] | None = None,
                window_id: int = 0) -> _TxScope | _LiveWindow:
         """The scene scope: an ambient transaction whose single top-level
         container mounts into the default window on exit. `title` names
@@ -8339,7 +8446,16 @@ class App:
         `fullscreen` says whether the window fills its screen, and
         on_fullscreen_changed(on) fires when the USER changes it through
         the platform's own door; the app's own write never echoes
-        (docs/fullscreen-plan.md)."""
+        (docs/fullscreen-plan.md).
+
+        `new_document` draws the platform's "+" beside this window's
+        documents (docs/doctabs-plan.md §2), and on_new_document() fires per
+        press. on_documents_close_requested(documents) fires when the user
+        closes the native window while any document it shows arms
+        intercept_close, and NOTHING HAS CLOSED; on_documents_detached(window,
+        documents) fires when the user moves documents out into a new native
+        window, which kaya names, and the app builds that window's chrome
+        and regions as it did this one's."""
         window_id = int(window_id)
         if on_close_requested is not None:
             self._close_requested[window_id] = on_close_requested
@@ -8348,6 +8464,8 @@ class App:
         if on_fullscreen_changed is not None:
             self._fullscreen_changed[window_id] = on_fullscreen_changed
         self._register_history(window_id, on_undone, on_redone)
+        self._register_documents(window_id, on_new_document,
+                                 on_documents_close_requested, on_documents_detached)
         if _tx is not None:
             # THE LIVE FORM: a transaction is already open, so the props
             # join it and there is nothing to enter. The thread check is
@@ -8355,7 +8473,7 @@ class App:
             _require_app_thread()
             _window_props(window_id, title, width, height, veto_close,
                           dirty, panes, sections_presentation, appearance,
-                          inset, remember_frame, fullscreen)
+                          inset, remember_frame, fullscreen, new_document)
             return _LiveWindow()
         return _TxScope(
             self, mount_on_exit=True, window=window_id,
@@ -8363,7 +8481,20 @@ class App:
             veto_close=veto_close, dirty=dirty,
             remember_frame=remember_frame, panes=panes,
             sections_presentation=sections_presentation,
-            appearance=appearance, inset=inset, fullscreen=fullscreen)
+            appearance=appearance, inset=inset, fullscreen=fullscreen,
+            new_document=new_document)
+
+    def _register_documents(self, window_id: int,
+                            on_new_document: Callable[[], object] | None,
+                            on_close: Callable[[list[int]], object] | None,
+                            on_detached: Callable[[int, list[int]], object] | None) -> None:
+        """Seat a window's document handlers. Per window and NOT one-shot."""
+        if on_new_document is not None:
+            self._new_document[window_id] = on_new_document
+        if on_close is not None:
+            self._documents_close_requested[window_id] = on_close
+        if on_detached is not None:
+            self._documents_detached[window_id] = on_detached
 
     def build(self) -> _TxScope:
         """An ambient transaction without the mount — for mutations
@@ -8450,6 +8581,53 @@ class App:
             self, mount_on_exit=True, window=section_id, section=True,
             title=title, symbol=None if symbol is None else _symbol_value(symbol),
             badge=badge, on_selected=on_selected, host_window=window)
+
+    def add_document(self, document_id: int, *, title: str | Signal[Any] | None = None,
+                     tooltip: str | Signal[Any] | None = None,
+                     dirty: bool | Signal[Any] | None = None,
+                     intercept_close: bool | Signal[Any] | None = None,
+                     on_selected: Callable[[], object] | None = None,
+                     on_close_requested: Callable[[], object] | None = None,
+                     on_closed: Callable[[], object] | None = None,
+                     on_moved: Callable[[int, int], object] | None = None,
+                     window: int = 0) -> _TxScope:
+        """A document's scene scope (docs/doctabs-plan.md §2): the single
+        top-level container mounts INTO IT on exit. Document ids are
+        guest-allocated in the shared surface namespace; the first one a
+        window gets is active.
+
+        on_selected() fires each time the USER makes this document active,
+        never for kaya.select_document. on_close_requested() fires per user
+        close while intercept_close is armed, and NOTHING HAS CLOSED —
+        answer with kaya.close_document to agree. on_closed() fires when the
+        user closed it unarmed, never for kaya.close_document.
+        on_moved(window, index) fires when the user drags it to another
+        place or into another window."""
+        did = int(document_id)
+        records = [wire.tx_add_document(int(window), did)]
+        if on_selected is not None:
+            self._document_selected[did] = on_selected
+        if on_close_requested is not None:
+            self._document_close_requested[did] = on_close_requested
+        if on_closed is not None:
+            self._document_closed[did] = on_closed
+        if on_moved is not None:
+            self._document_moved[did] = on_moved
+        for prop, value in ((DocumentProp.TITLE, title), (DocumentProp.TOOLTIP, tooltip),
+                            (DocumentProp.DIRTY, dirty),
+                            (DocumentProp.INTERCEPT_CLOSE, intercept_close)):
+            if value is not None:
+                records.append(_document_prop(did, prop, value))
+        return _TxScope(self, mount_on_exit=True, window=did, surface_records=records)
+
+    def add_region(self, region_id: int, edge: RegionEdge | str | int, *,
+                   window: int = 0) -> _TxScope:
+        """A window's shared region (docs/doctabs-plan.md §1.7): a surface
+        every document of the window shares, at `edge`; the single top-level
+        container mounts INTO IT on exit. One per edge, after a document."""
+        records = [wire.tx_add_region(int(window), int(region_id), int(RegionEdge(edge)))]
+        return _TxScope(self, mount_on_exit=True, window=int(region_id),
+                        surface_records=records)
 
     def menu(self, label: TextSource, *,
              enabled: bool | Signal[Any] | None = None,
@@ -8698,6 +8876,41 @@ class App:
                 handler = self._section_selected.get(ident)
                 if handler is not None:
                     self._dispatch(handler)
+                continue
+            if kind in (wire.OCC_DOCUMENT_SELECTED, wire.OCC_DOCUMENT_CLOSE_REQUESTED,
+                        wire.OCC_NEW_DOCUMENT_REQUESTED):
+                # NOT one-shot (docs/doctabs-plan.md §2.3): ident is the
+                # document, or the window for the "+".
+                table = {wire.OCC_DOCUMENT_SELECTED: self._document_selected,
+                         wire.OCC_DOCUMENT_CLOSE_REQUESTED: self._document_close_requested,
+                         wire.OCC_NEW_DOCUMENT_REQUESTED: self._new_document}[kind]
+                handler = table.get(ident)
+                if handler is not None:
+                    self._dispatch(handler)
+                continue
+            if kind == wire.OCC_DOCUMENT_CLOSED:
+                # One-shot: the document is gone; its registrations retire.
+                for gone in (self._document_selected, self._document_close_requested,
+                             self._document_moved):
+                    gone.pop(ident, None)
+                handler = self._document_closed.pop(ident, None)
+                if handler is not None:
+                    self._dispatch(handler)
+                continue
+            if kind == wire.OCC_DOCUMENT_MOVED:
+                handler = self._document_moved.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, int(payload[0]), int(payload[1]))
+                continue
+            if kind == wire.OCC_DOCUMENTS_CLOSE_REQUESTED:
+                handler = self._documents_close_requested.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, [int(d) for d in payload[1:]])
+                continue
+            if kind == wire.OCC_DOCUMENTS_DETACHED:
+                handler = self._documents_detached.get(ident)
+                if handler is not None:
+                    self._dispatch(handler, int(payload[0]), [int(d) for d in payload[2:]])
                 continue
             if kind == wire.OCC_FULLSCREEN_CHANGED:
                 handler = self._fullscreen_changed.get(ident)

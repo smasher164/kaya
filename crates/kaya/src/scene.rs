@@ -1226,6 +1226,8 @@ pub(crate) struct Scene {
     /// parent at its end.
     segment_symbol_dirty: Vec<WidgetId>,
     next_internal: u64,
+    /// How many ids below spec::MAX_SAFE_INTEGER the core has named.
+    core_named: u64,
     next_when_site: u64,
     next_scope: u64,
     /// One undo ledger per window (docs/undo-plan.md §3). Keyed by the
@@ -8205,6 +8207,18 @@ impl Scene {
     }
 
     /// Any live surface id, of every kind: the one namespace's freshness test.
+    /// A window the core names reaches every binding, so it is a guest-sized
+    /// id: the highest free one below spec::MAX_SAFE_INTEGER, counting down
+    /// (docs/traps.md, the torn-out window JS could not hold).
+    fn core_named_window(&mut self) -> WindowId {
+        let mut id = crate::spec::MAX_SAFE_INTEGER as u64 - self.core_named;
+        while self.surface_exists(WindowId(id)) {
+            id -= 1;
+        }
+        self.core_named = crate::spec::MAX_SAFE_INTEGER as u64 - id + 1;
+        WindowId(id)
+    }
+
     fn surface_exists(&self, id: WindowId) -> bool {
         self.windows.contains(&id)
             || self.nav_entries.contains_key(&id)
@@ -8281,11 +8295,10 @@ impl Scene {
     }
 
     /// The user tore documents out of `source` into a native window the
-    /// platform made: the core names that window (an id in the internal
-    /// range, which no guest id uses) and moves the documents into it.
+    /// platform made: the core names that window and moves the documents
+    /// into it.
     pub(crate) fn user_detached_documents(&mut self, source: WindowId, documents: &[WindowId]) -> WindowId {
-        self.next_internal += 1;
-        let window = WindowId(INTERNAL_BIT | self.next_internal);
+        let window = self.core_named_window();
         self.windows.insert(window);
         for (at, document) in documents.iter().enumerate() {
             assert!(
@@ -14989,6 +15002,23 @@ mod tests {
         ]);
     }
 
+    /// A core-named window skips an id a guest already holds and never
+    /// passes the safe range a JS number carries (docs/traps.md).
+    #[test]
+    fn a_core_named_window_is_a_free_safe_id() {
+        let top = crate::spec::MAX_SAFE_INTEGER as u64;
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(top) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(8) },
+            TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(9) },
+        ]);
+        let first = scene.user_detached_documents(DEFAULT_WINDOW, &[WindowId(8)]);
+        assert_eq!(first, WindowId(top - 1));
+        let second = scene.user_detached_documents(DEFAULT_WINDOW, &[WindowId(9)]);
+        assert_eq!(second, WindowId(top - 2));
+    }
+
     /// docs/doctabs-plan.md §1.2 (Q1 ruled anew): a tear-out is a new window
     /// the core names, the documents keep their ids and move into it, and a
     /// drag into another window moves one document between existing windows.
@@ -15001,7 +15031,7 @@ mod tests {
             TxOp::AddDocument { window: DEFAULT_WINDOW, document: WindowId(10) },
         ]);
         let torn = scene.user_detached_documents(DEFAULT_WINDOW, &[WindowId(9)]);
-        assert!(torn.0 & INTERNAL_BIT != 0, "a core-made window id is in the internal range");
+        assert_eq!(torn.0, crate::spec::MAX_SAFE_INTEGER as u64, "a core-named window is the top safe id");
         assert_eq!(scene.documents_of(torn), vec![WindowId(9)]);
         assert_eq!(scene.documents_of(DEFAULT_WINDOW), vec![WindowId(8), WindowId(10)]);
         assert_eq!(scene.active_document_of(torn), Some(WindowId(9)));

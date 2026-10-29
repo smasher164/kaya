@@ -381,8 +381,8 @@ ORDER = [
     ("richrows", ("rust", "python", "js", "go", "csharp", "java", "swift",
                   "ocaml", "haskell")),
     ("sheet", LANGS),
-    # docs/doctabs-plan.md §6 D2: rust-only at depth.
-    ("doctabs", ("rust",)),
+    # docs/doctabs-plan.md §6 D2: the bindings join as their sugar does.
+    ("doctabs", ("rust", "python", "js")),
     # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): every
     # binding's guest under the everyday locale, then under de-DE and ar-EG
     # through the KAYA_LOCALE knob (SCENE_LOCALE).
