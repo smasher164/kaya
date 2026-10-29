@@ -385,7 +385,10 @@ same kaya window; `page-reordered`, `page-attached` and `page-detached` feed
 `document_moved`; `notify::selected-page` (user acts only) and window focus
 feed `document_selected`. The per-tab menu (AdwTabBar's `menu-model`) carries
 Move to New Window and Close, as GNOME's HIG asks. AdwTabView's own shortcuts
-(Ctrl+Tab, Ctrl+Page Up/Down, Alt+1..9) come free.
+(Ctrl+Tab, Ctrl+Page Up/Down, Alt+1..9) come free. The close alert is
+transient for its window and modal (xprop read WM_TRANSIENT_FOR and
+_NET_WM_STATE_MODAL); it lands at the top left only on the lane's X server,
+which runs no window manager to place it (docs/probes/doctabs-dialogs-2026-10-29).
 
 **WinUI.** A TabView in each native window. kaya's WinUI windows already
 replace the caption with a TitleBar control (crates/kaya/src/winui/mod.rs,
@@ -405,7 +408,10 @@ regenerated file.
 
 **iOS.** The top bar's documents button opens a `.sheet` with medium and large
 detents holding a List; rows as §1.6, `.swipeActions` for close, `.onMove` for
-reorder in edit mode. The navigation title is the active document's.
+reorder in edit mode. The navigation title is the active document's. A close
+alert over the sheet shows the rows lensed through its glass; a plain UIKit
+alert over a UIKit sheet does the same, so that is iOS 26's material, not
+kaya (docs/probes/doctabs-dialogs-2026-10-29, measured 2026-10-29).
 
 **Android (Compose).** The top app bar's documents action opens a
 ModalBottomSheet with a LazyColumn of the same rows and a close IconButton per
