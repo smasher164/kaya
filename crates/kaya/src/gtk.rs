@@ -574,7 +574,7 @@ fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
     use gtk4::prelude::TextTagExt;
     let Some(name) = rich_tag_attr_name(tag_name) else { return };
     match name.as_str() {
-        "bold" => tag.set_weight(700),
+        "bold" => tag.set_weight(bold_weight(view)),
         "italic" => tag.set_style(gtk4::pango::Style::Italic),
         "underline" => tag.set_underline(gtk4::pango::Underline::Single),
         "strike" => tag.set_strikethrough(true),
@@ -582,7 +582,7 @@ fn style_rich_tag(view: &gtk4::TextView, tag: &gtk4::TextTag, tag_name: &str) {
         // behind the monospace, and the one thing on this backend that also
         // reaches the accessibility tree as a `bg-color` run.
         "code" => {
-            tag.set_family(Some("monospace"));
+            tag.set_family(Some(&code_family(view)));
             tag.set_background_rgba(Some(&rich_ground(view, CODE_GROUND_ALPHA)));
         }
         "link" => {
@@ -1047,14 +1047,19 @@ fn label_rich_attrs(label: &gtk4::Label, name: &str) -> Vec<gtk4::pango::Attribu
     use gtk4::pango;
     let one = |attr: pango::Attribute| vec![attr];
     match name {
-        "bold" => one(pango::AttrInt::new_weight(pango::Weight::Bold).into()),
+        "bold" => one(
+            pango::AttrInt::new_weight(unsafe {
+                <pango::Weight as gtk4::glib::translate::FromGlib<i32>>::from_glib(bold_weight(label))
+            })
+            .into(),
+        ),
         "italic" => one(pango::AttrInt::new_style(pango::Style::Italic).into()),
         "underline" => one(pango::AttrInt::new_underline(pango::Underline::Single).into()),
         "strike" => one(pango::AttrInt::new_strikethrough(true).into()),
         "code" => {
             let ground = rich_ground(label, CODE_GROUND_ALPHA);
             vec![
-                pango::AttrString::new_family("monospace").into(),
+                pango::AttrString::new_family(&code_family(label)).into(),
                 pango::AttrColor::new_background(
                     pango_channel(ground.red()),
                     pango_channel(ground.green()),
@@ -6482,6 +6487,8 @@ struct CoreState {
     /// apply arm applies it. Setting it on a dialog already on screen is
     /// silently ignored.
     live_file_dialog: std::rc::Rc<RefCell<Option<GtkLiveFileDialog>>>,
+    /// The open font picker's window title (docs/font-picker-plan.md §4.3).
+    live_font_dialog: std::rc::Rc<RefCell<Option<String>>>,
     pending_dialog_dir: std::rc::Rc<RefCell<Option<String>>>,
     /// The command-catalog registry (DESIGN.md, Menus). Rc'd so the
     /// GSimpleAction handlers reach the mirror without borrowing CORE.
@@ -10088,12 +10095,46 @@ struct Face {
     family: String,
     scale: f64,
     base: Option<(f64, bool)>,
+    /// docs/font-picker-plan.md §2.3: the face, None and false unset.
+    weight: Option<u16>,
+    italic: bool,
+    width: Option<u8>,
 }
 
 impl Default for Face {
     fn default() -> Self {
-        Face { mono: false, family: String::new(), scale: 1.0, base: None }
+        Face { mono: false, family: String::new(), scale: 1.0, base: None, weight: None, italic: false, width: None }
     }
+}
+
+impl Face {
+    fn face_set(&self) -> bool {
+        self.weight.is_some() || self.italic || self.width.is_some()
+    }
+
+    /// The face asked for, the role's weight standing in as 400 for matching.
+    fn want(&self) -> crate::protocol::FontFace {
+        crate::protocol::FontFace {
+            weight: self.weight.unwrap_or(400),
+            italic: self.italic,
+            width: self.width.unwrap_or(5),
+        }
+    }
+}
+
+/// The weight a rich text's Bold draws at over a face: at least 700
+/// (docs/font-picker-plan.md Q3), and the family a Code run keeps: a
+/// document's own named fixed-pitch family, else the platform's monospace.
+const FACE_BOLD_KEY: &str = "kaya-face-bold";
+const FACE_CODE_KEY: &str = "kaya-face-code";
+
+fn bold_weight(widget: &impl IsA<gtk4::Widget>) -> i32 {
+    unsafe { widget.as_ref().data::<i32>(FACE_BOLD_KEY).map(|p| *p.as_ref()) }.unwrap_or(700)
+}
+
+fn code_family(widget: &impl IsA<gtk4::Widget>) -> String {
+    unsafe { widget.as_ref().data::<String>(FACE_CODE_KEY).map(|p| p.as_ref().clone()) }
+        .unwrap_or_else(|| "monospace".to_owned())
 }
 
 const FACE_CLASS: &str = "kaya-face-";
@@ -10133,9 +10174,26 @@ fn widget_font_size(widget: &gtk4::Widget) -> Option<(f64, bool)> {
 fn set_face(core: &mut CoreState, id: u64, widget: &gtk4::Widget, edit: impl FnOnce(&mut Face)) {
     let face = core.faces.entry(id).or_default();
     edit(face);
+    let code = fontpick::pango_family(&face.family)
+        .filter(|f| f.is_monospace())
+        .map(|f| f.name().to_string())
+        .unwrap_or_else(|| "monospace".to_owned());
+    let bold = i32::from(face.weight.unwrap_or(0)).max(700);
     unsafe {
         widget.set_data(FACE_ASKED_KEY, face.family.clone());
         widget.set_data(FACE_ID_KEY, id);
+        widget.set_data(FACE_BOLD_KEY, bold);
+        widget.set_data(FACE_CODE_KEY, code.clone());
+    }
+    if let Some(view) = widget.downcast_ref::<gtk4::TextView>() {
+        use gtk4::prelude::{TextBufferExt, TextTagExt};
+        let table = view.buffer().tag_table();
+        if let Some(tag) = table.lookup(&format!("{RICH_PREFIX}bold")) {
+            tag.set_weight(bold);
+        }
+        if let Some(tag) = table.lookup(&format!("{RICH_PREFIX}code")) {
+            tag.set_family(Some(&code));
+        }
     }
     widget.add_css_class(&format!("{FACE_CLASS}{id}"));
     if face.scale != 1.0 && face.base.is_none() {
@@ -10165,12 +10223,36 @@ fn set_face(core: &mut CoreState, id: u64, widget: &gtk4::Widget, edit: impl FnO
 /// One widget's declarations: an installed family by name, else the
 /// fontconfig `monospace` alias for the role, and the scaled size once the
 /// base is measured.
-fn face_rule(face: &Face, present: bool) -> String {
+fn face_rule(face: &Face, present: bool, matched: Option<crate::protocol::FontFace>) -> String {
     let mut rule = Vec::new();
     if present && !face.family.is_empty() {
         rule.push(format!("font-family: {};", css_string(&face.family)));
     } else if face.mono {
         rule.push("font-family: monospace;".to_owned());
+    }
+    // docs/font-picker-plan.md §2.4: the installed face the core's CSS rule
+    // matched, asked for exactly, since fontconfig matches by distance (550 on
+    // IBM Plex Sans answered its 500, measured); a bold the face lacks is
+    // asked at the weight wanted, which fontconfig emboldens, and a slope it
+    // lacks as italic, which fontconfig shears.
+    if face.face_set() {
+        let want = face.want();
+        let (weight, width) = match matched {
+            Some(m) => {
+                let (_, bold) = crate::protocol::FontFace::synthesis(m, want);
+                (if bold { want.weight } else { m.weight }, m.width)
+            }
+            None => (want.weight, want.width),
+        };
+        if face.weight.is_some() || matched.is_some() {
+            rule.push(format!("font-weight: {weight};"));
+        }
+        if face.italic {
+            rule.push("font-style: italic;".to_owned());
+        }
+        if face.width.is_some() || matched.is_some_and(|m| m.width != 5) {
+            rule.push(format!("font-stretch: {};", fontpick::stretch_keyword(width)));
+        }
     }
     if let (true, Some((size, absolute))) = (face.scale != 1.0, face.base) {
         let unit = if absolute { "px" } else { "pt" };
@@ -10186,16 +10268,36 @@ mod face_tests {
     #[test]
     fn gtk_face_rule_falls_back_to_the_role_and_scales_the_measured_size() {
         let mut face = Face { mono: true, family: "Menlo".into(), ..Face::default() };
-        assert_eq!(face_rule(&face, true), "font-family: \"Menlo\";");
-        assert_eq!(face_rule(&face, false), "font-family: monospace;");
+        assert_eq!(face_rule(&face, true, None), "font-family: \"Menlo\";");
+        assert_eq!(face_rule(&face, false, None), "font-family: monospace;");
         face.mono = false;
-        assert_eq!(face_rule(&face, false), "");
+        assert_eq!(face_rule(&face, false, None), "");
         face.scale = 2.0;
-        assert_eq!(face_rule(&face, false), "", "no size rule before the base is measured");
+        assert_eq!(face_rule(&face, false, None), "", "no size rule before the base is measured");
         face.base = Some((11.0, false));
-        assert_eq!(face_rule(&face, false), "font-size: 22.000pt;");
+        assert_eq!(face_rule(&face, false, None), "font-size: 22.000pt;");
         face.base = Some((14.0, true));
-        assert_eq!(face_rule(&face, true), "font-family: \"Menlo\"; font-size: 28.000px;");
+        assert_eq!(face_rule(&face, true, None), "font-family: \"Menlo\"; font-size: 28.000px;");
+    }
+
+    /// docs/font-picker-plan.md §2.4: the matched face asked for exactly, a
+    /// missing bold at the weight wanted, a missing slope as italic.
+    #[test]
+    fn gtk_face_rule_asks_for_the_matched_face() {
+        use crate::protocol::FontFace;
+        let f = |weight, italic, width| FontFace { weight, italic, width };
+        let face = Face { family: "IBM Plex Sans".into(), weight: Some(550), ..Face::default() };
+        assert_eq!(
+            face_rule(&face, true, Some(f(600, false, 5))),
+            "font-family: \"IBM Plex Sans\"; font-weight: 600;"
+        );
+        let face = Face { family: "Monaco".into(), weight: Some(700), italic: true, ..Face::default() };
+        assert_eq!(
+            face_rule(&face, true, Some(f(400, false, 5))),
+            "font-family: \"Monaco\"; font-weight: 700; font-style: italic;"
+        );
+        let face = Face { mono: true, width: Some(3), ..Face::default() };
+        assert_eq!(face_rule(&face, false, None), "font-family: monospace; font-stretch: condensed;");
     }
 }
 
@@ -10204,7 +10306,15 @@ fn write_face_sheet(core: &mut CoreState) {
     let mut sheet = String::new();
     for (id, face) in &core.faces {
         let present = installed.iter().any(|f| f.eq_ignore_ascii_case(&face.family));
-        let rule = face_rule(face, present);
+        let matched = if present && face.face_set() {
+            fontpick::pango_family(&face.family).and_then(|family| {
+                let faces: Vec<_> = fontpick::real_faces(&family).into_iter().map(|(f, _)| f).collect();
+                crate::protocol::FontFace::matched(&faces, face.want())
+            })
+        } else {
+            None
+        };
+        let rule = face_rule(face, present, matched);
         if !rule.is_empty() {
             sheet.push_str(&format!(".{FACE_CLASS}{id} {{ {rule} }}\n"));
         }
@@ -17310,7 +17420,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
         ApplyOp::ListFontFamilies => list_font_families(core),
-        ApplyOp::PresentFontDialog(_) | ApplyOp::ListFontFaces { .. } => crate::depth_stub("fontpick"),
+        ApplyOp::PresentFontDialog(spec) => fontpick::present(core, spec),
+        ApplyOp::ListFontFaces { family } => fontpick::list_font_faces(core, &family),
         ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0),
         ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0),
         ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0),
@@ -18607,7 +18718,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (
                     NativeWidget::Label(_) | NativeWidget::Link(_) | NativeWidget::Entry(_) | NativeWidget::Textarea(..),
-                    Prop::Monospaced | Prop::Family | Prop::TextScale,
+                    Prop::Monospaced
+                    | Prop::Family
+                    | Prop::TextScale
+                    | Prop::FontWeight
+                    | Prop::FontItalic
+                    | Prop::FontWidth,
                     value,
                 ) => {
                     let target = match widget {
@@ -18620,10 +18736,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         (Prop::TextScale, Value::F64(scale)) => {
                             face.scale = scale;
                         }
+                        (Prop::FontWeight, Value::F64(weight)) => face.weight = Some(weight as u16),
+                        (Prop::FontItalic, Value::Bool(on)) => face.italic = on,
+                        (Prop::FontWidth, Value::F64(width)) => face.width = Some(width as u8),
                         _ => {}
                     });
                 }
-                (_, Prop::FontWeight | Prop::FontItalic | Prop::FontWidth, _) => crate::depth_stub("fontpick"),
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }
@@ -21043,6 +21161,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 dead_subtrees: Vec::new(),
                 live_alert: std::rc::Rc::new(RefCell::new(None)),
                 live_file_dialog: std::rc::Rc::new(RefCell::new(None)),
+                live_font_dialog: std::rc::Rc::new(RefCell::new(None)),
                 pending_dialog_dir: std::rc::Rc::new(RefCell::new(None)),
                 menus: Rc::new(RefCell::new(MenuRegistry::default())),
                 menu_models: HashMap::new(),
@@ -22501,6 +22620,71 @@ impl crate::harness::Stage for GtkStage {
             let family = face.family();
             let name = desc.family().map(|f| f.to_string()).unwrap_or_else(|| family.name().to_string());
             Ok(crate::harness::FaceRead { monospaced: family.is_monospace(), family: name, asked })
+        })
+    }
+
+    /// docs/font-picker-plan.md §2.5: the font Pango resolved, a label's off
+    /// its layout's first run, an entry's off its context, a textarea's range
+    /// off the view's description with the tags at its start applied.
+    fn font_face(
+        &self, target: crate::harness::Target, range: Option<crate::harness::TextRange>,
+    ) -> Result<crate::harness::DrawnFace, String> {
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let font = if let Some(label) = widget.downcast_ref::<gtk4::Label>() {
+                if range.is_some() {
+                    return Err("a range reads a textarea's text; a label has none".to_owned());
+                }
+                label.layout().iter().run().map(|run| run.item().analysis().font())
+            } else {
+                let view = widget.downcast_ref::<gtk4::TextView>().cloned();
+                let context = widget.pango_context();
+                let mut desc = context.font_description().ok_or("Pango resolved no description for it")?;
+                if let (Some(view), Some(range)) = (view, range) {
+                    use gtk4::prelude::{TextBufferExt, TextTagExt};
+                    let buffer = view.buffer();
+                    let iter = buffer.iter_at_offset(range.start as i32);
+                    for tag in iter.tags() {
+                        if tag.is_weight_set() {
+                            desc.set_weight(unsafe {
+                                <gtk4::pango::Weight as gtk4::glib::translate::FromGlib<i32>>::from_glib(tag.weight())
+                            });
+                        }
+                        if tag.is_style_set() {
+                            desc.set_style(tag.style());
+                        }
+                        if tag.is_family_set() {
+                            if let Some(family) = tag.family() {
+                                desc.set_family(&family);
+                            }
+                        }
+                    }
+                } else if range.is_some() {
+                    return Err("a range reads a textarea's text".to_owned());
+                }
+                context.load_font(&desc)
+            }
+            .ok_or("Pango resolved no font for it")?;
+            fontpick::drawn(&font)
+        })
+    }
+
+    fn font_dialog_families(&self) -> Result<Option<Vec<(String, bool)>>, String> {
+        Self::on_main(move |core| {
+            let Some(window) = fontpick::dialog_window(core) else { return Ok(None) };
+            let families = fontpick::listed_families(&window)?;
+            Ok(Some(families.into_iter().map(|f| {
+                let fixed = fontpick::measured_fixed_pitch(&f);
+                (f, fixed)
+            }).collect()))
+        })
+    }
+
+    fn pick_font(&self, choice: Option<&crate::protocol::FontChoice>) -> Result<(), String> {
+        let choice = choice.cloned();
+        Self::on_main(move |core| {
+            let window = fontpick::dialog_window(core).ok_or("no font picker is open")?;
+            fontpick::pick(&window, choice.as_ref())
         })
     }
 
@@ -30488,6 +30672,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
 mod capture;
 mod secure_text;
 mod doctabs;
+mod fontpick;
 mod soup_drain;
 
 mod gtk_media {

@@ -25,7 +25,7 @@ collection); `expect_face face`, `pick_font` and `expect_font_dialog`; the
 watched red (an echoed prop, a matcher rounding down, the shear dropped, the
 collection not chosen).
 
-  - **DEPTH STUB: fontpick on gtk** — GtkFontDialog, Pango's faces, the reads, the emoji family out of the monospace filter.
+  - ~~**DEPTH STUB: fontpick on gtk**~~ — BUILT 2026-10-29: the face through the face sheet's CSS, asking fontconfig for the installed face the core's CSS rule matched (fontconfig matches by distance: 550 on IBM Plex Sans answered its 500, measured), a missing slope or bold left to fontconfig's shear and embolden; Bold at least 700 and a Code run in the document's own fixed-pitch family; GtkFontDialog with choose_family or choose_font (its size row ignored, Q6); the code-only filter adding Latin coverage to Pango's monospace flag, which passed Noto Color Emoji; the reads off Pango's resolved font (a synthesized slope resolves to no face, measured); fontpick-rust green on x11 and wayland, five negatives watched red.
   - **DEPTH STUB: fontpick on swiftui/ios** — UIFontPickerViewController through the XCUITest driver, the Italic-over-Light weight fix.
   - **DEPTH STUB: fontpick on winui** — the kaya-drawn ContentDialog over DirectWrite's faces.
   - **DEPTH STUB: fontpick on compose** — the kaya-drawn bottom sheet over SystemFonts.

@@ -507,6 +507,7 @@ PY
         && run_exact_test gtk::chrome_tests::a_sessions_own_layout_is_followed \\
         && run_exact_test \\
             gtk::face_tests::gtk_face_rule_falls_back_to_the_role_and_scales_the_measured_size \\
+        && run_exact_test gtk::face_tests::gtk_face_rule_asks_for_the_matched_face \\
         && run_exact_test \\
             gtk::chrome_tests::adwaitas_minimize_bar_is_centred_only_under_adwaita \\
         && if run_exact_test gtk::flex::tests::check_gtk_zero_test_selftest \\

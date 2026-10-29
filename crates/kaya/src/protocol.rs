@@ -890,6 +890,72 @@ pub struct FontFace {
 
 impl FontFace {
     pub const REGULAR: FontFace = FontFace { weight: 400, italic: false, width: 5 };
+
+    /// The CSS Fonts 4 font matching algorithm, §5.2, over a family's
+    /// installed faces (docs/font-picker-plan.md §2.4): width first, then
+    /// slope, then weight. The Swift and Kotlin interpreters carry the same
+    /// rule (kayaMatchFace).
+    pub fn matched(faces: &[FontFace], want: FontFace) -> Option<FontFace> {
+        if faces.is_empty() {
+            return None;
+        }
+        let mut widths: Vec<u8> = faces.iter().map(|f| f.width).collect();
+        widths.sort_unstable();
+        widths.dedup();
+        let width = if widths.contains(&want.width) {
+            want.width
+        } else {
+            let narrower = widths.iter().rev().copied().filter(|w| *w < want.width);
+            let wider = widths.iter().copied().filter(|w| *w > want.width);
+            let order: Vec<u8> = if want.width <= 5 { narrower.chain(wider).collect() } else { wider.chain(narrower).collect() };
+            order[0]
+        };
+        let pool: Vec<FontFace> = faces.iter().copied().filter(|f| f.width == width).collect();
+        let italic = if pool.iter().any(|f| f.italic == want.italic) { want.italic } else { !want.italic };
+        let mut weights: Vec<u16> = pool.iter().filter(|f| f.italic == italic).map(|f| f.weight).collect();
+        weights.sort_unstable();
+        weights.dedup();
+        let w = want.weight;
+        let up = |limit: u16| weights.iter().copied().filter(move |x| *x > w && *x <= limit);
+        let down = || weights.iter().rev().copied().filter(|x| *x < w);
+        let chosen = if weights.contains(&w) {
+            w
+        } else if (400..=500).contains(&w) {
+            up(500).chain(down()).chain(weights.iter().copied().filter(|x| *x > 500)).next()?
+        } else if w < 400 {
+            down().chain(up(u16::MAX)).next()?
+        } else {
+            up(u16::MAX).chain(down()).next()?
+        };
+        pool.into_iter().find(|f| f.italic == italic && f.weight == chosen)
+    }
+
+    /// What drawing `want` with the installed face `matched` synthesizes:
+    /// a slope the face lacks, and a bold when 600 or more was asked of a
+    /// face under 600 (docs/font-picker-plan.md §2.4).
+    pub fn synthesis(matched: FontFace, want: FontFace) -> (bool, bool) {
+        (want.italic && !matched.italic, want.weight >= 600 && matched.weight < 600)
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn the_face_matcher_is_css_fonts_4() {
+    let f = |weight, italic, width| FontFace { weight, italic, width };
+    let plex = [f(100, false, 5), f(300, false, 5), f(400, false, 5), f(500, false, 5), f(600, false, 5), f(700, false, 5), f(300, true, 5)];
+    assert_eq!(FontFace::matched(&plex, f(300, false, 5)), Some(f(300, false, 5)));
+    assert_eq!(FontFace::matched(&plex, f(650, false, 5)), Some(f(700, false, 5)), "above 500: ascending first");
+    assert_eq!(FontFace::matched(&plex, f(550, false, 5)), Some(f(600, false, 5)));
+    assert_eq!(FontFace::matched(&plex, f(250, false, 5)), Some(f(100, false, 5)), "below 400: descending first");
+    assert_eq!(FontFace::matched(&plex, f(450, false, 5)), Some(f(500, false, 5)), "400-500: up to 500 first");
+    assert_eq!(FontFace::matched(&plex, f(700, true, 5)), Some(f(300, true, 5)), "slope before weight");
+    let condensed = [f(400, false, 3), f(400, false, 7)];
+    assert_eq!(FontFace::matched(&condensed, f(400, false, 5)), Some(f(400, false, 3)), "at 5 or below: narrower first");
+    assert_eq!(FontFace::matched(&condensed, f(400, false, 6)), Some(f(400, false, 7)), "above 5: wider first");
+    let monaco = [f(400, false, 5)];
+    let got = FontFace::matched(&monaco, f(700, true, 5)).unwrap();
+    assert_eq!(FontFace::synthesis(got, f(700, true, 5)), (true, true));
+    assert_eq!(FontFace::matched(&[], f(400, false, 5)), None);
 }
 
 /// A family and one of its faces: the font picker's answer.

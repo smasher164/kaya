@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints badge emoji"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints badge emoji fontpick"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1675,6 +1675,10 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" codesurfacebig-rust env KAYA_TEXT_SCALE=2 KAYA_SELFTEST=codesurfacebig \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/codesurface"
+    # THE FONT PICKER (docs/font-picker-plan.md §7): the faces, Bold and Italic
+    # over Light, and GtkFontDialog's code fonts.
+    run "$proto" fontpick-rust env KAYA_SELFTEST=fontpick \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/fontpick"
     # THE SEGMENTED CONTROL (docs/segmented-plan.md), through a11y-leg.sh for
     # its expect_ax.
     run "$proto" segmented-rust env KAYA_SELFTEST=segmented \
