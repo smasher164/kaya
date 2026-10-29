@@ -151,6 +151,9 @@ public final class EmissionCheck {
         CHAIN.put("summary(String)", prop(KayaWire.PROP_SUMMARY));
         CHAIN.put("symbol(Symbol)", prop(KayaWire.PROP_SYMBOL));
         CHAIN.put("textScale(double)", prop(KayaWire.PROP_TEXT_SCALE));
+        CHAIN.put("fontWeight(int)", prop(KayaWire.PROP_FONT_WEIGHT));
+        CHAIN.put("fontItalic(boolean)", prop(KayaWire.PROP_FONT_ITALIC));
+        CHAIN.put("fontWidth(int)", prop(KayaWire.PROP_FONT_WIDTH));
         CHAIN.put("tickSpacing(double)", prop(KayaWire.PROP_TICK_SPACING));
         CHAIN.put("tint(Signal)", prop(KayaWire.PROP_TINT));
         CHAIN.put("tint(Tint)", prop(KayaWire.PROP_TINT));

@@ -683,6 +683,34 @@ class _Handle:
         _records().append(wire.tx_set_text_scale(self.id, float(scale)))
         return self
 
+    def font_weight(self: H, weight: int) -> H:
+        """Draw this label, entry or textarea at a face weight, the OpenType
+        class 1 to 1000 (400 regular, 700 bold), on whatever family it
+        resolves to; a weight the family lacks is matched to its nearest face
+        and a missing bold synthesized (docs/font-picker-plan.md §2.3).
+        Returns the handle."""
+        if isinstance(weight, bool) or not isinstance(weight, int):
+            raise KayaTypeError(f"kaya: font_weight takes a whole number, not {weight!r}")
+        _records().append(wire.tx_set_font_weight(self.id, float(weight)))
+        return self
+
+    def font_italic(self: H, on: bool = True) -> H:
+        """Slant this label, entry or textarea: the family's italic or
+        oblique face, synthesized where it has none. Returns the handle."""
+        if not isinstance(on, bool):
+            raise KayaTypeError(f"kaya: font_italic takes True or False, not {on!r}")
+        _records().append(wire.tx_set_font_italic(self.id, on))
+        return self
+
+    def font_width(self: H, width: int) -> H:
+        """Draw this label, entry or textarea at a face width, the OpenType
+        class 1 to 9 (5 normal), matched to the family's nearest. Returns
+        the handle."""
+        if isinstance(width, bool) or not isinstance(width, int):
+            raise KayaTypeError(f"kaya: font_width takes a whole number, not {width!r}")
+        _records().append(wire.tx_set_font_width(self.id, float(width)))
+        return self
+
     def content_type(self: H, content: ContentType | str) -> H:
         """Say what this entry or secure field holds (kaya.ContentType or
         its name), so the platform's password manager, one-time-code
@@ -2971,6 +2999,46 @@ def save_file(suggested_name: str,
         app._file_dialog_handlers[dialog_id] = one
     _records().append(wire.tx_show_save_dialog(
         int(window), dialog_id, str(suggested_name), _filters(filters)))
+    return dialog_id
+
+
+@dataclasses.dataclass(frozen=True)
+class FontFace:
+    """One face of a family: the OpenType weight class (1 to 1000), the
+    slope, the width class (1 to 9, 5 normal), and the platform's name for
+    it, for showing only (docs/font-picker-plan.md §2.2)."""
+    weight: int
+    italic: bool
+    width: int
+    name: str
+
+
+@dataclasses.dataclass(frozen=True)
+class FontChoice:
+    """A family and one of its faces: the font picker's answer."""
+    family: str
+    weight: int
+    italic: bool
+    width: int
+
+
+def choose_font(*, code_only: bool = False, faces: bool = False,
+                initial: FontChoice | None = None,
+                on_result: Callable[[FontChoice | None], object] | None = None,
+                window: int = 0) -> int:
+    """Ask the platform's font picker for a family and, with `faces`, a
+    face, among monospaced families only with `code_only`
+    (docs/font-picker-plan.md §4). Out of the file dialogs' one live slot;
+    on_result(choice) fires exactly once and CANCEL IS `None`. Nothing is
+    applied by kaya."""
+    app = _app
+    dialog_id = app._next("file_dialog")
+    if on_result is not None:
+        app._font_dialog_handlers[dialog_id] = on_result
+    _records().append(wire.tx_show_font_dialog(
+        int(window), dialog_id, 1 if code_only else 0, 1 if faces else 0,
+        initial.weight if initial else 0, 1 if initial and initial.italic else 0,
+        initial.width if initial else 0, initial.family if initial else ""))
     return dialog_id
 
 
@@ -8123,6 +8191,19 @@ def on_font_families(f: Callable[[tuple[str, ...]], object]) -> None:
     _app._on_font_families = f
 
 
+def list_font_faces(family: str) -> None:
+    """Ask for one installed family's faces, answered once by
+    `kaya.on_font_faces` (docs/font-picker-plan.md §4.4)."""
+    _records().append(wire.tx_list_font_faces(str(family)))
+
+
+def on_font_faces(f: Callable[[str, tuple[FontFace, ...]], object]) -> None:
+    """Register the handler for a family's faces: the family asked for and
+    its faces, sorted by weight, then upright first, then width; none when
+    the family is not installed. Needs no transaction."""
+    _app._on_font_faces = f
+
+
 def on_capture_devices(f: Callable[[tuple[CaptureDevice, ...]], object]) -> None:
     """Register the handler for the device list, as watching starts and
     whenever it changes; needs no transaction."""
@@ -8255,6 +8336,8 @@ class App:
         self._on_capture_devices: Callable[
             [tuple[CaptureDevice, ...]], object] | None = None
         self._on_font_families: Callable[[tuple[str, ...]], object] | None = None
+        self._on_font_faces: Callable[[str, tuple[FontFace, ...]], object] | None = None
+        self._font_dialog_handlers: dict[int, Callable[[FontChoice | None], object]] = {}
         self._post_lock = threading.Lock()
         self._posted: list[tuple[Callable[..., object], tuple[Any, ...]]] = []
         _app = self
@@ -9100,6 +9183,22 @@ class App:
                 self._capture_permissions[which] = granted
                 if self._on_permission is not None:
                     self._dispatch(self._on_permission, which, granted)
+                continue
+            if kind == wire.OCC_FONT_FACES:
+                flat = payload[2:]
+                faces = tuple(
+                    FontFace(int(flat[i]), bool(flat[i + 1]), int(flat[i + 2]), str(flat[i + 3]))
+                    for i in builtins.range(0, len(flat) - 3, 4))
+                if self._on_font_faces is not None:
+                    self._dispatch(self._on_font_faces, str(payload[0]), faces)
+                continue
+            if kind == wire.OCC_FONT_DIALOG_RESULT:
+                # One-shot; CANCEL IS AN EMPTY FAMILY, delivered as None.
+                weight, italic, width, family = payload
+                choice = FontChoice(str(family), int(weight), bool(italic), int(width)) if family else None
+                font_handler = self._font_dialog_handlers.pop(ident, None)
+                if font_handler is not None:
+                    self._dispatch(font_handler, choice)
                 continue
             if kind == wire.OCC_FONT_FAMILIES:
                 families = tuple(str(name) for name in payload[1:])

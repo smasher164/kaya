@@ -592,6 +592,9 @@ static class Program
         Set("SetMonospaced", ["Node n", "bool on"], "n, on");
         Set("SetFamily", ["Node n", "string name"], "n, name");
         Set("SetTextScale", ["Node n", "double scale"], "n, scale");
+        Set("SetFontWeight", ["Node n", "int weight"], "n, weight");
+        Set("SetFontItalic", ["Node n", "bool on"], "n, on");
+        Set("SetFontWidth", ["Node n", "int width"], "n, width");
         Set("SetTint", ["Node n", "Signal s"], "n, s");
         Set("SetTint", ["Node n", "Field<Tint> f", "uint level = 0"], "n, f, level");
         Set("SetSelected", ["Node n", "bool on"], "n, on");

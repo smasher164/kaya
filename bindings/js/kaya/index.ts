@@ -832,6 +832,30 @@ export class Handle {
     return this;
   }
 
+  /** This label, entry or textarea at a face weight, the OpenType class 1
+   * to 1000; a weight the family lacks is matched and a missing bold
+   * synthesized (docs/font-picker-plan.md §2.3). Chains. */
+  fontWeight(weight: number): this {
+    if (!Number.isInteger(weight)) throw new TypeError(`kaya: fontWeight takes a whole number, got ${weight}`);
+    records().push(wire.tx_set_font_weight(this.id, weight));
+    return this;
+  }
+
+  /** This label, entry or textarea slanted, synthesized where the family
+   * has no slanted face. Chains. */
+  fontItalic(on = true): this {
+    if (typeof on !== "boolean") throw new TypeError(`kaya: fontItalic takes a boolean, got ${typeof on}`);
+    records().push(wire.tx_set_font_italic(this.id, on));
+    return this;
+  }
+
+  /** This label, entry or textarea at a face width, 1 to 9 (5 normal). Chains. */
+  fontWidth(width: number): this {
+    if (!Number.isInteger(width)) throw new TypeError(`kaya: fontWidth takes a whole number, got ${width}`);
+    records().push(wire.tx_set_font_width(this.id, width));
+    return this;
+  }
+
   /** What this entry or secure field holds, so the platform's password
    * manager, one-time-code autofill and keyboard can act on it
    * (docs/autofill-plan.md A1-A3); "none" takes the hint away. Chains. */
@@ -2772,7 +2796,7 @@ export function saveFile(suggestedName: string, opts: SaveOptions & { onResult: 
 export function saveFile(suggestedName: string, opts?: SaveOptions): Promise<PickedFile | null>;
 export function saveFile(suggestedName: string, opts: SaveOptions = {}): number | Promise<PickedFile | null> {
   const a = app();
-  if (a._fileDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
+  if (a._fileDialogHandlers.size !== 0 || a._fontDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
   const dialogId = a._next("file_dialog");
   const onResult = opts.onResult;
   const record = wire.tx_show_save_dialog(opts.window ?? 0, dialogId, String(suggestedName), filters(opts.filters ?? []));
@@ -2787,6 +2811,50 @@ export function saveFile(suggestedName: string, opts: SaveOptions = {}): number 
   }
   registerDialog(a._fileDialogHandlers, dialogId, (files) => onResult(files[0] ?? null));
   show();
+  return dialogId;
+}
+
+/** One face of a family: the OpenType weight class (1 to 1000), the slope,
+ * the width class (1 to 9, 5 normal), and the platform's name for it, for
+ * showing only (docs/font-picker-plan.md §2.2). */
+export type FontFace = { readonly weight: number; readonly italic: boolean; readonly width: number; readonly name: string };
+
+/** A family and one of its faces: the font picker's answer. */
+export type FontChoice = { readonly family: string; readonly weight: number; readonly italic: boolean; readonly width: number };
+
+export type FontOptions = {
+  codeOnly?: boolean;
+  faces?: boolean;
+  initial?: FontChoice;
+  onResult?: (choice: FontChoice | null) => void;
+  window?: number;
+};
+
+/** Ask the platform's font picker for a family and, with `faces`, a face,
+ * among monospaced families only with `codeOnly` (docs/font-picker-plan.md
+ * §4). Out of the file dialogs' one live slot; cancel is null and nothing
+ * is applied by kaya. */
+export function chooseFont(opts: FontOptions & { onResult: (choice: FontChoice | null) => void }): number;
+export function chooseFont(opts?: FontOptions): Promise<FontChoice | null>;
+export function chooseFont(opts: FontOptions = {}): number | Promise<FontChoice | null> {
+  const a = app();
+  if (a._fileDialogHandlers.size !== 0 || a._fontDialogHandlers.size !== 0) {
+    throw new Error("kaya: a file dialog is already live");
+  }
+  const dialogId = a._next("file_dialog");
+  const initial = opts.initial;
+  const record = wire.tx_show_font_dialog(
+    opts.window ?? 0, dialogId, opts.codeOnly ? 1 : 0, opts.faces ? 1 : 0,
+    initial?.weight ?? 0, initial?.italic ? 1 : 0, initial?.width ?? 0, initial?.family ?? "");
+  const onResult = opts.onResult;
+  if (onResult === undefined) {
+    return new Promise<FontChoice | null>((resolve) => {
+      registerDialog(a._fontDialogHandlers, dialogId, resolve);
+      records().push(record);
+    });
+  }
+  registerDialog(a._fontDialogHandlers, dialogId, onResult);
+  records().push(record);
   return dialogId;
 }
 
@@ -2809,7 +2877,7 @@ function registerDialog<T>(handlers: Map<number, T>, id: number, handler: T): vo
 
 function pick(multiple: boolean, opts: PickOptions): number | Promise<PickedFile[]> {
   const a = app();
-  if (a._fileDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
+  if (a._fileDialogHandlers.size !== 0 || a._fontDialogHandlers.size !== 0) throw new Error("kaya: a file dialog is already live");
   const dialogId = a._next("file_dialog");
   const content = vocab(FILE_CONTENTS, "content", opts.content ?? "any", '"images"');
   const record = wire.tx_show_file_dialog(opts.window ?? 0, dialogId, multiple ? 1 : 0, content, filters(opts.filters ?? []));
@@ -6991,6 +7059,19 @@ export function onFontFamilies(f: (families: readonly string[]) => void): void {
   app()._onFontFamilies = f;
 }
 
+/** Ask for one installed family's faces, answered once by
+ * `kaya.onFontFaces` (docs/font-picker-plan.md §4.4). */
+export function listFontFaces(family: string): void {
+  records().push(wire.tx_list_font_faces(String(family)));
+}
+
+/** The handler for a family's faces: the family asked for and its faces,
+ * sorted by weight, then upright first, then width; none when the family is
+ * not installed. */
+export function onFontFaces(f: (family: string, faces: readonly FontFace[]) => void): void {
+  app()._onFontFaces = f;
+}
+
 /** The handler for the device list, as watching starts and whenever it
  * changes. */
 export function onCaptureDevices(f: (devices: readonly CaptureDevice[]) => void): void {
@@ -7062,6 +7143,7 @@ export class App {
    * never opens the implicit transaction (docs/app-links-plan.md §4). */
   readonly _pendingRecords: Uint8Array[] = [];
   /** @internal */ readonly _fileDialogHandlers = new Map<number, (files: PickedFile[]) => void>();
+  /** @internal */ readonly _fontDialogHandlers = new Map<number, (choice: FontChoice | null) => void>();
   /** @internal */ readonly _clipboardHandlers = new Map<number, (clip: Clip | null) => void>();
   /** @internal */ readonly _menuHandlers = new Map<string, Handler>();
   /** @internal */ readonly _entryPopped = new Map<number, () => void>();
@@ -7106,6 +7188,7 @@ export class App {
   /** @internal */ _onPermission: ((kind: CaptureKind, permission: Permission) => void) | undefined;
   /** @internal */ _onCaptureDevices: ((devices: readonly CaptureDevice[]) => void) | undefined;
   /** @internal */ _onFontFamilies: ((families: readonly string[]) => void) | undefined;
+  /** @internal */ _onFontFaces: ((family: string, faces: readonly FontFace[]) => void) | undefined;
   private _posted: [Handler, unknown[]][] = [];
   private _drainScheduled = false;
   private _shutdown: (() => void) | null = null;
@@ -7804,6 +7887,26 @@ export class App {
       const granted = known(PERMISSIONS, Number(p), "permission");
       this._capturePermissions.set(which, granted);
       if (this._onPermission !== undefined) this._dispatch(this._onPermission as Handler, which, granted);
+      return;
+    }
+    if (kind === wire.OCC_FONT_FACES) {
+      const tail = payload as wire.Decoded[];
+      const flat = tail.slice(2);
+      const faces: FontFace[] = [];
+      for (let i = 0; i + 3 < flat.length; i += 4) {
+        faces.push({ weight: Number(flat[i]), italic: Boolean(flat[i + 1]), width: Number(flat[i + 2]), name: String(flat[i + 3]) });
+      }
+      if (this._onFontFaces !== undefined) this._dispatch(this._onFontFaces as Handler, String(tail[0]), faces);
+      return;
+    }
+    if (kind === wire.OCC_FONT_DIALOG_RESULT) {
+      // One-shot; CANCEL IS AN EMPTY FAMILY, delivered as null.
+      const [weight, italic, width, family] = payload as wire.Decoded[];
+      const handler = this._fontDialogHandlers.get(ident);
+      this._fontDialogHandlers.delete(ident);
+      const choice: FontChoice | null = String(family) === "" ? null
+        : { family: String(family), weight: Number(weight), italic: Number(italic) !== 0, width: Number(width) };
+      if (handler !== undefined) this._dispatch(handler as Handler, choice);
       return;
     }
     if (kind === wire.OCC_FONT_FAMILIES) {

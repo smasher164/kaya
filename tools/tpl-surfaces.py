@@ -296,7 +296,9 @@ TPL_PROPS = ["format", "grow", "a11y_id", "a11y_label", "a11y_hint", "accepts", 
              # DESIGN.md, Structural operators: a stamped copy hidden by its row's field.
              "hidden",
              # docs/code-surface-plan.md §4: a stamped text kind's face and size.
-             "monospaced", "family", "text_scale"]
+             "monospaced", "family", "text_scale",
+             # docs/font-picker-plan.md §2.3: a stamped text kind's face.
+             "font_weight", "font_italic", "font_width"]
 
 PROP_MEMBERS = {
     "rust": {
@@ -318,6 +320,7 @@ PROP_MEMBERS = {
         "max_width": "max_width",
         "hidden": "hidden",
         "monospaced": "monospaced", "family": "family", "text_scale": "text_scale",
+        "font_weight": "font_weight", "font_italic": "font_italic", "font_width": "font_width",
     },
     "go": {
         "format": "SetFormat",
@@ -339,6 +342,7 @@ PROP_MEMBERS = {
         "max_width": "SetMaxWidth",
         "hidden": "BindHidden",
         "monospaced": "SetMonospaced", "family": "SetFamily", "text_scale": "SetTextScale",
+        "font_weight": "SetFontWeight", "font_italic": "SetFontItalic", "font_width": "SetFontWidth",
     },
     "csharp": {
         "format": "SetFormat",
@@ -360,6 +364,7 @@ PROP_MEMBERS = {
         "max_width": "SetMaxWidth",
         "hidden": "SetHidden",
         "monospaced": "SetMonospaced", "family": "SetFamily", "text_scale": "SetTextScale",
+        "font_weight": "SetFontWeight", "font_italic": "SetFontItalic", "font_width": "SetFontWidth",
     },
     "java": {
         "format": "setFormat",
@@ -381,6 +386,7 @@ PROP_MEMBERS = {
         "max_width": "setMaxWidth",
         "hidden": "setHidden",
         "monospaced": "setMonospaced", "family": "setFamily", "text_scale": "setTextScale",
+        "font_weight": "setFontWeight", "font_italic": "setFontItalic", "font_width": "setFontWidth",
     },
     "swift": {
         "format": "setFormat",
@@ -402,6 +408,7 @@ PROP_MEMBERS = {
         "max_width": "setMaxWidth",
         "hidden": "setHidden",
         "monospaced": "setMonospaced", "family": "setFamily", "text_scale": "setTextScale",
+        "font_weight": "setFontWeight", "font_italic": "setFontItalic", "font_width": "setFontWidth",
     },
     "ocaml": {
         "format": "set_format",
@@ -423,6 +430,7 @@ PROP_MEMBERS = {
         "max_width": "set_max_width",
         "hidden": "bind_hidden_field",
         "monospaced": "set_monospaced", "family": "set_family", "text_scale": "set_text_scale",
+        "font_weight": "set_font_weight", "font_italic": "set_font_italic", "font_width": "set_font_width",
     },
     # Haskell's template props are not methods but CONSTRUCTORS of the
     # `TplAttr` GADT, applied by `applyTplAttr`.
@@ -446,6 +454,7 @@ PROP_MEMBERS = {
         "max_width": "TplMaxWidth",
         "hidden": "TplHiddenField",
         "monospaced": "TplMonospaced", "family": "TplFamily", "text_scale": "TplTextScale",
+        "font_weight": "TplFontWeight", "font_italic": "TplFontItalic", "font_width": "TplFontWidth",
     },
     # JS spells five of the seven as chainable methods on the base handle
     # and the other two as CONSTRUCTOR OPTIONS; members_js says why the
@@ -469,6 +478,7 @@ PROP_MEMBERS = {
         "max_width": "maxWidth",
         "hidden": "hidden",
         "monospaced": "monospaced", "family": "family", "text_scale": "textScale",
+        "font_weight": "fontWeight", "font_italic": "fontItalic", "font_width": "fontWidth",
     },
 }
 

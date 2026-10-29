@@ -69,6 +69,7 @@ module KayaApp
     askPickFilesOf,
     askPickFileOf,
     askSaveFile,
+    askChooseFont,
     askReadClipboard,
     build,
     runAsk,
@@ -166,6 +167,7 @@ module KayaApp
     pickFileOf,
     FileContent (..),
     saveFile,
+    chooseFont,
     clearWidget,
     focusWidget,
     showEmojiPicker,
@@ -260,6 +262,10 @@ module KayaApp
     bindFamily,
     setTextScale,
     listFontFamilies,
+    setFontWeight,
+    setFontItalic,
+    setFontWidth,
+    listFontFaces,
     within,
     setAxis,
     stackWhen,
@@ -400,6 +406,7 @@ module KayaApp
     onPermission,
     onCaptureDevices,
     onFontFamilies,
+    onFontFaces,
     onCaptureFrame,
     onCaptureSamples,
     forChecksClaimAppThread,
@@ -2408,6 +2415,27 @@ saveFile suggested filters handler = do
   pendB (PFileDialog n (handler . listToMaybe))
   emitB (W.txShowSaveDialog 0 n (W.VStr (T.unpack suggested)) (filterValues filters))
 
+-- | Ask the platform's font picker for a family and, with @faces@, a face,
+-- among monospaced families only with @codeOnly@ (docs\/font-picker-plan.md
+-- §4); the initial family and face the picker opens on, if any. Out of the
+-- file dialogs' one live slot; the handler fires exactly once and CANCEL IS
+-- 'Nothing'. Nothing is applied by kaya.
+chooseFont :: Bool -> Bool -> Maybe FontChoice -> (Maybe FontChoice -> IO ()) -> Build ()
+chooseFont codeOnly faces initial handler = do
+  n <- state $ \s ->
+    let c = s.bCounters
+        next = c.cFileDialog + 1
+     in (next, s {bCounters = c {cFileDialog = next}})
+  pendB (PFontDialog n handler)
+  let flag b = if b then 1 else 0
+      (fam, w, i, wd) = case initial of
+        Just c -> (c.family, c.weight, c.italic, c.width)
+        Nothing -> ("", 0, False, 0)
+  emitB
+    ( W.txShowFontDialog 0 n (flag codeOnly) (flag faces) (fromIntegral w) (flag i) (fromIntegral wd)
+        (W.VStr (T.unpack fam))
+    )
+
 -- (label, space-separated extensions) pairs, flattened the way the wire
 -- carries them.
 filterValues :: [(Text, Text)] -> [W.Value]
@@ -3106,6 +3134,25 @@ bindFamily (Widget w) (Signal s) = emitB (W.txBindFamily w s)
 setTextScale :: Widget -> Double -> Build ()
 setTextScale (Widget w) scale = emitB (W.txSetTextScale w scale)
 
+-- | A label, entry or textarea at a face weight, the OpenType class 1 to
+-- 1000; a weight the family lacks is matched and a missing bold synthesized
+-- (docs\/font-picker-plan.md §2.3).
+setFontWeight :: Widget -> Int -> Build ()
+setFontWeight (Widget w) weight = emitB (W.txSetFontWeight w (fromIntegral weight))
+
+-- | A label, entry or textarea slanted, synthesized where the family has none.
+setFontItalic :: Widget -> Bool -> Build ()
+setFontItalic (Widget w) on = emitB (W.txSetFontItalic w on)
+
+-- | A label, entry or textarea at a face width, 1 to 9 (5 normal).
+setFontWidth :: Widget -> Int -> Build ()
+setFontWidth (Widget w) wd = emitB (W.txSetFontWidth w (fromIntegral wd))
+
+-- | Ask for one installed family's faces, answered once by 'onFontFaces'
+-- (docs\/font-picker-plan.md §4.4).
+listFontFaces :: Text -> Build ()
+listFontFaces family = emitB (W.txListFontFaces (W.VStr (T.unpack family)))
+
 -- | Ask for the installed font families, answered once by 'onFontFamilies'
 -- (docs\/code-surface-plan.md M3).
 listFontFamilies :: Build ()
@@ -3436,6 +3483,10 @@ data Attr (c :: WClass) where
   Family :: Text -> Attr 'LeafW
   FamilyBound :: Signal Text -> Attr 'LeafW
   TextScale :: Double -> Attr 'LeafW
+  -- | docs\/font-picker-plan.md §2.3: a text kind's face.
+  FontWeight :: Int -> Attr 'LeafW
+  FontItalic :: Bool -> Attr 'LeafW
+  FontWidth :: Int -> Attr 'LeafW
   -- | The PROMPT this field shows while its text is empty
   -- (docs\/search-plan.md S3). Entry, textarea and search only; the root
   -- refuses it elsewhere, and an empty one by name.
@@ -3540,6 +3591,9 @@ applyAttr (Monospaced on) w = setMonospaced w on
 applyAttr (Family name) w = setFamily w name
 applyAttr (FamilyBound s) w = bindFamily w s
 applyAttr (TextScale scale) w = setTextScale w scale
+applyAttr (FontWeight weight) w = setFontWeight w weight
+applyAttr (FontItalic on) w = setFontItalic w on
+applyAttr (FontWidth wd) w = setFontWidth w wd
 applyAttr (Fill on) w = setFill w on
 applyAttr (Hidden on) (Widget n) = emitB (W.txSetHidden n on)
 applyAttr (HiddenBound (Signal s)) (Widget n) = emitB (W.txBindHidden n s)
@@ -4992,6 +5046,10 @@ data TplAttr where
   TplMonospaced :: Bool -> TplAttr
   TplFamily :: Text -> TplAttr
   TplTextScale :: Double -> TplAttr
+  -- | A stamped text kind's face (docs\/font-picker-plan.md §2.3).
+  TplFontWeight :: Int -> TplAttr
+  TplFontItalic :: Bool -> TplAttr
+  TplFontWidth :: Int -> TplAttr
   TplTintBound :: Signal Tint -> TplAttr
   TplTintField :: KField Tint -> TplAttr
   -- | A stamped video view's box ratio, constant across the copies.
@@ -5046,6 +5104,9 @@ applyTplAttr (TplMaxLines k) (Node n) = emitT (W.txSetMaxLines n (fromIntegral k
 applyTplAttr (TplMonospaced on) (Node n) = emitT (W.txSetMonospaced n on)
 applyTplAttr (TplFamily name) (Node n) = emitT (W.txSetFamily n (T.unpack name))
 applyTplAttr (TplTextScale scale) (Node n) = emitT (W.txSetTextScale n scale)
+applyTplAttr (TplFontWeight weight) (Node n) = emitT (W.txSetFontWeight n (fromIntegral weight))
+applyTplAttr (TplFontItalic on) (Node n) = emitT (W.txSetFontItalic n on)
+applyTplAttr (TplFontWidth wd) (Node n) = emitT (W.txSetFontWidth n (fromIntegral wd))
 applyTplAttr (TplTintBound (Signal s)) (Node n) = emitT (W.txBindTint n s)
 applyTplAttr (TplTintField (KField i)) (Node n) = emitT (W.txBindTintElement n 0 i)
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
@@ -5603,6 +5664,8 @@ register app pending = case pending of
   PToast n handler -> modifyIORef' (app.appToastHandlers) (Map.insert n handler)
   PFileDialog n handler ->
     modifyIORef' (app.appFileDialogHandlers) (Map.insert n handler)
+  PFontDialog n handler ->
+    modifyIORef' (app.appMedia.fontDialogHandlers) (Map.insert n handler)
   PClipboardRead n handler ->
     modifyIORef' (app.appClipboardReads) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (app.appEntryPopped) (Map.insert n handler)
@@ -5949,6 +6012,12 @@ onCaptureDevices app f = writeIORef app.appMedia.devicesHandler (Just f)
 onFontFamilies :: App -> ([Text] -> IO ()) -> IO ()
 onFontFamilies app f = writeIORef app.appMedia.fontFamiliesHandler (Just f)
 
+-- | One family's faces, answering 'listFontFaces': the family asked for and
+-- its faces, sorted by weight, then upright first, then width; none when the
+-- family is not installed (docs\/font-picker-plan.md §4.4).
+onFontFaces :: App -> (Text -> [FontFace] -> IO ()) -> IO ()
+onFontFaces app f = writeIORef app.appMedia.fontFacesHandler (Just f)
+
 -- The frame and sample callbacks by capture id: THE ONE TABLE THE CAPTURE
 -- THREAD READS, swapped whole so a read is one atomic load.
 captureFrameSinks :: IORef (Map.Map Word64 (CaptureFrame -> IO ()))
@@ -6252,6 +6321,26 @@ mediaOccurrence app kind ident keys payload tail_
       h <- readIORef m.fontFamiliesHandler
       dispatch (mapM_ ($ names) h)
       return True
+  | kind == W.occKindFontFaces = do
+      let faces (W.VI64 w : W.VBool i : W.VI64 wd : W.VStr n : rest) =
+            FontFace (fromIntegral w) i (fromIntegral wd) (T.pack n) : faces rest
+          faces _ = []
+      case tail_ of
+        W.VStr family : _count : values -> do
+          h <- readIORef m.fontFacesHandler
+          dispatch (mapM_ (\f -> f (T.pack family) (faces values)) h)
+        _ -> return ()
+      return True
+  | kind == W.occKindFontDialogResult = do
+      -- One-shot; CANCEL IS AN EMPTY FAMILY, delivered as 'Nothing'.
+      let choice = case tail_ of
+            W.VI64 w : W.VI64 i : W.VI64 wd : W.VStr family : _
+              | not (null family) -> Just (FontChoice (T.pack family) (fromIntegral w) (i /= 0) (fromIntegral wd))
+            _ -> Nothing
+      handlers <- readIORef m.fontDialogHandlers
+      writeIORef m.fontDialogHandlers (Map.delete ident handlers)
+      dispatch (mapM_ ($ choice) (Map.lookup ident handlers))
+      return True
   | kind == W.occKindSessionAction = do
       case tail_ of
         W.VI64 action : W.VI64 atMs : _ -> do
@@ -6397,6 +6486,8 @@ newApp =
             <*> newIORef Nothing -- permissionHandler
             <*> newIORef Nothing -- devicesHandler
             <*> newIORef Nothing -- fontFamiliesHandler
+            <*> newIORef Nothing -- fontFacesHandler
+            <*> newIORef Map.empty -- fontDialogHandlers
         ) -- appMedia
 
 -- | Set up (build the scene, register handlers) and run: occurrences
@@ -6448,7 +6539,7 @@ drainPosted app = do
 
 isMediaKind :: Word16 -> Bool
 isMediaKind kind =
-  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun, W.occKindFontFamilies]
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun, W.occKindFontFamilies, W.occKindFontFaces, W.occKindFontDialogResult]
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do
@@ -7130,6 +7221,9 @@ askPickFileOf content filters = askWith (pickFileOf content filters)
 
 askSaveFile :: Text -> [(Text, Text)] -> Ask (Maybe PickedFile)
 askSaveFile name filters = askWith (saveFile name filters)
+
+askChooseFont :: Bool -> Bool -> Maybe FontChoice -> Ask (Maybe FontChoice)
+askChooseFont codeOnly faces initial = askWith (chooseFont codeOnly faces initial)
 
 askReadClipboard :: [Text] -> Ask (Maybe Representation)
 askReadClipboard kinds = askWith (readClipboard kinds)

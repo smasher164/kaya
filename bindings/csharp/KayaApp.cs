@@ -1548,6 +1548,19 @@ sealed record DevicesListed(ulong Id, List<object> Keys, IReadOnlyList<CaptureDe
 sealed record FamiliesListed(ulong Id, List<object> Keys, IReadOnlyList<string> Families)
     : Occurrence(Id, Keys);
 
+sealed record FontFacesListed(ulong Id, List<object> Keys, string Family, IReadOnlyList<FontFace> Faces)
+    : Occurrence(Id, Keys);
+
+sealed record FontChosen(ulong Id, List<object> Keys, FontChoice? Choice) : Occurrence(Id, Keys);
+
+/// One face of a family: the OpenType weight class (1 to 1000), the slope,
+/// the width class (1 to 9, 5 normal), and the platform's name for it, for
+/// showing only (docs/font-picker-plan.md §2.2).
+public sealed record FontFace(int Weight, bool Italic, int Width, string Name);
+
+/// A family and one of its faces: the font picker's answer.
+public sealed record FontChoice(string Family, int Weight, bool Italic, int Width);
+
 sealed class KayaInstance
 {
     internal readonly List<object> Path;
@@ -2140,6 +2153,7 @@ sealed class KayaApp
     // picker's grammar out of the picker's id space (docs/save-plan.md
     // D2), narrowed to "one or none" at Tx.SaveFile.
     internal readonly Dictionary<ulong, Action<Tx, List<PickedFile>>> fileDialogs = new();
+    internal readonly Dictionary<ulong, Action<Tx, FontChoice?>> fontDialogs = new();
     // Clipboard reads share the alert's request/result grammar: one-shot,
     // keyed by request id.
     internal readonly Dictionary<ulong, Action<Tx, Representation?>> clipboardReads = new();
@@ -2468,6 +2482,11 @@ sealed class KayaApp
         RequestAsync<PickedFile?>((tx, resolve) => tx.SaveFile(
             suggestedName, filters, (_, file) => resolve(file), window));
 
+    public Task<FontChoice?> ChooseFontAsync(bool codeOnly = false, bool faces = false,
+        FontChoice? initial = null, ulong window = 0) =>
+        RequestAsync<FontChoice?>((tx, resolve) => tx.ChooseFont(
+            codeOnly, faces, initial, (_, choice) => resolve(choice), window));
+
     public Task<Representation?> ReadClipboardAsync(params string[] accepting) =>
         RequestAsync<Representation?>((tx, resolve) =>
         {
@@ -2588,6 +2607,12 @@ sealed class KayaApp
     {
         if (liveFileDialog == id) liveFileDialog = 0;
         if (fileDialogs.Remove(id, out var handler)) Dispatch(tx => handler(tx, files));
+    }
+
+    internal void FontDialogResult(ulong id, FontChoice? choice)
+    {
+        if (liveFileDialog == id) liveFileDialog = 0;
+        if (fontDialogs.Remove(id, out var handler)) Dispatch(tx => handler(tx, choice));
     }
 
     internal void ClipboardResult(ulong id, Representation? clip)
@@ -3174,6 +3199,14 @@ sealed class KayaApp
     /// (docs/code-surface-plan.md M3).
     public void OnFontFamilies(Action<Tx, IReadOnlyList<string>> handler) =>
         familiesHandler = handler;
+
+    Action<Tx, string, IReadOnlyList<FontFace>>? facesHandler;
+
+    /// One family's faces, answering Tx.ListFontFaces: the family asked for
+    /// and its faces, sorted by weight, then upright first, then width; none
+    /// when the family is not installed (docs/font-picker-plan.md §4.4).
+    public void OnFontFaces(Action<Tx, string, IReadOnlyList<FontFace>> handler) =>
+        facesHandler = handler;
 
     /// Run `callback` ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each
     /// frame of `c`, the next frame dropped while it still runs
@@ -3781,6 +3814,23 @@ sealed class KayaApp
                         tail[at + 4] is true));
                 return new DevicesListed(id, keys, devices);
             }
+            case KayaWire.OccKindFontFaces:
+            {
+                var tail = FlatTail("font_faces", payload as List<object>, 2);
+                var faces = new List<FontFace>();
+                for (int at = 2; at + 3 < tail.Count; at += 4)
+                    faces.Add(new FontFace((int)Int(tail[at]), tail[at + 1] is true, (int)Int(tail[at + 2]),
+                        tail[at + 3] as string ?? ""));
+                return new FontFacesListed(id, keys, tail[0] as string ?? "", faces);
+            }
+            case KayaWire.OccKindFontDialogResult:
+            {
+                // CANCEL IS AN EMPTY FAMILY, delivered as null.
+                var tail = FlatTail("font_dialog_result", payload as List<object>, 4);
+                string family = tail[3] as string ?? "";
+                return new FontChosen(id, keys, family.Length == 0 ? null
+                    : new FontChoice(family, (int)Int(tail[0]), Int(tail[1]) != 0, (int)Int(tail[2])));
+            }
             case KayaWire.OccKindFontFamilies:
             {
                 var tail = FlatTail("font_families", payload as List<object>, 1);
@@ -4145,6 +4195,14 @@ sealed class KayaApp
                 case FamiliesListed listedFamilies:
                     if (familiesHandler is { } onFamilies)
                         Dispatch(tx => onFamilies(tx, listedFamilies.Families));
+                    break;
+                case FontFacesListed listedFaces:
+                    if (facesHandler is { } onFaces)
+                        Dispatch(tx => onFaces(tx, listedFaces.Family, listedFaces.Faces));
+                    break;
+                // One-shot like the file dialog, out of its one live slot.
+                case FontChosen chosen:
+                    FontDialogResult(chosen.Id, chosen.Choice);
                     break;
                 // A paste rides a click tag verbatim, so it arrives on the
                 // ordinary widget/node split. Never empty: a paste that
@@ -4651,6 +4709,55 @@ sealed class Tx : IDisposable
     /// App.OnFontFamilies (docs/code-surface-plan.md M3).
     public void ListFontFamilies() =>
         Records.Add(KayaWire.TxListFontFamilies());
+
+    /// A label, entry or textarea at a face weight, the OpenType class 1 to
+    /// 1000, on whatever family it resolves to; a weight the family lacks is
+    /// matched and a missing bold synthesized (docs/font-picker-plan.md §2.3).
+    public void SetFontWeight(Widget w, int weight) =>
+        Records.Add(KayaWire.TxSetFontWeight(w.Id, weight));
+
+    /// A label, entry or textarea slanted, synthesized where the family has
+    /// no slanted face.
+    public void SetFontItalic(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetFontItalic(w.Id, on));
+
+    /// A label, entry or textarea at a face width, 1 to 9 (5 normal).
+    public void SetFontWidth(Widget w, int width) =>
+        Records.Add(KayaWire.TxSetFontWidth(w.Id, width));
+
+    /// Ask for one installed family's faces, answered once by
+    /// App.OnFontFaces (docs/font-picker-plan.md §4.4).
+    public void ListFontFaces(string family) =>
+        Records.Add(KayaWire.TxListFontFaces(family));
+
+    /// Ask the platform's font picker for a family and, with `faces`, a face,
+    /// among monospaced families only with `codeOnly` (docs/font-picker-plan.md
+    /// §4). Out of the file dialogs' one live slot; CANCEL IS null, onResult
+    /// fires once and retires, and nothing is applied by kaya.
+    public ulong ChooseFont(
+        bool codeOnly = false,
+        bool faces = false,
+        FontChoice? initial = null,
+        Action<Tx, FontChoice?>? onResult = null,
+        ulong window = 0)
+    {
+        Alive();
+        if (App.liveFileDialog != 0)
+            throw new InvalidOperationException($"kaya: cannot show a font dialog while dialog {App.liveFileDialog} is live");
+        ulong id = ++App.nextFileDialog;
+        Records.Add(KayaWire.TxShowFontDialog(window, id, codeOnly ? 1u : 0u, faces ? 1u : 0u,
+            (uint)(initial?.Weight ?? 0), initial?.Italic == true ? 1u : 0u, (uint)(initial?.Width ?? 0),
+            initial?.Family ?? ""));
+        if (onResult != null)
+            App.fontDialogs[id] = onResult;
+        App.liveFileDialog = id;
+        RollbackActions.Add(() =>
+        {
+            App.fontDialogs.Remove(id);
+            if (App.liveFileDialog == id) App.liveFileDialog = 0;
+        });
+        return id;
+    }
 
     /// An image's bound in points: the picture scales down to fit, its shape
     /// kept, and never up (docs/photo-attach-plan.md §2).
@@ -7511,6 +7618,18 @@ sealed class Tpl
     /// Every stamped copy in an installed family (Tx.SetFamily).
     public void SetFamily(Node n, string name) =>
         tx.Records.Add(KayaWire.TxSetFamily(n.Id, name));
+
+    /// Every stamped copy at a face weight (Tx.SetFontWeight).
+    public void SetFontWeight(Node n, int weight) =>
+        tx.Records.Add(KayaWire.TxSetFontWeight(n.Id, weight));
+
+    /// Every stamped copy slanted (Tx.SetFontItalic).
+    public void SetFontItalic(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetFontItalic(n.Id, on));
+
+    /// Every stamped copy at a face width (Tx.SetFontWidth).
+    public void SetFontWidth(Node n, int width) =>
+        tx.Records.Add(KayaWire.TxSetFontWidth(n.Id, width));
 
     /// Every stamped copy at a multiple of the platform's size (Tx.SetTextScale).
     public void SetTextScale(Node n, double scale) =>

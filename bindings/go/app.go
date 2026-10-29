@@ -287,6 +287,8 @@ type App struct {
 	capture captureState
 	// docs/code-surface-plan.md M3.
 	onFontFamilies func(*Tx, []string)
+	onFontFaces    func(*Tx, string, []FontFace)
+	fontDialogs    map[uint64]func(*Tx, *FontChoice)
 	// The network images' handlers and helpers (images.go).
 	images imageState
 	widgetTimes    map[uint64]func(*Tx, Time)
@@ -405,6 +407,7 @@ func NewApp() *App {
 		notifications:  make(map[uint64]func(*Tx, NotificationResult)),
 		links:          make(map[uint64]func(*Tx, map[string]string)),
 		fileDialogs:    make(map[uint64]func(*Tx, []PickedFile)),
+		fontDialogs:    make(map[uint64]func(*Tx, *FontChoice)),
 		clipboardReads: make(map[uint64]func(*Tx, Representation)),
 		widgetPastes:   make(map[uint64]func(*Tx, Representation)),
 		nodePastes:     make(map[uint64]func(*Tx, []any, Representation)),
@@ -1129,6 +1132,148 @@ func (tx *Tx) ListFontFamilies() {
 // OnFontFamilies hears the installed font families: unique, in code-point
 // order, the names SetFamily takes.
 func (a *App) OnFontFamilies(fn func(*Tx, []string)) { a.onFontFamilies = fn }
+
+// FontFace is one face of a family: the OpenType weight class (1 to 1000),
+// the slope, the width class (1 to 9, 5 normal), and the platform's name
+// for it, for showing only (docs/font-picker-plan.md §2.2).
+type FontFace struct {
+	Weight int
+	Italic bool
+	Width  int
+	Name   string
+}
+
+// FontChoice is a family and one of its faces: the font picker's answer.
+type FontChoice struct {
+	Family string
+	Weight int
+	Italic bool
+	Width  int
+}
+
+// SetFontWeight draws a label, entry or textarea at a face weight, 1 to
+// 1000, on whatever family it resolves to; a weight the family lacks is
+// matched to its nearest face and a missing bold synthesized
+// (docs/font-picker-plan.md §2.3, §2.4).
+func (tx *Tx) SetFontWeight(w Widget, weight int) {
+	tx.emit(TxSetFontWeight(w.id, float64(weight)))
+}
+
+// FontWeight is SetFontWeight at construction.
+func (w Widget) FontWeight(weight int) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: FontWeight on a widget outside its build transaction — use Tx.SetFontWeight inside a live transaction")
+	}
+	w.tx.SetFontWeight(w, weight)
+	return w
+}
+
+// SetFontItalic slants a label, entry or textarea: the family's italic or
+// oblique face, synthesized where it has none.
+func (tx *Tx) SetFontItalic(w Widget, on bool) {
+	tx.emit(TxSetFontItalic(w.id, on))
+}
+
+// FontItalic is SetFontItalic at construction.
+func (w Widget) FontItalic(on bool) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: FontItalic on a widget outside its build transaction — use Tx.SetFontItalic inside a live transaction")
+	}
+	w.tx.SetFontItalic(w, on)
+	return w
+}
+
+// SetFontWidth draws a label, entry or textarea at a face width, 1 to 9
+// (5 normal), matched to the family's nearest.
+func (tx *Tx) SetFontWidth(w Widget, width int) {
+	tx.emit(TxSetFontWidth(w.id, float64(width)))
+}
+
+// FontWidth is SetFontWidth at construction.
+func (w Widget) FontWidth(width int) Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: FontWidth on a widget outside its build transaction — use Tx.SetFontWidth inside a live transaction")
+	}
+	w.tx.SetFontWidth(w, width)
+	return w
+}
+
+// ListFontFaces asks for one installed family's faces, answered once by
+// App.OnFontFaces (docs/font-picker-plan.md §4.4).
+func (tx *Tx) ListFontFaces(family string) {
+	tx.emit(TxListFontFaces(family))
+}
+
+// OnFontFaces hears a family's faces: the family asked for and its faces,
+// sorted by weight, then upright first, then width; none when the family is
+// not installed.
+func (a *App) OnFontFaces(fn func(*Tx, string, []FontFace)) { a.onFontFaces = fn }
+
+// ChooseFont asks the platform's font picker for a family and, with Faces,
+// a face (docs/font-picker-plan.md §4). It shares the file dialogs' id
+// space and their one-live-dialog rule; nothing is applied by kaya.
+func (tx *Tx) ChooseFont() FontDialogRef {
+	tx.app.c.fileDialog++
+	return FontDialogRef{tx: tx, id: tx.app.c.fileDialog}
+}
+
+// FontDialogRef accumulates the one SHOW_FONT_DIALOG record; nothing is
+// sent until Show.
+type FontDialogRef struct {
+	tx       *Tx
+	id       uint64
+	window   uint64
+	codeOnly bool
+	faces    bool
+	initial  FontChoice
+	onResult func(*Tx, *FontChoice)
+}
+
+// In targets an auxiliary window (0 = primary).
+func (r FontDialogRef) In(window uint64) FontDialogRef {
+	r.window = window
+	return r
+}
+
+// CodeOnly lists monospaced families only.
+func (r FontDialogRef) CodeOnly(on bool) FontDialogRef {
+	r.codeOnly = on
+	return r
+}
+
+// Faces asks for a face as well as a family.
+func (r FontDialogRef) Faces(on bool) FontDialogRef {
+	r.faces = on
+	return r
+}
+
+// Initial is the family and face the picker opens on.
+func (r FontDialogRef) Initial(choice FontChoice) FontDialogRef {
+	r.initial = choice
+	return r
+}
+
+// OnResult binds the one-shot result handler; CANCEL IS A NIL CHOICE.
+func (r FontDialogRef) OnResult(fn func(*Tx, *FontChoice)) FontDialogRef {
+	r.onResult = fn
+	return r
+}
+
+// Show sends the request, returning its id.
+func (r FontDialogRef) Show() uint64 {
+	if r.onResult != nil {
+		r.tx.app.fontDialogs[r.id] = r.onResult
+	}
+	flag := func(on bool) uint32 {
+		if on {
+			return 1
+		}
+		return 0
+	}
+	r.tx.emit(TxShowFontDialog(r.window, r.id, flag(r.codeOnly), flag(r.faces), uint32(r.initial.Weight),
+		flag(r.initial.Italic), uint32(r.initial.Width), r.initial.Family))
+	return r.id
+}
 
 // SetFollowsEnd makes a scroll keep its end in view while its content grows,
 // until the user scrolls away from the end (docs/follow-end-plan.md).
@@ -6589,6 +6734,21 @@ func (t *Tpl) SetTextScale(n Node, scale float64) {
 	t.tx.emit(TxSetTextScale(n.id, scale))
 }
 
+// SetFontWeight draws every stamped copy at a face weight.
+func (t *Tpl) SetFontWeight(n Node, weight int) {
+	t.tx.emit(TxSetFontWeight(n.id, float64(weight)))
+}
+
+// SetFontItalic slants every stamped copy.
+func (t *Tpl) SetFontItalic(n Node, on bool) {
+	t.tx.emit(TxSetFontItalic(n.id, on))
+}
+
+// SetFontWidth draws every stamped copy at a face width.
+func (t *Tpl) SetFontWidth(n Node, width int) {
+	t.tx.emit(TxSetFontWidth(n.id, float64(width)))
+}
+
 // Spacer is an empty grown column in the blueprint, consuming the
 // leftover main-axis space between its siblings.
 func (t *Tpl) Spacer() Node {
@@ -7506,6 +7666,42 @@ func (a *App) Serve() {
 			}
 			if fn := a.onFontFamilies; fn != nil {
 				a.dispatch(func(tx *Tx) { fn(tx, families) })
+			}
+		case kind == occFontFaces:
+			fields, _ := payload.([]any)
+			family := ""
+			faces := []FontFace{}
+			if len(fields) > 0 {
+				family, _ = fields[0].(string)
+			}
+			if len(fields) > 2 {
+				flat := fields[2:]
+				for i := 0; i+3 < len(flat); i += 4 {
+					weight, _ := flat[i].(int64)
+					italic, _ := flat[i+1].(bool)
+					width, _ := flat[i+2].(int64)
+					name, _ := flat[i+3].(string)
+					faces = append(faces, FontFace{Weight: int(weight), Italic: italic, Width: int(width), Name: name})
+				}
+			}
+			if fn := a.onFontFaces; fn != nil {
+				a.dispatch(func(tx *Tx) { fn(tx, family, faces) })
+			}
+		case kind == occFontDialogResult:
+			// One-shot; CANCEL IS AN EMPTY FAMILY, delivered as nil.
+			fields, _ := payload.([]any)
+			var choice *FontChoice
+			if len(fields) == 4 {
+				weight, _ := fields[0].(int64)
+				italic, _ := fields[1].(int64)
+				width, _ := fields[2].(int64)
+				if family, _ := fields[3].(string); family != "" {
+					choice = &FontChoice{Family: family, Weight: int(weight), Italic: italic != 0, Width: int(width)}
+				}
+			}
+			if fn := a.fontDialogs[id]; fn != nil {
+				delete(a.fontDialogs, id)
+				a.dispatch(func(tx *Tx) { fn(tx, choice) })
 			}
 		case imageOccurrence(kind):
 			a.imageOccurred(kind, id, keys)

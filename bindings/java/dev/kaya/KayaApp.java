@@ -477,6 +477,8 @@ public final class KayaApp {
     private PermissionHandler permissionHandler;
     private BiConsumer<Tx, List<CaptureDevice>> captureDevicesHandler;
     private BiConsumer<Tx, List<String>> fontFamiliesHandler;
+    private FontFacesHandler fontFacesHandler;
+    private final java.util.Map<Long, BiConsumer<Tx, FontChoice>> fontDialogs = new java.util.HashMap<>();
     // The capture callbacks by capture id, process-wide as the core's sinks
     // are: written on the app thread, read on kaya's capture thread.
     static final Map<Long, CaptureFrameCallback> captureFrames =
@@ -543,6 +545,13 @@ public final class KayaApp {
 
     /** A template entry's change handler: the stamped copy's keys, then
      * the entry's new text. */
+    /** One family's faces, answering {@link Tx#listFontFaces}
+     * (docs/font-picker-plan.md §4.4). */
+    @FunctionalInterface
+    public interface FontFacesHandler {
+        void accept(Tx tx, String family, List<FontFace> faces);
+    }
+
     @FunctionalInterface
     public interface ChangeHandler {
         void accept(Tx tx, List<Object> keys, String text);
@@ -1440,6 +1449,14 @@ public final class KayaApp {
      * and neither phone (DESIGN.md, File dialogs). EMPTY IS THIS FIELD'S
      * null: a record component says its absence in-band rather than
      * through a second sentinel. */
+    /** One face of a family: the OpenType weight class (1 to 1000), the
+     * slope, the width class (1 to 9, 5 normal), and the platform's name for
+     * it, for showing only (docs/font-picker-plan.md §2.2). */
+    public record FontFace(int weight, boolean italic, int width, String name) {}
+
+    /** A family and one of its faces: the font picker's answer. */
+    public record FontChoice(String family, int weight, boolean italic, int width) {}
+
     public record PickedFile(long handle, String name, String localPath) {
         /**
          * Redeem the handle for real streams, plus whether it seeks.
@@ -3177,6 +3194,92 @@ public final class KayaApp {
         }
     }
 
+    /** Accumulates the one SHOW_FONT_DIALOG record (docs/font-picker-plan.md
+     * §4.2); nothing is sent until show. Out of the file dialogs' one live
+     * slot; CANCEL IS null and nothing is applied by kaya. */
+    public static class FontDialogRef {
+        private final Tx tx;
+        private final KayaApp app;
+        private final long id;
+        private long window;
+        private boolean codeOnly;
+        private boolean faces;
+        private FontChoice initial;
+        private BiConsumer<Tx, FontChoice> onResult;
+        private boolean sent;
+
+        FontDialogRef(Tx tx, KayaApp app, long id) {
+            this.tx = tx;
+            this.app = app;
+            this.id = id;
+        }
+
+        /** Target an auxiliary window (0 = primary). */
+        public FontDialogRef in(long window) {
+            this.window = window;
+            return this;
+        }
+
+        /** List monospaced families only. */
+        public FontDialogRef codeOnly(boolean on) {
+            this.codeOnly = on;
+            return this;
+        }
+
+        /** Ask for a face as well as a family. */
+        public FontDialogRef faces(boolean on) {
+            this.faces = on;
+            return this;
+        }
+
+        /** The family and face the picker opens on. */
+        public FontDialogRef initial(FontChoice choice) {
+            this.initial = choice;
+            return this;
+        }
+
+        /** Bind the one-shot result handler; CANCEL IS null. */
+        public FontDialogRef onResult(BiConsumer<Tx, FontChoice> handler) {
+            this.onResult = handler;
+            return this;
+        }
+
+        public long show() {
+            return send(onResult);
+        }
+
+        private long send(BiConsumer<Tx, FontChoice> handler) {
+            tx.alive();
+            if (sent) throw new IllegalStateException("kaya: this font request was already sent");
+            app.requireFileSlot();
+            tx.emit(KayaWire.txShowFontDialog(window, id, codeOnly ? 1 : 0, faces ? 1 : 0,
+                    initial == null ? 0 : initial.weight(), initial != null && initial.italic() ? 1 : 0,
+                    initial == null ? 0 : initial.width(), initial == null ? "" : initial.family()));
+            sent = true;
+            app.liveFileDialog = id;
+            if (handler != null) app.fontDialogs.put(id, handler);
+            tx.rollbackActions.add(() -> {
+                app.fontDialogs.remove(id);
+                if (app.liveFileDialog == id) app.liveFileDialog = 0;
+            });
+            return id;
+        }
+
+        private CompletableFuture<FontChoice> future() {
+            if (onResult != null) throw new IllegalStateException("kaya: choose a callback or a future, not both");
+            return app.requestFuture(tx, resolve -> send((t, answer) -> resolve.accept(answer)));
+        }
+    }
+
+    public static final class FutureFontDialogRef extends FontDialogRef {
+        FutureFontDialogRef(Tx tx, KayaApp app, long id) { super(tx, app, id); }
+        @Override public FutureFontDialogRef in(long window) { super.in(window); return this; }
+        @Override public FutureFontDialogRef codeOnly(boolean on) { super.codeOnly(on); return this; }
+        @Override public FutureFontDialogRef faces(boolean on) { super.faces(on); return this; }
+        @Override public FutureFontDialogRef initial(FontChoice choice) { super.initial(choice); return this; }
+        public CompletableFuture<FontChoice> showFuture() { return super.future(); }
+    }
+
     public static final class FutureSaveDialogRef extends SaveDialogRef {
         FutureSaveDialogRef(Tx tx, KayaApp app, long id, String name) { super(tx, app, id, name); }
         @Override public FutureSaveDialogRef in(long window) { super.in(window); return this; }
@@ -4883,6 +4986,27 @@ public final class KayaApp {
             return this;
         }
 
+        /** This text kind at a face weight (Tx.setFontWeight). */
+        public Widget fontWeight(int weight) {
+            inBuild("fontWeight");
+            tx.setFontWeight(this, weight);
+            return this;
+        }
+
+        /** This text kind slanted (Tx.setFontItalic). */
+        public Widget fontItalic(boolean on) {
+            inBuild("fontItalic");
+            tx.setFontItalic(this, on);
+            return this;
+        }
+
+        /** This text kind at a face width (Tx.setFontWidth). */
+        public Widget fontWidth(int width) {
+            inBuild("fontWidth");
+            tx.setFontWidth(this, width);
+            return this;
+        }
+
         /** This scroll keeps its end in view while its content grows, until
          * the user scrolls away (docs/follow-end-plan.md):
          * tx.scroll(s -> {...}).followsEnd(). */
@@ -6524,6 +6648,21 @@ public final class KayaApp {
             t.setTextScale(n, scale);
         }
 
+        /** This row's copy at a face weight (Tpl.setFontWeight). */
+        public void setFontWeight(Node n, int weight) {
+            t.setFontWeight(n, weight);
+        }
+
+        /** This row's copy slanted (Tpl.setFontItalic). */
+        public void setFontItalic(Node n, boolean on) {
+            t.setFontItalic(n, on);
+        }
+
+        /** This row's copy at a face width (Tpl.setFontWidth). */
+        public void setFontWidth(Node n, int width) {
+            t.setFontWidth(n, width);
+        }
+
         public void setTint(Node n, Signal<Tint> s) {
             t.setTint(n, s);
         }
@@ -7639,6 +7778,30 @@ public final class KayaApp {
          * {@link KayaApp#onFontFamilies} (docs/code-surface-plan.md M3). */
         public void listFontFamilies() {
             emit(KayaWire.txListFontFamilies());
+        }
+
+        /** A label, entry or textarea at a face weight, the OpenType class 1
+         * to 1000; a weight the family lacks is matched and a missing bold
+         * synthesized (docs/font-picker-plan.md §2.3). */
+        public void setFontWeight(Widget w, int weight) {
+            emit(KayaWire.txSetFontWeight(w.id, weight));
+        }
+
+        /** A label, entry or textarea slanted, synthesized where the family
+         * has no slanted face. */
+        public void setFontItalic(Widget w, boolean on) {
+            emit(KayaWire.txSetFontItalic(w.id, on));
+        }
+
+        /** A label, entry or textarea at a face width, 1 to 9 (5 normal). */
+        public void setFontWidth(Widget w, int width) {
+            emit(KayaWire.txSetFontWidth(w.id, width));
+        }
+
+        /** Ask for one installed family's faces, answered once by
+         * {@link KayaApp#onFontFaces} (docs/font-picker-plan.md §4.4). */
+        public void listFontFaces(String family) {
+            emit(KayaWire.txListFontFaces(family));
         }
 
         /** A scroll that keeps its end in view while its content grows
@@ -9505,6 +9668,13 @@ public final class KayaApp {
                     this, KayaApp.this, ++nextFileDialog, suggestedName);
         }
 
+        /** Ask the platform's font picker for a family and, with faces, a
+         * face (docs/font-picker-plan.md §4). Out of the file dialogs' one
+         * live slot; CANCEL IS null. */
+        public FutureFontDialogRef chooseFont() {
+            return new FutureFontDialogRef(this, KayaApp.this, ++nextFileDialog);
+        }
+
         // --- The clipboard (DESIGN.md, Clipboard) ------------------
 
         /** Begin a clip: fill in as many representations as the app
@@ -10077,6 +10247,21 @@ public final class KayaApp {
         /** Every stamped copy at a multiple of the platform's size (Tx.setTextScale). */
         public void setTextScale(Node n, double scale) {
             tx.emit(KayaWire.txSetTextScale(n.id, scale));
+        }
+
+        /** Every stamped copy at a face weight (Tx.setFontWeight). */
+        public void setFontWeight(Node n, int weight) {
+            tx.emit(KayaWire.txSetFontWeight(n.id, weight));
+        }
+
+        /** Every stamped copy slanted (Tx.setFontItalic). */
+        public void setFontItalic(Node n, boolean on) {
+            tx.emit(KayaWire.txSetFontItalic(n.id, on));
+        }
+
+        /** Every stamped copy at a face width (Tx.setFontWidth). */
+        public void setFontWidth(Node n, int width) {
+            tx.emit(KayaWire.txSetFontWidth(n.id, width));
         }
 
         public void setTint(Node n, Signal<Tint> s) {
@@ -12304,6 +12489,13 @@ public final class KayaApp {
         fontFamiliesHandler = handler;
     }
 
+    /** One family's faces, answering {@link Tx#listFontFaces}: the family
+     * asked for and its faces, sorted by weight, then upright first, then
+     * width; none when the family is not installed (docs/font-picker-plan.md §4.4). */
+    public void onFontFaces(FontFacesHandler handler) {
+        fontFacesHandler = handler;
+    }
+
     /**
      * Run {@code f} for each frame of {@code c} (docs/capture-plan.md §4).
      * IT RUNS ON KAYA'S CAPTURE THREAD, NOT THE APP THREAD, and holds no
@@ -12425,6 +12617,30 @@ public final class KayaApp {
                     List<CaptureDevice> heard = captureDeviceList;
                     dispatch(tx -> handler.accept(tx, heard));
                 }
+            }
+            case KayaWire.OCC_KIND_FONT_FACES -> {
+                List<?> tail = (List<?>) occ.payload;
+                String family = (String) tail.get(0);
+                List<FontFace> faces = new ArrayList<>();
+                for (int at = 2; at + 3 < tail.size(); at += 4) {
+                    faces.add(new FontFace(((Long) tail.get(at)).intValue(), (Boolean) tail.get(at + 1),
+                            ((Long) tail.get(at + 2)).intValue(), (String) tail.get(at + 3)));
+                }
+                FontFacesHandler handler = fontFacesHandler;
+                if (handler != null) {
+                    List<FontFace> heard = List.copyOf(faces);
+                    dispatch(tx -> handler.accept(tx, family, heard));
+                }
+            }
+            case KayaWire.OCC_KIND_FONT_DIALOG_RESULT -> {
+                // One-shot; CANCEL IS AN EMPTY FAMILY, delivered as null.
+                List<?> tail = (List<?>) occ.payload;
+                String family = (String) tail.get(3);
+                FontChoice choice = family.isEmpty() ? null : new FontChoice(family,
+                        ((Long) tail.get(0)).intValue(), ((Long) tail.get(1)) != 0, ((Long) tail.get(2)).intValue());
+                if (liveFileDialog == occ.id) liveFileDialog = 0;
+                BiConsumer<Tx, FontChoice> handler = fontDialogs.remove(occ.id);
+                if (handler != null) dispatch(tx -> handler.accept(tx, choice));
             }
             case KayaWire.OCC_KIND_FONT_FAMILIES -> {
                 List<?> tail = (List<?>) occ.payload;

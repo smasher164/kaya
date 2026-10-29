@@ -116,6 +116,8 @@ module Kaya.Core
     Selection (..),
     Representation (..),
     PickedFile (..),
+    FontFace (..),
+    FontChoice (..),
     Op (..),
     Dropped (..),
     Viewbox (..),
@@ -407,6 +409,24 @@ data PickedFile = PickedFile
     localPath :: !FilePath
   }
 
+-- | One face of a family: the OpenType weight class (1 to 1000), the slope,
+-- the width class (1 to 9, 5 normal), and the platform's name for it, for
+-- showing only (docs\/font-picker-plan.md §2.2).
+data FontFace = FontFace
+  { weight :: !Int,
+    italic :: !Bool,
+    width :: !Int,
+    name :: !Text
+  }
+
+-- | A family and one of its faces: the font picker's answer.
+data FontChoice = FontChoice
+  { family :: !Text,
+    weight :: !Int,
+    italic :: !Bool,
+    width :: !Int
+  }
+
 -- | WHAT THE USER DID WITH AN ALERT: an action by its 0-based index, or
 -- the dismissal that names none.
 data AlertChoice = AlertAction !Int | AlertCancel
@@ -508,6 +528,7 @@ data Pending
   | PNotification !Word64 (NotificationOutcome -> IO ())
   | PToast !Word64 (ToastOutcome -> IO ())
   | PFileDialog !Word64 ([PickedFile] -> IO ())
+  | PFontDialog !Word64 (Maybe FontChoice -> IO ())
   | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
   | PSectionSelected !Word64 (IO ())
@@ -2140,7 +2161,11 @@ data MediaState = MediaState
     devicesHandler :: IORef (Maybe ([CaptureDevice] -> IO ())),
     -- | docs\/code-surface-plan.md M3: the font family list rides the
     -- capture arm's record.
-    fontFamiliesHandler :: IORef (Maybe ([Text] -> IO ()))
+    fontFamiliesHandler :: IORef (Maybe ([Text] -> IO ())),
+    -- | docs\/font-picker-plan.md §4.4, §4.2: a family's faces, and the font
+    -- picker's one-shot answers by dialog id.
+    fontFacesHandler :: IORef (Maybe (Text -> [FontFace] -> IO ())),
+    fontDialogHandlers :: IORef (Map.Map Word64 (Maybe FontChoice -> IO ()))
   }
 
 -- | Players get their OWN id space (docs\/media-plan.md §2).

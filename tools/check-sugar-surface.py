@@ -2714,7 +2714,8 @@ CODE_SURFACES = [
                  (HS_APP, r"^{5} :: App -> \(\[Text\] -> IO \(\)\) -> IO \(\)")]),
     ("ocaml", [(ML_APP, r"\?on_format \?on_selection \?{0} \?{1} \?{2} \?{3} \(\) ="),
                (ML_APP, r"\?tint_bind \?text \?bind \?{1} \?{2} \?{3} \(\) ="),
-               (ML_APP, r"\?content_type \?on_change \?on_submit \?{1} \?{2} \?{3} \(\) ="),
+               (ML_APP, r"\?content_type \?on_change \?on_submit \?{1} \?{2} \?{3}"
+                        r"(?: \?font_[a-z]+)* \(\) ="),
                (ML_APP, r"^let {4} \(\) ="),
                (ML_APP, r"^let {5} app \(f : string list -> unit\) =")]),
     ("js", [(JS_APP, r"^  {0}\(on = true\): this \{{"),
@@ -2787,6 +2788,136 @@ for _lang, _rows in CODE_SURFACES:
                           f"code-surface cut")
         _cs_cuts += 1
 print(f"check-sugar-surface: code-surface cuts watched red {_cs_cuts}/{_cs_want}")
+
+# --- THE FONT PICKER SURFACE, live zone, in all nine (docs/font-picker-plan.md §5)
+# The three face props, the family's faces as a request and its handler, and
+# the picker's request; tpl-surfaces holds the template zone's three props.
+FONT_SURFACES = [
+    ("rust", [(APP_RS, r"pub fn {0}\(self, weight: u16\) -> Self"),
+              (APP_RS, r"pub fn {1}\(self, on: bool\) -> Self"),
+              (APP_RS, r"pub fn {2}\(self, width: u8\) -> Self"),
+              (APP_RS, r"pub fn {3}\(&mut self, family: impl Into<String>\)"),
+              (APP_RS, r"pub fn {4}\(&self, f: impl Fn\(&str, "
+                      r"&\[crate::protocol::NamedFace\]\) -> M \+ 'static\)"),
+              (APP_RS, r"pub fn {5}\(&mut self\) -> FontDialogRef")]),
+    ("python", [(PY_INIT, r"^    def {0}\(self: H, weight: int\) -> H:"),
+                (PY_INIT, r"^    def {1}\(self: H, on: bool = True\) -> H:"),
+                (PY_INIT, r"^    def {2}\(self: H, width: int\) -> H:"),
+                (PY_INIT, r"^def {3}\(family: str\) -> None:"),
+                (PY_INIT, r"^def {4}\(f: Callable\[\[str, tuple\[FontFace, \.\.\.\]\], "
+                          r"object\]\) -> None:"),
+                (PY_INIT, r"^def {5}\(\*, code_only: bool = False, faces: bool = False,")]),
+    ("go", [(GO_APP, r"^func \(w Widget\) {0}\(weight int\) Widget"),
+            (GO_APP, r"^func \(w Widget\) {1}\(on bool\) Widget"),
+            (GO_APP, r"^func \(w Widget\) {2}\(width int\) Widget"),
+            (GO_APP, r"^func \(tx \*Tx\) {3}\(family string\) \{{"),
+            (GO_APP, r"^func \(a \*App\) {4}\(fn func\(\*Tx, string, \[\]FontFace\)\)"),
+            (GO_APP, r"^func \(tx \*Tx\) {5}\(\) FontDialogRef")]),
+    ("csharp", [(CS_APP, r"public void Set{0}\(Widget w, int weight\)"),
+                (CS_APP, r"public void Set{1}\(Widget w, bool on\)"),
+                (CS_APP, r"public void Set{2}\(Widget w, int width\)"),
+                (CS_APP, r"public void {3}\(string family\) =>"),
+                (CS_APP, r"public void {4}\(Action<Tx, string, IReadOnlyList<FontFace>> handler\)"),
+                (CS_APP, r"public ulong {5}\(")]),
+    ("java", [(JAVA_APP, r"public Widget {0}\(int weight\)"),
+              (JAVA_APP, r"public Widget {1}\(boolean on\)"),
+              (JAVA_APP, r"public Widget {2}\(int width\)"),
+              (JAVA_APP, r"public void {3}\(String family\) \{{"),
+              (JAVA_APP, r"public void {4}\(FontFacesHandler handler\)"),
+              (JAVA_APP, r"public FutureFontDialogRef {5}\(\)")]),
+    ("swift", [(SW_APP, r"public func {0}\(_ w: KayaWidget, _ weight: Int\)"),
+               (SW_APP, r"public func {1}\(_ w: KayaWidget, _ on: Bool\)"),
+               (SW_APP, r"public func {2}\(_ w: KayaWidget, _ width: Int\)"),
+               (SW_APP, r"public func {3}\(_ family: String\) \{{"),
+               (SW_CAP, r"public func {4}\(_ handler: @escaping "
+                        r"\(KayaAppTx, String, \[KayaFontFace\]\)"
+                        r" throws -> Void\)"),
+               (SW_APP, r"public func {5}\(\n        codeOnly: Bool = false")]),
+    ("haskell", [(HS_APP, r"^  {0} :: Int -> Attr 'LeafW"),
+                 (HS_APP, r"^  {1} :: Bool -> Attr 'LeafW"),
+                 (HS_APP, r"^  {2} :: Int -> Attr 'LeafW"),
+                 (HS_APP, r"^{3} :: Text -> Build \(\)"),
+                 (HS_APP, r"^{4} :: App -> \(Text -> \[FontFace\] -> IO \(\)\) -> IO \(\)"),
+                 (HS_APP, r"^{5} :: Bool -> Bool -> Maybe FontChoice -> "
+                          r"\(Maybe FontChoice -> IO \(\)\) -> Build \(\)")]),
+    ("ocaml", [(ML_APP, r"\?own_undo \?{0} \?{1} \?{2} \?on_edit"),
+               (ML_APP, r"\?tint\n    \?{0} \?{1} \?{2} \?tint_bind"),
+               (ML_APP, r"\?text_scale \?{0} \?{1} \?{2} \(\) =\n  let tx = the_tx \(\) in\n"
+                        r"  let w = widget Kaya_wire\.kind_entry in"),
+               (ML_APP, r"^let {3} family ="),
+               (ML_APP, r"^let {4} app \(f : string -> Font_face\.t list -> unit\) ="),
+               (ML_APP, r"^let {5} \?\(window = 0L\) \?\(code_only = false\)")]),
+    ("js", [(JS_APP, r"^  {0}\(weight: number\): this \{{"),
+            (JS_APP, r"^  {1}\(on = true\): this \{{"),
+            (JS_APP, r"^  {2}\(width: number\): this \{{"),
+            (JS_APP, r"^export function {3}\(family: string\): void \{{"),
+            (JS_APP, r"^export function {4}\(f: \(family: string, "
+                     r"faces: readonly FontFace\[\]\) => void\)"
+                     r": void \{{"),
+            (JS_APP, r"^export function {5}\(opts: FontOptions = \{{\}}\)")]),
+]
+_FSNAKE = ("font_weight", "font_italic", "font_width", "list_font_faces", "on_font_faces",
+           "choose_font")
+_FCAMEL = ("fontWeight", "fontItalic", "fontWidth", "listFontFaces", "onFontFaces", "chooseFont")
+_FPASCAL = ("FontWeight", "FontItalic", "FontWidth", "ListFontFaces", "OnFontFaces", "ChooseFont")
+FONT_NAMES = {"rust": _FSNAKE, "python": _FSNAKE, "ocaml": _FSNAKE, "go": _FPASCAL,
+              "csharp": _FPASCAL, "java": _FCAMEL, "js": _FCAMEL,
+              "swift": ("setFontWeight", "setFontItalic", "setFontWidth", "listFontFaces",
+                        "onFontFaces", "chooseFont"),
+              "haskell": ("FontWeight", "FontItalic", "FontWidth", "listFontFaces",
+                          "onFontFaces", "chooseFont")}
+
+
+def check_font_surface(fake=None, text_for=None):
+    out = []
+    for lang, rows in FONT_SURFACES:
+        names = fake or FONT_NAMES[lang]
+        for rel, template in rows:
+            text = text_for(lang, rel) if text_for else read_rel(rel)
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell the font "
+                           f"picker surface (docs/font-picker-plan.md §5; wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_font_surface():
+    print(_line)
+    status = 1
+_fs_want = sum(len(rows) for _, rows in FONT_SURFACES)
+_fs_fake = check_font_surface(tuple(f"kayaFakeFont{i}" for i in range(6)))
+print(f"check-sugar-surface: fake font-surface spellings fired {len(_fs_fake)}/{_fs_want}")
+if len(_fs_fake) != _fs_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_fs_fake)}/{_fs_want} "
+                  f"font-surface patterns fired for names that exist nowhere)")
+_fs_cuts = 0
+for _lang, _rows in FONT_SURFACES:
+    for _rel, _template in _rows:
+        _real = read_rel(_rel)
+        _pat = _template.format(*FONT_NAMES[_lang])
+        _n = 0
+
+        def _fs_mangle(m):
+            global _n
+            _inner, _k = sub_count(
+                r"(?i)(list_?font_?faces|on_?font_?faces|choose_?font|(set_?)?font_?weight"
+                r"|(set_?)?font_?italic|(set_?)?font_?width)",
+                r"kayaCut", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _fs_mangle, _real, flags=re.M)
+        print(f"check-sugar-surface: font-surface cut {_lang} /{_template[:34]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_font_surface(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} font-surface cut "
+                          f"/{_template[:34]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the "
+                          f"font-surface cut")
+        _fs_cuts += 1
+print(f"check-sugar-surface: font-surface cuts watched red {_fs_cuts}/{_fs_want}")
 
 # --- THE PHONE FORMAT SURFACE, in all nine (docs/phone-format-plan.md §2, §3) ---
 # The keyboard bar's menu prop and the selection's handler, widget and copy.

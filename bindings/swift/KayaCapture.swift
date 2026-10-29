@@ -271,6 +271,7 @@ final class KayaCaptureMirror {
     var onDevices: ((KayaAppTx, [KayaCaptureDevice]) throws -> Void)?
     /// docs/code-surface-plan.md M3: the font family list rides this arm.
     var onFontFamilies: ((KayaAppTx, [String]) throws -> Void)?
+    var onFontFaces: ((KayaAppTx, String, [KayaFontFace]) throws -> Void)?
 }
 
 extension KayaApp {
@@ -326,6 +327,13 @@ extension KayaApp {
     /// code-point order, the names `setFamily` takes (docs/code-surface-plan.md M3).
     public func onFontFamilies(_ handler: @escaping (KayaAppTx, [String]) throws -> Void) {
         captures.onFontFamilies = handler
+    }
+
+    /// One family's faces, answering `listFontFaces`: the family asked for
+    /// and its faces, sorted by weight, then upright first, then width; none
+    /// when the family is not installed (docs/font-picker-plan.md §4.4).
+    public func onFontFaces(_ handler: @escaping (KayaAppTx, String, [KayaFontFace]) throws -> Void) {
+        captures.onFontFaces = handler
     }
 
     /// Run `f` for each frame of `c` (docs/capture-plan.md §4). IT RUNS ON
@@ -401,6 +409,25 @@ extension KayaApp {
             }
             captures.devices = list
             if let h = captures.onDevices { run { tx in try h(tx, list) } }
+        case UInt16(KAYA_OCCURRENCE_FONT_FACES):
+            let family = kayaStr(tail[0])
+            var faces: [KayaFontFace] = []
+            var at = 2
+            while at + 3 < tail.count {
+                var italic = false
+                if case .bool(let b) = tail[at + 1] { italic = b }
+                faces.append(KayaFontFace(
+                    weight: Int(kayaInt(tail[at])), italic: italic, width: Int(kayaInt(tail[at + 2])),
+                    name: kayaStr(tail[at + 3])))
+                at += 4
+            }
+            if let h = captures.onFontFaces { run { tx in try h(tx, family, faces) } }
+        case UInt16(KAYA_OCCURRENCE_FONT_DIALOG_RESULT):
+            // One-shot; CANCEL IS AN EMPTY FAMILY, delivered as nil.
+            let family = kayaStr(tail[3])
+            fontDialogResult(id, family.isEmpty ? nil : KayaFontChoice(
+                family: family, weight: Int(kayaInt(tail[0])), italic: kayaInt(tail[1]) != 0,
+                width: Int(kayaInt(tail[2]))))
         case UInt16(KAYA_OCCURRENCE_FONT_FAMILIES):
             let list = tail.dropFirst().map(kayaStr)
             if let h = captures.onFontFamilies { run { tx in try h(tx, Array(list)) } }

@@ -207,6 +207,9 @@ func (r playlistRow) SetMaxLines(n kaya.Node, lines int)                { r.t.Se
 func (r playlistRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r playlistRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }
 func (r playlistRow) SetTextScale(n kaya.Node, scale float64)           { r.t.SetTextScale(n, scale) }
+func (r playlistRow) SetFontWeight(n kaya.Node, weight int)             { r.t.SetFontWeight(n, weight) }
+func (r playlistRow) SetFontItalic(n kaya.Node, on bool)                { r.t.SetFontItalic(n, on) }
+func (r playlistRow) SetFontWidth(n kaya.Node, width int)               { r.t.SetFontWidth(n, width) }
 
 func (r playlistRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r playlistRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }

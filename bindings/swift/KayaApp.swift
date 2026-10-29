@@ -1765,6 +1765,31 @@ public final class KayaAsset {
     }
 }
 
+/// One face of a family: the OpenType weight class (1 to 1000), the slope,
+/// the width class (1 to 9, 5 normal), and the platform's name for it, for
+/// showing only (docs/font-picker-plan.md §2.2).
+public struct KayaFontFace: Sendable, Equatable {
+    public let weight: Int
+    public let italic: Bool
+    public let width: Int
+    public let name: String
+}
+
+/// A family and one of its faces: the font picker's answer.
+public struct KayaFontChoice: Sendable, Equatable {
+    public let family: String
+    public let weight: Int
+    public let italic: Bool
+    public let width: Int
+
+    public init(family: String, weight: Int, italic: Bool, width: Int) {
+        self.family = family
+        self.weight = weight
+        self.italic = italic
+        self.width = width
+    }
+}
+
 public struct KayaPickedFile: Sendable {
     let handle: UInt64
     public let name: String
@@ -2772,6 +2797,7 @@ public final class KayaApp {
     /// The network images' two row handlers and the helpers' feeds (KayaImages.swift).
     let images = KayaImageState()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
+    var fontDialogs: [UInt64: (KayaAppTx, KayaFontChoice?) throws -> Void] = [:]
     // Clipboard reads: one-shot, keyed by request id, on the alert's
     // request/result grammar.
     var clipboardReads: [UInt64: (KayaAppTx, KayaRepresentation?) throws -> Void] = [:]
@@ -3543,6 +3569,16 @@ public final class KayaApp {
         }
     }
 
+    @KayaAppActor public func chooseFont(
+        codeOnly: Bool = false, faces: Bool = false, initial: KayaFontChoice? = nil, window: UInt64 = 0
+    ) async -> KayaFontChoice? {
+        await requestAsync { tx, resolve in
+            tx.chooseFont(codeOnly: codeOnly, faces: faces, initial: initial, window: window) { _, choice in
+                resolve(choice)
+            }
+        }
+    }
+
     @KayaAppActor public func readClipboard(accepting: [String] = []) async -> KayaRepresentation? {
         await requestAsync { tx, resolve in
             var request = tx.readClipboard()
@@ -3771,6 +3807,24 @@ public final class KayaApp {
         if liveFileDialog == id { liveFileDialog = 0 }
         if let handler = fileDialogs.removeValue(forKey: id) {
             dispatch { try build { tx in try handler(tx, files) } }
+        }
+    }
+
+    /// Bind the font picker's one-shot result handler, out of the file
+    /// dialogs' one live slot.
+    func onFontDialog(_ dialog: UInt64, _ handler: ((KayaAppTx, KayaFontChoice?) throws -> Void)?) {
+        liveFileDialog = dialog
+        if let handler { fontDialogs[dialog] = handler }
+        currentTx!.rollbackActions.append { [self] in
+            fontDialogs.removeValue(forKey: dialog)
+            if liveFileDialog == dialog { liveFileDialog = 0 }
+        }
+    }
+
+    func fontDialogResult(_ id: UInt64, _ choice: KayaFontChoice?) {
+        if liveFileDialog == id { liveFileDialog = 0 }
+        if let handler = fontDialogs.removeValue(forKey: id) {
+            dispatch { try build { tx in try handler(tx, choice) } }
         }
     }
 
@@ -4631,6 +4685,30 @@ public final class KayaAppTx {
     /// `onFontFamilies` (docs/code-surface-plan.md M3).
     public func listFontFamilies() {
         tx.listFontFamilies()
+    }
+
+    /// A label, entry or textarea at a face weight, the OpenType class 1 to
+    /// 1000; a weight the family lacks is matched and a missing bold
+    /// synthesized (docs/font-picker-plan.md §2.3).
+    public func setFontWeight(_ w: KayaWidget, _ weight: Int) {
+        tx.setFontWeight(w.id, Double(weight))
+    }
+
+    /// A label, entry or textarea slanted, synthesized where the family has
+    /// no slanted face.
+    public func setFontItalic(_ w: KayaWidget, _ on: Bool) {
+        tx.setFontItalic(w.id, on)
+    }
+
+    /// A label, entry or textarea at a face width, 1 to 9 (5 normal).
+    public func setFontWidth(_ w: KayaWidget, _ width: Int) {
+        tx.setFontWidth(w.id, Double(width))
+    }
+
+    /// Ask for one installed family's faces, answered once by `onFontFaces`
+    /// (docs/font-picker-plan.md §4.4).
+    public func listFontFaces(_ family: String) {
+        tx.listFontFaces(.str(family))
     }
 
     /// An image's bound in points: the picture scales down to fit, its shape
@@ -6273,6 +6351,24 @@ public final class KayaAppTx {
         return id
     }
 
+    /// Ask the platform's font picker for a family and, with `faces`, a face,
+    /// among monospaced families only with `codeOnly` (docs/font-picker-plan.md
+    /// §4). Out of the file dialogs' one live slot; CANCEL IS `nil`, and
+    /// nothing is applied by kaya.
+    @discardableResult
+    public func chooseFont(
+        codeOnly: Bool = false, faces: Bool = false, initial: KayaFontChoice? = nil, window: UInt64 = 0,
+        onResult: ((KayaAppTx, KayaFontChoice?) throws -> Void)? = nil
+    ) -> UInt64 {
+        alive()
+        let id = app.allocFileDialog()
+        tx.showFontDialog(
+            window, id, codeOnly ? 1 : 0, faces ? 1 : 0, UInt32(initial?.weight ?? 0),
+            initial?.italic == true ? 1 : 0, UInt32(initial?.width ?? 0), .str(initial?.family ?? ""))
+        app.onFontDialog(id, onResult)
+        return id
+    }
+
     // --- The clipboard (DESIGN.md, Clipboard) ----------------------
 
     /// Begin a clip: fill in as many representations as the app wants to
@@ -7165,6 +7261,21 @@ public final class KayaTpl {
     /// Every stamped copy at a multiple of the platform's size (`setTextScale`).
     public func setTextScale(_ n: KayaNodeHandle, _ scale: Double) {
         tx.tx.setTextScale(n.id, scale)
+    }
+
+    /// Every stamped copy at a face weight (`setFontWeight`).
+    public func setFontWeight(_ n: KayaNodeHandle, _ weight: Int) {
+        tx.tx.setFontWeight(n.id, Double(weight))
+    }
+
+    /// Every stamped copy slanted (`setFontItalic`).
+    public func setFontItalic(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setFontItalic(n.id, on)
+    }
+
+    /// Every stamped copy at a face width (`setFontWidth`).
+    public func setFontWidth(_ n: KayaNodeHandle, _ width: Int) {
+        tx.tx.setFontWidth(n.id, Double(width))
     }
 
     public func setTint(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaTint>) {

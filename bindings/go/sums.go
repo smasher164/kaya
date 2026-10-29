@@ -488,6 +488,9 @@ func (sc SumCase[K, V]) SetMaxLines(n Node, lines int) { sc.t.SetMaxLines(n, lin
 // stamps (docs/code-surface-plan.md M1, M2, S1).
 func (sc SumCase[K, V]) SetMonospaced(n Node, on bool)       { sc.t.SetMonospaced(n, on) }
 func (sc SumCase[K, V]) SetFamily(n Node, name string)       { sc.t.SetFamily(n, name) }
+func (sc SumCase[K, V]) SetFontWeight(n Node, weight int)     { sc.t.SetFontWeight(n, weight) }
+func (sc SumCase[K, V]) SetFontItalic(n Node, on bool)        { sc.t.SetFontItalic(n, on) }
+func (sc SumCase[K, V]) SetFontWidth(n Node, width int)       { sc.t.SetFontWidth(n, width) }
 func (sc SumCase[K, V]) SetTextScale(n Node, scale float64) { sc.t.SetTextScale(n, scale) }
 
 // SetAlpha lets a colour picker this arm stamps choose translucency

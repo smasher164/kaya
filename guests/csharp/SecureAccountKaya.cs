@@ -525,6 +525,12 @@ sealed class SecureAccountRow
 
     public void SetTextScale(Node n, double scale) => t.SetTextScale(n, scale);
 
+    public void SetFontWeight(Node n, int weight) => t.SetFontWeight(n, weight);
+
+    public void SetFontItalic(Node n, bool on) => t.SetFontItalic(n, on);
+
+    public void SetFontWidth(Node n, int width) => t.SetFontWidth(n, width);
+
     public void SetTint(Node n, Signal s) => t.SetTint(n, s);
 
     public void SetTint(Node n, Field<Tint> f, uint level = 0) =>

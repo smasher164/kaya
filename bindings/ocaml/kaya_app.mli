@@ -613,6 +613,14 @@ module Capture_reading : sig
   }
 end
 
+module Font_face : sig
+  type t = { weight : int; italic : bool; width : int; name : string }
+end
+
+module Font_choice : sig
+  type t = { family : string; weight : int; italic : bool; width : int }
+end
+
 module Capture_device : sig
   type t = {
     id : string;
@@ -806,6 +814,12 @@ val set_family : widget -> string -> unit
 val set_text_scale : widget -> float -> unit
 val list_font_families : unit -> unit
 
+(* docs/font-picker-plan.md §2.3, §4.4: the face, and a family's faces. *)
+val set_font_weight : widget -> int -> unit
+val set_font_italic : widget -> bool -> unit
+val set_font_width : widget -> int -> unit
+val list_font_faces : string -> unit
+
 (* An image's bound in points (docs/photo-attach-plan.md §2). *)
 val set_max_width : widget -> float -> unit
 val set_max_height : widget -> float -> unit
@@ -988,6 +1002,9 @@ val textarea :
   ?rich:bool ->
   ?submits:bool ->
   ?own_undo:bool ->
+  ?font_weight:int ->
+  ?font_italic:bool ->
+  ?font_width:int ->
   ?on_edit:(edit -> unit) ->
   ?on_format:(format_act -> unit) ->
   ?on_selection:(selection -> unit) ->
@@ -1010,6 +1027,9 @@ val label :
   ?href:string ->
   ?href_bind:string signal ->
   ?tint:Tint.t ->
+  ?font_weight:int ->
+  ?font_italic:bool ->
+  ?font_width:int ->
   ?tint_bind:Tint.t signal ->
   ?text:string -> ?bind:string signal ->
   ?monospaced:bool ->
@@ -1058,7 +1078,10 @@ val entry :
   ?on_submit:(string -> unit) ->
   ?monospaced:bool ->
   ?family:string ->
-  ?text_scale:float -> unit -> widget
+  ?text_scale:float ->
+  ?font_weight:int ->
+  ?font_italic:bool ->
+  ?font_width:int -> unit -> widget
 
 val search :
   ?grow:float ->
@@ -2057,6 +2080,10 @@ val pick_file :
 val save_file :
   ?window:int64 -> ?filters:(string * string) list -> string -> picked_file option ask
 
+(* docs/font-picker-plan.md §4: the font picker's one answer; CANCEL IS [None]. *)
+val choose_font :
+  ?window:int64 -> ?code_only:bool -> ?faces:bool -> ?initial:Font_choice.t -> unit -> Font_choice.t option ask
+
 val copy :
   ?text:string ->
   ?html:string ->
@@ -2312,6 +2339,9 @@ module Tpl : sig
   val set_monospaced : node -> bool -> unit
   val set_family : node -> string -> unit
   val set_text_scale : node -> float -> unit
+  val set_font_weight : node -> int -> unit
+  val set_font_italic : node -> bool -> unit
+  val set_font_width : node -> int -> unit
   val bind_tint_field : ?level:int -> node -> ('e, Tint.t) field -> unit
   val set_selected : node -> bool -> unit
   val bind_selected_field : ?level:int -> node -> ('e, bool) field -> unit
@@ -3170,6 +3200,7 @@ val on_permission : app -> (Capture_kind.t -> Permission.t -> unit) -> unit
 (* The device list, as watching starts and whenever it changes. *)
 val on_capture_devices : app -> (Capture_device.t list -> unit) -> unit
 val on_font_families : app -> (string list -> unit) -> unit
+val on_font_faces : app -> (string -> Font_face.t list -> unit) -> unit
 
 (* Run [f] on KAYA'S CAPTURE THREAD, NOT THE APP THREAD, for each frame of
    the capture, the next frame dropped while [f] still runs

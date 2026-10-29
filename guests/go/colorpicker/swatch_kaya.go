@@ -193,6 +193,9 @@ func (r swatchRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetM
 func (r swatchRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r swatchRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }
 func (r swatchRow) SetTextScale(n kaya.Node, scale float64)           { r.t.SetTextScale(n, scale) }
+func (r swatchRow) SetFontWeight(n kaya.Node, weight int)             { r.t.SetFontWeight(n, weight) }
+func (r swatchRow) SetFontItalic(n kaya.Node, on bool)                { r.t.SetFontItalic(n, on) }
+func (r swatchRow) SetFontWidth(n kaya.Node, width int)               { r.t.SetFontWidth(n, width) }
 
 func (r swatchRow) SetA11yID(n kaya.Node, id string)                { r.t.SetA11yID(n, id) }
 func (r swatchRow) ContextMenu(n kaya.Node, c *kaya.ContextCatalog) { r.t.ContextMenu(n, c) }
