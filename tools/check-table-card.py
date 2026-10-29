@@ -384,8 +384,9 @@ ZONE = (
     # The folded children lead the content since D7; the segment census
     # still refuses a third segment wherever it lands.
     ("a third compose segment, at the head of the content", COMPOSE,
-     "            folded.forEach { KayaRender(it) }\n            node.tableColumns.forEachIndexed",
-     "            folded.forEach { KayaRender(it) }\n"
+     "            folded.forEach { androidx.compose.runtime.key(it.id) { KayaRender(it) } }\n"
+     "            node.tableColumns.forEachIndexed",
+     "            folded.forEach { androidx.compose.runtime.key(it.id) { KayaRender(it) } }\n"
      "            " + HEADER_SEG_CALL + "\n"
      "            node.tableColumns.forEachIndexed",
      "wanted exactly 2"),

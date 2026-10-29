@@ -15825,6 +15825,21 @@ answers what the masked field answers, with no undo. Its
 `writingToolsBehavior` reads `.none` (-1). The revealed element's
 accessibilityValue is the text, which the unmasked read counts.
 
+## A Compose loop that composes children by position rebuilds a focused field when a sibling is inserted before it: the positional loop (measured 2026-10-29)
+
+KayaRenderCore emitted a container's children with a bare `forEach`, so
+Compose matched each child to a slot by its index. A row stamped above a
+textarea handed the textarea's slot to the row, and the textarea entered
+composition afresh: a FOCUSED rich textarea holding 6:11 read `11:11=`
+after the stamp and Bold formatted nothing (stampbefore.steps, red three
+ways; the editor's format bar of 2026-10-26 was the first sighting). An
+UNFOCUSED plain textarea kept its selection through the same stamp, since
+the selection lives in the node's TextFieldState, so a scene without focus
+passes with the defect in place. Every loop that emits KayaRender now wraps
+its body in `key(child.id)`; tools/check-compose-state.py holds that, and a
+text field that enters composition again notes it in the leg's KAYA_DIAG
+trace ("text field node=N entered composition again (#n)").
+
 ## Compose's revealed secure field (measured 2026-10-08)
 
 foundation 1.11.4, API 35 emulators: with `TextObfuscationMode.Visible` and

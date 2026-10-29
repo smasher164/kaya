@@ -18611,7 +18611,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
         content = {
             // FIRST IN THE CONTENT: the folded children, in sibling
             // order; every index below starts past them.
-            folded.forEach { KayaRender(it) }
+            folded.forEach { androidx.compose.runtime.key(it.id) { KayaRender(it) } }
             node.tableColumns.forEachIndexed { index, title ->
                 val indicator = when {
                     node.tableSorted != index -> ""
@@ -18638,8 +18638,12 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
             Spacer(Modifier)
             rows.forEach { row -> KayaTableRowGround(row) }
             rows.forEach { row ->
-                row.children.forEachIndexed { index, cell ->
-                    Box(Modifier.edge("$geometryGeneration${row.id}/$index")) { KayaRender(cell) }
+                androidx.compose.runtime.key(row.id) {
+                    row.children.forEachIndexed { index, cell ->
+                        androidx.compose.runtime.key(cell.id) {
+                            Box(Modifier.edge("$geometryGeneration${row.id}/$index")) { KayaRender(cell) }
+                        }
+                    }
                 }
             }
             Spacer(Modifier)
@@ -19769,7 +19773,7 @@ private fun KayaRenderCore(
             val autoMinPx = with(LocalDensity.current) { node.minColumnWidth.dp.roundToPx() }
             val auto = node.columns == 0 && autoMinPx > 0
             androidx.compose.ui.layout.Layout(
-                content = { node.children.forEach { child -> KayaRender(child) } },
+                content = { node.children.forEach { child -> androidx.compose.runtime.key(child.id) { KayaRender(child) } } },
                 // The inset pair brackets the padding (see the column's
                 // note).
                 modifier = boxFill.then(a11y).onGloballyPositioned {
@@ -20020,46 +20024,48 @@ private fun KayaRenderCore(
                 },
             ) {
                 node.laidOut.forEach { child ->
-                    // Every child rides in a cell, grown or not: the
-                    // cell carries Modifier.weight (Compose's own
-                    // per-child weight, so the contract needs no
-                    // arithmetic here) and it is the track whose
-                    // measured height expect_shares reads.
-                    var cell = Modifier.onGloballyPositioned {
-                        kayaMainExtents[child.id] = it.size.height.toDouble()
-                        kayaNodeTops[child.id] = it.positionInRoot().y
-                        kayaNodeHeights[child.id] = it.size.height.toFloat()
-                        kayaCrossRects[child.id] = Pair(
-                            it.positionInParent().x.toDouble(),
-                            it.size.width.toDouble(),
-                        )
-                    }
-                    if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
-                    // The track a crossing ROW spans is the whole breadth,
-                    // under every align mode (the 2026-08-22 breadth
-                    // ruling) — beside stretch, which spans every child's.
-                    if (node.align == KayaCompose.ALIGN_STRETCH ||
-                        (child.kind == KayaCompose.KIND_ROW && child.fill != false) ||
-                        child.kind == KayaCompose.KIND_LABELED
-                    ) {
-                        cell = cell.fillMaxWidth()
-                    }
-                    // BOTH READERS: the one inside the cell sees what
-                    // the child drew, the one on the cell sees the
-                    // track. Without both, expect_fills on a widget
-                    // cannot tell a control that filled its cell from
-                    // one that ignored it.
-                    Box(cell) {
-                        Box(
-                            Modifier.onGloballyPositioned {
-                                kayaDrawnExtents[child.id] = it.size.height.toDouble()
-                            }
-                        ) {
-                            KayaRender(
-                                child,
-                                flexVertical = true,
-                                flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                    androidx.compose.runtime.key(child.id) {
+                        // Every child rides in a cell, grown or not: the
+                        // cell carries Modifier.weight (Compose's own
+                        // per-child weight, so the contract needs no
+                        // arithmetic here) and it is the track whose
+                        // measured height expect_shares reads.
+                        var cell = Modifier.onGloballyPositioned {
+                            kayaMainExtents[child.id] = it.size.height.toDouble()
+                            kayaNodeTops[child.id] = it.positionInRoot().y
+                            kayaNodeHeights[child.id] = it.size.height.toFloat()
+                            kayaCrossRects[child.id] = Pair(
+                                it.positionInParent().x.toDouble(),
+                                it.size.width.toDouble(),
                             )
+                        }
+                        if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                        // The track a crossing ROW spans is the whole breadth,
+                        // under every align mode (the 2026-08-22 breadth
+                        // ruling) — beside stretch, which spans every child's.
+                        if (node.align == KayaCompose.ALIGN_STRETCH ||
+                            (child.kind == KayaCompose.KIND_ROW && child.fill != false) ||
+                            child.kind == KayaCompose.KIND_LABELED
+                        ) {
+                            cell = cell.fillMaxWidth()
+                        }
+                        // BOTH READERS: the one inside the cell sees what
+                        // the child drew, the one on the cell sees the
+                        // track. Without both, expect_fills on a widget
+                        // cannot tell a control that filled its cell from
+                        // one that ignored it.
+                        Box(cell) {
+                            Box(
+                                Modifier.onGloballyPositioned {
+                                    kayaDrawnExtents[child.id] = it.size.height.toDouble()
+                                }
+                            ) {
+                                KayaRender(
+                                    child,
+                                    flexVertical = true,
+                                    flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                                )
+                            }
                         }
                     }
                 }
@@ -20083,18 +20089,20 @@ private fun KayaRenderCore(
                 verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
             ) {
                 node.laidOut.forEach { child ->
-                    Box(
-                        Modifier.onGloballyPositioned {
-                            kayaMainExtents[child.id] = it.size.width.toDouble()
-                            kayaDrawnExtents[child.id] = it.size.width.toDouble()
-                            kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
-                            kayaCrossRects[child.id] = Pair(
-                                it.positionInParent().y.toDouble(),
-                                it.size.height.toDouble(),
-                            )
+                    androidx.compose.runtime.key(child.id) {
+                        Box(
+                            Modifier.onGloballyPositioned {
+                                kayaMainExtents[child.id] = it.size.width.toDouble()
+                                kayaDrawnExtents[child.id] = it.size.width.toDouble()
+                                kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
+                                kayaCrossRects[child.id] = Pair(
+                                    it.positionInParent().y.toDouble(),
+                                    it.size.height.toDouble(),
+                                )
+                            }
+                        ) {
+                            KayaRender(child, flexVertical = false)
                         }
-                    ) {
-                        KayaRender(child, flexVertical = false)
                     }
                 }
             }
@@ -20120,44 +20128,46 @@ private fun KayaRenderCore(
                 },
             ) {
                 node.laidOut.forEach { child ->
-                    var cell = Modifier.onGloballyPositioned {
-                        kayaMainExtents[child.id] = it.size.width.toDouble()
-                        kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
-                        kayaCrossRects[child.id] = Pair(
-                            it.positionInParent().y.toDouble(),
-                            it.size.height.toDouble(),
-                        )
-                    }
-                    cell = cell.layout { measurable, constraints ->
-                        val placeable = measurable.measure(constraints)
-                        val fb = placeable[androidx.compose.ui.layout.FirstBaseline]
-                        if (fb != androidx.compose.ui.layout.AlignmentLine.Unspecified) {
-                            kayaBaselineOffsets[child.id] = fb.toDouble()
-                        }
-                        layout(placeable.width, placeable.height) { placeable.place(0, 0) }
-                    }
-                    // The crossing COLUMN's track — the column arm's
-                    // sibling, one axis over; the row's Layout hands a
-                    // stretched cell the row's own height.
-                    // The child's own `fill = false` outranks the crossing
-                    // default (docs/layout-knobs-plan.md §1, gtk.rs's rule).
-                    if (node.align == KayaCompose.ALIGN_STRETCH ||
-                        (child.kind == KayaCompose.KIND_COLUMN && child.fill != false)
-                    ) {
-                        cell = cell.fillMaxHeight()
-                    }
-                    // The drawn-extent reader, the column arm's sibling.
-                    Box(cell) {
-                        Box(
-                            Modifier.onGloballyPositioned {
-                                kayaDrawnExtents[child.id] = it.size.width.toDouble()
-                            }
-                        ) {
-                            KayaRender(
-                                child,
-                                flexVertical = false,
-                                flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                    androidx.compose.runtime.key(child.id) {
+                        var cell = Modifier.onGloballyPositioned {
+                            kayaMainExtents[child.id] = it.size.width.toDouble()
+                            kayaCellLefts[child.id] = it.positionInRoot().x.toDouble()
+                            kayaCrossRects[child.id] = Pair(
+                                it.positionInParent().y.toDouble(),
+                                it.size.height.toDouble(),
                             )
+                        }
+                        cell = cell.layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            val fb = placeable[androidx.compose.ui.layout.FirstBaseline]
+                            if (fb != androidx.compose.ui.layout.AlignmentLine.Unspecified) {
+                                kayaBaselineOffsets[child.id] = fb.toDouble()
+                            }
+                            layout(placeable.width, placeable.height) { placeable.place(0, 0) }
+                        }
+                        // The crossing COLUMN's track — the column arm's
+                        // sibling, one axis over; the row's Layout hands a
+                        // stretched cell the row's own height.
+                        // The child's own `fill = false` outranks the crossing
+                        // default (docs/layout-knobs-plan.md §1, gtk.rs's rule).
+                        if (node.align == KayaCompose.ALIGN_STRETCH ||
+                            (child.kind == KayaCompose.KIND_COLUMN && child.fill != false)
+                        ) {
+                            cell = cell.fillMaxHeight()
+                        }
+                        // The drawn-extent reader, the column arm's sibling.
+                        Box(cell) {
+                            Box(
+                                Modifier.onGloballyPositioned {
+                                    kayaDrawnExtents[child.id] = it.size.width.toDouble()
+                                }
+                            ) {
+                                KayaRender(
+                                    child,
+                                    flexVertical = false,
+                                    flexStretch = node.align == KayaCompose.ALIGN_STRETCH,
+                                )
+                            }
                         }
                     }
                 }
@@ -20719,6 +20729,15 @@ fun KayaTextField(
     val inComposer = LocalKayaInComposer.current
     val hostView = LocalView.current
     SideEffect { kayaFieldViews[node.id] = hostView }
+    DisposableEffect(node) {
+        val n = (kayaFieldCompositions[node.id] ?: 0) + 1
+        kayaFieldCompositions[node.id] = n
+        if (n > 1) {
+            KayaDiag.note(
+                "text field node=${node.id} entered composition again (#$n)")
+        }
+        onDispose { }
+    }
     val interaction = remember { MutableInteractionSource() }
     // THE RICH DISPLAY (docs/rich-text-plan.md R7 as amended): the arm's
     // own run table drawn through the field's OutputTransformation, which
@@ -22460,6 +22479,8 @@ internal val kayaNodeVisible = HashMap<Long, androidx.compose.ui.geometry.Rect>(
 
 /** The view each text field is composed in, whose root is its window's. */
 internal val kayaFieldViews = HashMap<Long, android.view.View>()
+
+internal val kayaFieldCompositions = HashMap<Long, Int>()
 
 internal fun kayaFrame(id: Long): Modifier = Modifier.onGloballyPositioned {
     kayaNodeFrames[id] = androidx.compose.ui.geometry.Rect(
@@ -25617,15 +25638,17 @@ internal fun KayaExpander(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
                 verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
             ) {
                 node.laidOut.forEachIndexed { i, child ->
-                    var cell = if (i == 0) Modifier.semantics { this[KayaExpanderBody] = node.id } else Modifier
-                    if (child.kind == KayaCompose.KIND_LABELED || child.kind == KayaCompose.KIND_ROW ||
-                        node.align == KayaCompose.ALIGN_STRETCH
-                    ) {
-                        cell = cell.fillMaxWidth()
+                    androidx.compose.runtime.key(child.id) {
+                        var cell = if (i == 0) Modifier.semantics { this[KayaExpanderBody] = node.id } else Modifier
+                        if (child.kind == KayaCompose.KIND_LABELED || child.kind == KayaCompose.KIND_ROW ||
+                            node.align == KayaCompose.ALIGN_STRETCH
+                        ) {
+                            cell = cell.fillMaxWidth()
+                        }
+                        // A labelled row brings the list item's own 16dp; anything else takes it here.
+                        if (child.kind != KayaCompose.KIND_LABELED) cell = cell.padding(horizontal = 16.dp)
+                        Box(cell) { KayaRender(child, flexVertical = true) }
                     }
-                    // A labelled row brings the list item's own 16dp; anything else takes it here.
-                    if (child.kind != KayaCompose.KIND_LABELED) cell = cell.padding(horizontal = 16.dp)
-                    Box(cell) { KayaRender(child, flexVertical = true) }
                 }
             }
         }

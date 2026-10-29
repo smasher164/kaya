@@ -684,7 +684,7 @@ a plain row around the activatable one until this is fixed; a scene that combine
 on every lane is the guard to add with the fix.
 KEY: swipe activatable, sync_swipe_hosts, ItemContainer, row@open.
 
-## OPEN — a Compose textarea drops its selection when a sibling is stamped before it (measured 2026-10-26)
+## ~~OPEN — a Compose textarea drops its selection when a sibling is stamped before it (measured 2026-10-26)~~ FIXED 2026-10-29: the cause was positional composition, as suspected. Reproduced by tools/scenes/stampbefore.steps (guests/rust/stampbefore.rs, rust on all five lanes): a FOCUSED rich textarea read `11:11=` after a row was stamped above it and Bold formatted nothing, while an unfocused plain one kept its selection; the leg's trace showed the field entering composition again at the stamp. Every KayaRender loop in KayaCompose.kt now keys its children by id, held by tools/check-compose-state.py's keyed-loop rule (two watched negatives) and the scene; docs/traps.md, the positional loop. The editor may put a bar above its document again
 
 With the text editor's formatting and find bars moved above the document (a try at the code editors'
 top bar, docs/editor-plan.md), the Android leg lost the textarea's selection the moment the format

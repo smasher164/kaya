@@ -1885,8 +1885,12 @@ and held rather than assumed. AND SINCE 2026-09-15 THE RUN TABLE'S
 GENERATION: every `richRuns` write bumps `richSeq` in the same body,
 because both displays re-derive from the generation and a table written
 without its bump leaves the picture stale while `expect_runs`, which
-reads the table, stays green (docs/rich-text-plan.md §17). Five watched
-negatives, counts printed, the first of them the shipped defect itself)
+reads the table, stays green (docs/rich-text-plan.md §17). AND SINCE
+2026-10-29 EVERY KayaRender A LOOP EMITS SITS IN A `key()` between the
+loop and the call: composed by position, a sibling stamped before a
+focused textarea rebuilt it and collapsed its selection (docs/traps.md,
+the positional loop). Seven watched negatives, counts printed, the first
+of them the shipped defect itself)
 
 ## tools/check-jni.py
 

@@ -76,6 +76,8 @@ LEGS = {
         "flexshrink-compose",
         # The common list-row shapes (docs/deferred.md).
         "listrow-compose",
+        # A sibling stamped before a textarea (docs/traps.md, the positional loop).
+        "stampbefore-compose",
         # The platform tints on a filled container, light and dark
         # (docs/tints-plan.md).
         "tints-compose",

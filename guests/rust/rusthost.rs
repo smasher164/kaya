@@ -165,6 +165,7 @@ mod toast;
 mod format;
 mod flexshrink;
 mod listrow;
+mod stampbefore;
 mod tints;
 
 #[path = "submit.rs"]
@@ -288,6 +289,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("format") | Ok("formatde") | Ok("formatar") | Ok("formatbig") | Ok("clock24") => format::app(ctx),
         Ok("flexshrink") => flexshrink::app(ctx),
         Ok("listrow") => listrow::app(ctx),
+        Ok("stampbefore") => stampbefore::app(ctx),
         Ok("tints") => tints::app(ctx),
         Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),

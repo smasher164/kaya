@@ -232,6 +232,43 @@ def rich_seq_pairs(code, findings, counts):
     counts["rich_writes"] = writes
 
 
+LOOP_HEAD = re.compile(r"(?:\.forEach(?:Indexed)?\s*|\bfor\s*\([^)]*\)\s*)$")
+KEY_HEAD = re.compile(r"\bkey\([^()]*\)\s*$")
+
+
+def keyed_loops(code, findings, counts):
+    """EVERY KayaRender A LOOP EMITS SITS IN A key(): composed by
+    position, a sibling inserted before a child hands its slot to the
+    newcomer and the child enters composition afresh, which collapsed a
+    focused textarea's selection (docs/traps.md, the positional loop)."""
+    stack, opens = [], {}
+    for i, c in enumerate(code):
+        if c == "{":
+            stack.append(i)
+        elif c == "}" and stack:
+            stack.pop()
+        elif code.startswith("KayaRender(", i) and not code[max(0, i - 4):i].endswith("fun "):
+            opens[i] = list(stack)
+    calls = 0
+    for at, enclosing in opens.items():
+        keyed = False
+        for brace in reversed(enclosing):
+            head = code[max(0, brace - 120):brace]
+            head = head[head.rfind("\n") + 1:] if "\n" in head else head
+            if KEY_HEAD.search(head):
+                keyed = True
+            elif LOOP_HEAD.search(head) or re.search(r"forEach(?:Indexed)?\s*$", head):
+                calls += 1
+                if not keyed:
+                    findings.append(
+                        f"{COMPOSE}:{line_of(code, at)}: KayaRender inside a loop with no "
+                        f"key() between them: children composed by position lose their "
+                        f"state when a sibling is inserted before them; wrap the loop "
+                        f"body in androidx.compose.runtime.key(child.id)")
+                break
+    counts["looped_renders"] = calls
+
+
 def census(text):
     """The findings for one KayaCompose.kt text, plus the counts the
     verdict prints. A pure function of its input, so the negatives can
@@ -291,6 +328,7 @@ def census(text):
               "state": sum(1 for _l, s in fields.values() if s),
               "composables": len(comps), "reads": reads}
     rich_seq_pairs(code, bad, counts)
+    keyed_loops(code, bad, counts)
     return bad, counts
 
 
@@ -318,6 +356,15 @@ NEGATIVES = [
      r"(node\.richRuns = kayaRichNormalize\(runs\)\n(?:[^\n]*\n){0,3}?)    node\.richSeq \+= 1\n",
      r"\1",
      "writes richRuns without a richSeq bump"),
+    ("a container loop composing its children by position (the shipped defect)",
+     r"node\.children\.forEach \{ child -> androidx\.compose\.runtime\.key\(child\.id\) "
+     r"\{ KayaRender\(child\) \} \}",
+     "node.children.forEach { child -> KayaRender(child) }",
+     "KayaRender inside a loop with no key()"),
+    ("a key() outside the loop rather than inside it",
+     r"folded\.forEach \{ androidx\.compose\.runtime\.key\(it\.id\) \{ KayaRender\(it\) \} \}",
+     "androidx.compose.runtime.key(node.id) { folded.forEach { KayaRender(it) } }",
+     "KayaRender inside a loop with no key()"),
 ]
 for label, pattern, repl, want in NEGATIVES:
     doctored = g.doctor(label, real, pattern, repl)
@@ -332,10 +379,13 @@ g.counted("model reads inside composables", range(counts.get("reads", 0)),
           floor=10)
 g.counted("richRuns writes paired with a generation bump",
           range(counts.get("rich_writes", 0)), floor=5)
+g.counted("KayaRender calls a loop emits, each keyed",
+          range(counts.get("looped_renders", 0)), floor=7)
 for line in findings:
     g.finding(line)
 g.verdict(f"{counts['fields']} fields ({counts['state']} state-backed), "
           f"{counts['composables']} composables, {counts['reads']} model "
           f"reads classified, {len(EXEMPT)} exemptions live, the alert "
           f"ordering held, {counts['rich_writes']} richRuns writes each "
-          f"bumping richSeq, {len(NEGATIVES)} watched negatives")
+          f"bumping richSeq, {counts['looped_renders']} looped KayaRender calls "
+          f"each keyed, {len(NEGATIVES)} watched negatives")

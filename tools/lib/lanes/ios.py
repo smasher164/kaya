@@ -143,6 +143,8 @@ RUST_SCENES = [
     "fullscreen",
     # The common list-row shapes (docs/deferred.md).
     "listrow",
+    # A sibling stamped before a textarea (docs/traps.md, the positional loop).
+    "stampbefore",
     # The platform tints on a filled container (docs/tints-plan.md).
     "tints",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).

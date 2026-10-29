@@ -607,6 +607,10 @@ name = "listrow"
 path = "../../guests/rust/listrow.rs"
 
 [[example]]
+name = "stampbefore"
+path = "../../guests/rust/stampbefore.rs"
+
+[[example]]
 name = "tints"
 path = "../../guests/rust/tints.rs"
 

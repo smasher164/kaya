@@ -63,7 +63,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "tints", "badge", "emoji", "media",
+                "format", "flexshrink", "listrow", "stampbefore", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
                 "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
@@ -316,6 +316,8 @@ ORDER = [
     # The common list-row shapes, and the height comparison nothing else
     # could make (docs/deferred.md's list-row layout scene).
     ("listrow", ("rust",)),
+    # A sibling stamped before a textarea (docs/traps.md, the positional loop).
+    ("stampbefore", ("rust",)),
     # The platform tints on a filled container (docs/tints-plan.md).
     ("tints", ("rust",)),
     ("codesurface", LANGS),
