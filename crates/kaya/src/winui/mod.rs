@@ -15,6 +15,7 @@ mod order;
 mod skin;
 mod code_surface;
 mod doctabs;
+mod fontpick;
 
 use order::{track_of, ChildOrder};
 
@@ -72,7 +73,6 @@ use bindings::Windows::Foundation::{Point, TypedEventHandler};
 use bindings::Microsoft::UI::Xaml::FlowDirection;
 // A RICH LABEL'S INLINES (docs/rich-text-plan.md §15): the run table is drawn
 // as TextBlock.Inlines, and the three traits are TextElement properties.
-use bindings::Microsoft::UI::Text::FontWeights;
 use bindings::Microsoft::UI::Xaml::Documents::{Hyperlink, Run, TextHighlighter, TextRange};
 use bindings::Windows::UI::Text::{FontStyle, TextDecorations};
 // The caption title's two text properties are vtable pads in this
@@ -12736,7 +12736,33 @@ struct RichPalette {
 
 /// The baseline the derived display is a multiple of: the document's own
 /// default character format, which is what an unformatted run already wears.
-fn rich_base(field: &RichEditBox) -> windows_core::Result<(f32, String)> {
+/// What a rich textarea's runs compose over (docs/font-picker-plan.md §3):
+/// the document's size, face, weight and slope, and the family a Code run
+/// draws in: the document's own when it is a fixed-pitch named family.
+struct RichBase {
+    size: f32,
+    face: String,
+    weight: i32,
+    italic: bool,
+    code_face: String,
+}
+
+fn rich_base(field: &RichEditBox) -> windows_core::Result<RichBase> {
+    let (size, face) = rich_base_face(field)?;
+    let format = field.TextDocument()?.GetDefaultCharacterFormat()?;
+    let weight = format.Weight().unwrap_or(400);
+    let first = face.split(',').next().unwrap_or("").trim().to_owned();
+    let code_face = if fontpick::is_code_family(&first) { first } else { RICH_MONOSPACE.to_owned() };
+    Ok(RichBase {
+        size,
+        face,
+        weight: if weight > 0 { weight } else { 400 },
+        italic: format.Italic().is_ok_and(|e| e == FormatEffect::On),
+        code_face,
+    })
+}
+
+fn rich_base_face(field: &RichEditBox) -> windows_core::Result<(f32, String)> {
     let format = field.TextDocument()?.GetDefaultCharacterFormat()?;
     let size = format.Size().unwrap_or(0.0);
     let size = if size > 0.0 { size } else { 12.0 };
@@ -12953,9 +12979,10 @@ fn rich_paragraph_bounds(text: &str, start: usize, end: usize) -> (usize, usize)
 /// ground stays `set_background`'s.
 fn rich_write_format(
     character: &ITextCharacterFormat, paragraph: Option<&ITextParagraphFormat>,
-    attrs: &BTreeMap<String, String>, base_size: f32, base_face: &str,
+    attrs: &BTreeMap<String, String>, base: &RichBase,
     palette: RichPalette,
 ) -> windows_core::Result<()> {
+    let base_size = base.size;
     let has = |name: &str| attrs.contains_key(name);
     let block = attrs.get("block").map(String::as_str).unwrap_or("body");
     let mut bold = has("bold");
@@ -12978,8 +13005,10 @@ fn rich_write_format(
     let monospace = has("code") || block == "code_block";
     let linked = attrs.contains_key("link");
     let effect = |on: bool| if on { FormatEffect::On } else { FormatEffect::Off };
-    character.SetBold(effect(bold))?;
-    character.SetItalic(effect(has("italic")))?;
+    // Bold at least 700 over the document's own weight, Italic over its own
+    // slope (docs/font-picker-plan.md Q3).
+    character.SetWeight(if bold { base.weight.max(700) } else { base.weight })?;
+    character.SetItalic(effect(base.italic || has("italic")))?;
     character.SetStrikethrough(effect(has("strike")))?;
     character.SetUnderline(if has("underline") || linked {
         UnderlineType::Single
@@ -12987,7 +13016,7 @@ fn rich_write_format(
         UnderlineType::None
     })?;
     character.SetSize(size)?;
-    character.SetName(&HSTRING::from(if monospace { RICH_MONOSPACE } else { base_face }))?;
+    character.SetName(&HSTRING::from(if monospace { base.code_face.as_str() } else { base.face.as_str() }))?;
     character.SetForegroundColor(match (linked, palette.text) {
         (true, _) => palette.link,
         (false, Some(text)) => text,
@@ -13018,7 +13047,7 @@ fn rich_restyle(
     if from >= to {
         return Ok(());
     }
-    let (base_size, base_face) = rich_base(field)?;
+    let base = rich_base(field)?;
     let palette = rich_palette(field);
     let mut edges: Vec<usize> = vec![from, to];
     for run in runs {
@@ -13044,9 +13073,7 @@ fn rich_restyle(
             let attrs = rich_attrs_at(runs, a);
             let character = range.CharacterFormat()?;
             let paragraph = range.ParagraphFormat()?;
-            rich_write_format(
-                &character, Some(&paragraph), &attrs, base_size, &base_face, palette,
-            )?;
+            rich_write_format(&character, Some(&paragraph), &attrs, &base, palette)?;
             // ASSIGNED BACK as `set_background` assigns: the probe measured the
             // object live (docs/measurements/richtext-windows-2026-09-11.md §4)
             // and this file's older comment calls it a snapshot, so the write
@@ -13118,11 +13145,11 @@ fn rich_arm_typing(field: &RichEditBox, widget: u64, caret: usize) -> windows_co
             }
         }
     });
-    let (base_size, base_face) = rich_base(field)?;
+    let base = rich_base(field)?;
     let palette = rich_palette(field);
     let selection = field.TextDocument()?.Selection()?;
     let character = selection.CharacterFormat()?;
-    rich_write_format(&character, None, &attrs, base_size, &base_face, palette)?;
+    rich_write_format(&character, None, &attrs, &base, palette)?;
     selection.SetCharacterFormat(&character)
 }
 
@@ -13715,7 +13742,9 @@ fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_cor
         let piece = Run::new()?;
         piece.SetText(&HSTRING::from(&text[start..end]))?;
         if attrs.contains_key("bold") {
-            piece.SetFontWeight(FontWeights::Bold()?)?;
+            // At least 700 over the label's own weight (docs/font-picker-plan.md Q3).
+            let own = block.FontWeight()?.Weight;
+            piece.SetFontWeight(bindings::Windows::UI::Text::FontWeight { Weight: own.max(700) })?;
         }
         if attrs.contains_key("italic") {
             piece.SetFontStyle(FontStyle::Italic)?;
@@ -13729,9 +13758,10 @@ fn label_restyle(block: &TextBlock, text: &str, runs: &[TextRun]) -> windows_cor
         }
         piece.SetTextDecorations(decorated)?;
         if attrs.contains_key("code") {
-            piece.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(
-                RICH_MONOSPACE,
-            ))?)?;
+            let own = block.FontFamily()?.Source()?.to_string();
+            let first = own.split(',').next().unwrap_or("").trim().to_owned();
+            let code = if fontpick::is_code_family(&first) { first } else { RICH_MONOSPACE.to_owned() };
+            piece.SetFontFamily(&FontFamily::CreateInstanceWithName(&HSTRING::from(code.as_str()))?)?;
         }
         match attrs.get("link") {
             // THE PLATFORM'S DEFAULT DOOR, `set_navigate_uri`'s rule one
@@ -18169,7 +18199,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
         ApplyOp::ListFontFamilies => code_surface::list_font_families(core),
-        ApplyOp::PresentFontDialog(_) | ApplyOp::ListFontFaces { .. } => crate::depth_stub("fontpick"),
+        ApplyOp::PresentFontDialog(spec) => fontpick::present(core, spec)?,
+        ApplyOp::ListFontFaces { family } => fontpick::list_font_faces(core, &family),
         ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0)?,
         ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0)?,
         ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0)?,
@@ -18426,9 +18457,6 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             if code_surface::set_prop(core, id, prop, &value)? {
                 return Ok(());
-            }
-            if matches!(prop, Prop::FontWeight | Prop::FontItalic | Prop::FontWidth) {
-                crate::depth_stub("fontpick");
             }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {
@@ -25015,6 +25043,26 @@ impl crate::harness::Stage for WinUiStage {
             None => Ok(Err("no such target".to_owned())),
         })
         .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    /// docs/font-picker-plan.md §2.5.
+    fn font_face(
+        &self, t: crate::harness::Target, range: Option<crate::harness::TextRange>,
+    ) -> Result<crate::harness::DrawnFace, String> {
+        Self::on_ui_read(move |core| match target_widget_id(core, t) {
+            Some(id) => code_surface::read::drawn_face(core, id, range),
+            None => Ok(Err("no such target".to_owned())),
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
+    fn font_dialog_families(&self) -> Result<Option<Vec<(String, bool)>>, String> {
+        Self::on_ui_bare(fontpick::read::families).map_err(|e| format!("unreadable: {e}"))
+    }
+
+    fn pick_font(&self, choice: Option<&crate::protocol::FontChoice>) -> Result<(), String> {
+        let choice = choice.cloned();
+        Self::on_ui_bare(move || fontpick::read::pick(choice)).unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
 
     /// docs/code-surface-plan.md S3.

@@ -123,6 +123,9 @@ fn main() {
         "Microsoft.UI.Xaml.Documents.TextRange".to_string(),
         "Windows.UI.Text.FontWeight".to_string(),
         "Windows.UI.Text.FontStyle".to_string(),
+        // THE FACE'S WIDTH (docs/font-picker-plan.md §2.3): SetFontStretch on
+        // the three text kinds is a pad until its type is named.
+        "Windows.UI.Text.FontStretch".to_string(),
         "Windows.UI.Text.TextDecorations".to_string(),
         "Microsoft.UI.Text.FontWeights".to_string(),
         "Microsoft.UI.Xaml.Controls.TextBox".to_string(),

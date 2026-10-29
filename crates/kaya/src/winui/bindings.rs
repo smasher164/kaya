@@ -1469,6 +1469,33 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn FontStretch(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Text::FontStretch>
+                {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).FontStretch)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetFontStretch(
+                    &self,
+                    value: super::super::super::Windows::UI::Text::FontStretch,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetFontStretch)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn FontStyle(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Text::FontStyle>
@@ -1916,6 +1943,13 @@ pub mod Microsoft {
                 ) -> windows_core::Result<()>;
                 fn Bold(&self) -> windows_core::Result<FormatEffect>;
                 fn SetBold(&self, value: FormatEffect) -> windows_core::Result<()>;
+                fn FontStretch(
+                    &self,
+                ) -> windows_core::Result<super::super::super::Windows::UI::Text::FontStretch>;
+                fn SetFontStretch(
+                    &self,
+                    value: super::super::super::Windows::UI::Text::FontStretch,
+                ) -> windows_core::Result<()>;
                 fn FontStyle(
                     &self,
                 ) -> windows_core::Result<super::super::super::Windows::UI::Text::FontStyle>;
@@ -2074,6 +2108,38 @@ pub mod Microsoft {
                             let this: &Identity =
                                 &*((this as *const *const ()).offset(OFFSET) as *const Identity);
                             ITextCharacterFormat_Impl::SetBold(this, value).into()
+                        }
+                    }
+                    unsafe extern "system" fn FontStretch<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        result__: *mut super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            match ITextCharacterFormat_Impl::FontStretch(this) {
+                                Ok(ok__) => {
+                                    result__.write(core::mem::transmute_copy(&ok__));
+                                    windows_core::HRESULT(0)
+                                }
+                                Err(err) => err.into(),
+                            }
+                        }
+                    }
+                    unsafe extern "system" fn SetFontStretch<
+                        Identity: ITextCharacterFormat_Impl,
+                        const OFFSET: isize,
+                    >(
+                        this: *mut core::ffi::c_void,
+                        value: super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::HRESULT {
+                        unsafe {
+                            let this: &Identity =
+                                &*((this as *const *const ()).offset(OFFSET) as *const Identity);
+                            ITextCharacterFormat_Impl::SetFontStretch(this, value).into()
                         }
                     }
                     unsafe extern "system" fn FontStyle<
@@ -2735,8 +2801,8 @@ pub mod Microsoft {
                         SetBackgroundColor: SetBackgroundColor::<Identity, OFFSET>,
                         Bold: Bold::<Identity, OFFSET>,
                         SetBold: SetBold::<Identity, OFFSET>,
-                        FontStretch: 0,
-                        SetFontStretch: 0,
+                        FontStretch: FontStretch::<Identity, OFFSET>,
+                        SetFontStretch: SetFontStretch::<Identity, OFFSET>,
                         FontStyle: FontStyle::<Identity, OFFSET>,
                         SetFontStyle: SetFontStyle::<Identity, OFFSET>,
                         ForegroundColor: ForegroundColor::<Identity, OFFSET>,
@@ -2815,8 +2881,16 @@ pub mod Microsoft {
                     *mut core::ffi::c_void,
                     FormatEffect,
                 ) -> windows_core::HRESULT,
-                FontStretch: usize,
-                SetFontStretch: usize,
+                pub FontStretch: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Text::FontStretch,
+                )
+                    -> windows_core::HRESULT,
+                pub SetFontStretch: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    super::super::super::Windows::UI::Text::FontStretch,
+                )
+                    -> windows_core::HRESULT,
                 pub FontStyle: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::UI::Text::FontStyle,
@@ -3024,7 +3098,11 @@ pub mod Microsoft {
                     *mut i32,
                 )
                     -> windows_core::HRESULT,
-                UndefinedFontStretch: usize,
+                pub UndefinedFontStretch: unsafe extern "system" fn(
+                    *mut core::ffi::c_void,
+                    *mut super::super::super::Windows::UI::Text::FontStretch,
+                )
+                    -> windows_core::HRESULT,
                 pub UndefinedFontStyle: unsafe extern "system" fn(
                     *mut core::ffi::c_void,
                     *mut super::super::super::Windows::UI::Text::FontStyle,
@@ -7749,6 +7827,18 @@ pub mod Microsoft {
                     Self::ITextConstantsStatics(|this| unsafe {
                         let mut result__ = core::mem::zeroed();
                         (windows_core::Interface::vtable(this).UndefinedInt32Value)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    })
+                }
+                pub fn UndefinedFontStretch(
+                ) -> windows_core::Result<super::super::super::Windows::UI::Text::FontStretch>
+                {
+                    Self::ITextConstantsStatics(|this| unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).UndefinedFontStretch)(
                             windows_core::Interface::as_raw(this),
                             &mut result__,
                         )
@@ -37307,6 +37397,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -41396,6 +41514,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -48536,6 +48682,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -52815,6 +52989,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -59986,6 +60188,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -64426,6 +64656,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -68980,6 +69238,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -73294,6 +73580,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -77487,6 +77801,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -81357,6 +81699,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -85674,6 +86044,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -89512,6 +89910,34 @@ pub mod Microsoft {
                         let this = self;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -93497,6 +93923,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -104910,6 +105364,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -110801,8 +111283,16 @@ pub mod Microsoft {
                         super::super::super::super::Windows::UI::Text::FontStyle,
                     )
                         -> windows_core::HRESULT,
-                    FontStretch: usize,
-                    SetFontStretch: usize,
+                    pub FontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
                     pub CharacterSpacing: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut i32,
@@ -118060,8 +118550,16 @@ pub mod Microsoft {
                         super::super::super::super::Windows::UI::Text::FontStyle,
                     )
                         -> windows_core::HRESULT,
-                    FontStretch: usize,
-                    SetFontStretch: usize,
+                    pub FontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
                     pub CharacterSpacing: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut i32,
@@ -126482,6 +126980,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -130342,6 +130868,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -134872,6 +135426,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -138734,6 +139316,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -142882,6 +143492,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -146958,6 +147596,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -150784,6 +151450,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -154780,6 +155474,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -158605,6 +159327,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -162932,6 +163682,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -166880,6 +167658,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -170661,6 +171467,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -174487,6 +175321,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -178403,6 +179265,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -183306,6 +184196,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -187418,6 +188336,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -191318,6 +192264,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -198752,6 +199726,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -203016,6 +204018,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -207081,6 +208111,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -211091,6 +212149,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -215126,6 +216212,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -220123,6 +221237,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -225572,6 +226714,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -229456,6 +230626,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -233400,6 +234598,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -237666,6 +238892,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -245522,6 +246776,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -250080,6 +251362,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -255262,6 +256572,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = self;
                         unsafe {
@@ -257955,6 +259293,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -263101,6 +264467,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -267152,6 +268546,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -271332,6 +272754,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
@@ -275310,6 +276760,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -279347,6 +280825,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -283434,6 +284940,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<IControl>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<IControl>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -291378,6 +292912,34 @@ pub mod Microsoft {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetFontStyle)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontStretch(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::UI::Text::FontStretch,
+                        > {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFontStretch(
+                            &self,
+                            value : super::super::super::super::super::Windows::UI::Text:: FontStretch,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontStretch)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -300819,6 +302381,34 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FontStretch(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::UI::Text::FontStretch,
+                        > {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFontStretch(
+                            &self,
+                            value : super::super::super::super::super::Windows::UI::Text:: FontStretch,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
@@ -305398,6 +306988,34 @@ pub mod Microsoft {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetFontStyle)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontStretch(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::UI::Text::FontStretch,
+                        > {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFontStretch(
+                            &self,
+                            value : super::super::super::super::super::Windows::UI::Text:: FontStretch,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontStretch)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -310163,6 +311781,34 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn FontStretch(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::UI::Text::FontStretch,
+                        > {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFontStretch(
+                            &self,
+                            value : super::super::super::super::super::Windows::UI::Text:: FontStretch,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
@@ -314552,6 +316198,34 @@ pub mod Microsoft {
                             let this = &windows_core::Interface::cast::<super::IControl>(self)?;
                             unsafe {
                                 (windows_core::Interface::vtable(this).SetFontStyle)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn FontStretch(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::super::super::super::Windows::UI::Text::FontStretch,
+                        > {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this).FontStretch)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetFontStretch(
+                            &self,
+                            value : super::super::super::super::super::Windows::UI::Text:: FontStretch,
+                        ) -> windows_core::Result<()> {
+                            let this = &windows_core::Interface::cast::<super::IControl>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this).SetFontStretch)(
                                     windows_core::Interface::as_raw(this),
                                     value,
                                 )
@@ -319167,6 +320841,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
@@ -319958,8 +321660,16 @@ pub mod Microsoft {
                         super::super::super::super::Windows::UI::Text::FontStyle,
                     )
                         -> windows_core::HRESULT,
-                    FontStretch: usize,
-                    SetFontStretch: usize,
+                    pub FontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
+                    pub SetFontStretch: unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    )
+                        -> windows_core::HRESULT,
                     pub CharacterSpacing: unsafe extern "system" fn(
                         *mut core::ffi::c_void,
                         *mut i32,
@@ -320497,6 +322207,34 @@ pub mod Microsoft {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -321378,6 +323116,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
@@ -321992,6 +323758,34 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<ITextElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn CharacterSpacing(&self) -> windows_core::Result<i32> {
                         let this = &windows_core::Interface::cast::<ITextElement>(self)?;
                         unsafe {
@@ -322559,6 +324353,34 @@ pub mod Microsoft {
                         let this = self;
                         unsafe {
                             (windows_core::Interface::vtable(this).SetFontStyle)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn FontStretch(
+                        &self,
+                    ) -> windows_core::Result<
+                        super::super::super::super::Windows::UI::Text::FontStretch,
+                    > {
+                        let this = self;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            (windows_core::Interface::vtable(this).FontStretch)(
+                                windows_core::Interface::as_raw(this),
+                                &mut result__,
+                            )
+                            .map(|| result__)
+                        }
+                    }
+                    pub fn SetFontStretch(
+                        &self,
+                        value: super::super::super::super::Windows::UI::Text::FontStretch,
+                    ) -> windows_core::Result<()> {
+                        let this = self;
+                        unsafe {
+                            (windows_core::Interface::vtable(this).SetFontStretch)(
                                 windows_core::Interface::as_raw(this),
                                 value,
                             )
@@ -367555,6 +369377,30 @@ pub mod Windows {
             unsafe impl Sync for ToastNotifier {}
         }
         pub mod Text {
+            #[repr(transparent)]
+            #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+            pub struct FontStretch(pub i32);
+            impl FontStretch {
+                pub const Undefined: Self = Self(0i32);
+                pub const UltraCondensed: Self = Self(1i32);
+                pub const ExtraCondensed: Self = Self(2i32);
+                pub const Condensed: Self = Self(3i32);
+                pub const SemiCondensed: Self = Self(4i32);
+                pub const Normal: Self = Self(5i32);
+                pub const SemiExpanded: Self = Self(6i32);
+                pub const Expanded: Self = Self(7i32);
+                pub const ExtraExpanded: Self = Self(8i32);
+                pub const UltraExpanded: Self = Self(9i32);
+            }
+            impl windows_core::TypeKind for FontStretch {
+                type TypeKind = windows_core::CopyType;
+            }
+            impl windows_core::RuntimeType for FontStretch {
+                const SIGNATURE: windows_core::imp::ConstBuffer =
+                    windows_core::imp::ConstBuffer::from_slice(
+                        b"enum(Windows.UI.Text.FontStretch;i4)",
+                    );
+            }
             #[repr(transparent)]
             #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
             pub struct FontStyle(pub i32);

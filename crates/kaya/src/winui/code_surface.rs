@@ -28,6 +28,10 @@ struct Face {
     /// The document's own default character size before the first override
     /// (a textarea's runs are a multiple of it, `rich_base`).
     before_doc_size: Option<f32>,
+    /// docs/font-picker-plan.md §2.3: the face, None and false unset.
+    weight: Option<u16>,
+    italic: bool,
+    width: Option<u8>,
 }
 
 struct Gutter {
@@ -70,6 +74,21 @@ pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &V
             apply_face(core, id)?;
             Ok(true)
         }
+        (Prop::FontWeight, Value::F64(weight)) => {
+            FACES.with_borrow_mut(|faces| faces.entry(id.0).or_insert_with(fresh).weight = Some(*weight as u16));
+            apply_face(core, id)?;
+            Ok(true)
+        }
+        (Prop::FontItalic, Value::Bool(on)) => {
+            FACES.with_borrow_mut(|faces| faces.entry(id.0).or_insert_with(fresh).italic = *on);
+            apply_face(core, id)?;
+            Ok(true)
+        }
+        (Prop::FontWidth, Value::F64(width)) => {
+            FACES.with_borrow_mut(|faces| faces.entry(id.0).or_insert_with(fresh).width = Some(*width as u8));
+            apply_face(core, id)?;
+            Ok(true)
+        }
         _ => Ok(false),
     }
 }
@@ -87,7 +106,7 @@ pub(super) fn after_role(core: &CoreState, id: WidgetId) -> windows_core::Result
 }
 
 /// Is this family in the system font collection? (M2's presence check.)
-fn installed(family: &str) -> bool {
+pub(super) fn installed(family: &str) -> bool {
     use windows::Win32::Graphics::DirectWrite::*;
     unsafe {
         let Ok(factory) = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) else {
@@ -107,7 +126,7 @@ fn installed(family: &str) -> bool {
 }
 
 /// The first family of a fallback list that is installed.
-fn first_installed(source: &str) -> Option<String> {
+pub(super) fn first_installed(source: &str) -> Option<String> {
     source.split(',').map(str::trim).find(|name| installed(name)).map(str::to_owned)
 }
 
@@ -157,18 +176,64 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
             None => face.before_family.clone().expect("captured above"),
         };
         let size = if face.scale != 1.0 { base * face.scale } else { face.before_size.unwrap_or(base) };
+        // docs/font-picker-plan.md §2.4: the installed face the core's CSS rule
+        // matched in a named family, asked for exactly; a missing bold asked at
+        // the weight wanted and a missing slope as italic, which DirectWrite
+        // simulates. With no named family DirectWrite matches the role's.
+        let current_weight = match widget {
+            NativeWidget::Label { block, .. } => block.FontWeight()?.Weight,
+            NativeWidget::Entry(field) => field.FontWeight()?.Weight,
+            NativeWidget::Textarea(field) => field.FontWeight()?.Weight,
+            _ => 400,
+        };
+        let faced = face.weight.is_some() || face.italic || face.width.is_some();
+        let want = crate::protocol::FontFace {
+            weight: face.weight.unwrap_or(current_weight),
+            italic: face.italic,
+            width: face.width.unwrap_or(5),
+        };
+        let resolved_name = wanted.as_deref().and_then(first_installed);
+        let matched = resolved_name.as_deref().and_then(|name| {
+            let faces: Vec<_> = super::fontpick::real_faces_named(name).into_iter().map(|(f, _)| f).collect();
+            crate::protocol::FontFace::matched(&faces, want)
+        });
+        let (draw_weight, draw_width) = match matched {
+            Some(m) => {
+                let (_, bold) = crate::protocol::FontFace::synthesis(m, want);
+                (if bold { want.weight } else { m.weight }, m.width)
+            }
+            None => (want.weight, want.width),
+        };
+        let weight = bindings::Windows::UI::Text::FontWeight { Weight: draw_weight };
+        let slope = if want.italic { FontStyle::Italic } else { FontStyle::Normal };
+        let stretch = bindings::Windows::UI::Text::FontStretch(i32::from(draw_width));
         match widget {
             NativeWidget::Label { block, .. } => {
                 block.SetFontFamily(&family)?;
                 block.SetFontSize(size)?;
+                if faced {
+                    block.SetFontWeight(weight)?;
+                    block.SetFontStyle(slope)?;
+                    block.SetFontStretch(stretch)?;
+                }
             }
             NativeWidget::Entry(field) => {
                 field.SetFontFamily(&family)?;
                 field.SetFontSize(size)?;
+                if faced {
+                    field.SetFontWeight(weight)?;
+                    field.SetFontStyle(slope)?;
+                    field.SetFontStretch(stretch)?;
+                }
             }
             NativeWidget::Textarea(field) => {
                 field.SetFontFamily(&family)?;
                 field.SetFontSize(size)?;
+                if faced {
+                    field.SetFontWeight(weight)?;
+                    field.SetFontStyle(slope)?;
+                    field.SetFontStretch(stretch)?;
+                }
                 // THE DOCUMENT'S OWN FORMAT TOO: a rich textarea's runs are
                 // written against it (`rich_base`), and a plain one's text
                 // carries the format it was inserted under.
@@ -188,6 +253,10 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
                 if doc_size > 0.0 {
                     format.SetSize(doc_size * face.scale as f32)?;
                 }
+                if faced {
+                    format.SetWeight(i32::from(draw_weight))?;
+                    format.SetItalic(if want.italic { FormatEffect::On } else { FormatEffect::Off })?;
+                }
                 doc.SetDefaultCharacterFormat(&format)?;
                 let text = lf(Editable::Textarea(field.clone()).text()?);
                 if rich_is_on(id.0) {
@@ -200,6 +269,10 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
                     }
                     if doc_size > 0.0 {
                         character.SetSize(doc_size * face.scale as f32)?;
+                    }
+                    if faced {
+                        character.SetWeight(i32::from(draw_weight))?;
+                        character.SetItalic(if want.italic { FormatEffect::On } else { FormatEffect::Off })?;
                     }
                     all.SetCharacterFormat(&character)?;
                 }
@@ -511,6 +584,56 @@ pub(super) mod read {
         };
         let asked = FACES.with_borrow(|faces| faces.get(&id).map(|f| f.family.clone()).unwrap_or_default());
         Ok(Ok(crate::harness::FaceRead { monospaced: monospaced(&family), family, asked }))
+    }
+
+    /// docs/font-picker-plan.md §2.5: the family the control's source
+    /// resolves to, and the face DirectWrite matches there for the weight,
+    /// slope and width the control (or, over a range, the document's run)
+    /// holds, with its simulations.
+    pub(in super::super) fn drawn_face(
+        core: &CoreState, id: u64, range: Option<crate::harness::TextRange>,
+    ) -> windows_core::Result<Result<crate::harness::DrawnFace, String>> {
+        let to_face = |weight: u16, italic: bool, stretch: i32| crate::protocol::FontFace {
+            weight,
+            italic,
+            width: stretch.clamp(1, 9) as u8,
+        };
+        let (source, want) = match core.widgets.get(&WidgetId(id)) {
+            Some(NativeWidget::Label { block, .. }) if range.is_none() => (
+                block.FontFamily()?.Source()?.to_string(),
+                to_face(block.FontWeight()?.Weight, block.FontStyle()? != FontStyle::Normal, block.FontStretch()?.0),
+            ),
+            Some(NativeWidget::Entry(field)) if range.is_none() => (
+                field.FontFamily()?.Source()?.to_string(),
+                to_face(field.FontWeight()?.Weight, field.FontStyle()? != FontStyle::Normal, field.FontStretch()?.0),
+            ),
+            Some(NativeWidget::Textarea(field)) => {
+                let stretch = field.FontStretch()?.0;
+                let character = match range {
+                    Some(range) => {
+                        let text = lf(Editable::Textarea(field.clone()).text()?);
+                        let (Some(start), Some(stop)) =
+                            (utf16_offset(&text, range.start as usize), utf16_offset(&text, range.stop as usize))
+                        else {
+                            return Ok(Err(format!("{}:{} is not inside the text", range.start, range.stop)));
+                        };
+                        field.TextDocument()?.GetRange(start, stop)?.CharacterFormat()?
+                    }
+                    None => field.TextDocument()?.GetDefaultCharacterFormat()?,
+                };
+                let weight = character.Weight().unwrap_or(400);
+                let italic = character.Italic().is_ok_and(|e| e == FormatEffect::On);
+                let name = character.Name()?.to_string();
+                let name = if name.is_empty() { field.FontFamily()?.Source()?.to_string() } else { name };
+                (name, to_face(if weight > 0 { weight as u16 } else { 400 }, italic, stretch))
+            }
+            _ => return Ok(Err("a range reads a textarea's text; this is a label or an entry".to_owned())),
+        };
+        let named = source.split(',').map(|s| s.rsplit_once('#').map_or(s, |(_, f)| f).trim().to_owned());
+        let Some(family) = named.clone().find(|name| installed(name)) else {
+            return Ok(Err(format!("asks for {source:?}, which no installed family answers")));
+        };
+        Ok(super::super::fontpick::read::drawn(&family, want))
     }
 
     /// S3: the control's font size and the platform's for its kind and role.

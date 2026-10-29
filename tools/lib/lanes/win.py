@@ -123,7 +123,9 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
                 "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji",
-                "ownundo", "richlabel", "notes", "richrows"]
+                "ownundo", "richlabel", "notes", "richrows",
+                # The font picker (docs/font-picker-plan.md §8), rust-only at depth.
+                "fontpick"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -513,6 +515,9 @@ ORDER = [
      "richlabel_rust",
      "richrows_rust",
      "notes_rust",
+     # The font picker (docs/font-picker-plan.md §7). POOLED: its dialog is
+     # the guest's own ContentDialog, pressed through automation peers.
+     "fontpick_rust",
      # The notification conformance scene (docs/tasks-s3-plan.md N5). POOLED:
      # the platform keys a notification by the AUMID `Register()` derives from
      # the EXE, so this leg's history is its own, and a toast banner neither
