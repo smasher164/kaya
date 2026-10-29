@@ -40,6 +40,7 @@ object GuestStart : KayaGuestStart {
             "stall" -> Stall::app
             "nav" -> Nav::app
             "sheet" -> Sheet::app
+            "doctabs" -> Doctabs::app
             "format" -> Format::app
             "formatde" -> Format::app
             "formatar" -> Format::app

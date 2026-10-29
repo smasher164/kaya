@@ -38992,9 +38992,7 @@ func kayaDocumentsRearranged(report: Bool) {
         if !report || fronted != nil || kayaWindowStrips[owner] == nil { kayaWindowStrips[owner] = key }
         for (at, did) in docs.enumerated() {
             guard let doc = kayaScene.documentsById[did] else { continue }
-            let now = (owner, UInt32(at))
-            let was = kayaDocPlace[did]
-            kayaDocPlace[did] = now
+            kayaDocPlace[did] = (owner, UInt32(at))
             if doc.window != owner {
                 // A DRAG INTO ANOTHER WINDOW (Merge All Windows included).
                 let from = doc.window
@@ -39005,12 +39003,39 @@ func kayaDocumentsRearranged(report: Bool) {
                 kayaDocResponders[did]?.windowId = owner
                 if report { KayaHost.emitDocumentMoved(did, owner, UInt32(at)) }
                 if kayaScene.windows[from]?.documents.isEmpty ?? true { kayaWindowEmptied(from) }
-            } else if report, let was, was != now {
-                KayaHost.emitDocumentMoved(did, owner, UInt32(at))
             }
+        }
+        if report, let model = kayaScene.windows[owner] {
+            kayaReportReorder(model, docs)
         }
     }
     for wid in Set(kayaScene.documentsById.values.map(\.window)) { kayaPlaceRegions(wid) }
+}
+
+/// THE USER'S REORDER, never a shift: a document whose index moved only
+/// because another left or closed did not move (measured: a tear-out reported
+/// the tab it left behind as moved to 0). The strip and the app's order are
+/// compared; the one document whose removal makes them agree is the one the
+/// user dragged, and a reorder no single document explains reports each in
+/// strip order.
+func kayaReportReorder(_ model: KayaWindowModel, _ strip: [UInt64]) {
+    let order = model.documents.map(\.id).filter { strip.contains($0) }
+    let mine = strip.filter { order.contains($0) }
+    guard order != mine else { return }
+    if let dragged = mine.first(where: { d in order.filter { $0 != d } == mine.filter { $0 != d } }),
+        let at = mine.firstIndex(of: dragged)
+    {
+        KayaHost.emitDocumentMoved(dragged, model.id, UInt32(at))
+    } else {
+        var walk = order
+        for (at, did) in mine.enumerated() where walk[at] != did {
+            walk.removeAll { $0 == did }
+            walk.insert(did, at: at)
+            KayaHost.emitDocumentMoved(did, model.id, UInt32(at))
+        }
+    }
+    let rest = model.documents.filter { !mine.contains($0.id) }
+    model.documents = mine.compactMap { kayaScene.documentsById[$0] } + rest
 }
 
 /// A window left with no documents closes (Q2). The primary's native window

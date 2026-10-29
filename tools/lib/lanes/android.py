@@ -218,7 +218,7 @@ LEGS = {
         "table-jvm", "save-jvm", "dirty-jvm",
         "ranges-jvm", "styling-jvm", "typeface-jvm",
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
-        "sheet-jvm",
+        "sheet-jvm", "doctabs-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
         "timecode-jvm", "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
         "range-jvm", "rangertl-jvm",
@@ -249,7 +249,7 @@ LEGS = {
         # The editor's Format menu above the keyboard (docs/phone-format-plan.md §4).
         "editorkeyboard-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
-        "sheet-go",
+        "sheet-go", "doctabs-go",
         "format-go", "formatde-go", "formatar-go",
         "timecode-go", "numberfield-go", "numberfieldde-go", "colorpicker-go",
         "range-go", "rangertl-go",

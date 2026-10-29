@@ -30,7 +30,7 @@ SWIFT_ENTRIES = [
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
     "table", "canvas", "sizepolicy", "dnd", "pickers", "sliders",
-    "tooltips", "sheet",
+    "tooltips", "sheet", "doctabs",
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
     "format", "formatde:format", "formatar:format",
@@ -66,7 +66,7 @@ GO_SCENES = [
     "menus", "rowmenu", "commands", "a11y", "a11yrows", "clipboard",
     "background", "undo", "ranges", "dirty", "filedialog",
     "save", "styling", "toolbar", "identity", "assets",
-    "table", "dnd", "pickers", "sliders", "tooltips", "sheet",
+    "table", "dnd", "pickers", "sliders", "tooltips", "sheet", "doctabs",
     "format", "formatde", "formatar",
     "numberfield", "numberfieldde", "timecode",
     "colorpicker",
@@ -361,6 +361,12 @@ MODS = {
     # (docs/doctabs-plan.md §1.6): the desktops' tail goes, and the phone ends
     # on its own empty state, Q2's carve-out.
     ("rust-swiftui", "doctabs"): {
+        "cut": "expect_ax", "keep": "expect_document_dirty expect_alert",
+        "extra": 'close_document "a"; close_document "untitled 1"; expect_documents ""'},
+    ("swift", "doctabs"): {
+        "cut": "expect_ax", "keep": "expect_document_dirty expect_alert",
+        "extra": 'close_document "a"; close_document "untitled 1"; expect_documents ""'},
+    ("go", "doctabs"): {
         "cut": "expect_ax", "keep": "expect_document_dirty expect_alert",
         "extra": 'close_document "a"; close_document "untitled 1"; expect_documents ""'},
     # The editor opens both pickers and ends past a chrome close

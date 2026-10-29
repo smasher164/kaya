@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge emoji doctabs"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow tints badge emoji"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -2006,9 +2006,25 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" sheet-rust env KAYA_SELFTEST=sheet \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/sheet"
-    # docs/doctabs-plan.md §6 B1: rust-only while the bindings follow.
+    # docs/doctabs-plan.md §5: every binding and the C floor.
     run "$proto" doctabs-rust env KAYA_SELFTEST=doctabs \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/doctabs"
+    run "$proto" doctabs-python env KAYA_SELFTEST=doctabs KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/doctabs.py
+    run "$proto" doctabs-js env KAYA_SELFTEST=doctabs KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/doctabs.ts
+    run "$proto" doctabs-go env KAYA_SELFTEST=doctabs \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" doctabs-csharp env KAYA_SELFTEST=doctabs KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" doctabs-ocaml env KAYA_SELFTEST=doctabs KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/doctabs.exe
+    run "$proto" doctabs-haskell env KAYA_SELFTEST=doctabs \
+        tools/linux/a11y-leg.sh "$(hs_bin doctabs)"
+    run "$proto" doctabs-java env KAYA_SELFTEST=doctabs KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" doctabs-c env KAYA_SELFTEST=doctabs \
+        tools/linux/a11y-leg.sh /tmp/c-guests/doctabs
     # THE FORMATTER DOOR AND THE CATALOG under three locales
     # (docs/compliance-plan.md §6): the knob installs the generated locale
     # (tools/linux/Dockerfile) and the reads ask glibc and GTK back.

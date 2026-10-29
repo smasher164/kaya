@@ -11906,6 +11906,34 @@ fn slow_apply_line(took: std::time::Duration, census: &[(String, usize)], lowere
     ))
 }
 
+/// THE USER'S REORDER of a strip, as the document_moved occurrences it is:
+/// the one document whose removal makes `was` and `now` agree is the one
+/// dragged, a document whose index shifted because another left did not
+/// move, and a reorder no single document explains reports each in strip
+/// order (docs/traps.md, the tab reported moved by a tear-out).
+#[cfg(any(test, windows))]
+pub(crate) fn reorder_moves(was: &[u64], now: &[u64]) -> Vec<(u64, u32)> {
+    let order: Vec<u64> = was.iter().copied().filter(|d| now.contains(d)).collect();
+    let mine: Vec<u64> = now.iter().copied().filter(|d| order.contains(d)).collect();
+    if order == mine {
+        return Vec::new();
+    }
+    let without = |list: &[u64], d: u64| list.iter().copied().filter(|x| *x != d).collect::<Vec<_>>();
+    if let Some((at, d)) = mine.iter().enumerate().find(|(_, d)| without(&order, **d) == without(&mine, **d)) {
+        return vec![(*d, at as u32)];
+    }
+    let mut walk = order;
+    let mut out = Vec::new();
+    for (at, d) in mine.iter().enumerate() {
+        if walk[at] != *d {
+            walk.retain(|x| x != d);
+            walk.insert(at, *d);
+            out.push((*d, at as u32));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -15000,6 +15028,16 @@ mod tests {
                 value: PropValue::Const(Value::Bool(true)),
             },
         ]);
+    }
+
+    #[test]
+    fn a_drag_reports_the_one_document_dragged() {
+        assert_eq!(reorder_moves(&[1, 2, 3], &[2, 3, 1]), vec![(1, 2)]);
+        assert_eq!(reorder_moves(&[1, 2, 3], &[3, 1, 2]), vec![(3, 0)]);
+        assert_eq!(reorder_moves(&[1, 2, 3], &[1, 2, 3]), vec![]);
+        // A tab that left is no move of the ones that stayed.
+        assert_eq!(reorder_moves(&[1, 2, 3], &[2, 3]), vec![]);
+        assert_eq!(reorder_moves(&[1, 2, 3, 4], &[2, 1, 4, 3]), vec![(2, 0), (4, 2)]);
     }
 
     /// A core-named window skips an id a guest already holds and never

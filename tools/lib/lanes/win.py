@@ -40,6 +40,8 @@ SCENES = [
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
     "sheet",
+    # docs/doctabs-plan.md §5.
+    "doctabs",
     # The formatter door and the catalog in every language this lane runs
     # (docs/compliance-plan.md §6); formatde/formatar reuse its guests.
     "format",
@@ -121,9 +123,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
                 "listrow", "tints", "badge", "emoji",
-                "ownundo", "richlabel", "notes", "richrows",
-                # docs/doctabs-plan.md §6 B2: rust-only while the bindings follow.
-                "doctabs"]
+                "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
 # out of an installed MSIX instead of out of C:\kaya, because a kaya app is
@@ -354,7 +354,7 @@ ORDER = [
      "sheet_rust", "sheet_python", "sheet_js", "sheet_go", "sheet_csharp", "sheet_java",
      # Document tabs (docs/doctabs-plan.md §4): the tab row's own items through
      # the user's route, no real mouse.
-     "doctabs_rust",
+     "doctabs_rust", "doctabs_python", "doctabs_js", "doctabs_go", "doctabs_csharp", "doctabs_java",
      # The toast pool: the InfoBar's own buttons pressed through their
      # peers and Edit>Undo through menu_activate's invoke pipeline, no real
      # mouse and no OS-global key (docs/toast-plan.md T10).

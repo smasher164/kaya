@@ -19609,3 +19609,15 @@ fallback took the documents window by a dictionary's order and read back the
 window a tab had just left; it is the frontmost document window by
 NSApp.orderedWindows now, and the read's failure prints the app's activity,
 its key window and the document windows front to back.
+
+## The tab reported moved by a tear-out (measured 2026-10-28)
+
+The Mac reported document_moved for every tab whose index changed between
+two reads of the strip, so when "a" tore out, "untitled 1" (which slid from
+index 1 to 0) was reported as moved to 0, and the C guest, the one guest that
+listens for every document's move, ended on "moved untitled to 0". WinUI's
+drag report had the twin defect: a drag of one tab from 0 to 2 reported all
+three as moved. A move is now what the user did: the one document whose
+removal makes the old order and the strip agree (scene::reorder_moves, and
+kayaReportReorder on the Mac), and a shift because another tab left or closed
+reports nothing.

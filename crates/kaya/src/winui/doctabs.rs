@@ -422,11 +422,9 @@ fn handle(core: &mut CoreState, event: DocEvent) -> windows_core::Result<()> {
             let items = tabs.view.TabItems()?;
             let now: Vec<u64> = (0..items.Size()?).filter_map(|i| items.GetAt(i).ok().and_then(|it| doc_of(&it))).collect();
             let was = core.docs.order.get(&window).cloned().unwrap_or_default();
-            for (at, doc) in now.iter().enumerate() {
-                if was.get(at) != Some(doc) {
-                    core.scene.user_moved_document(WindowId(*doc), WindowId(window), at as u32);
-                    core.occurrences.send(Occurrence::DocumentMoved { document: WindowId(*doc), window: WindowId(window), index: at as u32 });
-                }
+            for (doc, at) in crate::scene::reorder_moves(&was, &now) {
+                core.scene.user_moved_document(WindowId(doc), WindowId(window), at);
+                core.occurrences.send(Occurrence::DocumentMoved { document: WindowId(doc), window: WindowId(window), index: at });
             }
             core.docs.order.insert(window, now);
             Ok(())
