@@ -10081,6 +10081,20 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
         let labels = gutter.drawn.map { ($0.number, $0.mid) }
         return .success(kayaPairGutter(fragments, labels))
     }
+
+    /// What a refused gutter read saw of the view: where the caret is, on
+    /// which line, and where the viewport sits in the content.
+    @MainActor func kayaGutterContext(_ node: KayaNode) -> String {
+        guard let view = kayaLiveUITextView(node.id) else { return "" }
+        let units = Array((view.text ?? "").utf16)
+        let caret = view.selectedRange
+        let line = 1 + units.prefix(min(caret.location, units.count)).filter { $0 == 10 }.count
+        return String(
+            format: " (caret %d+%d on line %d of %d; viewport y %.0f-%.0f of content %.0f, inset bottom %.0f; first responder %@)",
+            caret.location, caret.length, line, 1 + units.filter { $0 == 10 }.count, view.contentOffset.y,
+            view.contentOffset.y + view.bounds.height, view.contentSize.height, view.adjustedContentInset.bottom,
+            view.isFirstResponder ? "yes" : "no")
+    }
 #endif
 
 
@@ -15615,10 +15629,15 @@ private func kayaRunScript(_ script: String) {
                         guard let node = kayaTarget(parts[1], "textarea", kayaScene.textareas) else {
                             return (nil, "no such target")
                         }
+                        let verdict: (String?, String)
                         switch kayaGutterRead(node) {
-                        case .failure(let why): return (nil, why)
-                        case .success(let read): return kayaGutterVerdict(read, clause)
+                        case .failure(let why): verdict = (nil, why)
+                        case .success(let read): verdict = kayaGutterVerdict(read, clause)
                         }
+                        #if os(iOS)
+                            if verdict.0 == nil { return (nil, verdict.1 + kayaGutterContext(node)) }
+                        #endif
+                        return verdict
                     }
                 }
                 var gutter = readGutter()

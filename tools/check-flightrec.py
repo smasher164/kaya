@@ -2571,6 +2571,17 @@ def census_session_answer(src):
     return found
 
 
+def census_gutter_context(src):
+    """docs/deferred.md, the iOS codesurface gutter that stayed at line 21:
+    a refused expect_gutter on iOS says where the caret and the viewport
+    were (kayaGutterContext)."""
+    text = src[SWIFTUI]
+    if "if verdict.0 == nil { return (nil, verdict.1 + kayaGutterContext(node)) }" not in text:
+        return ["SwiftUI: a refused iOS gutter read no longer says where the caret and the "
+                "viewport were (kayaGutterContext)"]
+    return []
+
+
 CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
             ("windows verb trace", census_vtrace),
@@ -2595,7 +2606,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("GTK media ring", census_gtk_media_ring),
             ("linux step cpu", census_linux_step_cpu),
             ("GTK failed-step picture", census_gtk_failshot),
-            ("SwiftUI routed session answer", census_session_answer))
+            ("SwiftUI routed session answer", census_session_answer),
+            ("iOS gutter context", census_gutter_context))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -2667,6 +2679,11 @@ for label, pattern, repl, want in (
          r"\1", "`player_rate(self.id, 0)` no longer records")):
     changed = doctored(SWIFTUI, pattern, repl, label)
     gate.negative(label, lambda: census_session_answer(changed), want=want)
+
+gc = doctored(SWIFTUI, r"verdict\.1 \+ kayaGutterContext\(node\)", "verdict.1",
+              "NG the gutter refusal without its context")
+gate.negative("NG the gutter refusal without its context",
+              lambda: census_gutter_context(gc), want="no longer says where the caret")
 
 # The frontmost-shot refusals, each removed from a copy.
 nf1 = doctored(LANE_PY,
@@ -3703,6 +3720,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(268 + (5 if DRIVES else 0))
+gate.negatives_ran(269 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

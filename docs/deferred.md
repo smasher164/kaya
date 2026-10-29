@@ -1324,6 +1324,21 @@ the sweep red on two over-long lines (fixed in b02e72b5), and android 907 net
 against 870 with the sweep 611 against 600. The android row's remaining cost
 and the sweep's are the open duration work.
 
+## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen once 2026-10-29, in the 8aa99928 matrix)
+KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
+
+The matrix read `textarea@code gutter reads 18 19 20 21, wanted shows 39`
+for 15 s and then `25 26 27 28, wanted shows 41` after the typed line; the
+app's own shot shows the caret drawn on line 21 with the keyboard up
+(window 375x460). Green alone right after (codesurface 4 of 4 on iOS). The
+bundle (flightrec run 20261029T142428Z-075973) could not say whether the
+caret was placed at line 21 or at the end with the view unscrolled, so a
+refused iOS gutter read now prints the caret's offset and line, the
+viewport against the content height, the bottom inset and first-responder
+state (kayaGutterContext; forced red: "caret 1171+0 on line 40 of 40;
+viewport y 846-942 of content 950"). Read that clause first on the next
+sighting.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 
