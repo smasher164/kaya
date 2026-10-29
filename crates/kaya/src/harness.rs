@@ -1829,13 +1829,16 @@ pub struct FaceWords {
     pub synthesized: bool,
 }
 
-/// What `pick_font` chooses: cancel, a family and face in the step, or the
-/// ones a label of the guest's shows as `<weight> <slope> <width> <family>`.
+/// What `pick_font` chooses: cancel, a family and face in the step, the
+/// ones a label of the guest's shows as `<weight> <slope> <width> <family>`,
+/// or a face of the first family the open picker lists (no family is
+/// installed on every platform, so a shared script cannot name one).
 #[derive(Clone, Debug, PartialEq)]
 pub enum PickWant {
     Cancel,
     Choice(crate::protocol::FontChoice),
     Label(Target),
+    First(crate::protocol::FontFace),
 }
 
 /// Parse `<weight> <upright|italic> <width> [synthesized]`.
@@ -5354,11 +5357,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     PickWant::Cancel
                 } else if arg.starts_with("label") {
                     PickWant::Label(parse_target(arg)?)
+                } else if let Some(face) = arg.strip_prefix("first ") {
+                    PickWant::First(parse_face_words(face).map_err(|e| format!("{e}: {line:?}"))?.face)
                 } else {
                     let (family, face) = arg
                         .strip_prefix('"')
                         .and_then(|a| a.split_once('"'))
-                        .ok_or_else(|| format!("pick_font wants cancel, a label or \"<family>\" <face>: {line:?}"))?;
+                        .ok_or_else(|| format!("pick_font wants cancel, a label, first <face> or \"<family>\" <face>: {line:?}"))?;
                     let words = parse_face_words(face).map_err(|e| format!("{e}: {line:?}"))?;
                     PickWant::Choice(crate::protocol::FontChoice { family: family.to_owned(), face: words.face })
                 })
@@ -8750,6 +8755,20 @@ fn run_with_log(
                             Err(e) => {
                                 break 'pick Some(Err(format!("pick_font: {} says {text:?}: {e}", target_spec(label))));
                             }
+                        }
+                    }
+                    PickWant::First(face) => {
+                        let first = poll_named("pick_font first", || match stage.font_dialog_families() {
+                            Ok(Some(listed)) => listed
+                                .first()
+                                .map(|(family, _)| family.clone())
+                                .ok_or_else(|| "pick_font first: the open picker lists no families".to_owned()),
+                            Ok(None) => Err("pick_font first: no font picker is open".to_owned()),
+                            Err(why) => Err(format!("pick_font first: {why}")),
+                        });
+                        match first {
+                            Ok(family) => Some(crate::protocol::FontChoice { family, face: *face }),
+                            Err(why) => break 'pick Some(Err(why)),
                         }
                     }
                 };
@@ -12864,7 +12883,8 @@ mod tests {
         assert!(font_dialog_verdict(None, "closed").is_ok());
         let steps = parse(
             "expect_face label@x face 300 upright 5\nexpect_face textarea@d 0:4 face label@want\n\
-             pick_font \"Menlo\" 700 italic 5\npick_font cancel\npick_font label@pick\nexpect_font_dialog code_only",
+             pick_font \"Menlo\" 700 italic 5\npick_font cancel\npick_font label@pick\nexpect_font_dialog code_only\n\
+             pick_font first 400 upright 5",
         )
         .unwrap();
         assert!(matches!(&steps[0], Step::ExpectFontFace(_, None, Some(_), None)));
@@ -12873,6 +12893,8 @@ mod tests {
         assert!(matches!(&steps[3], Step::PickFont(PickWant::Cancel)));
         assert!(matches!(&steps[4], Step::PickFont(PickWant::Label(_))));
         assert!(matches!(&steps[5], Step::ExpectFontDialog(s) if s == "code_only"));
+        assert!(matches!(&steps[6], Step::PickFont(PickWant::First(f)) if f.weight == 400 && !f.italic));
+        assert!(parse("pick_font first 400 upright").is_err());
         assert!(parse("expect_font_dialog shown").is_err());
         assert!(parse("expect_face label@x face 300 upright").is_err());
         assert!(parse("expect_face label@x monospaced").is_ok());

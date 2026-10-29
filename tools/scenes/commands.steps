@@ -5,6 +5,7 @@ expect_menu_bar "File" "View"
 expect_menu "File>Settings…" enabled
 expect_menu "View>Details" unchecked
 expect_menu "View>Sort" value 0
+expect_menu "View>Sort" titled
 
 shortcut "primary+backslash"
 expect_menu "View>Details" checked

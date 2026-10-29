@@ -313,6 +313,10 @@ guest change plus its scene's steps.
   XCUITest driver taps the rows (measured: the remote picker's tree is
   readable and a tap at a row's centre picks it); on WinUI and Compose the
   harness drives kaya's own controls.
+- `pick_font first <weight> <upright|italic> <width>` picks that face of the
+  first family the open picker lists: no code family is installed on all five
+  platforms, so a shared script (the editor's) cannot name one. It follows an
+  `expect_font_dialog code_only`, which waits for the Mac panel's collection.
 - `expect_font_dialog open|closed`, and `expect_font_dialog code_only` which
   reads the families the open picker lists (the Mac panel's family table, the
   GTK list model, iOS's remote tree, kaya's own lists) and fails on one that

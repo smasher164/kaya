@@ -166,7 +166,6 @@ type document struct {
 	open        bool
 	zoom        int
 	numbers     bool
-	font        int
 	sel         kaya.Selection
 	buffer      kaya.Widget
 	status      kaya.Signal[string]
@@ -205,10 +204,11 @@ func App() *kaya.App {
 		made   int
 		// The View menu's state (docs/code-surface-plan.md §4), shown for the
 		// active document.
-		numbersOn   kaya.Signal[bool]
-		fontGroup   kaya.MenuItem
-		fontChoice  kaya.Signal[float64]
-		fontOptions = []string{""}
+		numbersOn kaya.Signal[bool]
+		// The face every document wears, the app's preference
+		// (docs/font-picker-plan.md §6); no family is the platform's
+		// monospaced face.
+		font kaya.FontChoice
 		// The Format menu's check marks: what holds over the active buffer's
 		// selection (docs/phone-format-plan.md §3).
 		inline = map[string]kaya.Signal[bool]{}
@@ -280,7 +280,16 @@ func App() *kaya.App {
 			tx.Write(on, d.sel.Block() == kind)
 		}
 		tx.Write(numbersOn, d.numbers)
-		tx.Write(fontChoice, float64(d.font))
+	}
+
+	wear := func(tx *kaya.Tx, d *document) {
+		if font.Family == "" {
+			return
+		}
+		tx.SetFamily(d.buffer, font.Family)
+		tx.SetFontWeight(d.buffer, font.Weight)
+		tx.SetFontItalic(d.buffer, font.Italic)
+		tx.SetFontWidth(d.buffer, font.Width)
 	}
 
 	activate := func(tx *kaya.Tx, d *document) {
@@ -417,24 +426,6 @@ func App() *kaya.App {
 		tx.Write(d.status, fmt.Sprintf("zoom %d%%", int(zooms[d.zoom]*100+0.5)))
 	}
 
-	// The code fonts editors offer, in this order, kept to the ones this
-	// device has; the first option is the platform's own monospaced face.
-	codeFonts := []string{"SF Mono", "Menlo", "Monaco", "Cascadia Mono", "Consolas", "Adwaita Mono",
-		"DejaVu Sans Mono", "Noto Sans Mono", "Liberation Mono", "Droid Sans Mono", "Courier New", "monospace"}
-	app.OnFontFamilies(func(tx *kaya.Tx, families []string) {
-		have := map[string]bool{}
-		for _, f := range families {
-			have[f] = true
-		}
-		group := tx.Menu(fontGroup)
-		for _, f := range codeFonts {
-			if have[f] && len(fontOptions) < 6 {
-				fontOptions = append(fontOptions, f)
-				group.Option(f)
-			}
-		}
-	})
-
 	// One tab: its buffer, its find bar and its status line, each widget's
 	// a11y id carrying the document's number so two tabs never share one.
 	newDocument = func(tx *kaya.Tx) *document {
@@ -529,12 +520,19 @@ func App() *kaya.App {
 			}
 		})
 		tx.SetLineNumbers(d.buffer, d.numbers)
+		wear(tx, d)
 		active = d
 		tx.Focus(d.buffer)
 		return d
 	}
 
 	app.Build(func(tx *kaya.Tx) {
+		font = kaya.FontChoice{
+			Family: kaya.Prefs().GetString("font.family", ""),
+			Weight: int(kaya.Prefs().GetI64("font.weight", 400)),
+			Italic: kaya.Prefs().GetBool("font.italic", false),
+			Width:  int(kaya.Prefs().GetI64("font.width", 5)),
+		}
 		// Before anything mounts (the set-once wall); a REQUEST, not a rule.
 		tx.BrandAccent(0x0F7B6C)
 		// Inset 0 leaves a phone's safe area alone. The window is titled by
@@ -678,7 +676,6 @@ func App() *kaya.App {
 		// The code editors' View menu (Sublime Text, VS Code, Zed): the
 		// gutter, the zoom chords, and the face, each the active document's.
 		numbersOn = tx.Signal(true)
-		fontChoice = tx.Signal(0.0)
 		view := win.Menu("View")
 		view.Toggle("Line Numbers").BindChecked(numbersOn).OnToggle(func(tx *kaya.Tx, on bool) {
 			active.numbers = on
@@ -690,21 +687,28 @@ func App() *kaya.App {
 		view.Item("Zoom Out").Shortcut("primary+minus").OnActivate(func(tx *kaya.Tx) { setZoom(tx, active.zoom-1) })
 		view.Item("Actual Size").Shortcut("primary+0").OnActivate(func(tx *kaya.Tx) { setZoom(tx, 4) })
 		view.Separator()
-		fontGroup = view.RadioGroup("Font")
-		fontGroup.Option("System Monospaced")
-		fontGroup.BindValue(fontChoice).OnSelect(func(tx *kaya.Tx, index int) {
-			active.font = index
-			tx.Write(fontChoice, float64(index))
-			tx.SetFamily(active.buffer, fontOptions[index])
-			name := fontOptions[index]
-			if name == "" {
-				name = "System Monospaced"
+		view.Item("Font…").OnActivate(func(tx *kaya.Tx) {
+			ask := tx.ChooseFont().CodeOnly(true).Faces(true).OnResult(func(tx *kaya.Tx, c *kaya.FontChoice) {
+				if c == nil {
+					return
+				}
+				font = *c
+				kaya.Prefs().SetString("font.family", c.Family)
+				kaya.Prefs().SetI64("font.weight", int64(c.Weight))
+				kaya.Prefs().SetBool("font.italic", c.Italic)
+				kaya.Prefs().SetI64("font.width", int64(c.Width))
+				for _, d := range docs {
+					wear(tx, d)
+				}
+				tx.Write(active.status, "font "+c.Family)
+			})
+			if font.Family != "" {
+				ask = ask.Initial(font)
 			}
-			tx.Write(active.status, "font "+name)
+			ask.Show()
 		})
 
 		newDocument(tx)
-		tx.ListFontFamilies()
 	})
 
 	return app

@@ -16020,12 +16020,31 @@ private func kayaRunScript(_ script: String) {
                         break
                     }
                     choice = parsed
+                } else if pickArg.hasPrefix("first "), let face = kayaParseFaceWords(String(pickArg.dropFirst(6))) {
+                    // harness.rs's PickWant::First: the first family the open picker lists.
+                    var first: String?
+                    var why = "no font picker is open"
+                    let firstDeadline = Date().addingTimeInterval(8)
+                    while first == nil && Date() < firstDeadline {
+                        switch kayaFontDialogFamilies() {
+                        case .success(let listed?):
+                            if let family = listed.first?.0 { first = family } else { why = "the open picker lists no families" }
+                        case .success(nil): why = "no font picker is open"
+                        case .failure(let e): why = "\(e)"
+                        }
+                        if first == nil { Thread.sleep(forTimeInterval: 0.1) }
+                    }
+                    guard let family = first else {
+                        failures.append("pick_font first: \(why)")
+                        break
+                    }
+                    choice = (family, face.face)
                 } else if let (family, rest) = kayaQuotedPrefix(pickArg), let face = kayaParseFaceWords(rest),
                     !kayaFaceWordsSynthesized(rest)
                 {
                     choice = (family, face.face)
                 } else {
-                    failures.append("pick_font wants cancel, a label or \"<family>\" <face>: \(line)")
+                    failures.append("pick_font wants cancel, a label, first <face> or \"<family>\" <face>: \(line)")
                     break
                 }
                 kayaAwaitQuiet()

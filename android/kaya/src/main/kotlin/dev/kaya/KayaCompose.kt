@@ -15311,11 +15311,34 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     null
                                 } else bits[3].trim() to face.first
                             }
+                            arg.startsWith("first ") -> {
+                                // harness.rs's PickWant::First: the first family the open picker lists.
+                                val face = kayaParseFaceWords(arg.removePrefix("first "))
+                                if (face == null || face.second) {
+                                    refused = "pick_font first wants a face, `<weight> <slope> <width>`: $line"
+                                    null
+                                } else {
+                                    var first: String? = null
+                                    val deadline = System.nanoTime() + 8_000_000_000L
+                                    while (first == null && System.nanoTime() < deadline) {
+                                        first = onUi(activity) {
+                                            if (KayaSceneModel.fontPicker == null) null
+                                            else kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG)
+                                                ?.map { kayaNodeText(it) }?.firstOrNull { it.isNotEmpty() }
+                                        }
+                                        if (first == null) Thread.sleep(150)
+                                    }
+                                    if (first == null) {
+                                        refused = "pick_font first: no open font picker listed a family"
+                                        null
+                                    } else first!! to face.first
+                                }
+                            }
                             else -> {
                                 val close = arg.indexOf('"', 1)
                                 val face = if (arg.startsWith("\"") && close > 0) kayaParseFaceWords(arg.substring(close + 1)) else null
                                 if (face == null || face.second) {
-                                    refused = "pick_font wants cancel, a label or \"<family>\" <face>: $line"
+                                    refused = "pick_font wants cancel, a label, first <face> or \"<family>\" <face>: $line"
                                     null
                                 } else arg.substring(1, close) to face.first
                             }

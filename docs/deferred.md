@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29): the spec, the core, the Mac and the Rust binding with the fontpick scene green on the Mac (2026-10-29); every lane and binding built (2026-10-29); the editor open
+## BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29): the spec, the core, the Mac and the Rust binding with the fontpick scene green on the Mac (2026-10-29); every lane and binding built and the editor's Font… (2026-10-29); the matrix and the review page open
 KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_faces, font_weight, font_italic, font_width, choose_font, on_font_chosen, NSFontPanel, NSFontPanelCollectionsToolbarItem, UIFontPickerViewController, GtkFontDialog, expect_face face, pick_font, expect_font_dialog, fontpick.steps, DEPTH STUB fontpick
 
 The maintainer ruled the plan's seven questions on 2026-10-29 (§10, each
@@ -30,7 +30,7 @@ collection not chosen).
   - ~~**DEPTH STUB: fontpick on winui**~~ — BUILT 2026-10-29: the face on TextBlock and TextBox (FontWeight, FontStyle and the newly bound FontStretch) and on RichEditBox through the document's own Weight and Italic alone, the control's FontWeight having overwritten a Bold run (docs/traps.md, a RichEditBox's own FontWeight over a Bold run), asking for the installed face the core's CSS rule matched among DirectWrite's faces with the simulated ones dropped; rich Bold at least 700 over the document's weight through TOM's Weight in place of its Bold toggle, which reset a Light document to 400; the kaya-drawn ContentDialog (a search box, the families each in itself, the faces, a preview, Cancel and Choose), code fonts by IDWriteFont1::IsMonospacedFont with symbol fonts out; the reads through GetFirstMatchingFont and its simulations; fontpick_rust green, four negatives watched red (the slope dropped, the filter dropped, Bold over Light at the base weight, the core matcher descending). DirectWrite's own matcher agreed with the CSS rule for 650 on Cascadia Mono (measured), so a cut asking the unmatched weight stays green there.
   - ~~**DEPTH STUB: fontpick on compose**~~ — BUILT 2026-10-29: the faces from fonts.xml's own <font> entries with their axes (SystemFonts answers one Font per file, measured: Roboto as 400 and its condensed twin, where fonts.xml declares eighteen) plus SystemFonts for the rest; the face as a Compose FontFamily of the family's faces at the width kaya's matcher chose, Compose's own CSS font matcher picking the weight and slope and its FontSynthesis drawing what the family lacks; rich Bold at least 700 and a Code run in the document's own fixed-pitch family; the kaya-drawn ModalBottomSheet (search, the families each in itself, the faces as chips, a preview, Cancel and Choose), code fonts by measured i-against-W advances in the family's own font; the reads off TextRunShaper's shaped font and minikin's fake bold and fake italic; fontpick-compose green, three negatives watched red (the filter, the synthesis, Bold over Light).
   - ~~**The eight other bindings and the C floor**~~ — BUILT 2026-10-29: the three props on widgets, rows and templates, a family's faces with its handler, and the picker with a callback or an awaitable where the binding has one, in Python, Go, C#, Java, Swift, OCaml, Haskell and JS (check-sugar-surface's font clause, 54 spellings watched red); the C floor is the generated wire, as for the code surface; a fontpick guest in each language on every lane that runs it (the Mac 9, Linux 8 on x11 and wayland, Windows 6, iOS swift and go, Android jvm and go), all green. The pooled Windows legs found the picker presented before the island was live (docs/traps.md, a ContentDialog presented before the island is live), and the Android JVM host, the Java desktop guests and the C# guests now refuse a scene they do not register rather than running milestone2.
-  - **The editor's Font…** (the maintainer, 2026-10-29: "I think we can drop the short list") — one View item opening the picker, the choice applied to the document and kept in its preferences.
+  - ~~**The editor's Font…**~~ — BUILT 2026-10-29 (the maintainer, 2026-10-29: "I think we can drop the short list"): one View item, Font…, opening the picker with code fonts and faces; the choice dresses every open document and is kept in the app's preferences (font.family, font.weight, font.italic, font.width); the Font radio group and its list of code fonts are gone. editor.steps cancels the picker and then picks the first listed family's 400 upright 5 (`pick_font first`), reading the buffer named and at that face; the `titled` guard the group carried moved to commands.steps (`expect_menu "View>Sort" titled`), watched red on all five lanes with the heading cut.
 
 ## DEFER — the Mac font panel before macOS 26 lists every family under code_only (docs/font-picker-plan.md Q2; 2026-10-29)
 KEY: NSFontPanelCollectionsToolbarItem, kayaSelectFixedWidth, Fixed Width, code_only, macOS 13, macOS 15, font panel collections column
@@ -1357,7 +1357,7 @@ the sweep red on two over-long lines (fixed in b02e72b5), and android 907 net
 against 870 with the sweep 611 against 600. The android row's remaining cost
 and the sweep's are the open duration work.
 
-## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen once 2026-10-29, in the 8aa99928 matrix)
+## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen twice 2026-10-29, in the 8aa99928 matrix and on codesurface-swift)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 
 The matrix read `textarea@code gutter reads 18 19 20 21, wanted shows 39`
@@ -1371,6 +1371,15 @@ viewport against the content height, the bottom inset and first-responder
 state (kayaGutterContext; forced red: "caret 1171+0 on line 40 of 40;
 viewport y 846-942 of content 950"). Read that clause first on the next
 sighting.
+
+Second sighting, codesurface-swift in a filtered run (flightrec run
+20261029T220620Z-090469), the same 18-21 then 25-28: "caret 1171+0 on line
+40 of 40; viewport y 854-950 of content 950, inset bottom 0; first responder
+yes". The caret was at the end and the scroll offset was at the content's
+end, yet the gutter and the app's own shot both show lines 18-21: the offset
+moved and TextKit 2's drawn layout did not follow it. The next read wants
+the laid-out fragments' range beside the offset (what the viewport layout
+controller last laid out), to tell a stale layout from a stale draw.
 
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
