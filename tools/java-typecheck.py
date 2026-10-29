@@ -932,4 +932,78 @@ for label, cuts, sentence in IMAGES_NEGATIVES:
                  f"ever doctor the copy in the scratch directory.")
     print(f"java-typecheck: {label}: red with its own sentence")
 
+# THE EMISSION CHECK, RUN (docs/deferred.md, per-binding emission checks):
+# the records a construction stages, read back from a transaction that
+# aborts. A chain method that accepts its argument and stages nothing
+# passes every scene whose interpreter shares the node state a dropped write
+# never reaches; the table refuses a chain method it does not name.
+EMISSION_CHECK = "tools/checks/java-emission/dev/kaya/EmissionCheck.java"
+(TMP / "emissionclasses").mkdir()
+if run_javac("-encoding", "UTF-8", "-cp", TMP / "classes", "-d",
+             TMP / "emissionclasses", EMISSION_CHECK) != 0:
+    fail("FAIL — the emission check did not compile.")
+if run_java("-cp", f"{TMP / 'classes'}:{TMP / 'emissionclasses'}",
+            "dev.kaya.EmissionCheck", env=MEDIA_ENV) != 0:
+    fail("FAIL — a Java construction stages the wrong records "
+         "(tools/checks/java-emission).")
+
+EMISSION_NEGATIVES = [
+    ("emission negative: spacing stages nothing", [("KayaApp.java",
+     r"\n {12}tx\.setSpacing\(this, gap\);", "")],
+     "Widget.spacing(double) staged nothing"),
+    ("emission negative: spacing stages another value", [("KayaApp.java",
+     r"tx\.setSpacing\(this, gap\);", "tx.setSpacing(this, 0);")],
+     "Widget.spacing(double) staged its record without the value 13.25"),
+    ("emission negative: a chain method the table does not name", [("KayaApp.java",
+     r"(\n {8}public Widget spacing\(double gap\) \{)",
+     r"\n        public Widget unnamed() {\n            return this;\n        }\n\1")],
+     "Widget.unnamed() has no expectation"),
+    ("emission negative: bold sends italic", [("KayaApp.java",
+     r'format\(w, "bold", "true"\);', 'format(w, "italic", "true");')],
+     "bold staged other bytes"),
+    ("emission negative: a ranged act sent as a selection act", [("KayaApp.java",
+     r"txFormatText\(w\.id, mark == null \? 1 : 0, 1, at\.start",
+     "txFormatText(w.id, mark == null ? 1 : 0, 0, at.start")],
+     "formatRange staged (kind, removed, ranged, start, stop)"),
+    ("emission negative: the shortcut sent as spelled", [("KayaWire.java",
+     r"encodeValue\(b, canonicalizeShortcut\(shortcut\)\);", "encodeValue(b, shortcut);")],
+     "did not reach the records canonicalized"),
+    ("emission negative: a reopen re-anchors the bar", [("KayaApp.java",
+     r"(\n {12})(return new MenuItem\(item\.id, this, KayaApp\.this, false\);)",
+     r"\1emit(KayaWire.txMenubarAppend(0, item.id));\1\2")],
+     "the reopen re-anchored the bar"),
+]
+for label, cuts, sentence in EMISSION_NEGATIVES:
+    sources = ROOT / "bindings" / "java" / "dev" / "kaya"
+    before = {n: hashlib.sha256((sources / n).read_bytes()).hexdigest()
+              for n in {name for name, _, _ in cuts}}
+    stem = "e" + hashlib.sha256(label.encode("utf-8")).hexdigest()[:8]
+    (TMP / stem).mkdir()
+    for p in sorted(sources.glob("*.java")):
+        (TMP / stem / p.name).write_bytes(p.read_bytes())
+    for name, pattern, repl in cuts:
+        copy = TMP / stem / name
+        copy.write_text(g.doctor(label, copy.read_text(encoding="utf-8"), pattern, repl),
+                        encoding="utf-8")
+    if run_javac("-encoding", "UTF-8", "-d", TMP / (stem + "classes"),
+                 "bindings/java-desktop/dev/kaya/KayaRing.java",
+                 *sorted((TMP / stem).glob("*.java")), EMISSION_CHECK) != 0:
+        fail(f"FAIL — the doctored copy for '{label}' did not compile.")
+    log = TMP / (stem + ".log")
+    if run_java("-cp", str(TMP / (stem + "classes")), "dev.kaya.EmissionCheck",
+                log=log, env=MEDIA_ENV) == 0:
+        fail(f"FAIL — the emission check PASSED under '{label}', so it does "
+             f"not exercise that clause.")
+    said = log.read_text(encoding="utf-8", errors="replace")
+    if sentence not in said:
+        print(f"java-typecheck: FAIL — '{label}' failed, but not with "
+              f"'{sentence}'. What it printed:")
+        print(said)
+        raise SystemExit(1)
+    for n, sha in before.items():
+        if hashlib.sha256((sources / n).read_bytes()).hexdigest() != sha:
+            fail(f"FAIL — {sources / n} changed during '{label}'. It must only "
+                 f"ever doctor the copy in the scratch directory.")
+    print(f"java-typecheck: {label}: red with its own sentence")
+
 g.verdict()

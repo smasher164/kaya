@@ -2167,7 +2167,18 @@ binding of the eight that could not grow, and invisible to every gate
 because the ceiling is a THROW and no scene builds a big record. Its
 negative removes the growth from a COPY, prints the substitution count
 and demands BufferOverflowException by name; six refusal branches,
-all six watched firing, docs/deferred.md's java-record-ceiling entry)
+all six watched firing, docs/deferred.md's java-record-ceiling entry).
+Since 2026-10-29 it also RUNS the binding's emission check
+(tools/checks/java-emission): every Widget construction-chain method
+stages its set_property (or its breakpoint, size-policy record) on its own
+widget with its value, a chain method the table does not name is refused,
+the menu constructors stage their create/append/attach counts and a
+canonical shortcut, a reopen seats under the retained parent, and the
+format acts stage their removed/ranged words and the named acts format's
+bytes. Seven watched negatives on copies, each demanding its sentence
+(spacing cut, spacing's value, an unnamed chain method, bold as italic,
+a ranged act as a selection act, the shortcut uncanonicalized, a reopen
+that re-anchors the bar).
 
 ## tools/check-ambient-tx.py
 

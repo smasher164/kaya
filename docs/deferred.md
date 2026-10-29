@@ -6132,7 +6132,14 @@ reach.
   variant: `KAYA_RECORD=1 deploy-win … menus_rust` passed the leg and
   then reported "the capturer produced no frames" — the WGC capturer
   never attached to a window that lives about two seconds.
-- Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
+- ~~Per-binding EMISSION checks~~ — CLOSED 2026-10-29: JAVA PAID.
+  tools/checks/java-emission/dev/kaya/EmissionCheck.java, run by
+  tools/java-typecheck.py in the sweep, holds every Widget chain method
+  to the record it stages on its widget (and refuses one its table does
+  not name), the menu constructors' counts and canonical shortcut, the
+  reopen's parent, and the format acts' words; seven negatives watched
+  red with their own sentences (docs/gates.md). As filed:
+  Per-binding EMISSION checks (kaya_app_checks.py-style — assert the
   records a construction emits) in Java and Haskell — Go, Swift, C#
   and OCaml already have one (run by tools/check-abort.py), so this is
   two languages owed, not seven. HASKELL PAID 2026-09-15: `stageTx` is
