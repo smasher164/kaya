@@ -13069,6 +13069,32 @@ pub mod Microsoft {
                         .ok()
                     }
                 }
+                pub fn KeyboardAcceleratorPlacementMode(
+                    &self,
+                ) -> windows_core::Result<Input::KeyboardAcceleratorPlacementMode> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyboardAcceleratorPlacementMode)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetKeyboardAcceleratorPlacementMode(
+                    &self,
+                    value: Input::KeyboardAcceleratorPlacementMode,
+                ) -> windows_core::Result<()> {
+                    let this = &windows_core::Interface::cast::<IUIElement>(self)?;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetKeyboardAcceleratorPlacementMode)(
+                            windows_core::Interface::as_raw(this),
+                            value,
+                        )
+                        .ok()
+                    }
+                }
                 pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                     let this = &windows_core::Interface::cast::<IUIElement>(self)?;
                     unsafe {
@@ -15732,8 +15758,16 @@ pub mod Microsoft {
                         *mut core::ffi::c_void,
                         *mut core::ffi::c_void,
                     ) -> windows_core::HRESULT,
-                KeyboardAcceleratorPlacementMode: usize,
-                SetKeyboardAcceleratorPlacementMode: usize,
+                pub KeyboardAcceleratorPlacementMode:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        *mut Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::HRESULT,
+                pub SetKeyboardAcceleratorPlacementMode:
+                    unsafe extern "system" fn(
+                        *mut core::ffi::c_void,
+                        Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::HRESULT,
                 HighContrastAdjustment: usize,
                 SetHighContrastAdjustment: usize,
                 TabFocusNavigation: usize,
@@ -18355,6 +18389,32 @@ pub mod Microsoft {
                             .SetKeyboardAcceleratorPlacementTarget)(
                             windows_core::Interface::as_raw(this),
                             value.param().abi(),
+                        )
+                        .ok()
+                    }
+                }
+                pub fn KeyboardAcceleratorPlacementMode(
+                    &self,
+                ) -> windows_core::Result<Input::KeyboardAcceleratorPlacementMode> {
+                    let this = self;
+                    unsafe {
+                        let mut result__ = core::mem::zeroed();
+                        (windows_core::Interface::vtable(this).KeyboardAcceleratorPlacementMode)(
+                            windows_core::Interface::as_raw(this),
+                            &mut result__,
+                        )
+                        .map(|| result__)
+                    }
+                }
+                pub fn SetKeyboardAcceleratorPlacementMode(
+                    &self,
+                    value: Input::KeyboardAcceleratorPlacementMode,
+                ) -> windows_core::Result<()> {
+                    let this = self;
+                    unsafe {
+                        (windows_core::Interface::vtable(this).SetKeyboardAcceleratorPlacementMode)(
+                            windows_core::Interface::as_raw(this),
+                            value,
                         )
                         .ok()
                     }
@@ -39463,6 +39523,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -43534,6 +43618,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -46682,6 +46790,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -50616,6 +50748,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -54881,6 +55037,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -58076,6 +58256,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -62141,6 +62345,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -66416,6 +66644,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -71384,6 +71636,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -75253,6 +75529,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -79403,6 +79703,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -83251,6 +83575,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -87542,6 +87890,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -91430,6 +91802,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -95440,6 +95836,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -99136,6 +99556,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -102749,6 +103193,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -106695,6 +107163,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -121025,6 +121517,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -124236,6 +124752,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -128211,6 +128751,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -132335,6 +132899,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -136557,6 +137145,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -140677,6 +141289,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -144672,6 +145308,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -148545,6 +149205,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -152502,6 +153186,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -156310,6 +157018,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -160141,6 +160873,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -164530,6 +165286,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -168316,6 +169096,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -172087,6 +172891,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -175939,6 +176767,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -180691,6 +181543,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -184868,6 +185744,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -188753,6 +189653,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -193052,6 +193976,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -196202,6 +197150,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -200405,6 +201377,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -204492,6 +205488,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -208478,6 +209498,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -212478,6 +213522,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -216981,6 +218049,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -222599,6 +223691,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -226752,6 +227868,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -230639,6 +231779,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -234852,6 +236016,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -238817,6 +240005,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -242713,6 +243925,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -247176,6 +248412,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -251176,6 +252436,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -255092,6 +256376,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -259747,6 +261055,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -264171,6 +265503,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -268373,6 +269729,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -272323,6 +273703,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -276308,6 +277712,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -280320,6 +281748,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -284473,6 +285925,30 @@ pub mod Microsoft {
                             .ok()
                         }
                     }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
+                            )
+                            .ok()
+                        }
+                    }
                     pub fn Translation(&self) -> windows_core::Result<windows_numerics::Vector3> {
                         let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
                         unsafe {
@@ -287777,6 +289253,30 @@ pub mod Microsoft {
                                 .SetKeyboardAcceleratorPlacementTarget)(
                                 windows_core::Interface::as_raw(this),
                                 value.param().abi(),
+                            )
+                            .ok()
+                        }
+                    }
+                    pub fn KeyboardAcceleratorPlacementMode(
+                        &self,
+                    ) -> windows_core::Result<super::Input::KeyboardAcceleratorPlacementMode>
+                    {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            let mut result__ = core::mem::zeroed();
+                            ( windows_core::Interface::vtable ( this ) . KeyboardAcceleratorPlacementMode ) ( windows_core::Interface::as_raw ( this ) , & mut result__ ) . map ( || result__ )
+                        }
+                    }
+                    pub fn SetKeyboardAcceleratorPlacementMode(
+                        &self,
+                        value: super::Input::KeyboardAcceleratorPlacementMode,
+                    ) -> windows_core::Result<()> {
+                        let this = &windows_core::Interface::cast::<super::IUIElement>(self)?;
+                        unsafe {
+                            (windows_core::Interface::vtable(this)
+                                .SetKeyboardAcceleratorPlacementMode)(
+                                windows_core::Interface::as_raw(this),
+                                value,
                             )
                             .ok()
                         }
@@ -292318,6 +293818,38 @@ pub mod Microsoft {
                                     .SetKeyboardAcceleratorPlacementTarget)(
                                     windows_core::Interface::as_raw(this),
                                     value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
                                 )
                                 .ok()
                             }
@@ -297531,6 +299063,38 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn Translation(
                             &self,
                         ) -> windows_core::Result<windows_numerics::Vector3>
@@ -301876,6 +303440,38 @@ pub mod Microsoft {
                                     .SetKeyboardAcceleratorPlacementTarget)(
                                     windows_core::Interface::as_raw(this),
                                     value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
                                 )
                                 .ok()
                             }
@@ -306767,6 +308363,38 @@ pub mod Microsoft {
                                 .ok()
                             }
                         }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
+                                )
+                                .ok()
+                            }
+                        }
                         pub fn Translation(
                             &self,
                         ) -> windows_core::Result<windows_numerics::Vector3>
@@ -311002,6 +312630,38 @@ pub mod Microsoft {
                                     .SetKeyboardAcceleratorPlacementTarget)(
                                     windows_core::Interface::as_raw(this),
                                     value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
                                 )
                                 .ok()
                             }
@@ -315484,6 +317144,38 @@ pub mod Microsoft {
                                     .SetKeyboardAcceleratorPlacementTarget)(
                                     windows_core::Interface::as_raw(this),
                                     value.param().abi(),
+                                )
+                                .ok()
+                            }
+                        }
+                        pub fn KeyboardAcceleratorPlacementMode(
+                            &self,
+                        ) -> windows_core::Result<
+                            super::super::Input::KeyboardAcceleratorPlacementMode,
+                        > {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                let mut result__ = core::mem::zeroed();
+                                (windows_core::Interface::vtable(this)
+                                    .KeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    &mut result__,
+                                )
+                                .map(|| result__)
+                            }
+                        }
+                        pub fn SetKeyboardAcceleratorPlacementMode(
+                            &self,
+                            value: super::super::Input::KeyboardAcceleratorPlacementMode,
+                        ) -> windows_core::Result<()> {
+                            let this =
+                                &windows_core::Interface::cast::<super::super::IUIElement>(self)?;
+                            unsafe {
+                                (windows_core::Interface::vtable(this)
+                                    .SetKeyboardAcceleratorPlacementMode)(
+                                    windows_core::Interface::as_raw(this),
+                                    value,
                                 )
                                 .ok()
                             }
@@ -322836,6 +324528,22 @@ pub mod Microsoft {
                 }
                 unsafe impl Send for KeyboardAccelerator {}
                 unsafe impl Sync for KeyboardAccelerator {}
+                #[repr(transparent)]
+                #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+                pub struct KeyboardAcceleratorPlacementMode(pub i32);
+                impl KeyboardAcceleratorPlacementMode {
+                    pub const Auto: Self = Self(0i32);
+                    pub const Hidden: Self = Self(1i32);
+                }
+                impl windows_core::TypeKind for KeyboardAcceleratorPlacementMode {
+                    type TypeKind = windows_core::CopyType;
+                }
+                impl windows_core::RuntimeType for KeyboardAcceleratorPlacementMode {
+                    const SIGNATURE: windows_core::imp::ConstBuffer =
+                        windows_core::imp::ConstBuffer::from_slice(
+                            b"enum(Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode;i4)",
+                        );
+                }
                 windows_core::imp::define_interface!(
                     PointerEventHandler,
                     PointerEventHandler_Vtbl,

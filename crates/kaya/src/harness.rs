@@ -1120,6 +1120,11 @@ pub enum Step {
     /// following menu_activate resolves against the OPEN menu. An action,
     /// silent like click.
     ContextOpen(Target),
+    /// Draw the menu bar's menu at the `>`-joined path open, each submenu on
+    /// the way opened in turn, and leave it showing: the hand tools'
+    /// photograph of a menu (tools/linux/shot-gtk.py --then, the VM's
+    /// window shot). GTK's and WinUI's; the interpreters refuse it.
+    MenuOpen(String),
     /// The menu item's state along one axis (enablement, checkedness,
     /// or the radio group's value), from the platform's REAL menu
     /// chrome — never the scene model's copy.
@@ -1439,6 +1444,7 @@ impl Step {
             | Step::ExpectNoNotification(..)
             | Step::ExpectBadge(..)
             | Step::ExpectCaptionMenu
+            | Step::MenuOpen(..)
             | Step::SessionSend(..)
             | Step::ExpectNowPlaying(..)
             | Step::ExpectNowPlayingArt(..)
@@ -1707,6 +1713,7 @@ impl Step {
             Step::ExpectGroundColor { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
+            Step::MenuOpen { .. } => false,
             Step::ExpectMenu { .. } => true,
             Step::ExpectMenuSymbol { .. } => true,
             Step::ExpectAx { .. } => true,
@@ -2991,6 +2998,14 @@ pub trait Stage: Send + 'static {
     /// platform's own gesture route (right-click, long-press), so a
     /// following menu_activate resolves against the OPEN menu.
     fn context_open(&self, target: Target);
+    /// `menu_open`: the bar's menu at `path` drawn open and left open, or
+    /// what was found instead.
+    fn menu_open(&self, path: &str) -> Result<String, String> {
+        Err(format!(
+            "menu_open {path:?}: GTK's and WinUI's verb, for the hand tools' photographs; \
+             this backend opens no menu bar menu from the harness"
+        ))
+    }
     /// Run the row's context item `label` through its swipe. The default is
     /// the context menu, the route where a backend lowers no swipe
     /// (docs/swipe-actions-plan.md R1).
@@ -4846,6 +4861,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::MenuActivate(path)
             }
             "context_open" => Step::ContextOpen(parse_target(rest.trim())?),
+            "menu_open" => {
+                let path = parse_string(rest)?;
+                check_menu_path(&path).map_err(|e| format!("{e}: {line:?}"))?;
+                Step::MenuOpen(path)
+            }
             "expect_swipe_actions" => {
                 let (target, spec) = rest.split_once(char::is_whitespace).ok_or_else(|| {
                     format!("expect_swipe_actions wants a row and a quoted spec: {line:?}")
@@ -8422,6 +8442,10 @@ fn run_with_log(
                     stage.context_open(*t);
                     None
                 }
+            }
+            Step::MenuOpen(path) => {
+                await_quiet();
+                Some(stage.menu_open(path))
             }
             Step::Shortcut(spelling) => {
                 // An action, silent like click: the SAME
@@ -14214,9 +14238,18 @@ mod tests {
             "expect_menu \"\" enabled",
             "expect_menu \"File>\" enabled",
             "expect_menu \"File>Save disabled",
+            "menu_open \"Format>\"",
+            "menu_open Format",
+            "menu_open",
+            "expect_caption_menu \"Close\"",
         ] {
             assert!(parse(bad).is_err(), "{bad} should not parse");
         }
+        assert_eq!(
+            parse("menu_open \"Format>Paragraph Style\"").unwrap(),
+            vec![Step::MenuOpen("Format>Paragraph Style".into())]
+        );
+        assert_eq!(parse("expect_caption_menu").unwrap(), vec![Step::ExpectCaptionMenu]);
     }
 
     /// Menu-chrome spellings are a closed set on BOTH halves, checked

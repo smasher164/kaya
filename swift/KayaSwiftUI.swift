@@ -12760,6 +12760,10 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(prefix)fullscreen \(got), wanted \(want)")
                 }
+            case "menu_open":
+                failures.append(
+                    "menu_open: GTK's and WinUI's verb, for the hand tools' photographs; "
+                        + "tools/mac/menu-shot.py opens a macOS menu with a real click")
             case "expect_caption_menu":
                 failures.append(
                     "expect_caption_menu: Windows' verb, which only the windows lane appends "

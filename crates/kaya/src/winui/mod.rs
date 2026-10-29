@@ -9699,6 +9699,13 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
 /// The accelerator is DRESS, not dispatch: WinUI draws the chord text beside
 /// the item from it, and the key hook eats the keystroke before any default
 /// action of it can run (see The chord route).
+/// A menu row draws its chord in its own column, so the accelerator's
+/// tooltip would say it twice beside a keyboard-focused row (docs/traps.md,
+/// the WinUI menu row's second chord); `item_chord` reads it back.
+fn hide_accelerator_tip(item: &UIElement) -> windows_core::Result<()> {
+    item.SetKeyboardAcceleratorPlacementMode(bindings::Microsoft::UI::Xaml::Input::KeyboardAcceleratorPlacementMode::Hidden)
+}
+
 fn attach_accelerator(
     accels: &windows_collections::IVector<KeyboardAccelerator>,
     shortcut: &str,
@@ -9751,6 +9758,7 @@ fn build_menu_items(
                 item.SetIsEnabled(enabled)?;
                 apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
+                hide_accelerator_tip(&item.cast()?)?;
                 // A standard command shows the chord its text control answers
                 // (DESIGN.md, Standard commands): text only, so the control
                 // keeps the key.
@@ -9776,6 +9784,7 @@ fn build_menu_items(
                 // WinUI 3 it descends from MenuFlyoutItem.
                 apply_symbol(&item, symbol)?;
                 attach_accelerator(&item.KeyboardAccelerators()?, &shortcut)?;
+                hide_accelerator_tip(&item.cast()?)?;
                 let handler = RoutedEventHandler::new(move |_, _| {
                     menu_user_activate(id, attachment);
                     Ok(())
@@ -9810,6 +9819,7 @@ fn build_menu_items(
                     radio.SetIsEnabled(option_enabled)?;
                     apply_symbol(&radio, option_symbol)?;
                     attach_accelerator(&radio.KeyboardAccelerators()?, &option_shortcut)?;
+                    hide_accelerator_tip(&radio.cast()?)?;
                     let handler = RoutedEventHandler::new(move |_, _| {
                         menu_user_activate(option, attachment);
                         Ok(())
@@ -24641,6 +24651,54 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
 
+    fn menu_open(&self, path: &str) -> Result<String, String> {
+        let parts: Vec<String> = path.split('>').map(str::to_owned).collect();
+        for level in 0..parts.len() {
+            let prefix = parts[..=level].join(">");
+            let mut last = String::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                let asked = prefix.clone();
+                let read = Self::on_ui_mut(move |core| {
+                    use bindings::Microsoft::UI::Xaml::Automation::ExpandCollapseState;
+                    use bindings::Microsoft::UI::Xaml::Automation::Peers::FrameworkElementAutomationPeer;
+                    use bindings::Microsoft::UI::Xaml::Automation::Provider::IExpandCollapseProvider;
+                    let roots = core.menu_windows.get(&0).cloned().unwrap_or_default();
+                    let attachment = MenuAttachment::Window(0);
+                    let Some(item) = resolve_menu_path(core, &asked, &roots, attachment) else {
+                        return Ok(Err(format!("no menu {asked:?} on the bar")));
+                    };
+                    let element: UIElement = match core.menu_natives.get(&(attachment, item)) {
+                        Some(MenuNative::Bar(i)) => i.cast()?,
+                        Some(MenuNative::Sub(i)) => i.cast()?,
+                        Some(_) => return Ok(Err(format!("{asked:?} is an item, not a menu"))),
+                        None => return Ok(Err(format!("{asked:?} has no chrome"))),
+                    };
+                    let peer = FrameworkElementAutomationPeer::CreatePeerForElement(&element)?;
+                    let Ok(pattern) = peer.cast::<IExpandCollapseProvider>() else {
+                        return Ok(Err(format!("{asked:?}'s peer has no expand pattern")));
+                    };
+                    let state = pattern.ExpandCollapseState()?;
+                    if state == ExpandCollapseState::Expanded {
+                        return Ok(Ok(None));
+                    }
+                    let tried = pattern.Expand().err().map(|e| e.message().to_string());
+                    Ok(Ok(Some(format!("{asked:?} reads {} after its Expand ({})", state.0, tried.unwrap_or_else(|| "accepted".to_owned())))))
+                });
+                match read {
+                    Ok(None) => break,
+                    Ok(Some(said)) => last = said,
+                    Err(why) => return Err(why),
+                }
+                if std::time::Instant::now() > deadline {
+                    return Err(format!("{last}, 3 s on"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        Ok(format!("menu {path} open"))
+    }
+
     fn context_open(&self, t: crate::harness::Target) {
         let widget = Self::on_ui_mut(move |core| Ok(widget_id_for_target(core, t)));
         self.open_context_flyout(widget, &format!("{t:?}"));
@@ -24674,6 +24732,19 @@ impl crate::harness::Stage for WinUiStage {
                 for j in 0..children.Size()? {
                     let child = children.GetAt(j)?;
                     if let Ok(item) = child.cast::<MenuFlyoutItem>() {
+                        let tip = item.cast::<UIElement>()?.KeyboardAcceleratorPlacementMode()?;
+                        if item.KeyboardAccelerators()?.Size()? > 0
+                            && tip != bindings::Microsoft::UI::Xaml::Input::KeyboardAcceleratorPlacementMode::Hidden
+                        {
+                            return Ok(Err(format!(
+                                "menu {:?} item {:?} draws its chord {} in its row and its accelerator's \
+                                 tooltip placement mode is {}, not Hidden, so a keyboard-focused row shows it twice",
+                                top.Title()?.to_string(),
+                                item.Text()?.to_string(),
+                                item_chord(&item)?,
+                                tip.0
+                            )));
+                        }
                         let role = roles
                             .iter()
                             .find(|(native, _)| *native == item)

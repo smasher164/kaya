@@ -11570,6 +11570,69 @@ fn assert_model_actions_resolve(_core: &CoreState, _window: u64, _model: &gio::M
 /// visible=1 mapped=0` inside a popover that is neither — which is what lets
 /// the harness read a symbol without popping a menu the scene never opens.
 #[cfg(feature = "harness")]
+/// The first popover under `root`, depth first.
+#[cfg(feature = "harness")]
+fn first_popover(root: &gtk4::Widget) -> Option<gtk4::Popover> {
+    use gtk4::prelude::{Cast, WidgetExt};
+    let mut child = root.first_child();
+    while let Some(w) = child {
+        if let Some(popover) = w.downcast_ref::<gtk4::Popover>() {
+            return Some(popover.clone());
+        }
+        if let Some(found) = first_popover(&w) {
+            return Some(found);
+        }
+        child = w.next_sibling();
+    }
+    None
+}
+
+/// `menu_open`'s one level: the bar item (level 0) or the submenu row under
+/// the level above, whether its popover is showing, activated when it is not
+/// and `activate` asks.
+#[cfg(feature = "harness")]
+fn menu_level(core: &CoreState, parts: &[String], level: usize, activate: bool) -> Result<bool, String> {
+    use gtk4::prelude::{Cast, PopoverExt, WidgetExt};
+    let bar = core
+        .menu_strips
+        .get(&0)
+        .and_then(|(strip, _)| strip.first_child())
+        .and_then(|w| w.downcast::<gtk4::PopoverMenuBar>().ok())
+        .ok_or("the window has no menu bar chrome")?;
+    let mut shown = Vec::new();
+    let mut item = None;
+    let mut child = bar.first_child();
+    while let Some(w) = child {
+        let text = first_label_text(&w).unwrap_or_default();
+        if item.is_none() && text == parts[0] {
+            item = Some(w.clone());
+        }
+        shown.push(text);
+        child = w.next_sibling();
+    }
+    let mut holder = item.ok_or_else(|| format!("the bar shows {shown:?}, none of them {:?}", parts[0]))?;
+    for depth in 1..=level {
+        let above = first_popover(&holder).ok_or_else(|| format!("{:?} holds no popover", parts[..depth].join(">")))?;
+        let mut rows = Vec::new();
+        collect_model_buttons(above.upcast_ref(), &mut rows);
+        let texts: Vec<String> = rows.iter().map(|r| widget_string_prop(r, "text").unwrap_or_default()).collect();
+        holder = rows
+            .iter()
+            .find(|r| widget_string_prop(r, "text").as_deref() == Some(parts[depth].as_str()))
+            .cloned()
+            .ok_or_else(|| format!("{:?}'s rows are {texts:?}, none of them {:?}", parts[..depth].join(">"), parts[depth]))?;
+    }
+    let popover = first_popover(&holder)
+        .ok_or_else(|| format!("{:?} holds no popover of its own", parts[..=level].join(">")))?;
+    if popover.is_visible() {
+        return Ok(true);
+    }
+    if activate {
+        holder.activate();
+    }
+    Ok(false)
+}
+
 fn collect_model_buttons(root: &gtk4::Widget, out: &mut Vec<gtk4::Widget>) {
     use gtk4::prelude::WidgetExt;
     let mut child = root.first_child();
@@ -22119,6 +22182,28 @@ impl crate::harness::Stage for GtkStage {
             note_claim(&core.context_trail, "harness context_open", Some(anchor));
             attachment.popover.popup();
         });
+    }
+
+    fn menu_open(&self, path: &str) -> Result<String, String> {
+        let parts: Vec<String> = path.split('>').map(str::to_owned).collect();
+        for level in 0..parts.len() {
+            let mut last = String::new();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            loop {
+                let wanted = parts.clone();
+                let read = Self::on_main(move |core| menu_level(core, &wanted, level, true));
+                match read {
+                    Ok(true) => break,
+                    Ok(false) => last = format!("{:?}'s popover is not showing", parts[..=level].join(">")),
+                    Err(why) => return Err(why),
+                }
+                if std::time::Instant::now() > deadline {
+                    return Err(format!("{last} 3 s after it was activated"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+        Ok(format!("menu {path} open"))
     }
 
     fn menu_bar(&self) -> Result<(Vec<crate::harness::BarMenu>, bool), String> {

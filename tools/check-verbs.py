@@ -1795,7 +1795,8 @@ for _shape, _body, _want in (
         ("an unconditional refusal",
          '"expect_x" -> {\n    failures.add("expect_x: not here")\n}', True),
         ("a refusal behind a branch", '"expect_x" -> {\n    if (a) failures.add("no")\n}', False),
-        ("a guarded refusal", 'case "expect_x":\n    guard ok else { failures.append("no") }', False)):
+        ("a guarded refusal",
+         'case "expect_x":\n    guard ok else { failures.append("no") }', False)):
     if records_or_refuses(_body, "observed.add(") != _want:
         fail(f"self-test: records_or_refuses misjudges {_shape}")
     else:

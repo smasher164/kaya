@@ -19734,3 +19734,15 @@ identity guest, the guest held by a settle):
   client reading the GUEST'S OWN window killed the Java guest with
   0x8001010d on the first draft of the step (the file-dialog entry above);
   the mark is read through its peer instead.
+
+## The WinUI menu row's second chord
+
+Measured 2026-10-29 in the first photograph of a WinUI menu drawn open (the
+editor's Format > Paragraph Style, opened through `menu_open`, which expands
+through the automation peers and so leaves the first row keyboard-focused):
+a `KeyboardAccelerator` on a menu row shows its own tooltip ("Ctrl+Alt+1")
+beside the row that already draws the chord in its column. Every menu row
+kaya builds sets `KeyboardAcceleratorPlacementMode::Hidden`
+(`hide_accelerator_tip`); the WinUI bar read behind `expect_menu_bar`
+refuses a top-level row with an accelerator whose mode is not Hidden,
+watched red on menus_rust with the setter cut.

@@ -563,6 +563,10 @@ fn main() {
         // enums KeyboardAccelerator's Key/Modifiers setters take live in
         // Windows.System.
         "Microsoft.UI.Xaml.Input.KeyboardAccelerator".to_string(),
+        // A menu row already draws its chord; the accelerator's own tooltip
+        // repeated it beside a keyboard-focused row (docs/traps.md, the
+        // WinUI menu row's second chord).
+        "Microsoft.UI.Xaml.Input.KeyboardAcceleratorPlacementMode".to_string(),
         "Windows.System.VirtualKey".to_string(),
         "Windows.System.VirtualKeyModifiers".to_string(),
         // The harness verbs invoke flyout items through their

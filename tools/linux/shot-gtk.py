@@ -10,6 +10,7 @@ dev_shell_or_die()
 # docs/traps.md: GTK hand capture hid a failed build and reused an old image.
 
 import argparse
+import json
 import math
 import os
 import re
@@ -35,7 +36,49 @@ def image_bytes(path):
     return blob
 
 
-def capture(scene, out, crop, settle, guest=None, go=False):
+def wayland_session():
+    """A headless sway of this capture's own, run-suites.sh's
+    wayland_session_boot shape: (process, environment for its clients)."""
+    runtime = pathlib.Path(tempfile.mkdtemp(prefix="kaya-shot-wl-"))
+    runtime.chmod(0o700)
+    conf = runtime / "sway.conf"
+    conf.write_text('for_window [app_id=".*"] floating enable\noutput * resolution 1600x1000\n',
+                    encoding="utf-8")
+    sway = subprocess.Popen(["sway", "-c", str(conf)],
+                            env=dict(os.environ, XDG_RUNTIME_DIR=str(runtime),
+                                     WLR_BACKENDS="headless", WLR_LIBINPUT_NO_DEVICES="1"),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        socket = next((p.name for p in runtime.glob("wayland-[0-9]") if p.is_socket()), None)
+        ipc = next((str(p) for p in runtime.glob("sway-ipc.*.sock") if p.is_socket()), None)
+        if socket and ipc:
+            return sway, {"XDG_RUNTIME_DIR": str(runtime), "WAYLAND_DISPLAY": socket,
+                          "SWAYSOCK": ipc, "GDK_BACKEND": "wayland"}
+        time.sleep(0.05)
+    sway.kill()
+    raise RuntimeError("sway never created its sockets")
+
+
+def wayland_window(env):
+    """The one client toplevel on this capture's own sway output, as
+    `WxH+X+Y` (the guest may sit under a wrapper, so not by pid)."""
+    tree = subprocess.run(["swaymsg", "-t", "get_tree"], env=dict(os.environ, **env),
+                          capture_output=True, text=True, check=False)
+    nodes, views = [json.loads(tree.stdout or "{}")], []
+    while nodes:
+        node = nodes.pop()
+        if node.get("pid"):
+            views.append(node)
+        nodes += node.get("nodes", []) + node.get("floating_nodes", [])
+    if len(views) != 1:
+        raise RuntimeError(f"sway's tree holds {len(views)} client windows, wanted one: "
+                           f"{[(v.get('app_id'), v.get('name')) for v in views]}")
+    r = views[0]["rect"]
+    return f"{r['width']}x{r['height']}+{r['x']}+{r['y']}"
+
+
+def capture(scene, out, crop, settle, guest=None, go=False, wayland=False):
     guest = guest or scene
     target = ROOT / "target-linux"
     # A GO APP (docs/chat-plan.md) is one binary for every Go scene, built
@@ -55,6 +98,7 @@ def capture(scene, out, crop, settle, guest=None, go=False):
     else:
         binary = target / "debug/examples" / guest
     raw = out.with_name("root.png")
+    sway, session = wayland_session() if wayland else (None, {})
     with open(out.with_name("guest.log"), "wb") as log:
         # KAYA_SHOT_ACCESSIBILITY=1 (--env): a scene that drives a file dialog reads it
         # over the accessibility bus, which the lane's legs get from
@@ -62,19 +106,24 @@ def capture(scene, out, crop, settle, guest=None, go=False):
         argv = ([str(ROOT / "tools/linux/a11y-leg.sh"), str(binary)]
                 if os.environ.get("KAYA_SHOT_ACCESSIBILITY") == "1" else [str(binary)])
         guest = subprocess.Popen(argv, cwd=ROOT,
-                                 env=dict(os.environ, KAYA_SELFTEST=scene),
+                                 env=dict(os.environ, KAYA_SELFTEST=scene, **session),
                                  stdout=log, stderr=subprocess.STDOUT)
         try:
             time.sleep(settle)
             rc = guest.poll()
             if rc is not None:
                 raise RuntimeError(f"{scene} exited {rc} before the screenshot")
-            checked("screenshot", ["import", "-window", "root", str(raw)])
+            if wayland:
+                checked("screenshot", ["grim", str(raw)], env=dict(os.environ, **session))
+                window = None if crop else wayland_window(session)
+            else:
+                checked("screenshot", ["import", "-window", "root", str(raw)])
             rc = guest.poll()
             if rc is not None:
                 raise RuntimeError(f"{scene} exited {rc} during the screenshot")
             image_bytes(raw)
-            cut = ["-crop", f"{crop}+0+0"] if crop else ["-trim"]
+            whole = ["-crop", window] if wayland else ["-trim"]
+            cut = ["-crop", f"{crop}+0+0"] if crop else whole
             checked("crop", ["convert", str(raw), *cut, "+repage", str(out)])
             image_bytes(out)
         finally:
@@ -87,6 +136,9 @@ def capture(scene, out, crop, settle, guest=None, go=False):
                     guest.wait(timeout=5)
             else:
                 guest.wait()
+            if sway is not None:
+                sway.terminate()
+                sway.wait(timeout=10)
 
 
 def photograph(args, out, script):
@@ -116,6 +168,7 @@ def photograph(args, out, script):
                      "--in-container", "--settle-seconds", str(args.settle_seconds),
                      *(["--guest", args.guest] if getattr(args, "guest", None) else []),
                      *(["--go"] if getattr(args, "go", False) else []),
+                     *(["--wayland"] if getattr(args, "wayland", False) else []),
                      *options], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=False)
             finally:
                 guest_log = scratch / "guest.log"
@@ -145,6 +198,8 @@ def main(argv=None):
                     "leaves showing (a context menu open: context_open row@convo[maya])")
     ap.add_argument("--go", action="store_true",
                     help="the scene is a Go app's (the chat app): build and run the Go guests")
+    ap.add_argument("--wayland", action="store_true",
+                    help="run the guest on a headless sway of its own and shoot it with grim")
     ap.add_argument("--in-container", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     for pair in args.env:
@@ -174,7 +229,7 @@ def main(argv=None):
         out.parent.mkdir(parents=True, exist_ok=True)
         if args.in_container:
             capture(args.scene, out, args.crop, args.settle_seconds, guest=args.guest,
-                    go=args.go)
+                    go=args.go, wayland=args.wayland)
         else:
             photograph(args, out, "\n".join(held) + "\n")
     except (OSError, RuntimeError) as error:
