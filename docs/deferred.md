@@ -9,7 +9,7 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29): the spec, the core, the Mac and the Rust binding with the fontpick scene green on the Mac (2026-10-29); every lane and binding built and the editor's Font… (2026-10-29); the matrix and the review page open
+## ~~BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29)~~ COMPLETE 2026-10-29: every lane, all nine bindings, the fontpick scene in every language and the editor's Font…, through one full matrix (e2d4a307) and the review page (claude.ai/artifact/6RrGZauKea4rQyycBPn3oC); the three findings of its captures are the GAP entry below, the panel before macOS 26 the DEFER entry
 KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_faces, font_weight, font_italic, font_width, choose_font, on_font_chosen, NSFontPanel, NSFontPanelCollectionsToolbarItem, UIFontPickerViewController, GtkFontDialog, expect_face face, pick_font, expect_font_dialog, fontpick.steps, DEPTH STUB fontpick
 
 The maintainer ruled the plan's seven questions on 2026-10-29 (§10, each
@@ -31,6 +31,30 @@ collection not chosen).
   - ~~**DEPTH STUB: fontpick on compose**~~ — BUILT 2026-10-29: the faces from fonts.xml's own <font> entries with their axes (SystemFonts answers one Font per file, measured: Roboto as 400 and its condensed twin, where fonts.xml declares eighteen) plus SystemFonts for the rest; the face as a Compose FontFamily of the family's faces at the width kaya's matcher chose, Compose's own CSS font matcher picking the weight and slope and its FontSynthesis drawing what the family lacks; rich Bold at least 700 and a Code run in the document's own fixed-pitch family; the kaya-drawn ModalBottomSheet (search, the families each in itself, the faces as chips, a preview, Cancel and Choose), code fonts by measured i-against-W advances in the family's own font; the reads off TextRunShaper's shaped font and minikin's fake bold and fake italic; fontpick-compose green, three negatives watched red (the filter, the synthesis, Bold over Light).
   - ~~**The eight other bindings and the C floor**~~ — BUILT 2026-10-29: the three props on widgets, rows and templates, a family's faces with its handler, and the picker with a callback or an awaitable where the binding has one, in Python, Go, C#, Java, Swift, OCaml, Haskell and JS (check-sugar-surface's font clause, 54 spellings watched red); the C floor is the generated wire, as for the code surface; a fontpick guest in each language on every lane that runs it (the Mac 9, Linux 8 on x11 and wayland, Windows 6, iOS swift and go, Android jvm and go), all green. The pooled Windows legs found the picker presented before the island was live (docs/traps.md, a ContentDialog presented before the island is live), and the Android JVM host, the Java desktop guests and the C# guests now refuse a scene they do not register rather than running milestone2.
   - ~~**The editor's Font…**~~ — BUILT 2026-10-29 (the maintainer, 2026-10-29: "I think we can drop the short list"): one View item, Font…, opening the picker with code fonts and faces; the choice dresses every open document and is kept in the app's preferences (font.family, font.weight, font.italic, font.width); the Font radio group and its list of code fonts are gone. editor.steps cancels the picker and then picks the first listed family's 400 upright 5 (`pick_font first`), reading the buffer named and at that face; the `titled` guard the group carried moved to commands.steps (`expect_menu "View>Sort" titled`), watched red on all five lanes with the heading cut.
+
+## GAP — three font picker findings from the review captures (2026-10-29, docs/font-picker-plan.md Q4 and §4.3)
+KEY: synthesized bold, entry, TextField, kayaLabelDrawn, NSFontPanel toolbar, size field, ContentDialog face row, font picker review
+
+The review page's captures (claude.ai/artifact/6RrGZauKea4rQyycBPn3oC) show
+three things no gate holds yet:
+
+  - **An Apple entry draws no synthesized bold.** Q4 rules a missing bold
+    synthesized on all five; on the Mac and iOS kaya draws it on a label (a
+    second pass a hair apart) and in a text view (stroked), but a SwiftUI
+    TextField takes no overlay or stroke, so an entry asking 700 of a family
+    with no bold draws regular. GNOME, WinUI and Compose draw it. The
+    fontpick scene reads labels and a textarea only, which is why it stayed
+    green; a scene step reading an entry at a missing bold is the wall, and
+    the drawing is the open half.
+  - **The macOS 26 font panel still shows its size field and its B I U
+    effects menu** in the toolbar although kaya's mode mask leaves size and
+    effects out. They are ignored (the answer is a family and a face), but a
+    user can change them to no effect. Unmeasured: whether any public route
+    hides them in the toolbar form of the panel.
+  - **The WinUI picker's face row and preview fall below its family list** in
+    a small window (556 by 378 in the capture), out of view; the list is a
+    fixed 260 px. The dialog wants to give the list what is left after the
+    face row and preview.
 
 ## DEFER — the Mac font panel before macOS 26 lists every family under code_only (docs/font-picker-plan.md Q2; 2026-10-29)
 KEY: NSFontPanelCollectionsToolbarItem, kayaSelectFixedWidth, Fixed Width, code_only, macOS 13, macOS 15, font panel collections column

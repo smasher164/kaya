@@ -1,8 +1,8 @@
 # The font picker: a family and a face, native where the platform has one
 
 Status: RULED 2026-10-29 (§10: "I agree with most of your recommendations",
-with Q2 changed); the depth slice is built (docs/deferred.md, the font picker
-entry). The maintainer, 2026-10-29, agreed to build a font picker: native
+with Q2 changed); built on all five lanes and in all nine bindings with the
+editor's Font… (docs/deferred.md, the font picker entry). The maintainer, 2026-10-29, agreed to build a font picker: native
 on the Mac (NSFontPanel), iOS (UIFontPickerViewController) and GNOME
 (GtkFontDialog); kaya-drawn on Windows (a ContentDialog with a search field,
 not Win32 ChooseFont) and Android (a bottom sheet with search), built from
