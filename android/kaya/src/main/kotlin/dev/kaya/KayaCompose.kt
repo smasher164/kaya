@@ -1992,6 +1992,7 @@ object KayaSceneModel {
     var alertMessage: String = ""
     var alertActions: List<String> = emptyList()
     var alertCancel: String = ""
+    var alertWindow: android.view.Window? = null
     var toast by mutableStateOf<KayaToast?>(null)
     var sectionBarHeight by mutableStateOf(0.dp)
     var dockHeight by mutableStateOf(0.dp)
@@ -2731,16 +2732,19 @@ object KayaFailShot {
     private fun sheetLayers(activity: ComponentActivity, base: Bitmap): String {
         val origin = IntArray(2).also { activity.window.decorView.getLocationOnScreen(it) }
         val said = ArrayList<String>()
-        for (sheet in KayaSceneModel.sheets.toList()) {
-            val window = sheet.window
-            if (window == null) { said.add("sheet ${sheet.id}: no window"); continue }
+        // The documents list is a sheet of its own (docs/doctabs-plan.md §1.6).
+        val layers = KayaSceneModel.sheets.toList().map { "sheet ${it.id}" to it.window } +
+            listOfNotNull(KayaSceneModel.documentsSheetWindow?.let { "the documents list" to it }) +
+            listOfNotNull(KayaSceneModel.alertWindow?.takeIf { KayaSceneModel.alertId != null }?.let { "the alert" to it })
+        for ((name, window) in layers) {
+            if (window == null) { said.add("$name: no window"); continue }
             val decor = window.decorView
-            if (decor.width <= 0 || decor.height <= 0) { said.add("sheet ${sheet.id}: ${decor.width}x${decor.height}"); continue }
+            if (decor.width <= 0 || decor.height <= 0) { said.add("$name: ${decor.width}x${decor.height}"); continue }
             val (layer, result) = copy(window, decor.width, decor.height)
-            if (result != android.view.PixelCopy.SUCCESS) { said.add("sheet ${sheet.id}: PixelCopy answered $result"); continue }
+            if (result != android.view.PixelCopy.SUCCESS) { said.add("$name: PixelCopy answered $result"); continue }
             val at = IntArray(2).also { decor.getLocationOnScreen(it) }
             android.graphics.Canvas(base).drawBitmap(layer, (at[0] - origin[0]).toFloat(), (at[1] - origin[1]).toFloat(), null)
-            said.add("sheet ${sheet.id} drawn over it at (${at[0] - origin[0]},${at[1] - origin[1]}) ${decor.width}x${decor.height}")
+            said.add("$name drawn over it at (${at[0] - origin[0]},${at[1] - origin[1]}) ${decor.width}x${decor.height}")
         }
         return if (said.isEmpty()) "" else "; " + said.joinToString("; ")
     }
@@ -22793,7 +22797,14 @@ fun KayaRoot() {
         AlertDialog(
             onDismissRequest = { kayaAnswerAlert(alert, KayaCompose.ALERT_CHOICE_CANCEL) },
             title = { Text(KayaSceneModel.alertTitle) },
-            text = { Text(KayaSceneModel.alertMessage) },
+            text = {
+                // The dialog's own window, for the failure picture.
+                val view = LocalView.current
+                androidx.compose.runtime.SideEffect {
+                    KayaSceneModel.alertWindow = (view.parent as? DialogWindowProvider)?.window
+                }
+                Text(KayaSceneModel.alertMessage)
+            },
             confirmButton = {
                 Row {
                     KayaSceneModel.alertActions.forEachIndexed { index, label ->

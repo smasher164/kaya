@@ -19621,3 +19621,17 @@ three as moved. A move is now what the user did: the one document whose
 removal makes the old order and the strip agree (scene::reorder_moves, and
 kayaReportReorder on the Mac), and a shift because another tab left or closed
 reports nothing.
+
+## The iOS close dialog that never showed over the documents list (measured 2026-10-28)
+
+UIAlertController was presented from the window's root view controller, which
+refuses a second presentation while it already presents a sheet, and says so
+only in the console. With the documents list up, closing an armed document
+made the alert and showed nothing, and every leg passed: expect_alert read the
+controller's title and alert_choose ran the answer closure, neither needing
+the alert on screen. Alerts are presented from the topmost presented
+controller now, and expect_alert reads a title only from an alert in a window
+("made and not on screen" otherwise). Found by the doctabs review page's
+captures; GTK's unsaved mark ("document-modified-symbolic" read back as set
+and drew image-missing) and WinUI's ("●" in Segoe Fluent Icons drew a box)
+were found the same way.

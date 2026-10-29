@@ -322,7 +322,7 @@ pub(super) fn set_prop(core: &mut CoreState, doc: u64, prop: crate::protocol::Do
         // The unsaved mark is the page's indicator, never its title, which
         // the harness and the app's strings read byte for byte.
         if record.dirty {
-            page.set_indicator_icon(Some(&gio::ThemedIcon::new("document-modified-symbolic")));
+            page.set_indicator_icon(Some(&gio::ThemedIcon::new(MARK_ICON)));
             page.set_indicator_tooltip("Unsaved changes");
         } else {
             page.set_indicator_icon(gio::Icon::NONE);
@@ -580,11 +580,32 @@ fn shown(core: &CoreState) -> String {
     format!("tabs: {}", all.join(", "))
 }
 
+/// The unsaved mark: a dot, the one Adwaita draws for media-record.
+/// "document-modified-symbolic" read back as set and drew GTK's image-missing
+/// glyph (docs/traps.md, GTK's Adwaita icon names read right and draw wrong),
+/// so the read below asks the theme for the name, too.
+const MARK_ICON: &str = "media-record-symbolic";
+
 pub(super) fn dirty(core: &CoreState, title: &str) -> Result<bool, String> {
-    let Some((_, _, page)) = find(core, title) else {
+    let Some((_, view, page)) = find(core, title) else {
         return Err(format!("no tab titled {title:?} ({})", shown(core)));
     };
-    Ok(page.indicator_icon().is_some())
+    let Some(icon) = page.indicator_icon() else { return Ok(false) };
+    let Some(names) = icon.downcast_ref::<gio::ThemedIcon>().map(|t| t.names()) else {
+        return Err(format!("the tab {title:?} carries an indicator that is not a themed icon"));
+    };
+    let theme = gtk4::IconTheme::for_display(&view.display());
+    // GTK draws the first name the theme has; a themed icon's names carry
+    // their own fallbacks ("media-record" behind "media-record-symbolic").
+    if names.iter().any(|n| theme.has_icon(n)) {
+        return Ok(true);
+    }
+    Err(format!(
+        "the tab {title:?} carries the mark {:?}, none of it in this machine's icon theme {:?}: \
+         GTK draws its image-missing glyph there",
+        names.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+        theme.theme_name()
+    ))
 }
 
 pub(super) fn select(core: &CoreState, title: &str) -> Result<(), String> {

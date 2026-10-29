@@ -6888,10 +6888,15 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                         })
                     kayaAlertAnswers["cancel"] = { answer(kayaAlertChoiceCancel) }
                     kayaLiveAlertController = alert
+                    // FROM THE TOPMOST PRESENTED CONTROLLER: the root refuses a
+                    // second presentation while a sheet is up, silently, and the
+                    // documents list's close asked with no dialog on screen
+                    // (the review page's capture, 2026-10-28).
                     let scenes = UIApplication.shared.connectedScenes
                     let ws = scenes.compactMap { $0 as? UIWindowScene }.first
-                    ws?.windows.first?.rootViewController?
-                        .present(alert, animated: false)
+                    var top = ws?.windows.first?.rootViewController
+                    while let next = top?.presentedViewController, !next.isBeingDismissed { top = next }
+                    top?.present(alert, animated: false)
                 #endif
             case applySetProp:
                 let id = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -14155,7 +14160,14 @@ private func kayaRunScript(_ script: String) {
                     #if os(macOS)
                         return kayaLiveNSAlert?.messageText
                     #else
-                        return kayaLiveAlertController?.title ?? ""
+                        // ON SCREEN, not only made: a controller UIKit refused to
+                        // present has a title and no window.
+                        guard let alert = kayaLiveAlertController else { return "" }
+                        if alert.viewIfLoaded?.window == nil {
+                            return "<made and not on screen: presented by "
+                                + "\(alert.presentingViewController.map { "\(type(of: $0))" } ?? "nothing")>"
+                        }
+                        return alert.title ?? ""
                     #endif
                 }
                 if let got, kayaBytesEqual(got, want) {

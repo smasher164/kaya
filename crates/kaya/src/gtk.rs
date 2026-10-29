@@ -25679,9 +25679,24 @@ impl crate::harness::Stage for GtkStage {
                 Err(why) => return format!("NOT WRITTEN ({}): {why}", out.display()),
             };
             let (w, h) = (shot.texture.width(), shot.texture.height());
+            // WHAT THE PICTURE LEAVES OUT: every other visible window of this
+            // process (an alert, a torn-out tab) is its own toplevel, rendered
+            // separately or not at all (the review page's dialog capture,
+            // 2026-10-28, a picture of the strip with the dialog missing).
+            let others: Vec<String> = gtk4::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk4::Window>().ok())
+                .filter(|w| w.is_visible() && w.upcast_ref::<gtk4::Widget>() != core.window.upcast_ref::<gtk4::Widget>())
+                .map(|w| format!("{:?} ({})", w.title().map(|s| s.to_string()).unwrap_or_default(), w.type_().name()))
+                .collect();
+            let left = if others.is_empty() {
+                String::new()
+            } else {
+                format!("; NOT IN IT, this process's other visible windows: {}", others.join(", "))
+            };
             match shot.flattened().save_to_png(&out) {
                 Ok(()) => format!(
-                    "this process's window content rendered offscreen over the window's ground {}, {w}x{h} -> {}",
+                    "this process's window content rendered offscreen over the window's ground {}, {w}x{h} -> {}{left}",
                     skin::hex(shot.ground),
                     out.display()
                 ),

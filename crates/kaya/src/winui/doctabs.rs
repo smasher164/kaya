@@ -300,6 +300,12 @@ pub(super) fn set_prop(core: &mut CoreState, doc: u64, prop: crate::protocol::Do
             if *b {
                 let glyph = FontIconSource::new()?;
                 glyph.SetGlyph(&HSTRING::from("\u{25CF}"))?;
+                // A TEXT FACE THAT CARRIES THE DOT: an unset family resolves to
+                // Segoe Fluent Icons, which has no U+25CF and drew a missing-glyph
+                // box (the review page's capture, 2026-10-28).
+                glyph.SetFontFamily(&bindings::Microsoft::UI::Xaml::Media::FontFamily::CreateInstanceWithName(
+                    &HSTRING::from("Segoe UI"),
+                )?)?;
                 record.item.SetIconSource(&glyph)?;
             } else {
                 record.item.SetIconSource(None::<&bindings::Microsoft::UI::Xaml::Controls::IconSource>)?;
