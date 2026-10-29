@@ -951,7 +951,12 @@ PICTURE MARKS ITS KEYBOARD since 2026-10-21 (docs/traps.md, the android red
 leg's picture without its keyboard): KayaFailShot reads the IME inset off
 the window and hatches that band, named, over the picture, since the IME's
 window is another process's and PixelCopy cannot read it; two cuts watched.
-Two hundred and sixty-four watched negatives, counts printed)
+AND A HOST PICTURE IS ONE WINDOW BY ID since 2026-10-29 (docs/traps.md, the
+menu-shot rect capture, which photographed the maintainer's browser): every
+screencapture argv under tools/ carries `-l` and no `-R`, shot_desktop the
+one ruled exception, and menu-shot refuses a window of another pid before
+its first capture; three cuts watched.
+Two hundred and seventy-two watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 

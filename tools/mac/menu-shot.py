@@ -10,19 +10,24 @@ menu bar position ("#5", for a bar that carries two menus of one title).
 
 The guests run `.accessory`, which has NO MENU BAR, so no menu of theirs
 can be drawn open; the leg runs with KAYA_WINDOW_FRONT=regular, which
-raises the interpreter to `.regular` and activates it. The window is moved
-to the top left and sized so every menu falls over the app's own window,
-and only that region (the bar above it and the window) is shot: nothing of
-anyone else's is in the picture. HOST UI: it refuses while the host has
-seen input in the last 20 s that was not its own.
+raises the interpreter to `.regular` and activates it. The picture is
+composed from the guest's OWN windows, each shot by id (`screencapture
+-l`), on a neutral background: the app window and its open menus. The
+menu bar strip is the Window Server's, so it is not in the picture. Before
+any image is written, every window id is checked against an unfiltered
+window list, and one owned by another pid refuses the shot. HOST UI: it
+refuses while the host has seen input in the last 20 s that was not its
+own.
 """
 import contextlib
+import fcntl
 import os
 import pathlib
 import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "lib"))
@@ -40,12 +45,63 @@ outdir = pathlib.Path(outdir)
 outdir.mkdir(parents=True, exist_ok=True)
 WIDTH, HEIGHT, BAR = 900, 560, 33
 IDLE_FLOOR = 20.0
+SHOT_TURN = "/tmp/kaya-screencapture.lock"
 winlist = flightrec_lane.winlist_bin(ROOT)
-if winlist is None:
-    print("menu-shot: tools/mac/flightrec-winlist.swift would not build", file=sys.stderr)
+compose = flightrec_lane.mac_tool_bin(ROOT, "menu-compose")
+if winlist is None or compose is None:
+    print("menu-shot: tools/mac/flightrec-winlist.swift or menu-compose.swift would not build",
+          file=sys.stderr)
     sys.exit(1)
 
 last_event = [0.0]
+
+
+def own_windows(pid):
+    """The pid's on-screen windows, back to front: (id, layer, x, y, w, h)."""
+    listed = subprocess.run([winlist, str(pid)], capture_output=True, text=True,
+                            check=False).stdout
+    got = []
+    for m in re.finditer(r"^win=(\d+) pid=(\d+) layer=(-?\d+) bounds=(-?\d+),(-?\d+),(\d+),(\d+) ",
+                         listed, re.M):
+        win, owner, layer, x, y, w, h = map(int, m.groups())
+        if owner == pid and w > 1 and h > 1:
+            got.append((win, layer, x, y, w, h))
+    return got[::-1]
+
+
+def shoot(pid, out):
+    wins = own_windows(pid)
+    if not wins:
+        print(f"menu-shot: {out.name}: pid {pid} has no window on screen; nothing shot",
+              file=sys.stderr)
+        return False
+    everyone = subprocess.run([winlist], capture_output=True, text=True, check=False).stdout
+    foreign = flightrec_lane.foreign_windows([w[0] for w in wins], everyone, pid)
+    if foreign:
+        print(f"menu-shot: {out.name} REFUSED, a window to compose is not pid {pid}'s: "
+              + "; ".join(foreign), file=sys.stderr)
+        return False
+    with tempfile.TemporaryDirectory(prefix="menu-shot-") as tmp:
+        argv = [compose, str(out)]
+        with open(SHOT_TURN, "a", encoding="utf-8") as turn:
+            fcntl.flock(turn, fcntl.LOCK_EX)
+            for win, _layer, x, y, w, h in wins:
+                part = pathlib.Path(tmp) / f"{win}.png"
+                subprocess.run(["screencapture", "-x", "-o", f"-l{win}", str(part)], check=False)
+                if not part.is_file() or not part.stat().st_size:
+                    print(f"menu-shot: {out.name}: screencapture -l{win} took no picture",
+                          file=sys.stderr)
+                    return False
+                argv += [str(part), str(x), str(y), str(w), str(h)]
+        made = subprocess.run(argv, capture_output=True, text=True, check=False)
+    if made.returncode != 0:
+        print(f"menu-shot: {made.stdout.strip()}", file=sys.stderr)
+        out.unlink(missing_ok=True)
+        return False
+    menus = sum(1 for w in wins if w[1] == 101)
+    print(f"menu-shot: {out}: windows {', '.join(str(w[0]) for w in wins)} of pid {pid} "
+          f"({menus} menu window(s)), no other window", flush=True)
+    return True
 
 
 def host_idle():
@@ -122,15 +178,10 @@ try:
             if rc != 0:
                 print(f"menu-shot: {spec}: {said}", file=sys.stderr)
             time.sleep(1.0)
-        listed = subprocess.run([winlist, str(pid)], capture_output=True, text=True,
-                                check=False).stdout
-        menus_open = listed.count("layer=101")
         name = re.sub(r"[^a-z0-9]+", "-", spec.lower()).strip("-")
         out = outdir / f"menu-{name}.png"
-        subprocess.run(["screencapture", "-x", f"-R0,0,{WIDTH},{HEIGHT + BAR}", str(out)],
-                       check=False)
-        print(f"menu-shot: {out} ({menus_open} menu window(s) of pid {pid} open)", flush=True)
-        shots += 1
+        if shoot(pid, out):
+            shots += 1
         osa("key code 53")
         time.sleep(0.3)
         osa("key code 53")

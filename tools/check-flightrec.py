@@ -1039,6 +1039,83 @@ def census_frontmost(src):
     return found
 
 
+MENU_SHOT = "tools/mac/menu-shot.py"
+
+
+def host_capture_sources():
+    return {str(path.relative_to(ROOT)): path.read_text(encoding="utf-8", errors="replace")
+            for path in gate.walk("*.py", "*.sh", "*.swift", "*.c", "*.ps1", under="tools")}
+
+
+def census_host_captures(texts):
+    """docs/traps.md, the menu-shot rect capture: a host picture is one
+    window by id (`screencapture -l`), never a rect (`-R`) or the whole
+    screen. The one whole-screen capture is shot_desktop (the maintainer's
+    2026-09-28 ruling, held by desktop_shot_checks)."""
+    found = []
+    for rel, text in sorted(texts.items()):
+        if not rel.endswith(".py"):
+            for n, line in enumerate(text.splitlines(), 1):
+                code = line.split("//")[0] if rel.endswith((".swift", ".c")) else line.split("#")[0]
+                if re.search(r"\bscreencapture\b", code) and (
+                        "-l" not in code or "-R" in code):
+                    found.append(f"{rel}:{n}: screencapture without -l, or with -R")
+            continue
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        funcs = {}
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for node in ast.walk(fn):
+                    funcs.setdefault(id(node), fn.name)
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.List, ast.Tuple)) or not node.elts:
+                continue
+            head = node.elts[0]
+            if not (isinstance(head, ast.Constant) and isinstance(head.value, str)
+                    and head.value.rsplit("/", 1)[-1] == "screencapture"):
+                continue
+            flags = []
+            for e in node.elts[1:]:
+                if (isinstance(e, ast.JoinedStr) and e.values
+                        and isinstance(e.values[0], ast.Constant)):
+                    flags.append(str(e.values[0].value))
+                elif isinstance(e, ast.Constant) and isinstance(e.value, str):
+                    flags.append(e.value)
+            if rel == LANE_PY and funcs.get(id(node)) == "shot_desktop":
+                continue
+            if any(f.startswith("-R") for f in flags):
+                found.append(f"{rel}:{node.lineno}: screencapture -R photographs a screen rect, "
+                             f"whoever's windows are in it")
+            elif not any(f.startswith("-l") for f in flags):
+                found.append(f"{rel}:{node.lineno}: screencapture without -l<window id> "
+                             f"photographs the screen")
+    body = py_block(texts.get(MENU_SHOT, ""), "shoot")
+    check = body.find("flightrec_lane.foreign_windows(")
+    refuse = body.find("return False", check)
+    grab = body.find('"screencapture"')
+    if check < 0 or grab < 0 or not check < refuse < grab:
+        found.append(f"{MENU_SHOT}: shoot() does not refuse a window of another pid "
+                     f"(flightrec_lane.foreign_windows) before its first screencapture")
+    return found
+
+
+def foreign_window_checks():
+    from flightrec_lane import foreign_windows
+    listing = ("win=11 pid=500 layer=0 bounds=0,33,900,560 app=\"guest\" title=\"\"\n"
+               "win=12 pid=500 layer=101 bounds=10,40,200,300 app=\"guest\" title=\"\"\n"
+               "win=13 pid=77 layer=0 bounds=0,0,1400,900 app=\"browser\" title=\"x\"\n")
+    found = []
+    if foreign_windows([11, 12], listing, 500):
+        found.append("foreign_windows refuses the guest's own windows")
+    said = foreign_windows([11, 13, 14], listing, 500)
+    if said != ["window 13 is of pid 77", "window 14 is not on screen"]:
+        found.append(f"foreign_windows let another pid's window through ({said!r})")
+    return found
+
+
 def desktop_shot_checks(src):
     """THE DESKTOP IS PHOTOGRAPHED ONLY ON AN IDLE HOST (the maintainer's
     ruling of 2026-09-28): shot_desktop cut out and run against a doubled
@@ -2622,6 +2699,10 @@ if sys.platform == "darwin":
         gate.finding(line, at="no frontmost shot")
 for line in desktop_shot_checks(REAL):
     gate.finding(line, at="desktop shot on an idle host")
+HOST_CAPTURES = host_capture_sources()
+gate.counted("tools sources read for host captures", list(HOST_CAPTURES), floor=200)
+for line in census_host_captures(HOST_CAPTURES) + foreign_window_checks():
+    gate.finding(line, at="host captures by window id")
 for line in mac_power_checks(REAL, echo=True):
     gate.finding(line, at="Mac power history")
 for line in mac_unified_log_checks(REAL, echo=True):
@@ -2696,6 +2777,17 @@ nf2 = doctored(WINLIST, r'is not a pid"\)', 'is odd")',
                "NF2 removed the window list's refusal sentence")
 gate.negative("NF2 the window list reading nonsense as no filter",
               lambda: census_frontmost(nf2), want="does not refuse an argument")
+
+for label, pattern, repl, want in (
+        ("HC1 menu-shot shooting a screen rect", r'"-x", "-o", f"-l\{win\}"',
+         '"-x", f"-R0,0,900,593"', "screencapture -R photographs"),
+        ("HC2 menu-shot shooting the whole screen", r'"-x", "-o", f"-l\{win\}"', '"-x"',
+         "without -l<window id>"),
+        ("HC3 menu-shot's foreign-window refusal cut",
+         r"flightrec_lane\.foreign_windows\(", "list(", "does not refuse a window of another pid")):
+    nh = dict(HOST_CAPTURES)
+    nh[MENU_SHOT] = gate.doctor(label, HOST_CAPTURES[MENU_SHOT], pattern, repl)
+    gate.negative(label, lambda: census_host_captures(nh), want=want)
 
 # The android app's own picture, each link cut from a copy.
 na1 = doctored(COMPOSE, r"^ *mountedActivity\?\.let \{ KayaFailShot\.take\(it, "
@@ -3720,6 +3812,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(269 + (5 if DRIVES else 0))
+gate.negatives_ran(272 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

@@ -19557,6 +19557,23 @@ Help"): kayaSyncMacMenuBar kept SwiftUI's menus as dress and inserted kaya's
 beside them (docs/deferred.md, the duplicate mac menus entry; since
 2026-10-27 they merge, held by `expect_menu_bar`).
 
+## The menu-shot rect capture (measured 2026-10-29)
+
+tools/mac/menu-shot.py moved the guest's window to the top left by
+osascript, ignored the answers, and shot the screen rect it expected the
+window to fill (`screencapture -R0,0,900,593`). Whatever the window did not
+cover was photographed too: the maintainer's browser behind the editor, with
+its tabs and a sign-in URL. A rect or full-screen capture photographs the
+screen, not the app. Since 2026-10-29 the picture is composed from the
+guest's own windows only, each shot by id (`screencapture -o -l<id>`) and
+drawn at its bounds on grey (tools/mac/menu-compose.swift), and the tool
+refuses before any capture if a window id it would compose is another
+pid's (flightrec_lane.foreign_windows; check-flightrec's "host captures by
+window id" holds both). The menu bar strip is the Window Server's window,
+so it is not in the picture. Measured with a decoy window of red "DECOY"
+text on yellow behind the guest: an open menu shot by id draws its
+material as flat grey, and nothing of the decoy shows through it.
+
 ## AppKit empties a key equivalent that another item in the menu holds (measured 2026-10-27)
 
 Merging the editor's Edit into SwiftUI's, with SwiftUI's Undo, Cut, Copy and

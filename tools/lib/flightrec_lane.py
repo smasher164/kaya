@@ -529,12 +529,18 @@ def winlist_bin(root):
     relaunched process owns a window (docs/app-links-plan.md L5). One
     copy of the rule, two callers.
     """
+    return mac_tool_bin(root, "flightrec-winlist")
+
+
+def mac_tool_bin(root, stem):
+    """tools/mac/<stem>.swift built on demand to a content-hashed path;
+    None when it cannot be built."""
     root = pathlib.Path(root)
-    src = root / "tools/mac/flightrec-winlist.swift"
+    src = root / f"tools/mac/{stem}.swift"
     if not src.is_file():
         return None
     digest = hashlib.sha256(src.read_bytes()).hexdigest()[:12]
-    binp = root / f"target/tools/flightrec-winlist-{digest}"
+    binp = root / f"target/tools/{stem}-{digest}"
     if binp.is_file():
         return str(binp)
     (root / "target/tools").mkdir(parents=True, exist_ok=True)
@@ -545,6 +551,19 @@ def winlist_bin(root):
          "_", str(root), str(binp), str(src)],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
     return str(binp) if got.returncode == 0 and binp.is_file() else None
+
+
+def foreign_windows(ids, listing, pid):
+    """The window ids in `ids` that flightrec-winlist's unfiltered `listing`
+    does not show as owned by `pid`, each with the owner it does show
+    (docs/traps.md, the menu-shot rect capture)."""
+    owner = {}
+    for line in listing.splitlines():
+        got = re.match(r"win=(-?\d+) pid=(-?\d+) ", line)
+        if got:
+            owner[int(got.group(1))] = int(got.group(2))
+    return [f"window {i} is {'not on screen' if i not in owner else f'of pid {owner[i]}'}"
+            for i in ids if owner.get(i) != pid]
 
 
 def frontmost_from_listing(out, rc, err):
