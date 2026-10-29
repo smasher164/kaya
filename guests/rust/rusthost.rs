@@ -185,6 +185,8 @@ mod autofill;
 mod reveal;
 #[path = "codesurface.rs"]
 mod codesurface;
+#[path = "fontpick.rs"]
+mod fontpick;
 #[path = "segmented.rs"]
 mod segmented;
 #[path = "expander.rs"]
@@ -302,6 +304,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("autofillkeyboard") => autofill::app(ctx),
         Ok("reveal") => reveal::app(ctx),
         Ok("codesurface") | Ok("codesurfacebig") => codesurface::app(ctx),
+        Ok("fontpick") => fontpick::app(ctx),
         Ok("segmented") => segmented::app(ctx),
         Ok("expander") => expander::app(ctx),
         Ok("safearea") => safearea::app(ctx),

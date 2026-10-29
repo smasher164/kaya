@@ -149,7 +149,8 @@ pub use app::{
     CatalogHome, MenuRole, Platform, Role, SizeClass, Shape, Sort, Symbol, SymbolKind, Tint, TintKind, ToggleRef, Tpl, TplSource, Tx,
     ValueKind,
     props, Dropped, Op, Block, Document, Edit, EditSource, Format, Run, Selection,
-    AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
+    AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, FontDialogRef, FontFutureRef, SaveFutureRef,
+    TaskOutcome, TaskScope,
     // docs/media-plan.md: the player, the video view and the session.
     can_play, MediaSource, PlayerKind, PlayerReading, PlayerRef, SessionRef,
     // docs/media-plan.md §8: the reader's answers.
@@ -174,7 +175,7 @@ pub use protocol::{
     SheetProp, DocumentProp, RegionEdge,
     Appearance, MenuProp, NotificationId, NotificationOutcome, Occurrence, Path, Prop,
     SectionProp, SectionsPresentation, SignalId, TemplateNodeId, WindowProp,
-    FileContent, FileDialogId, FileMode, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
+    FileContent, FileDialogId, FileMode, FontChoice, FontFace, NamedFace, PickedFile, PickedId, Representation, Time, UndoDelta, UndoText, Value,
     ValueType, WidgetId, WidgetKind, WindowId,
     Fit, ImagePhase, MediaFailure, PlaybackState, PlayerId, PlayerState, PlayerTracks, SessionAction, SessionActionKind,
     TrackKind,

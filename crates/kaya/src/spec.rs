@@ -341,6 +341,13 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // kind's size as a multiple of the size the platform gives it, so it
     // composes with the user's text-size setting. 0.5 to 3; 1 is unset.
     ("text_scale", 72, PropKind::F64),
+    // docs/font-picker-plan.md §2.3: a text kind's face on the family it
+    // resolves to, matched by §2.4 and synthesized where the family lacks it.
+    // Weight is an integral 1 to 1000 (the role's own when unset), width an
+    // integral 1 to 9 (5 when unset).
+    ("font_weight", 73, PropKind::F64),
+    ("font_italic", 74, PropKind::Bool),
+    ("font_width", 75, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -2274,6 +2281,39 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   surface every document's tab shares, filled by mount. One \
                   per edge, never removed.",
         },
+        Record {
+            kind: 94,
+            name: "show_font_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("code_only", FieldTy::U32),
+                f("faces", FieldTy::U32),
+                f("weight", FieldTy::U32),
+                f("italic", FieldTy::U32),
+                f("width", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("family", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Request the font picker over a live window (0 = primary), \
+                  on the file dialog's request/result grammar and in its one \
+                  live slot (docs/font-picker-plan.md §4.2): one request, one \
+                  answer, a font_dialog_result whose id retires there. \
+                  `code_only` (0 or 1) lists monospaced families only; \
+                  `faces` (0 or 1) asks for a face as well as a family. \
+                  `family` (a Str, empty for none) is the family the picker \
+                  opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or \
+                  1) and `width` (1 to 9, 0 for 5) its face.",
+        },
+        Record {
+            kind: 95,
+            name: "list_font_faces",
+            fields: &[f("family", FieldTy::Value)],
+            payload: None,
+            doc: "List one installed family's faces, answered once by \
+                  font_faces (docs/font-picker-plan.md §4.4).",
+        },
     ],
     apply: &[
         Record {
@@ -3374,6 +3414,35 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Declare a shared region at an edge of the window, hidden \
                   until a mount fills it; one instance per strip.",
+        },
+        Record {
+            kind: 82,
+            name: "present_font_dialog",
+            fields: &[
+                f("window", FieldTy::U64),
+                f("dialog", FieldTy::U64),
+                f("code_only", FieldTy::U32),
+                f("faces", FieldTy::U32),
+                f("weight", FieldTy::U32),
+                f("italic", FieldTy::U32),
+                f("width", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("family", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "Present the font picker over the window (SHOW_FONT_DIALOG, \
+                  already validated by the core, `weight` and `width` \
+                  resolved to 400 and 5 when unset). The presentation \
+                  answers with kaya_emit_font_dialog_result exactly once: \
+                  the chosen family and face, or an EMPTY family for cancel.",
+        },
+        Record {
+            kind: 83,
+            name: "list_font_faces",
+            fields: &[f("family", FieldTy::Value)],
+            payload: None,
+            doc: "Enumerate one family's faces and answer through \
+                  kaya_font_faces (docs/font-picker-plan.md §4.4).",
         },
     ],
     occurrence: &[
@@ -4515,6 +4584,39 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   order. The app declares the new window's chrome and regions \
                   and binds its handlers.",
         },
+        Record {
+            kind: 69,
+            name: "font_dialog_result",
+            fields: &[
+                f("dialog", FieldTy::U64),
+                f("weight", FieldTy::U32),
+                f("italic", FieldTy::U32),
+                f("width", FieldTy::U32),
+                f("reserved", FieldTy::U32),
+                f("family", FieldTy::Value),
+            ],
+            payload: None,
+            doc: "The font picker's one answer (docs/font-picker-plan.md \
+                  §4.2): the chosen `family` (a Str) and its face, `weight` \
+                  1 to 1000, `italic` 0 or 1, `width` 1 to 9. CANCEL IS AN \
+                  EMPTY FAMILY, with the face fields 0. A request that asked \
+                  for no face answers the family's regular face as the \
+                  platform resolves it. The dialog id retires here.",
+        },
+        Record {
+            kind: 70,
+            name: "font_faces",
+            fields: &[f("family", FieldTy::Value), f("faces", FieldTy::Values)],
+            payload: None,
+            doc: "The answer to list_font_faces: the family asked for (a Str) \
+                  and its faces, each four consecutive values in `faces`, \
+                  the file dialog's grouping: an I64 weight (1 to 1000), a \
+                  Bool italic, an I64 width (1 to 9) and the platform's Str \
+                  display name, for showing only. Faces the platform would \
+                  synthesize are not listed; one per weight, slope and width, \
+                  sorted by weight, then upright first, then width. A family \
+                  the platform lacks answers no faces.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4714,6 +4816,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("monospaced", 70),
                 ("family", 71),
                 ("text_scale", 72),
+                ("font_weight", 73),
+                ("font_italic", 74),
+                ("font_width", 75),
             ],
         },
         EnumSpec {
@@ -5411,6 +5516,8 @@ mod tests {
             ("close_document", wire::TX_CLOSE_DOCUMENT),
             ("set_document_prop", wire::TX_SET_DOCUMENT_PROP),
             ("add_region", wire::TX_ADD_REGION),
+            ("show_font_dialog", wire::TX_SHOW_FONT_DIALOG),
+            ("list_font_faces", wire::TX_LIST_FONT_FACES),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5503,6 +5610,8 @@ mod tests {
                 ("close_document", wire::APPLY_CLOSE_DOCUMENT),
                 ("set_document_prop", wire::APPLY_SET_DOCUMENT_PROP),
                 ("add_region", wire::APPLY_ADD_REGION),
+                ("present_font_dialog", wire::APPLY_PRESENT_FONT_DIALOG),
+                ("list_font_faces", wire::APPLY_LIST_FONT_FACES),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -5580,6 +5689,8 @@ mod tests {
                 ("new_document_requested", crate::ring::REC_NEW_DOCUMENT_REQUESTED),
                 ("document_moved", crate::ring::REC_DOCUMENT_MOVED),
                 ("documents_detached", crate::ring::REC_DOCUMENTS_DETACHED),
+                ("font_dialog_result", crate::ring::REC_FONT_DIALOG_RESULT),
+                ("font_faces", crate::ring::REC_FONT_FACES),
             ]
         );
     }
@@ -5938,6 +6049,9 @@ mod tests {
                     ("prop", "monospaced") => wire::PROP_MONOSPACED,
                     ("prop", "family") => wire::PROP_FAMILY,
                     ("prop", "text_scale") => wire::PROP_TEXT_SCALE,
+                    ("prop", "font_weight") => wire::PROP_FONT_WEIGHT,
+                    ("prop", "font_italic") => wire::PROP_FONT_ITALIC,
+                    ("prop", "font_width") => wire::PROP_FONT_WIDTH,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

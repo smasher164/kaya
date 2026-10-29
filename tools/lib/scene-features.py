@@ -163,6 +163,9 @@ VERB_FEATURE = {
     "expect_gutter": "codesurface",
     "expect_face": "codesurface",
     "expect_scaled": "codesurface",
+    # docs/font-picker-plan.md §7, the same reasoning.
+    "pick_font": "fontpick",
+    "expect_font_dialog": "fontpick",
     # docs/color-picker-plan.md §5, the same reasoning.
     "set_color": "colorpicker",
     "expect_color": "colorpicker",

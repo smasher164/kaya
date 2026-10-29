@@ -65,7 +65,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The font picker (docs/font-picker-plan.md §8), rust-only at depth.
+                "fontpick"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -324,6 +326,8 @@ ORDER = [
     # The platform tints on a filled container (docs/tints-plan.md).
     ("tints", ("rust",)),
     ("codesurface", LANGS),
+    # docs/font-picker-plan.md §7.
+    ("fontpick", ("rust",)),
     # The skin (docs/styling-pass-plan.md §5): grounds, shapes, cards, the
     # track table and the dock.
     ("grounds", LANGS + ("c",)),

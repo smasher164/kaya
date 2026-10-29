@@ -807,6 +807,8 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::RequestPermission { .. } => UndoVerdict::Refused("request_permission"),
         TxOp::WatchCaptureDevices { .. } => UndoVerdict::Refused("watch_capture_devices"),
         TxOp::ListFontFamilies => UndoVerdict::Refused("list_font_families"),
+        TxOp::ShowFontDialog(_) => UndoVerdict::Refused("show_font_dialog"),
+        TxOp::ListFontFaces { .. } => UndoVerdict::Refused("list_font_faces"),
         TxOp::DeclareLinkRoute { .. } => UndoVerdict::Refused("declare_link_route"),
         TxOp::ShowFileDialog(_) => UndoVerdict::Refused("show_file_dialog"),
         TxOp::ShowSaveDialog(_) => UndoVerdict::Refused("show_save_dialog"),
@@ -1576,6 +1578,10 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/code-surface-plan.md G1, M1.
         Prop::LineNumbers => kind == WidgetKind::Textarea,
         Prop::Monospaced | Prop::Family | Prop::TextScale => matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea),
+        // docs/font-picker-plan.md §2.3.
+        Prop::FontWeight | Prop::FontItalic | Prop::FontWidth => {
+            matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea)
+        }
         // Layout weight is kind-agnostic: any child of a row/column may
         // grow, so it applies to every widget kind.
         Prop::Grow => true,
@@ -2324,6 +2330,8 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::LineNumbers | Prop::Monospaced => ValueType::Bool,
         Prop::Family => ValueType::Str,
         Prop::TextScale => ValueType::F64,
+        Prop::FontWeight | Prop::FontWidth => ValueType::F64,
+        Prop::FontItalic => ValueType::Bool,
         Prop::Role => ValueType::I64,
         Prop::Symbol => ValueType::I64,
         Prop::Indeterminate | Prop::Fill | Prop::Wrap | Prop::Rich | Prop::Submits => ValueType::Bool,
@@ -3055,6 +3063,15 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             scale.is_finite() && (TEXT_SCALE_MIN..=TEXT_SCALE_MAX).contains(scale),
             "kaya: {kind:?} declares text_scale {scale}: a multiple of the platform's size from \
              {TEXT_SCALE_MIN} to {TEXT_SCALE_MAX}"
+        );
+    }
+    // docs/font-picker-plan.md §2.3: the OpenType weight and width classes,
+    // whole numbers.
+    if let (Prop::FontWeight | Prop::FontWidth, Value::F64(n)) = (prop, value) {
+        let (name, top) = if prop == Prop::FontWeight { ("font_weight", 1000.0) } else { ("font_width", 9.0) };
+        assert!(
+            n.is_finite() && n.fract() == 0.0 && (1.0..=top).contains(n),
+            "kaya: {kind:?} declares {name} {n}: a whole number from 1 to {top} (docs/font-picker-plan.md §2.2)"
         );
     }
     // One family by name (docs/code-surface-plan.md M2): a toolkit's own
@@ -4620,6 +4637,32 @@ impl Scene {
                 TxOp::RequestPermission { kind } => out.push(ApplyOp::RequestPermission(kind)),
                 TxOp::WatchCaptureDevices { on } => out.push(ApplyOp::WatchCaptureDevices(on)),
                 TxOp::ListFontFamilies => out.push(ApplyOp::ListFontFamilies),
+                TxOp::ListFontFaces { family } => out.push(ApplyOp::ListFontFaces { family }),
+                TxOp::ShowFontDialog(mut spec) => {
+                    assert!(
+                        spec.window == crate::protocol::DEFAULT_WINDOW || self.windows.contains(&spec.window),
+                        "kaya: show_font_dialog over unknown window {:?} — create_window first (0 is the primary)",
+                        spec.window
+                    );
+                    assert!(
+                        !spec.family.contains([',', ';', '\n', '"']) && spec.family.trim() == spec.family,
+                        "kaya: show_font_dialog opens on the family {:?}: one installed family by its name, \
+                         no list and no padding",
+                        spec.family
+                    );
+                    if spec.weight == 0 {
+                        spec.weight = 400;
+                    }
+                    if spec.width == 0 {
+                        spec.width = 5;
+                    }
+                    // The file dialog's one live slot: a font picker over a
+                    // live file dialog (or the reverse) is refused, since no
+                    // backend can stack two modals (docs/font-picker-plan.md §4.2).
+                    if crate::capi::file_dialog_shown(spec.dialog) {
+                        out.push(ApplyOp::PresentFontDialog(spec));
+                    }
+                }
                 TxOp::DeclareLinkRoute { route, pattern } => {
                     // NOTHING REACHES THE BACKENDS: the route table is the
                     // core's, and the platform arms hand it URLs
@@ -23526,6 +23569,60 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
             let msg = skin_refusal(skin_root(WidgetKind::Label, vec![set(1, prop, value)]));
             assert!(msg.contains(want), "{msg}");
         }
+    }
+
+    /// docs/font-picker-plan.md §2.3, §4.2: the face props on the three
+    /// text kinds and their OpenType ranges; the picker resolves an unset
+    /// face to 400 and 5, refuses a family list, and takes the file dialog's
+    /// one live slot (whose refusal is a process fault, so not driven here).
+    #[test]
+    fn the_face_props_and_the_font_picker_are_held_at_the_root() {
+        for kind in [WidgetKind::Label, WidgetKind::Entry, WidgetKind::Textarea] {
+            for prop in [Prop::FontWeight, Prop::FontItalic, Prop::FontWidth] {
+                check_prop(kind, prop);
+            }
+        }
+        for kind in [WidgetKind::Button, WidgetKind::Search, WidgetKind::Column] {
+            for prop in [Prop::FontWeight, Prop::FontItalic, Prop::FontWidth] {
+                assert!(std::panic::catch_unwind(|| check_prop(kind, prop)).is_err(), "{kind:?} {prop:?}");
+            }
+        }
+        let fine = |prop, value| {
+            Scene::new().apply(skin_root(WidgetKind::Label, vec![set(1, prop, value)]));
+        };
+        fine(Prop::FontWeight, Value::F64(1.0));
+        fine(Prop::FontWeight, Value::F64(1000.0));
+        fine(Prop::FontWidth, Value::F64(9.0));
+        fine(Prop::FontItalic, Value::Bool(true));
+        for (prop, value) in [
+            (Prop::FontWeight, Value::F64(0.0)),
+            (Prop::FontWeight, Value::F64(1001.0)),
+            (Prop::FontWeight, Value::F64(350.5)),
+            (Prop::FontWeight, Value::F64(f64::NAN)),
+            (Prop::FontWidth, Value::F64(0.0)),
+            (Prop::FontWidth, Value::F64(10.0)),
+        ] {
+            let msg = skin_refusal(skin_root(WidgetKind::Label, vec![set(1, prop, value)]));
+            assert!(msg.contains("a whole number from 1 to"), "{msg}");
+        }
+        let spec = |dialog: u64, family: &str| crate::protocol::FontDialogSpec {
+            window: DEFAULT_WINDOW,
+            dialog: crate::protocol::FileDialogId(dialog),
+            code_only: true,
+            faces: true,
+            family: family.into(),
+            weight: 0,
+            italic: true,
+            width: 0,
+        };
+        let msg = skin_refusal(vec![TxOp::ShowFontDialog(spec(9_000_001, "Menlo, Monaco"))]);
+        assert!(msg.contains("no list"), "{msg}");
+        let ops = Scene::new().apply(vec![TxOp::ShowFontDialog(spec(9_000_002, "Menlo"))]);
+        let presented: Vec<_> = ops.iter().filter(|op| matches!(op, ApplyOp::PresentFontDialog(_))).collect();
+        assert_eq!(presented.len(), 1, "{ops:?}");
+        let ApplyOp::PresentFontDialog(got) = presented[0] else { unreachable!() };
+        assert_eq!((got.weight, got.width, got.italic), (400, 5, true));
+        crate::capi::file_dialog_retire(9_000_002);
     }
 
     /// Y1: the skin's props live on their kinds and no control takes one.

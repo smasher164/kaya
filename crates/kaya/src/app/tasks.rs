@@ -215,6 +215,7 @@ enum Pending {
     Alert(Arc<Mutex<Reply<AlertChoice>>>),
     File(Arc<Mutex<Reply<Vec<PickedFile>>>>),
     Save(Arc<Mutex<Reply<Option<PickedFile>>>>),
+    Font(Arc<Mutex<Reply<Option<crate::protocol::FontChoice>>>>),
     Clipboard(Arc<Mutex<Reply<Option<Representation>>>>),
 }
 
@@ -234,6 +235,7 @@ impl Pending {
             Self::Alert(reply) => close(reply),
             Self::File(reply) => close(reply),
             Self::Save(reply) => close(reply),
+            Self::Font(reply) => close(reply),
             Self::Clipboard(reply) => close(reply),
         }
     }
@@ -266,6 +268,9 @@ impl Replies {
                 self.file = None;
             }
             TxOp::ShowSaveDialog(spec) if self.file == Some(spec.dialog.0) => {
+                self.file = None;
+            }
+            TxOp::ShowFontDialog(spec) if self.file == Some(spec.dialog.0) => {
                 self.file = None;
             }
             _ => {}
@@ -355,6 +360,7 @@ impl AppCtx {
                 TxOp::ShowAlert(spec) => replies.claim_alert(spec.alert.0),
                 TxOp::ShowFileDialog(spec) => replies.claim_file(spec.dialog.0),
                 TxOp::ShowSaveDialog(spec) => replies.claim_file(spec.dialog.0),
+                TxOp::ShowFontDialog(spec) => replies.claim_file(spec.dialog.0),
                 _ => {}
             }
         }
@@ -415,6 +421,12 @@ impl AppCtx {
                     }
                     replies.pending.remove(&Key::File(dialog.0))
                 }
+                Occurrence::FontDialogResult { dialog, .. } => {
+                    if replies.file == Some(dialog.0) {
+                        replies.file = None;
+                    }
+                    replies.pending.remove(&Key::File(dialog.0))
+                }
                 Occurrence::ClipboardResult { request, .. } => {
                     replies.pending.remove(&Key::Clipboard(*request))
                 }
@@ -436,6 +448,9 @@ impl AppCtx {
             }
             (Some(Pending::Save(reply)), Occurrence::FileDialogResult { files, .. }) => {
                 complete(reply, files.first().cloned())
+            }
+            (Some(Pending::Font(reply)), Occurrence::FontDialogResult { choice, .. }) => {
+                complete(reply, choice.clone())
             }
             (Some(Pending::Clipboard(reply)), Occurrence::ClipboardResult { clip, .. }) => {
                 complete(reply, clip.clone())
@@ -487,6 +502,22 @@ impl AppCtx {
                 dialog: self.alloc_file_dialog(),
                 suggested_name: name.into(),
                 filters: Vec::new(),
+            },
+        }
+    }
+
+    pub fn choose_font(&self) -> FontFutureRef<'_> {
+        FontFutureRef {
+            ctx: self,
+            spec: crate::protocol::FontDialogSpec {
+                window: DEFAULT_WINDOW,
+                dialog: self.alloc_file_dialog(),
+                code_only: false,
+                faces: false,
+                family: String::new(),
+                weight: 0,
+                italic: false,
+                width: 0,
             },
         }
     }
@@ -605,6 +636,45 @@ impl<'a> IntoFuture for SaveFutureRef<'a> {
         let key = Key::File(self.spec.dialog.0);
         self.ctx.submit_dialog(TxOp::ShowSaveDialog(self.spec));
         self.ctx.reply(key, Pending::Save)
+    }
+}
+
+#[must_use]
+pub struct FontFutureRef<'a> {
+    ctx: &'a AppCtx,
+    spec: crate::protocol::FontDialogSpec,
+}
+
+impl FontFutureRef<'_> {
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+    pub fn code_only(mut self, on: bool) -> Self {
+        self.spec.code_only = on;
+        self
+    }
+    pub fn faces(mut self, on: bool) -> Self {
+        self.spec.faces = on;
+        self
+    }
+    pub fn initial(mut self, choice: &crate::protocol::FontChoice) -> Self {
+        self.spec.family = choice.family.clone();
+        self.spec.weight = choice.face.weight;
+        self.spec.italic = choice.face.italic;
+        self.spec.width = choice.face.width;
+        self
+    }
+}
+
+impl<'a> IntoFuture for FontFutureRef<'a> {
+    type Output = Option<crate::protocol::FontChoice>;
+    type IntoFuture = DialogFuture<'a, Option<crate::protocol::FontChoice>>;
+    fn into_future(self) -> Self::IntoFuture {
+        self.ctx.check_async_request();
+        let key = Key::File(self.spec.dialog.0);
+        self.ctx.submit_dialog(TxOp::ShowFontDialog(self.spec));
+        self.ctx.reply(key, Pending::Font)
     }
 }
 

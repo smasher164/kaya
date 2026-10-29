@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xa37dca454ad9d6cc
+let kayaSpecHash: UInt64 = 0xd4526bbce915c1b5
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -136,6 +136,8 @@ private let applySelectDocument: UInt16 = 78
 private let applyCloseDocument: UInt16 = 79
 private let applySetDocumentProp: UInt16 = 80
 private let applyAddRegion: UInt16 = 81
+private let applyPresentFontDialog: UInt16 = 82
+private let applyListFontFaces: UInt16 = 83
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -392,6 +394,9 @@ private let propLineNumbers: UInt32 = 69
 private let propMonospaced: UInt32 = 70
 private let propFamily: UInt32 = 71
 private let propTextScale: UInt32 = 72
+private let propFontWeight: UInt32 = 73
+private let propFontItalic: UInt32 = 74
+private let propFontWidth: UInt32 = 75
 private let groundNone: Int64 = 0
 private let groundGradient: Int64 = 1
 private let groundImage: Int64 = 2
@@ -883,6 +888,10 @@ final class KayaNode: Identifiable {
     var monospaced = false
     var family = ""
     var textScale: Double = 1
+    /// docs/font-picker-plan.md §2.3: the face; 0 is unset.
+    var fontWeight = 0
+    var fontItalic = false
+    var fontWidth = 0
     /// The widget's accept list, verbatim; empty means it takes nothing.
     var accepts = ""
     /// A `role link` label's destination (docs/tasks-s2-plan.md T3).
@@ -7202,6 +7211,12 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case (propTextScale, valueF64):
                     kayaScene.nodes[id]!.textScale =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
+                case (propFontWeight, valueF64):
+                    kayaScene.nodes[id]!.fontWeight = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
+                case (propFontItalic, valueBool):
+                    kayaScene.nodes[id]!.fontItalic = raw[body + 24] != 0
+                case (propFontWidth, valueF64):
+                    kayaScene.nodes[id]!.fontWidth = Int(raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self))
                 case (propSource, valueBlob):
                     // The value's payload is a u64 batch-local handle;
                     // the pump prefetched the bytes into `blobs`. The decode
@@ -7823,6 +7838,26 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 kayaCaptureRequestPermission(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self))
             case applyListFontFamilies:
                 kayaListFontFamilies()
+            case applyListFontFaces:
+                let len = Int(raw.loadUnaligned(fromByteOffset: body + 4, as: UInt32.self))
+                kayaListFontFaces(String(decoding: raw[(body + 8)..<(body + 8 + len)], as: UTF8.self))
+            case applyPresentFontDialog:
+                let len = Int(raw.loadUnaligned(fromByteOffset: body + 44, as: UInt32.self))
+                let fontDialogArgs = (
+                    raw.loadUnaligned(fromByteOffset: body, as: UInt64.self),
+                    raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self),
+                    raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self) != 0,
+                    raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self) != 0,
+                    String(decoding: raw[(body + 48)..<(body + 48 + len)], as: UTF8.self),
+                    KayaFace(
+                        weight: Int(raw.loadUnaligned(fromByteOffset: body + 24, as: UInt32.self)),
+                        italic: raw.loadUnaligned(fromByteOffset: body + 28, as: UInt32.self) != 0,
+                        width: Int(raw.loadUnaligned(fromByteOffset: body + 32, as: UInt32.self))))
+                MainActor.assumeIsolated {
+                    kayaPresentFontDialog(
+                        window: fontDialogArgs.0, dialog: fontDialogArgs.1, codeOnly: fontDialogArgs.2,
+                        faces: fontDialogArgs.3, family: fontDialogArgs.4, initial: fontDialogArgs.5)
+                }
             case applyWatchCaptureDevices:
                 kayaCaptureWatchDevices(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self) != 0)
             case applySetVideoCapture:
@@ -10248,6 +10283,230 @@ func kayaNodeStyle(_ node: KayaNode) -> KayaPlatformTextStyle {
     let name = CTFontCopyPostScriptName(font as CTFont) as String
     return .success("\(bold ? "bold" : "regular") (\(name), weight trait \(String(format: "%.2f", weight)))")
 }
+
+// --- THE FONT PICKER'S AND THE FACE'S READS (docs/font-picker-plan.md §2.5, §7) ---
+
+/// `<weight> <upright|italic> <width> [synthesized]`, harness.rs's parse_face_words.
+func kayaParseFaceWords(_ text: String) -> KayaFaceWords? {
+    let words = text.split(whereSeparator: \.isWhitespace)
+    guard words.count == 3 || (words.count == 4 && words[3] == "synthesized"),
+        let weight = Int(words[0]), (1...1000).contains(weight),
+        words[1] == "upright" || words[1] == "italic",
+        let width = Int(words[2]), (1...9).contains(width)
+    else { return nil }
+    return KayaFaceWords(face: KayaFace(weight: weight, italic: words[1] == "italic", width: width), synthesized: words.count == 4)
+}
+
+func kayaFaceWordsSynthesized(_ text: String) -> Bool { text.split(whereSeparator: \.isWhitespace).count == 4 }
+
+/// `<weight> <slope> <width> <family>`, harness.rs's parse_font_choice.
+func kayaParseFontChoice(_ text: String) -> (String, KayaFace)? {
+    let parts = text.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 3)
+    guard parts.count == 4, let words = kayaParseFaceWords(parts[0...2].joined(separator: " ")), !words.synthesized
+    else { return nil }
+    return (String(parts[3]).trimmingCharacters(in: .whitespaces), words.face)
+}
+
+/// What a scene holds a face to.
+struct KayaFaceWords: Equatable, CustomStringConvertible {
+    let face: KayaFace
+    let synthesized: Bool
+    var description: String { face.words + (synthesized ? " synthesized" : "") }
+}
+
+/// What `expect_face ... face` read: the drawn words and the log line.
+struct KayaDrawnFace {
+    let words: KayaFaceWords
+    let said: String
+}
+
+/// harness.rs's DrawnFace::words: a synthesized bold draws at 700 or the
+/// face's own weight, whichever is heavier.
+func kayaDrawn(_ family: String, _ face: KayaFace, synthItalic: Bool, synthBold: Bool, detail: String) -> KayaDrawnFace {
+    let words = KayaFaceWords(
+        face: KayaFace(
+            weight: synthBold ? max(face.weight, 700) : face.weight, italic: face.italic || synthItalic,
+            width: face.width),
+        synthesized: synthItalic || synthBold)
+    return KayaDrawnFace(words: words, said: "\(words) (\(family), \(detail))")
+}
+
+/// The face a text kind draws, read off the font the toolkit holds: a text
+/// view's storage at the range (its matrix is a synthesized slope, its stroke
+/// a synthesized bold), an entry's field font (its matrix), a label's AX font;
+/// a label's synthesis is kaya's own drawing (the overlay and the shear), which
+/// accessibility does not carry.
+@MainActor func kayaDrawnFace(_ node: KayaNode, _ range: Substring?) -> KayaRead<KayaDrawnFace> {
+    if node.kind == kindTextarea {
+        #if os(macOS)
+            guard let view = kayaMacTextViews[node.id]?.view, let storage = view.textStorage else {
+                return .failure("no text view on screen")
+            }
+            let typing = view.typingAttributes
+        #else
+            guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+            let storage = view.textStorage
+            let typing = view.typingAttributes
+        #endif
+        var at = 0
+        if let range {
+            let bounds = range.split(separator: ":")
+            let from = bounds.count == 2 ? kayaUtf16Offset(storage.string, Int(bounds[0]) ?? -1) : -1
+            let to = bounds.count == 2 ? kayaUtf16Offset(storage.string, Int(bounds[1]) ?? -1) : -1
+            guard from >= 0, to > from, to <= storage.length else {
+                return .failure("range \(range) is not inside the text view's \(storage.length) UTF-16 units")
+            }
+            at = from
+        }
+        let attrs = storage.length > at ? storage.attributes(at: at, effectiveRange: nil) : typing
+        guard let font = attrs[.font] as? KayaPlatformFont else { return .failure("the text view carries no font at \(at)") }
+        let face = kayaFaceOf(font as CTFont)
+        let synthItalic = CTFontGetMatrix(font as CTFont).c != 0 && !face.italic
+        let synthBold = ((attrs[.strokeWidth] as? NSNumber)?.doubleValue ?? 0) < 0
+        let name = CTFontCopyPostScriptName(font as CTFont) as String
+        return .success(kayaDrawn(
+            CTFontCopyFamilyName(font as CTFont) as String, face, synthItalic: synthItalic, synthBold: synthBold,
+            detail: "\(name) in the text view"))
+    }
+    guard range == nil else { return .failure("a range reads a textarea's text; \(node.kind) has none") }
+    switch kayaResolvedFont(node) {
+    case .failure(let why): return .failure(why)
+    case .success(let font):
+        let face = kayaFaceOf(font as CTFont)
+        let drawn = node.kind == kindLabel ? kayaLabelDrawn[node.id] : nil
+        let shear = CTFontGetMatrix(font as CTFont).c != 0 || (drawn?.shear ?? false)
+        let synthItalic = !face.italic && shear
+        let synthBold = drawn?.overlay ?? false
+        let name = CTFontCopyPostScriptName(font as CTFont) as String
+        return .success(kayaDrawn(
+            CTFontCopyFamilyName(font as CTFont) as String, face, synthItalic: synthItalic, synthBold: synthBold,
+            detail: node.kind == kindLabel ? "\(name) from accessibility, its shear and bold as drawn" : "\(name) in the field"))
+    }
+}
+
+/// harness.rs's font_dialog_verdict.
+func kayaFontDialogVerdict(_ listed: [(String, Bool)]?, _ want: String) -> (String?, String) {
+    guard let listed else { return want == "closed" ? ("closed", "") : (nil, ": no font picker is open") }
+    if want == "closed" { return (nil, ": a font picker is open, listing \(listed.count) families") }
+    if want == "open" { return ("open, listing \(listed.count) families", "") }
+    if listed.isEmpty { return (nil, ": the open picker lists no families") }
+    let proportional = listed.filter { !$0.1 }.map(\.0)
+    if proportional.isEmpty { return ("code only, \(listed.count) monospaced families", "") }
+    return (nil, ": the open picker lists \(proportional.count) proportional families of \(listed.count): "
+        + proportional.prefix(8).joined(separator: ", "))
+}
+
+#if os(macOS)
+    /// The font panel's tables: its families list and its faces list, told
+    /// apart by what their rows name.
+    @MainActor func kayaFontPanelTables(_ panel: NSPanel) -> (families: NSTableView?, faces: NSTableView?) {
+        func views(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(views) }
+        guard let root = panel.contentView?.superview else { return (nil, nil) }
+        let installed = Set(NSFontManager.shared.availableFontFamilies)
+        var families: NSTableView?
+        var faces: NSTableView?
+        for table in views(root).compactMap({ $0 as? NSTableView }) where !table.isHiddenOrHasHiddenAncestor {
+            let rows = (0..<min(table.numberOfRows, 40)).map { kayaFontPanelCell(table, $0) }
+            if rows.contains(where: installed.contains) { families = table } else if !rows.isEmpty { faces = table }
+        }
+        return (families, faces)
+    }
+
+    @MainActor func kayaFontPanelCell(_ table: NSTableView, _ row: Int) -> String {
+        guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) else { return "" }
+        func views(_ v: NSView) -> [NSView] { [v] + v.subviews.flatMap(views) }
+        return views(cell).compactMap { ($0 as? NSTextField)?.stringValue }.filter { !$0.isEmpty }.last ?? ""
+    }
+
+    /// Whether any face of a family is fixed-pitch, by the font manager's own trait.
+    func kayaFamilyFixedPitch(_ family: String) -> Bool {
+        (NSFontManager.shared.availableMembers(ofFontFamily: family) ?? []).contains {
+            (($0[3] as? NSNumber)?.uintValue ?? 0) & NSFontTraitMask.fixedPitchFontMask.rawValue != 0
+        }
+    }
+#endif
+
+/// The open picker's families with each one's fixed-pitch trait, nil when
+/// no picker is open.
+func kayaFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
+    #if os(macOS)
+        return DispatchQueue.main.sync {
+            guard let agent = kayaFontAgent, !agent.answered, let panel = NSFontManager.shared.fontPanel(false),
+                panel.isVisible
+            else { return .success(nil) }
+            guard let table = kayaFontPanelTables(panel).families else {
+                return .failure("the font panel shows no families list")
+            }
+            let installed = Set(NSFontManager.shared.availableFontFamilies)
+            let names = (0..<table.numberOfRows).map { kayaFontPanelCell(table, $0) }.filter(installed.contains)
+            return .success(names.map { ($0, kayaFamilyFixedPitch($0)) })
+        }
+    #else
+        return kayaIOSFontDialogFamilies()
+    #endif
+}
+
+/// Drive the open picker: the family's row, the face's row, then Choose;
+/// or Cancel. nil when the presses went out; otherwise why not.
+func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
+    #if os(macOS)
+        return DispatchQueue.main.sync {
+            guard let agent = kayaFontAgent, !agent.answered, let panel = NSFontManager.shared.fontPanel(false),
+                let accessory = panel.accessoryView
+            else { return "no font picker is open" }
+            func button(_ id: String) -> NSButton? {
+                accessory.subviews.compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == id }
+            }
+            guard let (family, face) = choice else {
+                guard let cancel = button("kaya.font.cancel") else { return "the picker has no Cancel" }
+                cancel.performClick(nil)
+                return nil
+            }
+            let tables = kayaFontPanelTables(panel)
+            guard let families = tables.families else { return "the font panel shows no families list" }
+            guard let row = (0..<families.numberOfRows).first(where: { kayaFontPanelCell(families, $0) == family })
+            else {
+                return "the families list has no \(family)"
+            }
+            families.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            families.scrollRowToVisible(row)
+            if let action = families.action { NSApp.sendAction(action, to: families.target, from: families) }
+            if agent.faces {
+                guard let hit = kayaFamilyFaces(family).first(where: { $0.face == face }) else {
+                    return "\(family) has no face \(face.words) among \(kayaFamilyFaces(family).map(\.face.words))"
+                }
+                let ps = CTFontDescriptorCopyAttribute(hit.descriptor, kCTFontNameAttribute) as? String ?? ""
+                let member = (NSFontManager.shared.availableMembers(ofFontFamily: family) ?? [])
+                    .first { ($0[0] as? String) == ps }
+                let title = (member?[1] as? String) ?? hit.name
+                guard let faces = kayaFontPanelTables(panel).faces else { return "the font panel shows no faces list" }
+                guard
+                    let faceRow = (0..<faces.numberOfRows).first(where: { kayaFontPanelCell(faces, $0) == title })
+                else {
+                    return "the faces list has no \(title) among \((0..<faces.numberOfRows).map { kayaFontPanelCell(faces, $0) })"
+                }
+                faces.selectRowIndexes(IndexSet(integer: faceRow), byExtendingSelection: false)
+                if let action = faces.action { NSApp.sendAction(action, to: faces.target, from: faces) }
+            }
+            guard let choose = button("kaya.font.choose") else { return "the picker has no Choose" }
+            choose.performClick(nil)
+            return nil
+        }
+    #else
+        return kayaIOSPickFont(choice)
+    #endif
+}
+
+#if !os(macOS)
+    /// iOS reads the remote picker through the resident XCUITest driver.
+    func kayaIOSFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
+        kayaDepthStub("fontpick", on: "ios")
+    }
+
+    func kayaIOSPickFont(_ choice: (String, KayaFace)?) -> String? {
+        kayaDepthStub("fontpick", on: "ios")
+    }
+#endif
 
 private func kayaTextTarget(_ spec: Substring) -> KayaNode? {
     if spec.hasPrefix("textarea") { return kayaTarget(spec, "textarea", kayaScene.textareas) }
@@ -15652,6 +15911,113 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(parts[1]) gutter \(gutter.1)")
                 }
+            case "expect_face" where parts.contains("face"):
+                // docs/font-picker-plan.md §2.5: harness.rs's drawn_face_verdict.
+                let faceAt = parts.firstIndex(of: "face")!
+                let rangeWord: Substring? = faceAt == 3 ? parts[2] : nil
+                let spec = parts[(faceAt + 1)...].joined(separator: " ")
+                guard faceAt == 2 || faceAt == 3, !spec.isEmpty else {
+                    failures.append("expect_face wants `<target> [<range>] face <face>`: \(line)")
+                    break
+                }
+                func readDrawnFace() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTextTarget(parts[1]) else { return (nil, ": no such target") }
+                        var wantText = spec
+                        if spec.hasPrefix("label") {
+                            guard let label = kayaTextTarget(Substring(spec)) else {
+                                return (nil, ": no such label \(spec)")
+                            }
+                            wantText = label.text
+                        }
+                        guard let want = kayaParseFaceWords(wantText) else {
+                            return (nil, ": \(spec) says \"\(wantText)\", not `<weight> <upright|italic> <width> [synthesized]`")
+                        }
+                        switch kayaDrawnFace(node, rangeWord) {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let got):
+                            return got.words == want ? (got.said, "") : (nil, " reads \(got.said), wanted \(want)")
+                        }
+                    }
+                }
+                var drawnFace = readDrawnFace()
+                let drawnDeadline = Date().addingTimeInterval(5)
+                while drawnFace.0 == nil && Date() < drawnDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    drawnFace = readDrawnFace()
+                }
+                let drawnWhat = "\(parts[1])\(rangeWord.map { " \($0)" } ?? "") face"
+                if let ok = drawnFace.0 {
+                    observed.append("\(drawnWhat) \(ok)")
+                } else {
+                    failures.append("\(drawnWhat)\(drawnFace.1)")
+                }
+            case "expect_font_dialog":
+                // docs/font-picker-plan.md §7: harness.rs's font_dialog_verdict.
+                let want = parts.count == 2 ? String(parts[1]) : ""
+                guard ["open", "closed", "code_only"].contains(want) else {
+                    failures.append("expect_font_dialog is one of open, closed, code_only: \(line)")
+                    break
+                }
+                func readDialog() -> (String?, String) {
+                    switch kayaFontDialogFamilies() {
+                    case .failure(let why): return (nil, ": \(why)")
+                    case .success(let listed): return kayaFontDialogVerdict(listed, want)
+                    }
+                }
+                var dialogRead = readDialog()
+                let dialogDeadline = Date().addingTimeInterval(8)
+                while dialogRead.0 == nil && Date() < dialogDeadline {
+                    Thread.sleep(forTimeInterval: 0.2)
+                    dialogRead = readDialog()
+                }
+                if let ok = dialogRead.0 {
+                    observed.append("font dialog \(ok)")
+                } else {
+                    failures.append("font dialog\(dialogRead.1)")
+                }
+            case "pick_font":
+                // docs/font-picker-plan.md §7: drive the open picker through its
+                // own controls, then hold that it is gone (harness.rs's rule).
+                let pickArg = parts.dropFirst().joined(separator: " ")
+                var choice: (String, KayaFace)?
+                if pickArg == "cancel" {
+                    choice = nil
+                } else if pickArg.hasPrefix("label") {
+                    let text = DispatchQueue.main.sync { kayaTextTarget(Substring(pickArg))?.text } ?? ""
+                    guard let parsed = kayaParseFontChoice(text) else {
+                        failures.append("pick_font: \(pickArg) says \"\(text)\", not `<weight> <slope> <width> <family>`")
+                        break
+                    }
+                    choice = parsed
+                } else if let (family, rest) = kayaQuotedPrefix(pickArg), let face = kayaParseFaceWords(rest),
+                    !kayaFaceWordsSynthesized(rest)
+                {
+                    choice = (family, face.face)
+                } else {
+                    failures.append("pick_font wants cancel, a label or \"<family>\" <face>: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let pickAnswered = kayaAnswers()
+                if let why = kayaPickFont(choice) {
+                    failures.append("pick_font: \(why)")
+                    break
+                }
+                var pickGone = false
+                let pickDeadline = Date().addingTimeInterval(8)
+                while Date() < pickDeadline {
+                    if case .success(nil) = kayaFontDialogFamilies() {
+                        pickGone = true
+                        break
+                    }
+                    Thread.sleep(forTimeInterval: 0.1)
+                }
+                if !pickGone {
+                    failures.append("pick_font: the picker is still open, so the press was swallowed")
+                    break
+                }
+                kayaAwaitAnswer(pickAnswered)
             case "expect_face":
                 // docs/code-surface-plan.md M4: harness.rs's face_verdict.
                 let want = parts.count == 3 ? String(parts[2]) : ""
@@ -25058,6 +25424,24 @@ func kayaFamilyPresent(_ family: String) -> Bool {
 /// else touched. nil when no typeface is in force.
 /// The font a rich LABEL's runs apply their traits to: the role's own
 /// (docs/rich-text-plan.md R8, §15).
+/// Whether kaya synthesizes the bold of a rich label's own face.
+@MainActor func kayaLabelBaseBold(_ node: KayaNode) -> Bool {
+    kayaNodeFaceResolution(node, kayaNodeStyle(node))?.synthBold ?? false
+}
+
+/// A plain textarea's synthesized bold, on its text and its typing
+/// (docs/font-picker-plan.md §2.4); a rich one carries it per run.
+@MainActor func kayaPlainSyntheticBold(_ storage: NSTextStorage, typing: inout [NSAttributedString.Key: Any], on: Bool) {
+    let full = NSRange(location: 0, length: storage.length)
+    if on {
+        storage.addAttribute(.strokeWidth, value: kayaSyntheticBoldStroke, range: full)
+        typing[.strokeWidth] = kayaSyntheticBoldStroke
+    } else if storage.length > 0 || typing[.strokeWidth] != nil {
+        storage.removeAttribute(.strokeWidth, range: full)
+        typing.removeValue(forKey: .strokeWidth)
+    }
+}
+
 @MainActor func kayaLabelBaseFont(_ node: KayaNode) -> KayaPlatformFont {
     let style: KayaPlatformTextStyle =
         node.role == roleHeading ? .headline : node.role == roleCaption ? .footnote : .body
@@ -25176,12 +25560,12 @@ struct KayaGutterLine {
 /// The gutter, face and size a textarea asks for, as one value its body
 /// reads so a change to any of them updates the view.
 func kayaSurfaceKey(_ node: KayaNode) -> String {
-    "\(node.lineNumbers) \(node.monospaced) \(node.textScale) \(node.family)"
+    "\(node.lineNumbers) \(node.monospaced) \(node.textScale) \(node.family) \(node.fontWeight) \(node.fontItalic) \(node.fontWidth)"
 }
 
 /// Whether the node asks for a face or a size of its own.
 func kayaNodeFontSet(_ node: KayaNode) -> Bool {
-    node.monospaced || !node.family.isEmpty || node.textScale != 1
+    node.monospaced || !node.family.isEmpty || node.textScale != 1 || kayaNodeFaceSet(node)
 }
 
 /// The font a text kind draws in: the platform's (or the brand's) for the
@@ -25216,6 +25600,9 @@ func kayaNodeFontSet(_ node: KayaNode) -> Bool {
     #else
         let present = !node.family.isEmpty && !UIFont.fontNames(forFamilyName: node.family).isEmpty
     #endif
+    if kayaNodeFaceSet(node) {
+        return kayaNodeResolvedFace(node, base: base, size: size, present: present).font as KayaPlatformFont
+    }
     if present {
         let descriptor = KayaPlatformFontDescriptor(fontAttributes: [
             .family: node.family,
@@ -25249,6 +25636,39 @@ func kayaNodeFontSet(_ node: KayaNode) -> Bool {
     #endif
 }
 
+/// The face a node asks for, over the role's own: its weight (the role's when
+/// unset), slope and width (docs/font-picker-plan.md §2.3).
+func kayaNodeWantFace(_ node: KayaNode, base: KayaPlatformFont) -> KayaFace {
+    KayaFace(
+        weight: node.fontWeight != 0 ? node.fontWeight : kayaFaceOf(base as CTFont).weight,
+        italic: node.fontItalic,
+        width: node.fontWidth != 0 ? node.fontWidth : 5)
+}
+
+/// The family a node's face resolves in: its installed `family`, else the
+/// platform's monospaced face, else the brand family or the platform's.
+@MainActor func kayaNodeResolvedFace(
+    _ node: KayaNode, base: KayaPlatformFont, size: CGFloat, present: Bool
+) -> KayaResolvedFace {
+    let want = kayaNodeWantFace(node, base: base)
+    let family: String? = present ? node.family : node.monospaced ? nil : kayaScene.typefaceFamily
+    return kayaResolveFace(family: family, mono: !present && node.monospaced, want: want, size: size)
+}
+
+/// The resolved face of a text kind with its synthesis, for the label's drawn
+/// bold and for expect_face; nil when the node asks for no face.
+@MainActor func kayaNodeFaceResolution(_ node: KayaNode, _ style: KayaPlatformTextStyle) -> KayaResolvedFace? {
+    guard kayaNodeFaceSet(node) else { return nil }
+    #if os(macOS)
+        let base = kayaPlatformFont(style) ?? NSFont.preferredFont(forTextStyle: style)
+        let present = !node.family.isEmpty && kayaFamilyPresent(node.family)
+    #else
+        let base = UIFont.preferredFont(forTextStyle: style, compatibleWith: kayaHarnessWindow()?.traitCollection)
+        let present = !node.family.isEmpty && !UIFont.fontNames(forFamilyName: node.family).isEmpty
+    #endif
+    return kayaNodeResolvedFace(node, base: base, size: base.pointSize * CGFloat(node.textScale), present: present)
+}
+
 /// The SwiftUI spelling of kayaNodeFont, or nil when the node asks for nothing.
 @MainActor func kayaNodeSwiftFont(
     _ node: KayaNode, _ style: KayaPlatformTextStyle, traits: KayaTextTraits? = nil
@@ -25275,6 +25695,11 @@ struct KayaNodeFontModifier: ViewModifier {
     }
 }
 
+/// What a label's font modifier last DREW: a sheared font, and the second
+/// pass of a synthesized bold. expect_face reads it, since accessibility
+/// publishes the font's name and neither (docs/font-picker-plan.md §2.5).
+@MainActor var kayaLabelDrawn: [UInt64: (shear: Bool, overlay: Bool)] = [:]
+
 /// A label's font: its own face and size when it asks for one (with the
 /// role's text style under it), else the role's.
 struct KayaLabelFont: ViewModifier {
@@ -25283,7 +25708,22 @@ struct KayaLabelFont: ViewModifier {
 
     func body(content: Content) -> some View {
         if kayaNodeFontSet(node) {
-            content.modifier(KayaNodeFontModifier(node: node, style: kayaNodeStyle(node)))
+            let resolved = kayaNodeFaceResolution(node, kayaNodeStyle(node))
+            let _ = kayaLabelDrawn[node.id] = (
+                CTFontGetMatrix(resolved?.font ?? kayaNodeFont(node, kayaNodeStyle(node)) as CTFont).c != 0,
+                resolved?.synthBold ?? false)
+            if let resolved, resolved.synthBold {
+                // A synthesized bold, drawn twice a hair apart: SwiftUI's Text
+                // takes no stroke (docs/font-picker-plan.md §2.4).
+                content.modifier(KayaNodeFontModifier(node: node, style: kayaNodeStyle(node)))
+                    .overlay(alignment: .topLeading) {
+                        content.modifier(KayaNodeFontModifier(node: node, style: kayaNodeStyle(node)))
+                            .offset(x: max(0.5, CTFontGetSize(resolved.font) * 0.04))
+                            .accessibilityHidden(true)
+                    }
+            } else {
+                content.modifier(KayaNodeFontModifier(node: node, style: kayaNodeStyle(node)))
+            }
         } else {
             content.font(font)
         }
@@ -25302,6 +25742,542 @@ func kayaListFontFamilies() {
         KayaHost.api.font_families(buffer.baseAddress, UInt(buffer.count))
     }
 }
+
+// --- THE FACE (docs/font-picker-plan.md §2) ---
+
+/// A face as kaya names it on every platform: the OpenType weight class, the
+/// slope, and the width class (§2.2).
+struct KayaFace: Equatable, Hashable {
+    var weight: Int
+    var italic: Bool
+    var width: Int
+    static let regular = KayaFace(weight: 400, italic: false, width: 5)
+    var words: String { "\(weight) \(italic ? "italic" : "upright") \(width)" }
+}
+
+/// The shear a synthesized slope draws with, about 11 degrees (§2.4).
+let kayaObliqueShear = CGAffineTransform(a: 1, b: 0, c: 0.2, d: 1, tx: 0, ty: 0)
+/// The stroke a synthesized bold draws with in TextKit, in percent of the
+/// font's size, negative to fill as well (§2.4).
+let kayaSyntheticBoldStroke: CGFloat = -3.0
+
+func kayaAxisTag(_ s: String) -> Int { s.utf8.reduce(0) { $0 << 8 | Int($1) } }
+
+/// A `wdth` percentage as the nearest OpenType width class.
+func kayaWidthClass(percent: Double) -> Int {
+    let steps: [Double] = [50, 62.5, 75, 87.5, 100, 112.5, 125, 150, 200]
+    var best = 5
+    var distance = Double.infinity
+    for (i, step) in steps.enumerated() where abs(step - percent) < distance {
+        distance = abs(step - percent)
+        best = i + 1
+    }
+    return best
+}
+
+func kayaWidthPercent(_ width: Int) -> Double {
+    [50, 62.5, 75, 87.5, 100, 112.5, 125, 150, 200][max(1, min(9, width)) - 1]
+}
+
+/// Core Text's -1..1 weight trait as a weight class, by the anchors AppKit's
+/// own NSFont.Weight constants sit at (measured: Thin -0.6 is 200, Bold 0.4 700).
+func kayaWeightClass(trait w: Double) -> Int {
+    let anchors: [(Double, Int)] = [
+        (-0.8, 100), (-0.6, 200), (-0.4, 300), (0, 400), (0.23, 500), (0.3, 600), (0.4, 700), (0.56, 800),
+        (0.62, 900),
+    ]
+    if w <= anchors[0].0 { return 100 }
+    for i in 1..<anchors.count where w <= anchors[i].0 {
+        let (a, wa) = anchors[i - 1]
+        let (b, wb) = anchors[i]
+        return Int((Double(wa) + (w - a) / (b - a) * Double(wb - wa)).rounded())
+    }
+    return 900
+}
+
+/// The face a font IS, read off the font: a variable font's `wght` and `wdth`
+/// where the axes are on the OpenType scale (Skia's legacy axes are not), else
+/// the OS/2 table (a weight under 100 is a legacy 1-9 value and is not
+/// trusted), else Core Text's traits. Italic is the symbolic trait, the OS/2
+/// italic bit, or a slanted axis.
+func kayaFaceOf(_ font: CTFont) -> KayaFace {
+    var weight: Int?
+    var width: Int?
+    var italic = CTFontGetSymbolicTraits(font).contains(.traitItalic)
+    let axes = (CTFontCopyVariationAxes(font) as? [[String: Any]]) ?? []
+    func axisMax(_ tag: String) -> Double {
+        let want = kayaAxisTag(tag)
+        for axis in axes where (axis[kCTFontVariationAxisIdentifierKey as String] as? NSNumber)?.intValue == want {
+            return (axis[kCTFontVariationAxisMaximumValueKey as String] as? NSNumber)?.doubleValue ?? 0
+        }
+        return 0
+    }
+    if let variation = CTFontCopyVariation(font) as? [NSNumber: NSNumber] {
+        if let w = variation[NSNumber(value: kayaAxisTag("wght"))], axisMax("wght") >= 100 {
+            weight = max(1, min(1000, Int(w.doubleValue.rounded())))
+        }
+        if let d = variation[NSNumber(value: kayaAxisTag("wdth"))], axisMax("wdth") >= 10 {
+            width = kayaWidthClass(percent: d.doubleValue)
+        }
+        if let s = variation[NSNumber(value: kayaAxisTag("slnt"))], s.doubleValue != 0 { italic = true }
+        if let s = variation[NSNumber(value: kayaAxisTag("ital"))], s.doubleValue != 0 { italic = true }
+    }
+    if let data = CTFontCopyTable(font, CTFontTableTag(kCTFontTableOS2), []) as Data?, data.count >= 64 {
+        let w = Int(data[4]) << 8 | Int(data[5])
+        let d = Int(data[6]) << 8 | Int(data[7])
+        let selection = Int(data[62]) << 8 | Int(data[63])
+        if weight == nil, (100...1000).contains(w) { weight = w }
+        if width == nil, (1...9).contains(d) { width = d }
+        if selection & 1 != 0 { italic = true }
+    }
+    if weight == nil || width == nil {
+        let traits = CTFontCopyTraits(font) as NSDictionary
+        if weight == nil { weight = kayaWeightClass(trait: (traits[kCTFontWeightTrait] as? Double) ?? 0) }
+        if width == nil {
+            let w = (traits[kCTFontWidthTrait] as? Double) ?? 0
+            width = max(1, min(9, 5 + Int((w * 4).rounded())))
+        }
+    }
+    return KayaFace(weight: weight ?? 400, italic: italic, width: width ?? 5)
+}
+
+/// One installed face of a family: what it is, the platform's name for it,
+/// and the descriptor that makes it.
+struct KayaFamilyFace {
+    let face: KayaFace
+    let name: String
+    let descriptor: CTFontDescriptor
+}
+
+private var kayaFamilyFaceCache: [String: [KayaFamilyFace]] = [:]
+private let kayaFamilyFaceLock = NSLock()
+
+/// A family's installed faces, one per face (the first name in sort order
+/// kept), in weight, slope, width order. Faces the platform would synthesize
+/// are not installed, so never listed.
+func kayaFamilyFaces(_ family: String) -> [KayaFamilyFace] {
+    kayaFamilyFaceLock.lock()
+    defer { kayaFamilyFaceLock.unlock() }
+    if let hit = kayaFamilyFaceCache[family] { return hit }
+    let wanted = CTFontDescriptorCreateWithAttributes([kCTFontFamilyNameAttribute: family as CFString] as CFDictionary)
+    let mandatory = NSSet(array: [kCTFontFamilyNameAttribute]) as CFSet
+    let all = (CTFontDescriptorCreateMatchingFontDescriptors(wanted, mandatory) as? [CTFontDescriptor]) ?? []
+    var faces: [KayaFamilyFace] = all.map { descriptor in
+        let font = CTFontCreateWithFontDescriptor(descriptor, 13, nil)
+        let name = (CTFontCopyName(font, kCTFontStyleNameKey) as String?) ?? (CTFontCopyPostScriptName(font) as String)
+        return KayaFamilyFace(face: kayaFaceOf(font), name: name, descriptor: descriptor)
+    }
+    faces.sort {
+        ($0.face.weight, $0.face.italic ? 1 : 0, $0.face.width, $0.name)
+            < ($1.face.weight, $1.face.italic ? 1 : 0, $1.face.width, $1.name)
+    }
+    var seen = Set<KayaFace>()
+    faces = faces.filter { seen.insert($0.face).inserted }
+    kayaFamilyFaceCache[family] = faces
+    return faces
+}
+
+/// The CSS Fonts 4 font matching algorithm, §5.2 (docs/font-picker-plan.md
+/// §2.4): width first, then slope, then weight.
+func kayaMatchFace(_ faces: [KayaFace], _ want: KayaFace) -> KayaFace? {
+    guard !faces.isEmpty else { return nil }
+    let widths = Set(faces.map(\.width))
+    let width: Int
+    if widths.contains(want.width) {
+        width = want.width
+    } else {
+        let narrower = widths.filter { $0 < want.width }.sorted(by: >)
+        let wider = widths.filter { $0 > want.width }.sorted()
+        width = (want.width <= 5 ? narrower + wider : wider + narrower)[0]
+    }
+    var pool = faces.filter { $0.width == width }
+    let slopes = Set(pool.map(\.italic))
+    let italic = slopes.contains(want.italic) ? want.italic : !want.italic
+    pool = pool.filter { $0.italic == italic }
+    let weights = Set(pool.map(\.weight))
+    let w = want.weight
+    let chosen: Int
+    if weights.contains(w) {
+        chosen = w
+    } else if (400...500).contains(w) {
+        let up = weights.filter { $0 > w && $0 <= 500 }.sorted()
+        let down = weights.filter { $0 < w }.sorted(by: >)
+        let above = weights.filter { $0 > 500 }.sorted()
+        chosen = (up + down + above)[0]
+    } else if w < 400 {
+        let down = weights.filter { $0 < w }.sorted(by: >)
+        let up = weights.filter { $0 > w }.sorted()
+        chosen = (down + up)[0]
+    } else {
+        let up = weights.filter { $0 > w }.sorted()
+        let down = weights.filter { $0 < w }.sorted(by: >)
+        chosen = (up + down)[0]
+    }
+    return pool.first { $0.weight == chosen }
+}
+
+/// A resolved face: the font to draw with, and what kaya draws itself on top
+/// (§2.4: Apple synthesizes nothing, measured).
+struct KayaResolvedFace {
+    let font: CTFont
+    let synthItalic: Bool
+    let synthBold: Bool
+}
+
+/// The font for `want` in `family` (nil for the platform's own face, `mono`
+/// for its monospaced one) at `size`. A named family is matched by
+/// kayaMatchFace and a missing slope or bold synthesized; the platform's
+/// faces are variable, so their weight and width are set exactly.
+func kayaResolveFace(family: String?, mono: Bool, want: KayaFace, size: CGFloat) -> KayaResolvedFace {
+    if let family, !family.isEmpty {
+        let faces = kayaFamilyFaces(family)
+        if let match = kayaMatchFace(faces.map(\.face), want), let hit = faces.first(where: { $0.face == match }) {
+            let synthItalic = want.italic && !match.italic
+            var matrix = kayaObliqueShear
+            let font = synthItalic
+                ? CTFontCreateWithFontDescriptor(hit.descriptor, size, &matrix)
+                : CTFontCreateWithFontDescriptor(hit.descriptor, size, nil)
+            return KayaResolvedFace(font: font, synthItalic: synthItalic, synthBold: want.weight >= 600 && match.weight < 600)
+        }
+    }
+    #if os(macOS)
+        let base: CTFont = mono
+            ? NSFont.monospacedSystemFont(ofSize: size, weight: .regular) : NSFont.systemFont(ofSize: size)
+    #else
+        let base: CTFont = mono
+            ? UIFont.monospacedSystemFont(ofSize: size, weight: .regular) : UIFont.systemFont(ofSize: size)
+    #endif
+    var descriptor = CTFontCopyFontDescriptor(base)
+    descriptor = CTFontDescriptorCreateCopyWithVariation(
+        descriptor, NSNumber(value: kayaAxisTag("wght")), CGFloat(want.weight))
+    if want.width != 5 {
+        descriptor = CTFontDescriptorCreateCopyWithVariation(
+            descriptor, NSNumber(value: kayaAxisTag("wdth")), CGFloat(kayaWidthPercent(want.width)))
+    }
+    var synthItalic = false
+    if want.italic {
+        if let slanted = CTFontDescriptorCreateCopyWithSymbolicTraits(descriptor, .traitItalic, .traitItalic) {
+            descriptor = slanted
+        } else {
+            synthItalic = true
+        }
+    }
+    var matrix = kayaObliqueShear
+    let font = synthItalic
+        ? CTFontCreateWithFontDescriptor(descriptor, size, &matrix) : CTFontCreateWithFontDescriptor(descriptor, size, nil)
+    return KayaResolvedFace(font: font, synthItalic: synthItalic, synthBold: false)
+}
+
+/// Whether a node asks for a face of its own (§2.3).
+func kayaNodeFaceSet(_ node: KayaNode) -> Bool {
+    node.fontWeight != 0 || node.fontItalic || node.fontWidth != 0
+}
+
+/// The face a rich run draws with over `base` (docs/font-picker-plan.md §3):
+/// Bold at least 700, Italic over the base's own weight and width, Code in the
+/// platform's monospaced face (or the base's own family when that is a named
+/// fixed-pitch one, the editor's case) at the run's face. `baseBold` is a base
+/// whose bold kaya synthesizes, which its font cannot say.
+func kayaRunFace(
+    base: CTFont, baseBold: Bool, size: CGFloat, bold: Bool, italic: Bool, code: Bool
+) -> KayaResolvedFace {
+    var want = kayaFaceOf(base)
+    if CTFontGetMatrix(base).c != 0 { want.italic = true }
+    if baseBold || bold { want.weight = max(want.weight, 700) }
+    if italic { want.italic = true }
+    let name = CTFontCopyFamilyName(base) as String
+    let named = !name.hasPrefix(".")
+    let fixed = CTFontGetSymbolicTraits(base).contains(.traitMonoSpace)
+    if code {
+        return kayaResolveFace(family: named && fixed ? name : nil, mono: true, want: want, size: size)
+    }
+    return kayaResolveFace(family: named ? name : nil, mono: !named && fixed, want: want, size: size)
+}
+
+/// list_font_faces, answered through the core (docs/font-picker-plan.md §4.4).
+func kayaListFontFaces(_ family: String) {
+    let present = kayaFamilyPresent(family)
+    let lines = present
+        ? kayaFamilyFaces(family).map { "\($0.face.weight)\t\($0.face.italic ? 1 : 0)\t\($0.face.width)\t\($0.name)" } : []
+    let familyBytes = Array(family.utf8)
+    let joined = Array(lines.joined(separator: "\n").utf8)
+    familyBytes.withUnsafeBufferPointer { f in
+        joined.withUnsafeBufferPointer { j in
+            KayaHost.api.font_faces(f.baseAddress, UInt(f.count), j.baseAddress, UInt(j.count))
+        }
+    }
+}
+
+// --- THE FONT PICKER (docs/font-picker-plan.md §4) ---
+
+/// The picker's one answer through the core: a family and its face, or an
+/// empty family for cancel.
+func kayaEmitFontChoice(_ dialog: UInt64, _ family: String?, _ face: KayaFace) {
+    let bytes = Array((family ?? "").utf8)
+    bytes.withUnsafeBufferPointer { b in
+        KayaHost.api.emit_font_dialog_result(
+            dialog, b.baseAddress, UInt(b.count), UInt32(family == nil ? 0 : face.weight),
+            family != nil && face.italic ? 1 : 0, UInt32(family == nil ? 0 : face.width))
+    }
+}
+
+/// The face a picker answers for a family when the request asked for none:
+/// the family's regular face as the platform matches it (§4.2).
+func kayaRegularFace(_ family: String) -> KayaFace {
+    kayaMatchFace(kayaFamilyFaces(family).map(\.face), .regular) ?? .regular
+}
+
+#if os(macOS)
+    /// The identifier of the macOS 26 font panel's collections popup. NOT
+    /// PUBLIC (docs/font-picker-plan.md Q2, RULED 2026-10-29): kayaSelectFixedWidth
+    /// names what it could not find and the panel stays whole and unfiltered.
+    let kayaCollectionsToolbarItem = "NSFontPanelCollectionsToolbarItem"
+    /// The Mac's own collection of fixed-pitch families.
+    let kayaFixedWidthCollection = "Fixed Width"
+
+    /// The floating NSFontPanel as kaya's one-answer picker (Q1, RULED):
+    /// kaya's own Cancel and Choose in the accessory view, the panel's clicks
+    /// kept to this agent, the size and effects masked off, and with
+    /// `code_only` the Fixed Width collection selected and its popup masked
+    /// off so the user cannot leave it.
+    @MainActor final class KayaFontPanelAgent: NSObject, NSFontChanging {
+        let dialog: UInt64
+        let faces: Bool
+        let codeOnly: Bool
+        /// The collection is chosen and its popup may be masked off.
+        var codeLocked = false
+        /// Why the code-only filter is off, when it is.
+        var codeOffWhy: String?
+        /// The collection the panel showed before kaya chose Fixed Width,
+        /// put back at the end: the panel remembers its collection across
+        /// runs, and a later request for every family must not open on kaya's.
+        var previousCollection: String?
+        var answered = false
+        var lastFont: NSFont?
+        var previousTarget: AnyObject?
+        var observer: NSObjectProtocol?
+
+        init(dialog: UInt64, faces: Bool, codeOnly: Bool) {
+            self.dialog = dialog
+            self.faces = faces
+            self.codeOnly = codeOnly
+        }
+
+        func changeFont(_ sender: NSFontManager?) {
+            lastFont = (sender ?? NSFontManager.shared).convert(NSFont.systemFont(ofSize: 13))
+        }
+
+        func validModesForFontPanel(_ fontPanel: NSFontPanel) -> NSFontPanel.ModeMask {
+            if codeOnly && !codeLocked { return faces ? [.face, .collection] : [.collection] }
+            return faces ? [.face] : []
+        }
+
+        @objc func choose() {
+            let manager = NSFontManager.shared
+            guard let font = lastFont ?? manager.selectedFont, let family = font.familyName, !family.hasPrefix(".")
+            else {
+                finish(nil, .regular)
+                return
+            }
+            finish(family, faces ? kayaFaceOf(font as CTFont) : kayaRegularFace(family))
+        }
+
+        @objc func cancel() { finish(nil, .regular) }
+
+        func finish(_ family: String?, _ face: KayaFace) {
+            guard !answered else { return }
+            answered = true
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            let manager = NSFontManager.shared
+            let panel = manager.fontPanel(false)
+            if codeLocked, let previous = previousCollection, let panel {
+                _ = kayaSelectCollection(panel, previous)
+            }
+            panel?.accessoryView = nil
+            panel?.orderOut(nil)
+            manager.target = previousTarget
+            kayaFontAgent = nil
+            kayaEmitFontChoice(dialog, family, face)
+        }
+    }
+
+    @MainActor var kayaFontAgent: KayaFontPanelAgent?
+
+    /// Select the Mac's Fixed Width collection through the panel's toolbar
+    /// popup, noting what it showed before. nil when it is selected;
+    /// otherwise what was missing.
+    @MainActor func kayaSelectFixedWidth(_ panel: NSFontPanel) -> String? {
+        kayaSelectCollection(panel, kayaFixedWidthCollection)
+    }
+
+    @MainActor func kayaSelectCollection(_ panel: NSFontPanel, _ collection: String) -> String? {
+        guard #available(macOS 26, *) else {
+            return "the font panel before macOS 26 keeps its collections in a column, unmeasured (docs/deferred.md, the font panel before macOS 26)"
+        }
+        guard let toolbar = panel.toolbar else { return "the font panel has no toolbar" }
+        let ids = toolbar.items.map(\.itemIdentifier.rawValue)
+        guard let item = toolbar.items.first(where: { $0.itemIdentifier.rawValue == kayaCollectionsToolbarItem }) else {
+            return "the font panel's toolbar has no \(kayaCollectionsToolbarItem) among \(ids)"
+        }
+        func popups(_ view: NSView) -> [NSPopUpButton] {
+            (view as? NSPopUpButton).map { [$0] } ?? view.subviews.flatMap(popups)
+        }
+        guard let popup = item.view.flatMap({ popups($0).first }) else {
+            return "\(kayaCollectionsToolbarItem) holds no popup (its view is \(item.view.map { String(describing: type(of: $0)) } ?? "none"))"
+        }
+        let index = popup.indexOfItem(withTitle: collection)
+        guard index >= 0 else {
+            return "\(kayaCollectionsToolbarItem)'s popup has no \(collection) among \(popup.itemTitles)"
+        }
+        if collection == kayaFixedWidthCollection, kayaFontAgent?.previousCollection == nil {
+            kayaFontAgent?.previousCollection = popup.titleOfSelectedItem
+        }
+        popup.selectItem(at: index)
+        popup.menu?.performActionForItem(at: index)
+        guard popup.titleOfSelectedItem == collection else {
+            return "\(kayaCollectionsToolbarItem)'s popup did not keep \(collection) (it shows \(popup.titleOfSelectedItem ?? "nothing"))"
+        }
+        return nil
+    }
+#endif
+
+@MainActor func kayaPresentFontDialog(
+    window: UInt64, dialog: UInt64, codeOnly: Bool, faces: Bool, family: String, initial: KayaFace
+) {
+    #if os(macOS)
+        let manager = NSFontManager.shared
+        let agent = KayaFontPanelAgent(dialog: dialog, faces: faces, codeOnly: codeOnly)
+        kayaFontAgent = agent
+        agent.previousTarget = manager.target as AnyObject?
+        manager.target = agent
+        let start: NSFont =
+            !family.isEmpty && kayaFamilyPresent(family)
+            ? kayaResolveFace(family: family, mono: false, want: initial, size: 13).font as NSFont
+            : NSFont.systemFont(ofSize: 13)
+        manager.setSelectedFont(start, isMultiple: false)
+        guard let panel = manager.fontPanel(true) else {
+            kayaDiag("kaya: NSFontManager made no font panel; the font dialog answers cancel")
+            agent.finish(nil, .regular)
+            return
+        }
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 220, height: 40))
+        let cancel = NSButton(title: "Cancel", target: agent, action: #selector(KayaFontPanelAgent.cancel))
+        cancel.keyEquivalent = "\u{1b}"
+        cancel.setAccessibilityIdentifier("kaya.font.cancel")
+        let choose = NSButton(title: "Choose", target: agent, action: #selector(KayaFontPanelAgent.choose))
+        choose.keyEquivalent = "\r"
+        choose.setAccessibilityIdentifier("kaya.font.choose")
+        cancel.frame = NSRect(x: 20, y: 6, width: 96, height: 28)
+        choose.frame = NSRect(x: 120, y: 6, width: 96, height: 28)
+        accessory.addSubview(cancel)
+        accessory.addSubview(choose)
+        panel.accessoryView = accessory
+        agent.observer = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: panel, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { kayaFontAgent?.cancel() }
+        }
+        // The masks are asked when the panel BECOMES KEY (measured), so it is
+        // made key, never only ordered front.
+        panel.makeKeyAndOrderFront(nil)
+        guard codeOnly else { return }
+        var tries = 0
+        func lock() {
+            guard kayaFontAgent === agent, !agent.answered else { return }
+            if let why = kayaSelectFixedWidth(panel) {
+                tries += 1
+                if tries < 10 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { lock() }
+                    return
+                }
+                agent.codeOffWhy = why
+                kayaDiag(
+                    "kaya: the font picker shows every family, not code fonts only: \(why); Fixed Width stays one click away in its collections")
+                return
+            }
+            agent.codeLocked = true
+            panel.makeKeyAndOrderFront(nil)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { lock() }
+    #else
+        kayaPresentFontPicker(window: window, dialog: dialog, codeOnly: codeOnly, faces: faces, family: family, initial: initial)
+    #endif
+}
+
+#if !os(macOS)
+    /// UIFontPickerViewController as kaya's one-answer picker (§4.3): a remote
+    /// view, so only the delegate is reachable; it stays presented after a
+    /// pick (measured), so kaya dismisses it.
+    final class KayaFontPickerDelegate: NSObject, UIFontPickerViewControllerDelegate,
+        UIAdaptivePresentationControllerDelegate
+    {
+        let dialog: UInt64
+        let faces: Bool
+        var answered = false
+        weak var picker: UIFontPickerViewController?
+
+        init(dialog: UInt64, faces: Bool) {
+            self.dialog = dialog
+            self.faces = faces
+        }
+
+        func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
+            guard let descriptor = viewController.selectedFontDescriptor else {
+                finish(nil, .regular)
+                return
+            }
+            let font = UIFont(descriptor: descriptor, size: 17)
+            let family = font.familyName
+            finish(family, faces ? kayaFaceOf(font as CTFont) : kayaRegularFace(family))
+        }
+
+        func fontPickerViewControllerDidCancel(_ viewController: UIFontPickerViewController) {
+            finish(nil, .regular)
+        }
+
+        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+            finish(nil, .regular)
+        }
+
+        func finish(_ family: String?, _ face: KayaFace) {
+            guard !answered else { return }
+            answered = true
+            if let picker, picker.presentingViewController != nil { picker.dismiss(animated: false) }
+            kayaFontPickerDelegate = nil
+            kayaEmitFontChoice(dialog, family, face)
+        }
+    }
+
+    var kayaFontPickerDelegate: KayaFontPickerDelegate?
+
+    @MainActor func kayaPresentFontPicker(
+        window: UInt64, dialog: UInt64, codeOnly: Bool, faces: Bool, family: String, initial: KayaFace
+    ) {
+        _ = window
+        let configuration = UIFontPickerViewController.Configuration()
+        configuration.includeFaces = faces
+        configuration.filteredTraits = codeOnly ? .traitMonoSpace : []
+        let picker = UIFontPickerViewController(configuration: configuration)
+        if !family.isEmpty, kayaFamilyPresent(family) {
+            picker.selectedFontDescriptor =
+                (kayaResolveFace(family: family, mono: false, want: initial, size: 17).font as UIFont).fontDescriptor
+        }
+        let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces)
+        delegate.picker = picker
+        picker.delegate = delegate
+        kayaFontPickerDelegate = delegate
+        var host = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?
+            .windows.first(where: \.isKeyWindow)?.rootViewController
+        while let next = host?.presentedViewController { host = next }
+        guard let host else {
+            kayaDiag("kaya: no view controller to present the font picker over; it answers cancel")
+            delegate.finish(nil, .regular)
+            return
+        }
+        host.present(picker, animated: false)
+        picker.presentationController?.delegate = delegate
+    }
+#endif
 
 /// expect_face's read: what the toolkit resolved for the font a view holds.
 func kayaFaceWord(_ font: KayaPlatformFont) -> String {
@@ -28480,7 +29456,7 @@ struct KayaRender: View {
             // own font (docs/rich-text-plan.md R8, §15).
             let base = (node.rich
                 ? Text(AttributedString(kayaAttributedDocument(
-                    node.text, node.richRuns, base: kayaLabelBaseFont(node), ground: true)))
+                    node.text, node.richRuns, base: kayaLabelBaseFont(node), baseBold: kayaLabelBaseBold(node), ground: true)))
                 : Text(node.text))
                 .modifier(KayaLabelFont(node: node, font: font))
                 .textCase(
@@ -36626,7 +37602,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 context.coordinator.richDone = richSeq
                 let selection = view.selectedRange
                 storage.setAttributedString(
-                    kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view)))
+                    kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view)))
                 let end = (text as NSString).length
                 let location = min(selection.location, end)
                 view.setSelectedRange(
@@ -36639,6 +37615,13 @@ private struct KayaMacTextarea: NSViewRepresentable {
             let location = min(selection.location, end)
             view.setSelectedRange(
                 NSRange(location: location, length: min(selection.length, end - location)))
+        }
+        if !rich, !view.hasMarkedText(), let storage = view.textStorage {
+            var typing = view.typingAttributes
+            kayaPlainSyntheticBold(storage, typing: &typing, on: kayaNodeFaceResolution(node, .body)?.synthBold ?? false)
+            if (typing[.strokeWidth] as? CGFloat) != (view.typingAttributes[.strokeWidth] as? CGFloat) {
+                view.typingAttributes = typing
+            }
         }
 
         // THE UNIVERSAL PROPS, ON THE ELEMENT THAT PUBLISHES AS THE TEXT AREA:
@@ -36880,9 +37863,17 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     return kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
 }
 
+/// Whether kaya synthesizes the bold of a textarea's own face (docs/font-picker-plan.md §2.4).
+@MainActor func kayaRichBaseBold(_ view: NSTextView) -> Bool {
+    guard let id = (view as? KayaTextView)?.nodeId, let node = kayaScene.nodes[id] else { return false }
+    return kayaNodeFaceResolution(node, .body)?.synthBold ?? false
+}
+
 /// The display attributes derived from the kaya keys over `range`. Nothing
 /// else on the storage moves; the highlight ground stays applyRanges'.
-@MainActor func kayaRestyle(_ storage: NSMutableAttributedString, _ range: NSRange, base: NSFont) {
+@MainActor func kayaRestyle(
+    _ storage: NSMutableAttributedString, _ range: NSRange, base: NSFont, baseBold: Bool = false
+) {
     let manager = NSFontManager.shared
     storage.enumerateAttributes(in: range, options: []) { attrs, sub, _ in
         let has = { (name: String) -> Bool in attrs[kayaRichKey(name)] != nil }
@@ -36901,15 +37892,17 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             bold = true
         default: break
         }
-        var font: NSFont
-        if has("code") || block == "code_block" {
-            font = NSFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
-        } else {
-            font = size == base.pointSize ? base : manager.convert(base, toSize: size)
-            if bold { font = manager.convert(font, toHaveTrait: .boldFontMask) }
+        var font = size == base.pointSize ? base : manager.convert(base, toSize: size)
+        var synthBold = baseBold
+        let code = has("code") || block == "code_block"
+        if code || bold || has("italic") || baseBold {
+            let run = kayaRunFace(
+                base: base, baseBold: baseBold, size: size, bold: bold, italic: has("italic"), code: code)
+            font = run.font as NSFont
+            synthBold = run.synthBold
         }
-        if has("italic") { font = manager.convert(font, toHaveTrait: .italicFontMask) }
         var out: [NSAttributedString.Key: Any] = [.font: font]
+        if synthBold { out[.strokeWidth] = kayaSyntheticBoldStroke } else { storage.removeAttribute(.strokeWidth, range: sub) }
         let link = attrs[kayaRichKey("link")] as? String
         out[.foregroundColor] =
             link != nil
@@ -36945,7 +37938,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 }
 
 @MainActor func kayaAttributedDocument(
-    _ text: String, _ runs: [KayaRichRun], base: NSFont, ground: Bool = false
+    _ text: String, _ runs: [KayaRichRun], base: NSFont, baseBold: Bool = false, ground: Bool = false
 ) -> NSAttributedString {
     let doc = NSMutableAttributedString(
         string: text, attributes: [.font: base, .foregroundColor: NSColor.textColor])
@@ -36953,7 +37946,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         doc.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
     }
     let full = NSRange(location: 0, length: doc.length)
-    kayaRestyle(doc, full, base: base)
+    kayaRestyle(doc, full, base: base, baseBold: baseBold)
     if ground { kayaMergeGround(doc, full) }
     return doc
 }
@@ -36967,9 +37960,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         NSMaxRange(range) <= storage.length
     else { return }
     let base = kayaRichBaseFont(view)
+    let baseBold = kayaRichBaseBold(view)
     storage.beginEditing()
     storage.removeAttribute(kayaRichKey("block"), range: range)
-    kayaRestyle(storage, range, base: base)
+    kayaRestyle(storage, range, base: base, baseBold: baseBold)
     storage.endEditing()
     var typing = storage.attributes(at: NSMaxRange(range) - 1, effectiveRange: nil)
     typing.removeValue(forKey: kayaRichKey("link"))
@@ -36993,6 +37987,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         return
     }
     let base = kayaRichBaseFont(view)
+    let baseBold = kayaRichBaseBold(view)
     let piece = NSMutableAttributedString(
         string: inserted, attributes: [.font: base, .foregroundColor: NSColor.textColor])
     for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= piece.length {
@@ -37000,7 +37995,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     }
     storage.beginEditing()
     storage.replaceCharacters(in: range, with: piece)
-    kayaRestyle(storage, NSRange(location: range.location, length: piece.length), base: base)
+    kayaRestyle(storage, NSRange(location: range.location, length: piece.length), base: base, baseBold: baseBold)
     storage.endEditing()
     let end = storage.length
     let location = min(selection.location, end)
@@ -37032,13 +38027,13 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         if off { storage.removeAttribute(key, range: range) } else {
             storage.addAttribute(key, value: value, range: range)
         }
-        kayaRestyle(storage, range, base: kayaRichBaseFont(view))
+        kayaRestyle(storage, range, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view))
         storage.endEditing()
         node.richRuns = kayaReadRichRuns(storage)
         return nil
     }
     let doc = NSMutableAttributedString(
-        attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node)))
+        attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node), baseBold: kayaLabelBaseBold(node)))
     guard NSMaxRange(range) <= doc.length else {
         return "range \(range) is past the \(doc.length)-unit text"
     }
@@ -37095,13 +38090,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         return nil
     }
     let base = kayaRichBaseFont(view)
+    let baseBold = kayaRichBaseBold(view)
     storage.beginEditing()
     if off {
         storage.removeAttribute(key, range: range)
     } else {
         storage.addAttribute(key, value: value, range: range)
     }
-    kayaRestyle(storage, range, base: base)
+    kayaRestyle(storage, range, base: base, baseBold: baseBold)
     storage.endEditing()
     node.richRuns = kayaReadRichRuns(storage)
     var typing = view.typingAttributes
@@ -37425,7 +38421,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                     context.coordinator.richDone = richSeq
                     let selection = view.selectedRange
                     view.textStorage.setAttributedString(
-                        kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view)))
+                        kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view)))
                     let end = (text as NSString).length
                     let location = min(selection.location, end)
                     view.selectedRange = NSRange(
@@ -37963,6 +38959,12 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         return kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body)
     }
 
+    /// Whether kaya synthesizes the bold of a textarea's own face (docs/font-picker-plan.md §2.4).
+    @MainActor func kayaRichBaseBold(_ view: UITextView) -> Bool {
+        guard let id = (view as? KayaTextView)?.nodeId, let node = kayaScene.nodes[id] else { return false }
+        return kayaNodeFaceResolution(node, .body)?.synthBold ?? false
+    }
+
     /// A font with `trait` added; UIKit answers nil for a face that has no
     /// such member and the plain font is then the honest answer.
     func kayaWithTrait(_ font: UIFont, _ trait: UIFontDescriptor.SymbolicTraits) -> UIFont {
@@ -37976,7 +38978,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// The display attributes derived from the kaya keys over `range`. Nothing
     /// else on the storage moves; the highlight ground stays applyRanges'.
     @MainActor func kayaRestyle(
-        _ storage: NSMutableAttributedString, _ range: NSRange, base: UIFont
+        _ storage: NSMutableAttributedString, _ range: NSRange, base: UIFont, baseBold: Bool = false
     ) {
         storage.enumerateAttributes(in: range, options: []) { attrs, sub, _ in
             let has = { (name: String) -> Bool in attrs[kayaRichKey(name)] != nil }
@@ -37995,15 +38997,21 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 bold = true
             default: break
             }
-            var font: UIFont
-            if has("code") || block == "code_block" {
-                font = UIFont.monospacedSystemFont(ofSize: size, weight: bold ? .bold : .regular)
-            } else {
-                font = size == base.pointSize ? base : base.withSize(size)
-                if bold { font = kayaWithTrait(font, .traitBold) }
+            var font = size == base.pointSize ? base : base.withSize(size)
+            var synthBold = baseBold
+            let code = has("code") || block == "code_block"
+            if code || bold || has("italic") || baseBold {
+                let run = kayaRunFace(
+                    base: base, baseBold: baseBold, size: size, bold: bold, italic: has("italic"), code: code)
+                font = run.font as UIFont
+                synthBold = run.synthBold
             }
-            if has("italic") { font = kayaWithTrait(font, .traitItalic) }
             var out: [NSAttributedString.Key: Any] = [.font: font]
+            if synthBold {
+                out[.strokeWidth] = kayaSyntheticBoldStroke
+            } else {
+                storage.removeAttribute(.strokeWidth, range: sub)
+            }
             let link = attrs[kayaRichKey("link")] as? String
             out[.foregroundColor] =
                 link != nil
@@ -38039,7 +39047,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     }
 
     @MainActor func kayaAttributedDocument(
-        _ text: String, _ runs: [KayaRichRun], base: UIFont, ground: Bool = false
+        _ text: String, _ runs: [KayaRichRun], base: UIFont, baseBold: Bool = false, ground: Bool = false
     ) -> NSAttributedString {
         let doc = NSMutableAttributedString(
             string: text, attributes: [.font: base, .foregroundColor: UIColor.label])
@@ -38047,7 +39055,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             doc.addAttribute(kayaRichKey(run.name), value: run.value, range: run.range)
         }
         let full = NSRange(location: 0, length: doc.length)
-        kayaRestyle(doc, full, base: base)
+        kayaRestyle(doc, full, base: base, baseBold: baseBold)
         if ground { kayaMergeGround(doc, full) }
         return doc
     }
@@ -38092,9 +39100,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         let storage = view.textStorage
         guard range.length > 0, NSMaxRange(range) <= storage.length else { return }
         let base = kayaRichBaseFont(view)
+        let baseBold = kayaRichBaseBold(view)
         storage.beginEditing()
         storage.removeAttribute(kayaRichKey("block"), range: range)
-        kayaRestyle(storage, range, base: base)
+        kayaRestyle(storage, range, base: base, baseBold: baseBold)
         storage.endEditing()
         view.typingAttributes = storage.attributes(
             at: NSMaxRange(range) - 1, effectiveRange: nil)
@@ -38117,6 +39126,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
         let storage = view.textStorage
         let base = kayaRichBaseFont(view)
+        let baseBold = kayaRichBaseBold(view)
         let piece = NSMutableAttributedString(
             string: inserted, attributes: [.font: base, .foregroundColor: UIColor.label])
         for run in runs where run.range.length > 0 && NSMaxRange(run.range) <= piece.length {
@@ -38124,7 +39134,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
         storage.beginEditing()
         storage.replaceCharacters(in: range, with: piece)
-        kayaRestyle(storage, NSRange(location: range.location, length: piece.length), base: base)
+        kayaRestyle(storage, NSRange(location: range.location, length: piece.length), base: base, baseBold: baseBold)
         storage.endEditing()
         let end = storage.length
         let location = min(selection.location, end)
@@ -38154,13 +39164,13 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             if off { storage.removeAttribute(key, range: range) } else {
                 storage.addAttribute(key, value: value, range: range)
             }
-            kayaRestyle(storage, range, base: kayaRichBaseFont(view))
+            kayaRestyle(storage, range, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view))
             storage.endEditing()
             node.richRuns = kayaReadRichRuns(storage)
             return nil
         }
         let doc = NSMutableAttributedString(
-            attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node)))
+            attributedString: kayaAttributedDocument(node.text, node.richRuns, base: kayaLabelBaseFont(node), baseBold: kayaLabelBaseBold(node)))
         guard NSMaxRange(range) <= doc.length else {
             return "range \(range) is past the \(doc.length)-unit text"
         }
@@ -38216,13 +39226,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             return nil
         }
         let base = kayaRichBaseFont(view)
+        let baseBold = kayaRichBaseBold(view)
         storage.beginEditing()
         if off {
             storage.removeAttribute(key, range: range)
         } else {
             storage.addAttribute(key, value: value, range: range)
         }
-        kayaRestyle(storage, range, base: base)
+        kayaRestyle(storage, range, base: base, baseBold: baseBold)
         storage.endEditing()
         node.richRuns = kayaReadRichRuns(storage)
         var typing = view.typingAttributes

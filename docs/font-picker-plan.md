@@ -1,7 +1,8 @@
 # The font picker: a family and a face, native where the platform has one
 
-Status: PROPOSED 2026-10-29, nothing built; §10 asks the maintainer seven
-questions. The maintainer, 2026-10-29, agreed to build a font picker: native
+Status: RULED 2026-10-29 (§10: "I agree with most of your recommendations",
+with Q2 changed); the depth slice is built (docs/deferred.md, the font picker
+entry). The maintainer, 2026-10-29, agreed to build a font picker: native
 on the Mac (NSFontPanel), iOS (UIFontPickerViewController) and GNOME
 (GtkFontDialog); kaya-drawn on Windows (a ContentDialog with a search field,
 not Win32 ChooseFont) and Android (a bottom sheet with search), built from
@@ -171,6 +172,9 @@ negatives: a backend that echoes the prop (perturb: report the requested
 weight), a matcher that rounds the wrong way (perturb the descending branch:
 650 on a 600/700 family must read 700), and synthesis that does not happen
 (perturb: drop the shear on Apple; italic on Monaco must read `synthesized`).
+On the Mac a label's weight, slope and width come from the font its
+accessibility element names, and its shear and second bold pass from what
+kaya's label modifier last drew, since accessibility carries neither.
 
 A scene cannot know another lane's faces, so (as M4's `named`) the GUEST asks:
 `list_font_faces(family)` (§5.4) answers the family's faces, the guest picks
@@ -285,11 +289,13 @@ language cannot express.
 
 ## §6 The editor
 
-View > Font gains "Other Font…" below the short list: it opens the picker with
-`code_only` on and `faces` on (a "Show all fonts" checkbox is not offered:
-the editor is a code editor, and `code_only` false is one argument away for an
-app that wants it). The chosen family joins the short list and is remembered
-in the app's preferences; the chosen face becomes the document's
+RULED 2026-10-29 (the maintainer: "I think we can drop the short list"): View
+carries one item, "Font…", in place of the Font radio group of code fonts; it
+opens the picker with `code_only` on and `faces` on (a "Show all fonts"
+checkbox is not offered: the editor is a code editor, and `code_only` false is
+one argument away for an app that wants it). The chosen family and face apply
+to the document and are remembered in the app's preferences, and the window
+shows nothing else: the family is the document's `family`, the face its
 `font_weight`, `font_italic` and `font_width`. Format > Bold and Italic
 compose over it by §3, so Bold over a Light document reads 700 and Italic
 keeps Light. Cancel changes nothing. The editor is Go, so its slice is a Go
@@ -358,7 +364,8 @@ beyond `set_brand_typeface`.
 
 ## §10 Questions for the maintainer
 
-Each has a recommendation; the explanations start from zero.
+Each had a recommendation; the explanations start from zero. All seven are
+RULED (2026-10-29).
 
 **Q1. Does the picker answer once, or every time the user clicks?** On a Mac
 the font panel is "live": every click in it changes the selected text at once,
@@ -368,14 +375,14 @@ ANSWER everywhere: kaya adds Cancel and Choose buttons to the Mac panel
 (measured working) and tells the app only at the end. Simple for the app and
 identical on five platforms. (b) LIVE on the Mac: the app hears each click and
 can preview the font in the document as the user browses; on cancel the app
-puts the old font back; the other four still answer once. RECOMMENDED: (a).
+puts the old font back; the other four still answer once. RULED 2026-10-29: (a).
 Sub-question Q1b, the Mac's form: a FLOATING panel (the user can still type in
 the window while it is open, the size and B/I/U controls are hidden as kaya
 asks, and the code-fonts-only lock works) or a SHEET on the window (the window
 is blocked until Choose or Cancel, like every other platform, but macOS
 ignores kaya's request to hide the size field and the B/I/U popup inside a
 sheet, measured, and the code-only lock cannot hide the collections popup).
-RECOMMENDED: floating, with Cancel and Choose.
+RULED 2026-10-29: floating, with Cancel and Choose.
 
 **Q2. How does the Mac show code fonts only?** kaya can publicly add a "Code"
 collection (all fixed-width fonts, 13 on this Mac) to the panel's collections
@@ -387,10 +394,16 @@ can reach only through an undocumented toolbar identifier, and kaya's macOS
 both outside public API, with a check that fails loudly when Apple renames
 them. (b) Public only: add the "Code" collection but leave the panel on All
 Fonts; the user picks "Code" themselves. (c) When the app asks for code fonts
-only, draw the kaya picker on the Mac too, as on Windows. RECOMMENDED: (a)
-with the loud check, falling back to (b) when the item is missing, because
-it is the native panel with exactly the behaviour asked, and a renamed item
-then degrades to an unfiltered native panel rather than a broken one.
+only, draw the kaya picker on the Mac too, as on Windows. RULED 2026-10-29,
+changed from the recommendation (the maintainer: "I don't mind using the
+undocumented code list control thing"): the Mac's BUILT-IN "Fixed Width"
+collection (the probe found the same 13 families), selected through
+`NSFontPanelCollectionsToolbarItem` on macOS 26, with a loud check (a
+diagnostic naming what was missing, and `expect_font_dialog code_only` failing
+when the panel did not end on Fixed Width); when the item is missing the native
+panel opens unfiltered with Fixed Width one click away. Nothing is built for the
+column on macOS 13 to 15, which is unmeasured (docs/deferred.md, the font panel
+before macOS 26).
 
 **Q3. What does Bold do on a font that is already thin or already heavy?**
 A face has a weight number (300 is Light, 400 Regular, 600 SemiBold, 700
@@ -399,7 +412,7 @@ Black (900) stays. This is what GTK, Windows and Android do today and what
 the Mac and iOS do except on 600 faces. (b) CSS's relative "bolder": one
 step heavier, so Light becomes Regular (400), Regular becomes Bold, SemiBold
 becomes Black. Word processors and editors use (a); (b) makes Bold over a
-Light document look unbolded. RECOMMENDED: (a).
+Light document look unbolded. RULED 2026-10-29: (a), at least 700.
 
 **Q4. Should kaya fake a slant or a bold the font does not have?** Some fonts
 have no italic (Monaco, PT Mono, DejaVu Sans) or no bold (Monaco, Android's
@@ -408,26 +421,25 @@ copy); the Mac and iOS do not, so today Italic on Monaco does nothing on a
 Mac and slants on Linux. (a) Fake them on all five, drawn by kaya on Apple,
 and say so in `expect_face`. (b) Never fake; Italic on a font without italic
 does nothing anywhere, which needs the three lanes' faking turned off. (c)
-Leave each platform's habit, a stated divergence. RECOMMENDED: (a), the
-behaviour most users have seen in every browser.
+Leave each platform's habit, a stated divergence. RULED 2026-10-29: (a),
+synthesized on all five, drawn by kaya on Apple, reported by `expect_face`.
 
 **Q5. Is "oblique" its own choice?** Some fonts call their slanted face
 Italic, some Oblique, and a few have both. (a) One switch, `font_italic`: the
 font's slanted face, whatever it is called. (b) Three states, upright,
-italic, oblique. Only a typography tool needs (b). RECOMMENDED: (a).
+italic, oblique. Only a typography tool needs (b). RULED 2026-10-29: (a).
 
 **Q6. With `faces` on, GNOME shows a size slider kaya will ignore.**
 GtkFontDialog has no "family and face but no size" form: its family-and-face
 dialog also shows a size row. (a) Use it and ignore the size (the size stays
 the app's `text_scale`). (b) Ask the family first, then a second dialog for
-the face. (c) Draw kaya's own picker on GNOME too. RECOMMENDED: (a): one
-native dialog; the size row is visible but changes nothing, which the review
-page will show.
+the face. (c) Draw kaya's own picker on GNOME too. RULED 2026-10-29: (a),
+GNOME's family-and-face dialog with its size ignored.
 
 **Q7. May the app read a family's faces without a picker?** The kaya-drawn
 pickers need the list internally and the scenes need it to test portably.
 Exposing it as `list_font_faces` also lets an app build its own style menu.
-RECOMMENDED: yes; it is the same shape as `list_font_families`.
+RULED 2026-10-29: yes, `list_font_faces`, the same shape as `list_font_families`.
 
 ## §11 The probe record
 

@@ -84,6 +84,8 @@ pub(crate) const TX_SELECT_DOCUMENT: u16 = 90;
 pub(crate) const TX_CLOSE_DOCUMENT: u16 = 91;
 pub(crate) const TX_SET_DOCUMENT_PROP: u16 = 92;
 pub(crate) const TX_ADD_REGION: u16 = 93;
+pub(crate) const TX_SHOW_FONT_DIALOG: u16 = 94;
+pub(crate) const TX_LIST_FONT_FACES: u16 = 95;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -213,6 +215,8 @@ pub(crate) const APPLY_SELECT_DOCUMENT: u16 = 78;
 pub(crate) const APPLY_CLOSE_DOCUMENT: u16 = 79;
 pub(crate) const APPLY_SET_DOCUMENT_PROP: u16 = 80;
 pub(crate) const APPLY_ADD_REGION: u16 = 81;
+pub(crate) const APPLY_PRESENT_FONT_DIALOG: u16 = 82;
+pub(crate) const APPLY_LIST_FONT_FACES: u16 = 83;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1036,6 +1040,45 @@ pub(crate) fn font_families_body(families: &[String]) -> Vec<u8> {
     b
 }
 
+/// FONT_DIALOG_RESULT { u64 dialog; u32 weight; u32 italic; u32 width; u32
+/// reserved; Value family }: cancel is an empty family over zeros.
+pub(crate) fn font_dialog_result_body(
+    dialog: crate::protocol::FileDialogId,
+    choice: Option<&crate::protocol::FontChoice>,
+) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&dialog.0.to_le_bytes());
+    let (family, face) = match choice {
+        Some(c) => (c.family.as_str(), (u32::from(c.face.weight), u32::from(c.face.italic), u32::from(c.face.width))),
+        None => ("", (0, 0, 0)),
+    };
+    b.extend_from_slice(&face.0.to_le_bytes());
+    b.extend_from_slice(&face.1.to_le_bytes());
+    b.extend_from_slice(&face.2.to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_value(&mut b, &Value::from(family), &mut Vec::new());
+    b
+}
+
+/// FONT_FACES { Value family; Values faces }, four values a face.
+pub(crate) fn font_faces_body(family: &str, faces: &[crate::protocol::NamedFace]) -> Vec<u8> {
+    let mut b = Vec::new();
+    write_value(&mut b, &Value::from(family), &mut Vec::new());
+    let values: Vec<Value> = faces
+        .iter()
+        .flat_map(|f| {
+            [
+                Value::I64(i64::from(f.face.weight)),
+                Value::Bool(f.face.italic),
+                Value::I64(i64::from(f.face.width)),
+                Value::Str(f.name.clone()),
+            ]
+        })
+        .collect();
+    write_values(&mut b, &values, &mut Vec::new());
+    b
+}
+
 /// CAPTURE_OVERRUN { u64 capture; u64 behind_ms }.
 pub(crate) fn capture_overrun_body(capture: crate::protocol::CaptureId, behind_ms: u64) -> [u8; 16] {
     let mut b = [0u8; 16];
@@ -1237,6 +1280,9 @@ pub(crate) const PROP_LINE_NUMBERS: u32 = 69;
 pub(crate) const PROP_MONOSPACED: u32 = 70;
 pub(crate) const PROP_FAMILY: u32 = 71;
 pub(crate) const PROP_TEXT_SCALE: u32 = 72;
+pub(crate) const PROP_FONT_WEIGHT: u32 = 73;
+pub(crate) const PROP_FONT_ITALIC: u32 = 74;
+pub(crate) const PROP_FONT_WIDTH: u32 = 75;
 
 /// The clip representation masks (spec enum "clip"). BIT POSITIONS, not
 /// an ordinal: a copy carries several and a widget accepts several, so
@@ -1943,6 +1989,9 @@ fn prop(raw: u32) -> Prop {
         PROP_MONOSPACED => Prop::Monospaced,
         PROP_FAMILY => Prop::Family,
         PROP_TEXT_SCALE => Prop::TextScale,
+        PROP_FONT_WEIGHT => Prop::FontWeight,
+        PROP_FONT_ITALIC => Prop::FontItalic,
+        PROP_FONT_WIDTH => Prop::FontWidth,
         other => panic!("kaya: unknown property {other}"),
     }
 }
@@ -3063,6 +3112,13 @@ pub fn decode_transaction_with_blobs(
                 let _reserved = r.u32();
                 TxOp::AddRegion { window, region, edge }
             }
+            TX_SHOW_FONT_DIALOG => TxOp::ShowFontDialog(read_font_dialog(&mut r)),
+            TX_LIST_FONT_FACES => TxOp::ListFontFaces {
+                family: match r.value() {
+                    Value::Str(s) => s,
+                    other => panic!("kaya: list_font_faces family is {other:?}, wanted a string"),
+                },
+            },
             TX_MENU_ITEM_CREATE => TxOp::MenuItemCreate {
                 item: MenuItemId(r.u64()),
                 kind: {
@@ -3264,6 +3320,51 @@ fn write_native_runs(b: &mut Vec<u8>, blobs: &mut Vec<Arc<[u8]>>, runs: &[Native
         write_value(b, &Value::Str(run.name.clone()), blobs);
         write_value(b, &Value::Str(run.value.clone()), blobs);
     }
+}
+
+/// SHOW_FONT_DIALOG's body, which PRESENT_FONT_DIALOG repeats.
+fn read_font_dialog(r: &mut Reader<'_>) -> crate::protocol::FontDialogSpec {
+    let window = WindowId(r.u64());
+    let dialog = crate::protocol::FileDialogId(r.u64());
+    let flag = |raw: u32, what: &str| match raw {
+        0 => false,
+        1 => true,
+        other => panic!("kaya: show_font_dialog {what} is {other}, wanted 0 or 1"),
+    };
+    let code_only = flag(r.u32(), "code_only");
+    let faces = flag(r.u32(), "faces");
+    let weight = r.u32();
+    let italic = flag(r.u32(), "italic");
+    let width = r.u32();
+    let _reserved = r.u32();
+    let family = match r.value() {
+        Value::Str(s) => s,
+        other => panic!("kaya: show_font_dialog family is {other:?}, wanted a string"),
+    };
+    assert!(weight <= 1000, "kaya: show_font_dialog weight {weight} is past 1000 (docs/font-picker-plan.md §2.2)");
+    assert!(width <= 9, "kaya: show_font_dialog width {width} is past 9 (docs/font-picker-plan.md §2.2)");
+    crate::protocol::FontDialogSpec {
+        window,
+        dialog,
+        code_only,
+        faces,
+        family,
+        weight: weight as u16,
+        italic,
+        width: width as u8,
+    }
+}
+
+fn write_font_dialog(b: &mut Vec<u8>, spec: &crate::protocol::FontDialogSpec, blobs: &mut Vec<Arc<[u8]>>) {
+    b.extend_from_slice(&spec.window.0.to_le_bytes());
+    b.extend_from_slice(&spec.dialog.0.to_le_bytes());
+    b.extend_from_slice(&u32::from(spec.code_only).to_le_bytes());
+    b.extend_from_slice(&u32::from(spec.faces).to_le_bytes());
+    b.extend_from_slice(&u32::from(spec.weight).to_le_bytes());
+    b.extend_from_slice(&u32::from(spec.italic).to_le_bytes());
+    b.extend_from_slice(&u32::from(spec.width).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_value(b, &Value::Str(spec.family.clone()), blobs);
 }
 
 fn alert_str(v: Value, field: &str) -> String {
@@ -4936,6 +5037,12 @@ impl Writer {
                     write_value(b, value, blobs);
                 })
             }
+            ApplyOp::PresentFontDialog(spec) => self.record(APPLY_PRESENT_FONT_DIALOG, |b, blobs| {
+                write_font_dialog(b, spec, blobs);
+            }),
+            ApplyOp::ListFontFaces { family } => self.record(APPLY_LIST_FONT_FACES, |b, blobs| {
+                write_value(b, &Value::Str(family.clone()), blobs);
+            }),
             ApplyOp::AddRegion { window, region, edge } => self.record(APPLY_ADD_REGION, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&region.0.to_le_bytes());
@@ -5665,6 +5772,12 @@ impl Writer {
                     }
                 })
             }
+            TxOp::ShowFontDialog(spec) => self.record(TX_SHOW_FONT_DIALOG, |b, blobs| {
+                write_font_dialog(b, spec, blobs);
+            }),
+            TxOp::ListFontFaces { family } => self.record(TX_LIST_FONT_FACES, |b, blobs| {
+                write_value(b, &Value::Str(family.clone()), blobs);
+            }),
             TxOp::AddRegion { window, region, edge } => self.record(TX_ADD_REGION, |b, _| {
                 b.extend_from_slice(&window.0.to_le_bytes());
                 b.extend_from_slice(&region.0.to_le_bytes());
@@ -6109,6 +6222,9 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Monospaced => PROP_MONOSPACED,
         Prop::Family => PROP_FAMILY,
         Prop::TextScale => PROP_TEXT_SCALE,
+        Prop::FontWeight => PROP_FONT_WEIGHT,
+        Prop::FontItalic => PROP_FONT_ITALIC,
+        Prop::FontWidth => PROP_FONT_WIDTH,
     }
 }
 
@@ -6689,6 +6805,17 @@ mod tests {
                 content: crate::protocol::FileContent::Images,
                 filters: vec![],
             }),
+            TxOp::ShowFontDialog(crate::protocol::FontDialogSpec {
+                window: WindowId(0),
+                dialog: FileDialogId(10),
+                code_only: true,
+                faces: false,
+                family: "IBM Plex Mono".into(),
+                weight: 300,
+                italic: true,
+                width: 4,
+            }),
+            TxOp::ListFontFaces { family: "Menlo".into() },
             TxOp::ShowSaveDialog(SaveDialogSpec {
                 window: WindowId(3),
                 dialog: FileDialogId(8),

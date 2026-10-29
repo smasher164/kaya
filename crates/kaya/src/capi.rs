@@ -183,6 +183,12 @@ pub const KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED: u16 = 66;
 pub const KAYA_OCCURRENCE_DOCUMENT_MOVED: u16 = 67;
 /// DOCUMENTS_DETACHED { u64 source; u64 window; Values: I64 document ids }.
 pub const KAYA_OCCURRENCE_DOCUMENTS_DETACHED: u16 = 68;
+/// FONT_DIALOG_RESULT { u64 dialog; u32 weight; u32 italic; u32 width; u32
+/// reserved; Value family } (docs/font-picker-plan.md §4.2).
+pub const KAYA_OCCURRENCE_FONT_DIALOG_RESULT: u16 = 69;
+/// FONT_FACES { Value family; Values: weight, italic, width, name a face }
+/// (docs/font-picker-plan.md §4.4).
+pub const KAYA_OCCURRENCE_FONT_FACES: u16 = 70;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -232,6 +238,8 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED == ring::REC_NEW_DOCUMENT_REQUESTED
         && KAYA_OCCURRENCE_DOCUMENT_MOVED == ring::REC_DOCUMENT_MOVED
         && KAYA_OCCURRENCE_DOCUMENTS_DETACHED == ring::REC_DOCUMENTS_DETACHED
+        && KAYA_OCCURRENCE_FONT_DIALOG_RESULT == ring::REC_FONT_DIALOG_RESULT
+        && KAYA_OCCURRENCE_FONT_FACES == ring::REC_FONT_FACES
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -392,6 +400,12 @@ pub const KAYA_TX_SELECT_DOCUMENT: u16 = 90;
 pub const KAYA_TX_CLOSE_DOCUMENT: u16 = 91;
 pub const KAYA_TX_SET_DOCUMENT_PROP: u16 = 92;
 pub const KAYA_TX_ADD_REGION: u16 = 93;
+/// SHOW_FONT_DIALOG { u64 window; u64 dialog; u32 code_only; u32 faces; u32
+/// weight; u32 italic; u32 width; u32 reserved; Value family }
+/// (docs/font-picker-plan.md §4.2).
+pub const KAYA_TX_SHOW_FONT_DIALOG: u16 = 94;
+/// LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
+pub const KAYA_TX_LIST_FONT_FACES: u16 = 95;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -745,6 +759,8 @@ const _: () = assert!(
         && KAYA_TX_CLOSE_DOCUMENT == wire::TX_CLOSE_DOCUMENT
         && KAYA_TX_SET_DOCUMENT_PROP == wire::TX_SET_DOCUMENT_PROP
         && KAYA_TX_ADD_REGION == wire::TX_ADD_REGION
+        && KAYA_TX_SHOW_FONT_DIALOG == wire::TX_SHOW_FONT_DIALOG
+        && KAYA_TX_LIST_FONT_FACES == wire::TX_LIST_FONT_FACES
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -862,6 +878,10 @@ pub const KAYA_APPLY_SELECT_DOCUMENT: u16 = 78;
 pub const KAYA_APPLY_CLOSE_DOCUMENT: u16 = 79;
 pub const KAYA_APPLY_SET_DOCUMENT_PROP: u16 = 80;
 pub const KAYA_APPLY_ADD_REGION: u16 = 81;
+/// PRESENT_FONT_DIALOG, SHOW_FONT_DIALOG's body (docs/font-picker-plan.md §4.2).
+pub const KAYA_APPLY_PRESENT_FONT_DIALOG: u16 = 82;
+/// LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
+pub const KAYA_APPLY_LIST_FONT_FACES: u16 = 83;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1015,6 +1035,8 @@ const _: () = assert!(
         && KAYA_APPLY_CLOSE_DOCUMENT == wire::APPLY_CLOSE_DOCUMENT
         && KAYA_APPLY_SET_DOCUMENT_PROP == wire::APPLY_SET_DOCUMENT_PROP
         && KAYA_APPLY_ADD_REGION == wire::APPLY_ADD_REGION
+        && KAYA_APPLY_PRESENT_FONT_DIALOG == wire::APPLY_PRESENT_FONT_DIALOG
+        && KAYA_APPLY_LIST_FONT_FACES == wire::APPLY_LIST_FONT_FACES
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1266,6 +1288,12 @@ pub const KAYA_PROP_MONOSPACED: u32 = 70;
 pub const KAYA_PROP_FAMILY: u32 = 71;
 /// A text kind's size as a multiple of the platform's (docs/code-surface-plan.md S1).
 pub const KAYA_PROP_TEXT_SCALE: u32 = 72;
+/// A text kind's face weight, 1 to 1000 (docs/font-picker-plan.md §2.3).
+pub const KAYA_PROP_FONT_WEIGHT: u32 = 73;
+/// A text kind's slope (docs/font-picker-plan.md §2.3).
+pub const KAYA_PROP_FONT_ITALIC: u32 = 74;
+/// A text kind's face width, 1 to 9 (docs/font-picker-plan.md §2.3).
+pub const KAYA_PROP_FONT_WIDTH: u32 = 75;
 
 /// Window properties (spec::WINDOW_PROPS): their own namespace —
 /// windows are not widgets. Window 0 is the primary surface.
@@ -1445,7 +1473,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 68,
+    crate::spec::SPEC.occurrence.len() == 70,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -1566,6 +1594,9 @@ const _: () = assert!(
         && KAYA_PROP_MONOSPACED == wire::PROP_MONOSPACED
         && KAYA_PROP_FAMILY == wire::PROP_FAMILY
         && KAYA_PROP_TEXT_SCALE == wire::PROP_TEXT_SCALE
+        && KAYA_PROP_FONT_WEIGHT == wire::PROP_FONT_WEIGHT
+        && KAYA_PROP_FONT_ITALIC == wire::PROP_FONT_ITALIC
+        && KAYA_PROP_FONT_WIDTH == wire::PROP_FONT_WIDTH
         && KAYA_WPROP_TITLE == wire::WPROP_TITLE
         && KAYA_WPROP_WIDTH == wire::WPROP_WIDTH
         && KAYA_WPROP_HEIGHT == wire::WPROP_HEIGHT
@@ -2165,7 +2196,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 72,
+    crate::spec::PROPS.len() == 75,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(
@@ -4244,6 +4275,73 @@ pub(crate) fn file_dialog_resolved(dialog: u64, files: Vec<crate::protocol::Pick
     );
 }
 
+/// Presentation side (interpreter platforms ONLY, the file dialog's twin):
+/// retire the shared dialog slot, then emit the font picker's answer.
+#[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+pub(crate) fn font_dialog_resolved(dialog: u64, choice: Option<crate::protocol::FontChoice>) {
+    file_dialog_retire(dialog);
+    let dialog = crate::protocol::FileDialogId(dialog);
+    if let Some(sink) = PRESENTATION_SINK.lock().unwrap().as_ref() {
+        sink.send(crate::protocol::Occurrence::FontDialogResult { dialog, choice });
+        return;
+    }
+    state().ring.push_record(
+        ring::REC_FONT_DIALOG_RESULT,
+        &crate::wire::font_dialog_result_body(dialog, choice.as_ref()),
+    );
+}
+
+/// The font picker's answer as a presentation hands it over: an empty
+/// family is cancel; a weight or width outside the OpenType classes is a
+/// backend's misreading, refused in a fault and clamped
+/// (docs/font-picker-plan.md §4.2).
+pub(crate) fn font_choice(family: &str, weight: u32, italic: bool, width: u32) -> Option<crate::protocol::FontChoice> {
+    if family.is_empty() {
+        return None;
+    }
+    if !(1..=1000).contains(&weight) || !(1..=9).contains(&width) {
+        crate::fault::report(format!(
+            "kaya: the font picker answered {family:?} at weight {weight} width {width}, outside 1-1000 and 1-9"
+        ));
+    }
+    Some(crate::protocol::FontChoice {
+        family: family.to_owned(),
+        face: crate::protocol::FontFace {
+            weight: weight.clamp(1, 1000) as u16,
+            italic,
+            width: width.clamp(1, 9) as u8,
+        },
+    })
+}
+
+/// Presentation side (interpreter platforms): the font picker's one
+/// answer. `family` empty (or null) is cancel; `italic` is 0 or 1.
+///
+/// # Safety
+/// `family` must describe `len` readable bytes, or be null with `len` 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_emit_font_dialog_result(
+    dialog: u64,
+    family: *const u8,
+    len: usize,
+    weight: u32,
+    italic: u32,
+    width: u32,
+) {
+    let family = if family.is_null() { String::new() } else { unsafe { lossy(family, len) } };
+    let choice = font_choice(&family, weight, italic != 0, width);
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+    font_dialog_resolved(dialog, choice);
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "android")))]
+    {
+        let _ = (dialog, choice);
+        panic!(
+            "kaya: kaya_emit_font_dialog_result is the interpreter platforms' \
+             entry — this host's backend answers on its own sink"
+        );
+    }
+}
+
 /// Scene side: a show_alert was applied. Answers whether the slot took
 /// it — `false` means one was already live, the op is DROPPED, and the
 /// fault carries the sentence (the guest error is: show the next alert
@@ -5779,6 +5877,71 @@ fn the_font_family_list_is_one_shape_on_every_backend() {
     );
 }
 
+/// Presentation side: one family's faces, answering list_font_faces, as
+/// UTF-8 lines `weight\titalic\twidth\tname` (italic 0 or 1) in any order;
+/// the core sorts and deduplicates them (font_face_list), so every backend's
+/// list reads the same way (docs/font-picker-plan.md §4.4).
+///
+/// # Safety
+/// `family` must describe `family_len` readable bytes and `faces` `len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_font_faces(family: *const u8, family_len: usize, faces: *const u8, len: usize) {
+    let family = unsafe { lossy(family, family_len) };
+    let joined = unsafe { lossy(faces, len) };
+    let faces = font_face_list(&joined);
+    send_occurrences(vec![crate::protocol::Occurrence::FontFaces { family, faces }]);
+}
+
+#[cfg(test)]
+#[test]
+fn the_font_face_list_is_one_shape_on_every_backend() {
+    let list = font_face_list(
+        "700\t1\t5\tBold Italic\n300\t0\t5\tLight\n\n400\t0\t5\tRegular\n400\t0\t5\tBook\n\
+         400\t1\t5\tItalic\n700\t0\t3\tCondensed Bold\n700\t0\t5\tBold\nbad line\n1200\t0\t5\tPast\n",
+    );
+    let got: Vec<(u16, bool, u8, &str)> =
+        list.iter().map(|f| (f.face.weight, f.face.italic, f.face.width, f.name.as_str())).collect();
+    assert_eq!(
+        got,
+        vec![
+            (300, false, 5, "Light"),
+            (400, false, 5, "Book"),
+            (400, true, 5, "Italic"),
+            (700, false, 3, "Condensed Bold"),
+            (700, false, 5, "Bold"),
+            (700, true, 5, "Bold Italic"),
+        ]
+    );
+}
+
+/// One shape for a family's faces on every backend: sorted by weight, then
+/// upright before italic, then width; one face per (weight, italic, width),
+/// the name sorting first kept; a line that does not parse, or a weight or
+/// width outside the OpenType classes, dropped.
+pub(crate) fn font_face_list(joined: &str) -> Vec<crate::protocol::NamedFace> {
+    let mut faces: Vec<crate::protocol::NamedFace> = joined
+        .split('\n')
+        .filter_map(|line| {
+            let mut parts = line.splitn(4, '\t');
+            let weight: u16 = parts.next()?.trim().parse().ok()?;
+            let italic = match parts.next()?.trim() {
+                "0" => false,
+                "1" => true,
+                _ => return None,
+            };
+            let width: u8 = parts.next()?.trim().parse().ok()?;
+            let name = parts.next()?.trim().to_owned();
+            ((1..=1000).contains(&weight) && (1..=9).contains(&width)).then_some(crate::protocol::NamedFace {
+                face: crate::protocol::FontFace { weight, italic, width },
+                name,
+            })
+        })
+        .collect();
+    faces.sort_by(|a, b| a.face.cmp(&b.face).then_with(|| a.name.cmp(&b.name)));
+    faces.dedup_by(|b, a| a.face == b.face);
+    faces
+}
+
 pub(crate) fn font_family_list(joined: &str) -> Vec<String> {
     let mut families: Vec<String> = joined
         .split('\n')
@@ -7137,6 +7300,7 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::CapturePermission { .. }
             | crate::protocol::Occurrence::CaptureDevices { .. }
             | crate::protocol::Occurrence::FontFamilies { .. }
+            | crate::protocol::Occurrence::FontFaces { .. }
             | crate::protocol::Occurrence::TextSelected { .. }
             | crate::protocol::Occurrence::InstanceTextSelected { .. }
             | crate::protocol::Occurrence::CaptureOverrun { .. }
@@ -7801,6 +7965,8 @@ mod tests {
             ("close_document", KAYA_TX_CLOSE_DOCUMENT),
             ("set_document_prop", KAYA_TX_SET_DOCUMENT_PROP),
             ("add_region", KAYA_TX_ADD_REGION),
+            ("show_font_dialog", KAYA_TX_SHOW_FONT_DIALOG),
+            ("list_font_faces", KAYA_TX_LIST_FONT_FACES),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -7882,6 +8048,8 @@ mod tests {
             ("close_document", KAYA_APPLY_CLOSE_DOCUMENT),
             ("set_document_prop", KAYA_APPLY_SET_DOCUMENT_PROP),
             ("add_region", KAYA_APPLY_ADD_REGION),
+            ("present_font_dialog", KAYA_APPLY_PRESENT_FONT_DIALOG),
+            ("list_font_faces", KAYA_APPLY_LIST_FONT_FACES),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

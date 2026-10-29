@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xa37dca454ad9d6ccn;
+export const SPEC_HASH = 0xd4526bbce915c1b5n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -147,6 +147,9 @@ export const PROP_LINE_NUMBERS = 69;
 export const PROP_MONOSPACED = 70;
 export const PROP_FAMILY = 71;
 export const PROP_TEXT_SCALE = 72;
+export const PROP_FONT_WEIGHT = 73;
+export const PROP_FONT_ITALIC = 74;
+export const PROP_FONT_WIDTH = 75;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -514,6 +517,8 @@ export const TX_SELECT_DOCUMENT = 90;
 export const TX_CLOSE_DOCUMENT = 91;
 export const TX_SET_DOCUMENT_PROP = 92;
 export const TX_ADD_REGION = 93;
+export const TX_SHOW_FONT_DIALOG = 94;
+export const TX_LIST_FONT_FACES = 95;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -593,6 +598,8 @@ export const APPLY_SELECT_DOCUMENT = 78;
 export const APPLY_CLOSE_DOCUMENT = 79;
 export const APPLY_SET_DOCUMENT_PROP = 80;
 export const APPLY_ADD_REGION = 81;
+export const APPLY_PRESENT_FONT_DIALOG = 82;
+export const APPLY_LIST_FONT_FACES = 83;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -661,6 +668,8 @@ export const OCC_DOCUMENT_CLOSED = 65;
 export const OCC_NEW_DOCUMENT_REQUESTED = 66;
 export const OCC_DOCUMENT_MOVED = 67;
 export const OCC_DOCUMENTS_DETACHED = 68;
+export const OCC_FONT_DIALOG_RESULT = 69;
+export const OCC_FONT_FACES = 70;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1626,6 +1635,28 @@ export function tx_add_region(window: number, region: number, edge: number): Uin
   enc.u32(edge);
   enc.u32(0);
   return enc.end(TX_ADD_REGION);
+}
+
+/** Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face. */
+export function tx_show_font_dialog(window: number, dialog: number, code_only: number, faces: number, weight: number, italic: number, width: number, family: WireValue): Uint8Array {
+  enc.begin();
+  enc.u64(window);
+  enc.u64(dialog);
+  enc.u32(code_only);
+  enc.u32(faces);
+  enc.u32(weight);
+  enc.u32(italic);
+  enc.u32(width);
+  enc.u32(0);
+  enc.value(family);
+  return enc.end(TX_SHOW_FONT_DIALOG);
+}
+
+/** List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4). */
+export function tx_list_font_faces(family: WireValue): Uint8Array {
+  enc.begin();
+  enc.value(family);
+  return enc.end(TX_LIST_FONT_FACES);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -2954,6 +2985,60 @@ export function tx_bind_text_scale_element(widget_id: number, level = 0, field =
   return enc.end(TX_SET_PROPERTY);
 }
 
+/** set_property with a constant font_weight value. */
+export function tx_set_font_weight(widget_id: number, font_weight: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WEIGHT); enc.u32(SOURCE_CONST); enc.value(font_weight);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound font_weight value. */
+export function tx_bind_font_weight(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WEIGHT); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_font_weight_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WEIGHT); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant font_italic value. */
+export function tx_set_font_italic(widget_id: number, font_italic: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_ITALIC); enc.u32(SOURCE_CONST); enc.value(font_italic);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound font_italic value. */
+export function tx_bind_font_italic(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_ITALIC); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_font_italic_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_ITALIC); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant font_width value. */
+export function tx_set_font_width(widget_id: number, font_width: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WIDTH); enc.u32(SOURCE_CONST); enc.value(font_width);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound font_width value. */
+export function tx_bind_font_width(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WIDTH); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_font_width_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WIDTH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
 /** set_window_prop with a constant title value; window 0, the primary surface. */
 export function tx_set_window_title(window: number, title: string): Uint8Array {
   enc.begin(); enc.u64(window); enc.u32(WPROP_TITLE); enc.u32(SOURCE_CONST); enc.value(title);
@@ -3466,7 +3551,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED, OCC_FONT_DIALOG_RESULT, OCC_FONT_FACES].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -3765,6 +3850,46 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
       }
     }
     return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_FONT_DIALOG_RESULT) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
+  }
+  if (kind === OCC_FONT_FACES) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    {
+      const count = read_u32(buf, at);
+      at += 8;
+      tail.push(count);
+      for (let i = 0; i < count; i++) {
+        let value: Decoded;
+        [value, at] = parse_value(buf, at);
+        tail.push(value);
+      }
+    }
+    return { kind, id: 0, keys: [], payload: tail };
   }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);

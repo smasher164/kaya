@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xa37dca454ad9d6ccULL
+#define KAYA_SPEC_HASH 0xd4526bbce915c1b5ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -1039,6 +1039,28 @@ static inline void kaya_tx_add_region(KayaTx *tx, uint64_t window, uint64_t regi
     kaya_wire_u64(tx, region);
     kaya_wire_u32(tx, edge);
     kaya_wire_u32(tx, 0);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face. */
+static inline void kaya_tx_show_font_dialog(KayaTx *tx, uint64_t window, uint64_t dialog, uint32_t code_only, uint32_t faces, uint32_t weight, uint32_t italic, uint32_t width, KayaVal family) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SHOW_FONT_DIALOG);
+    kaya_wire_u64(tx, window);
+    kaya_wire_u64(tx, dialog);
+    kaya_wire_u32(tx, code_only);
+    kaya_wire_u32(tx, faces);
+    kaya_wire_u32(tx, weight);
+    kaya_wire_u32(tx, italic);
+    kaya_wire_u32(tx, width);
+    kaya_wire_u32(tx, 0);
+    kaya_wire_value(tx, family);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4). */
+static inline void kaya_tx_list_font_faces(KayaTx *tx, KayaVal family) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_LIST_FONT_FACES);
+    kaya_wire_value(tx, family);
     kaya_wire_end(tx, kaya_at);
 }
 
@@ -3378,6 +3400,102 @@ static inline void kaya_tx_bind_text_scale_element(KayaTx *tx, uint64_t widget_i
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
     kaya_wire_u64(tx, widget_id);
     kaya_wire_u32(tx, KAYA_PROP_TEXT_SCALE);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant font_weight value. */
+static inline void kaya_tx_set_font_weight(KayaTx *tx, uint64_t widget_id, double font_weight) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WEIGHT);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(font_weight));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound font_weight value. */
+static inline void kaya_tx_bind_font_weight(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WEIGHT);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_font_weight_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WEIGHT);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant font_italic value. */
+static inline void kaya_tx_set_font_italic(KayaTx *tx, uint64_t widget_id, int font_italic) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_ITALIC);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_bool(font_italic));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound font_italic value. */
+static inline void kaya_tx_bind_font_italic(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_ITALIC);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_font_italic_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_ITALIC);
+    kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
+    kaya_wire_u32(tx, level);
+    kaya_wire_u32(tx, field);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a constant font_width value. */
+static inline void kaya_tx_set_font_width(KayaTx *tx, uint64_t widget_id, double font_width) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WIDTH);
+    kaya_wire_u32(tx, KAYA_SOURCE_CONST);
+    kaya_wire_value(tx, kaya_f64(font_width));
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property with a signal-bound font_width value. */
+static inline void kaya_tx_bind_font_width(KayaTx *tx, uint64_t widget_id, uint64_t signal_id) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WIDTH);
+    kaya_wire_u32(tx, KAYA_SOURCE_SIGNAL);
+    kaya_wire_u64(tx, signal_id);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* set_property bound to one field of the element of the enclosing
+ * For, `level` Fors up (field 0 for a scalar collection). */
+static inline void kaya_tx_bind_font_width_element(KayaTx *tx, uint64_t widget_id, uint32_t level, uint32_t field) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_SET_PROPERTY);
+    kaya_wire_u64(tx, widget_id);
+    kaya_wire_u32(tx, KAYA_PROP_FONT_WIDTH);
     kaya_wire_u32(tx, KAYA_SOURCE_ELEMENT);
     kaya_wire_u32(tx, level);
     kaya_wire_u32(tx, field);

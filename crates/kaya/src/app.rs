@@ -20,7 +20,9 @@ mod images;
 pub use images::RowImages;
 pub use capture::{CaptureReading, CaptureRef};
 pub use media::{can_play, Frame, MediaSource, PlayerReading, PlayerRef, ReadError, SessionRef};
-pub use tasks::{AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, SaveFutureRef, TaskOutcome, TaskScope};
+pub use tasks::{
+    AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, FontFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
+};
 
 use crate::protocol::{
     Inbox,
@@ -2109,6 +2111,24 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This label, entry or textarea at a face weight — [`Tx::font_weight`] chained.
+    pub fn font_weight(self, weight: u16) -> Self {
+        self.tx.font_weight(self.id, weight);
+        self
+    }
+
+    /// This label, entry or textarea slanted — [`Tx::font_italic`] chained.
+    pub fn font_italic(self, on: bool) -> Self {
+        self.tx.font_italic(self.id, on);
+        self
+    }
+
+    /// This label, entry or textarea at a face width — [`Tx::font_width`] chained.
+    pub fn font_width(self, width: u8) -> Self {
+        self.tx.font_width(self.id, width);
+        self
+    }
+
     /// This scroll keeps its end in view while its content grows —
     /// [`Tx::follows_end`] chained.
     pub fn follows_end(self, on: bool) -> Self {
@@ -3371,6 +3391,53 @@ impl<'a> Tx<'a> {
     /// [`Messages::on_font_families`] (docs/code-surface-plan.md M3).
     pub fn list_font_families(&mut self) {
         self.ops.push(TxOp::ListFontFamilies);
+    }
+
+    /// Ask for one installed family's faces, answered once by
+    /// [`Messages::on_font_faces`] (docs/font-picker-plan.md §4.4).
+    pub fn list_font_faces(&mut self, family: impl Into<String>) {
+        self.ops.push(TxOp::ListFontFaces { family: family.into() });
+    }
+
+    /// A label, entry or textarea at a face weight, the OpenType class 1 to
+    /// 1000 (400 regular, 700 bold), on whatever family it resolves to; a
+    /// weight the family lacks is matched to its nearest face and a missing
+    /// bold synthesized (docs/font-picker-plan.md §2.3, §2.4).
+    pub fn font_weight(&mut self, widget: WidgetId, weight: u16) {
+        self.set(widget, Prop::FontWeight, f64::from(weight));
+    }
+
+    /// A label, entry or textarea slanted: the family's italic or oblique
+    /// face, synthesized where it has none (docs/font-picker-plan.md §2.3).
+    pub fn font_italic(&mut self, widget: WidgetId, on: bool) {
+        self.set(widget, Prop::FontItalic, on);
+    }
+
+    /// A label, entry or textarea at a face width, the OpenType class 1 to 9
+    /// (5 normal), matched to the family's nearest (docs/font-picker-plan.md §2.3).
+    pub fn font_width(&mut self, widget: WidgetId, width: u8) {
+        self.set(widget, Prop::FontWidth, f64::from(width));
+    }
+
+    /// Ask the platform's font picker for a family and, with
+    /// [`FontDialogRef::faces`], a face; [`Messages::on_font_chosen`] binds
+    /// the handler and cancel arrives as `None`. Nothing is applied by kaya
+    /// (docs/font-picker-plan.md §4).
+    pub fn choose_font(&mut self) -> FontDialogRef<'_, 'a> {
+        let dialog = self.ctx.alloc_file_dialog();
+        FontDialogRef {
+            tx: self,
+            spec: crate::protocol::FontDialogSpec {
+                window: DEFAULT_WINDOW,
+                dialog,
+                code_only: false,
+                faces: false,
+                family: String::new(),
+                weight: 0,
+                italic: false,
+                width: 0,
+            },
+        }
     }
 
     /// A label, entry or textarea in an INSTALLED family by name, the user's
@@ -5614,6 +5681,18 @@ impl<'b> Row<'_, 'b> {
         self.tpl().text_scale(node, scale)
     }
 
+    pub fn font_weight(&mut self, node: TemplateNodeId, weight: u16) {
+        self.tpl().font_weight(node, weight)
+    }
+
+    pub fn font_italic(&mut self, node: TemplateNodeId, on: bool) {
+        self.tpl().font_italic(node, on)
+    }
+
+    pub fn font_width(&mut self, node: TemplateNodeId, width: u8) {
+        self.tpl().font_width(node, width)
+    }
+
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.tpl().selected(node, src)
     }
@@ -5861,6 +5940,10 @@ pub struct Messages<M> {
     capture_devices: RefCell<Option<Box<dyn Fn(&[crate::protocol::CaptureDevice]) -> M>>>,
     #[allow(clippy::type_complexity)]
     font_families: RefCell<Option<Box<dyn Fn(&[String]) -> M>>>,
+    #[allow(clippy::type_complexity)]
+    font_faces: RefCell<Option<Box<dyn Fn(&str, &[crate::protocol::NamedFace]) -> M>>>,
+    #[allow(clippy::type_complexity)]
+    font_dialogs: RefCell<HashMap<u64, Box<dyn Fn(Option<crate::protocol::FontChoice>) -> M>>>,
     /// THE CANVAS'S DRAWING-AS-A-FUNCTION-OF-SIZE (docs/canvas-plan.md
     /// §3.2.1). Not a Mapper: these produce a DRAWING, not a message, so
     /// [`Messages::next`] answers them itself and keeps looping rather
@@ -6003,6 +6086,8 @@ impl<M> Messages<M> {
             permission: RefCell::new(None),
             capture_devices: RefCell::new(None),
             font_families: RefCell::new(None),
+            font_faces: RefCell::new(None),
+            font_dialogs: RefCell::new(HashMap::new()),
         }
     }
 
@@ -6011,6 +6096,23 @@ impl<M> Messages<M> {
     /// (docs/code-surface-plan.md M3).
     pub fn on_font_families(&self, f: impl Fn(&[String]) -> M + 'static) {
         *self.font_families.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// One family's faces, answering [`Tx::list_font_faces`]: the family
+    /// asked for and its faces, sorted by weight, then upright first, then
+    /// width; none when the family is not installed (docs/font-picker-plan.md §4.4).
+    pub fn on_font_faces(&self, f: impl Fn(&str, &[crate::protocol::NamedFace]) -> M + 'static) {
+        *self.font_faces.borrow_mut() = Some(Box::new(f));
+    }
+
+    /// Bind the one-shot result handler to a font-picker request; cancel
+    /// arrives as `None` (docs/font-picker-plan.md §4.2).
+    pub fn on_font_chosen(
+        &self,
+        dialog: crate::protocol::FileDialogId,
+        f: impl Fn(Option<crate::protocol::FontChoice>) -> M + 'static,
+    ) {
+        self.font_dialogs.borrow_mut().insert(dialog.0, Box::new(f));
     }
 
     /// The registration half of [`Widget::on_draw`] and
@@ -7130,6 +7232,12 @@ impl<M> Messages<M> {
                 Occurrence::FontFamilies { families } => {
                     self.font_families.borrow().as_ref().map(|f| f(families))
                 }
+                Occurrence::FontFaces { family, faces } => {
+                    self.font_faces.borrow().as_ref().map(|f| f(family, faces))
+                }
+                Occurrence::FontDialogResult { dialog, choice } => {
+                    self.font_dialogs.borrow_mut().remove(&dialog.0).map(|f| f(choice.clone()))
+                }
                 // Menu occurrences key the menu-item table — their own id
                 // space. Direct and node-anchored variants share it: an
                 // item has exactly one anchor, so its registered mapper
@@ -7247,6 +7355,52 @@ impl SaveDialogRef<'_, '_> {
         let id = self.spec.dialog;
         self.tx.ctx.replies.borrow_mut().claim_file(id.0);
         self.tx.ops.push(TxOp::ShowSaveDialog(self.spec));
+        id
+    }
+}
+
+/// A font-picker request under construction, the save dialog's chain,
+/// terminated by `show` (docs/font-picker-plan.md §4.2).
+#[must_use = "a font dialog shows nothing until .show()"]
+pub struct FontDialogRef<'t, 'a> {
+    tx: &'t mut Tx<'a>,
+    spec: crate::protocol::FontDialogSpec,
+}
+
+impl FontDialogRef<'_, '_> {
+    /// Present over this window instead of the primary.
+    pub fn in_window(mut self, window: WindowId) -> Self {
+        self.spec.window = window;
+        self
+    }
+
+    /// List monospaced families only.
+    pub fn code_only(mut self, on: bool) -> Self {
+        self.spec.code_only = on;
+        self
+    }
+
+    /// Ask for a face as well as a family.
+    pub fn faces(mut self, on: bool) -> Self {
+        self.spec.faces = on;
+        self
+    }
+
+    /// The family and face the picker opens on.
+    pub fn initial(mut self, choice: &crate::protocol::FontChoice) -> Self {
+        self.spec.family = choice.family.clone();
+        self.spec.weight = choice.face.weight;
+        self.spec.italic = choice.face.italic;
+        self.spec.width = choice.face.width;
+        self
+    }
+
+    /// Send the request, returning its id, the handle
+    /// [`Messages::on_font_chosen`] binds the one-shot result handler to.
+    pub fn show(self) -> crate::protocol::FileDialogId {
+        let id = self.spec.dialog;
+        self.tx.ctx.replies.borrow_mut().claim_file(id.0);
+        self.tx.ops.push(TxOp::ShowFontDialog(self.spec));
         id
     }
 }
@@ -9557,6 +9711,21 @@ impl<'b> Tpl<'_, 'b> {
         self.set(node, Prop::TextScale, scale);
     }
 
+    /// A stamped text kind's face weight, the blueprint twin of [`Tx::font_weight`].
+    pub fn font_weight(&mut self, node: TemplateNodeId, weight: u16) {
+        self.set(node, Prop::FontWeight, f64::from(weight));
+    }
+
+    /// A stamped text kind's slope, the blueprint twin of [`Tx::font_italic`].
+    pub fn font_italic(&mut self, node: TemplateNodeId, on: bool) {
+        self.set(node, Prop::FontItalic, on);
+    }
+
+    /// A stamped text kind's face width, the blueprint twin of [`Tx::font_width`].
+    pub fn font_width(&mut self, node: TemplateNodeId, width: u8) {
+        self.set(node, Prop::FontWidth, f64::from(width));
+    }
+
     /// A stamped container's selected surface, the blueprint twin of [`Tx::selected`].
     pub fn selected(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BoolKind>>) {
         self.apply_source(node, Prop::Selected, src.into().inner);
@@ -10531,7 +10700,7 @@ mod tests {
             .expect("app.rs reads back");
         let lines: Vec<&str> = source.lines().collect();
         let mut found = 0;
-        for name in ["FileDialogRef", "SaveDialogRef", "NotificationRef"] {
+        for name in ["FileDialogRef", "SaveDialogRef", "FontDialogRef", "NotificationRef"] {
             let decl = format!("pub struct {name}");
             let idx = lines
                 .iter()
@@ -10544,7 +10713,7 @@ mod tests {
             found += 1;
         }
         println!("dialog_and_notification_refs_are_must_use: {found} refs checked");
-        assert_eq!(found, 3);
+        assert_eq!(found, 4);
     }
 
     /// A move is a keyed reposition: the model reorders (items reads
@@ -11169,6 +11338,7 @@ mod tests {
                     | Occurrence::CaptureDevices { .. }
                     | Occurrence::CaptureOverrun { .. } => {}
                     Occurrence::FontFamilies { .. } => {}
+                    Occurrence::FontFaces { .. } | Occurrence::FontDialogResult { .. } => {}
                     Occurrence::LinkOpened { .. } => {}
                     Occurrence::Shutdown => break,
                 }

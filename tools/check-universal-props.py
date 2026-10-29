@@ -71,7 +71,7 @@ BASELINE_LINKS = (
         "let bs = dims.indices.map { i in textless(i) ? nil : Self.textBaseline(dims[i]) }",
         "i < nodes.count && nodes[i].kind == kindCheckbox && nodes[i].text.isEmpty",
     )),
-    (SWIFTUI, "kayaLabelBaseFont(node), ground: true", 3000, (
+    (SWIFTUI, "kayaLabelBaseFont(node), baseBold: kayaLabelBaseBold(node), ground: true", 3000, (
         "kayaLineHeights[node.id] = d.height - d[.lastTextBaseline] + d[.firstTextBaseline]",
     )),
     (COMPOSE, "internal fun KayaFlexRow(", 5000, (

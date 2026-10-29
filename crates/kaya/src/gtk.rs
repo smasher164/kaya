@@ -17310,6 +17310,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
         ApplyOp::RequestPermission(kind) => capture::request_permission(kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch(on),
         ApplyOp::ListFontFamilies => list_font_families(core),
+        ApplyOp::PresentFontDialog(_) | ApplyOp::ListFontFaces { .. } => crate::depth_stub("fontpick"),
         ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0),
         ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0),
         ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0),
@@ -18622,6 +18623,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                         _ => {}
                     });
                 }
+                (_, Prop::FontWeight | Prop::FontItalic | Prop::FontWidth, _) => crate::depth_stub("fontpick"),
                 (_, prop, value) => {
                     panic!("kaya: gtk cannot apply {prop:?} = {value:?} here")
                 }

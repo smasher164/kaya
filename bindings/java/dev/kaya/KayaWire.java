@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xa37dca454ad9d6ccL;
+    public static final long SPEC_HASH = 0xd4526bbce915c1b5L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -153,6 +153,9 @@ public final class KayaWire {
     public static final int PROP_MONOSPACED = 70;
     public static final int PROP_FAMILY = 71;
     public static final int PROP_TEXT_SCALE = 72;
+    public static final int PROP_FONT_WEIGHT = 73;
+    public static final int PROP_FONT_ITALIC = 74;
+    public static final int PROP_FONT_WIDTH = 75;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -519,6 +522,8 @@ public final class KayaWire {
     public static final short TX_KIND_CLOSE_DOCUMENT = 91;
     public static final short TX_KIND_SET_DOCUMENT_PROP = 92;
     public static final short TX_KIND_ADD_REGION = 93;
+    public static final short TX_KIND_SHOW_FONT_DIALOG = 94;
+    public static final short TX_KIND_LIST_FONT_FACES = 95;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -598,6 +603,8 @@ public final class KayaWire {
     public static final short APPLY_KIND_CLOSE_DOCUMENT = 79;
     public static final short APPLY_KIND_SET_DOCUMENT_PROP = 80;
     public static final short APPLY_KIND_ADD_REGION = 81;
+    public static final short APPLY_KIND_PRESENT_FONT_DIALOG = 82;
+    public static final short APPLY_KIND_LIST_FONT_FACES = 83;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -666,6 +673,8 @@ public final class KayaWire {
     public static final short OCC_KIND_NEW_DOCUMENT_REQUESTED = 66;
     public static final short OCC_KIND_DOCUMENT_MOVED = 67;
     public static final short OCC_KIND_DOCUMENTS_DETACHED = 68;
+    public static final short OCC_KIND_FONT_DIALOG_RESULT = 69;
+    public static final short OCC_KIND_FONT_FACES = 70;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1605,6 +1614,28 @@ public final class KayaWire {
         b.putLong(region);
         b.putInt(edge);
         b.putInt(0);
+        return finish(b);
+    }
+
+    /** Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face. */
+    public static byte[] txShowFontDialog(long window, long dialog, int codeOnly, int faces, int weight, int italic, int width, Object family) {
+        Enc b = begin(TX_KIND_SHOW_FONT_DIALOG);
+        b.putLong(window);
+        b.putLong(dialog);
+        b.putInt(codeOnly);
+        b.putInt(faces);
+        b.putInt(weight);
+        b.putInt(italic);
+        b.putInt(width);
+        b.putInt(0);
+        encodeValue(b, family);
+        return finish(b);
+    }
+
+    /** List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4). */
+    public static byte[] txListFontFaces(Object family) {
+        Enc b = begin(TX_KIND_LIST_FONT_FACES);
+        encodeValue(b, family);
         return finish(b);
     }
 
@@ -3305,6 +3336,75 @@ public final class KayaWire {
         return finish(b);
     }
 
+    /** set_property with a constant font_weight value. */
+    public static byte[] txSetFontWeight(long widgetId, double fontWeight) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WEIGHT).putInt(SOURCE_CONST);
+        encodeValue(b, fontWeight);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound font_weight value. */
+    public static byte[] txBindFontWeight(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WEIGHT).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFontWeightElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WEIGHT).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant font_italic value. */
+    public static byte[] txSetFontItalic(long widgetId, boolean fontItalic) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_ITALIC).putInt(SOURCE_CONST);
+        encodeValue(b, fontItalic);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound font_italic value. */
+    public static byte[] txBindFontItalic(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_ITALIC).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFontItalicElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_ITALIC).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant font_width value. */
+    public static byte[] txSetFontWidth(long widgetId, double fontWidth) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WIDTH).putInt(SOURCE_CONST);
+        encodeValue(b, fontWidth);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound font_width value. */
+    public static byte[] txBindFontWidth(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WIDTH).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindFontWidthElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_FONT_WIDTH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
     /** set_window_prop with a constant title value (window 0, the primary surface). */
     public static byte[] txSetWindowTitle(long window, String title) {
         Enc b = begin(TX_KIND_SET_WINDOW_PROP);
@@ -4057,7 +4157,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED && kind != OCC_KIND_FONT_DIALOG_RESULT && kind != OCC_KIND_FONT_FACES) {
             return null;
         }
         long id = b.getLong(8);
@@ -4327,6 +4427,36 @@ public final class KayaWire {
                 }
             }
             return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_FONT_DIALOG_RESULT) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_FONT_FACES) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            tail.add(parseValue(rec, b, at));
+            {
+                int count = b.getInt(at[0]);
+                at[0] += 8;
+                tail.add((long) count);
+                for (int i = 0; i < count; i++) {
+                    tail.add(parseValue(rec, b, at));
+                }
+            }
+            return new Occ(kind, 0L, java.util.List.of(), tail);
         }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

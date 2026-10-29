@@ -1239,6 +1239,18 @@ pub enum Step {
     /// The face a text kind's toolkit RESOLVED, `monospaced` or
     /// `proportional` (docs/code-surface-plan.md M4).
     ExpectFace(Target, String),
+    /// The face a text kind (or a range of a textarea's text) DRAWS:
+    /// weight class, slope and width, and whether kaya or the toolkit
+    /// synthesized a slope or a bold, read off the resolved font, never
+    /// the props (docs/font-picker-plan.md §2.5).
+    /// The face is the step's words, or the words the label shows.
+    ExpectFontFace(Target, Option<TextRange>, Option<FaceWords>, Option<Target>),
+    /// Drive the open font picker the way each lane can: choose a family
+    /// and face and press Choose, or cancel (docs/font-picker-plan.md §7).
+    PickFont(PickWant),
+    /// The font picker `open`, `closed`, or open listing monospaced
+    /// families only (`code_only`; docs/font-picker-plan.md §7).
+    ExpectFontDialog(String),
     /// A text kind's resolved size against the size the platform gives it
     /// now, as a multiple (docs/code-surface-plan.md S3).
     ExpectScaled(Target, f64),
@@ -1406,6 +1418,9 @@ impl Step {
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectGutter(t, _) | Step::ExpectFace(t, _) | Step::ExpectScaled(t, _) => vec![t],
             Step::ExpectWeight(t, _, _) => vec![t],
+            Step::ExpectFontFace(t, _, _, label) => std::iter::once(t).chain(label.as_mut()).collect(),
+            Step::PickFont(PickWant::Label(label)) => vec![label],
+            Step::PickFont(_) | Step::ExpectFontDialog(_) => Vec::new(),
             Step::ExpectWindow(t, _, _) => vec![t],
             Step::ExpectInset { target, .. } => target.iter_mut().collect(),
             Step::Settle(..)
@@ -1742,6 +1757,8 @@ impl Step {
             Step::ExpectRevealed { .. } => true,
             Step::ExpectGutter { .. } | Step::ExpectFace { .. } | Step::ExpectScaled { .. } => true,
             Step::ExpectWeight { .. } => true,
+            Step::ExpectFontFace { .. } | Step::ExpectFontDialog(_) => true,
+            Step::PickFont(_) => false,
             Step::Compose { .. } => false,
             Step::Format { .. } => false,
             Step::ExpectRuns { .. } => true,
@@ -1803,6 +1820,137 @@ pub(crate) fn faint_hover(sample: [f64; 3], resting: [f64; 3]) -> Option<String>
 
 /// `expect_face`'s words (docs/code-surface-plan.md M4).
 pub const FACES: [&str; 3] = ["monospaced", "proportional", "named"];
+
+/// A face as a scene writes it: `<weight> <upright|italic> <width>
+/// [synthesized]` (docs/font-picker-plan.md §2.5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FaceWords {
+    pub face: crate::protocol::FontFace,
+    pub synthesized: bool,
+}
+
+/// What `pick_font` chooses: cancel, a family and face in the step, or the
+/// ones a label of the guest's shows as `<weight> <slope> <width> <family>`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PickWant {
+    Cancel,
+    Choice(crate::protocol::FontChoice),
+    Label(Target),
+}
+
+/// Parse `<weight> <upright|italic> <width> [synthesized]`.
+pub fn parse_face_words(text: &str) -> Result<FaceWords, String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let (weight, slope, width, synthesized) = match words.as_slice() {
+        [w, s, d] => (*w, *s, *d, false),
+        [w, s, d, "synthesized"] => (*w, *s, *d, true),
+        _ => return Err(format!("a face is `<weight> <upright|italic> <width> [synthesized]`, got {text:?}")),
+    };
+    let weight: u16 = weight
+        .parse()
+        .ok()
+        .filter(|w| (1..=1000).contains(w))
+        .ok_or_else(|| format!("a face's weight is 1 to 1000, got {weight:?}"))?;
+    let italic = match slope {
+        "upright" => false,
+        "italic" => true,
+        other => return Err(format!("a face's slope is upright or italic, got {other:?}")),
+    };
+    let width: u8 = width
+        .parse()
+        .ok()
+        .filter(|w| (1..=9).contains(w))
+        .ok_or_else(|| format!("a face's width is 1 to 9, got {width:?}"))?;
+    Ok(FaceWords { face: crate::protocol::FontFace { weight, italic, width }, synthesized })
+}
+
+/// Parse `<weight> <slope> <width> <family>`, the family the rest of the line.
+pub fn parse_font_choice(text: &str) -> Result<crate::protocol::FontChoice, String> {
+    let mut parts = text.trim().splitn(4, char::is_whitespace);
+    let (Some(w), Some(s), Some(d), Some(family)) = (parts.next(), parts.next(), parts.next(), parts.next()) else {
+        return Err(format!("a font is `<weight> <upright|italic> <width> <family>`, got {text:?}"));
+    };
+    let words = parse_face_words(&format!("{w} {s} {d}"))?;
+    let family = family.trim();
+    if family.is_empty() {
+        return Err(format!("a font names its family, got {text:?}"));
+    }
+    Ok(crate::protocol::FontChoice { family: family.to_owned(), face: words.face })
+}
+
+/// What `Stage::font_face` read off the drawn font: its family and face,
+/// whether the slope or the bold was synthesized, and what the reading
+/// measured, for the log.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DrawnFace {
+    pub family: String,
+    pub face: crate::protocol::FontFace,
+    pub synthetic_italic: bool,
+    pub synthetic_bold: bool,
+    pub detail: String,
+}
+
+impl DrawnFace {
+    /// The words the face DRAWS at: a synthesized bold draws at 700 or the
+    /// face's own weight, whichever is heavier; a synthesized slope is italic.
+    pub fn words(&self) -> FaceWords {
+        let weight = if self.synthetic_bold { self.face.weight.max(700) } else { self.face.weight };
+        FaceWords {
+            face: crate::protocol::FontFace {
+                weight,
+                italic: self.face.italic || self.synthetic_italic,
+                width: self.face.width,
+            },
+            synthesized: self.synthetic_italic || self.synthetic_bold,
+        }
+    }
+}
+
+pub fn face_words_text(w: &FaceWords) -> String {
+    format!(
+        "{} {} {}{}",
+        w.face.weight,
+        if w.face.italic { "italic" } else { "upright" },
+        w.face.width,
+        if w.synthesized { " synthesized" } else { "" }
+    )
+}
+
+pub(crate) fn drawn_face_verdict(read: &DrawnFace, want: &FaceWords) -> Result<String, String> {
+    let got = read.words();
+    let said = format!("{} ({}, {})", face_words_text(&got), read.family, read.detail);
+    if got == *want { Ok(said) } else { Err(format!("reads {said}, wanted {}", face_words_text(want))) }
+}
+
+/// What `expect_font_dialog` may say (docs/font-picker-plan.md §7).
+pub const FONT_DIALOG_STATES: [&str; 3] = ["open", "closed", "code_only"];
+
+/// expect_font_dialog's verdict over what the open picker lists, each
+/// family with its own fixed-pitch trait, read off the platform's fonts.
+pub(crate) fn font_dialog_verdict(listed: Option<&[(String, bool)]>, want: &str) -> Result<String, String> {
+    match (listed, want) {
+        (None, "closed") => Ok("closed".into()),
+        (None, _) => Err("no font picker is open".into()),
+        (Some(families), "closed") => Err(format!("a font picker is open, listing {} families", families.len())),
+        (Some(families), "open") => Ok(format!("open, listing {} families", families.len())),
+        (Some(families), _) => {
+            let proportional: Vec<&str> =
+                families.iter().filter(|(_, mono)| !mono).map(|(name, _)| name.as_str()).collect();
+            if families.is_empty() {
+                Err("the open picker lists no families".into())
+            } else if proportional.is_empty() {
+                Ok(format!("code only, {} monospaced families", families.len()))
+            } else {
+                Err(format!(
+                    "the open picker lists {} proportional families of {}: {}",
+                    proportional.len(),
+                    families.len(),
+                    proportional.iter().take(8).copied().collect::<Vec<_>>().join(", ")
+                ))
+            }
+        }
+    }
+}
 
 /// What `Stage::face` read: the resolved font's fixed-pitch trait and
 /// family, and the family the app asked for ("" for none).
@@ -3155,6 +3303,22 @@ pub trait Stage: Send + 'static {
     /// The face the toolkit resolved for a text kind, read off the font the
     /// widget holds, and the family the app asked for, "" for none
     /// (docs/code-surface-plan.md M4).
+    /// The face a text kind (or a range of a textarea's text) draws, read
+    /// off the resolved font (docs/font-picker-plan.md §2.5).
+    fn font_face(&self, target: Target, range: Option<TextRange>) -> Result<DrawnFace, String> {
+        let _ = (target, range);
+        Err("expect_face face is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
+    }
+    /// The open font picker's families, each with its own fixed-pitch trait,
+    /// read off the picker's list; None when no picker is open.
+    fn font_dialog_families(&self) -> Result<Option<Vec<(String, bool)>>, String> {
+        Err("expect_font_dialog is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
+    }
+    /// Choose in the open picker through its own controls, or cancel.
+    fn pick_font(&self, choice: Option<&crate::protocol::FontChoice>) -> Result<(), String> {
+        let _ = choice;
+        Err("pick_font is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
+    }
     fn face(&self, target: Target) -> Result<FaceRead, String> {
         let _ = target;
         Err("expect_face is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
@@ -5156,6 +5320,58 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_gutter takes one clause: {line:?}"));
                 }
                 Step::ExpectGutter(parse_target(target)?, clause)
+            }
+            "expect_face" if rest.split_whitespace().any(|w| w == "face") => {
+                let mut parts = rest.trim().splitn(2, char::is_whitespace);
+                let target = parse_target(parts.next().unwrap_or_default())?;
+                let tail = parts.next().unwrap_or_default().trim();
+                let (range, tail) = match tail.split_once(char::is_whitespace) {
+                    Some((range, after)) if range.starts_with(|c: char| c.is_ascii_digit()) => {
+                        (Some(parse_range(range).map_err(|e| format!("{e}: {line:?}"))?), after.trim())
+                    }
+                    _ => (None, tail),
+                };
+                let spec = tail
+                    .strip_prefix("face")
+                    .map(str::trim)
+                    .ok_or_else(|| format!("expect_face wants `<target> [<range>] face <face>`: {line:?}"))?;
+                // A label's words, since a scene cannot know another lane's
+                // faces and the guest, which listed them, can.
+                if spec.starts_with("label") {
+                    Step::ExpectFontFace(target, range, None, Some(parse_target(spec)?))
+                } else {
+                    Step::ExpectFontFace(
+                        target,
+                        range,
+                        Some(parse_face_words(spec).map_err(|e| format!("{e}: {line:?}"))?),
+                        None,
+                    )
+                }
+            }
+            "pick_font" => {
+                let arg = rest.trim();
+                Step::PickFont(if arg == "cancel" {
+                    PickWant::Cancel
+                } else if arg.starts_with("label") {
+                    PickWant::Label(parse_target(arg)?)
+                } else {
+                    let (family, face) = arg
+                        .strip_prefix('"')
+                        .and_then(|a| a.split_once('"'))
+                        .ok_or_else(|| format!("pick_font wants cancel, a label or \"<family>\" <face>: {line:?}"))?;
+                    let words = parse_face_words(face).map_err(|e| format!("{e}: {line:?}"))?;
+                    PickWant::Choice(crate::protocol::FontChoice { family: family.to_owned(), face: words.face })
+                })
+            }
+            "expect_font_dialog" => {
+                let state = rest.trim();
+                if !FONT_DIALOG_STATES.contains(&state) {
+                    return Err(format!(
+                        "expect_font_dialog is one of {}, got {state:?}",
+                        FONT_DIALOG_STATES.join(", ")
+                    ));
+                }
+                Step::ExpectFontDialog(state.to_owned())
             }
             "expect_face" => {
                 let (target, word) = rest
@@ -8503,6 +8719,62 @@ fn run_with_log(
                 let read = stage.face(*target).map_err(|why| format!("{what}: {why}"))?;
                 face_verdict(&read, want).map_err(|why| format!("{what} {why}"))
             })),
+            Step::ExpectFontFace(target, range, words, label) => Some(poll(|| {
+                let what = match range {
+                    Some(r) => format!("{} {}:{} face", target_spec(target), r.start, r.stop),
+                    None => format!("{} face", target_spec(target)),
+                };
+                let want = match (words, label) {
+                    (Some(words), _) => words.clone(),
+                    (None, Some(label)) => {
+                        let text = stage.read_label(*label);
+                        parse_face_words(&text).map_err(|e| format!("{what}: {} says {text:?}: {e}", target_spec(label)))?
+                    }
+                    (None, None) => unreachable!("expect_face face parses words or a label"),
+                };
+                let read = stage.font_face(*target, *range).map_err(|why| format!("{what}: {why}"))?;
+                drawn_face_verdict(&read, &want).map_err(|why| format!("{what} {why}"))
+            })),
+            Step::ExpectFontDialog(want) => Some(poll(|| {
+                let listed = stage.font_dialog_families().map_err(|why| format!("font dialog: {why}"))?;
+                font_dialog_verdict(listed.as_deref(), want).map_err(|why| format!("font dialog: {why}"))
+            })),
+            Step::PickFont(want) => 'pick: {
+                let choice = match want {
+                    PickWant::Cancel => None,
+                    PickWant::Choice(c) => Some(c.clone()),
+                    PickWant::Label(label) => {
+                        let text = stage.read_label(*label);
+                        match parse_font_choice(&text) {
+                            Ok(c) => Some(c),
+                            Err(e) => {
+                                break 'pick Some(Err(format!("pick_font: {} says {text:?}: {e}", target_spec(label))));
+                            }
+                        }
+                    }
+                };
+                await_quiet();
+                let answered = crate::scene::answers();
+                if let Err(why) = stage.pick_font(choice.as_ref()) {
+                    break 'pick Some(Err(format!("pick_font: {why}")));
+                }
+                // The picker must be gone: a press that landed before it
+                // was interactive is swallowed with no error anywhere.
+                match poll_named("pick_font", || match stage.font_dialog_families() {
+                    Ok(None) => Ok(String::new()),
+                    Ok(Some(listed)) => Err(format!(
+                        "pick_font: the picker is still open listing {} families, so the press was swallowed",
+                        listed.len()
+                    )),
+                    Err(why) => Err(format!("pick_font: {why}")),
+                }) {
+                    Ok(_) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(why)),
+                }
+            }
             Step::ExpectWeight(target, range, want) => Some(poll(|| {
                 let what = format!("{} {}:{} weight", target_spec(target), range.start, range.stop);
                 let got = stage.drawn_weight(*target, *range).map_err(|why| format!("{what}: {why}"))?;
@@ -12546,6 +12818,64 @@ mod tests {
             parse("expect_gutter textarea@code hides 40").unwrap()[0],
             Step::ExpectGutter(parse_target("textarea@code").unwrap(), GutterClause::Hides(40))
         );
+    }
+
+    /// docs/font-picker-plan.md §2.5, §7: the face words, the drawn face
+    /// (a synthesized bold draws at 700), the picker's code-only read, and
+    /// the three new verbs' grammar.
+    #[test]
+    fn the_font_face_and_picker_verbs_read_what_was_drawn() {
+        use crate::protocol::{FontChoice, FontFace};
+        let face = |weight, italic, width| FontFace { weight, italic, width };
+        assert_eq!(
+            parse_face_words("700 italic 5 synthesized").unwrap(),
+            FaceWords { face: face(700, true, 5), synthesized: true }
+        );
+        for bad in ["700 italic", "0 upright 5", "1001 upright 5", "400 oblique 5", "400 upright 10", "400 upright 5 fake"] {
+            assert!(parse_face_words(bad).is_err(), "{bad}");
+        }
+        assert_eq!(
+            parse_font_choice("300 upright 5 IBM Plex Mono").unwrap(),
+            FontChoice { family: "IBM Plex Mono".into(), face: face(300, false, 5) }
+        );
+        assert!(parse_font_choice("300 upright 5").is_err());
+        let drawn = |w, i, sb, si| DrawnFace {
+            family: "Monaco".into(),
+            face: face(w, i, 5),
+            synthetic_italic: si,
+            synthetic_bold: sb,
+            detail: "probe".into(),
+        };
+        assert_eq!(
+            drawn_face_verdict(&drawn(400, false, true, false), &parse_face_words("700 upright 5 synthesized").unwrap())
+                .unwrap(),
+            "700 upright 5 synthesized (Monaco, probe)"
+        );
+        assert!(drawn_face_verdict(&drawn(400, false, false, true), &parse_face_words("400 italic 5").unwrap())
+            .unwrap_err()
+            .contains("reads 400 italic 5 synthesized"));
+        assert!(drawn_face_verdict(&drawn(300, false, false, false), &parse_face_words("300 upright 5").unwrap()).is_ok());
+        let mono = vec![("Menlo".to_string(), true), ("Monaco".to_string(), true)];
+        assert!(font_dialog_verdict(Some(&mono), "code_only").is_ok());
+        let mixed = vec![("Menlo".to_string(), true), ("Helvetica".to_string(), false)];
+        assert!(font_dialog_verdict(Some(&mixed), "code_only").unwrap_err().contains("Helvetica"));
+        assert!(font_dialog_verdict(Some(&[]), "code_only").is_err());
+        assert!(font_dialog_verdict(None, "open").is_err());
+        assert!(font_dialog_verdict(None, "closed").is_ok());
+        let steps = parse(
+            "expect_face label@x face 300 upright 5\nexpect_face textarea@d 0:4 face label@want\n\
+             pick_font \"Menlo\" 700 italic 5\npick_font cancel\npick_font label@pick\nexpect_font_dialog code_only",
+        )
+        .unwrap();
+        assert!(matches!(&steps[0], Step::ExpectFontFace(_, None, Some(_), None)));
+        assert!(matches!(&steps[1], Step::ExpectFontFace(_, Some(TextRange { start: 0, stop: 4 }), None, Some(_))));
+        assert!(matches!(&steps[2], Step::PickFont(PickWant::Choice(c)) if c.family == "Menlo"));
+        assert!(matches!(&steps[3], Step::PickFont(PickWant::Cancel)));
+        assert!(matches!(&steps[4], Step::PickFont(PickWant::Label(_))));
+        assert!(matches!(&steps[5], Step::ExpectFontDialog(s) if s == "code_only"));
+        assert!(parse("expect_font_dialog shown").is_err());
+        assert!(parse("expect_face label@x face 300 upright").is_err());
+        assert!(parse("expect_face label@x monospaced").is_ok());
     }
 
     /// docs/code-surface-plan.md M4, S3.

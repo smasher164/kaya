@@ -18169,6 +18169,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
         ApplyOp::RequestPermission(kind) => capture::request_permission(core, kind),
         ApplyOp::WatchCaptureDevices(on) => capture::watch_devices(core, on),
         ApplyOp::ListFontFamilies => code_surface::list_font_families(core),
+        ApplyOp::PresentFontDialog(_) | ApplyOp::ListFontFaces { .. } => crate::depth_stub("fontpick"),
         ApplyOp::AddDocument { window, document } => doctabs::add_document(core, window.0, document.0)?,
         ApplyOp::SelectDocument { window, document } => doctabs::select_document(core, window.0, document.0)?,
         ApplyOp::CloseDocument { document, .. } => doctabs::close_document(core, document.0)?,
@@ -18425,6 +18426,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             }
             if code_surface::set_prop(core, id, prop, &value)? {
                 return Ok(());
+            }
+            if matches!(prop, Prop::FontWeight | Prop::FontItalic | Prop::FontWidth) {
+                crate::depth_stub("fontpick");
             }
             let widget = core.widgets.get(&id).expect("scene validated the id");
             match (widget, prop, value) {

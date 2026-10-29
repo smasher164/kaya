@@ -9,14 +9,38 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
-## RULING — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, proposed 2026-10-29)
-KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_weight, font_italic, font_width, NSFontPanel, UIFontPickerViewController, GtkFontDialog, expect_face face
+## BUILD — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, ruled 2026-10-29): the spec, the core, the Mac and the Rust binding with the fontpick scene green on the Mac (2026-10-29); the other lanes, bindings and the editor open
+KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_faces, font_weight, font_italic, font_width, choose_font, on_font_chosen, NSFontPanel, NSFontPanelCollectionsToolbarItem, UIFontPickerViewController, GtkFontDialog, expect_face face, pick_font, expect_font_dialog, fontpick.steps, DEPTH STUB fontpick
 
-Proposed with measurements on every lane; §10 asks seven questions (the Mac's
-live panel versus one answer, code fonts only on the Mac, what Bold means over
-a thin or heavy face, synthesis, oblique, GNOME's size row, listing faces).
-Nothing is built. Replaces docs/code-surface-plan.md M5. Closing this entry
-also closes the iOS family-list entry below, whose trigger is this ruling.
+The maintainer ruled the plan's seven questions on 2026-10-29 (§10, each
+marked RULED there). The depth slice: the spec's records (tx 94 and 95, apply
+82 and 83, occurrences 69 and 70) and props 73 to 75; the core's walls (the
+OpenType ranges, the file dialog's one live slot, the face list's one shape)
+under their unit tests; the Rust surface with its future form; the SwiftUI arm
+on the Mac (the CSS matcher over Core Text's faces, the shear and the
+double-drawn or stroked bold kaya synthesizes, Bold and Italic composed by §3,
+the floating NSFontPanel with Cancel and Choose and the Fixed Width
+collection); `expect_face face`, `pick_font` and `expect_font_dialog`; the
+`fontpick` scene with its Rust guest on the Mac's depth roster, four negatives
+watched red (an echoed prop, a matcher rounding down, the shear dropped, the
+collection not chosen).
+
+  - **DEPTH STUB: fontpick on gtk** — GtkFontDialog, Pango's faces, the reads, the emoji family out of the monospace filter.
+  - **DEPTH STUB: fontpick on swiftui/ios** — UIFontPickerViewController through the XCUITest driver, the Italic-over-Light weight fix.
+  - **DEPTH STUB: fontpick on winui** — the kaya-drawn ContentDialog over DirectWrite's faces.
+  - **DEPTH STUB: fontpick on compose** — the kaya-drawn bottom sheet over SystemFonts.
+  - **The eight other bindings and the C floor** — the three props, the request and its two handlers.
+  - **The editor's Font…** (the maintainer, 2026-10-29: "I think we can drop the short list") — one View item opening the picker, the choice applied to the document and kept in its preferences.
+
+## DEFER — the Mac font panel before macOS 26 lists every family under code_only (docs/font-picker-plan.md Q2; 2026-10-29)
+KEY: NSFontPanelCollectionsToolbarItem, kayaSelectFixedWidth, Fixed Width, code_only, macOS 13, macOS 15, font panel collections column
+
+The macOS 26 panel keeps its collections in a toolbar popup, which kaya drives
+to the Mac's own Fixed Width collection (Q2, RULED). The panel on kaya's macOS
+13 to 15 floor keeps them in a column instead, and no host older than 26 is
+reachable here, so nothing is built for it: `kayaSelectFixedWidth` says so and
+the panel opens unfiltered, Fixed Width one click away. UNMEASURED. Trigger: a
+macOS 13, 14 or 15 host to measure the column on.
 
 ## BUILD — document tabs over surfaces, native on each platform (docs/doctabs-plan.md, ruled 2026-10-28): every backend, the nine bindings and the C floor built, the scene and the editor's tabs green in 48 legs on five lanes (2026-10-28); the WinUI tab row in the title bar (2026-10-29); the review page open
 KEY: doctabs, document tabs, add_document, select_document, close_document, set_document_prop, add_region, DOCUMENT_PROPS, dprop, region_edge, new_document, document_selected, document_close_requested, documents_close_requested, document_closed, new_document_requested, document_moved, DocumentRef, DocumentProp, RegionEdge, KayaDocumentModel, KayaRegionModel, KayaDocumentRoot, KayaDocumentResponder, KayaRegionSlot, kayaPlaceRegions, kayaMoveRegionHost, expect_documents, expect_document, expect_document_dirty, move_to_new_window, close_native_window, doctabs.steps, check-doctabs, DEPTH STUB doctabs

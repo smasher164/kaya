@@ -363,6 +363,10 @@ name = "codesurface"
 path = "../../guests/rust/codesurface.rs"
 
 [[example]]
+name = "fontpick"
+path = "../../guests/rust/fontpick.rs"
+
+[[example]]
 name = "numberfield"
 path = "../../guests/rust/numberfield.rs"
 

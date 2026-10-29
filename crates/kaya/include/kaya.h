@@ -320,6 +320,18 @@
 #define KAYA_OCCURRENCE_DOCUMENTS_DETACHED 68
 
 /**
+ * FONT_DIALOG_RESULT { u64 dialog; u32 weight; u32 italic; u32 width; u32
+ * reserved; Value family } (docs/font-picker-plan.md §4.2).
+ */
+#define KAYA_OCCURRENCE_FONT_DIALOG_RESULT 69
+
+/**
+ * FONT_FACES { Value family; Values: weight, italic, width, name a face }
+ * (docs/font-picker-plan.md §4.4).
+ */
+#define KAYA_OCCURRENCE_FONT_FACES 70
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -547,6 +559,18 @@
 #define KAYA_TX_SET_DOCUMENT_PROP 92
 
 #define KAYA_TX_ADD_REGION 93
+
+/**
+ * SHOW_FONT_DIALOG { u64 window; u64 dialog; u32 code_only; u32 faces; u32
+ * weight; u32 italic; u32 width; u32 reserved; Value family }
+ * (docs/font-picker-plan.md §4.2).
+ */
+#define KAYA_TX_SHOW_FONT_DIALOG 94
+
+/**
+ * LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
+ */
+#define KAYA_TX_LIST_FONT_FACES 95
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -988,6 +1012,16 @@
 #define KAYA_APPLY_SET_DOCUMENT_PROP 80
 
 #define KAYA_APPLY_ADD_REGION 81
+
+/**
+ * PRESENT_FONT_DIALOG, SHOW_FONT_DIALOG's body (docs/font-picker-plan.md §4.2).
+ */
+#define KAYA_APPLY_PRESENT_FONT_DIALOG 82
+
+/**
+ * LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
+ */
+#define KAYA_APPLY_LIST_FONT_FACES 83
 
 #define KAYA_APPLY_ADD_SECTION 15
 
@@ -1457,6 +1491,21 @@
  * A text kind's size as a multiple of the platform's (docs/code-surface-plan.md S1).
  */
 #define KAYA_PROP_TEXT_SCALE 72
+
+/**
+ * A text kind's face weight, 1 to 1000 (docs/font-picker-plan.md §2.3).
+ */
+#define KAYA_PROP_FONT_WEIGHT 73
+
+/**
+ * A text kind's slope (docs/font-picker-plan.md §2.3).
+ */
+#define KAYA_PROP_FONT_ITALIC 74
+
+/**
+ * A text kind's face width, 1 to 9 (docs/font-picker-plan.md §2.3).
+ */
+#define KAYA_PROP_FONT_WIDTH 75
 
 /**
  * Window properties (spec::WINDOW_PROPS): their own namespace —
@@ -2257,6 +2306,13 @@
 typedef struct BoolKind BoolKind;
 
 /**
+ * A face of a family, the portable three (docs/font-picker-plan.md §2.2):
+ * the OpenType weight class 1 to 1000, upright or slanted, and the width
+ * class 1 to 9.
+ */
+typedef struct FontFace FontFace;
+
+/**
  * Property keys; grows with widgets.
  */
 typedef struct Prop Prop;
@@ -2914,7 +2970,18 @@ typedef struct KayaHostApi {
    * docs/code-surface-plan.md M3: the installed families, `\n`-joined.
    */
   void (*font_families)(const uint8_t*, uintptr_t);
+  /**
+   * docs/font-picker-plan.md §4.4: one family's faces as
+   * `weight\titalic\twidth\tname` lines.
+   */
+  void (*font_faces)(const uint8_t*, uintptr_t, const uint8_t*, uintptr_t);
+  /**
+   * docs/font-picker-plan.md §4.2: the picker's one answer.
+   */
+  void (*emit_font_dialog_result)(uint64_t, const uint8_t*, uintptr_t, uint32_t, uint32_t, uint32_t);
 } KayaHostApi;
+
+
 
 
 
@@ -3561,6 +3628,20 @@ int32_t kaya_open_picked(uint64_t handle,
                          uint32_t *out_seekable);
 
 /**
+ * Presentation side (interpreter platforms): the font picker's one
+ * answer. `family` empty (or null) is cancel; `italic` is 0 or 1.
+ *
+ * # Safety
+ * `family` must describe `len` readable bytes, or be null with `len` 0.
+ */
+void kaya_emit_font_dialog_result(uint64_t dialog,
+                                  const uint8_t *family,
+                                  uintptr_t len,
+                                  uint32_t weight,
+                                  uint32_t italic,
+                                  uint32_t width);
+
+/**
  * Presentation side: the file picker's one answer. `locators` and `names`
  * are parallel arrays of `count` NUL-terminated UTF-8 strings; an EMPTY
  * count is cancel. LOCATORS AND NOT PATHS: a locator is whatever the
@@ -4123,6 +4204,20 @@ void kaya_capture_permission(uint32_t kind,
  * `names` must describe `len` readable bytes.
  */
 void kaya_font_families(const uint8_t *names, uintptr_t len);
+
+/**
+ * Presentation side: one family's faces, answering list_font_faces, as
+ * UTF-8 lines `weight\titalic\twidth\tname` (italic 0 or 1) in any order;
+ * the core sorts and deduplicates them (font_face_list), so every backend's
+ * list reads the same way (docs/font-picker-plan.md §4.4).
+ *
+ * # Safety
+ * `family` must describe `family_len` readable bytes and `faces` `len`.
+ */
+void kaya_font_faces(const uint8_t *family,
+                     uintptr_t family_len,
+                     const uint8_t *faces,
+                     uintptr_t len);
 
 /**
  * Presentation side: a device list starts.

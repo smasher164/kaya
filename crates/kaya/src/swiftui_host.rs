@@ -437,6 +437,11 @@ pub struct KayaHostApi {
     pub emit_selection_changed: unsafe extern "C" fn(*const u8, usize),
     /// docs/code-surface-plan.md M3: the installed families, `\n`-joined.
     pub font_families: unsafe extern "C" fn(*const u8, usize),
+    /// docs/font-picker-plan.md §4.4: one family's faces as
+    /// `weight\titalic\twidth\tname` lines.
+    pub font_faces: unsafe extern "C" fn(*const u8, usize, *const u8, usize),
+    /// docs/font-picker-plan.md §4.2: the picker's one answer.
+    pub emit_font_dialog_result: unsafe extern "C" fn(u64, *const u8, usize, u32, u32, u32),
 }
 
 /// # Safety
@@ -750,6 +755,8 @@ pub(crate) fn run() -> i32 {
         emit_activated: crate::capi::kaya_emit_activated,
         emit_selection_changed: crate::capi::kaya_emit_selection_changed,
         font_families: crate::capi::kaya_font_families,
+        font_faces: crate::capi::kaya_font_faces,
+        emit_font_dialog_result: crate::capi::kaya_emit_font_dialog_result,
     };
     // THIS BACKEND WINDOWS ROWS (docs/deferred.md, the declares-windowing
     // entry), and the declaration has to beat the first transaction rather

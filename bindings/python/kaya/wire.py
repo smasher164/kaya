@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xa37dca454ad9d6cc
+SPEC_HASH = 0xd4526bbce915c1b5
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -154,6 +154,9 @@ PROP_LINE_NUMBERS = 69
 PROP_MONOSPACED = 70
 PROP_FAMILY = 71
 PROP_TEXT_SCALE = 72
+PROP_FONT_WEIGHT = 73
+PROP_FONT_ITALIC = 74
+PROP_FONT_WIDTH = 75
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -521,6 +524,8 @@ TX_SELECT_DOCUMENT = 90
 TX_CLOSE_DOCUMENT = 91
 TX_SET_DOCUMENT_PROP = 92
 TX_ADD_REGION = 93
+TX_SHOW_FONT_DIALOG = 94
+TX_LIST_FONT_FACES = 95
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -600,6 +605,8 @@ APPLY_SELECT_DOCUMENT = 78
 APPLY_CLOSE_DOCUMENT = 79
 APPLY_SET_DOCUMENT_PROP = 80
 APPLY_ADD_REGION = 81
+APPLY_PRESENT_FONT_DIALOG = 82
+APPLY_LIST_FONT_FACES = 83
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -668,6 +675,8 @@ OCC_DOCUMENT_CLOSED = 65
 OCC_NEW_DOCUMENT_REQUESTED = 66
 OCC_DOCUMENT_MOVED = 67
 OCC_DOCUMENTS_DETACHED = 68
+OCC_FONT_DIALOG_RESULT = 69
+OCC_FONT_FACES = 70
 
 
 def _pad(b: bytes) -> bytes:
@@ -1122,6 +1131,14 @@ def tx_set_document_prop(document: int, prop: int, source: int) -> bytes:
 def tx_add_region(window: int, region: int, edge: int) -> bytes:
     """Declare a shared region of a window with documents at an edge (enum region_edge; docs/doctabs-plan.md §1.7): a surface every document's tab shares, filled by mount. One per edge, never removed."""
     return record(TX_ADD_REGION, struct.pack("<Q", window) + struct.pack("<Q", region) + struct.pack("<I", edge) + struct.pack("<I", 0))
+
+def tx_show_font_dialog(window: int, dialog: int, code_only: int, faces: int, weight: int, italic: int, width: int, family: Value) -> bytes:
+    """Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face."""
+    return record(TX_SHOW_FONT_DIALOG, struct.pack("<Q", window) + struct.pack("<Q", dialog) + struct.pack("<I", code_only) + struct.pack("<I", faces) + struct.pack("<I", weight) + struct.pack("<I", italic) + struct.pack("<I", width) + struct.pack("<I", 0) + _enc.value(family))
+
+def tx_list_font_faces(family: Value) -> bytes:
+    """List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4)."""
+    return record(TX_LIST_FONT_FACES, _enc.value(family))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:
@@ -2204,6 +2221,51 @@ def tx_bind_text_scale_element(widget_id: int, level: int = 0, field: int = 0) -
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TEXT_SCALE, SOURCE_ELEMENT, level, field))
 
 
+def tx_set_font_weight(widget_id: int, font_weight: float) -> bytes:
+    """set_property with a constant font_weight value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FONT_WEIGHT, SOURCE_CONST) + _enc.value(font_weight))
+
+
+def tx_bind_font_weight(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound font_weight value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FONT_WEIGHT, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_font_weight_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FONT_WEIGHT, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_font_italic(widget_id: int, font_italic: bool) -> bytes:
+    """set_property with a constant font_italic value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FONT_ITALIC, SOURCE_CONST) + _enc.value(font_italic))
+
+
+def tx_bind_font_italic(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound font_italic value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FONT_ITALIC, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_font_italic_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FONT_ITALIC, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_font_width(widget_id: int, font_width: float) -> bytes:
+    """set_property with a constant font_width value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_FONT_WIDTH, SOURCE_CONST) + _enc.value(font_width))
+
+
+def tx_bind_font_width(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound font_width value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_FONT_WIDTH, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_font_width_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FONT_WIDTH, SOURCE_ELEMENT, level, field))
+
+
 def tx_set_window_title(window: int, title: str) -> bytes:
     """set_window_prop with a constant title value (str); window 0, the primary surface."""
     return record(TX_SET_WINDOW_PROP, struct.pack("<QII", window, WPROP_TITLE, SOURCE_CONST) + _enc.value(title))
@@ -2629,7 +2691,7 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
     value for OCC_VALUE_CHANGED, None otherwise.
     """
     _size, kind, _flags = struct.unpack_from("<IHH", buf, 0)
-    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED):
+    if kind not in (OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED, OCC_FONT_DIALOG_RESULT, OCC_FONT_FACES):
         return kind, None, [], None
     if kind == OCC_ALERT_RESULT:
         # A request's one answer: id + the u32 code.
@@ -2884,6 +2946,36 @@ def parse_occurrence(buf: bytes | bytearray) -> tuple[int, Any, list[Any], Any]:
         at += 8
         tail.append(struct.unpack_from("<Q", buf, at)[0])
         at += 8
+        count = struct.unpack_from("<I", buf, at)[0]
+        at += 8
+        tail.append(count)
+        for _ in range(count):
+            value, at = parse_value(buf, at)
+            tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_FONT_DIALOG_RESULT:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = struct.unpack_from("<Q", buf, 8)[0]
+        at += 8
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        tail.append(struct.unpack_from("<I", buf, at)[0])
+        at += 4
+        at += 4
+        value, at = parse_value(buf, at)
+        tail.append(value)
+        return kind, flat_id, [], tail
+    if kind == OCC_FONT_FACES:
+        # A flat record: its fields in order, into the tail.
+        at = 8
+        tail = []
+        flat_id = 0
+        value, at = parse_value(buf, at)
+        tail.append(value)
         count = struct.unpack_from("<I", buf, at)[0]
         at += 8
         tail.append(count)

@@ -3509,7 +3509,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xa37dca454ad9d6ccuL
+    private const val SPEC_HASH: ULong = 0xd4526bbce915c1b5uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3658,6 +3658,8 @@ object KayaCompose {
     private const val APPLY_CLOSE_DOCUMENT = 79
     private const val APPLY_SET_DOCUMENT_PROP = 80
     private const val APPLY_ADD_REGION = 81
+    private const val APPLY_PRESENT_FONT_DIALOG = 82
+    private const val APPLY_LIST_FONT_FACES = 83
     private const val DPROP_TITLE = 1
     private const val DPROP_TOOLTIP = 2
     private const val DPROP_DIRTY = 3
@@ -3868,6 +3870,9 @@ object KayaCompose {
     private const val PROP_MONOSPACED = 70
     private const val PROP_FAMILY = 71
     private const val PROP_TEXT_SCALE = 72
+    private const val PROP_FONT_WEIGHT = 73
+    private const val PROP_FONT_ITALIC = 74
+    private const val PROP_FONT_WIDTH = 75
     // The ground and shape enums' wire values (docs/styling-pass-plan.md Y2, Y6).
     const val GROUND_NONE = 0L
     const val GROUND_GRADIENT = 1L
@@ -4955,6 +4960,7 @@ object KayaCompose {
                         PROP_MONOSPACED -> KayaSceneModel.nodes[id]!!.monospaced = readBool(b)
                         PROP_FAMILY -> KayaSceneModel.nodes[id]!!.family = readString(b)
                         PROP_TEXT_SCALE -> KayaSceneModel.nodes[id]!!.textScale = readF64(b)
+                        PROP_FONT_WEIGHT, PROP_FONT_ITALIC, PROP_FONT_WIDTH -> depthStub("fontpick")
                         PROP_TINT -> KayaSceneModel.nodes[id]!!.labelTint = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
@@ -5461,6 +5467,7 @@ object KayaCompose {
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
                 APPLY_LIST_FONT_FAMILIES -> kayaListFontFamilies()
+                APPLY_PRESENT_FONT_DIALOG, APPLY_LIST_FONT_FACES -> depthStub("fontpick")
                 APPLY_ADD_DOCUMENT -> {
                     b.long // window: 0, the one surface on this host
                     val did = b.long
@@ -15089,6 +15096,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 ?: failures.add("${parts[1]} ${parts[2]} weight${got.second}")
                         }
                     }
+                    "pick_font", "expect_font_dialog" -> depthStub("fontpick")
                     "expect_scaled" -> {
                         // docs/code-surface-plan.md S3: harness.rs's ExpectScaled.
                         val want = parts.getOrNull(2)?.toDoubleOrNull()

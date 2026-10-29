@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xa37dca454ad9d6cc
+let kayaSpecHash: UInt64 = 0xd4526bbce915c1b5
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -971,6 +971,28 @@ struct KayaTx {
         self.u64(region)
         self.u32(edge)
         self.u32(0)
+        self.end(kayaAt)
+    }
+
+    /// Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face.
+    mutating func showFontDialog(_ window: UInt64, _ dialog: UInt64, _ codeOnly: UInt32, _ faces: UInt32, _ weight: UInt32, _ italic: UInt32, _ width: UInt32, _ family: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SHOW_FONT_DIALOG))
+        self.u64(window)
+        self.u64(dialog)
+        self.u32(codeOnly)
+        self.u32(faces)
+        self.u32(weight)
+        self.u32(italic)
+        self.u32(width)
+        self.u32(0)
+        self.value(family)
+        self.end(kayaAt)
+    }
+
+    /// List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4).
+    mutating func listFontFaces(_ family: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_LIST_FONT_FACES))
+        self.value(family)
         self.end(kayaAt)
     }
 
@@ -3278,6 +3300,102 @@ struct KayaTx {
         self.end(kayaAt)
     }
 
+    /// set_property with a constant font_weight value.
+    mutating func setFontWeight(_ widgetId: UInt64, _ fontWeight: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WEIGHT))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(fontWeight))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound font_weight value.
+    mutating func bindFontWeight(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WEIGHT))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindFontWeightElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WEIGHT))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant font_italic value.
+    mutating func setFontItalic(_ widgetId: UInt64, _ fontItalic: Bool) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_ITALIC))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.bool(fontItalic))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound font_italic value.
+    mutating func bindFontItalic(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_ITALIC))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindFontItalicElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_ITALIC))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
+    /// set_property with a constant font_width value.
+    mutating func setFontWidth(_ widgetId: UInt64, _ fontWidth: Double) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WIDTH))
+        self.u32(UInt32(KAYA_SOURCE_CONST))
+        self.value(.f64(fontWidth))
+        self.end(kayaAt)
+    }
+
+    /// set_property with a signal-bound font_width value.
+    mutating func bindFontWidth(_ widgetId: UInt64, _ signalId: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WIDTH))
+        self.u32(UInt32(KAYA_SOURCE_SIGNAL))
+        self.u64(signalId)
+        self.end(kayaAt)
+    }
+
+    /// set_property bound to one field of the element of the
+    /// enclosing For, `level` Fors up (0 = nearest).
+    mutating func bindFontWidthElement(_ widgetId: UInt64, level: UInt32 = 0, field: UInt32 = 0) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_SET_PROPERTY))
+        self.u64(widgetId)
+        self.u32(UInt32(KAYA_PROP_FONT_WIDTH))
+        self.u32(UInt32(KAYA_SOURCE_ELEMENT))
+        self.u32(level)
+        self.u32(field)
+        self.end(kayaAt)
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     mutating func setWindowTitle(_ window: UInt64, _ title: String) {
         let kayaAt = self.begin(UInt16(KAYA_TX_SET_WINDOW_PROP))
@@ -4149,6 +4267,8 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED)
             || kind == UInt16(KAYA_OCCURRENCE_DOCUMENT_MOVED)
             || kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_DETACHED)
+            || kind == UInt16(KAYA_OCCURRENCE_FONT_DIALOG_RESULT)
+            || kind == UInt16(KAYA_OCCURRENCE_FONT_FACES)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4654,6 +4774,62 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
                 for _ in 0..<count { tail.append(value()) }
             }
             return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_FONT_DIALOG_RESULT) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            at += 4
+            tail.append(value())
+            return (kind, id, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_FONT_FACES) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            tail.append(value())
+            do {
+                let count = Int(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))
+                at += 8
+                tail.append(.i64(Int64(count)))
+                for _ in 0..<count { tail.append(value()) }
+            }
+            return (kind, 0, [], nil, [], nil, nil, tail)
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xa37dca454ad9d6cc;
+    public const ulong SpecHash = 0xd4526bbce915c1b5;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -152,6 +152,9 @@ static class KayaWire
     public const uint PropMonospaced = 70;
     public const uint PropFamily = 71;
     public const uint PropTextScale = 72;
+    public const uint PropFontWeight = 73;
+    public const uint PropFontItalic = 74;
+    public const uint PropFontWidth = 75;
     public const uint WpropTitle = 1;
     public const uint WpropWidth = 2;
     public const uint WpropHeight = 3;
@@ -518,6 +521,8 @@ static class KayaWire
     public const ushort TxKindCloseDocument = 91;
     public const ushort TxKindSetDocumentProp = 92;
     public const ushort TxKindAddRegion = 93;
+    public const ushort TxKindShowFontDialog = 94;
+    public const ushort TxKindListFontFaces = 95;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -597,6 +602,8 @@ static class KayaWire
     public const ushort ApplyKindCloseDocument = 79;
     public const ushort ApplyKindSetDocumentProp = 80;
     public const ushort ApplyKindAddRegion = 81;
+    public const ushort ApplyKindPresentFontDialog = 82;
+    public const ushort ApplyKindListFontFaces = 83;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -665,6 +672,8 @@ static class KayaWire
     public const ushort OccKindNewDocumentRequested = 66;
     public const ushort OccKindDocumentMoved = 67;
     public const ushort OccKindDocumentsDetached = 68;
+    public const ushort OccKindFontDialogResult = 69;
+    public const ushort OccKindFontFaces = 70;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1671,6 +1680,30 @@ static class KayaWire
         w.Write(edge);
         w.Write(0u);
         return Finish(stream, w, TxKindAddRegion);
+    }
+
+    /// Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face.
+    public static byte[] TxShowFontDialog(ulong window, ulong dialog, uint codeOnly, uint faces, uint weight, uint italic, uint width, object family)
+    {
+        var w = Begin(out var stream);
+        w.Write(window);
+        w.Write(dialog);
+        w.Write(codeOnly);
+        w.Write(faces);
+        w.Write(weight);
+        w.Write(italic);
+        w.Write(width);
+        w.Write(0u);
+        EncodeValue(w, family);
+        return Finish(stream, w, TxKindShowFontDialog);
+    }
+
+    /// List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4).
+    public static byte[] TxListFontFaces(object family)
+    {
+        var w = Begin(out var stream);
+        EncodeValue(w, family);
+        return Finish(stream, w, TxKindListFontFaces);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -3509,6 +3542,81 @@ static class KayaWire
         return Finish(stream, w, TxKindSetProperty);
     }
 
+    /// set_property with a constant font_weight value.
+    public static byte[] TxSetFontWeight(ulong widgetId, double fontWeight)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWeight); w.Write(SourceConst);
+        EncodeValue(w, fontWeight);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound font_weight value.
+    public static byte[] TxBindFontWeight(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWeight); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindFontWeightElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWeight); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant font_italic value.
+    public static byte[] TxSetFontItalic(ulong widgetId, bool fontItalic)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontItalic); w.Write(SourceConst);
+        EncodeValue(w, fontItalic);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound font_italic value.
+    public static byte[] TxBindFontItalic(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontItalic); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindFontItalicElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontItalic); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a constant font_width value.
+    public static byte[] TxSetFontWidth(ulong widgetId, double fontWidth)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWidth); w.Write(SourceConst);
+        EncodeValue(w, fontWidth);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property with a signal-bound font_width value.
+    public static byte[] TxBindFontWidth(ulong widgetId, ulong signalId)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWidth); w.Write(SourceSignal); w.Write(signalId);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
+    /// set_property bound to one field of the element of the enclosing For.
+    public static byte[] TxBindFontWidthElement(ulong widgetId, uint level = 0, uint field = 0)
+    {
+        var w = Begin(out var stream);
+        w.Write(widgetId); w.Write(PropFontWidth); w.Write(SourceElement); w.Write(level); w.Write(field);
+        return Finish(stream, w, TxKindSetProperty);
+    }
+
     /// set_window_prop with a constant title value (window 0, the primary surface).
     public static byte[] TxSetWindowTitle(ulong window, string title)
     {
@@ -4175,7 +4283,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected && kind != OccKindDocumentSelected && kind != OccKindDocumentCloseRequested && kind != OccKindDocumentsCloseRequested && kind != OccKindDocumentClosed && kind != OccKindNewDocumentRequested && kind != OccKindDocumentMoved && kind != OccKindDocumentsDetached)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected && kind != OccKindDocumentSelected && kind != OccKindDocumentCloseRequested && kind != OccKindDocumentsCloseRequested && kind != OccKindDocumentClosed && kind != OccKindNewDocumentRequested && kind != OccKindDocumentMoved && kind != OccKindDocumentsDetached && kind != OccKindFontDialogResult && kind != OccKindFontFaces)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -4606,6 +4714,73 @@ static class KayaWire
             flatAt += 8;
             tail.Add(BitConverter.ToInt64(rec, flatAt));
             flatAt += 8;
+            {
+                int count = (int)BitConverter.ToUInt32(rec, flatAt);
+                flatAt += 8;
+                tail.Add((long)count);
+                for (int i = 0; i < count; i++)
+                {
+                    uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                    int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                    switch (vtype)
+                    {
+                        case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                        case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                        case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                        default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                    }
+                    flatAt += 8 + ((vlen + 7) & ~7);
+                }
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindFontDialogResult)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindFontFaces)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            id = 0;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
+            }
             {
                 int count = (int)BitConverter.ToUInt32(rec, flatAt);
                 flatAt += 8;

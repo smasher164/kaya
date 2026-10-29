@@ -1,0 +1,28 @@
+# The font picker (docs/font-picker-plan.md §7). The guest lists the
+# platform's families and their faces and labels what it asked for, since a
+# scene cannot know another lane's faces: an exact face, a weight between two
+# of a family's (the CSS matcher), a slope on a family with none (synthesized),
+# and Bold and Italic over a light document (§3). Then the picker, code fonts
+# with faces: its listing, a pick applied to a label, and a cancel that leaves
+# the label as it was.
+expect_title "fontpick"
+click button@faces
+expect label@ready "faces: found"
+expect_face label@exact face label@want_exact
+expect_face label@between face label@want_between
+expect_face label@synth face label@want_synth
+expect_face textarea@doc 0:4 face label@want_bold
+expect_face textarea@doc 10:16 face label@want_italic
+expect_face textarea@doc 22:27 face label@want_exact
+click button@pick_button
+expect_font_dialog code_only
+pick_font label@pick
+expect_font_dialog closed
+expect label@picked "picked: as asked"
+expect_face label@chosen named
+expect_face label@chosen face label@want_pick
+click button@pick_button
+expect_font_dialog open
+pick_font cancel
+expect label@picked "picked: cancelled"
+expect_face label@chosen face label@want_pick

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xa37dca454ad9d6ccL
+let spec_hash = 0xd4526bbce915c1b5L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -170,6 +170,9 @@ let prop_line_numbers = 69
 let prop_monospaced = 70
 let prop_family = 71
 let prop_text_scale = 72
+let prop_font_weight = 73
+let prop_font_italic = 74
+let prop_font_width = 75
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -536,6 +539,8 @@ let tx_kind_select_document = 90
 let tx_kind_close_document = 91
 let tx_kind_set_document_prop = 92
 let tx_kind_add_region = 93
+let tx_kind_show_font_dialog = 94
+let tx_kind_list_font_faces = 95
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -615,6 +620,8 @@ let apply_kind_select_document = 78
 let apply_kind_close_document = 79
 let apply_kind_set_document_prop = 80
 let apply_kind_add_region = 81
+let apply_kind_present_font_dialog = 82
+let apply_kind_list_font_faces = 83
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -683,6 +690,8 @@ let occ_kind_document_closed = 65
 let occ_kind_new_document_requested = 66
 let occ_kind_document_moved = 67
 let occ_kind_documents_detached = 68
+let occ_kind_font_dialog_result = 69
+let occ_kind_font_faces = 70
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1393,6 +1402,24 @@ let tx_add_region window region edge =
       Buffer.add_int64_le b region;
       Buffer.add_int32_le b (Int32.of_int edge);
       Buffer.add_int32_le b 0l)
+
+(* Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face. *)
+let tx_show_font_dialog window dialog code_only faces weight italic width family =
+  finish tx_kind_show_font_dialog (fun b ->
+      Buffer.add_int64_le b window;
+      Buffer.add_int64_le b dialog;
+      Buffer.add_int32_le b (Int32.of_int code_only);
+      Buffer.add_int32_le b (Int32.of_int faces);
+      Buffer.add_int32_le b (Int32.of_int weight);
+      Buffer.add_int32_le b (Int32.of_int italic);
+      Buffer.add_int32_le b (Int32.of_int width);
+      Buffer.add_int32_le b 0l;
+      encode_value b family)
+
+(* List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4). *)
+let tx_list_font_faces family =
+  finish tx_kind_list_font_faces (fun b ->
+      encode_value b family)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -3292,6 +3319,84 @@ let tx_bind_text_scale_element ?(level = 0) ?(field = 0) widget_id =
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))
 
+(* set_property with a constant font_weight value. *)
+let tx_set_font_weight widget_id font_weight =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_weight);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 font_weight))
+
+(* set_property with a signal-bound font_weight value. *)
+let tx_bind_font_weight widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_weight);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_font_weight_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_weight);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant font_italic value. *)
+let tx_set_font_italic widget_id font_italic =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_italic);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool font_italic))
+
+(* set_property with a signal-bound font_italic value. *)
+let tx_bind_font_italic widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_italic);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_font_italic_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_italic);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant font_width value. *)
+let tx_set_font_width widget_id font_width =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_width);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 font_width))
+
+(* set_property with a signal-bound font_width value. *)
+let tx_bind_font_width widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_width);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_font_width_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_font_width);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
 (* set_window_prop with a constant title value (window 0, the primary surface). *)
 let tx_set_window_title window title =
   finish tx_kind_set_window_prop (fun b ->
@@ -3939,7 +4044,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached && kind <> occ_kind_font_dialog_result && kind <> occ_kind_font_faces then None
   else begin
     let id = id_at byte 8 in
     if kind = occ_kind_alert_result
@@ -4249,6 +4354,42 @@ let parse_occurrence byte =
          at := next
        done);
       Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_font_dialog_result
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_font_faces
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      (let count = u32_at byte !at in
+       at := !at + 8;
+       out := I64 (Int64.of_int count) :: !out;
+       for _ = 1 to count do
+         let v, next = parse_value byte !at in
+         out := v :: !out;
+         at := next
+       done);
+      Some (kind, 0L, [], None, None, None, List.rev !out)
     end
     else if kind = occ_kind_file_dialog_result
     then begin

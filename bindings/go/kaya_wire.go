@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xa37dca454ad9d6cc
+	SpecHash uint64 = 0xd4526bbce915c1b5
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -154,6 +154,9 @@ const (
 	PropMonospaced = 70
 	PropFamily = 71
 	PropTextScale = 72
+	PropFontWeight = 73
+	PropFontItalic = 74
+	PropFontWidth = 75
 	WpropTitle = 1
 	WpropWidth = 2
 	WpropHeight = 3
@@ -520,6 +523,8 @@ const (
 	txCloseDocument = 91
 	txSetDocumentProp = 92
 	txAddRegion = 93
+	txShowFontDialog = 94
+	txListFontFaces = 95
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -599,6 +604,8 @@ const (
 	applyCloseDocument = 79
 	applySetDocumentProp = 80
 	applyAddRegion = 81
+	applyPresentFontDialog = 82
+	applyListFontFaces = 83
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -667,6 +674,8 @@ const (
 	occNewDocumentRequested = 66
 	occDocumentMoved = 67
 	occDocumentsDetached = 68
+	occFontDialogResult = 69
+	occFontFaces = 70
 )
 
 func (d Detent) String() string {
@@ -2017,6 +2026,28 @@ func TxAddRegion(window uint64, region uint64, edge uint32) []byte {
 	b = binary.LittleEndian.AppendUint64(b, region)
 	b = binary.LittleEndian.AppendUint32(b, edge)
 	b = binary.LittleEndian.AppendUint32(b, 0)
+	return endRecord(b)
+}
+
+// TxShowFontDialog: Request the font picker over a live window (0 = primary), on the file dialog's request/result grammar and in its one live slot (docs/font-picker-plan.md §4.2): one request, one answer, a font_dialog_result whose id retires there. `code_only` (0 or 1) lists monospaced families only; `faces` (0 or 1) asks for a face as well as a family. `family` (a Str, empty for none) is the family the picker opens on, `weight` (1 to 1000, 0 for 400), `italic` (0 or 1) and `width` (1 to 9, 0 for 5) its face.
+func TxShowFontDialog(window uint64, dialog uint64, codeOnly uint32, faces uint32, weight uint32, italic uint32, width uint32, family any) []byte {
+	b := beginRecord(txShowFontDialog)
+	b = binary.LittleEndian.AppendUint64(b, window)
+	b = binary.LittleEndian.AppendUint64(b, dialog)
+	b = binary.LittleEndian.AppendUint32(b, codeOnly)
+	b = binary.LittleEndian.AppendUint32(b, faces)
+	b = binary.LittleEndian.AppendUint32(b, weight)
+	b = binary.LittleEndian.AppendUint32(b, italic)
+	b = binary.LittleEndian.AppendUint32(b, width)
+	b = binary.LittleEndian.AppendUint32(b, 0)
+	b = encodeValue(b, family)
+	return endRecord(b)
+}
+
+// TxListFontFaces: List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4).
+func TxListFontFaces(family any) []byte {
+	b := beginRecord(txListFontFaces)
+	b = encodeValue(b, family)
 	return endRecord(b)
 }
 
@@ -4354,6 +4385,102 @@ func TxBindTextScaleElement(widgetID uint64, level uint32, field uint32) []byte 
 	return endRecord(b)
 }
 
+// TxSetFontWeight: set_property with a constant font_weight value.
+func TxSetFontWeight(widgetID uint64, fontWeight float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, fontWeight)
+	return endRecord(b)
+}
+
+// TxBindFontWeight: set_property with a signal-bound font_weight value.
+func TxBindFontWeight(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindFontWeightElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindFontWeightElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWeight)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetFontItalic: set_property with a constant font_italic value.
+func TxSetFontItalic(widgetID uint64, fontItalic bool) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontItalic)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, fontItalic)
+	return endRecord(b)
+}
+
+// TxBindFontItalic: set_property with a signal-bound font_italic value.
+func TxBindFontItalic(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontItalic)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindFontItalicElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindFontItalicElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontItalic)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
+// TxSetFontWidth: set_property with a constant font_width value.
+func TxSetFontWidth(widgetID uint64, fontWidth float64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceConst)
+	b = encodeValue(b, fontWidth)
+	return endRecord(b)
+}
+
+// TxBindFontWidth: set_property with a signal-bound font_width value.
+func TxBindFontWidth(widgetID uint64, signalID uint64) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceSignal)
+	b = binary.LittleEndian.AppendUint64(b, signalID)
+	return endRecord(b)
+}
+
+// TxBindFontWidthElement: set_property bound to one field of the element of the
+// enclosing For, `level` Fors up (0 = nearest).
+func TxBindFontWidthElement(widgetID uint64, level uint32, field uint32) []byte {
+	b := beginRecord(txSetProperty)
+	b = binary.LittleEndian.AppendUint64(b, widgetID)
+	b = binary.LittleEndian.AppendUint32(b, PropFontWidth)
+	b = binary.LittleEndian.AppendUint32(b, SourceElement)
+	b = binary.LittleEndian.AppendUint32(b, level)
+	b = binary.LittleEndian.AppendUint32(b, field)
+	return endRecord(b)
+}
+
 // TxSetWindowTitle: set_window_prop with a constant title value (window 0, the primary surface).
 func TxSetWindowTitle(window uint64, title string) []byte {
 	b := beginRecord(txSetWindowProp)
@@ -5150,7 +5277,7 @@ func parseValue(rec []byte, at int) (any, int) {
 // false for pad/unknown records.
 func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload any, ok bool) {
 	kind = binary.LittleEndian.Uint16(rec[4:])
-	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected && kind != occDocumentSelected && kind != occDocumentCloseRequested && kind != occDocumentsCloseRequested && kind != occDocumentClosed && kind != occNewDocumentRequested && kind != occDocumentMoved && kind != occDocumentsDetached {
+	if kind != occButtonClicked && kind != occTextChanged && kind != occToggled && kind != occValueChanged && kind != occCloseRequested && kind != occWindowClosed && kind != occAlertResult && kind != occEntryPopped && kind != occBackRequested && kind != occSectionSelected && kind != occMenuActivated && kind != occMenuToggled && kind != occMenuValueChanged && kind != occFileDialogResult && kind != occClipboardResult && kind != occPasted && kind != occUndone && kind != occRedone && kind != occSortRequested && kind != occDrawRequested && kind != occTick && kind != occDropped && kind != occDragEnded && kind != occDateChanged && kind != occTimeChanged && kind != occValueCommitted && kind != occNotificationResult && kind != occLinkOpened && kind != occTextEdited && kind != occTextFormatted && kind != occSheetDismissed && kind != occDismissRequested && kind != occSubmitted && kind != occNotificationReplied && kind != occFullscreenChanged && kind != occColorChanged && kind != occRangeChanged && kind != occRangeCommitted && kind != occPlayerChanged && kind != occPlayerPosition && kind != occSeekCompleted && kind != occSessionAction && kind != occPlayerTracks && kind != occCaptionCue && kind != occVideoVisibility && kind != occReaderFrame && kind != occReaderProgress && kind != occReaderPeaks && kind != occReaderDone && kind != occImageLoaded && kind != occCaptureChanged && kind != occCapturePermission && kind != occCaptureDevices && kind != occCaptureOverrun && kind != occToastResult && kind != occImageNeeded && kind != occImageReleased && kind != occActivated && kind != occSelectionChanged && kind != occFontFamilies && kind != occTextSelected && kind != occDocumentSelected && kind != occDocumentCloseRequested && kind != occDocumentsCloseRequested && kind != occDocumentClosed && kind != occNewDocumentRequested && kind != occDocumentMoved && kind != occDocumentsDetached && kind != occFontDialogResult && kind != occFontFaces {
 		return 0, 0, nil, nil, false
 	}
 	id = binary.LittleEndian.Uint64(rec[8:])
@@ -5459,6 +5586,49 @@ func ParseOccurrence(rec []byte) (kind uint16, id uint64, keys []any, payload an
 		at += 8
 		tail = append(tail, int64(binary.LittleEndian.Uint64(rec[at:])))
 		at += 8
+		{
+			count := int(binary.LittleEndian.Uint32(rec[at:]))
+			at += 8
+			tail = append(tail, int64(count))
+			for i := 0; i < count; i++ {
+				var v any
+				v, at = parseValue(rec, at)
+				tail = append(tail, v)
+			}
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occFontDialogResult {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		at += 8
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		tail = append(tail, int64(binary.LittleEndian.Uint32(rec[at:])))
+		at += 4
+		at += 4
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
+		_ = at
+		return kind, id, nil, tail, true
+	}
+	if kind == occFontFaces {
+		// A flat record: its fields in order, into the tail.
+		at := 8
+		tail := []any{}
+		id = 0
+		{
+			var v any
+			v, at = parseValue(rec, at)
+			tail = append(tail, v)
+		}
 		{
 			count := int(binary.LittleEndian.Uint32(rec[at:]))
 			at += 8

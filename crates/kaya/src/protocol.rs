@@ -878,6 +878,49 @@ pub struct SaveDialogSpec {
     pub filters: Vec<(String, String)>,
 }
 
+/// A face of a family, the portable three (docs/font-picker-plan.md §2.2):
+/// the OpenType weight class 1 to 1000, upright or slanted, and the width
+/// class 1 to 9.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FontFace {
+    pub weight: u16,
+    pub italic: bool,
+    pub width: u8,
+}
+
+impl FontFace {
+    pub const REGULAR: FontFace = FontFace { weight: 400, italic: false, width: 5 };
+}
+
+/// A family and one of its faces: the font picker's answer.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FontChoice {
+    pub family: String,
+    pub face: FontFace,
+}
+
+/// One listed face with the platform's display name, for showing only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedFace {
+    pub face: FontFace,
+    pub name: String,
+}
+
+/// A font-picker request (docs/font-picker-plan.md §4.2). `family` is the
+/// family the picker opens on, empty for none; `weight` 0 and `width` 0
+/// are unset, which the core resolves to 400 and 5 before presenting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FontDialogSpec {
+    pub window: WindowId,
+    pub dialog: FileDialogId,
+    pub code_only: bool,
+    pub faces: bool,
+    pub family: String,
+    pub weight: u16,
+    pub italic: bool,
+    pub width: u8,
+}
+
 /// A brand-typeface request, carried UNRESOLVED from the guest to every
 /// backend (docs/styling-plan.md Slice 2b). `family` is the default,
 /// `platforms` the per-platform overrides over the spec's `platform`
@@ -1351,6 +1394,12 @@ pub enum Occurrence {
     /// The installed font families, answering list_font_families
     /// (docs/code-surface-plan.md M3): unique, code-point order.
     FontFamilies { families: Vec<String> },
+    /// The font picker's one answer, `None` for cancel
+    /// (docs/font-picker-plan.md §4.2); the dialog id retires here.
+    FontDialogResult { dialog: FileDialogId, choice: Option<FontChoice> },
+    /// One family's faces, answering list_font_faces, sorted by weight,
+    /// then upright first, then width (docs/font-picker-plan.md §4.4).
+    FontFaces { family: String, faces: Vec<NamedFace> },
     /// The app's sample callback has fallen this far behind the microphone.
     CaptureOverrun { capture: CaptureId, behind_ms: u64 },
     /// A menu action fired — clicked OR invoked through its shortcut:
@@ -2389,6 +2438,14 @@ pub enum Prop {
     /// A text kind's size as a multiple of the platform's (F64, 0.5 to 3;
     /// docs/code-surface-plan.md S1).
     TextScale,
+    /// A text kind's face weight, 1 to 1000 (F64, integral;
+    /// docs/font-picker-plan.md §2.3).
+    FontWeight,
+    /// A text kind's slope (Bool; docs/font-picker-plan.md §2.3).
+    FontItalic,
+    /// A text kind's face width, 1 to 9 (F64, integral;
+    /// docs/font-picker-plan.md §2.3).
+    FontWidth,
     /// The app owns a rich textarea's undo (Bool-valued; docs/rich-text-plan.md
     /// R6, §14): the native stack is off, the ledger never banks it, and
     /// Edit>Undo/Redo reach the app through the role item's own activation.
@@ -2953,6 +3010,10 @@ pub enum TxOp {
     ContextLabelNode { node: TemplateNodeId, item: MenuItemId, level: u32, field: u32 },
     /// Ask for the installed font families (docs/code-surface-plan.md M3).
     ListFontFamilies,
+    /// Ask for the font picker (docs/font-picker-plan.md §4.2).
+    ShowFontDialog(FontDialogSpec),
+    /// Ask for one family's faces (docs/font-picker-plan.md §4.4).
+    ListFontFaces { family: String },
     /// Bind a menu property (MENU_PROPS). Element sources are rejected at
     /// decode — menu items are not collection elements; `icon`,
     /// `primary`, and `shortcut` reject signal sources at the root.
@@ -3267,6 +3328,10 @@ pub enum ApplyOp {
     ContextLabelNode { widget: WidgetId, item: MenuItemId, label: String },
     /// Enumerate the installed font families (docs/code-surface-plan.md M3).
     ListFontFamilies,
+    /// Present the font picker, its unset weight and width resolved.
+    PresentFontDialog(FontDialogSpec),
+    /// Enumerate one family's faces (docs/font-picker-plan.md §4.4).
+    ListFontFaces { family: String },
     /// Set a menu property to an already-resolved value.
     SetMenuProp { item: MenuItemId, prop: MenuProp, value: Value },
     AddChild { parent: WidgetId, child: WidgetId },
@@ -3784,6 +3849,15 @@ impl OccSink {
                 }
                 Occurrence::FontFamilies { families } => {
                     ring.push_record(crate::ring::REC_FONT_FAMILIES, &crate::wire::font_families_body(&families));
+                }
+                Occurrence::FontDialogResult { dialog, choice } => {
+                    ring.push_record(
+                        crate::ring::REC_FONT_DIALOG_RESULT,
+                        &crate::wire::font_dialog_result_body(dialog, choice.as_ref()),
+                    );
+                }
+                Occurrence::FontFaces { family, faces } => {
+                    ring.push_record(crate::ring::REC_FONT_FACES, &crate::wire::font_faces_body(&family, &faces));
                 }
                 Occurrence::CaptureDevices { devices } => {
                     ring.push_record(crate::ring::REC_CAPTURE_DEVICES, &crate::wire::capture_devices_body(&devices));

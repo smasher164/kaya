@@ -110,6 +110,8 @@ pub(crate) const REC_DOCUMENT_CLOSED: u16 = 65;
 pub(crate) const REC_NEW_DOCUMENT_REQUESTED: u16 = 66;
 pub(crate) const REC_DOCUMENT_MOVED: u16 = 67;
 pub(crate) const REC_DOCUMENTS_DETACHED: u16 = 68;
+pub(crate) const REC_FONT_DIALOG_RESULT: u16 = 69;
+pub(crate) const REC_FONT_FACES: u16 = 70;
 
 /// Wire framing of every record, exported through the C header so direct
 /// consumers cast a pointer instead of bit-twiddling. Little-endian;
