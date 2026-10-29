@@ -4688,12 +4688,19 @@ unpicked.
   (`expect_ax <control>` answering the label's text). The grid-columns
   reader is the model. KEY: expect_form_columns, form geometry,
   labelled row, shared label column
-- **An identified container hides its children's identifiers in the mac
-  accessibility tree** (2026-09-06, docs/traps.md): a `labeled` row with
+- ~~**An identified container hides its children's identifiers in the mac
+  accessibility tree**~~ FIXED 2026-10-29: the labelled row was the one
+  container kind missing from kayaA11yProps' container list, so its
+  identifier went onto every child instead of onto a `.contain` group;
+  it is in the list now, the task manager's When row is tagged
+  `when_row`, and tasks.steps reads `button@clear_when` beside
+  `date_picker@when` inside it on every lane (watched red on the mac
+  without the fix: both "<not in the accessibility tree>")
+  (2026-09-06, docs/traps.md): a `labeled` row with
   an a11y_id made its picker and button report the row's id, and
   `expect_ax` could not find them. The SwiftUI a11y wrapper's
   `accessibilityElement(children: .contain)` on an identified container
-  is the mechanism; the general fix is an identified container that
+  was thought the mechanism (it was the fix: the labelled row lacked it); the general fix is an identified container that
   keeps its children reachable by their own ids, held by a scene that
   reads a child inside a tagged container. Rows tagged `task` in the
   task manager are addressed by the model, not the AX tree, which is

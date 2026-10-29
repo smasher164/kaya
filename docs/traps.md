@@ -10965,14 +10965,14 @@ runningboardd's exit context before hunting a crash report.
 - **On macOS a container's a11y_id overrides its children's identifiers
   in the accessibility tree** (2026-09-06, the labelled row's first mac
   run: `expect_ax date_picker@when` read "<not in the accessibility
-  tree>"). The SwiftUI a11y wrapper marks an identified container as one
-  accessibility element containing its children, and the picker and the
-  Clear button inside a row tagged `when_row` then both reported
+  tree>"). SwiftUI's `.accessibilityIdentifier` on a view that is not
+  its own element lands on every element inside it (the container entry
+  above), and the picker and the Clear button inside a row tagged `when_row` then both reported
   `id=when_row` in KAYA_AX_TRACE while their own "when" and "clear_when"
   were gone; the untagged Deadline row beside it kept its picker's id.
-  Address the children, not a labelled row, when the children must stay
-  reachable to `expect_ax`; the general fix (an identified container
-  that keeps its children's ids) is ledgered with the finding.
+  FIXED 2026-10-29: the labelled row was missing from kayaA11yProps'
+  container list, which puts `.contain` before the id; tasks.steps reads
+  both children of the tagged `when_row`.
 - **A WinUI window with no initial focus draws a focus rectangle on its
   first tab stop** (2026-09-05, the boxed hamburger of the task
   manager's Windows captures). XAML seats focus on the first focusable

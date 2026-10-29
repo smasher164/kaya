@@ -7962,7 +7962,7 @@ private func kayaA11yProps(_ view: some View, _ node: KayaNode) -> some View {
     // the way leaves do").
     let isContainer =
         node.kind == kindColumn || node.kind == kindRow || node.kind == kindGrid
-        || node.kind == kindScroll
+        || node.kind == kindScroll || node.kind == kindLabeled
     // An activatable container is already ONE element, a button combining its
     // children (docs/styling-pass-plan.md Y4); `.contain` would wrap it in a
     // group that takes the identifier instead.

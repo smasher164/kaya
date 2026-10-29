@@ -105,7 +105,10 @@ expect textarea@notes ""
 # A text field fills its column (R10).
 expect_breadth textarea@notes
 # The picker's accessibility name IS its row's label (docs/forms-plan.md §4).
+# The row is tagged `when_row` and its children keep their own ids
+# (docs/traps.md, a container's a11y_id over its children's).
 expect_ax date_picker@when "datetime/When: none"
+expect_ax button@clear_when "button/Clear"
 # A link in the notes (S2, R14): the platform's link and its destination.
 expect_placeholder textarea@notes "Notes"
 expect_href label@reference "https://example.com/tasks/t2"

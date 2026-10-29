@@ -1533,6 +1533,7 @@ fn open_details(app: &mut App, ctx: &kaya::AppCtx, msgs: &kaya::Messages<Msg>, k
                         let clear = tx.button(&kaya::tr!("clear")).a11y_id("clear_when").id();
                         msgs.on_click(clear, Msg::ClearWhen);
                     })
+                    .a11y_id("when_row")
                     .id();
                     tx.labeled(deadline_text, |tx| {
                         let picker = tx.date_picker_bound(deadline_sig).a11y_id("deadline").id();
