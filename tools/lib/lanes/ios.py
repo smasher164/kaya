@@ -125,6 +125,8 @@ RUST_SCENES = [
     "menus", "rowmenu", "toolbar", "identity", "assets", "listdetail",
     "table", "windowed", "adaptive", "commands", "undo",
     "dirty", "dnd", "pickers", "sliders", "tooltips", "sheet",
+    # docs/doctabs-plan.md §1.6: the list of open documents.
+    "doctabs",
     # The formatter door and the catalog under three locales
     # (docs/compliance-plan.md §6); SCENE_LOCALE carries the knob.
     "format", "formatde", "formatar",
@@ -355,6 +357,12 @@ MODS = {
                  "dismiss_sheet; expect_sheets 0"},
     ("rust-swiftui", "dirty"): {"cut": "close_window",
                                 "keep": "expect_dirty"},
+    # A PHONE SHOWS ITS REGIONS IN THE DOCUMENTS LIST AND HAS NO WINDOWS
+    # (docs/doctabs-plan.md §1.6): the desktops' tail goes, and the phone ends
+    # on its own empty state, Q2's carve-out.
+    ("rust-swiftui", "doctabs"): {
+        "cut": "expect_ax", "keep": "expect_document_dirty expect_alert",
+        "extra": 'close_document "a"; close_document "untitled 1"; expect_documents ""'},
     # The editor opens both pickers and ends past a chrome close
     # (docs/editor-plan.md).
     ("go", "editor"): {"cut": "close_window", "keep": "expect_dirty"},

@@ -164,6 +164,8 @@ LEGS = {
         # richtext's reason, and no IME_SCENES member — the copy's act is
         # the harness's format verb.
         "richrows-compose",
+        # The list of open documents (docs/doctabs-plan.md §1.6).
+        "doctabs-compose",
         "sheet-compose",
         # The formatter door and the catalog (docs/compliance-plan.md §6):
         # rust-only until the eight bindings' fmt lands, the same guest
@@ -422,6 +424,11 @@ MODS = {
                         "expect_sheet_detent medium;dismiss_sheet;"
                         "expect_sheets 0;"},
     "editor": {"cut": ("close_window", "expect_dirty", "")},
+    # A PHONE SHOWS ITS REGIONS IN THE DOCUMENTS LIST AND HAS NO WINDOWS
+    # (docs/doctabs-plan.md §1.6): the desktops' tail goes, and the phone ends
+    # on its own empty state, Q2's carve-out.
+    "doctabs": {"cut": ("expect_ax", "expect_document_dirty expect_alert", ""),
+                "append": 'close_document "a";close_document "untitled 1";expect_documents "";'},
     "chat": {"drop": ((("expect_selected row@convo[maya]", "expect_selected row@convo[sam]"),
                        "expect_tint", "a phone's list sits under the pushed thread"),)},
     # A PHONE HAS NO USER DOOR OUT OF IMMERSIVE MODE (docs/fullscreen-plan.md

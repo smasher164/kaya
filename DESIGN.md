@@ -666,6 +666,13 @@ fix.
   and the navigation vocabulary. Synthesizing a marker the platform
   never shows is the rejected alternative: it fails the carve-out test
   in reverse, expressing what no native app expresses.
+- **A phone's last document closes to the window's own root (ratified
+  2026-10-28; docs/doctabs-plan.md Q2).** A desktop window left with no
+  documents closes, and the process ends when no window holds any; a phone
+  cannot close its one window, so it shows the window's own mounted root,
+  the empty state. `document_closed` is reported the same everywhere; only
+  what remains on screen differs, and neither phone has a move into a new
+  window, since neither has windows.
 - **~~A Linux sidebar's section rows are text-only (ratified
   2026-08-17)~~ — lifted 2026-09-07, when its premise fell.** Accepted by the
   maintainer the same day, from the S2 review page. The
@@ -2325,7 +2332,9 @@ documents on the phones) and the app never says which.
   `bottom`) that every document shares, filled like any surface, one
   instance per window. On the Mac kaya MOVES the one view into the
   selected tab window, restoring focus and the caret a turn later
-  (measured); elsewhere it sits beside the tab view.
+  (measured); elsewhere it sits beside the tab view. On a phone a `bottom`
+  region sits under the document and a `leading` or `trailing` one shows
+  in the documents list above its rows.
 - **Walls**: a window has sections or documents, not both, and no stack
   or panes with documents (Q8); `dirty` is the documents', never the
   window's.

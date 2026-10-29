@@ -22,9 +22,6 @@ select_document "b"
 expect_document "b"
 expect label@status "selected b"
 expect entry@note "half typed"
-# AND ON SCREEN, not only in the model: the region's widgets are in the front
-# tab's accessibility tree, which they are only if the view moved there.
-expect_ax label@status "label/selected b"
 click button@first
 expect_document "a"
 expect label@status "selected b"
@@ -67,8 +64,14 @@ expect_alerts 0
 expect label@status "discarded b"
 expect_documents "a|untitled 1"
 
-# ---- a document moves into a native window of its own ---------------
+# ---- the desktops: the region on screen, and a window of its own ------
+# The phones stop here: a phone shows its regions in the documents list and
+# has no windows to move a document into (docs/doctabs-plan.md §1.6).
 select_document "a"
+# ON SCREEN, not only in the model: the region's widgets are in the front
+# tab's accessibility tree, which on the Mac they are only if the one view
+# moved there (§1.7).
+expect_ax label@status "label/selected a"
 move_to_new_window "a"
 # A TORN-OUT TAB IS A NEW WINDOW (docs/doctabs-plan.md §1.2): the app heard
 # documents_detached and built that window's region with the same code.

@@ -4822,12 +4822,17 @@ for rel, pattern, repl, label in (
 def winui_frame_arms(src=None):
     bad = []
     code = re.sub(r"//[^\n]*", "", src if src is not None else real(WINUI))
-    for head in ("fn setup(occ_tx", "ApplyOp::CreateWindow { window } => {"):
-        at = code.find(head)
-        body = brace_body(code[at + len(head) - 1:], "{") if at >= 0 else None
+    at = code.find("fn setup(occ_tx")
+    births = {"fn setup(occ_tx": brace_body(code[at + len("fn setup(occ_tx") - 1:], "{")
+              if at >= 0 else None,
+              "fn create_aux_window": rust_fn(code, "create_aux_window")}
+    for head, body in births.items():
         if body is None or not 0 <= body.find("subclass(") < body.find("mirror_frame("):
             bad.append(f"`{head}` does not mirror its window after subclassing it "
                        f"(mirror_frame) — its caption stays left to right under an RTL locale")
+    if "ApplyOp::CreateWindow { window } => create_aux_window(core, window.0)?," not in code:
+        bad.append("ApplyOp::CreateWindow does not build its window through create_aux_window, "
+                   "the birth this read holds to mirror_frame")
     toolbar = rust_fn(code, "refresh_toolbar")
     if toolbar is None or toolbar.count("publish_mirrored_passthrough(") < 2 \
             or "SetAutoRefreshDragRegions(!frame_mirrored())" not in toolbar:
@@ -4854,8 +4859,10 @@ if frame_out:
 print("check-verbs: the WinUI frame's mirroring read (2 window births, the caption's "
       "drag regions, the client origin, the direction reader)")
 for pattern, repl, label in (
-    (r"(\n            subclass\(&aux, window\.0\)\?;)\n            mirror_frame\(&aux\)\?;", "",
+    (r"(\n    subclass\(&aux, window\)\?;)\n    mirror_frame\(&aux\)\?;", "",
      "a second window left unmirrored"),
+    (r"(ApplyOp::CreateWindow \{ window \} => )create_aux_window\(core, window\.0\)\?,",
+     "{ let _ = (core, window); }", "the CreateWindow arm bypassing create_aux_window"),
     (r"(titlebar\.SetAutoRefreshDragRegions\()!frame_mirrored\(\)", "true",
      "the TitleBar's own drag regions kept"),
     (r"(\n    let client = )client_origin\(hwnd\);\n    let mut outer",

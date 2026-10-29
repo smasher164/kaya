@@ -8,6 +8,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.draw.clip
 import android.app.AlarmManager
@@ -2014,6 +2019,18 @@ object KayaSceneModel {
     /// means no sections body has rendered at all, which is a
     /// different answer from either arm and is reported as one.
     var sectionsRendered = ""
+    // docs/doctabs-plan.md §1.6: the window's open documents in the app's
+    // order, the active one, its regions, and the list's sheet.
+    val documents = androidx.compose.runtime.mutableStateListOf<KayaDocument>()
+    val documentIndex = HashMap<Long, KayaDocument>()
+    var activeDocument by mutableStateOf<Long?>(null)
+    var newDocument by mutableStateOf(false)
+    val regions = androidx.compose.runtime.mutableStateListOf<KayaRegion>()
+    val regionIndex = HashMap<Long, KayaRegion>()
+    var documentsListShown by mutableStateOf(false)
+    var documentsSheetWindow: android.view.Window? = null
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    var documentsSheetState: androidx.compose.material3.SheetState? = null
     // The window's command catalog in menubar-append order, plus every
     // menu item by id. Menu items are their OWN id space (c_menu_item),
     // never widget, node or surface ids (DESIGN.md, Menus).
@@ -2212,6 +2229,18 @@ fun kayaLabelOverflow(node: KayaNode): TextOverflow =
  * (a section dies only with its window, and this host has one).
  * Carries its own navigation stack: stacks are per-surface
  * (DESIGN.md, Sections). */
+class KayaDocument(val id: Long) {
+    var root by mutableStateOf<KayaNode?>(null)
+    var title by mutableStateOf("")
+    var tooltip = ""
+    var dirty by mutableStateOf(false)
+    var interceptClose = false
+}
+
+class KayaRegion(val id: Long, val edge: Int) {
+    var root by mutableStateOf<KayaNode?>(null)
+}
+
 class KayaSection(val id: Long) {
     var root by mutableStateOf<KayaNode?>(null)
     var title by mutableStateOf("")
@@ -3625,6 +3654,11 @@ object KayaCompose {
     private const val APPLY_CLOSE_DOCUMENT = 79
     private const val APPLY_SET_DOCUMENT_PROP = 80
     private const val APPLY_ADD_REGION = 81
+    private const val DPROP_TITLE = 1
+    private const val DPROP_TOOLTIP = 2
+    private const val DPROP_DIRTY = 3
+    private const val DPROP_INTERCEPT_CLOSE = 4
+    internal const val REGION_EDGE_BOTTOM = 3
 
     /// The alert_choice cancel sentinel: the wire's u32 0xFFFFFFFF is
     /// Kotlin's Int -1 (two's complement — the java-int spelling the
@@ -3704,6 +3738,12 @@ object KayaCompose {
      * backend reports `overflow` and not `more`.
      */
     const val TOOLBAR_TAG = "kaya:toolbar"
+    // The phone's documents list (docs/doctabs-plan.md §1.6): the bar's
+    // button, the sheet's "+", and each row and its close.
+    const val DOCUMENTS_TAG = "kaya:documents"
+    const val NEW_DOCUMENT_TAG = "kaya:new-document"
+    const val DOCUMENT_ROW_TAG = "kaya:document-row"
+    const val DOCUMENT_CLOSE_TAG = "kaya:document-close"
     /** The bar above the keyboard, its buttons and its gaps (docs/phone-format-plan.md §4). */
     const val KEYBOARD_BAR_TAG = "kaya:keyboardbar"
     const val KEYBOARD_BAR_ITEM_TAG = "kaya:keyboardbar:item"
@@ -4663,8 +4703,7 @@ object KayaCompose {
      * (materialized as the Activity task label, the surface-title
      * path expect_title reads), the window's own when it empties. */
     internal fun refreshNavTitle() {
-        val top = kayaActiveEntries().lastOrNull()
-        mountedActivity?.title = top?.title ?: KayaSceneModel.windowTitle
+        mountedActivity?.title = kayaShownTitle()
     }
 
     /**
@@ -5069,7 +5108,7 @@ object KayaCompose {
                         // the task label stays the app's own string.
                         WPROP_DIRTY -> KayaSceneModel.windowDirty = readBool(b)
                         WPROP_REMEMBER_FRAME -> readBool(b)
-                        WPROP_NEW_DOCUMENT -> depthStub("doctabs")
+                        WPROP_NEW_DOCUMENT -> KayaSceneModel.newDocument = readBool(b)
                         WPROP_FULLSCREEN -> {
                             KayaSceneModel.windowFullscreen = readBool(b)
                             mountedActivity?.let {
@@ -5418,8 +5457,48 @@ object KayaCompose {
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
                 APPLY_LIST_FONT_FAMILIES -> kayaListFontFamilies()
-                APPLY_ADD_DOCUMENT, APPLY_SELECT_DOCUMENT, APPLY_CLOSE_DOCUMENT,
-                APPLY_SET_DOCUMENT_PROP, APPLY_ADD_REGION -> depthStub("doctabs")
+                APPLY_ADD_DOCUMENT -> {
+                    b.long // window: 0, the one surface on this host
+                    val did = b.long
+                    val doc = KayaDocument(did)
+                    KayaSceneModel.documentIndex[did] = doc
+                    KayaSceneModel.documents.add(doc)
+                    if (KayaSceneModel.activeDocument == null) KayaSceneModel.activeDocument = did
+                    refreshNavTitle()
+                }
+                APPLY_SELECT_DOCUMENT -> {
+                    // Programmatic and QUIET (the echo doctrine).
+                    b.long
+                    KayaSceneModel.activeDocument = b.long
+                    refreshNavTitle()
+                }
+                APPLY_CLOSE_DOCUMENT -> {
+                    b.long
+                    kayaDocumentGone(b.long, user = false)
+                }
+                APPLY_SET_DOCUMENT_PROP -> {
+                    val did = b.long
+                    val prop = b.int
+                    b.int // pad
+                    val doc = KayaSceneModel.documentIndex[did]!!
+                    when (prop) {
+                        DPROP_TITLE -> {
+                            doc.title = readString(b)
+                            refreshNavTitle()
+                        }
+                        DPROP_TOOLTIP -> doc.tooltip = readString(b)
+                        DPROP_DIRTY -> doc.dirty = readBool(b)
+                        DPROP_INTERCEPT_CLOSE -> doc.interceptClose = readBool(b)
+                        else -> error("kaya: unknown document prop $prop")
+                    }
+                }
+                APPLY_ADD_REGION -> {
+                    b.long
+                    val rid = b.long
+                    val region = KayaRegion(rid, b.int)
+                    KayaSceneModel.regionIndex[rid] = region
+                    KayaSceneModel.regions.add(region)
+                }
                 APPLY_PRESENT_TOAST -> {
                     // THE ONE DOOR (docs/toast-plan.md T7): the slot is
                     // REPLACED, never queued. Window 0, the one surface.
@@ -5830,6 +5909,13 @@ object KayaCompose {
                         notePresentedChanged()
                     } else if (entry != null) entry.root = KayaSceneModel.nodes[root]
                     else if (section != null) section.root = KayaSceneModel.nodes[root]
+                    else if (KayaSceneModel.documentIndex[wid] != null) {
+                        KayaSceneModel.documentIndex[wid]!!.root = KayaSceneModel.nodes[root]
+                        notePresentedChanged()
+                    } else if (KayaSceneModel.regionIndex[wid] != null) {
+                        KayaSceneModel.regionIndex[wid]!!.root = KayaSceneModel.nodes[root]
+                        notePresentedChanged()
+                    }
                     else KayaSceneModel.root = KayaSceneModel.nodes[root]
                 }
                 APPLY_MOVE_CHILD -> {
@@ -6810,6 +6896,8 @@ object KayaCompose {
         for (entry in KayaSceneModel.navEntries) entry.root?.let { stack.addLast(it) }
         for (sheet in KayaSceneModel.sheets) sheet.root?.let { stack.addLast(it) }
         KayaSceneModel.dockRoot?.let { stack.addLast(it) }
+        for (doc in KayaSceneModel.documents) doc.root?.let { stack.addLast(it) }
+        for (region in KayaSceneModel.regions) region.root?.let { stack.addLast(it) }
         while (stack.isNotEmpty()) {
             val node = stack.removeLast()
             if (!ids.add(node.id)) continue
@@ -10156,6 +10244,70 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         return null
     }
 
+    private class KayaDocRow(val title: String, val dirty: Boolean, val node: SemanticsNode)
+
+    /** The documents list's rows off its sheet's semantics tree, top to
+     * bottom; empty when the bar shows no documents button, null while the
+     * sheet is not up and settled, which this read opens through the bar's
+     * button. MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class,
+        androidx.compose.material3.ExperimentalMaterial3Api::class)
+    private fun kayaDocumentRows(activity: ComponentActivity): List<KayaDocRow>? {
+        val main = kayaComposeRoot(activity.window.decorView) as? RootForTest ?: return null
+        main.measureAndLayoutForTest()
+        val button = kayaAxFind(main.semanticsOwner.rootSemanticsNode, DOCUMENTS_TAG) ?: return emptyList()
+        val window = KayaSceneModel.documentsSheetWindow
+        val state = KayaSceneModel.documentsSheetState
+        if (window == null || state == null) {
+            if (!KayaSceneModel.documentsListShown) {
+                button.config.getOrNull(SemanticsActions.OnClick)?.action?.invoke()
+            }
+            return null
+        }
+        if (state.currentValue != SheetValue.Expanded || state.targetValue != SheetValue.Expanded) return null
+        val root = kayaComposeRoot(window.decorView) as? RootForTest ?: return null
+        root.measureAndLayoutForTest()
+        val rows = mutableListOf<SemanticsNode>()
+        fun walk(n: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (n.config.getOrNull(SemanticsProperties.TestTag) == DOCUMENT_ROW_TAG) {
+                rows.add(n)
+                return
+            }
+            n.children.forEach { walk(it, depth + 1) }
+        }
+        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        if (rows.isEmpty()) return null
+        return rows.sortedBy { it.boundsInRoot.top }.map { n ->
+            KayaDocRow(
+                n.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text } ?: "",
+                n.config.getOrNull(SemanticsProperties.ContentDescription)?.contains("Unsaved changes") == true,
+                n,
+            )
+        }
+    }
+
+    /** A node of the settled documents sheet. MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun kayaDocumentsSheetNode(activity: ComponentActivity, match: (SemanticsNode) -> Boolean): SemanticsNode? {
+        kayaDocumentRows(activity) ?: return null
+        val window = KayaSceneModel.documentsSheetWindow ?: return null
+        val root = kayaComposeRoot(window.decorView) as? RootForTest ?: return null
+        return kayaSemanticsWith(root.semanticsOwner.rootSemanticsNode, 0, match)
+    }
+
+    /** The rows once [done] holds of them, or the last read at the bound. */
+    private fun kayaDocumentsRead(activity: ComponentActivity, done: (List<KayaDocRow>) -> Boolean): List<KayaDocRow>? {
+        var rows: List<KayaDocRow>? = null
+        val readBy = System.nanoTime() + 5_000_000_000L
+        do {
+            rows = onUi(activity) { kayaDocumentRows(activity) } ?: rows
+            if (rows != null && done(rows)) break
+            Thread.sleep(100)
+        } while (System.nanoTime() < readBy)
+        return rows
+    }
+
     /** Every Compose root the app shows: each live sheet's own window (a
      * ModalBottomSheet is a dialog window), topmost first, then the
      * activity's. */
@@ -10554,7 +10706,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * label is the only surface expect_title can assert.
      */
     private fun kayaWindowHasChrome(): Boolean =
-        KayaSceneModel.menubar.isNotEmpty() ||
+        KayaSceneModel.menubar.isNotEmpty() || KayaSceneModel.documents.isNotEmpty() ||
             (kayaCoveredDepth() >= 1 && !kayaTopIsGround(kayaActiveEntries().lastOrNull()?.root))
 
     /**
@@ -11672,7 +11824,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             val here = mountedActivity
             if (here != null &&
                 onUi(here) {
-                    KayaSceneModel.root != null || KayaSceneModel.sections.isNotEmpty()
+                    KayaSceneModel.root != null || KayaSceneModel.sections.isNotEmpty() ||
+                        KayaSceneModel.documents.any { it.root != null }
                 }
             ) {
                 break
@@ -14012,9 +14165,89 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         }
                         kayaAwaitAnswer(answered)
                     }
-                    "expect_documents", "expect_document", "expect_document_dirty", "select_document",
-                    "close_document", "new_document", "move_to_new_window", "close_native_window" ->
-                        depthStub("doctabs")
+                    // docs/doctabs-plan.md §4: the list's rows off the sheet's
+                    // semantics tree, opened through the bar's own button.
+                    "expect_documents" -> {
+                        val want = quoted(parts.drop(1))
+                        val rows = kayaDocumentsRead(activity) { r -> r.joinToString("|") { it.title } == want }
+                        val got = rows?.joinToString("|") { it.title }
+                        when {
+                            got == want -> observed.add("documents \"$want\"")
+                            rows == null -> failures.add("the documents list is not up yet, wanted \"$want\"")
+                            else -> failures.add("documents \"$got\", wanted \"$want\"")
+                        }
+                    }
+                    "expect_document" -> {
+                        val want = quoted(parts.drop(1))
+                        var got: String? = null
+                        val readBy = System.nanoTime() + 2_000_000_000L
+                        do {
+                            got = onUi(activity) { kayaChromeTitle(activity) }
+                            if (got == want) break
+                            Thread.sleep(100)
+                        } while (System.nanoTime() < readBy)
+                        if (got == want) observed.add("document \"$want\"")
+                        else failures.add("document \"${got ?: "<no top bar title>"}\", wanted \"$want\"")
+                    }
+                    "expect_document_dirty" -> {
+                        val wantDirty = parts.last()
+                        val title = quoted(parts.drop(1).dropLast(1))
+                        fun dirtyOf(r: List<KayaDocRow>): String =
+                            r.firstOrNull { it.title == title }?.let { if (it.dirty) "true" else "false" }
+                                ?: "<no row titled $title (rows: ${r.map { it.title }})>"
+                        val rows = kayaDocumentsRead(activity) { dirtyOf(it) == wantDirty }
+                        val got = rows?.let(::dirtyOf) ?: "<the documents list is not up yet>"
+                        if (got == wantDirty) observed.add("document \"$title\" dirty $wantDirty")
+                        else failures.add("document \"$title\" dirty $got, wanted $wantDirty")
+                    }
+                    "select_document", "close_document", "new_document" -> {
+                        val docArg = if (parts.size > 1) quoted(parts.drop(1)) else ""
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        var why: String? = "the documents list did not come up"
+                        val driveBy = System.nanoTime() + 5_000_000_000L
+                        while (System.nanoTime() < driveBy) {
+                            val attempt: String? = onUi(activity) {
+                                val rows = kayaDocumentRows(activity) ?: return@onUi null
+                                when (parts[0]) {
+                                    "select_document" -> {
+                                        val row = rows.firstOrNull { it.title == docArg }
+                                            ?: return@onUi "no row titled $docArg (rows: ${rows.map { it.title }})"
+                                        val press = row.node.config.getOrNull(SemanticsActions.OnClick)?.action
+                                            ?: return@onUi "the row $docArg publishes no click action"
+                                        if (press()) "" else "the row $docArg refused the click"
+                                    }
+                                    "close_document" -> {
+                                        val close = kayaDocumentsSheetNode(activity) {
+                                            it.config.getOrNull(SemanticsProperties.TestTag) == DOCUMENT_CLOSE_TAG &&
+                                                it.config.getOrNull(SemanticsProperties.ContentDescription)
+                                                    ?.contains("Close $docArg") == true
+                                        } ?: return@onUi "no close button for $docArg"
+                                        val press = close.config.getOrNull(SemanticsActions.OnClick)?.action
+                                            ?: return@onUi "the close of $docArg publishes no click action"
+                                        if (press()) "" else "the close of $docArg refused the click"
+                                    }
+                                    else -> {
+                                        val plus = kayaDocumentsSheetNode(activity) {
+                                            it.config.getOrNull(SemanticsProperties.TestTag) == NEW_DOCUMENT_TAG
+                                        } ?: return@onUi "no + in the documents list (is new_document armed?)"
+                                        val press = plus.config.getOrNull(SemanticsActions.OnClick)?.action
+                                            ?: return@onUi "the + publishes no click action"
+                                        if (press()) "" else "the + refused the click"
+                                    }
+                                }
+                            }
+                            if (attempt != null) {
+                                why = attempt.takeIf { it.isNotEmpty() }
+                                break
+                            }
+                            Thread.sleep(100)
+                        }
+                        if (why != null) failures.add("${parts[0]}: $why")
+                        else kayaAwaitAnswer(answered)
+                    }
+                    "move_to_new_window", "close_native_window" ->
+                        failures.add("${parts[0]}: a phone has no windows to move a document into or close")
                     "expect_sheets" -> {
                         // The platform's truth: sheet states visible,
                         // never the model.
@@ -22441,12 +22674,13 @@ fun KayaRoot() {
         // Inside a section too, whose own bar is at the bottom (M16 (10)).
         val covered = kayaCovers()
         val shownTop = kayaActiveEntries().lastOrNull()?.root
-        if (KayaSceneModel.menubar.isEmpty() && !covered) {
+        val documents = KayaSceneModel.documents.isNotEmpty()
+        if (KayaSceneModel.menubar.isEmpty() && !covered && !documents) {
             // No catalog: the surface keeps its exact pre-menus shape (no
             // phantom bar over scenes that declared no commands).
             KayaSceneModel.menuPresentation = "none"
             KayaSurface(topConsumed = false)
-        } else if (KayaSceneModel.menubar.isEmpty() && kayaTopIsGround(shownTop)) {
+        } else if (KayaSceneModel.menubar.isEmpty() && !documents && kayaTopIsGround(shownTop)) {
             // A PAGE WHOSE TOP IS A PICTURE OR A GRADIENT keeps it under the
             // status bar (M15) and the back arrow floats over it on a clear
             // bar, the page's own heading its title (M16 (10)): a bar with the
@@ -22485,6 +22719,7 @@ fun KayaRoot() {
     // The sheets over the window, an entry or a section; a chain nests
     // inside its parent sheet's content (docs/sheet-plan.md).
     KayaSheetHost(null)
+    KayaDocumentsSheet()
     KayaEmojiPanel()
     KayaColorSheet()
 
@@ -22651,6 +22886,10 @@ internal fun kayaSplitArm(): Boolean = kayaSplitArm(kayaScaffoldValue(kayaPaneDi
 @OptIn(ExperimentalMaterial3AdaptiveApi::class, ExperimentalLayoutApi::class)
 @Composable
 private fun KayaSurface(topConsumed: Boolean) {
+    if (KayaSceneModel.documents.isNotEmpty()) {
+        KayaDocumentsSurface(topConsumed)
+        return
+    }
     val activeSection =
         KayaSceneModel.selectedSection?.let { KayaSceneModel.sectionIndex[it] }
     if (KayaSceneModel.sections.isNotEmpty() && activeSection != null) {
@@ -22996,6 +23235,7 @@ fun KayaMenuTopBar(clear: Boolean = false) {
             // the task label is the other one (see TOOLBAR_TITLE_TAG).
             if (!clear) Text(
                 kayaActiveEntries().lastOrNull()?.title
+                    ?: KayaSceneModel.documents.firstOrNull { it.id == KayaSceneModel.activeDocument }?.title
                     ?: KayaSceneModel.windowTitle,
                 modifier = Modifier.testTag(KayaCompose.TOOLBAR_TITLE_TAG),
             )
@@ -23046,6 +23286,7 @@ fun KayaMenuTopBar(clear: Boolean = false) {
                     }
                 }
             }
+            if (KayaSceneModel.documents.isNotEmpty()) KayaDocumentsButton()
             // A pushed screen's bar with no catalog carries no overflow.
             if (KayaSceneModel.menubar.isNotEmpty()) KayaOverflowMenu()
         },
@@ -23650,6 +23891,250 @@ fun kayaUserSelectsSection(sid: Long) {
     KayaSceneModel.selectedSection = sid
     KayaCompose.refreshNavTitle()
     KayaPresent.emitSectionSelected(0, sid)
+}
+
+internal fun kayaShownTitle(): String =
+    kayaActiveEntries().lastOrNull()?.title
+        ?: KayaSceneModel.activeDocument?.let { KayaSceneModel.documentIndex[it]?.title }
+        ?: KayaSceneModel.windowTitle
+
+// MARK: Documents on the phone (docs/doctabs-plan.md §1.6). The window shows
+// its active document, a bottom region under it, and the bar's button opens
+// the list of open documents in a sheet: the "+" in its header, a leading or
+// trailing region above the rows, each row its title, its unsaved mark, a
+// check on the active one and a close button, reordered by a long press.
+
+/** A document the user or the app closed: an empty window shows its own
+ * root, the phones' empty state (Q2's carve-out). */
+fun kayaDocumentGone(did: Long, user: Boolean) {
+    KayaSceneModel.documentIndex.remove(did) ?: return
+    val at = KayaSceneModel.documents.indexOfFirst { it.id == did }
+    KayaSceneModel.documents.removeAll { it.id == did }
+    if (user) KayaPresent.emitDocumentClosed(did)
+    if (KayaSceneModel.activeDocument == did) {
+        val next = KayaSceneModel.documents.getOrNull(at) ?: KayaSceneModel.documents.lastOrNull()
+        KayaSceneModel.activeDocument = next?.id
+    }
+    if (KayaSceneModel.documents.isEmpty()) KayaSceneModel.documentsListShown = false
+    KayaCompose.notePresentedChanged()
+    KayaCompose.refreshNavTitle()
+}
+
+fun kayaUserClosesDocument(did: Long) {
+    val doc = KayaSceneModel.documentIndex[did] ?: return
+    if (doc.interceptClose) {
+        KayaPresent.emitDocumentCloseRequested(did)
+        return
+    }
+    kayaDocumentGone(did, user = true)
+}
+
+fun kayaUserSelectsDocument(did: Long) {
+    if (KayaSceneModel.documentIndex[did] == null) return
+    kayaHideDocumentsList()
+    if (KayaSceneModel.activeDocument == did) return
+    KayaSceneModel.activeDocument = did
+    KayaCompose.refreshNavTitle()
+    KayaPresent.emitDocumentSelected(0, did)
+}
+
+fun kayaUserMovesDocument(did: Long, to: Int) {
+    val docs = KayaSceneModel.documents
+    val from = docs.indexOfFirst { it.id == did }
+    val target = to.coerceIn(0, docs.size - 1)
+    if (from < 0 || from == target) return
+    docs.add(target, docs.removeAt(from))
+    KayaPresent.emitDocumentMoved(did, 0, target)
+}
+
+fun kayaUserNewDocument() {
+    kayaHideDocumentsList()
+    KayaPresent.emitNewDocumentRequested(0)
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun kayaHideDocumentsList() {
+    val state = KayaSceneModel.documentsSheetState
+    if (state == null) {
+        KayaSceneModel.documentsListShown = false
+        return
+    }
+    kayaDocumentsScope?.launch { state.hide() }?.invokeOnCompletion {
+        KayaSceneModel.documentsListShown = false
+    } ?: run { KayaSceneModel.documentsListShown = false }
+}
+
+private var kayaDocumentsScope: kotlinx.coroutines.CoroutineScope? = null
+
+@OptIn(ExperimentalMaterial3AdaptiveApi::class)
+@Composable
+private fun KayaDocumentsSurface(topConsumed: Boolean) {
+    val doc = KayaSceneModel.documents.firstOrNull { it.id == KayaSceneModel.activeDocument }
+    val bottom = KayaSceneModel.regions.firstOrNull { it.edge == KayaCompose.REGION_EDGE_BOTTOM }?.root
+    KayaSceneModel.splitPresentation = "stacked"
+    KayaSceneModel.paneValue = null
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            KayaContentBox(topConsumed, bottomConsumed = bottom != null, rides = kayaRidesNow(doc?.root),
+                root = doc?.root) {
+                doc?.root?.let { root -> androidx.compose.runtime.key(doc.id) { KayaRender(root, isRoot = true) } }
+            }
+        }
+        if (bottom != null) {
+            HorizontalDivider()
+            Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(KayaSceneModel.windowInset.dp)) {
+                KayaRender(bottom, isRoot = true)
+            }
+        }
+    }
+}
+
+/** The bar's documents button: Chrome's square with the count in it. */
+@Composable
+private fun KayaDocumentsButton() {
+    val count = KayaSceneModel.documents.size
+    IconButton(
+        onClick = { KayaSceneModel.documentsListShown = true },
+        modifier = Modifier.testTag(KayaCompose.DOCUMENTS_TAG).semantics {
+            contentDescription = "Documents"
+            stateDescription = "$count open"
+        },
+    ) {
+        val ink = androidx.compose.material3.LocalContentColor.current
+        Box(
+            Modifier.size(22.dp).border(2.dp, ink, androidx.compose.foundation.shape.RoundedCornerShape(5.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("$count", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = ink)
+        }
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaDocumentsSheet() {
+    if (!KayaSceneModel.documentsListShown || KayaSceneModel.documents.isEmpty()) return
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    KayaSceneModel.documentsSheetState = state
+    kayaDocumentsScope = scope
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            KayaSceneModel.documentsSheetState = null
+            KayaSceneModel.documentsSheetWindow = null
+            kayaDocumentsScope = null
+        }
+    }
+    ModalBottomSheet(onDismissRequest = { KayaSceneModel.documentsListShown = false }, sheetState = state) {
+        val view = LocalView.current
+        androidx.compose.runtime.SideEffect {
+            KayaSceneModel.documentsSheetWindow = (view.parent as? DialogWindowProvider)?.window
+        }
+        val side = KayaSceneModel.regions.firstOrNull { it.edge != KayaCompose.REGION_EDGE_BOTTOM }?.root
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Documents", style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f).semantics { heading() })
+                if (KayaSceneModel.newDocument) {
+                    IconButton(
+                        onClick = { kayaUserNewDocument() },
+                        modifier = Modifier.testTag(KayaCompose.NEW_DOCUMENT_TAG),
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = "New document")
+                    }
+                }
+            }
+            if (side != null) {
+                Box(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp)) {
+                    KayaRender(side, isRoot = true)
+                }
+                HorizontalDivider()
+            }
+            KayaDocumentRows()
+        }
+    }
+}
+
+/** The rows, and the hand-written reorder (Q5): a long press lifts a row,
+ * the drag carries it, and the release drops it where it stands. */
+@Composable
+private fun KayaDocumentRows() {
+    var lifted by remember { mutableStateOf<Long?>(null) }
+    var lift by remember { mutableStateOf(0f) }
+    var rowHeight by remember { mutableStateOf(1) }
+    val docs = KayaSceneModel.documents
+    for ((index, doc) in docs.withIndex()) {
+        androidx.compose.runtime.key(doc.id) {
+            val active = KayaSceneModel.activeDocument == doc.id
+            val up = lifted == doc.id
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .onGloballyPositioned { rowHeight = maxOf(1, it.size.height) }
+                    .zIndex(if (up) 1f else 0f)
+                    .graphicsLayer { translationY = if (up) lift else 0f }
+                    .background(if (up) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
+                    .pointerInput(doc.id) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { lifted = doc.id; lift = 0f },
+                            onDrag = { change, amount -> change.consume(); lift += amount.y },
+                            onDragEnd = {
+                                val from = KayaSceneModel.documents.indexOfFirst { it.id == doc.id }
+                                val steps = Math.round(lift / rowHeight)
+                                lifted = null
+                                lift = 0f
+                                if (from >= 0 && steps != 0) kayaUserMovesDocument(doc.id, from + steps)
+                            },
+                            onDragCancel = { lifted = null; lift = 0f },
+                        )
+                    }
+                    .padding(start = 24.dp, end = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .testTag(KayaCompose.DOCUMENT_ROW_TAG)
+                        .clickable { kayaUserSelectsDocument(doc.id) }
+                        .semantics(mergeDescendants = true) {
+                            selected = active
+                            customActions = listOfNotNull(
+                                if (index > 0) androidx.compose.ui.semantics.CustomAccessibilityAction("Move up") {
+                                    kayaUserMovesDocument(doc.id, index - 1); true
+                                } else null,
+                                if (index < docs.size - 1) androidx.compose.ui.semantics.CustomAccessibilityAction("Move down") {
+                                    kayaUserMovesDocument(doc.id, index + 1); true
+                                } else null,
+                            )
+                        }
+                        .padding(vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(doc.title, style = MaterialTheme.typography.bodyLarge)
+                    if (doc.dirty) {
+                        Spacer(Modifier.width(8.dp))
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
+                                .semantics { contentDescription = "Unsaved changes" },
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    if (active) Icon(Icons.Filled.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+                IconButton(
+                    onClick = { kayaUserClosesDocument(doc.id) },
+                    modifier = Modifier.testTag(KayaCompose.DOCUMENT_CLOSE_TAG),
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close ${doc.title}")
+                }
+            }
+        }
+    }
 }
 
 // The ACTIVE surface's stack: the selected section's when sections

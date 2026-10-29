@@ -403,6 +403,14 @@ object KayaPresent {
      * doctrine. */
     @JvmStatic external fun emitSectionSelected(window: Long, section: Long)
 
+    // docs/doctabs-plan.md §3: the phone list's user acts; the app's own
+    // select and close never come here.
+    @JvmStatic external fun emitDocumentSelected(window: Long, document: Long)
+    @JvmStatic external fun emitDocumentCloseRequested(document: Long)
+    @JvmStatic external fun emitDocumentClosed(document: Long)
+    @JvmStatic external fun emitNewDocumentRequested(window: Long)
+    @JvmStatic external fun emitDocumentMoved(document: Long, window: Long, index: Int)
+
     /** A menu action fired — a bar/overflow row, a context-menu row,
      * OR its shortcut: ONE occurrence, one dispatch path. [noun] is
      * the raw wire key path CONTEXT_ATTACH_NODE delivered with the

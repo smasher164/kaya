@@ -1055,6 +1055,31 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_emit_section_selected as *mut _,
             },
             NativeMethod {
+                name: "emitDocumentSelected".into(),
+                sig: "(JJ)V".into(),
+                fn_ptr: present_emit_document_selected as *mut _,
+            },
+            NativeMethod {
+                name: "emitDocumentCloseRequested".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_document_close_requested as *mut _,
+            },
+            NativeMethod {
+                name: "emitDocumentClosed".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_document_closed as *mut _,
+            },
+            NativeMethod {
+                name: "emitNewDocumentRequested".into(),
+                sig: "(J)V".into(),
+                fn_ptr: present_emit_new_document_requested as *mut _,
+            },
+            NativeMethod {
+                name: "emitDocumentMoved".into(),
+                sig: "(JJI)V".into(),
+                fn_ptr: present_emit_document_moved as *mut _,
+            },
+            NativeMethod {
                 name: "emitMenuActivated".into(),
                 sig: "(J[B)V".into(),
                 fn_ptr: present_emit_menu_activated as *mut _,
@@ -2311,6 +2336,32 @@ extern "system" fn present_emit_section_selected(
     section: jlong,
 ) {
     crate::capi::kaya_emit_section_selected(window as u64, section as u64);
+}
+
+extern "system" fn present_emit_document_selected(_env: JNIEnv, _class: JClass, window: jlong, document: jlong) {
+    crate::capi::kaya_emit_document_selected(window as u64, document as u64);
+}
+
+extern "system" fn present_emit_document_close_requested(_env: JNIEnv, _class: JClass, document: jlong) {
+    crate::capi::kaya_emit_document_close_requested(document as u64);
+}
+
+extern "system" fn present_emit_document_closed(_env: JNIEnv, _class: JClass, document: jlong) {
+    crate::capi::kaya_emit_document_closed(document as u64);
+}
+
+extern "system" fn present_emit_new_document_requested(_env: JNIEnv, _class: JClass, window: jlong) {
+    crate::capi::kaya_emit_new_document_requested(window as u64);
+}
+
+extern "system" fn present_emit_document_moved(
+    _env: JNIEnv,
+    _class: JClass,
+    document: jlong,
+    window: jlong,
+    index: jint,
+) {
+    crate::capi::kaya_emit_document_moved(document as u64, window as u64, index as u32);
 }
 
 /// KayaPresent.emitBackRequested: back on an intercept_back-armed

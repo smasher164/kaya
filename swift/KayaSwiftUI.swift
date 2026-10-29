@@ -1166,6 +1166,9 @@ final class KayaWindowModel: Identifiable {
     var activeDocument: UInt64?
     var newDocument = false
     var regions: [KayaRegionModel] = []
+    /// docs/doctabs-plan.md §1.6: whether a phone's list of open documents is
+    /// up.
+    var documentsListShown = false
 
     init(id: UInt64, title: String = "") {
         self.id = id
@@ -6352,8 +6355,6 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     model?.newDocument = raw[body + 24] != 0
                     #if os(macOS)
                         kayaRefreshNewDocument(wid)
-                    #else
-                        kayaDepthStub("doctabs", on: "ios")
                     #endif
                 case (wpropFullscreen, valueBool):
                     #if os(macOS)
@@ -7556,30 +7557,24 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 menusTouched = true
             case applyAddDocument:
                 // docs/doctabs-plan.md §3: on the Mac a document is its own
-                // NSWindow in the window's tab group.
+                // NSWindow in the window's tab group; a phone lists them.
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let did = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                let doc = KayaDocumentModel(id: did, window: wid)
+                kayaScene.documentsById[did] = doc
+                let window = kayaScene.windows[wid]!
+                window.documents.append(doc)
+                if window.activeDocument == nil { window.activeDocument = did }
                 #if os(macOS)
-                    let doc = KayaDocumentModel(id: did, window: wid)
-                    kayaScene.documentsById[did] = doc
-                    let window = kayaScene.windows[wid]!
-                    window.documents.append(doc)
-                    if window.activeDocument == nil { window.activeDocument = did }
                     kayaOpenDocumentWindow(did)
-                #else
-                    _ = (wid, did)
-                    kayaDepthStub("doctabs", on: "ios")
                 #endif
             case applySelectDocument:
                 // Programmatic and QUIET (the echo doctrine).
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let did = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                kayaScene.windows[wid]?.activeDocument = did
                 #if os(macOS)
-                    kayaScene.windows[wid]?.activeDocument = did
                     kayaSelectDocumentWindow(did)
-                #else
-                    _ = (wid, did)
-                    kayaDepthStub("doctabs", on: "ios")
                 #endif
             case applyCloseDocument:
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -7587,44 +7582,37 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 #if os(macOS)
                     kayaCloseDocument(wid, did)
                 #else
-                    _ = (wid, did)
-                    kayaDepthStub("doctabs", on: "ios")
+                    kayaPhoneDocumentGone(wid, did, user: false)
                 #endif
             case applySetDocumentProp:
                 let did = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let prop = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt32.self)
                 let dvType = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let doc = kayaScene.documentsById[did]!
+                switch (prop, dvType) {
+                case (dpropTitle, valueStr), (dpropTooltip, valueStr):
+                    let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
+                    let text = String(decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
+                    if prop == dpropTitle { doc.title = text } else { doc.tooltip = text }
+                case (dpropDirty, valueBool):
+                    doc.dirty = raw[body + 24] != 0
+                case (dpropInterceptClose, valueBool):
+                    doc.interceptClose = raw[body + 24] != 0
+                default:
+                    fatalError("kaya: bad document prop \(prop) value type \(dvType)")
+                }
                 #if os(macOS)
-                    let doc = kayaScene.documentsById[did]!
-                    switch (prop, dvType) {
-                    case (dpropTitle, valueStr), (dpropTooltip, valueStr):
-                        let len = Int(raw.loadUnaligned(fromByteOffset: body + 20, as: UInt32.self))
-                        let text = String(decoding: raw[(body + 24)..<(body + 24 + len)], as: UTF8.self)
-                        if prop == dpropTitle { doc.title = text } else { doc.tooltip = text }
-                    case (dpropDirty, valueBool):
-                        doc.dirty = raw[body + 24] != 0
-                    case (dpropInterceptClose, valueBool):
-                        doc.interceptClose = raw[body + 24] != 0
-                    default:
-                        fatalError("kaya: bad document prop \(prop) value type \(dvType)")
-                    }
                     kayaApplyDocumentTab(did)
-                #else
-                    _ = (did, prop, dvType)
-                    kayaDepthStub("doctabs", on: "ios")
                 #endif
             case applyAddRegion:
                 let wid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let rid = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
                 let edge = raw.loadUnaligned(fromByteOffset: body + 16, as: UInt32.self)
+                let region = KayaRegionModel(id: rid, window: wid, edge: edge)
+                kayaScene.regionsById[rid] = region
+                kayaScene.windows[wid]!.regions.append(region)
                 #if os(macOS)
-                    let region = KayaRegionModel(id: rid, window: wid, edge: edge)
-                    kayaScene.regionsById[rid] = region
-                    kayaScene.windows[wid]!.regions.append(region)
                     DispatchQueue.main.async { kayaPlaceRegions(wid) }
-                #else
-                    _ = (wid, rid, edge)
-                    kayaDepthStub("doctabs", on: "ios")
                 #endif
             case applyPresentSheet:
                 let parent = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
@@ -12613,6 +12601,11 @@ private func kayaRunScript(_ script: String) {
                         if let top = kayaScene.windows[wid]?.entries.last {
                             return top.title
                         }
+                        // A window with documents is titled by its active one
+                        // (docs/doctabs-plan.md §1.4), on the top bar.
+                        if kayaScene.windows[wid]?.documents.isEmpty == false {
+                            return kayaPhoneActiveTitle() ?? ""
+                        }
                         return kayaWindowCaption(wid)
                     #endif
                 }
@@ -14210,13 +14203,28 @@ private func kayaRunScript(_ script: String) {
                     if let got, kayaBytesEqual(got.joined(separator: "|"), want) {
                         observed.append("documents \"\(want)\"")
                     } else if let got {
-                        failures.append("documents \"\(got.joined(separator: "|"))\", wanted \"\(want)\"")
+                        let witness = DispatchQueue.main.sync { kayaStripWitness() }
+                        failures.append("documents \"\(got.joined(separator: "|"))\", wanted \"\(want)\" (\(witness))")
                     } else {
                         failures.append("no window holds documents, wanted \"\(want)\"")
                     }
                 #else
-                    _ = want
-                    kayaDepthStub("doctabs", on: "ios")
+                    // THE LIST COMES UP FIRST, so the read waits for it and for
+                    // the rows to settle on the wanted ones, bounded.
+                    var got: [String]? = nil
+                    let readBy = Date().addingTimeInterval(5)
+                    repeat {
+                        got = DispatchQueue.main.sync { kayaPhoneRows()?.map(\.title) }
+                        if let got, kayaBytesEqual(got.joined(separator: "|"), want) { break }
+                        Thread.sleep(forTimeInterval: 0.1)
+                    } while Date() < readBy
+                    if let got, kayaBytesEqual(got.joined(separator: "|"), want) {
+                        observed.append("documents \"\(want)\"")
+                    } else if let got {
+                        failures.append("documents \"\(got.joined(separator: "|"))\", wanted \"\(want)\"")
+                    } else {
+                        failures.append("the documents list is not up yet, wanted \"\(want)\"")
+                    }
                 #endif
             case "expect_document":
                 let want = kayaQuoted(Array(parts[1...]))
@@ -14225,13 +14233,18 @@ private func kayaRunScript(_ script: String) {
                     if let got, kayaBytesEqual(got, want) {
                         observed.append("document \"\(want)\"")
                     } else if let got {
-                        failures.append("document \"\(got)\", wanted \"\(want)\"")
+                        let witness = DispatchQueue.main.sync { kayaStripWitness() }
+                        failures.append("document \"\(got)\", wanted \"\(want)\" (\(witness))")
                     } else {
                         failures.append("no active document, wanted \"\(want)\"")
                     }
                 #else
-                    _ = want
-                    kayaDepthStub("doctabs", on: "ios")
+                    let got = DispatchQueue.main.sync { kayaPhoneActiveTitle() }
+                    if let got, kayaBytesEqual(got, want) {
+                        observed.append("document \"\(want)\"")
+                    } else {
+                        failures.append("document \"\(got ?? "<no top bar title>")\", wanted \"\(want)\"")
+                    }
                 #endif
             case "expect_document_dirty":
                 let dirtyRest = String(line.dropFirst(parts[0].count))
@@ -14248,8 +14261,24 @@ private func kayaRunScript(_ script: String) {
                         failures.append("document \"\(dirtyTitle)\" dirty \(gotDirty), wanted \(dirtyWant)")
                     }
                 #else
-                    _ = dirtyWant
-                    kayaDepthStub("doctabs", on: "ios")
+                    var gotDirty = ""
+                    let readBy = Date().addingTimeInterval(5)
+                    repeat {
+                        gotDirty = DispatchQueue.main.sync { () -> String in
+                            guard let rows = kayaPhoneRows() else { return "<the documents list is not up yet>" }
+                            guard let row = rows.first(where: { kayaBytesEqual($0.title, dirtyTitle) }) else {
+                                return "<no row titled \(dirtyTitle) (rows: \(rows.map(\.title)))>"
+                            }
+                            return row.value.split(separator: ",").contains("edited") ? "true" : "false"
+                        }
+                        if gotDirty == dirtyWant { break }
+                        Thread.sleep(forTimeInterval: 0.1)
+                    } while Date() < readBy
+                    if gotDirty == dirtyWant {
+                        observed.append("document \"\(dirtyTitle)\" dirty \(dirtyWant)")
+                    } else {
+                        failures.append("document \"\(dirtyTitle)\" dirty \(gotDirty), wanted \(dirtyWant)")
+                    }
                 #endif
             case "select_document", "close_document", "move_to_new_window", "new_document",
                 "close_native_window":
@@ -14272,8 +14301,49 @@ private func kayaRunScript(_ script: String) {
                         kayaAwaitAnswer(answered)
                     }
                 #else
-                    _ = docArg
-                    kayaDepthStub("doctabs", on: "ios")
+                    kayaAwaitQuiet()
+                    let answered = kayaAnswers()
+                    var why: String? = "the documents list did not come up"
+                    let deadline = Date().addingTimeInterval(5)
+                    while Date() < deadline {
+                        let attempt = DispatchQueue.main.sync { () -> String?? in
+                            switch parts[0] {
+                            case "move_to_new_window", "close_native_window":
+                                return .some("a phone has no windows to move a document into or close")
+                            default: break
+                            }
+                            guard let rows = kayaPhoneRows() else { return .none }
+                            switch parts[0] {
+                            case "select_document":
+                                guard let row = rows.first(where: { kayaBytesEqual($0.title, docArg) }) else {
+                                    return .some("no row titled \(docArg) (rows: \(rows.map(\.title)))")
+                                }
+                                return .some(row.element.accessibilityActivate() ? nil : "the row \(docArg) refused activation")
+                            case "close_document":
+                                guard let close = kayaPhoneElements("kaya-document-close")
+                                    .first(where: { $0.accessibilityLabel == "Close \(docArg)" })
+                                else {
+                                    return .some("no close button for \(docArg)")
+                                }
+                                return .some(close.accessibilityActivate() ? nil : "the close of \(docArg) refused activation")
+                            default:
+                                guard let plus = kayaPhoneElements("kaya-new-document").first else {
+                                    return .some("no + in the documents list (is new_document armed?)")
+                                }
+                                return .some(plus.accessibilityActivate() ? nil : "the + refused activation")
+                            }
+                        }
+                        if case .some(let result) = attempt {
+                            why = result
+                            break
+                        }
+                        Thread.sleep(forTimeInterval: 0.1)
+                    }
+                    if let why {
+                        failures.append("\(parts[0]): \(why)")
+                    } else {
+                        kayaAwaitAnswer(answered)
+                    }
                 #endif
             case "expect_sheets":
                 // The chain's depth off the PLATFORM: sheet windows still
@@ -38330,7 +38400,10 @@ struct KayaRoot: View {
 
     var body: some View {
         Group {
-        if scene.windows[0]?.sections.isEmpty == false {
+        if kayaPhoneHoldsDocuments(0) {
+            // docs/doctabs-plan.md §1.6: the active document and the list.
+            KayaPhoneDocumentsHome(windowId: 0)
+        } else if scene.windows[0]?.sections.isEmpty == false {
             // Sections present: the switcher IS the window content
             // (each pane carries its own stack).
             KayaSectionsView(windowId: 0)
@@ -38567,10 +38640,6 @@ func kayaOpenDocumentWindow(_ did: UInt64) {
 }
 
 /// The window that holds documents (one per app in v1, Q1).
-func kayaDocumentsWindowId() -> UInt64? {
-    kayaScene.windows.values.first(where: { !$0.documents.isEmpty })?.id
-}
-
 func kayaDocumentId(of window: NSWindow) -> UInt64? {
     kayaDocNSWindows.first(where: { $0.value === window })?.key
 }
@@ -39141,10 +39210,19 @@ func kayaActiveStrip() -> [NSWindow]? {
     if let key = NSApp.keyWindow, kayaDocumentId(of: key) != nil {
         return key.tabGroup?.windows ?? [key]
     }
-    guard let wid = kayaDocumentsWindowId(), let front = kayaNSWindows[wid],
-        kayaDocumentId(of: front) != nil
+    // AN INACTIVE APP HAS NO KEY WINDOW, so the strip is the frontmost one in
+    // the app's own z-order (measured: a torn-out tab read back the window it
+    // left, chosen by a dictionary's order).
+    guard let front = NSApp.orderedWindows.first(where: { $0.isVisible && kayaDocumentId(of: $0) != nil })
     else { return nil }
     return front.tabGroup?.windows ?? [front]
+}
+
+/// Which strip a read took and why, for its failure sentence.
+func kayaStripWitness() -> String {
+    let key = NSApp.keyWindow.flatMap { kayaDocumentId(of: $0) }.map { "document \($0)" } ?? "none"
+    let order = NSApp.orderedWindows.filter { $0.isVisible && kayaDocumentId(of: $0) != nil }.map { $0.tab.title as String }
+    return "app active \(NSApp.isActive), key window \(key), document windows front to back \(order)"
 }
 
 func kayaDocWindow(titled title: String) -> NSWindow? {
@@ -39258,6 +39336,293 @@ func kayaMoveToNewWindowDrive(_ title: String) -> String? {
 func kayaCloseNativeWindowDrive() -> String? {
     guard let front = kayaActiveStrip()?.first else { return "no window holds documents" }
     kayaCloseNativeWindow(front.tabGroup?.selectedWindow ?? front)
+    return nil
+}
+#endif
+
+/// A phone's window that holds documents shows them (§1.6); the Mac's are
+/// their own windows, so its primary root never does.
+func kayaPhoneHoldsDocuments(_ windowId: UInt64) -> Bool {
+    #if os(iOS)
+        return kayaScene.windows[windowId]?.documents.isEmpty == false
+    #else
+        return false
+    #endif
+}
+
+struct KayaPhoneDocumentsHome: View {
+    let windowId: UInt64
+    var body: some View {
+        #if os(iOS)
+            KayaPhoneDocumentsRoot(windowId: windowId)
+        #else
+            EmptyView()
+        #endif
+    }
+}
+
+#if os(iOS)
+// MARK: - Documents on the phone (docs/doctabs-plan.md §1.6)
+//
+// No phone has a document tab (the study's §2): the window shows its active
+// document, and a button in the top bar opens the list of open documents in
+// a sheet, each row with its title, its unsaved mark, a check on the active
+// one and a close button, the "+" in the sheet's header, and a leading or
+// trailing region above the list.
+
+/// A document the user closed, or the app closed: the model drops it, a
+/// user's close is reported, and an empty window shows its own root, the
+/// phones' empty state (Q2's carve-out).
+func kayaPhoneDocumentGone(_ wid: UInt64, _ did: UInt64, user: Bool) {
+    guard kayaScene.documentsById.removeValue(forKey: did) != nil else { return }
+    let model = kayaScene.windows[wid]
+    model?.documents.removeAll { $0.id == did }
+    if user { KayaHost.emitDocumentClosed(did) }
+    if model?.activeDocument == did { model?.activeDocument = model?.documents.first?.id }
+    if model?.documents.isEmpty ?? true { model?.documentsListShown = false }
+}
+
+func kayaPhoneUserClose(_ did: UInt64) {
+    guard let doc = kayaScene.documentsById[did] else { return }
+    if doc.interceptClose {
+        KayaHost.emitDocumentCloseRequested(did)
+        return
+    }
+    kayaPhoneDocumentGone(doc.window, did, user: true)
+}
+
+func kayaPhoneUserSelect(_ did: UInt64) {
+    guard let doc = kayaScene.documentsById[did], let model = kayaScene.windows[doc.window] else { return }
+    model.documentsListShown = false
+    guard model.activeDocument != did else { return }
+    model.activeDocument = did
+    KayaHost.emitDocumentSelected(doc.window, did)
+}
+
+/// The window's body while it holds documents: the active one, a bottom
+/// region under it, and the top bar's documents button.
+struct KayaPhoneDocumentsRoot: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        let model = scene.windows[windowId]
+        let doc = model?.activeDocument.flatMap { scene.documentsById[$0] }
+        let bottom = model?.regions.first { $0.edge == regionEdgeBottom }
+        NavigationStack {
+            VStack(spacing: 0) {
+                Group {
+                    if let root = doc?.root {
+                        KayaRender(node: root, isRoot: true)
+                    }
+                }
+                .padding(model?.inset ?? 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                if let root = bottom?.root {
+                    KayaRender(node: root, isRoot: true).padding(model?.inset ?? 16)
+                }
+            }
+            .navigationTitle(doc?.title ?? "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        model?.documentsListShown = true
+                    } label: {
+                        Image(systemName: "square.on.square")
+                    }
+                    .accessibilityIdentifier("kaya-documents")
+                    .accessibilityLabel("Documents")
+                    .accessibilityValue("\(model?.documents.count ?? 0)")
+                }
+            }
+            .modifier(KayaMenuChrome(windowId: windowId))
+        }
+        .sheet(
+            isPresented: Binding(
+                get: { scene.windows[windowId]?.documentsListShown ?? false },
+                set: { scene.windows[windowId]?.documentsListShown = $0 })
+        ) {
+            // LARGE, so every row is laid out: a row a medium sheet leaves off
+            // screen is never realized, and neither the user nor a reader sees
+            // it (measured: the fourth of four rows was absent).
+            KayaPhoneDocumentsList(windowId: windowId)
+                .presentationDetents([.large])
+        }
+    }
+}
+
+/// The list of open documents.
+struct KayaPhoneDocumentsList: View {
+    let windowId: UInt64
+    @State private var scene = kayaScene
+
+    var body: some View {
+        let model = scene.windows[windowId]
+        let side = model?.regions.first { $0.edge != regionEdgeBottom }
+        NavigationStack {
+            List {
+                if let root = side?.root {
+                    Section {
+                        KayaRender(node: root, isRoot: true)
+                    }
+                }
+                Section {
+                    if model?.newDocument == true {
+                        Button {
+                            KayaHost.emitNewDocumentRequested(windowId)
+                            model?.documentsListShown = false
+                        } label: {
+                            Label("New Document", systemImage: "plus")
+                        }
+                        .accessibilityIdentifier("kaya-new-document")
+                    }
+                    ForEach(model?.documents ?? []) { doc in
+                        KayaPhoneDocumentRow(doc: doc, active: model?.activeDocument == doc.id)
+                    }
+                    .onMove { from, to in
+                        guard let model else { return }
+                        let moved = from.map { model.documents[$0].id }
+                        model.documents.move(fromOffsets: from, toOffset: to)
+                        for id in moved {
+                            if let at = model.documents.firstIndex(where: { $0.id == id }) {
+                                KayaHost.emitDocumentMoved(id, windowId, UInt32(at))
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Documents")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { EditButton() }
+            }
+        }
+    }
+}
+
+struct KayaPhoneDocumentRow: View {
+    let doc: KayaDocumentModel
+    let active: Bool
+
+    var body: some View {
+        HStack {
+            Button {
+                kayaPhoneUserSelect(doc.id)
+            } label: {
+                HStack {
+                    Text(doc.title).foregroundStyle(.primary)
+                    if doc.dirty {
+                        Circle().fill(.secondary).frame(width: 8, height: 8)
+                    }
+                    Spacer()
+                    if active {
+                        Image(systemName: "checkmark").foregroundStyle(.tint)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("kaya-document-row")
+            .accessibilityLabel(doc.title)
+            .accessibilityValue([active ? "active" : nil, doc.dirty ? "edited" : nil].compactMap { $0 }.joined(separator: ","))
+            Button {
+                kayaPhoneUserClose(doc.id)
+            } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("kaya-document-close")
+            .accessibilityLabel("Close \(doc.title)")
+        }
+        .swipeActions {
+            Button(role: .destructive) {
+                kayaPhoneUserClose(doc.id)
+            } label: {
+                Text("Close")
+            }
+        }
+    }
+}
+
+// The harness's reads and drives (docs/doctabs-plan.md §4): the list's rows
+// as UIKit publishes them, read with the list up, since that is the one
+// place a phone shows its documents; the drives activate those elements.
+
+func kayaPhoneDocumentsWindow() -> UInt64? {
+    kayaScene.windows.values.first { !$0.documents.isEmpty }?.id
+}
+
+func kayaPhoneElements(_ identifier: String) -> [NSObject] {
+    // THE SETTLED SHEET ALONE: a list being dismissed still publishes the rows
+    // it had, so a read over the whole window took a stale list for the new.
+    guard let sheet = kayaPresentedSheetControllers().last,
+        !sheet.isBeingPresented, !sheet.isBeingDismissed, sheet.transitionCoordinator == nil,
+        let root = sheet.view
+    else { return [] }
+    root.layoutIfNeeded()
+    var out: [NSObject] = []
+    var seen: Set<ObjectIdentifier> = []
+    func walk(_ element: NSObject, _ depth: Int) {
+        if depth > 64 || !seen.insert(ObjectIdentifier(element)).inserted { return }
+        if kayaAxIdentifier(element) == identifier { out.append(element) }
+        let count = element.accessibilityElementCount()
+        if count != NSNotFound && count > 0 {
+            for i in 0..<count {
+                if let child = element.accessibilityElement(at: i) as? NSObject { walk(child, depth + 1) }
+            }
+        }
+        if let view = element as? UIView { view.subviews.forEach { walk($0, depth + 1) } }
+    }
+    // THE LIST'S VISIBLE CELLS, top to bottom: a removed row's element lingers
+    // in the hosting views' published tree at a live row's frame (measured: a
+    // closed document read back after its row went), and a cell the list
+    // still shows is the one thing that cannot be stale.
+    var lists: [UICollectionView] = []
+    var stack: [UIView] = [root]
+    while let view = stack.popLast() {
+        if let list = view as? UICollectionView { lists.append(list) }
+        stack.append(contentsOf: view.subviews)
+    }
+    if lists.isEmpty {
+        walk(root, 0)
+        return out
+    }
+    for list in lists {
+        for cell in list.visibleCells.sorted(by: { $0.frame.minY < $1.frame.minY }) {
+            walk(cell, 0)
+        }
+    }
+    return out
+}
+
+/// The rows of the list, opening it first; nil while it is still coming up.
+func kayaPhoneRows() -> [(title: String, value: String, element: NSObject)]? {
+    guard let wid = kayaPhoneDocumentsWindow(), let model = kayaScene.windows[wid] else { return [] }
+    if !model.documentsListShown {
+        model.documentsListShown = true
+        return nil
+    }
+    let rows = kayaPhoneElements("kaya-document-row").map {
+        (title: $0.accessibilityLabel ?? "", value: $0.accessibilityValue ?? "", element: $0)
+    }
+    return rows.isEmpty ? nil : rows
+}
+
+func kayaPhoneActiveTitle() -> String? {
+    for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+        for window in scene.windows {
+            var stack: [UIView] = [window]
+            while let view = stack.popLast() {
+                if let bar = view as? UINavigationBar, bar.window != nil,
+                    let title = bar.topItem?.title, title != "Documents"
+                {
+                    return title
+                }
+                stack.append(contentsOf: view.subviews)
+            }
+        }
+    }
     return nil
 }
 #endif
