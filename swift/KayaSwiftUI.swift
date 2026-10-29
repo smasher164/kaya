@@ -39836,8 +39836,18 @@ final class KayaPlayer {
                 guard let self else { return }
                 KayaVTrace.attempt("player#\(self.id)", 0, "<- timeControlStatus=\(status.rawValue), now \(self.stateText)")
                 switch status {
-                case .playing: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 1) }
-                case .paused: kayaPlayerReport(self.id) { KayaHost.api.player_rate(self.id, 0) }
+                case .playing:
+                    kayaPlayerReport(self.id) {
+                        let answer = KayaHost.api.player_rate(self.id, 1)
+                        kayaRoutedRateReport(self.id, 1, answer)
+                        return answer
+                    }
+                case .paused:
+                    kayaPlayerReport(self.id) {
+                        let answer = KayaHost.api.player_rate(self.id, 0)
+                        kayaRoutedRateReport(self.id, 0, answer)
+                        return answer
+                    }
                 default: break
                 }
             }
@@ -40765,7 +40775,46 @@ func kayaRemote(_ action: Int32, _ atMs: UInt64) -> MPRemoteCommandHandlerStatus
         p.play()
     default: return .commandFailed
     }
+    kayaRoutedAnswer(action, route, p)
     return .success
+}
+
+/// docs/deferred.md, the routed remote pause that left the player playing:
+/// what the player answered a routed command, at once and after, and the
+/// core's answer to its next rate report.
+nonisolated(unsafe) var kayaRoutedPending: (action: Int32, route: UInt32, at: Date)? = nil
+
+func kayaRoutedAnswer(_ action: Int32, _ route: UInt32, _ p: KayaPlayer) {
+    let id = p.id
+    kayaRoutedPending = (action, route, Date())
+    kayaDiag(
+        "routed action=\(action) route=\(route) player#\(id) answered at once: \(p.stateText) "
+            + "timeControlStatus=\(p.player.timeControlStatus.rawValue) "
+            + "waiting=\(p.player.reasonForWaitingToPlay?.rawValue ?? "none")")
+    for delay in [0.25, 1.0, 3.0] {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            guard let q = kayaPlayers[id] else {
+                kayaDiag("routed action=\(action) +\(delay)s: player#\(id) is gone")
+                return
+            }
+            let pending = kayaRoutedPending.map { $0.action == action } ?? false
+            kayaDiag(
+                "routed action=\(action) +\(delay)s: player#\(id) \(q.stateText) "
+                    + "timeControlStatus=\(q.player.timeControlStatus.rawValue)"
+                    + (pending ? ", no rate report since the command" : ""))
+        }
+    }
+}
+
+/// The core's answer to the attached player's first rate report after a
+/// routed command (kayaRoutedAnswer).
+func kayaRoutedRateReport(_ id: UInt64, _ rate: UInt32, _ answer: UInt32) {
+    guard let pending = kayaRoutedPending, kayaSession.player == id else { return }
+    kayaRoutedPending = nil
+    kayaDiag(
+        "routed action=\(pending.action) next player report: player#\(id) rate=\(rate) after "
+            + "\(Int(Date().timeIntervalSince(pending.at) * 1000)) ms, the core answered \(answer), "
+            + "session state \(KayaHost.api.session_state())")
 }
 
 func kayaApplySession(_ session: KayaSession) {

@@ -1340,6 +1340,20 @@ so the recorder grows that line around a routed session command before the
 next sighting, proven by a forced red. Not touched by the capture slice (the
 capture arm reaches no player or session).
 
+THE RECORDER CARRIES IT since 2026-10-29: after a routed command the SwiftUI
+arm prints `routed action=N route=R player#P answered at once: ...` with
+timeControlStatus, the rate, the clock and the waiting reason, the same
+reading at +0.25, +1 and +3 s (saying "no rate report since the command"
+while none came), and `next player report: ... rate=X after N ms, the core
+answered A, session state S` (kayaRoutedAnswer, kayaRoutedRateReport;
+check-flightrec's "SwiftUI routed session answer", NQ1/NQ2). Proven by a
+forced red, the routed pause cut (run 20261029T125154Z-099461): the leg log
+read "answered at once: playing rate=1.0 ... timeControlStatus=2" and three
+readings still playing, the next report the loop's rate=1. On the next
+sighting read those lines in leg-log.txt first: a player that never paused
+is this arm, a player that paused with the label still "playing" is the
+core's report or the guest.
+
 ## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day; the C floor's parsers, §5's far end and the rulings below remain
 KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_nearest_format, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied, pwsynth, capture-leg.py, winvcam, kaya-capture-lane, capture-install.ps1, emulator_capture.py, KayaCapture.kt, scene-negative.py
 

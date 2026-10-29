@@ -2551,6 +2551,26 @@ if sys.platform == "darwin":
 else:
     print("check-flightrec: the mac recorder drive needs a mac; not run here")
 
+def census_session_answer(src):
+    """docs/deferred.md, the routed remote pause that left the iOS player
+    playing: after a routed session command the SwiftUI arm prints the
+    player's answer (at once, +0.25/1/3 s) and the core's answer to its next
+    rate report, both rate arms included."""
+    text = src[SWIFTUI]
+    remote = text[text.find("func kayaRemote("):]
+    remote = remote[:remote.find("\n}\n")]
+    found = []
+    if "kayaRoutedAnswer(action, route, p)" not in remote:
+        found.append("SwiftUI: kayaRemote no longer records the player's answer to a routed "
+                     "command (kayaRoutedAnswer)")
+    for arm in ("player_rate(self.id, 1)", "player_rate(self.id, 0)"):
+        at = text.find(f"let answer = KayaHost.api.{arm}")
+        if at < 0 or "kayaRoutedRateReport(self.id" not in text[at:at + 200]:
+            found.append(f"SwiftUI: the rate report `{arm}` no longer records the core's answer "
+                         "after a routed command (kayaRoutedRateReport)")
+    return found
+
+
 CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("finish", census_finish), ("capture point", census_when),
             ("windows verb trace", census_vtrace),
@@ -2574,7 +2594,8 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("mac host apps", census_mac_apps),
             ("GTK media ring", census_gtk_media_ring),
             ("linux step cpu", census_linux_step_cpu),
-            ("GTK failed-step picture", census_gtk_failshot))
+            ("GTK failed-step picture", census_gtk_failshot),
+            ("SwiftUI routed session answer", census_session_answer))
 TABLE = declared(REAL)
 gate.counted("lanes declaring a bundle shape", list(TABLE), floor=5)
 gate.counted("sections declared across the five lanes",
@@ -2637,6 +2658,15 @@ def doctored(rel, pattern, repl, label, *, flags=re.M, want=1):
                            want=want)
     return src
 
+
+for label, pattern, repl, want in (
+        ("NQ1 the routed command's answer cut", r"^ +kayaRoutedAnswer\(action, route, p\)\n", "",
+         "no longer records the player's answer"),
+        ("NQ2 the pause report's answer cut",
+         r"(let answer = KayaHost\.api\.player_rate\(self\.id, 0\)\n) +kayaRoutedRateReport\(.*\n",
+         r"\1", "`player_rate(self.id, 0)` no longer records")):
+    changed = doctored(SWIFTUI, pattern, repl, label)
+    gate.negative(label, lambda: census_session_answer(changed), want=want)
 
 # The frontmost-shot refusals, each removed from a copy.
 nf1 = doctored(LANE_PY,
@@ -3673,6 +3703,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(266 + (5 if DRIVES else 0))
+gate.negatives_ran(268 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
