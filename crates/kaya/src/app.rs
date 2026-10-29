@@ -3070,6 +3070,11 @@ impl<'a> Tx<'a> {
         DocumentRef { tx: self, document }
     }
 
+    /// The prop chain of a document already added.
+    pub fn document(&mut self, document: WindowId) -> DocumentRef<'_, 'a> {
+        DocumentRef { tx: self, document }
+    }
+
     /// Make a document the active one: configuration, never echoes
     /// document_selected.
     pub fn select_document(&mut self, document: WindowId) {
@@ -6646,16 +6651,16 @@ impl<M> Messages<M> {
         self.document_moved.borrow_mut().insert(document.0, Box::new(f));
     }
 
-    /// Bind the tear-out handler to a SOURCE window: the user moved these
-    /// documents into a new window kaya made, whose id this hands you;
-    /// declare its chrome and regions and bind its handlers
+    /// Bind the tear-out handler to the window documents leave: the user
+    /// moved these documents into a new window kaya made, whose id this
+    /// hands you; declare its chrome and regions and bind its handlers
     /// (docs/doctabs-plan.md §1.2).
     pub fn on_documents_detached(
         &self,
-        source: WindowId,
+        window: WindowId,
         f: impl Fn(WindowId, Vec<WindowId>) -> M + 'static,
     ) {
-        self.documents_detached.borrow_mut().insert(source.0, Box::new(f));
+        self.documents_detached.borrow_mut().insert(window.0, Box::new(f));
     }
 
     /// Bind the window-close handler of a window with documents: the user

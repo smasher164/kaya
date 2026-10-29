@@ -77,6 +77,8 @@ C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             "segmented",
             # The toast at the floor (docs/toast-plan.md T15).
             "toast",
+            # Document tabs at the floor (docs/doctabs-plan.md §5).
+            "doctabs",
             # The expander at the floor (docs/expander-plan.md K18).
             "expander",
             # The safe area at the floor (docs/safe-area-plan.md A16).
@@ -382,7 +384,7 @@ ORDER = [
                   "ocaml", "haskell")),
     ("sheet", LANGS),
     # docs/doctabs-plan.md §6 D2: the bindings join as their sugar does.
-    ("doctabs", ("rust", "python", "js", "go", "csharp", "java")),
+    ("doctabs", ("rust", "python", "js", "go", "csharp", "java", "swift", "ocaml", "haskell", "c")),
     # THE FORMATTER DOOR AND THE CATALOG (docs/compliance-plan.md §6): every
     # binding's guest under the everyday locale, then under de-DE and ar-EG
     # through the KAYA_LOCALE knob (SCENE_LOCALE).

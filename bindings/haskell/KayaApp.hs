@@ -103,6 +103,15 @@ module KayaApp
     addSection,
     addSectionIn,
     selectSection,
+    addDocument,
+    addDocumentIn,
+    updateDocument,
+    selectDocument,
+    closeDocument,
+    DocumentAttr (..),
+    RegionEdge (..),
+    addRegion,
+    addRegionIn,
     window,
     SectionAttr (..),
     Symbol (..),
@@ -1207,6 +1216,17 @@ data WindowAttr
     -- platform's own stack and reports itself as an ordinary edit, so
     -- that one does not arrive here.
     WOnRedone (Text -> UndoDelta -> IO ())
+  | -- | Draws the platform's "+" beside this window's documents
+    -- (docs\/doctabs-plan.md §2); 'WOnNewDocument' hears each press.
+    WNewDocument Bool
+  | WOnNewDocument (IO ())
+  | -- | The user closed this native window while a document it shows arms
+    -- intercept_close: the documents it shows, and NOTHING HAS CLOSED.
+    WOnDocumentsCloseRequested ([Word64] -> IO ())
+  | -- | The user moved documents out of this window into a new native
+    -- window, which kaya names; declare its chrome and regions as this
+    -- one's were.
+    WOnDocumentsDetached (Word64 -> [Word64] -> IO ())
   | -- | The menubar rides the window construct: 'WMenus' realizes its
     -- inline Build actions in order and appends each top-level grouping
     -- node to this window's catalog — append-only, at any time.
@@ -1243,6 +1263,13 @@ window n = mapM_ apply
     apply (WOnRedone handler) = pendB (PRedone n handler)
     apply (WMenus menus) =
       mapM_ (\m -> m >>= \(MItem i) -> emitB (W.txMenubarAppend n i)) menus
+    apply (WNewDocument v) = emitB (W.txSetWindowNewDocument n v)
+    apply (WOnNewDocument handler) =
+      pendB (PDocuments (\d -> d {dtNewDocument = Map.insert n handler d.dtNewDocument}))
+    apply (WOnDocumentsCloseRequested handler) =
+      pendB (PDocuments (\d -> d {dtWindowClose = Map.insert n handler d.dtWindowClose}))
+    apply (WOnDocumentsDetached handler) =
+      pendB (PDocuments (\d -> d {dtDetached = Map.insert n handler d.dtDetached}))
 
 -- | Create an auxiliary window (capability-gated: phone hosts reject
 -- at the root); materializes hidden, 'mountIn' presents:
@@ -1402,6 +1429,80 @@ addSectionIn w n attrs = do
 -- 'SOnSelected' (the echo doctrine).
 selectSection :: Word64 -> Build ()
 selectSection n = emitB (W.txSelectSection 0 n)
+
+-- | Document attributes (docs\/doctabs-plan.md §2) — the config-list
+-- spelling. 'DOnSelected' fires each time the USER makes it active;
+-- 'DOnCloseRequested' per user close while 'DInterceptClose' is armed, with
+-- nothing closed (answer with 'closeDocument'); 'DOnClosed' when the user
+-- closed it unarmed, one-shot; 'DOnMoved' with the window and index when the
+-- user drags it. A programmatic select or close fires none of them.
+data DocumentAttr
+  = DTitle Text
+  | DTitleBound (Signal Text)
+  | DTooltip Text
+  | DDirty Bool
+  | DDirtyBound (Signal Bool)
+  | DInterceptClose Bool
+  | DOnSelected (IO ())
+  | DOnCloseRequested (IO ())
+  | DOnClosed (IO ())
+  | DOnMoved (Word64 -> Word32 -> IO ())
+
+-- | Add a document to the primary window; 'mountIn' fills it, and the first
+-- a window gets is active.
+addDocument :: Word64 -> [DocumentAttr] -> Build ()
+addDocument = addDocumentIn 0
+
+-- | 'addDocument' with the window said out loud.
+addDocumentIn :: Word64 -> Word64 -> [DocumentAttr] -> Build ()
+addDocumentIn w n attrs = do
+  emitB (W.txAddDocument w n)
+  updateDocument n attrs
+
+-- | A document's attributes after its 'addDocument'.
+updateDocument :: Word64 -> [DocumentAttr] -> Build ()
+updateDocument n = mapM_ apply
+  where
+    apply (DTitle t) = emitB (W.txSetDocumentTitle n (T.unpack t))
+    apply (DTitleBound (Signal s)) = emitB (W.txBindDocumentTitle n s)
+    apply (DTooltip t) = emitB (W.txSetDocumentTooltip n (T.unpack t))
+    apply (DDirty v) = emitB (W.txSetDocumentDirty n v)
+    apply (DDirtyBound (Signal s)) = emitB (W.txBindDocumentDirty n s)
+    apply (DInterceptClose v) = emitB (W.txSetDocumentInterceptClose n v)
+    apply (DOnSelected h) = pendB (PDocuments (\d -> d {dtSelected = Map.insert n h d.dtSelected}))
+    apply (DOnCloseRequested h) =
+      pendB (PDocuments (\d -> d {dtCloseRequested = Map.insert n h d.dtCloseRequested}))
+    apply (DOnClosed h) = pendB (PDocuments (\d -> d {dtClosed = Map.insert n h d.dtClosed}))
+    apply (DOnMoved h) = pendB (PDocuments (\d -> d {dtMoved = Map.insert n h d.dtMoved}))
+
+-- | Make a document the active one: configuration, never echoes
+-- 'DOnSelected'.
+selectDocument :: Word64 -> Build ()
+selectDocument n = emitB (W.txSelectDocument n)
+
+-- | Close a document and forget its tree — also the close-veto grammar's
+-- confirmation after 'DOnCloseRequested'. Never echoes 'DOnClosed'. A
+-- window left with no documents closes.
+closeDocument :: Word64 -> Build ()
+closeDocument n = emitB (W.txCloseDocument n)
+
+-- | Where a window's shared region sits beside its documents
+-- (docs\/doctabs-plan.md §1.7).
+data RegionEdge = RegionLeading | RegionTrailing | RegionBottom
+  deriving (Eq, Show)
+
+-- | A shared region of the primary window at an edge, a surface every
+-- document shares; 'mountIn' fills it. One per edge, after a document.
+addRegion :: Word64 -> RegionEdge -> Build ()
+addRegion = addRegionIn 0
+
+addRegionIn :: Word64 -> Word64 -> RegionEdge -> Build ()
+addRegionIn w n edge = emitB (W.txAddRegion w n edgeWire)
+  where
+    edgeWire = case edge of
+      RegionLeading -> W.regionEdgeLeading
+      RegionTrailing -> W.regionEdgeTrailing
+      RegionBottom -> W.regionEdgeBottom
 
 -- | HOW A WINDOW PRESENTS ITS SECTION SET (spec enum
 -- @sections_presentation@): the platform's own judgment, a bar, or a
@@ -5490,6 +5591,9 @@ buildTx app b = do
   kayaSubmit (routes ++ carried ++ [records])
   return a
 
+surfaceIds :: [W.Value] -> [Word64]
+surfaceIds values = [fromIntegral d | W.VI64 d <- values]
+
 register :: App -> Pending -> IO ()
 register app pending = case pending of
   PClick n handler -> modifyIORef' (app.appWidgetHandlers) (Map.insert n handler)
@@ -5503,6 +5607,7 @@ register app pending = case pending of
     modifyIORef' (app.appClipboardReads) (Map.insert n handler)
   PEntryPopped n handler -> modifyIORef' (app.appEntryPopped) (Map.insert n handler)
   PSectionSelected n handler -> modifyIORef' (app.appSectionSelected) (Map.insert n handler)
+  PDocuments update -> modifyIORef' (app.appDocumentTabs) update
   PBackRequested n handler -> modifyIORef' (app.appBackRequested) (Map.insert n handler)
   PSheetDismissed n handler -> modifyIORef' (app.appSheetDismissed) (Map.insert n handler)
   PDismissRequested n handler -> modifyIORef' (app.appDismissRequested) (Map.insert n handler)
@@ -6243,6 +6348,7 @@ newApp =
     <*> newIORef Map.empty -- appFullscreenChanged
     <*> newIORef Map.empty -- appEntryPopped
     <*> newIORef Map.empty -- appSectionSelected
+    <*> newIORef emptyDocumentTables -- appDocumentTabs
     <*> newIORef Map.empty -- appBackRequested
     <*> newIORef Map.empty -- appSheetDismissed
     <*> newIORef Map.empty -- appDismissRequested
@@ -6590,6 +6696,47 @@ dispatchLoop app = do
           dispatchLoop app
       | kind == W.occKindFullscreenChanged -> do
           fullscreenChangedTo app ident (case payload of Just (W.VBool b) -> b; _ -> False)
+          dispatchLoop app
+      | kind `elem` [W.occKindDocumentSelected, W.occKindDocumentCloseRequested, W.occKindNewDocumentRequested] -> do
+          -- NOT one-shot (docs/doctabs-plan.md §2.3): ident is the
+          -- document, or the window for the "+".
+          tables <- readIORef (app.appDocumentTabs)
+          let table
+                | kind == W.occKindDocumentSelected = tables.dtSelected
+                | kind == W.occKindDocumentCloseRequested = tables.dtCloseRequested
+                | otherwise = tables.dtNewDocument
+          dispatch (mapM_ id (Map.lookup ident table))
+          dispatchLoop app
+      | kind == W.occKindDocumentClosed -> do
+          -- One-shot: the document is gone; its registrations retire.
+          tables <- readIORef (app.appDocumentTabs)
+          writeIORef (app.appDocumentTabs) tables
+            { dtSelected = Map.delete ident tables.dtSelected,
+              dtCloseRequested = Map.delete ident tables.dtCloseRequested,
+              dtClosed = Map.delete ident tables.dtClosed,
+              dtMoved = Map.delete ident tables.dtMoved
+            }
+          dispatch (mapM_ id (Map.lookup ident tables.dtClosed))
+          dispatchLoop app
+      | kind == W.occKindDocumentMoved -> do
+          tables <- readIORef (app.appDocumentTabs)
+          case (Map.lookup ident tables.dtMoved, askTail) of
+            (Just handler, [W.VI64 w, W.VI64 at]) ->
+              dispatch (handler (fromIntegral w) (fromIntegral at))
+            _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindDocumentsCloseRequested -> do
+          tables <- readIORef (app.appDocumentTabs)
+          case (Map.lookup ident tables.dtWindowClose, askTail) of
+            (Just handler, _ : documents) -> dispatch (handler (surfaceIds documents))
+            _ -> return ()
+          dispatchLoop app
+      | kind == W.occKindDocumentsDetached -> do
+          tables <- readIORef (app.appDocumentTabs)
+          case (Map.lookup ident tables.dtDetached, askTail) of
+            (Just handler, W.VI64 w : _ : documents) ->
+              dispatch (handler (fromIntegral w) (surfaceIds documents))
+            _ -> return ()
           dispatchLoop app
       | kind == W.occKindSectionSelected -> do
           -- NOT one-shot: sections never die, and the user can return any

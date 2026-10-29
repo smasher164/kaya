@@ -65,6 +65,8 @@ module Kaya.Core
     Model,
     Fresh,
     Pending (..),
+    DocumentTables (..),
+    emptyDocumentTables,
     AlertChoice (..),
     alertChoiceOfWire,
     NotificationOutcome (..),
@@ -484,6 +486,22 @@ data BuildState = BuildState
     bDerived :: !(Map.Map Word64 [(Word64, [(W.Value, (Word32, [W.Value]))] -> W.Value)])
   }
 
+-- | Per document, and per window for the "+", the native window's close
+-- and the tear-out (docs/doctabs-plan.md §2.3).
+data DocumentTables = DocumentTables
+  { dtSelected :: Map.Map Word64 (IO ()),
+    dtCloseRequested :: Map.Map Word64 (IO ()),
+    dtClosed :: Map.Map Word64 (IO ()),
+    dtMoved :: Map.Map Word64 (Word64 -> Word32 -> IO ()),
+    dtNewDocument :: Map.Map Word64 (IO ()),
+    dtWindowClose :: Map.Map Word64 ([Word64] -> IO ()),
+    dtDetached :: Map.Map Word64 (Word64 -> [Word64] -> IO ())
+  }
+
+emptyDocumentTables :: DocumentTables
+emptyDocumentTables =
+  DocumentTables Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty
+
 data Pending
   = PClick !Word64 (IO ())
   | PAlert !Word64 (AlertChoice -> IO ())
@@ -493,6 +511,8 @@ data Pending
   | PClipboardRead !Word64 (Maybe Representation -> IO ())
   | PEntryPopped !Word64 (IO ())
   | PSectionSelected !Word64 (IO ())
+  -- The document handlers (docs/doctabs-plan.md §2.3), one table update.
+  | PDocuments (DocumentTables -> DocumentTables)
   | PBackRequested !Word64 (IO ())
   | PSheetDismissed !Word64 (IO ())
   | PDismissRequested !Word64 (IO ())
@@ -2365,6 +2385,7 @@ data App = App
     -- request-bound alert precedent).
     appEntryPopped :: IORef (Map.Map Word64 (IO ())),
     appSectionSelected :: IORef (Map.Map Word64 (IO ())),
+    appDocumentTabs :: IORef DocumentTables,
     appBackRequested :: IORef (Map.Map Word64 (IO ())),
     -- Per-sheet handlers, keyed by sheet surface id (docs/sheet-plan.md).
     appSheetDismissed :: IORef (Map.Map Word64 (IO ())),

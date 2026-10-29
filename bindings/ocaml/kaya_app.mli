@@ -1838,7 +1838,11 @@ val window :
   ?on_undone:(string -> undo_delta -> unit) ->
   ?on_redone:(string -> undo_delta -> unit) ->
   ?on_fullscreen_changed:(bool -> unit) ->
-  ?menus:(unit -> menu_item) list -> ?id:int64 -> unit -> unit
+  ?menus:(unit -> menu_item) list ->
+  ?new_document:bool ->
+  ?on_new_document:(unit -> unit) ->
+  ?on_documents_close_requested:(int64 list -> unit) ->
+  ?on_documents_detached:(int64 -> int64 list -> unit) -> ?id:int64 -> unit -> unit
 
 (* Create an auxiliary window (capability-gated); materializes hidden,
    [mount_in] presents. *)
@@ -1859,7 +1863,11 @@ val create_window :
   ?on_undone:(string -> undo_delta -> unit) ->
   ?on_redone:(string -> undo_delta -> unit) ->
   ?on_fullscreen_changed:(bool -> unit) ->
-  ?menus:(unit -> menu_item) list -> int64 -> unit
+  ?menus:(unit -> menu_item) list ->
+  ?new_document:bool ->
+  ?on_new_document:(unit -> unit) ->
+  ?on_documents_close_requested:(int64 list -> unit) ->
+  ?on_documents_detached:(int64 -> int64 list -> unit) -> int64 -> unit
 
 (* Close and forget an auxiliary window. *)
 val destroy_window : int64 -> unit
@@ -1893,6 +1901,44 @@ val add_section :
 (* Select a section programmatically: configuration, never echoes
    [~on_selected]. *)
 val select_section : ?window:int64 -> int64 -> unit
+
+(* Where a window's shared region sits beside its documents
+   (docs/doctabs-plan.md §1.7). *)
+module Region_edge : sig
+  type t = Leading | Trailing | Bottom
+end
+
+(* Add a document to a window (docs/doctabs-plan.md §2); [mount_in] fills
+   it. *)
+val add_document :
+  ?window:int64 ->
+  ?title:string ->
+  ?title_bind:string signal ->
+  ?tooltip:string ->
+  ?dirty:bool ->
+  ?dirty_bind:bool signal ->
+  ?intercept_close:bool ->
+  ?on_selected:(unit -> unit) ->
+  ?on_close_requested:(unit -> unit) ->
+  ?on_closed:(unit -> unit) ->
+  ?on_moved:(int64 -> int -> unit) -> int64 -> unit
+
+(* A document's props after its [add_document]. *)
+val update_document :
+  ?title:string ->
+  ?title_bind:string signal ->
+  ?tooltip:string ->
+  ?dirty:bool ->
+  ?dirty_bind:bool signal -> ?intercept_close:bool -> int64 -> unit
+
+(* Make a document the active one; never echoes [~on_selected]. *)
+val select_document : int64 -> unit
+
+(* Close a document; never echoes [~on_closed]. *)
+val close_document : int64 -> unit
+
+(* A shared region of a window at an edge; [mount_in] fills it. *)
+val add_region : ?window:int64 -> int64 -> Region_edge.t -> unit
 
 (* Pop the primary surface's top entry. *)
 val pop_entry : ?window:int64 -> unit -> unit

@@ -265,6 +265,11 @@ executable dirty
   main-is: dirty.hs
   build-depends: kaya-guests
 
+executable doctabs
+  import: shared
+  main-is: doctabs.hs
+  build-depends: kaya-guests
+
 executable styling
   import: shared
   main-is: styling.hs

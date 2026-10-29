@@ -2127,8 +2127,13 @@ selectors or key-value coding, because a private read works until the next
 macOS and Ghostty's issue list is what follows. And every DOCUMENT_PROPS key
 has an apply ARM on each backend (the arm, never the constant every
 interpreter declares) or that backend's `depth_stub("doctabs")`, so a dropped
-tooltip or mark is caught before a review page. Two watched negatives,
-perturbed in memory with their counts printed, red on every run)
+tooltip or mark is caught before a review page. And every one of the nine
+bindings defines add_document, select_document, close_document and add_region
+in its own spelling and has a dispatch arm for each document occurrence the
+generated header names, so a new occurrence is wanted in every binding the day
+it lands and a binding whose handler never fires is caught without a leg. Four
+watched negatives, perturbed in memory with their counts printed, red on every
+run)
 
 ## tools/check-keyed.py
 

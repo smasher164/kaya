@@ -3874,6 +3874,10 @@ let tx_set_menu_keyboard_bar item keyboard_bar =
 let u16_at byte i = byte i lor (byte (i + 1) lsl 8)
 let u32_at byte i = u16_at byte i lor (u16_at byte (i + 2) lsl 16)
 
+(* A u64 id as a native int: guest ids and the ids the core names stay
+   within the safe-integer bound (docs/traps.md, the torn-out window). *)
+let id_at byte i = u32_at byte i lor (u32_at byte (i + 4) lsl 32)
+
 (* Decode one value at offset [at]; returns (value, next offset). *)
 let parse_value byte at =
   let vtype = u32_at byte at in
@@ -3937,8 +3941,7 @@ let parse_occurrence byte =
   let kind = u16_at byte 4 in
   if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached then None
   else begin
-    (* ids are guest-allocated and small; the low u32 is the story. *)
-    let id = u32_at byte 8 in
+    let id = id_at byte 8 in
     if kind = occ_kind_alert_result
     then
       (* A request's one answer: id + the u32 code. *)
@@ -4290,7 +4293,7 @@ let parse_occurrence byte =
     then
       Some
         ( kind,
-          Int64.of_int (u32_at byte 16),
+          Int64.of_int (id_at byte 16),
           [],
           Some (I64 (Int64.of_int id)),
           None,

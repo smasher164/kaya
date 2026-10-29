@@ -468,6 +468,10 @@ pub fn emit(spec: &ProtocolSpec) -> String {
     c.line("let u16_at byte i = byte i lor (byte (i + 1) lsl 8)");
     c.line("let u32_at byte i = u16_at byte i lor (u16_at byte (i + 2) lsl 16)");
     c.line("");
+    c.line("(* A u64 id as a native int: guest ids and the ids the core names stay");
+    c.line("   within the safe-integer bound (docs/traps.md, the torn-out window). *)");
+    c.line("let id_at byte i = u32_at byte i lor (u32_at byte (i + 4) lsl 32)");
+    c.line("");
     c.line("(* Decode one value at offset [at]; returns (value, next offset). *)");
     c.line("let parse_value byte at =");
     c.line("  let vtype = u32_at byte at in");
@@ -540,8 +544,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         .join(" && ");
     c.line(&format!("  if {accepted} then None"));
     c.line("  else begin");
-    c.line("    (* ids are guest-allocated and small; the low u32 is the story. *)");
-    c.line("    let id = u32_at byte 8 in");
+    c.line("    let id = id_at byte 8 in");
     // ONE-SHOT REQUEST ANSWERS: a request id and a u32 code, derived
     // rather than named (main.rs's code_answer_occurrence_names). The
     // generic tail takes that code for a key-path length. FIRST IN THE
@@ -676,7 +679,7 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("    then");
         c.line("      Some");
         c.line("        ( kind,");
-        c.line("          Int64.of_int (u32_at byte 16),");
+        c.line("          Int64.of_int (id_at byte 16),");
         c.line("          [],");
         c.line("          Some (I64 (Int64.of_int id)),\n          None,\n          None,\n          [] )");
     }

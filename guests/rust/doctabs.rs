@@ -43,7 +43,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW).title("doctabs").size(640.0, 420.0).new_document(true);
         let status = tx.signal("ready");
         for (id, name) in [(A, "a"), (B, "b"), (C, "c")] {
-            tx.add_document(id).title(name).tooltip(&format!("/documents/{name}"));
+            tx.add_document(id).title(name).tooltip(&format!("/documents/{name}")).intercept_close(id == B);
             let root = tx
                 .column(|tx| {
                     let caption = tx.signal(format!("{name} body"));
@@ -57,7 +57,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 .id();
             tx.mount_in(id, root);
         }
-        tx.set_document_prop(B, kaya::DocumentProp::InterceptClose, true);
         notes(tx, kaya::DEFAULT_WINDOW, NOTES, status);
         status
     });
@@ -96,7 +95,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 });
             }
             Msg::Mark => ctx.apply(|tx| {
-                tx.set_document_prop(B, kaya::DocumentProp::Dirty, true);
+                tx.document(B).dirty(true);
                 tx.write(status, "marked b");
             }),
             // Programmatic: no document_selected follows, so the status stays.

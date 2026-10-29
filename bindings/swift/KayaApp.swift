@@ -504,6 +504,19 @@ public enum KayaSectionsPresentation: Int64 {
     case sidebar = 2
 }
 
+/// Where a window's shared region sits beside its documents
+/// (docs/doctabs-plan.md §1.7).
+public enum KayaRegionEdge: UInt32 {
+    case leading = 1
+    case trailing = 2
+    case bottom = 3
+}
+
+/// The surface ids a flat occurrence tail carries from `from` on.
+func kayaSurfaceIds(_ tail: [KayaValue], from: Int) -> [UInt64] {
+    tail.dropFirst(from).compactMap { if case .i64(let id) = $0 { return UInt64(bitPattern: id) } else { return nil } }
+}
+
 /// The app's OWN light/dark choice, applied process-wide from the
 /// default window (docs/tasks-s2b-plan.md R1-R3).
 public enum KayaAppearance: Int64 {
@@ -2721,6 +2734,14 @@ public final class KayaApp {
     private var sheetDismissed: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var dismissRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
     private var sectionSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    // Per document and per window (docs/doctabs-plan.md §2.3).
+    private var documentSelected: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var documentCloseRequested: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var documentClosed: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var documentMoved: [UInt64: (KayaAppTx, UInt64, UInt32) throws -> Void] = [:]
+    private var newDocument: [UInt64: (KayaAppTx) throws -> Void] = [:]
+    private var documentsCloseRequested: [UInt64: (KayaAppTx, [UInt64]) throws -> Void] = [:]
+    private var documentsDetached: [UInt64: (KayaAppTx, UInt64, [UInt64]) throws -> Void] = [:]
     // NOT one-shot (docs/fullscreen-plan.md).
     private var fullscreenChanged: [UInt64: (KayaAppTx, Bool) throws -> Void] = [:]
     var alerts: [UInt64: (KayaAppTx, KayaAlertChoice) throws -> Void] = [:]
@@ -3793,6 +3814,35 @@ public final class KayaApp {
         dismissRequested[sheet] = handler
     }
 
+    /// Per document and per window (docs/doctabs-plan.md §2.3), NOT
+    /// one-shot except the closed one, which retires with its document.
+    func onDocument(
+        _ document: UInt64, selected: ((KayaAppTx) throws -> Void)?,
+        closeRequested: ((KayaAppTx) throws -> Void)?, closed: ((KayaAppTx) throws -> Void)?,
+        moved: ((KayaAppTx, UInt64, UInt32) throws -> Void)?
+    ) {
+        if let selected { documentSelected[document] = selected }
+        if let closeRequested { documentCloseRequested[document] = closeRequested }
+        if let closed { documentClosed[document] = closed }
+        if let moved { documentMoved[document] = moved }
+    }
+
+    func onNewDocument(_ window: UInt64, _ handler: @escaping (KayaAppTx) throws -> Void) {
+        newDocument[window] = handler
+    }
+
+    func onDocumentsCloseRequested(
+        _ window: UInt64, _ handler: @escaping (KayaAppTx, [UInt64]) throws -> Void
+    ) {
+        documentsCloseRequested[window] = handler
+    }
+
+    func onDocumentsDetached(
+        _ window: UInt64, _ handler: @escaping (KayaAppTx, UInt64, [UInt64]) throws -> Void
+    ) {
+        documentsDetached[window] = handler
+    }
+
     /// Per-section, NOT one-shot: the user can return any number of
     /// times; a programmatic selectSection never fires it (the echo
     /// doctrine).
@@ -4101,6 +4151,44 @@ public final class KayaApp {
                 }
             case (UInt16(KAYA_OCCURRENCE_FULLSCREEN_CHANGED), _):
                 fullscreenChangedTo(id, checked)
+            // NOT one-shot (docs/doctabs-plan.md §2.3); a programmatic select
+            // or close never lands here.
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENT_SELECTED), _):
+                if let handler = documentSelected[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED), _):
+                if let handler = documentCloseRequested[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED), _):
+                if let handler = newDocument[id] {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENT_CLOSED), _):
+                // One-shot: the document is gone; its registrations retire.
+                documentSelected.removeValue(forKey: id)
+                documentCloseRequested.removeValue(forKey: id)
+                documentMoved.removeValue(forKey: id)
+                if let handler = documentClosed.removeValue(forKey: id) {
+                    dispatch { try build(handler) }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENT_MOVED), _):
+                if let handler = documentMoved[id], tail.count == 2,
+                    case .i64(let window) = tail[0], case .i64(let index) = tail[1]
+                {
+                    dispatch { try build { tx in try handler(tx, UInt64(bitPattern: window), UInt32(index)) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED), _):
+                if let handler = documentsCloseRequested[id] {
+                    let documents = kayaSurfaceIds(tail, from: 1)
+                    dispatch { try build { tx in try handler(tx, documents) } }
+                }
+            case (UInt16(KAYA_OCCURRENCE_DOCUMENTS_DETACHED), _):
+                if let handler = documentsDetached[id], tail.count >= 2, case .i64(let window) = tail[0] {
+                    let documents = kayaSurfaceIds(tail, from: 2)
+                    dispatch { try build { tx in try handler(tx, UInt64(bitPattern: window), documents) } }
+                }
             case (UInt16(KAYA_OCCURRENCE_SECTION_SELECTED), _):
                 // NOT one-shot: sections never die (id is the section;
                 // the window rides as the payload).
@@ -6389,7 +6477,11 @@ public final class KayaAppTx {
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onFullscreenChanged: ((KayaAppTx, Bool) throws -> Void)? = nil,
-        menus: [KayaMenuItem]? = nil
+        menus: [KayaMenuItem]? = nil,
+        newDocument: Bool? = nil,
+        onNewDocument: ((KayaAppTx) throws -> Void)? = nil,
+        onDocumentsCloseRequested: ((KayaAppTx, [UInt64]) throws -> Void)? = nil,
+        onDocumentsDetached: ((KayaAppTx, UInt64, [UInt64]) throws -> Void)? = nil
     ) {
         tx.createWindow(id)
         window(
@@ -6401,7 +6493,9 @@ public final class KayaAppTx {
             onCloseRequested: onCloseRequested, onClosed: onClosed,
             onUndone: onUndone, onRedone: onRedone,
             onFullscreenChanged: onFullscreenChanged,
-            menus: menus)
+            menus: menus, newDocument: newDocument, onNewDocument: onNewDocument,
+            onDocumentsCloseRequested: onDocumentsCloseRequested,
+            onDocumentsDetached: onDocumentsDetached)
     }
 
     /// Set a window's attributes in one construct — EXACTLY createWindow's
@@ -6428,9 +6522,19 @@ public final class KayaAppTx {
         onUndone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onRedone: ((KayaAppTx, String, KayaUndoDelta) throws -> Void)? = nil,
         onFullscreenChanged: ((KayaAppTx, Bool) throws -> Void)? = nil,
-        menus: [KayaMenuItem]? = nil
+        menus: [KayaMenuItem]? = nil,
+        newDocument: Bool? = nil,
+        onNewDocument: ((KayaAppTx) throws -> Void)? = nil,
+        onDocumentsCloseRequested: ((KayaAppTx, [UInt64]) throws -> Void)? = nil,
+        onDocumentsDetached: ((KayaAppTx, UInt64, [UInt64]) throws -> Void)? = nil
     ) {
         if let title { tx.setWindowTitle(id, title) }
+        // The "+" and the three window-level document handlers
+        // (docs/doctabs-plan.md §2.3), NOT one-shot.
+        if let newDocument { tx.setWindowNewDocument(id, newDocument) }
+        if let onNewDocument { app.onNewDocument(id, onNewDocument) }
+        if let onDocumentsCloseRequested { app.onDocumentsCloseRequested(id, onDocumentsCloseRequested) }
+        if let onDocumentsDetached { app.onDocumentsDetached(id, onDocumentsDetached) }
         if let width { tx.setWindowWidth(id, width) }
         if let height { tx.setWindowHeight(id, height) }
         if let vetoClose { tx.setWindowVetoClose(id, vetoClose) }
@@ -6780,6 +6884,66 @@ public final class KayaAppTx {
     /// Select a section programmatically: never echoes onSelected.
     public func selectSection(_ id: UInt64, window: UInt64 = 0) {
         tx.selectSection(window, id)
+    }
+
+    /// Add a document to a window (docs/doctabs-plan.md §2; ids
+    /// guest-allocated in the shared surface namespace); mountIn fills it,
+    /// and the first a window gets is active. `onSelected` fires each time
+    /// the USER makes it active; `onCloseRequested` per user close while
+    /// `interceptClose` is armed, with nothing closed — answer with
+    /// closeDocument; `onClosed` when the user closed it unarmed, one-shot;
+    /// `onMoved(window, index)` when the user drags it. A programmatic
+    /// select or close fires none of them. The props are updateDocument's.
+    public func addDocument(
+        _ id: UInt64, title: String? = nil, titleSignal: KayaSignal? = nil,
+        tooltip: String? = nil, dirty: Bool? = nil, dirtySignal: KayaSignal? = nil,
+        interceptClose: Bool? = nil,
+        onSelected: ((KayaAppTx) throws -> Void)? = nil,
+        onCloseRequested: ((KayaAppTx) throws -> Void)? = nil,
+        onClosed: ((KayaAppTx) throws -> Void)? = nil,
+        onMoved: ((KayaAppTx, UInt64, UInt32) throws -> Void)? = nil,
+        window: UInt64 = 0
+    ) {
+        tx.addDocument(window, id)
+        updateDocument(
+            id, title: title, titleSignal: titleSignal, tooltip: tooltip, dirty: dirty,
+            dirtySignal: dirtySignal, interceptClose: interceptClose)
+        app.onDocument(
+            id, selected: onSelected, closeRequested: onCloseRequested, closed: onClosed,
+            moved: onMoved)
+    }
+
+    /// A document's props after its addDocument: a constant or a signal.
+    public func updateDocument(
+        _ id: UInt64, title: String? = nil, titleSignal: KayaSignal? = nil,
+        tooltip: String? = nil, dirty: Bool? = nil, dirtySignal: KayaSignal? = nil,
+        interceptClose: Bool? = nil
+    ) {
+        if let title { tx.setDocumentTitle(id, title) }
+        if let titleSignal { tx.bindDocumentTitle(id, titleSignal.id) }
+        if let tooltip { tx.setDocumentTooltip(id, tooltip) }
+        if let dirty { tx.setDocumentDirty(id, dirty) }
+        if let dirtySignal { tx.bindDocumentDirty(id, dirtySignal.id) }
+        if let interceptClose { tx.setDocumentInterceptClose(id, interceptClose) }
+    }
+
+    /// Make a document the active one: configuration, never echoes onSelected.
+    public func selectDocument(_ id: UInt64) {
+        tx.selectDocument(id)
+    }
+
+    /// Close a document and forget its tree — also the close-veto grammar's
+    /// confirmation after onCloseRequested. Never echoes onClosed. A window
+    /// left with no documents closes.
+    public func closeDocument(_ id: UInt64) {
+        tx.closeDocument(id)
+    }
+
+    /// Declare a shared region of a window at `edge` (docs/doctabs-plan.md
+    /// §1.7): a surface every document shares, filled by mountIn. One per
+    /// edge, after a document.
+    public func addRegion(_ id: UInt64, _ edge: KayaRegionEdge, window: UInt64 = 0) {
+        tx.addRegion(window, id, edge.rawValue)
     }
 
     /// Mount a root into a specific window; mounting presents an

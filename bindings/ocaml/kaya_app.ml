@@ -1220,6 +1220,14 @@ type app = {
   sheet_dismissed : (int64, unit -> unit) Hashtbl.t;
   dismiss_requested : (int64, unit -> unit) Hashtbl.t;
   section_selected : (int64, unit -> unit) Hashtbl.t;
+  (* Per document and per window (docs/doctabs-plan.md §2.3). *)
+  document_selected : (int64, unit -> unit) Hashtbl.t;
+  document_close_requested : (int64, unit -> unit) Hashtbl.t;
+  document_closed : (int64, unit -> unit) Hashtbl.t;
+  document_moved : (int64, int64 -> int -> unit) Hashtbl.t;
+  new_document : (int64, unit -> unit) Hashtbl.t;
+  documents_close_requested : (int64, int64 list -> unit) Hashtbl.t;
+  documents_detached : (int64, int64 -> int64 list -> unit) Hashtbl.t;
   (* NOT one-shot (docs/fullscreen-plan.md). *)
   fullscreen_changed : (int64, bool -> unit) Hashtbl.t;
   alert_handlers : (int64, Alert_choice.t -> unit) Hashtbl.t;
@@ -1453,6 +1461,13 @@ let create () =
     sheet_dismissed = Hashtbl.create 8;
     dismiss_requested = Hashtbl.create 8;
     section_selected = Hashtbl.create 8;
+    document_selected = Hashtbl.create 8;
+    document_close_requested = Hashtbl.create 8;
+    document_closed = Hashtbl.create 8;
+    document_moved = Hashtbl.create 8;
+    new_document = Hashtbl.create 8;
+    documents_close_requested = Hashtbl.create 8;
+    documents_detached = Hashtbl.create 8;
     fullscreen_changed = Hashtbl.create 8;
     alert_handlers = Hashtbl.create 8;
     toast_handlers = Hashtbl.create 8;
@@ -4282,8 +4297,16 @@ let window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?(sections_presentation : Sections_presentation.t option)
     ?(appearance : Appearance.t option) ?fullscreen
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
-    ?(id = 0L) () =
+    ?new_document ?on_new_document ?on_documents_close_requested ?on_documents_detached ?(id = 0L) () =
   let tx = the_tx () in
+  (* The "+" and the three window-level document handlers
+     (docs/doctabs-plan.md §2.3), NOT one-shot. *)
+  Option.iter (fun v -> emit tx (Kaya_wire.tx_set_window_new_document id v)) new_document;
+  Option.iter (fun f -> Hashtbl.replace tx.app.new_document id f) on_new_document;
+  Option.iter
+    (fun f -> Hashtbl.replace tx.app.documents_close_requested id f)
+    on_documents_close_requested;
+  Option.iter (fun f -> Hashtbl.replace tx.app.documents_detached id f) on_documents_detached;
   Option.iter (fun t -> emit tx (Kaya_wire.tx_set_window_title id t)) title;
   Option.iter (fun w -> emit tx (Kaya_wire.tx_set_window_width id w)) width;
   Option.iter (fun h -> emit tx (Kaya_wire.tx_set_window_height id h)) height;
@@ -4355,13 +4378,14 @@ let create_window ?title ?width ?height ?inset ?veto_close ?dirty
     ?remember_frame ?panes
     ?sections_presentation ?appearance ?fullscreen
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
-    id =
+    ?new_document ?on_new_document ?on_documents_close_requested ?on_documents_detached id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_create_window id);
   window ?title ?width ?height ?inset ?veto_close ?dirty ?remember_frame
     ?panes
     ?sections_presentation ?appearance ?fullscreen
     ?on_close_requested ?on_closed ?on_undone ?on_redone ?on_fullscreen_changed ?menus
+    ?new_document ?on_new_document ?on_documents_close_requested ?on_documents_detached
     ~id ()
 
 (* Close and forget an auxiliary window — also the veto grammar's
@@ -4427,6 +4451,65 @@ let add_section ?(window = 0L) ?title ?symbol ?badge ?badge_bind ?on_selected id
 let select_section ?(window = 0L) id =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_select_section window id)
+
+(* Where a window's shared region sits beside its documents
+   (docs/doctabs-plan.md §1.7). *)
+module Region_edge = struct
+  type t = Leading | Trailing | Bottom
+
+  let wire = function
+    | Leading -> Kaya_wire.region_edge_leading
+    | Trailing -> Kaya_wire.region_edge_trailing
+    | Bottom -> Kaya_wire.region_edge_bottom
+end
+
+(* A document's props after its [add_document]: a constant or a signal. *)
+let update_document ?title ?title_bind ?tooltip ?dirty ?dirty_bind ?intercept_close id =
+  let tx = the_tx () in
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_document_title id t)) title;
+  Option.iter
+    (fun (s : string signal) -> emit tx (Kaya_wire.tx_bind_document_title id s.sig_id))
+    title_bind;
+  Option.iter (fun t -> emit tx (Kaya_wire.tx_set_document_tooltip id t)) tooltip;
+  Option.iter (fun d -> emit tx (Kaya_wire.tx_set_document_dirty id d)) dirty;
+  Option.iter
+    (fun (s : bool signal) -> emit tx (Kaya_wire.tx_bind_document_dirty id s.sig_id))
+    dirty_bind;
+  Option.iter (fun i -> emit tx (Kaya_wire.tx_set_document_intercept_close id i)) intercept_close
+
+(* Add a document to a window (docs/doctabs-plan.md §2); [mount_in] fills it,
+   and the first a window gets is active. [~on_selected] fires each time the
+   USER makes it active; [~on_close_requested] per user close while
+   [~intercept_close] is armed, nothing closed (answer with [close_document]);
+   [~on_closed] when the user closed it unarmed, one-shot; [~on_moved window
+   index] when the user drags it. A programmatic select or close fires none. *)
+let add_document ?(window = 0L) ?title ?title_bind ?tooltip ?dirty ?dirty_bind
+    ?intercept_close ?on_selected ?on_close_requested ?on_closed ?on_moved id =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_add_document window id);
+  update_document ?title ?title_bind ?tooltip ?dirty ?dirty_bind ?intercept_close id;
+  Option.iter (fun f -> Hashtbl.replace tx.app.document_selected id f) on_selected;
+  Option.iter (fun f -> Hashtbl.replace tx.app.document_close_requested id f) on_close_requested;
+  Option.iter (fun f -> Hashtbl.replace tx.app.document_closed id f) on_closed;
+  Option.iter (fun f -> Hashtbl.replace tx.app.document_moved id f) on_moved
+
+(* Make a document the active one: configuration, never echoes
+   [~on_selected]. *)
+let select_document id = emit (the_tx ()) (Kaya_wire.tx_select_document id)
+
+(* Close a document and forget its tree — also the close-veto grammar's
+   confirmation after [~on_close_requested]. Never echoes [~on_closed]. A
+   window left with no documents closes. *)
+let close_document id = emit (the_tx ()) (Kaya_wire.tx_close_document id)
+
+(* A shared region of a window at [edge] (docs/doctabs-plan.md §1.7), a
+   surface every document shares; [mount_in] fills it. One per edge, after a
+   document. *)
+let add_region ?(window = 0L) id edge =
+  emit (the_tx ()) (Kaya_wire.tx_add_region window id (Region_edge.wire edge))
+
+let surface_ids values =
+  List.filter_map (function Kaya_wire.I64 d -> Some d | _ -> None) values
 
 (* Pop the window's top navigation entry and forget its tree — also the
    back-veto grammar's confirmation after [on_back_requested]. *)
@@ -7813,6 +7896,44 @@ let dispatch_loop app =
            (match (Hashtbl.find_opt app.fullscreen_changed id, payload) with
            | Some handler, Some (Kaya_wire.Bool on) ->
                dispatch app (fun () -> handler on)
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_document_selected
+                 || kind = Kaya_wire.occ_kind_document_close_requested
+                 || kind = Kaya_wire.occ_kind_new_document_requested then
+           (* NOT one-shot (docs/doctabs-plan.md §2.3): id is the document,
+              or the window for the "+". *)
+           (let table =
+              if kind = Kaya_wire.occ_kind_document_selected then app.document_selected
+              else if kind = Kaya_wire.occ_kind_document_close_requested then
+                app.document_close_requested
+              else app.new_document
+            in
+            match Hashtbl.find_opt table id with
+            | Some handler -> dispatch app handler
+            | None -> ())
+         else if kind = Kaya_wire.occ_kind_document_closed then (
+           (* One-shot: the document is gone; its registrations retire. *)
+           Hashtbl.remove app.document_selected id;
+           Hashtbl.remove app.document_close_requested id;
+           Hashtbl.remove app.document_moved id;
+           match Hashtbl.find_opt app.document_closed id with
+           | Some handler ->
+               Hashtbl.remove app.document_closed id;
+               dispatch app handler
+           | None -> ())
+         else if kind = Kaya_wire.occ_kind_document_moved then
+           (match (Hashtbl.find_opt app.document_moved id, tail) with
+           | Some handler, [ Kaya_wire.I64 window; Kaya_wire.I64 index ] ->
+               dispatch app (fun () -> handler window (Int64.to_int index))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_documents_close_requested then
+           (match (Hashtbl.find_opt app.documents_close_requested id, tail) with
+           | Some handler, _ :: documents -> dispatch app (fun () -> handler (surface_ids documents))
+           | _ -> ())
+         else if kind = Kaya_wire.occ_kind_documents_detached then
+           (match (Hashtbl.find_opt app.documents_detached id, tail) with
+           | Some handler, Kaya_wire.I64 window :: _ :: documents ->
+               dispatch app (fun () -> handler window (surface_ids documents))
            | _ -> ())
          else if kind = Kaya_wire.occ_kind_section_selected then
            (* NOT one-shot: sections never die, and the user can return any
