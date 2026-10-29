@@ -2762,6 +2762,12 @@ pub trait Stage: Send + 'static {
     /// Whether the titled document's tab shows the unsaved mark; Err names
     /// what could not be read.
     fn document_dirty(&self, title: &str) -> Result<bool, String>;
+    /// Empty when the front window's tab row sits where the platform's chrome
+    /// puts it and draws only what it needs (WinUI: docs/doctabs-plan.md Q9);
+    /// else what was measured. Read with every `expect_documents`.
+    fn document_row(&self) -> String {
+        String::new()
+    }
     /// Drive the titled document's tab; Err when there is no such tab.
     fn select_document(&self, title: &str) -> Result<(), String>;
     /// Drive the titled document's own close affordance.
@@ -7814,7 +7820,10 @@ fn run_with_log(
                 }
             })),
             Step::ExpectDocuments(want) => Some(poll(|| match stage.document_titles() {
-                Some(got) if got == *want => Ok(format!("documents {:?}", want.join("|"))),
+                Some(got) if got == *want => match stage.document_row() {
+                    row if row.is_empty() => Ok(format!("documents {:?}", want.join("|"))),
+                    row => Err(format!("documents {:?}, but {row}", want.join("|"))),
+                },
                 Some(got) => Err(format!("documents {:?}, wanted {:?}", got.join("|"), want.join("|"))),
                 None => Err(format!("no window holds documents, wanted {:?}", want.join("|"))),
             })),

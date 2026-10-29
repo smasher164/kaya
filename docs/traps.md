@@ -19635,3 +19635,19 @@ controller now, and expect_alert reads a title only from an alert in a window
 captures; GTK's unsaved mark ("document-modified-symbolic" read back as set
 and drew image-missing) and WinUI's ("●" in Segoe Fluent Icons drew a box)
 were found the same way.
+
+## WinUI's TabView keeps its scroll buttons after a close the pointer did not make (measured 2026-10-29)
+TabView (the pinned WinUI 2.2.1, TabWidthMode Equal) answers a removed tab the
+way Edge does: the remaining tabs keep their widths, and the scroll buttons
+stay drawn (disabled), until the pointer leaves the row, so a close under the
+pointer leaves the next tab's close button where it was. A close the pointer
+did not make (Ctrl+W, the app's own `close_document`, a tear-out, every
+harness close) never sees the pointer leave, and the row kept its arrows over
+three tabs 106 DIP wide in a row with room for 127 (doctabs_rust, the review
+page's win-dialog capture). kaya re-runs the row's width pass after every tab
+it adds or removes while the pointer is not over the row, by setting
+TabWidthMode away and back (winui/doctabs.rs `reflow`); a pointer close is
+left to the control. The read is WinUI's `document_row` under every
+`expect_documents` (the scroll buttons DRAWN, judged up the visual tree: the
+scroll viewer hides them by collapsing a panel above them, and the buttons'
+own Visibility stays Visible); watched red with `reflow` cut.

@@ -6839,14 +6839,14 @@ fn resolve_menu_path(
     found
 }
 
-/// Build the window shell at the first menubar_append: an Auto row for the
-/// TITLEBAR, an Auto row for the MenuBar, and a Star content slot every
-/// later mount/nav/sections swap fills. Built ONCE; content the window
-/// already presents is DETACHED first, since XAML refuses re-parenting
+/// Build the window shell at the first menubar_append, or the first
+/// document (its tab row rides the caption): an Auto row for the TITLEBAR,
+/// an Auto row for the MenuBar, and a Star content slot every later
+/// mount/nav/sections swap fills. Built ONCE; content the window already
+/// presents is DETACHED first, since XAML refuses re-parenting
 /// (docs/traps.md). The titlebar row is filled later by `refresh_toolbar`;
 /// the MenuBar may leave row 1 for `TitleBar.LeftHeader` (chrome-plan C2).
 fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
-    use windows_core::Interface as _;
     if core.menubars.contains_key(&window) {
         return Ok(());
     }
@@ -6854,6 +6854,20 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     // append below, so the failure this guards would otherwise land
     // milliseconds later on a dispatcher tick.
     require_control_resources("this window declares a menu");
+    ensure_shell(core, window)?;
+    let bar = MenuBar::new()?;
+    let bar_el: FrameworkElement = bar.cast()?;
+    Grid::SetRow(&bar_el, MENUBAR_ROW)?;
+    core.menu_shells[&window].Children()?.Append(&bar_el)?;
+    core.menubars.insert(window, bar);
+    Ok(())
+}
+
+fn ensure_shell(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
+    use windows_core::Interface as _;
+    if core.menu_shells.contains_key(&window) {
+        return Ok(());
+    }
     let target = winui_window(core, window)?;
     let shell: Grid = XamlReader::Load(&HSTRING::from(MENU_SHELL_XAML))?.cast()?;
     let defs = shell.RowDefinitions()?;
@@ -6875,10 +6889,6 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
         GridUnitType: GridUnitType::Star,
     })?;
     defs.Append(&fill)?;
-    let bar = MenuBar::new()?;
-    let bar_el: FrameworkElement = bar.cast()?;
-    Grid::SetRow(&bar_el, MENUBAR_ROW)?;
-    shell.Children()?.Append(&bar_el)?;
     let slot = Grid::new()?;
     let slot_el: FrameworkElement = slot.cast()?;
     Grid::SetRow(&slot_el, TOOLBAR_CONTENT_ROW)?;
@@ -6894,7 +6904,6 @@ fn ensure_menu_shell(core: &mut CoreState, window: u64) -> windows_core::Result<
     if let Some(old) = old {
         slot.Children()?.Append(&old)?;
     }
-    core.menubars.insert(window, bar);
     core.menu_slots.insert(window, slot);
     core.menu_shells.insert(window, shell);
     Ok(())
@@ -7888,7 +7897,10 @@ fn promoted_items(core: &CoreState, window: u64) -> Vec<u64> {
 ///     `MenuFlyoutItem`, and a second is a SECOND HANDLER for one key.
 fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     let promoted = promoted_items(core, window);
-    if promoted.is_empty() && !core.toolbars.contains_key(&window) {
+    // A WINDOW WITH DOCUMENTS DRAWS ITS TAB ROW IN THE CAPTION (docs/doctabs-plan.md
+    // Q9), so it is extended whether or not it promotes anything.
+    let row = core.docs.tabs.get(&window).map(|t| t.view.clone());
+    if promoted.is_empty() && !core.toolbars.contains_key(&window) && row.is_none() {
         return Ok(());
     }
     let bar = match core.toolbars.get(&window) {
@@ -7905,12 +7917,13 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             // extended caption it never asked for and seven rust legs ALL
             // PASSED — no harness verb reads "is this caption extended".
             assert!(
-                !promoted.is_empty(),
+                !promoted.is_empty() || row.is_some(),
                 "kaya: winui: window {window} reached the caption mint with \
-                 an EMPTY promotion list. `extended` is derived from toolbar \
-                 presence (docs/chrome-plan.md C2's WinUI row): a window that \
-                 promotes nothing keeps the system caption, and minting a \
-                 TitleBar here would give it chrome no app declared."
+                 an EMPTY promotion list and no documents. `extended` is derived \
+                 from toolbar or tab row presence (docs/chrome-plan.md C2's WinUI \
+                 row, docs/doctabs-plan.md Q9): a window that promotes nothing \
+                 keeps the system caption, and minting a TitleBar here would \
+                 give it chrome no app declared."
             );
             let Some(shell) = core.menu_shells.get(&window).cloned() else {
                 return Ok(());
@@ -7927,9 +7940,11 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             Grid::SetRow(&tb_el, TITLEBAR_ROW)?;
             shell.Children()?.Append(&titlebar.cast::<UIElement>()?)?;
 
-            let caption_text = caption_title_text()?;
-            titlebar.SetContent(&caption_text.cast::<UIElement>()?)?;
-            core.window_caption_texts.insert(window, caption_text);
+            if row.is_none() {
+                let caption_text = caption_title_text()?;
+                titlebar.SetContent(&caption_text.cast::<UIElement>()?)?;
+                core.window_caption_texts.insert(window, caption_text);
+            }
 
             // The hook that keeps the title centred (`center_caption_title`).
             // A WEAK REFERENCE for two reasons that both bite: a strong one
@@ -7954,20 +7969,17 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
                 }
             });
             titlebar.LayoutUpdated(&recentre)?;
-            if frame_mirrored() {
-                let id = target.AppWindow()?.Id()?;
-                let weak_titlebar = titlebar.downgrade()?;
-                titlebar.LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
-                    match weak_titlebar.upgrade() {
-                        Some(titlebar) => publish_mirrored_passthrough(id, &titlebar),
-                        None => Ok(()),
-                    }
-                }))?;
-            }
+            let id = target.AppWindow()?.Id()?;
+            let weak_titlebar = titlebar.downgrade()?;
+            titlebar.LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+                match weak_titlebar.upgrade() {
+                    Some(titlebar) if caption_drags_by_hand(&titlebar) => publish_caption_passthrough(id, &titlebar),
+                    _ => Ok(()),
+                }
+            }))?;
 
             let bar = CommandBar::new()?;
             titlebar.SetRightHeader(&bar.cast::<UIElement>()?)?;
-            titlebar.SetAutoRefreshDragRegions(!frame_mirrored())?;
 
             // ORDER IS LOAD-BEARING AND DOCUMENTED: "To specify a custom
             // title bar, you must first set ExtendsContentIntoTitleBar to
@@ -8028,15 +8040,21 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
     // system caption. The extended state follows the one number in BOTH
     // directions.
     let holds = primary.Size()? + bar.SecondaryCommands()?.Size()?;
-    let extended = holds > 0;
-    let visibility = if extended {
-        Visibility::Visible
-    } else {
-        Visibility::Collapsed
-    };
-    bar.SetVisibility(visibility)?;
+    let extended = holds > 0 || row.is_some();
+    let shown = |on: bool| if on { Visibility::Visible } else { Visibility::Collapsed };
+    bar.SetVisibility(shown(holds > 0))?;
     if let Some(titlebar) = core.window_titlebars.get(&window).cloned() {
-        titlebar.SetVisibility(visibility)?;
+        titlebar.SetVisibility(shown(extended))?;
+        if let Some(view) = &row {
+            if doctabs::caption_row(&titlebar).as_ref() != Some(view) {
+                core.window_caption_texts.remove(&window);
+                titlebar.SetContent(&view.cast::<UIElement>()?)?;
+            }
+        }
+        let auto = !caption_drags_by_hand(&titlebar);
+        if titlebar.AutoRefreshDragRegions()? != auto {
+            titlebar.SetAutoRefreshDragRegions(auto)?;
+        }
         let target = winui_window(core, window)?;
         // READ BEFORE WRITE: this runs on every catalog rebuild, and
         // re-asserting the flag re-enters the window's frame/inset
@@ -8059,7 +8077,7 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // Before RecomputeDragRegions, deliberately: the move changes
         // LeftHeader's extent, and the rects published below have to be the
         // ones the bar ends up occupying.
-        rehost_menubar(core, window, extended)?;
+        rehost_menubar(core, window, extended && row.is_none())?;
         // ARM THE GEOMETRY POST-CONDITION: this rebuild may be the one
         // that puts the bar in the tree, so there is nothing arranged yet
         // to measure.
@@ -8068,8 +8086,8 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
         // the control's automatic refresh does not watch. Without this the
         // passthrough rects describe the PREVIOUS set of buttons. The menu
         // has the same problem for the same reason.
-        if frame_mirrored() {
-            publish_mirrored_passthrough(target.AppWindow()?.Id()?, &titlebar)?;
+        if caption_drags_by_hand(&titlebar) {
+            publish_caption_passthrough(target.AppWindow()?.Id()?, &titlebar)?;
         } else {
             titlebar.RecomputeDragRegions()?;
         }
@@ -21410,20 +21428,35 @@ fn mirror_frame(window: &Window) -> windows_core::Result<()> {
     Ok(())
 }
 
+/// Whether kaya writes this caption's drag regions itself: a mirrored
+/// window, and a caption carrying a tab row.
+fn caption_drags_by_hand(titlebar: &TitleBar) -> bool {
+    frame_mirrored() || doctabs::caption_row(titlebar).is_some()
+}
+
 /// A MIRRORED WINDOW READS ITS DRAG REGIONS MIRRORED, and the TitleBar
 /// control writes them unmirrored, so a click on the toolbar dragged the
 /// window (measured, docs/traps.md). An RTL ground's own coordinates are
 /// already the mirrored window's, so the headers' bounds in the ground are
-/// the rects.
-fn publish_mirrored_passthrough(id: bindings::Microsoft::UI::XamlWindowId, titlebar: &TitleBar) -> windows_core::Result<()> {
+/// the rects. A TAB ROW in the caption passes its tabs and "+" through and
+/// leaves its footer to the drag, where the control would pass its whole
+/// content slot (docs/doctabs-plan.md Q9).
+fn publish_caption_passthrough(id: bindings::Microsoft::UI::XamlWindowId, titlebar: &TitleBar) -> windows_core::Result<()> {
     use bindings::Microsoft::UI::Input::{InputNonClientPointerSource, NonClientRegionKind};
     use bindings::Windows::Graphics::RectInt32;
     let Ok(root) = titlebar.XamlRoot() else { return Ok(()) };
     let Ok(ground) = root.Content() else { return Ok(()) };
     let scale = root.RasterizationScale()?;
     let mut rects = Vec::new();
+    let mut parts: Vec<FrameworkElement> = Vec::new();
     for header in [titlebar.LeftHeader(), titlebar.RightHeader()].into_iter().flatten() {
-        let element: FrameworkElement = header.cast()?;
+        parts.push(header.cast()?);
+    }
+    if let Some(view) = doctabs::caption_row(titlebar) {
+        parts.extend(doctabs::row_click_parts(&view)?);
+    }
+    for element in parts {
+        let header: UIElement = element.cast()?;
         let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
         if header.Visibility()? != Visibility::Visible || w <= 0.0 || h <= 0.0 {
             continue;
@@ -21472,21 +21505,10 @@ fn client_origin(hwnd: isize) -> Point32 {
 /// overlapping it on a pooled lane cannot answer.
 #[cfg(feature = "harness")]
 fn frame_direction(core: &CoreState) -> Result<(String, Vec<String>), String> {
-    const WM_NCHITTEST: u32 = 0x0084;
     const HTCLIENT: isize = 1;
     const HTCLOSE: isize = 20;
     let hwnd = window_hwnd(core, 0).ok_or("the window has no HWND")?;
-    let answer = |x: i32, y: i32| -> isize {
-        let mut at = Point32 { x, y };
-        // SAFETY: a live HWND and stack POINTs; the hit test is a query.
-        unsafe {
-            ScreenToClient(hwnd, &mut at);
-            let child = ChildWindowFromPointEx(hwnd, at, 0x0001);
-            let target = if child == 0 { hwnd } else { child };
-            let lp = ((y as u32 as isize & 0xffff) << 16) | (x as u32 as isize & 0xffff);
-            SendMessageW(target, WM_NCHITTEST, 0, lp)
-        }
-    };
+    let answer = |x: i32, y: i32| nc_hit(hwnd, x, y);
     let mut win = Rect::default();
     // SAFETY: a live HWND with a stack RECT.
     let dpi = unsafe {
@@ -21537,6 +21559,22 @@ fn frame_direction(core: &CoreState) -> Result<(String, Vec<String>), String> {
         }
     }
     Ok((side, wrong))
+}
+
+/// WM_NCHITTEST at a screen point, asked of this window's own child under
+/// it, so a window overlapping it on a pooled lane cannot answer.
+#[cfg(feature = "harness")]
+fn nc_hit(hwnd: isize, x: i32, y: i32) -> isize {
+    const WM_NCHITTEST: u32 = 0x0084;
+    let mut at = Point32 { x, y };
+    // SAFETY: a live HWND and stack POINTs; the hit test is a query.
+    unsafe {
+        ScreenToClient(hwnd, &mut at);
+        let child = ChildWindowFromPointEx(hwnd, at, 0x0001);
+        let target = if child == 0 { hwnd } else { child };
+        let lp = ((y as u32 as isize & 0xffff) << 16) | (x as u32 as isize & 0xffff);
+        SendMessageW(target, WM_NCHITTEST, 0, lp)
+    }
 }
 
 fn window_hwnd(core: &CoreState, window: u64) -> Option<isize> {
@@ -29159,6 +29197,9 @@ impl crate::harness::Stage for WinUiStage {
     }
     fn active_document(&self) -> Option<String> {
         Self::on_ui_read(|core| Ok(doctabs::active_title(core))).unwrap_or(None)
+    }
+    fn document_row(&self) -> String {
+        Self::on_ui_read(|core| Ok(doctabs::row_report(core))).unwrap_or_else(|e| format!("the tab row was not read: {e}"))
     }
     fn document_dirty(&self, title: &str) -> Result<bool, String> {
         let title = title.to_owned();

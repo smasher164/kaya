@@ -4834,8 +4834,10 @@ def winui_frame_arms(src=None):
         bad.append("ApplyOp::CreateWindow does not build its window through create_aux_window, "
                    "the birth this read holds to mirror_frame")
     toolbar = rust_fn(code, "refresh_toolbar")
-    if toolbar is None or toolbar.count("publish_mirrored_passthrough(") < 2 \
-            or "SetAutoRefreshDragRegions(!frame_mirrored())" not in toolbar:
+    by_hand = rust_fn(code, "caption_drags_by_hand")
+    if toolbar is None or toolbar.count("publish_caption_passthrough(") < 2 \
+            or "let auto = !caption_drags_by_hand(&titlebar);" not in toolbar \
+            or by_hand is None or "frame_mirrored()" not in by_hand:
         bad.append("refresh_toolbar does not own a mirrored caption's drag regions — the "
                    "TitleBar's own land mirrored and steal the caption buttons")
     raw = [m.start() for m in re.finditer(r"ClientToScreen\(hwnd, &mut", code)]
@@ -4863,7 +4865,7 @@ for pattern, repl, label in (
      "a second window left unmirrored"),
     (r"(ApplyOp::CreateWindow \{ window \} => )create_aux_window\(core, window\.0\)\?,",
      "{ let _ = (core, window); }", "the CreateWindow arm bypassing create_aux_window"),
-    (r"(titlebar\.SetAutoRefreshDragRegions\()!frame_mirrored\(\)", "true",
+    (r"(let auto = )!caption_drags_by_hand\(&titlebar\);", "true;",
      "the TitleBar's own drag regions kept"),
     (r"(\n    let client = )client_origin\(hwnd\);\n    let mut outer",
      "{ let mut p = Point32 { x: 0, y: 0 }; unsafe { ClientToScreen(hwnd, &mut p) }; p };"

@@ -1,7 +1,7 @@
 // Document tabs on Windows (docs/doctabs-plan.md §3): a TabView used as the
-// tab ROW (Windows Terminal's shape) above the window's content, the active
-// document's root shown below it beside the shared regions; a tab dropped
-// outside, or the tab's Move to New Window, is a new kaya window (§1.2).
+// tab ROW in the caption (Q9; Notepad's and Windows Terminal's shape), the
+// active document's root shown below it beside the shared regions; a tab
+// dropped outside, or the tab's Move to New Window, is a new kaya window (§1.2).
 // Toolkit events are queued and drained on a dispatcher turn with CORE
 // borrowed, since kaya's own calls raise some of them while CORE is held.
 
@@ -52,6 +52,21 @@ thread_local! {
     /// The documents window the user is in, by kaya's account (the GTK arm's
     /// rule: a window a tear-out activates need not report it at once).
     static FRONT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static POINTER_IN_ROW: RefCell<BTreeSet<u64>> = const { RefCell::new(BTreeSet::new()) };
+}
+
+/// TabView keeps a closed tab's neighbours at their widths, and its scroll
+/// buttons up, until the pointer leaves the row (Edge's close-under-the-pointer
+/// behaviour), so a close the pointer did not make left arrows over a row with
+/// room (docs/traps.md, the WinUI tab row's scroll buttons). Away from the
+/// pointer kaya has the row re-fill: a TabWidthMode change re-runs its width pass.
+fn reflow(window: u64, view: &TabView) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Xaml::Controls::TabViewWidthMode;
+    if POINTER_IN_ROW.with_borrow(|set| set.contains(&window)) {
+        return Ok(());
+    }
+    view.SetTabWidthMode(TabViewWidthMode::SizeToContent)?;
+    view.SetTabWidthMode(TabViewWidthMode::Equal)
 }
 
 fn enqueue(event: DocEvent) {
@@ -122,8 +137,38 @@ pub(super) fn ensure_tabs(core: &mut CoreState, window: u64) -> windows_core::Re
     let view = TabView::new()?;
     view.SetIsAddTabButtonVisible(core.docs.new_document.get(&window).copied().unwrap_or(false))?;
     view.SetCanReorderTabs(true)?;
+    view.PointerEntered(&PointerEventHandler::new(move |_, _| {
+        POINTER_IN_ROW.with_borrow_mut(|set| set.insert(window));
+        Ok(())
+    }))?;
+    view.PointerExited(&PointerEventHandler::new(move |_, _| {
+        POINTER_IN_ROW.with_borrow_mut(|set| set.remove(&window));
+        Ok(())
+    }))?;
     view.SetCanDragTabs(true)?;
-    view.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Top)?;
+    view.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Bottom)?;
+    view.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+    let footer = Grid::new()?;
+    footer.SetMinWidth(CAPTION_TAB_DRAG)?;
+    view.SetTabStripFooter(&footer)?;
+    // The caption's content presenter centres what it holds
+    // (TitleBarContentHorizontalAlignment); a tab row spans the slot.
+    view.Loaded(&RoutedEventHandler::new(|sender, _| {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let Some(sender) = sender.as_ref() else { return Ok(()) };
+        let mut at = VisualTreeHelper::GetParent(&sender.cast::<bindings::Microsoft::UI::Xaml::DependencyObject>()?).ok();
+        while let Some(node) = at {
+            if let Ok(fe) = node.cast::<FrameworkElement>() {
+                if fe.Name()? == "PART_ContentPresenter" {
+                    fe.SetHorizontalAlignment(HorizontalAlignment::Stretch)?;
+                    fe.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Stretch)?;
+                    break;
+                }
+            }
+            at = VisualTreeHelper::GetParent(&node).ok();
+        }
+        Ok(())
+    }))?;
     view.SelectionChanged(&SelectionChangedEventHandler::new(move |_, _| {
         enqueue(DocEvent::Selected(window));
         Ok(())
@@ -161,7 +206,7 @@ pub(super) fn ensure_tabs(core: &mut CoreState, window: u64) -> windows_core::Re
 
     let outer = Grid::new()?;
     let rows = outer.RowDefinitions()?;
-    for (value, unit) in [(1.0, GridUnitType::Auto), (1.0, GridUnitType::Star), (1.0, GridUnitType::Auto)] {
+    for (value, unit) in [(1.0, GridUnitType::Star), (1.0, GridUnitType::Auto)] {
         let row = RowDefinition::new()?;
         row.SetHeight(star(value, unit)?)?;
         rows.Append(&row)?;
@@ -181,19 +226,46 @@ pub(super) fn ensure_tabs(core: &mut CoreState, window: u64) -> windows_core::Re
     middle.Children()?.Append(&slots[0].cast::<UIElement>()?)?;
     middle.Children()?.Append(&host.cast::<UIElement>()?)?;
     middle.Children()?.Append(&slots[1].cast::<UIElement>()?)?;
-    Grid::SetRow(&view.cast::<FrameworkElement>()?, 0)?;
-    Grid::SetRow(&middle.cast::<FrameworkElement>()?, 1)?;
-    Grid::SetRow(&slots[2].cast::<FrameworkElement>()?, 2)?;
-    outer.Children()?.Append(&view.cast::<UIElement>()?)?;
+    Grid::SetRow(&middle.cast::<FrameworkElement>()?, 0)?;
+    Grid::SetRow(&slots[2].cast::<FrameworkElement>()?, 1)?;
     outer.Children()?.Append(&middle.cast::<UIElement>()?)?;
     outer.Children()?.Append(&slots[2].cast::<UIElement>()?)?;
+    ensure_shell(core, window)?;
     set_window_content(core, window, &outer.cast::<UIElement>()?)?;
     DOC_WINDOWS.with_borrow_mut(|set| set.insert(window));
     if FRONT.with(|f| f.get()).is_none() {
         FRONT.with(|f| f.set(Some(window)));
     }
     core.docs.tabs.insert(window, WinTabs { view, host, slots });
-    Ok(())
+    // THE ROW GOES INTO THE CAPTION (Q9), which refresh_toolbar mints for a
+    // window with documents whether or not it promotes anything.
+    refresh_toolbar(core, window)
+}
+
+/// The empty caption a tab row keeps for dragging the window: the
+/// `TitleBar` control's own minimum drag region (TitleBarMinDragRegionWidth's
+/// library value), held by the tab strip's footer, which Equal-width tabs
+/// would otherwise take.
+const CAPTION_TAB_DRAG: f64 = 48.0;
+
+/// The tab row a window's caption carries, if it carries one.
+pub(super) fn caption_row(titlebar: &TitleBar) -> Option<TabView> {
+    titlebar.Content().ok()?.cast().ok()
+}
+
+/// The parts of a tab row that take clicks, so the caption's passthrough
+/// rects leave the footer, and the caption beyond it, to the drag.
+pub(super) fn row_click_parts(view: &TabView) -> windows_core::Result<Vec<FrameworkElement>> {
+    let root: UIElement = view.cast()?;
+    let mut parts = Vec::new();
+    for name in ["TabListView", "AddButton"] {
+        if let Some(part) = named_descendant(&root, name)? {
+            if part.Visibility()? == Visibility::Visible {
+                parts.push(part);
+            }
+        }
+    }
+    Ok(parts)
 }
 
 pub(super) fn add_document(core: &mut CoreState, window: u64, doc: u64) -> windows_core::Result<()> {
@@ -216,6 +288,7 @@ pub(super) fn add_document(core: &mut CoreState, window: u64, doc: u64) -> windo
     item.SetContextFlyout(&flyout)?;
     let tabs = &core.docs.tabs[&window];
     tabs.view.TabItems()?.Append(&item.cast::<windows_core::IInspectable>()?)?;
+    reflow(window, &tabs.view)?;
     let first = core.docs.order.get(&window).is_none_or(|o| o.is_empty());
     core.docs.pages.insert(doc, DocPage { window, item: item.clone(), root: None, title: String::new(), dirty: false, intercept: false });
     core.docs.order.entry(window).or_default().push(doc);
@@ -363,6 +436,7 @@ fn forget(core: &mut CoreState, doc: u64, user: bool) -> windows_core::Result<()
         let mut at = 0u32;
         if items.IndexOf(&record.item.cast::<windows_core::IInspectable>()?, &mut at)? {
             items.RemoveAt(at)?;
+            reflow(window, &tabs.view)?;
         }
     }
     if let Some(order) = core.docs.order.get_mut(&window) {
@@ -485,6 +559,7 @@ fn tear_out(core: &mut CoreState, doc: u64) -> windows_core::Result<()> {
         let mut at = 0u32;
         if items.IndexOf(&item.cast::<windows_core::IInspectable>()?, &mut at)? {
             items.RemoveAt(at)?;
+            reflow(source, &tabs.view)?;
         }
     }
     if let Some(order) = core.docs.order.get_mut(&source) {
@@ -501,6 +576,7 @@ fn tear_out(core: &mut CoreState, doc: u64) -> windows_core::Result<()> {
     }
     show_active(core, source)?;
     core.docs.tabs[&window].view.TabItems()?.Append(&item.cast::<windows_core::IInspectable>()?)?;
+    reflow(window, &core.docs.tabs[&window].view)?;
     core.docs.tabs[&window].view.SetSelectedItem(&item.cast::<windows_core::IInspectable>()?)?;
     core.docs.order.insert(window, vec![doc]);
     core.docs.active.insert(window, doc);
@@ -603,4 +679,147 @@ pub(super) fn move_out(core: &mut CoreState, title: &str) -> Result<(), String> 
 pub(super) fn close_native(core: &mut CoreState) -> Result<(), String> {
     let Some(window) = active_window(core) else { return Err("no window holds documents".into()) };
     handle(core, DocEvent::CloseWindow(window)).map_err(|e| e.message())
+}
+
+/// Empty when the front window's tab row is where Q9 puts it and shows only
+/// what it needs: inside the frame's caption band, its tabs and "+" taking
+/// clicks while its footer drags the window (HTCAPTION), and its scroll
+/// buttons drawn only while the tabs at their minimum width do not fit.
+/// Otherwise what was measured.
+#[cfg(feature = "harness")]
+pub(super) fn row_report(core: &CoreState) -> String {
+    let Some(window) = active_window(core) else { return String::new() };
+    row_measure(core, window).unwrap_or_else(|e| format!("window {window}'s tab row could not be read: {}", e.message()))
+}
+
+#[cfg(feature = "harness")]
+fn row_measure(core: &CoreState, window: u64) -> windows_core::Result<String> {
+    const HTCLIENT: isize = 1;
+    const HTCAPTION: isize = 2;
+    use bindings::Windows::Foundation::Rect;
+    let Some(tabs) = core.docs.tabs.get(&window) else { return Ok(String::new()) };
+    let view = &tabs.view;
+    let Some(titlebar) = core.window_titlebars.get(&window) else {
+        return Ok(format!("window {window} holds documents and has no caption TitleBar, so its tab row is not in the caption"));
+    };
+    if caption_row(titlebar).as_ref() != Some(view) {
+        return Ok(format!("window {window}'s tab row is not its caption TitleBar's content"));
+    }
+    let target = winui_window(core, window)?;
+    let band = f64::from(target.AppWindow()?.TitleBar()?.Height()?);
+    let scale = view.XamlRoot()?.RasterizationScale()?;
+    let Some(hwnd) = window_hwnd(core, window) else { return Ok(format!("window {window} has no HWND")) };
+    let client = client_origin(hwnd);
+    // A point of an element, in screen pixels, and the element's box in the
+    // client area's pixels.
+    let place = |element: &FrameworkElement| -> windows_core::Result<Option<(Rect, (i32, i32))>> {
+        let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+        if w <= 0.0 || h <= 0.0 {
+            return Ok(None);
+        }
+        let b = element
+            .TransformToVisual(None::<&UIElement>)?
+            .TransformBounds(Rect { X: 0.0, Y: 0.0, Width: w as f32, Height: h as f32 })?;
+        let px = Rect {
+            X: (f64::from(b.X) * scale) as f32,
+            Y: (f64::from(b.Y) * scale) as f32,
+            Width: (f64::from(b.Width) * scale) as f32,
+            Height: (f64::from(b.Height) * scale) as f32,
+        };
+        let centre = (
+            client.x + (f64::from(px.X) + f64::from(px.Width) / 2.0).round() as i32,
+            client.y + (f64::from(px.Y) + f64::from(px.Height) / 2.0).round() as i32,
+        );
+        Ok(Some((px, centre)))
+    };
+    let mut wrong = Vec::new();
+    let row: FrameworkElement = view.cast()?;
+    let Some((at, _)) = place(&row)? else { return Ok(format!("window {window}'s tab row is not arranged")) };
+    let (top, bottom) = (f64::from(at.Y), f64::from(at.Y) + f64::from(at.Height));
+    if top < -0.5 || bottom > band + 0.5 {
+        wrong.push(format!("the tab row spans y {top:.0}..{bottom:.0} px, outside the frame's caption band 0..{band:.0} px"));
+    }
+    let items = items_of(view);
+    // The selected tab, which the row keeps scrolled into view.
+    if let Some(selected) = view.SelectedItem().ok().and_then(|i| i.cast::<FrameworkElement>().ok()) {
+        if let Some((_, (x, y))) = place(&selected)? {
+            let ht = nc_hit(hwnd, x, y);
+            if ht != HTCLIENT {
+                wrong.push(format!("the selected tab answers hit test {ht} at its centre ({x},{y}), not HTCLIENT"));
+            }
+        }
+    }
+    let root: UIElement = view.cast()?;
+    if let Some(add) = named_descendant(&root, "AddButton")?.filter(|a| a.Visibility().ok() == Some(Visibility::Visible)) {
+        if let Some((_, (x, y))) = place(&add)? {
+            let ht = nc_hit(hwnd, x, y);
+            if ht != HTCLIENT {
+                wrong.push(format!("the \"+\" answers hit test {ht} at its centre ({x},{y}), not HTCLIENT"));
+            }
+        }
+    }
+    match view.TabStripFooter().ok().and_then(|f| f.cast::<FrameworkElement>().ok()) {
+        Some(footer) => match place(&footer)? {
+            Some((_, (x, y))) => {
+                let ht = nc_hit(hwnd, x, y);
+                if ht != HTCAPTION {
+                    let mut win = super::Rect::default();
+                    // SAFETY: a live HWND with a stack RECT.
+                    unsafe { GetWindowRect(hwnd, &mut win) };
+                    let mut runs: Vec<(i32, i32, isize)> = Vec::new();
+                    for sx in (win.left + 1..win.right - 1).step_by(4) {
+                        let h = nc_hit(hwnd, sx, y);
+                        match runs.last_mut() {
+                            Some(run) if run.2 == h => run.1 = sx,
+                            _ => runs.push((sx, sx, h)),
+                        }
+                    }
+                    wrong.push(format!(
+                        "the empty caption after the tabs answers hit test {ht} at ({x},{y}), not HTCAPTION, so it does not drag the window (window {}..{}, client origin {}, along y={y}: {})",
+                        win.left,
+                        win.right,
+                        client.x,
+                        runs.iter().map(|(a, b, h)| format!("{a}..{b}={h}")).collect::<Vec<_>>().join(" ")
+                    ));
+                }
+            }
+            None => wrong.push("the tab row's footer, its empty caption, is not arranged".into()),
+        },
+        None => wrong.push("the tab row has no footer, so no empty caption is left to drag".into()),
+    }
+    // DRAWN, not merely Visible: the scroll viewer hides its buttons by
+    // collapsing a panel above them.
+    let shown = |name: &str| -> windows_core::Result<bool> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let Some(button) = named_descendant(&root, name)? else { return Ok(false) };
+        if button.ActualWidth()? <= 0.0 {
+            return Ok(false);
+        }
+        let mut at: Option<bindings::Microsoft::UI::Xaml::DependencyObject> = Some(button.cast()?);
+        while let Some(node) = at {
+            if let Ok(el) = node.cast::<UIElement>() {
+                if el.Visibility()? != Visibility::Visible || el.Opacity()? <= 0.0 {
+                    return Ok(false);
+                }
+                if el == root {
+                    return Ok(true);
+                }
+            }
+            at = VisualTreeHelper::GetParent(&node).ok();
+        }
+        Ok(false)
+    };
+    let arrows = shown("ScrollDecreaseButton")? || shown("ScrollIncreaseButton")?;
+    if arrows {
+        let least = theme_resource::<IReference<f64>>("TabViewItemMinWidth").and_then(|v| v.Value()).unwrap_or(0.0);
+        let widths: Vec<f64> = items.iter().map(|i| i.ActualWidth().unwrap_or(0.0)).collect();
+        if widths.iter().any(|w| *w > least + 0.5) {
+            wrong.push(format!(
+                "the scroll buttons are drawn over {} tab(s) {:?} DIP wide, wider than their {least} DIP minimum, so the row has room it is scrolling instead of using",
+                widths.len(),
+                widths.iter().map(|w| w.round()).collect::<Vec<_>>()
+            ));
+        }
+    }
+    Ok(wrong.join("; "))
 }
