@@ -1,6 +1,6 @@
-// THE TEXT EDITOR, kaya's forcing artifact (tools/scenes/editor.steps). It
-// works around a refused live-zone When (docs/traps.md: A live-zone `When`
-// stamps an EMPTY key path) and a refused close.
+// THE TEXT EDITOR, kaya's forcing artifact (tools/scenes/editor.steps), one
+// tab per document (docs/doctabs-plan.md §5). It works around a refused
+// live-zone When (docs/traps.md: A live-zone `When` stamps an EMPTY key path).
 package editor
 
 import (
@@ -153,6 +153,36 @@ func tally(n int) string {
 	return fmt.Sprintf("%d matches", n)
 }
 
+// One open document: its buffer, find bar and status line, and the state
+// they describe (docs/doctabs-plan.md §5).
+type document struct {
+	id          uint64
+	n           int
+	text, saved string
+	dest        *kaya.PickedFile
+	pattern     string
+	hits        []kaya.TextRange
+	at          int
+	open        bool
+	zoom        int
+	numbers     bool
+	font        int
+	sel         kaya.Selection
+	buffer      kaya.Widget
+	status      kaya.Signal[string]
+	count       kaya.Signal[string]
+	countTint   kaya.Signal[kaya.Tint]
+	// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
+	// key path".
+	findRows kaya.Collection
+}
+
+func (d *document) dirty() bool { return d.text != d.saved }
+
+// A tab Open… may take over rather than sit beside (VS Code's and TextEdit's
+// rule): untitled, never saved, never typed in.
+func (d *document) pristine() bool { return d.dest == nil && d.text == "" && d.saved == "" }
+
 func App() *kaya.App {
 	app := kaya.NewApp()
 
@@ -169,134 +199,211 @@ func App() *kaya.App {
 		panic("kaya: the editor could not write the decoy: " + err.Error())
 	}
 
-	text := ""
-	saved := ""
-	var dest *kaya.PickedFile
-
-	// The app's own copy: a signal is written and never read back.
-	pattern := ""
-	var hits []kaya.TextRange
-	at := 0
-	open := false
-
 	var (
-		buffer        kaya.Widget
-		status, count kaya.Signal[string]
-		countTint     kaya.Signal[kaya.Tint]
-		// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
-		// key path".
-		findRows kaya.Collection
-		// TEMPLATE NODES, not widgets: their handlers register below Build.
-		query, prev, next, done kaya.Node
-		// The View menu's state (docs/code-surface-plan.md §4): the gutter,
-		// the zoom step, and the face, "" for the platform's monospaced one.
+		docs   []*document
+		active *document
+		made   int
+		// The View menu's state (docs/code-surface-plan.md §4), shown for the
+		// active document.
 		numbersOn   kaya.Signal[bool]
 		fontGroup   kaya.MenuItem
 		fontChoice  kaya.Signal[float64]
 		fontOptions = []string{""}
-		// The Format menu's check marks: what holds over the selection
-		// (docs/phone-format-plan.md §3), written by the buffer's OnSelection.
+		// The Format menu's check marks: what holds over the active buffer's
+		// selection (docs/phone-format-plan.md §3).
 		inline = map[string]kaya.Signal[bool]{}
 		styles = map[kaya.Block]kaya.Signal[bool]{}
 	)
-	zoom := 4
 
-	mark := func(tx *kaya.Tx) { tx.Window(0).Dirty(text != saved) }
+	// THE MARK IS THE DOCUMENT'S, and so is the veto: a clean tab just closes.
+	mark := func(tx *kaya.Tx, d *document) {
+		tx.Document(d.id).Dirty(d.dirty()).InterceptClose(d.dirty())
+	}
 
 	// A declared set dies on the next edit (docs/ranges-plan.md D2).
 	// HIGHLIGHTS ONLY: this runs while somebody is typing.
-	refind := func(tx *kaya.Tx) {
-		hits = nil
-		at = 0
+	refind := func(tx *kaya.Tx, d *document) {
+		d.hits = nil
+		d.at = 0
 		// LIVE zone: a stamped copy has no id select_range can aim at.
-		tx.Write(countTint, kaya.TintNone)
-		if !open {
-			tx.HighlightRanges(buffer, nil)
-			tx.Write(count, "")
+		tx.Write(d.countTint, kaya.TintNone)
+		if !d.open {
+			tx.HighlightRanges(d.buffer, nil)
+			tx.Write(d.count, "")
 			return
 		}
-		if pattern == "" {
-			tx.HighlightRanges(buffer, nil)
-			tx.Write(count, "no matches")
+		if d.pattern == "" {
+			tx.HighlightRanges(d.buffer, nil)
+			tx.Write(d.count, "no matches")
 			return
 		}
 		// A half-typed pattern is ordinary here: a compile error is a state.
-		re, err := regexp.Compile(pattern)
+		re, err := regexp.Compile(d.pattern)
 		if err != nil {
-			tx.HighlightRanges(buffer, nil)
-			tx.Write(count, "bad pattern")
-			tx.Write(countTint, kaya.TintCritical)
+			tx.HighlightRanges(d.buffer, nil)
+			tx.Write(d.count, "bad pattern")
+			tx.Write(d.countTint, kaya.TintCritical)
 			return
 		}
 		// GO STRING INDICES, unconverted: a UTF-16 backend converts its side.
-		for _, m := range re.FindAllStringIndex(text, -1) {
+		for _, m := range re.FindAllStringIndex(d.text, -1) {
 			// AN EMPTY MATCH DECORATES NOTHING.
 			if m[0] == m[1] {
 				continue
 			}
-			hits = append(hits, kaya.TextRange{Start: m[0], End: m[1]})
+			d.hits = append(d.hits, kaya.TextRange{Start: m[0], End: m[1]})
 		}
-		tx.HighlightRanges(buffer, hits)
-		tx.Write(count, tally(len(hits)))
-		if len(hits) == 0 {
-			tx.Write(countTint, kaya.TintCritical)
+		tx.HighlightRanges(d.buffer, d.hits)
+		tx.Write(d.count, tally(len(d.hits)))
+		if len(d.hits) == 0 {
+			tx.Write(d.countTint, kaya.TintCritical)
 		}
 	}
 
-	show := func(tx *kaya.Tx, i int) {
-		if len(hits) == 0 {
+	show := func(tx *kaya.Tx, d *document, i int) {
+		if len(d.hits) == 0 {
 			return
 		}
-		n := len(hits)
-		at = ((i % n) + n) % n
-		tx.SelectRange(buffer, hits[at])
-		tx.RevealRange(buffer, hits[at])
-		tx.Write(count, fmt.Sprintf("%d of %d", at+1, n))
+		n := len(d.hits)
+		d.at = ((i % n) + n) % n
+		tx.SelectRange(d.buffer, d.hits[d.at])
+		tx.RevealRange(d.buffer, d.hits[d.at])
+		tx.Write(d.count, fmt.Sprintf("%d of %d", d.at+1, n))
 	}
 
-	// The ONLY place the destination moves, and always from a posted
-	// transaction, so it needs no lock.
-	retarget := func(tx *kaya.Tx, file *kaya.PickedFile, body string) {
-		dest = file
-		saved = body
-		tx.Window(0).Title(docName(dest))
+	// The menus' check marks follow the active document (§5).
+	marks := func(tx *kaya.Tx, d *document) {
+		for name, on := range inline {
+			tx.Write(on, d.sel.Has(name))
+		}
+		for kind, on := range styles {
+			tx.Write(on, d.sel.Block() == kind)
+		}
+		tx.Write(numbersOn, d.numbers)
+		tx.Write(fontChoice, float64(d.font))
 	}
+
+	activate := func(tx *kaya.Tx, d *document) {
+		active = d
+		marks(tx, d)
+		tx.Focus(d.buffer)
+	}
+
+	// The ONLY place a destination moves, and always from a posted
+	// transaction, so it needs no lock. The document's name is its tab's
+	// title, and the window's while it is in front.
+	retarget := func(tx *kaya.Tx, d *document, file *kaya.PickedFile, body string) {
+		d.dest = file
+		d.saved = body
+		tx.Document(d.id).Title(docName(d.dest))
+	}
+
+	// The documents in the app's order; a closed one leaves, and the window
+	// closes with the last of them (docs/doctabs-plan.md Q2).
+	forget := func(tx *kaya.Tx, d *document) {
+		at := -1
+		for i, o := range docs {
+			if o == d {
+				at = i
+			}
+		}
+		if at < 0 {
+			return
+		}
+		docs = append(docs[:at], docs[at+1:]...)
+		if active == d && len(docs) > 0 {
+			next := docs[min(at, len(docs)-1)]
+			tx.SelectDocument(next.id)
+			activate(tx, next)
+		}
+	}
+	closeDoc := func(tx *kaya.Tx, d *document) {
+		tx.CloseDocument(d.id)
+		forget(tx, d)
+	}
+
+	// A COMPOSITION: kaya has no "confirm before you discard".
+	ask := func(tx *kaya.Tx, d *document, then func(*kaya.Tx)) {
+		if !d.dirty() {
+			then(tx)
+			return
+		}
+		tx.ShowAlert().
+			Title("unsaved changes").
+			Message(docName(d.dest) + " has unsaved changes").
+			Action("Discard").
+			Cancel("Keep Editing").
+			OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
+				if choice == kaya.AlertChoiceCancel {
+					return
+				}
+				then(tx)
+			}).
+			Show()
+	}
+
+	// The native window's close asks about each unsaved document in turn,
+	// one alert at a time, and closes them all once every one is agreed to;
+	// one Keep Editing keeps them all.
+	var askEach func(tx *kaya.Tx, left, all []*document)
+	askEach = func(tx *kaya.Tx, left, all []*document) {
+		for len(left) > 0 && !left[0].dirty() {
+			left = left[1:]
+		}
+		if len(left) == 0 {
+			for _, d := range all {
+				closeDoc(tx, d)
+			}
+			return
+		}
+		ask(tx, left[0], func(tx *kaya.Tx) { askEach(tx, left[1:], all) })
+	}
+
+	var newDocument func(tx *kaya.Tx) *document
 
 	// saveTo writes off the app goroutine: PickedFile.Open BLOCKS.
-	saveTo := func(file kaya.PickedFile, body string) {
+	saveTo := func(d *document, file kaya.PickedFile, body string) {
 		go func() {
 			n, err := writeDoc(file, body)
 			app.Post(func(tx *kaya.Tx) {
 				if err != nil {
-					tx.Write(status, "save failed: "+err.Error())
+					tx.Write(d.status, "save failed: "+err.Error())
 					return
 				}
 				// body AND NOT text: the user may have typed since.
-				retarget(tx, &file, body)
+				retarget(tx, d, &file, body)
 				// The byte count is READ BACK OFF THE DISK.
-				tx.Write(status, fmt.Sprintf("saved, %d bytes", n))
-				mark(tx)
+				tx.Write(d.status, fmt.Sprintf("saved, %d bytes", n))
+				mark(tx, d)
 			})
 		}()
 	}
 
+	// A file opens into the active tab while it is pristine, else into a
+	// tab of its own.
 	openFrom := func(file kaya.PickedFile) {
 		go func() {
 			body, err := readDoc(file)
 			app.Post(func(tx *kaya.Tx) {
+				d := active
 				if err != nil {
-					tx.Write(status, "open failed: "+err.Error())
+					if d != nil {
+						tx.Write(d.status, "open failed: "+err.Error())
+					}
 					return
 				}
-				text = body
-				retarget(tx, &file, body)
+				if d == nil || !d.pristine() {
+					d = newDocument(tx)
+				}
+				d.text = body
+				retarget(tx, d, &file, body)
 				// A PROGRAMMATIC WRITE does not echo, so the fold is by hand;
 				// it also spends the field's native undo history.
-				tx.SetText(buffer, body)
-				tx.Focus(buffer)
-				tx.Write(status, fmt.Sprintf("opened, %d bytes", len(body)))
-				mark(tx)
-				refind(tx)
+				tx.SetText(d.buffer, body)
+				tx.Focus(d.buffer)
+				tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
+				mark(tx, d)
+				refind(tx, d)
 			})
 		}()
 	}
@@ -304,9 +411,10 @@ func App() *kaya.App {
 	// The editors' zoom steps, a multiple of the platform's size.
 	zooms := []float64{0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3}
 	setZoom := func(tx *kaya.Tx, step int) {
-		zoom = min(max(step, 0), len(zooms)-1)
-		tx.SetTextScale(buffer, zooms[zoom])
-		tx.Write(status, fmt.Sprintf("zoom %d%%", int(zooms[zoom]*100+0.5)))
+		d := active
+		d.zoom = min(max(step, 0), len(zooms)-1)
+		tx.SetTextScale(d.buffer, zooms[d.zoom])
+		tx.Write(d.status, fmt.Sprintf("zoom %d%%", int(zooms[d.zoom]*100+0.5)))
 	}
 
 	// The code fonts editors offer, in this order, kept to the ones this
@@ -327,99 +435,176 @@ func App() *kaya.App {
 		}
 	})
 
+	// One tab: its buffer, its find bar and its status line, each widget's
+	// a11y id carrying the document's number so two tabs never share one.
+	newDocument = func(tx *kaya.Tx) *document {
+		made++
+		d := &document{id: uint64(made), n: made, zoom: 4, numbers: true}
+		docs = append(docs, d)
+		d.status = tx.Signal("new file")
+		d.count = tx.Signal("")
+		d.countTint = tx.Signal(kaya.TintNone)
+		tx.AddDocument(d.id).Title(untitled).Select().
+			OnSelected(func(tx *kaya.Tx) { activate(tx, d) }).
+			OnCloseRequested(func(tx *kaya.Tx) { ask(tx, d, func(tx *kaya.Tx) { closeDoc(tx, d) }) }).
+			OnClosed(func(tx *kaya.Tx) { forget(tx, d) })
+		id := func(name string) string { return fmt.Sprintf("%s-%d", name, d.n) }
+		var query, prev, next, done kaya.Node
+		// grow divides the MAIN axis and align owns the cross one: a
+		// full-window buffer needs both.
+		tx.MountIn(d.id, tx.Column(func() {
+			// RICH FROM LAUNCH: a plain document is a rich one with no runs,
+			// and the runs are the widget's, never the file's (§8).
+			d.buffer = tx.Textarea(func(tx *kaya.Tx, s string) {
+				// Every user edit arrives here, a native undo included.
+				d.text = s
+				mark(tx, d)
+				refind(tx, d)
+			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich().LineNumbers(true).Monospaced(true)
+
+			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
+			// (editor.steps reads it). SetInset rides the STAMPED row.
+			d.findRows = tx.Collection()
+			for row := range tx.Rows(d.findRows).All() {
+				bar := row.Row(func() {
+					query = row.Entry()
+					row.SetPlaceholder(query, "Find")
+					row.SetGrow(query, 1)
+					icon := func(id, title string, symbol kaya.Symbol) kaya.Node {
+						n := row.Button(title)
+						row.SetA11yID(n, id)
+						row.SetSymbol(n, symbol)
+						row.SetHelp(n, title)
+						return n
+					}
+					prev = icon("prev", "Previous match", kaya.SymbolBack)
+					next = icon("next", "Next match", kaya.SymbolForward)
+					// Dismiss cannot be a keystroke: no bare Escape exists.
+					done = icon("done", "Close find bar", kaya.SymbolClose)
+				})
+				row.SetInset(bar, 8)
+			}
+
+			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) takes this row's
+			// margin with it (docs/deferred.md, the inset entry).
+			tx.Row(func() {
+				tx.Label(d.status).Grow(1).A11yID(id("status"))
+				tx.Label(d.count).BindTint(d.countTint).A11yID(id("matches"))
+			}).Inset(8).A11yID(id("statusbar"))
+		}).Align(kaya.AlignStretch))
+
+		// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever
+		// stamped.
+		query.OnChange(func(tx *kaya.Tx, _ []any, s string) {
+			d.pattern = s
+			refind(tx, d)
+			// The one place the selection moves without a person asking.
+			show(tx, d, 0)
+		})
+		prev.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, d, d.at-1) })
+		next.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, d, d.at+1) })
+		// Dismiss TEARS THE BAR DOWN; nothing clears the query field, so the
+		// next Find… stamps a NEW one.
+		done.OnClick(func(tx *kaya.Tx, _ []any) {
+			d.open = false
+			d.pattern = ""
+			tx.Remove(d.findRows, findKey)
+			refind(tx, d)
+			tx.Focus(d.buffer)
+		})
+		d.buffer.OnSelection(func(tx *kaya.Tx, sel kaya.Selection) {
+			d.sel = sel
+			if active == d {
+				marks(tx, d)
+			}
+		})
+		d.buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
+			switch {
+			case f.Removed:
+				tx.Write(d.status, fmt.Sprintf("%s off %d:%d", f.Name, f.Range.Start, f.Range.End))
+			case f.Name == "block":
+				tx.Write(d.status, fmt.Sprintf("%s %d:%d", f.Value, f.Range.Start, f.Range.End))
+			default:
+				tx.Write(d.status, fmt.Sprintf("%s %d:%d", f.Name, f.Range.Start, f.Range.End))
+			}
+		})
+		tx.SetLineNumbers(d.buffer, d.numbers)
+		active = d
+		tx.Focus(d.buffer)
+		return d
+	}
+
 	app.Build(func(tx *kaya.Tx) {
 		// Before anything mounts (the set-once wall); a REQUEST, not a rule.
 		tx.BrandAccent(0x0F7B6C)
-		// docName from the first frame, so one expression names this window
-		// everywhere. Inset 0 leaves a phone's safe area alone.
-		win := tx.Window(0).Title(docName(dest)).Size(640, 420).Inset(0).VetoClose(true)
-
-		status = tx.Signal("new file")
-		count = tx.Signal("")
-		countTint = tx.Signal(kaya.TintNone)
-
-		newDoc := func(tx *kaya.Tx) {
-			text = ""
-			retarget(tx, nil, "")
-			tx.SetText(buffer, "")
-			tx.Focus(buffer)
-			tx.Write(status, "new file")
-			mark(tx)
-			refind(tx)
-		}
+		// Inset 0 leaves a phone's safe area alone. The window is titled by
+		// the document in front.
+		win := tx.Window(0).Size(640, 420).Inset(0).NewDocument(true).
+			OnNewDocument(func(tx *kaya.Tx) { activate(tx, newDocument(tx)) }).
+			OnDocumentsCloseRequested(func(tx *kaya.Tx, ids []uint64) {
+				var asked []*document
+				for _, id := range ids {
+					for _, d := range docs {
+						if d.id == id {
+							asked = append(asked, d)
+						}
+					}
+				}
+				askEach(tx, asked, asked)
+			})
 
 		// NO FILTER: the scene's documents have no extensions to match.
 		openDoc := func(tx *kaya.Tx) {
 			tx.PickFile().OnResult(func(tx *kaya.Tx, files []kaya.PickedFile) {
 				if len(files) == 0 {
-					tx.Write(status, "open cancelled")
+					tx.Write(active.status, "open cancelled")
 					return
 				}
-				openFrom(files[0])
+				for _, f := range files {
+					openFrom(f)
+				}
 			}).Show()
 		}
 
 		// The panel OPENS with the name the window is already showing.
 		saveAs := func(tx *kaya.Tx) {
-			suggested := docName(dest)
-			body := text
-			tx.SaveFile(suggested).OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
+			d := active
+			body := d.text
+			tx.SaveFile(docName(d.dest)).OnResult(func(tx *kaya.Tx, file *kaya.PickedFile) {
 				if file == nil {
-					tx.Write(status, "save cancelled")
+					tx.Write(d.status, "save cancelled")
 					return
 				}
-				saveTo(*file, body)
+				saveTo(d, *file, body)
 			}).Show()
 		}
 
 		// No dialog: the handle the user chose the file with is writable.
 		save := func(tx *kaya.Tx) {
-			if dest == nil {
+			if active.dest == nil {
 				saveAs(tx)
 				return
 			}
-			saveTo(*dest, text)
+			saveTo(active, *active.dest, active.text)
 		}
-
-		// A COMPOSITION: kaya has no "confirm before you discard".
-		ask := func(tx *kaya.Tx, then func(*kaya.Tx)) {
-			if text == saved {
-				then(tx)
-				return
-			}
-			tx.ShowAlert().
-				Title("unsaved changes").
-				Message("the document has unsaved changes").
-				Action("Discard").
-				Cancel("Keep Editing").
-				OnResult(func(tx *kaya.Tx, choice kaya.AlertChoice) {
-					if choice == kaya.AlertChoiceCancel {
-						return
-					}
-					then(tx)
-				}).
-				Show()
-		}
-
-		// The ONE call that leaves the framework — docs/traps.md, "An app can
-		// VETO a close but cannot AGREE to one".
-		quit := func(_ *kaya.Tx) { os.Exit(0) }
-
-		win.OnCloseRequested(func(tx *kaya.Tx) { ask(tx, quit) })
 
 		file := win.Menu("File")
 		file.Item("New").Shortcut("primary+n").OnActivate(func(tx *kaya.Tx) {
-			ask(tx, newDoc)
+			activate(tx, newDocument(tx))
 		})
-		file.Item("Open…").Shortcut("primary+o").OnActivate(func(tx *kaya.Tx) {
-			ask(tx, openDoc)
-		})
+		file.Item("Open…").Shortcut("primary+o").OnActivate(openDoc)
 		// The host promotes the first k primaries in catalog preorder.
 		file.Item("Save").Symbol(kaya.SymbolSave).Primary(true).
 			Shortcut("primary+s").OnActivate(save)
 		file.Item("Save As…").Shortcut("primary+shift+s").OnActivate(saveAs)
+		file.Separator()
+		file.Item("Close Tab").Shortcut("primary+w").OnActivate(func(tx *kaya.Tx) {
+			d := active
+			ask(tx, d, func(tx *kaya.Tx) { closeDoc(tx, d) })
+		})
 
-		// NO SHORTCUTS ON A ROLE: it carries the platform's own chord.
+		// NO SHORTCUTS ON A ROLE: it carries the platform's own chord, and
+		// acts on the focused widget, which is in the document in front.
 		edit := win.Menu("Edit")
 		edit.Item("Undo").Role(kaya.RoleUndo)
 		edit.Item("Redo").Role(kaya.RoleRedo)
@@ -432,12 +617,13 @@ func App() *kaya.App {
 		// why the bar carries a `done` button.
 		edit.Item("Find…").Symbol(kaya.SymbolSearch).Primary(true).
 			Shortcut("primary+f").OnActivate(func(tx *kaya.Tx) {
-			if open {
+			d := active
+			if d.open {
 				return
 			}
-			open = true
-			tx.Insert(findRows, findKey, "")
-			refind(tx)
+			d.open = true
+			tx.Insert(d.findRows, findKey, "")
+			refind(tx, d)
 		})
 
 		// Over the widget's own selection (docs/rich-text-plan.md §7). Each
@@ -451,9 +637,9 @@ func App() *kaya.App {
 			item := format.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
 				tx.Write(on, want)
 				if want {
-					tx.FormatFlag(buffer, name, true)
+					tx.FormatFlag(active.buffer, name, true)
 				} else {
-					tx.Unformat(buffer, name)
+					tx.Unformat(active.buffer, name)
 				}
 			}).Shortcut(chord)
 			if symbol != 0 {
@@ -473,12 +659,12 @@ func App() *kaya.App {
 			item := style.Toggle(label).BindChecked(on).OnToggle(func(tx *kaya.Tx, want bool) {
 				// Body cannot be taken off: a paragraph is always some kind.
 				if !want || kind == kaya.Body {
-					tx.SetBlock(buffer, kaya.Body)
+					tx.SetBlock(active.buffer, kaya.Body)
 					tx.Write(on, kind == kaya.Body)
 					return
 				}
 				tx.Write(on, true)
-				tx.SetBlock(buffer, kind)
+				tx.SetBlock(active.buffer, kind)
 			})
 			if chord != "" {
 				item.Shortcut(chord)
@@ -490,117 +676,35 @@ func App() *kaya.App {
 		paragraph("Body", kaya.Body, "primary+alt+0")
 
 		// The code editors' View menu (Sublime Text, VS Code, Zed): the
-		// gutter, the zoom chords, and the face.
+		// gutter, the zoom chords, and the face, each the active document's.
 		numbersOn = tx.Signal(true)
 		fontChoice = tx.Signal(0.0)
 		view := win.Menu("View")
 		view.Toggle("Line Numbers").BindChecked(numbersOn).OnToggle(func(tx *kaya.Tx, on bool) {
+			active.numbers = on
 			tx.Write(numbersOn, on)
-			tx.SetLineNumbers(buffer, on)
+			tx.SetLineNumbers(active.buffer, on)
 		})
 		view.Separator()
-		view.Item("Zoom In").Shortcut("primary+equal").OnActivate(func(tx *kaya.Tx) { setZoom(tx, zoom+1) })
-		view.Item("Zoom Out").Shortcut("primary+minus").OnActivate(func(tx *kaya.Tx) { setZoom(tx, zoom-1) })
+		view.Item("Zoom In").Shortcut("primary+equal").OnActivate(func(tx *kaya.Tx) { setZoom(tx, active.zoom+1) })
+		view.Item("Zoom Out").Shortcut("primary+minus").OnActivate(func(tx *kaya.Tx) { setZoom(tx, active.zoom-1) })
 		view.Item("Actual Size").Shortcut("primary+0").OnActivate(func(tx *kaya.Tx) { setZoom(tx, 4) })
 		view.Separator()
 		fontGroup = view.RadioGroup("Font")
 		fontGroup.Option("System Monospaced")
 		fontGroup.BindValue(fontChoice).OnSelect(func(tx *kaya.Tx, index int) {
+			active.font = index
 			tx.Write(fontChoice, float64(index))
-			tx.SetFamily(buffer, fontOptions[index])
+			tx.SetFamily(active.buffer, fontOptions[index])
 			name := fontOptions[index]
 			if name == "" {
 				name = "System Monospaced"
 			}
-			tx.Write(status, "font "+name)
+			tx.Write(active.status, "font "+name)
 		})
 
-		// grow divides the MAIN axis and align owns the cross one: a
-		// full-window buffer needs both.
-		tx.Mount(tx.Column(func() {
-			// RICH FROM LAUNCH: a plain document is a rich one with no runs,
-			// and the runs are the widget's, never the file's (§8).
-			buffer = tx.Textarea(func(tx *kaya.Tx, s string) {
-				// Every user edit arrives here, a native undo included.
-				text = s
-				mark(tx)
-				refind(tx)
-			}).Grow(1).A11yID("buffer").A11yLabel("Document").Rich().LineNumbers(true).Monospaced(true) // textarea#0
-
-			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
-			// (editor.steps reads it). SetInset rides the STAMPED row.
-			findRows = tx.Collection()
-			for row := range tx.Rows(findRows).All() {
-				bar := row.Row(func() {
-					query = row.Entry() // entry#0
-					row.SetPlaceholder(query, "Find")
-					row.SetGrow(query, 1)
-					icon := func(id, title string, symbol kaya.Symbol) kaya.Node {
-						n := row.Button(title)
-						row.SetA11yID(n, id)
-						row.SetSymbol(n, symbol)
-						row.SetHelp(n, title)
-						return n
-					}
-					prev = icon("prev", "Previous match", kaya.SymbolBack) // button#0
-					next = icon("next", "Next match", kaya.SymbolForward)  // button#1
-					// Dismiss cannot be a keystroke: no bare Escape exists.
-					done = icon("done", "Close find bar", kaya.SymbolClose) // button#2
-				})
-				row.SetInset(bar, 8)
-			}
-
-			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) above takes this
-			// row's margin with it (docs/deferred.md, the inset entry).
-			tx.Row(func() {
-				tx.Label(status).Grow(1).A11yID("status")             // label#0
-				tx.Label(count).BindTint(countTint).A11yID("matches") // label#1
-			}).Inset(8)
-		}).Align(kaya.AlignStretch))
-
-		tx.Focus(buffer)
+		newDocument(tx)
 		tx.ListFontFamilies()
-	})
-
-	// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever
-	// stamped.
-	query.OnChange(func(tx *kaya.Tx, _ []any, s string) {
-		pattern = s
-		refind(tx)
-		// The one place the selection moves without a person asking.
-		show(tx, 0)
-	})
-	prev.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at-1) })
-	next.OnClick(func(tx *kaya.Tx, _ []any) { show(tx, at+1) })
-
-	buffer.OnSelection(func(tx *kaya.Tx, sel kaya.Selection) {
-		for name, on := range inline {
-			tx.Write(on, sel.Has(name))
-		}
-		for kind, on := range styles {
-			tx.Write(on, sel.Block() == kind)
-		}
-	})
-
-	buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
-		switch {
-		case f.Removed:
-			tx.Write(status, fmt.Sprintf("%s off %d:%d", f.Name, f.Range.Start, f.Range.End))
-		case f.Name == "block":
-			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Value, f.Range.Start, f.Range.End))
-		default:
-			tx.Write(status, fmt.Sprintf("%s %d:%d", f.Name, f.Range.Start, f.Range.End))
-		}
-	})
-
-	// Dismiss TEARS THE BAR DOWN; nothing clears the query field, so the
-	// next Find… stamps a NEW one.
-	done.OnClick(func(tx *kaya.Tx, _ []any) {
-		open = false
-		pattern = ""
-		tx.Remove(findRows, findKey)
-		refind(tx)
-		tx.Focus(buffer)
 	})
 
 	return app

@@ -10029,9 +10029,26 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         if (!insets.isVisible(WindowInsetsCompat.Type.ime())) {
             val method = android.provider.Settings.Secure.getString(
                 activity.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+            // WHY THE KEYBOARD IS DOWN, as far as this process can see it: a
+            // window without focus is served no input, and an input method
+            // inactive for the view never took its field.
+            val imm = activity.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+            val view = kayaComposeRoot(decor)
+            // THE PROCESS'S OWN WINDOWS that can hold focus over the activity.
+            val over = listOfNotNull(
+                KayaSceneModel.alertId?.let { "alert $it" },
+                KayaSceneModel.sheets.takeIf { it.isNotEmpty() }?.let { "${it.size} sheet(s)" },
+                "documents list".takeIf { KayaSceneModel.documentsListShown || KayaSceneModel.documentsSheetWindow != null },
+                "overflow menu".takeIf { KayaSceneModel.menuOverflowOpen },
+                "emoji panel".takeIf { KayaSceneModel.emojiPickerFor != null },
+                "colour sheet".takeIf { KayaSceneModel.colorSheetFor != null },
+            ).ifEmpty { listOf("none of its own") }.joinToString(", ")
+            val served = "the activity window ${if (decor.hasWindowFocus()) "holds" else "lacks"} window " +
+                "focus (the process's windows over it: $over), the input method is " +
+                "${if (view != null && imm?.isActive(view) == true) "active" else "inactive"} for the Compose view"
             return "$verb: no software keyboard is up over the focused field $who (frame " +
                 "${kayaRectText(frame)}, $window): the root's insets report the input method's window " +
-                "not visible, and the default input method reads ${method ?: "nothing"} " +
+                "not visible, $served, and the default input method reads ${method ?: "nothing"} " +
                 "(docs/safe-area-plan.md A9, A10)"
         }
         val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
@@ -10287,6 +10304,25 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         }
     }
 
+    /** The list fully up or fully gone, with the window's focus back: a list
+     * still sliding away reads as open to the next step and is gone a moment
+     * later (measured: a read that found it closing reopened it and left it
+     * up over the next tab's keyboard). */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    private fun kayaAwaitListSettled(activity: ComponentActivity) {
+        val by = System.nanoTime() + 5_000_000_000L
+        while (System.nanoTime() < by && onUi(activity) {
+                val state = KayaSceneModel.documentsSheetState
+                val up = KayaSceneModel.documentsListShown && state != null &&
+                    state.currentValue == SheetValue.Expanded && state.targetValue == SheetValue.Expanded
+                val gone = !KayaSceneModel.documentsListShown && KayaSceneModel.documentsSheetWindow == null &&
+                    activity.window.decorView.hasWindowFocus()
+                !(up || gone)
+            }) {
+            Thread.sleep(50)
+        }
+    }
+
     /** A node of the settled documents sheet. MAIN THREAD ONLY. */
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun kayaDocumentsSheetNode(activity: ComponentActivity, match: (SemanticsNode) -> Boolean): SemanticsNode? {
@@ -10296,8 +10332,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         return kayaSemanticsWith(root.semanticsOwner.rootSemanticsNode, 0, match)
     }
 
-    /** The rows once [done] holds of them, or the last read at the bound. */
+    /** The rows once [done] holds of them, or the last read at the bound; a
+     * list the read opened it closes again, waiting for the sheet to go, so
+     * the next step meets the document (docs/doctabs-plan.md §4). */
     private fun kayaDocumentsRead(activity: ComponentActivity, done: (List<KayaDocRow>) -> Boolean): List<KayaDocRow>? {
+        kayaAwaitListSettled(activity)
+        val opened = onUi(activity) { !KayaSceneModel.documentsListShown }
         var rows: List<KayaDocRow>? = null
         val readBy = System.nanoTime() + 5_000_000_000L
         do {
@@ -10305,6 +10345,18 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             if (rows != null && done(rows)) break
             Thread.sleep(100)
         } while (System.nanoTime() < readBy)
+        if (opened) {
+            onUi(activity) { kayaHideDocumentsList() }
+            val goneBy = System.nanoTime() + 5_000_000_000L
+            // GONE MEANS THE ACTIVITY HOLDS WINDOW FOCUS AGAIN: until it does,
+            // no field of it is served the keyboard (measured: the editor's
+            // next tab typed into a window without focus).
+            while (System.nanoTime() < goneBy && onUi(activity) {
+                    KayaSceneModel.documentsSheetWindow != null || !activity.window.decorView.hasWindowFocus()
+                }) {
+                Thread.sleep(50)
+            }
+        }
         return rows
     }
 
@@ -11961,6 +12013,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     "click ${parts[1]} -> focus node=${text.id} " +
                                         "batches=$kayaBatches")
                                 KayaSceneModel.focusedId = text.id
+                                // A TAP ON A FIELD RAISES THE KEYBOARD, the one
+                                // it already holds included: a list or sheet
+                                // over it took the keyboard down and gave the
+                                // focus back without it.
+                                WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                                    .show(WindowInsetsCompat.Type.ime())
                                 true
                             } else {
                                 target(parts[1], "button", KayaSceneModel.buttons)
@@ -14244,7 +14302,10 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             Thread.sleep(100)
                         }
                         if (why != null) failures.add("${parts[0]}: $why")
-                        else kayaAwaitAnswer(answered)
+                        else {
+                            kayaAwaitAnswer(answered)
+                            kayaAwaitListSettled(activity)
+                        }
                     }
                     "move_to_new_window", "close_native_window" ->
                         failures.add("${parts[0]}: a phone has no windows to move a document into or close")
@@ -16605,7 +16666,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             val reported =
                 if (KayaSceneModel.nodes.isNotEmpty() &&
                     KayaSceneModel.root == null &&
-                    KayaSceneModel.sections.isEmpty()
+                    KayaSceneModel.sections.isEmpty() &&
+                    KayaSceneModel.documents.none { it.root != null }
                 ) {
                     listOf(
                         "${KayaSceneModel.nodes.size} widgets exist but NO ROOT IS " +
@@ -23953,7 +24015,7 @@ fun kayaUserNewDocument() {
 }
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-private fun kayaHideDocumentsList() {
+internal fun kayaHideDocumentsList() {
     val state = KayaSceneModel.documentsSheetState
     if (state == null) {
         KayaSceneModel.documentsListShown = false
@@ -23977,7 +24039,18 @@ private fun KayaDocumentsSurface(topConsumed: Boolean) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
             KayaContentBox(topConsumed, bottomConsumed = bottom != null, rides = kayaRidesNow(doc?.root),
                 root = doc?.root) {
-                doc?.root?.let { root -> androidx.compose.runtime.key(doc.id) { KayaRender(root, isRoot = true) } }
+                doc?.root?.let { root ->
+                    androidx.compose.runtime.key(doc.id) {
+                        // The front document's root is what expect_root_fills
+                        // compares, as the window's own root is.
+                        Box(Modifier.onGloballyPositioned {
+                            kayaRootSize = it.size
+                            kayaContentSize = it.findRootCoordinates().size
+                        }) {
+                            KayaRender(root, isRoot = true)
+                        }
+                    }
+                }
             }
         }
         if (bottom != null) {

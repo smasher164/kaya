@@ -1664,11 +1664,15 @@ if not typing_lint(patched, "-"):
 # RENDERED CAPTION, which is what expect_title reads there, so a title
 # read while the window is dirty answers "notes" on four lanes and
 # "*notes" on the fifth. THE STRETCH IS THE SCENE'S OWN CLAIM: from an
-# `expect_dirty true` to the next `expect_dirty false`.
+# `expect_dirty true` to the next `expect_dirty false`, and for a window of
+# documents from `expect_document_dirty "T" true` to its `false`, since the
+# title a window of documents shows is its front document's, marked with it
+# (docs/doctabs-plan.md §1.4).
 def title_dirty_lint(src, path):
     bad = []
     dirty = None
     dirty_line = 0
+    docs = {}
     for lineno, step in enumerate(src.split("\n"), start=1):
         s = step.strip()
         if not s or s.startswith("#"):
@@ -1678,6 +1682,13 @@ def title_dirty_lint(src, path):
             dirty = m.group(1) == "true"
             dirty_line = lineno
             continue
+        m = re.match(r'expect_document_dirty\s+"([^"]*)"\s+(true|false)\s*$', s)
+        if m:
+            docs[m.group(1)] = (m.group(2) == "true", lineno)
+            continue
+        t = re.match(r'expect_title\s+"([^"]*)"', s)
+        if t and docs.get(t.group(1), (False, 0))[0]:
+            dirty, dirty_line = True, docs[t.group(1)][1]
         if s.startswith("expect_title") and dirty:
             bad.append(
                 f"{path}:{lineno}: {s} — this window was claimed DIRTY "
@@ -1704,12 +1715,19 @@ if title_dirty_lint('expect_dirty true\nexpect_dirty false\n'
     selftest_fail("expect_title after the mark cleared was refused")
 if title_dirty_lint('expect_title "window probe"\n', "-"):
     selftest_fail("a scene with no dirty claim at all was refused")
+if not title_dirty_lint('expect_document_dirty "notes" true\nexpect_title "notes"\n', "-"):
+    selftest_fail("expect_title of a document claimed dirty passed")
+if title_dirty_lint('expect_document_dirty "notes" true\nexpect_document_dirty "notes" false\n'
+                    'expect_title "notes"\n', "-"):
+    selftest_fail("expect_title after the document's mark cleared was refused")
+if title_dirty_lint('expect_document_dirty "notes" true\nexpect_title "draft"\n', "-"):
+    selftest_fail("expect_title of a clean document beside a dirty one was refused")
 # AND ON THE REAL FILE THAT NEEDS IT: the perturbation moves
 # editor.steps' own launch title read to just after an
 # `expect_dirty true`; an unchanged file is a FAILED test.
 patched, applied = sub_first(
-    r"^expect_dirty true$",
-    'expect_dirty true\nexpect_title "notes"', editor_text, flags=re.M)
+    r'^expect_document_dirty "notes" true$',
+    'expect_document_dirty "notes" true\nexpect_title "notes"', editor_text, flags=re.M)
 if applied != 1:
     print(f"check-steps: SELF-TEST FAIL (the title/dirty perturbation "
           f"applied {applied} times, wanted 1 — editor.steps no longer "

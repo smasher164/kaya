@@ -2285,6 +2285,12 @@ def run_one_suite(name, slot, log):
                   f"five-lane matrix.", file=log)
             (LEGS_DIR / ".vm-dead").touch()
             return False
+        # WHAT THE GUEST SAID BEFORE IT STALLED: its steps and the one it
+        # never finished (the editor's tabs leg timed out with a bundle that
+        # named nothing, 2026-10-28).
+        said = run_ssh_out(f"cmd /c type C:\\kaya\\out_{name}.txt", log=log)
+        print(f"{name}: the guest's output before the timeout:\n{said}" if said
+              else f"{name}: the guest wrote no output before the timeout", file=log)
         # THE ONLY MOMENT A FAILING GUEST IS STILL ALIVE: every other
         # failure path arrives after the guest wrote EXIT= and went.
         # Collected BEFORE kill_guests, which destroys the evidence.

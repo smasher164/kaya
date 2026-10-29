@@ -1,21 +1,24 @@
 # THE TEXT EDITOR (docs/editor-plan.md E5) — an APP rather than a
 # conformance scene, so the assertions are the ones a person would make.
-# The app declares `dirty` as `text != saved`, which makes an
-# `expect_dirty false` after an undo a claim that the restored buffer is
-# BYTE-IDENTICAL to disk, read off the platform's own window chrome. It
-# opens on a buffer and a status line and NOTHING else, so label#1 — the
-# find tally — is empty until the bar is asked for.
+# One tab per document (docs/doctabs-plan.md §5). Each declares `dirty` as
+# `text != saved`, which makes an `expect_document_dirty ... false` after an
+# undo a claim that the restored buffer is BYTE-IDENTICAL to disk, read off
+# the platform's own tab. It opens on one tab, a buffer and a status line and
+# NOTHING else, so label#1 — the find tally — is empty until the bar is asked
+# for. The first tab's widgets are #0 and its ids end in -1; a second tab's
+# carry -2, which is how the script names them once there are two.
 expect label#0 "new file"
 expect textarea#0 ""
 expect label#1 ""
-expect_dirty false
-# The window is named before the document is.
+expect_documents "untitled"
+expect_document_dirty "untitled" false
+# The window is named by the document in front.
 expect_title "untitled"
 # THE SAME TWO LABELS IN CHILD ORDER, which the creation-ordered
 # registries cannot see. This is what fails if the find bar is ever
 # mounted at launch again: its row would land between the buffer and
-# this one, and row#0 would read the wrong row.
-expect_order row#0 "new file|"
+# this one, and the row's children would read in the wrong order.
+expect_order row@statusbar-1 "new file|"
 
 # THE BUFFER FILLS THE WINDOW: this app opened with a 240x96 box in the
 # corner of a 640x420 window while every SHARE assertion passed, because
@@ -52,8 +55,8 @@ expect_face textarea#0 monospaced
 expect_fills textarea#0
 expect_safe textarea#0
 # The status line follows the grown buffer, so it rides the keyboard (A5).
-expect_safe label@status
-expect_dirty true
+expect_safe label@status-1
+expect_document_dirty "untitled" true
 expect_menu "Edit>Undo" enabled
 
 # ---- save as ------------------------------------------------------
@@ -72,27 +75,28 @@ file_save
 # DISK rather than the length the app handed over — a write that returns
 # success and lands nowhere is exactly the failure "save" has.
 expect label#0 "saved, 15 bytes"
-# THE MARK COMES DOWN FIRST, AND EVERY expect_title STANDS BEHIND AN
-# expect_dirty false: the WinUI arm composes its unsaved asterisk into
-# the RENDERED caption, which is what expect_title reads there, so a
-# title read inside a dirty stretch cannot hold on five lanes at once
-# (tools/check-steps.py refuses the shape).
-expect_dirty false
-# The destination moved, so the TITLE moved with it: the document's name
-# lives in the chrome and nowhere else.
+# THE MARK COMES DOWN FIRST, AND EVERY expect_title STANDS BEHIND A CLEAN
+# READ: the WinUI arm composes its unsaved asterisk into the RENDERED
+# caption, which is what expect_title reads there, so a title read inside a
+# dirty stretch cannot hold on five lanes at once.
+expect_document_dirty "draft" false
+# The destination moved, so the TAB'S TITLE moved with it, and the window's.
 expect_title "draft"
 
-# ---- open a file --------------------------------------------------
+# ---- open a file, into a tab of its own --------------------------
 #
 # THE DECOY IS LOAD-BEARING: with ONE file in the directory a dialog
 # completes with it when nothing is selected, so `file_choose` would
 # pass on a backend that never selected anything. "decoy" sorts first.
+# "draft" is saved, so the file takes a NEW tab rather than replacing it.
 file_dialog_goto $TMP/kaya-editor-$PID
 menu_activate "File>Open…"
 expect_file_dialog kaya-editor-$PID decoy draft notes
 file_choose notes
-expect label#0 "opened, 1294 bytes"
-expect_dirty false
+expect label@status-2 "opened, 1294 bytes"
+expect_documents "draft|notes"
+expect_document "notes"
+expect_document_dirty "notes" false
 # Also the assertion that the DECOY was not opened: a backend that
 # completed the picker with the first-sorted file is titled `decoy`.
 expect_title "notes"
@@ -103,37 +107,38 @@ expect_title "notes"
 # SCENE IS WRONG IF IT IS EVER MORE — how much of a run one undo spends
 # is FRONTIER GRANULARITY, forbidden to a shared scene (undo-plan §5.2);
 # check-steps' typing lint refuses the shape and holds the measurement.
-expect_focused textarea#0
+expect_focused textarea@buffer-2
 type "z"
-expect_dirty true
+expect_document_dirty "notes" true
+# AND ONLY ITS OWN: the other tab's mark did not move.
+expect_document_dirty "draft" false
 # ONE UNDO PUTS THE DOCUMENT BACK BYTE FOR BYTE, with no undo stack or
 # handler in the app: Edit>Undo is a ROLE routed to whatever is focused,
-# and `expect_dirty false` is the whole-document comparison.
+# and the clean mark is the whole-document comparison.
 menu_activate "Edit>Undo"
-expect_dirty false
+expect_document_dirty "notes" false
 
 # ---- edit, and save to the file already chosen --------------------
 #
 # SAVE NEEDS NO DIALOG once a destination exists: the handle the user
 # chose the file with is writable.
-expect_focused textarea#0
+expect_focused textarea@buffer-2
 type " 99"
-expect_dirty true
+expect_document_dirty "notes" true
 menu_activate "File>Save"
-expect label#0 "saved, 1297 bytes"
-expect_dirty false
+expect label@status-2 "saved, 1297 bytes"
+expect_document_dirty "notes" false
 # THE TITLE DID NOT MOVE: a Save that re-ran the panel, or adopted some
-# other handle, renames the window here.
+# other handle, renames the tab here.
 expect_title "notes"
 
 # ---- summon the find bar ------------------------------------------
 # THE BAR IS BUILT WHEN IT IS ASKED FOR: "shown and hidden"
 # (docs/editor-plan.md E1) means STAMPED and torn down here, not the
-# `hidden` prop, so a dismissed query is gone for good. label#1 is the
-# proof it came up — a live label whose index never moves, empty while
-# the bar is away.
+# `hidden` prop, so a dismissed query is gone for good. label@matches-2 is the
+# proof it came up — a live label, empty while the bar is away.
 menu_activate "Edit>Find…"
-expect label#1 "no matches"
+expect label@matches-2 "no matches"
 expect entry#0 ""
 # THE QUERY ARRIVES BY set_text, the one departure from this script's
 # real-keystrokes rule: NOTHING CAN FOCUS A STAMPED COPY (`focus` takes
@@ -142,23 +147,23 @@ expect entry#0 ""
 # app `[` before `[0-9]+`, and that state is asserted here instead of
 # flying past unread.
 set_text entry#0 "["
-expect label#1 "bad pattern"
+expect label@matches-2 "bad pattern"
 # A query that finds nothing reads in the error colour, as Zed's count and
 # GNOME Text Editor's field do; a found one in the text's own.
-expect_tint label#1 critical
-expect_highlights textarea#0 ""
+expect_tint label@matches-2 critical
+expect_highlights textarea@buffer-2 ""
 set_text entry#0 "[0-9]+"
 # FOUR RUNS OF DIFFERENT LENGTHS, so a backend that lowered one range's
 # length onto all of them fails. The offsets are UTF-8 BYTES and each
 # assertion carries the covered TEXT as well, because the core converts
 # into the backend's unit and back: two symmetric mistakes cancel.
-expect label#1 "1 of 4"
-expect_tint label#1 none
-expect_highlights textarea#0 "28:29=3|656:659=140|1256:1258=12|1295:1297=99"
-expect_selection textarea#0 "28:29=3"
+expect label@matches-2 "1 of 4"
+expect_tint label@matches-2 none
+expect_highlights textarea@buffer-2 "28:29=3|656:659=140|1256:1258=12|1295:1297=99"
+expect_selection textarea@buffer-2 "28:29=3"
 # The `offscreen` line is what makes the `visible` one mean anything: on
 # a document that fits, containment is true before anything scrolls.
-expect_revealed textarea#0 1295:1297 offscreen
+expect_revealed textarea@buffer-2 1295:1297 offscreen
 # THE STAMPED BUTTONS' INDICES ARE STABLE HERE AND ONLY HERE: nothing
 # has been torn down yet. After a teardown a backend need not prune its
 # harness registry (the SwiftUI interpreter does not), so every later
@@ -169,17 +174,17 @@ expect_help button@next[bar] "Next match"
 click button#1
 click button#1
 click button#1
-expect label#1 "4 of 4"
-expect_selection textarea#0 "1295:1297=99"
-expect_revealed textarea#0 1295:1297 visible
+expect label@matches-2 "4 of 4"
+expect_selection textarea@buffer-2 "1295:1297=99"
+expect_revealed textarea@buffer-2 1295:1297 visible
 # The walk scrolled the last line in, so a line is cut by the viewport's top:
 # its number is clipped with its text, never drawn outside the box.
-expect_gutter textarea#0 shows 52
+expect_gutter textarea@buffer-2 shows 52
 # AND THE WALK WRAPS, both ways.
 click button#1
-expect label#1 "1 of 4"
+expect label@matches-2 "1 of 4"
 click button#0
-expect label#1 "4 of 4"
+expect label@matches-2 "4 of 4"
 
 # ---- rich text (docs/rich-text-plan.md §8): the same buffer, formatted --
 #
@@ -188,64 +193,65 @@ expect label#1 "4 of 4"
 # each act, and the status line says what it heard. Formatting is the
 # widget's, never the file's, so `dirty` does not move. Each act is reached
 # both ways a person reaches it: Bold and Body by their chords, the rest by
-# their menu paths (on a phone, the overflow's Format group).
+# their menu paths (on a phone, the overflow's Format group). The Format
+# menu acts on the document in front.
 # EACH STYLE TOGGLES, and its check is what holds over the selection
 # (docs/phone-format-plan.md §3): the platform's own check mark, read off
 # the real menu.
 expect_menu "Format>Bold" enabled
 expect_menu "Format>Bold" unchecked
 shortcut "primary+b"
-expect label#0 "bold 1295:1297"
-expect_runs textarea#0 "1295:1297 bold"
+expect label@status-2 "bold 1295:1297"
+expect_runs textarea@buffer-2 "1295:1297 bold"
 expect_menu "Format>Bold" checked
 menu_activate "Format>Italic"
-expect label#0 "italic 1295:1297"
-expect_runs textarea#0 "1295:1297 bold|1295:1297 italic"
+expect label@status-2 "italic 1295:1297"
+expect_runs textarea@buffer-2 "1295:1297 bold|1295:1297 italic"
 expect_menu "Format>Italic" checked
 # BOLD ON BOLD TEXT TAKES IT OFF.
 shortcut "primary+b"
-expect label#0 "bold off 1295:1297"
-expect_runs textarea#0 "1295:1297 italic"
+expect label@status-2 "bold off 1295:1297"
+expect_runs textarea@buffer-2 "1295:1297 italic"
 expect_menu "Format>Bold" unchecked
 expect_menu "Format>Italic" checked
 shortcut "primary+b"
-expect label#0 "bold 1295:1297"
+expect label@status-2 "bold 1295:1297"
 # A HALF-BOLD SELECTION IS NOT BOLD, and Bold on it bolds all of it (Word's
 # and Pages' rule). `format` selects the range through the widget; taking
 # off an underline nobody put on changes no run.
-format textarea#0 1294:1297 underline off
-expect label#0 "underline off 1294:1297"
+format textarea@buffer-2 1294:1297 underline off
+expect label@status-2 "underline off 1294:1297"
 expect_menu "Format>Bold" unchecked
 expect_menu "Format>Italic" unchecked
 shortcut "primary+b"
-expect label#0 "bold 1294:1297"
-expect_runs textarea#0 "1294:1297 bold|1295:1297 italic"
+expect label@status-2 "bold 1294:1297"
+expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Bold" checked
 menu_activate "Format>Paragraph Style>Heading 1"
-expect label#0 "heading1 1274:1297"
-expect_runs textarea#0 "1274:1297 block=heading1|1294:1297 bold|1295:1297 italic"
+expect label@status-2 "heading1 1274:1297"
+expect_runs textarea@buffer-2 "1274:1297 block=heading1|1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" checked
 expect_menu "Format>Paragraph Style>Body" unchecked
 shortcut "primary+alt+0"
-expect label#0 "block off 1274:1297"
-expect_runs textarea#0 "1294:1297 bold|1295:1297 italic"
+expect label@status-2 "block off 1274:1297"
+expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" unchecked
 expect_menu "Format>Paragraph Style>Body" checked
-expect_dirty false
+expect_document_dirty "notes" false
 
 # ---- a declared set is bound to the text it was declared against ---
 #
 # The document changed, so kaya DROPS the decorations and the app
 # re-declares from its own change handler: here that finds nothing, and
 # the count says so rather than going stale.
-set_text textarea#0 "scratch"
-expect textarea#0 "scratch"
+set_text textarea@buffer-2 "scratch"
+expect textarea@buffer-2 "scratch"
 # A PLAIN WRITE IS A WHOLE DOCUMENT WITH NO RUNS (§8): the bold went with
 # the text it sat on.
-expect_runs textarea#0 ""
-expect label#1 "no matches"
-expect_highlights textarea#0 ""
-expect_dirty true
+expect_runs textarea@buffer-2 ""
+expect label@matches-2 "no matches"
+expect_highlights textarea@buffer-2 ""
+expect_document_dirty "notes" true
 
 # ---- dismiss it, and it is GONE -----------------------------------
 #
@@ -253,85 +259,102 @@ expect_dirty true
 # shortcut floor reserves no bare Escape), and it is the blueprint's
 # LAST control, so `#last` names it in any copy.
 click button#last
-expect label#1 ""
-expect_focused textarea#0
+expect label@matches-2 ""
+expect_focused textarea@buffer-2
 # THE PROOF THAT THE BAR WAS TORN DOWN rather than left up: nothing in
 # the app clears that field, so an EMPTY one is a widget that did not
 # exist a moment ago. A bar that stayed mounted reads "[0-9]+" here.
 menu_activate "Edit>Find…"
 expect entry#last ""
-expect label#1 "no matches"
+expect label@matches-2 "no matches"
 click button#last
-expect label#1 ""
+expect label@matches-2 ""
 # The status line carries the last act the buffer answered (§8).
-expect_order row#0 "block off 1274:1297|"
-# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), at a BAR-FREE
-# moment deliberately: the find bar's stamped row would shift row
-# ordinals, and here the status row is the only row there is.
-expect_inset row#0 8
+expect_order row@statusbar-2 "block off 1274:1297|"
+# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3).
+expect_inset row@statusbar-2 8
 
 # ---- the View menu: the gutter and the zoom ------------------------
 #
 # The zoom is a multiple of the size the platform gives the text, so it
 # composes with the user's own text-size setting (S1).
 shortcut "primary+equal"
-expect label#0 "zoom 110%"
-expect_scaled textarea#0 1.1
+expect label@status-2 "zoom 110%"
+expect_scaled textarea@buffer-2 1.1
 menu_activate "View>Actual Size"
-expect label#0 "zoom 100%"
-expect_scaled textarea#0 1
+expect label@status-2 "zoom 100%"
+expect_scaled textarea@buffer-2 1
 menu_activate "View>Line Numbers"
-expect_gutter textarea#0 off
+expect_gutter textarea@buffer-2 off
 menu_activate "View>Line Numbers"
-expect_gutter textarea#0 on
+expect_gutter textarea@buffer-2 on
 expect_menu "View>Line Numbers" checked
 expect_menu "View>Font" value 0
 
-# ---- the unsaved-work guard, from two different doors --------------
+# ---- the unsaved-work guard, from two doors ------------------------
 #
-# Nothing in kaya says "ask before you discard": the app composes it
-# from the alert machinery and veto_close. Both doors refuse, and the
-# second proves the first dialog's id retired.
-menu_activate "File>New"
+# Nothing in kaya says "ask before you discard": the app composes it from
+# the alert machinery and the tab's own veto, armed while it is dirty.
+# File>New no longer asks, since nothing is discarded: it opens a tab.
+# Close Tab asks, and the answer that refuses keeps the tab whole.
+menu_activate "File>Close Tab"
 expect_alert "unsaved changes"
 alert_choose cancel
-expect textarea#0 "scratch"
-expect_dirty true
+expect textarea@buffer-2 "scratch"
+expect_document_dirty "notes" true
 # AND THE DIALOG IS GONE BEFORE ANYTHING ASKS FOR ANOTHER: a CANCEL's
 # continuation does nothing, so every other assertion here was already
 # true and only the dialog count can be the wait (docs/traps.md, measured
 # on the iOS lane 2026-08-10; check-steps' alert_wait_lint holds it).
 expect_alerts 0
+expect_documents "draft|notes"
+
+# ---- switch tabs: each keeps its own buffer and mark ---------------
+#
+# The menus, the mark and the title follow the tab in front; the tab left
+# behind keeps its text and its mark.
+select_document "draft"
+expect_document "draft"
+expect_document_dirty "draft" false
+expect_document_dirty "notes" true
+expect textarea#0 "alpha 1 beta 22"
+expect_title "draft"
+select_document "notes"
+expect_document "notes"
 
 # ---- and the answer that AGREES ------------------------------------
 #
-# The Discard arm, and the ONLY path that CLEARS the destination — save
-# and open both adopt one behind a dialog, New drops one silently, so
-# the title going back to "untitled" is what makes it visible.
-menu_activate "File>New"
+# The Discard arm closes the tab, and the one beside it comes to the front.
+menu_activate "File>Close Tab"
 expect_alert "unsaved changes"
 alert_choose 0
-expect textarea#0 ""
-expect label#0 "new file"
-expect_dirty false
-expect_title "untitled"
-# The same wait before the third door: the rule is about the shape, not
-# about whether this stretch would have got away without it.
 expect_alerts 0
+expect_documents "draft"
+expect_document "draft"
+expect_title "draft"
+menu_activate "File>New"
+expect label@status-3 "new file"
 
 # DIRTY AGAIN FOR THE SECOND DOOR, and this keystroke is load-bearing: a
 # CLEAN document does not ask, so the close would run through the guard
-# into the affirmative arm, which is os.Exit.
-expect_focused textarea#0
+# and end the app. A TAP ON THE NEW BUFFER FIRST, as a person makes: on a
+# phone the list the reads above opened took the keyboard down with it.
+click textarea@buffer-3
+expect_focused textarea@buffer-3
 type "q"
-expect_dirty true
+expect_documents "draft|untitled"
+expect_document "untitled"
+expect_document_dirty "untitled" true
 
+# THE WINDOW'S CLOSE asks about each unsaved tab in turn; Keep Editing
+# keeps every one.
 close_window window#0
 expect_alert "unsaved changes"
 alert_choose cancel
 expect_windows 1
-expect_dirty true
+expect_documents "draft|untitled"
+expect_document_dirty "untitled" true
 
 # One REAL-TREE read at the end: everything above reads kaya's own model
 # and would pass for an arm that drew nothing.
-expect_ax label#0 "label/new file"
+expect_ax label@status-3 "label/new file"

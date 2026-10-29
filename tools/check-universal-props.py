@@ -604,12 +604,16 @@ def compose_pushed_screen(compose_text):
     if panes == 0 or wrapped != panes:
         bad.append(f"{COMPOSE}: {wrapped} of {panes} scaffold panes take the reveal's focus "
                    "themselves (KayaPaneFocus); the rest hand it to their first text field")
-    # A covered stack is kayaCovers()'s (DESIGN.md's back rule, M16 (9), (10)).
+    # A covered stack is kayaCovers()'s (DESIGN.md's back rule, M16 (9), (10)),
+    # and a window of documents wears the bar its documents button sits in
+    # (docs/doctabs-plan.md §1.6).
     covered = ("val covered = kayaCovers()\n"
                "        val shownTop = kayaActiveEntries().lastOrNull()?.root\n"
-               "        if (KayaSceneModel.menubar.isEmpty() && !covered)")
+               "        val documents = KayaSceneModel.documents.isNotEmpty()\n"
+               "        if (KayaSceneModel.menubar.isEmpty() && !covered && !documents)")
     if covered not in compose_text:
-        bad.append(f"{COMPOSE}: a covered stack no longer wears the top bar")
+        bad.append(f"{COMPOSE}: a covered stack or a window of documents no longer "
+                   "wears the top bar")
     # THE BARS CONSUME THEIR OWN SIDES (docs/safe-area-plan.md A2): the root
     # pads nothing, so the top bar's and the section bar's grounds run under
     # the system bars, and the content between takes what they left.
@@ -1422,7 +1426,7 @@ for label, path, pattern, repl in (
      r"val pads = kayaContentPads\(topConsumed, bottomConsumed, rides\)",
      "val pads = KayaSafePads(WindowInsets(0), WindowInsets(0))"),
     ("Compose's pushed screen without its bar", COMPOSE,
-     r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered\)",
+     r"if \(KayaSceneModel\.menubar\.isEmpty\(\) && !covered && !documents\)",
      "if (KayaSceneModel.menubar.isEmpty())"),
     ("SwiftUI's pushed screen back on a collapsing large title", SWIFTUI,
      r"        #if os\(iOS\)\n"

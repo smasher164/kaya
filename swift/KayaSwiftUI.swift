@@ -14210,7 +14210,10 @@ private func kayaRunScript(_ script: String) {
                     }
                 #else
                     // THE LIST COMES UP FIRST, so the read waits for it and for
-                    // the rows to settle on the wanted ones, bounded.
+                    // the rows to settle on the wanted ones, bounded; a list the
+                    // read opened it closes again (docs/doctabs-plan.md §4).
+                    let opened = DispatchQueue.main.sync { !kayaPhoneListShown() }
+                    defer { if opened { kayaPhoneCloseList() } }
                     var got: [String]? = nil
                     let readBy = Date().addingTimeInterval(5)
                     repeat {
@@ -14261,6 +14264,8 @@ private func kayaRunScript(_ script: String) {
                         failures.append("document \"\(dirtyTitle)\" dirty \(gotDirty), wanted \(dirtyWant)")
                     }
                 #else
+                    let opened = DispatchQueue.main.sync { !kayaPhoneListShown() }
+                    defer { if opened { kayaPhoneCloseList() } }
                     var gotDirty = ""
                     let readBy = Date().addingTimeInterval(5)
                     repeat {
@@ -23762,7 +23767,10 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
 
 @MainActor func kayaWindowPixels() -> KayaWindowPixels? {
     #if os(macOS)
-        guard let window = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }),
+        // A WINDOW OF DOCUMENTS is pictured by its front tab's window, the one
+        // the reads' frames are in.
+        let front = kayaActiveStrip()?.first.map { $0.tabGroup?.selectedWindow ?? $0 }
+        guard let window = front ?? NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }),
             let content = window.contentView,
             let cg = kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image
         else { return nil }
@@ -38442,9 +38450,11 @@ struct KayaRoot: View {
                         )
                 }
             }
-            .onAppear { kayaAvailableSize = available.size }
+            // A WINDOW OF DOCUMENTS records its front document's offer
+            // (KayaDocumentRoot); this one is ordered out behind them.
+            .onAppear { if !kayaHoldsDocuments(0) { kayaAvailableSize = available.size } }
             .onChange(of: available.size) { _, size in
-                kayaAvailableSize = size
+                if !kayaHoldsDocuments(0) { kayaAvailableSize = size }
             }
         }
         // The normalized root inset, now the window's OWN (wprop 8,
@@ -38687,6 +38697,10 @@ func kayaRegisterDocumentWindow(_ did: UInt64, _ window: NSWindow) {
             primary.orderOut(nil)
         }
         kayaNSWindows[wid] = window
+        // THE WINDOW'S DECLARED SIZE IS ITS FIRST TAB'S, the primary's having
+        // been applied before this window existed (measured: 540x398 for a
+        // 640x420 declaration).
+        kayaApplyWindowSize(wid)
     }
     kayaObserveStrips()
     kayaDocumentsRearranged(report: false)
@@ -39168,16 +39182,21 @@ struct KayaDocumentRoot: View {
     var body: some View {
         let doc = scene.documentsById[documentId]
         let wid = doc?.window ?? 0
+        // THE FRONT DOCUMENT'S ROOT AND OFFER are the window's, which
+        // expect_root_fills compares (the primary root's two readings).
+        let front = scene.windows[wid]?.activeDocument == documentId
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 slot(wid, regionEdgeLeading)
                 Group {
                     if let root = doc?.root {
                         KayaRender(node: root, isRoot: true)
+                            .background(KayaSizeRecorder(front: front) { kayaRootSize = $0 })
                     }
                 }
-                .padding(scene.windows[wid]?.inset ?? 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(KayaSizeRecorder(front: front) { kayaAvailableSize = $0 })
+                .padding(scene.windows[wid]?.inset ?? 16)
                 slot(wid, regionEdgeTrailing)
             }
             slot(wid, regionEdgeBottom)
@@ -39365,6 +39384,26 @@ func kayaCloseNativeWindowDrive() -> String? {
 }
 #endif
 
+/// A size, written while its document is the front one and whenever it
+/// becomes so.
+struct KayaSizeRecorder: View {
+    let front: Bool
+    let record: (CGSize) -> Void
+
+    var body: some View {
+        GeometryReader { geo in
+            Color.clear
+                .onAppear { if front { record(geo.size) } }
+                .onChange(of: geo.size) { _, size in if front { record(size) } }
+                .onChange(of: front) { _, now in if now { record(geo.size) } }
+        }
+    }
+}
+
+func kayaHoldsDocuments(_ windowId: UInt64) -> Bool {
+    kayaScene.windows[windowId]?.documents.isEmpty == false
+}
+
 /// A phone's window that holds documents shows them (§1.6); the Mac's are
 /// their own windows, so its primary root never does.
 func kayaPhoneHoldsDocuments(_ windowId: UInt64) -> Bool {
@@ -39439,10 +39478,12 @@ struct KayaPhoneDocumentsRoot: View {
                 Group {
                     if let root = doc?.root {
                         KayaRender(node: root, isRoot: true)
+                            .background(KayaSizeRecorder(front: true) { kayaRootSize = $0 })
                     }
                 }
-                .padding(model?.inset ?? 16)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .background(KayaSizeRecorder(front: true) { kayaAvailableSize = $0 })
+                .padding(model?.inset ?? 16)
                 if let root = bottom?.root {
                     KayaRender(node: root, isRoot: true).padding(model?.inset ?? 16)
                 }
@@ -39632,6 +39673,22 @@ func kayaPhoneRows() -> [(title: String, value: String, element: NSObject)]? {
         (title: $0.accessibilityLabel ?? "", value: $0.accessibilityValue ?? "", element: $0)
     }
     return rows.isEmpty ? nil : rows
+}
+
+func kayaPhoneListShown() -> Bool {
+    kayaPhoneDocumentsWindow().flatMap { kayaScene.windows[$0]?.documentsListShown } ?? false
+}
+
+/// Closes the list a read opened, and waits for the sheet to go, so the next
+/// step meets the document rather than the list. OFF the main thread.
+func kayaPhoneCloseList() {
+    DispatchQueue.main.sync {
+        if let wid = kayaPhoneDocumentsWindow() { kayaScene.windows[wid]?.documentsListShown = false }
+    }
+    let goneBy = Date().addingTimeInterval(5)
+    while Date() < goneBy, DispatchQueue.main.sync(execute: { !kayaPresentedSheetControllers().isEmpty }) {
+        Thread.sleep(forTimeInterval: 0.05)
+    }
 }
 
 func kayaPhoneActiveTitle() -> String? {

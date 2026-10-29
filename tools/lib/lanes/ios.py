@@ -371,7 +371,7 @@ MODS = {
         "extra": 'close_document "a"; close_document "untitled 1"; expect_documents ""'},
     # The editor opens both pickers and ends past a chrome close
     # (docs/editor-plan.md).
-    ("go", "editor"): {"cut": "close_window", "keep": "expect_dirty"},
+    ("go", "editor"): {"cut": "close_window", "keep": "expect_document_dirty"},
     # A phone's list sits under the pushed thread.
     ("go", "chat"): {"drop": (("expect_selected", "row@convo[maya]"),
                               ("expect_selected", "row@convo[sam]")),

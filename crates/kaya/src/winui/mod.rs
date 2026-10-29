@@ -5962,6 +5962,11 @@ const DIRTY_MARK: &str = "*";
 /// THE DECLARED TITLE IS NEVER TOUCHED (docs/dirty-plan.md D1): the
 /// marker is composed here, on the way to the OS.
 fn window_caption(core: &CoreState, window: u64) -> String {
+    // A WINDOW OF DOCUMENTS IS TITLED AND MARKED BY ITS FRONT ONE
+    // (docs/doctabs-plan.md §1.4).
+    if let Some(page) = core.docs.active.get(&window).and_then(|d| core.docs.pages.get(d)) {
+        return if page.dirty { format!("{DIRTY_MARK}{}", page.title) } else { page.title.clone() };
+    }
     let title = core
         .nav_stacks
         .get(&window)
@@ -5991,7 +5996,7 @@ fn window_caption(core: &CoreState, window: u64) -> String {
 /// `appWindow.Title` from its own `Title` property (microsoft-ui-xaml @
 /// winui3/release/2.2.0, `TitleBar.cpp:505-513`), and the first casualty of
 /// two writers is the dirty marker — so that property is left empty.
-fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
+pub(super) fn refresh_caption(core: &CoreState, window: u64) -> windows_core::Result<()> {
     let caption = HSTRING::from(window_caption(core, window));
     let target = winui_window(core, window)?;
     target.SetTitle(&caption)?;
@@ -29644,14 +29649,19 @@ impl crate::harness::Stage for WinUiStage {
                 return read(format!("no such target {spec}"));
             };
             let Some(widget) = core.widgets.get(&id) else { return read(format!("no such target {spec}")) };
-            let Some(root) = core.mounted_roots.get(&0).and_then(|r| core.widgets.get(r)) else {
+            // A WINDOW OF DOCUMENTS shows its front document's root.
+            let document = core.docs.active.get(&0).and_then(|d| core.docs.pages.get(d)).and_then(|p| p.root.clone());
+            let mounted = core.mounted_roots.get(&0).and_then(|r| core.widgets.get(r));
+            if document.is_none() && mounted.is_none() {
                 return read(format!("{spec}: nothing is mounted in the window"));
-            };
+            }
             // A docked control is read against the whole window, which the
             // dock shares with the content (docs/styling-pass-plan.md Y8).
-            let root: FrameworkElement = match skin::docked_in(core, id) {
-                Some(window) => window_ground(&winui_window(core, window)?)?.cast()?,
-                None => root.element()?.cast()?,
+            let root: FrameworkElement = match (skin::docked_in(core, id), document, mounted) {
+                (Some(window), _, _) => window_ground(&winui_window(core, window)?)?.cast()?,
+                (None, Some(document), _) => document.cast()?,
+                (None, None, Some(root)) => root.element()?.cast()?,
+                (None, None, None) => unreachable!("refused above"),
             };
             let element: FrameworkElement = widget.element()?.cast()?;
             let at = element

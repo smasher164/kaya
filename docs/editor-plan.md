@@ -16,7 +16,11 @@ a BINDING would stay invisible.
   launch. Saving exists now, so an empty buffer is a complete story:
   type, save-as, keep working.
 - **Sublime-shaped**: one buffer filling the window, the menu bar above
-  it. **No tabs, no panes** (2026-08-10).
+  it. ~~**No tabs, no panes** (2026-08-10).~~ Tabs SHIPPED 2026-10-28 at the
+  maintainer's request ("so i guess we should add tabbing support to the text
+  editor"): one document per tab, each with its own buffer, find bar and
+  status line, File > New and Open… into tabs and Close Tab (primary+w)
+  asking when unsaved (docs/doctabs-plan.md §5). Still no panes.
 - **No syntax highlighting in v1** (2026-08-09). Recorded as a future
   slice; the textarea foundation already put a rich-capable control
   under every platform so it stays cheap.

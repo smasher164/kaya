@@ -230,18 +230,23 @@ pub(super) fn add_document(core: &mut CoreState, window: u64, doc: u64) -> windo
 fn show_active(core: &mut CoreState, window: u64) -> windows_core::Result<()> {
     let Some(tabs) = core.docs.tabs.get(&window) else { return Ok(()) };
     let children = tabs.host.Children()?;
-    children.Clear()?;
     let active = core.docs.active.get(&window).copied();
-    if let Some(record) = active.and_then(|d| core.docs.pages.get(&d)) {
-        if let Some(root) = &record.root {
+    let record = active.and_then(|d| core.docs.pages.get(&d));
+    // THE ROOT ALREADY SHOWN STAYS PUT: a re-parented root loses focus, and a
+    // title or mark refresh on every keystroke took the caret out of the
+    // buffer mid-word (measured on the editor's tabs leg, 2026-10-28).
+    let shown = match record.and_then(|r| r.root.as_ref()) {
+        Some(root) => children.Size()? == 1 && children.GetAt(0)? == *root,
+        None => children.Size()? == 0,
+    };
+    if !shown {
+        children.Clear()?;
+        if let Some(root) = record.and_then(|r| r.root.as_ref()) {
             unparent_element(root)?;
             children.Append(root)?;
         }
-        let title = record.title.clone();
-        let dirty = record.dirty;
-        winui_window(core, window)?.SetTitle(&HSTRING::from(if dirty { format!("*{title}") } else { title }))?;
     }
-    Ok(())
+    super::refresh_caption(core, window)
 }
 
 /// XAML refuses an element with a parent (docs/traps.md): a document's root

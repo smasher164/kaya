@@ -423,7 +423,7 @@ MODS = {
               "append": "click button#0;expect_sheets 1;"
                         "expect_sheet_detent medium;dismiss_sheet;"
                         "expect_sheets 0;"},
-    "editor": {"cut": ("close_window", "expect_dirty", "")},
+    "editor": {"cut": ("close_window", "expect_document_dirty", "")},
     # A PHONE SHOWS ITS REGIONS IN THE DOCUMENTS LIST AND HAS NO WINDOWS
     # (docs/doctabs-plan.md §1.6): the desktops' tail goes, and the phone ends
     # on its own empty state, Q2's carve-out.
