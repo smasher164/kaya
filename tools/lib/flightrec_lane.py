@@ -113,6 +113,8 @@ def mac_unified_log(pid, cap=SECTION_CAP, run=subprocess.run):
     parts = ([("this leg's guest", f"processID == {pid}"),
               ("replayd and ScreenCaptureKit",
                'process == "replayd" OR subsystem BEGINSWITH "com.apple.ScreenCaptureKit"'),
+              ("screencapture's errors, every run",
+               'process == "screencapture" AND messageType == error'),
               ("MediaRemote's commands",
                '(process == "mediaremoted" AND eventMessage CONTAINS[c] "command") OR '
                '(process == "perl" AND subsystem BEGINSWITH "com.apple.amp.mediaremote")'),

@@ -4090,6 +4090,51 @@ func kayaExpandPath(_ path: String) -> String {
             + "— the read that failed raced the panel"
     }
 
+    /// What a COLUMN browser published, column by column: each column's item
+    /// count and its selected item. An empty `[]` read in columns mode is
+    /// otherwise silent about whether the target's column exists at all.
+    func kayaOpenPanelColumns() -> String {
+        guard kayaLiveOpenPanel != nil,
+            let sheet = kayaPanelFind(kayaPanelAxApp(), [kayaPanelSheetId]),
+            let browser = kayaPanelFind(sheet, [KayaPanelShape.columns.rawValue])
+        else { return "" }
+        var columns: [AXUIElement] = []
+        func hunt(_ e: AXUIElement, _ depth: Int) {
+            if depth > 4 { return }
+            for child in kayaAxKids(e) {
+                switch kayaAxCopy(child, kAXRoleAttribute) as? String {
+                case "AXList": columns.append(child)
+                case "AXScrollArea": hunt(child, depth + 1)
+                default: break
+                }
+            }
+        }
+        hunt(browser, 0)
+        let each = columns.map { column -> String in
+            var count: CFIndex = -1
+            AXUIElementGetAttributeValueCount(column, kAXChildrenAttribute as CFString, &count)
+            let picked =
+                (kayaAxCopy(column, kAXSelectedChildrenAttribute) as? [AXUIElement])?.first
+                .flatMap { kayaPanelTexts($0).first } ?? "none"
+            return "\(count) items, \"\(picked)\" selected"
+        }
+        if columns.isEmpty {
+            func shape(_ e: AXUIElement, _ depth: Int) -> String {
+                let role = kayaAxCopy(e, kAXRoleAttribute) as? String ?? "?"
+                var count: CFIndex = -1
+                AXUIElementGetAttributeValueCount(e, kAXChildrenAttribute as CFString, &count)
+                if depth >= 4 || count <= 0 || count > 12 { return "\(role)(\(count))" }
+                return "\(role)[" + kayaAxKids(e).map { shape($0, depth + 1) }.joined(separator: " ") + "]"
+            }
+            let arrange =
+                CFPreferencesCopyAppValue("FK_ArrangeBy" as CFString, "com.apple.finder" as CFString)
+                .map { "\"\($0)\"" } ?? "unset"
+            return "ColumnView publishes no AXList column; its shape is \(shape(browser, 0)); "
+                + "com.apple.finder FK_ArrangeBy (the panel's Arrange By) reads \(arrange)"
+        }
+        return "ColumnView publishes \(columns.count) column(s): " + each.joined(separator: " | ")
+    }
+
     /// What the live panel is REALLY showing: its directory, and the file
     /// names its browser holds, in any view mode. nil when no panel is live or
     /// the tree is not readable — and then kayaOpenPanelWhyNot says which.
@@ -13201,8 +13246,15 @@ private func kayaRunScript(_ script: String) {
                             return !stems.contains((wanted as NSString).deletingPathExtension)
                         #endif
                     }) {
-                        failures.append(
-                            "file dialog list has \(rows), missing \"\(missing)\"")
+                        #if os(macOS)
+                            let columns = DispatchQueue.main.sync { kayaOpenPanelColumns() }
+                            failures.append(
+                                "file dialog list has \(rows), missing \"\(missing)\""
+                                    + (columns.isEmpty ? "" : " (\(columns))"))
+                        #else
+                            failures.append(
+                                "file dialog list has \(rows), missing \"\(missing)\"")
+                        #endif
                     } else {
                         observed.append("file dialog \"\(wantDir)\" \(wantNames)")
                     }

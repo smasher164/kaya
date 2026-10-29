@@ -261,8 +261,9 @@ def panel_mode_restore():
     removed only once the box reads back the value it started with. A
     restore that failed keeps the stamp, so the next run and probe-env
     both still see the debt."""
+    arranged = panel_arrange_restore()
     if not PANEL_MODE_STAMP.is_file():
-        return True
+        return arranged
     want = PANEL_MODE_STAMP.read_text(encoding="utf-8").strip()
     panel_mode_write(want)
     back = panel_mode_read()
@@ -272,6 +273,58 @@ def panel_mode_restore():
               f"-g {PANEL_MODE_KEY} -int {want}", file=sys.stderr)
         return False
     PANEL_MODE_STAMP.unlink(missing_ok=True)
+    return arranged
+
+
+# The panel's Arrange By, held off for the same legs (docs/traps.md,
+# "The open panel's Arrange By empties the columns browser").
+PANEL_ARRANGE = ("com.apple.finder", "FK_ArrangeBy")
+PANEL_ARRANGE_STAMP = ROOT / "target/panel-arrange.orig"
+
+
+def panel_arrange_read():
+    got = subprocess.run(["defaults", "read", *PANEL_ARRANGE],
+                         stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL, check=False, **TEXT)
+    return got.stdout.strip() if got.returncode == 0 else "unset"
+
+
+def panel_arrange_write(value):
+    if value == "unset":
+        run(["defaults", "delete", *PANEL_ARRANGE],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        run(["defaults", "write", *PANEL_ARRANGE, "-string", value])
+
+
+def panel_arrange_restore():
+    if not PANEL_ARRANGE_STAMP.is_file():
+        return True
+    want = PANEL_ARRANGE_STAMP.read_text(encoding="utf-8").strip()
+    panel_arrange_write(want)
+    back = panel_arrange_read()
+    if back != want:
+        print(f"validate-mac: FAILED to put {' '.join(PANEL_ARRANGE)} back: "
+              f'wanted "{want}", reads "{back}". By hand: defaults write '
+              f'{" ".join(PANEL_ARRANGE)} -string "{want}"', file=sys.stderr)
+        return False
+    PANEL_ARRANGE_STAMP.unlink(missing_ok=True)
+    return True
+
+
+def panel_arrange_off():
+    if not PANEL_ARRANGE_STAMP.is_file():
+        PANEL_ARRANGE_STAMP.parent.mkdir(parents=True, exist_ok=True)
+        PANEL_ARRANGE_STAMP.write_text(panel_arrange_read() + "\n",
+                                       encoding="utf-8")
+    panel_arrange_write("unset")
+    back = panel_arrange_read()
+    if back != "unset":
+        print(f'validate-mac: {" ".join(PANEL_ARRANGE)} did not clear — '
+              f'reads "{back}"', file=sys.stderr)
+        return False
+    orig = PANEL_ARRANGE_STAMP.read_text(encoding="utf-8").strip()
+    print(f'== file panel Arrange By off; restoring "{orig}" at exit')
     return True
 
 
@@ -286,6 +339,9 @@ def panel_mode_set(mode, name):
     is read back and the lane refuses rather than pretend it
     rotated."""
     global status
+    if not panel_arrange_off():
+        status = 1
+        return False
     if not PANEL_MODE_STAMP.is_file():
         PANEL_MODE_STAMP.parent.mkdir(parents=True, exist_ok=True)
         PANEL_MODE_STAMP.write_text(panel_mode_read() + "\n",
@@ -320,6 +376,12 @@ if PANEL_MODE_STAMP.is_file():
           f"changed; restoring "
           f"{PANEL_MODE_STAMP.read_text(encoding='utf-8').strip()}")
     if not panel_mode_restore():
+        status = 1
+if PANEL_ARRANGE_STAMP.is_file():
+    print(f"validate-mac: an earlier run left the file panel's Arrange By "
+          f"changed; restoring "
+          f"{PANEL_ARRANGE_STAMP.read_text(encoding='utf-8').strip()}")
+    if not panel_arrange_restore():
         status = 1
 
 _torn = threading.Lock()

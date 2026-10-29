@@ -657,6 +657,21 @@ bindings were not read. Settle with a census of the template grow spelling in al
 app needs it.
 KEY: template grow, SetGrow, Tpl grow, tasks.rs Details.
 
+## OPEN — the mac capture legs' video reads lose to `screencapture -l`'s one-second window lookup under host load (measured 2026-10-29)
+
+The capture scene's `expect_video_corner` and `expect_video_ink` read the
+window through `/usr/sbin/screencapture -l<window>` (kayaScreencaptureWindow
+in swift/KayaSwiftUI.swift), and ScreenCaptureKit's window lookup inside it
+gives up at 1.0 s: in a five-lane filtered run 69 of 178 lookups timed out
+and three capture legs (python, csharp, ocaml) failed every attempt of a
+step while rust and go passed (docs/traps.md, "`screencapture -l` gives up
+after ONE SECOND of window lookup"). Seen in the e056958d matrix too (rust,
+csharp, ocaml, java). The bundle now carries screencapture's error lines.
+The fix wants a read with no one-second lookup in its path, or a lane that
+keeps the host's memory from starving the window server while these legs
+run; neither was tried.
+KEY: screencapture -l, getWindowForWindowId, could not create image from window, capture-*-swiftui, kayaScreencaptureWindow.
+
 ## ~~OPEN — WinUI refuses swipes on an activatable row (measured 2026-10-26)~~ FIXED 2026-10-26: `sync_swipe_hosts` wraps the activatable container's ItemContainer (`skin::host_of`), the element its parent lays out, instead of the container's own control inside it; the chat app's conversation row is one activatable row carrying the swipes and the context menu (row@convo), and chat.steps reads its swipes, click and selected surface on every lane, watched red on Windows with the wrap cut ("kaya: lowering the row swipes failed: The parameter is incorrect. (0x80070057)")
 
 A stamped row that is activatable (`on_activate`, docs/styling-pass-plan.md Y4) and carries a

@@ -3911,6 +3911,42 @@ an ACTION, so the step wrapper never re-runs it, and its own read of the
 empty browser refuses the row permanently. A read with no retry cover
 must do its own waiting.
 
+### The open panel's Arrange By empties the columns browser
+
+2026-10-29: the three columns-mode filedialog legs (rust, python, go) went
+red in the e056958d matrix and on every rerun with `file dialog list has
+[]`, list and icons green beside them. The panel was aimed right (its
+title read the picked directory) but drawn GROUPED, "Previous 30 Days",
+"August", "Today" over each column. The grouping is the panel's Arrange
+By, a user preference in `com.apple.finder` (`FK_ArrangeBy`, here "Date
+Added"; Finder's own `FXArrangeGroupViewBy` is a different key). Grouped,
+the ColumnView publishes one AXScrollArea per path component and NO
+CHILDREN under any of them, so there is nothing to read or select;
+measured as `AXBrowser[AXScrollArea[AXScrollArea(0) x5 ...]]` with the key
+set, and 7 | 4 | 4368 | 2 | 2 items in five AXList columns with it deleted,
+same panel, same tree. Not the 4368-entry /private/tmp column: aimed under
+/Users/Shared instead, the grouped panel read the same nothing.
+
+validate-mac holds the key off for the panel rotation and restores it
+(stamp target/panel-arrange.orig, read back both ways), and the column
+reader's failure prints the browser's shape and the key's value.
+
+### `screencapture -l` gives up after ONE SECOND of window lookup (measured 2026-10-29)
+
+The mac capture legs' video reads (`expect_video_corner`, `expect_video_ink`)
+go out of process to `screencapture -l<window>`, and under a five-lane
+filtered run (memory 1.5 GB free, swap 5.1 of 6 GB) python, csharp and ocaml
+read `<screencapture -l...: exited 1>` for whole steps while rust and go
+passed beside them; the e056958d matrix lost rust, csharp, ocaml and java the
+same way. screencapture's own log names the cause: ScreenCaptureKit's
+`+[SCShareableContent getWindowForWindowId:]` "timed out", and the lookup's
+deadline is 1.0 s. Over 80 s of that run 109 lookups answered (median
+0.475 s, max 0.999 s) and 69 timed out at 1.000-1.012 s; each timeout prints
+"could not create image from window". Not the disk and not the frontmost
+Terminal: neither enters that lookup. The mac bundle carries screencapture's
+error lines since (tools/lib/flightrec_lane.py). OPEN: a read that does not
+hang on a one-second window lookup under host load (docs/deferred.md).
+
 ## The diagnostic that named a cause nobody had measured
 
 The entry that used to sit here said the legs need the app to reach the
