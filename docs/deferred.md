@@ -8300,8 +8300,24 @@ declared identity (name + icon bytes, likely the wire blob channel the
 typeface uses) lowered per platform. Design question for a future
 slice; the caption-left slot is its Windows home when it lands.
 
-## The caption mark's system-menu affordance waits on two bindings (found 2026-08-18)
+## ~~The caption mark's system-menu affordance waits on two bindings (found 2026-08-18)~~
 KEY: caption icon, system menu, NonClientRegionKind, InputNonClientPointerSource
+
+CLOSED 2026-10-29, crates/kaya/src/winui/mod.rs. The bindings were already
+there (2b3cb0c5 added them for the right-to-left caption). THE PRECEDENCE,
+MEASURED with a real click on the VM: an Icon rect registered inside the
+TitleBar control's own passthrough LOSES. The top-level window answers
+HTSYSMENU, but the child window under the mark is still the content bridge
+answering HTCLIENT, and the click opens nothing. So a caption that carries
+a mark now writes its drag regions itself (`caption_drags_by_hand`): the
+LeftHeader's children pass through except the mark, and the mark's rect is
+published as `NonClientRegionKind::Icon` on every layout pass
+(`publish_caption_icon`). A click on the mark opens the window menu at the
+click, and a double click closes the window, as in every Windows app.
+GUARD: `expect_caption_menu`, which the windows lane appends to the identity
+scene (tools/lib/lanes/win.py MODS); seven watched negatives
+(docs/traps.md, the caption mark's window menu).
+
 
 Every precedent's caption icon opens the system menu on click (the
 Win95-lineage affordance). kaya's mark cannot yet: the TitleBar control
@@ -8315,8 +8331,17 @@ bindings. Closing it: two winui-bindgen filter entries, then the
 precedence measurement the report says cannot be made until the binding
 exists (docs/chrome/winui-icon-position.md).
 
-## The identity scene cannot SEE the promoted caption's mark (proved 2026-08-18)
+## ~~The identity scene cannot SEE the promoted caption's mark (proved 2026-08-18)~~
 KEY: identity read, LeftHeader mark, read gap, wall-only guard
+
+CLOSED 2026-10-29: `expect_caption_menu` finds the mark as the window's
+automation peers publish it (an Image peer named with the declared name, under
+the TitleBar's peer), not through a UI Automation client, which may not
+attach to a guest (docs/traps.md, UI Automation cannot read the Shell's file
+dialog: the first draft did exactly that and killed the Java guest with
+0x8001010d). With the mark missing the step fails naming the Image peers it
+found; the wall stays as the geometry guard.
+
 
 The identity read walks WM_GETICON and the window class — honest for the
 window icon and the taskbar, blind to the LeftHeader-composed mark on a

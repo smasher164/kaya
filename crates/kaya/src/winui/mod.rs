@@ -7568,11 +7568,9 @@ fn element_origin_y(element: &FrameworkElement, within: &UIElement) -> windows_c
 }
 
 /// THE MARK IS AT THE CAPTION'S FAR LEFT, ARRANGED, AND BEFORE THE MENU,
-/// asserted against the arrangement XAML produced. THE HARNESS READ CANNOT
-/// SEE THIS: `expect_app_icon` reads `WM_GETICON` on the HWND, which answers
-/// identically whether the mark was composed, composed in the wrong column,
-/// or never composed — measured with the compose call deleted, the scene
-/// still passes. Deferred: `false` leaves it ARMED rather than vacuous.
+/// asserted against the arrangement XAML produced; the windows lane's
+/// `expect_caption_menu` reads the mark's presence, not its column.
+/// Deferred: `false` leaves it ARMED rather than vacuous.
 fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_core::Result<bool> {
     if APP_ICON_BITMAP.with_borrow(|slot| slot.is_none()) {
         return Ok(true);
@@ -7601,9 +7599,7 @@ fn assert_caption_mark_geometry(window: u64, titlebar: &TitleBar) -> windows_cor
              which is the Image that carries the mark (a MenuBar was {} among them). The \
              mark belongs in that container's first column, BEFORE the menu — the ruling \
              of 2026-08-18 — and refresh_caption_mark is what puts it there, from the \
-             declaration, from a window's creation and from the caption's mint. No scene \
-             can see this: expect_app_icon reads WM_GETICON, which is the WINDOW's icon \
-             and answers the same with no caption mark at all.",
+             declaration, from a window's creation and from the caption's mint.",
             if menu.is_some() { "found" } else { "not found" }
         )
     };
@@ -7973,8 +7969,13 @@ fn refresh_toolbar(core: &mut CoreState, window: u64) -> windows_core::Result<()
             let weak_titlebar = titlebar.downgrade()?;
             titlebar.LayoutUpdated(&EventHandler::<windows_core::IInspectable>::new(move |_, _| {
                 match weak_titlebar.upgrade() {
-                    Some(titlebar) if caption_drags_by_hand(&titlebar) => publish_caption_passthrough(id, &titlebar),
-                    _ => Ok(()),
+                    Some(titlebar) => {
+                        if caption_drags_by_hand(&titlebar) {
+                            publish_caption_passthrough(id, &titlebar)?;
+                        }
+                        publish_caption_icon(id, &titlebar)
+                    }
+                    None => Ok(()),
                 }
             }))?;
 
@@ -20488,6 +20489,9 @@ fn refresh_caption_mark(core: &CoreState, window: u64) -> windows_core::Result<(
     }
     Grid::SetColumn(&mark.cast::<FrameworkElement>()?, CAPTION_MARK_COLUMN)?;
     children.Append(&mark.cast::<UIElement>()?)?;
+    if titlebar.AutoRefreshDragRegions()? {
+        titlebar.SetAutoRefreshDragRegions(false)?;
+    }
     Ok(())
 }
 
@@ -20882,6 +20886,14 @@ unsafe extern "system" {
     fn DestroyWindow(hwnd: isize) -> i32;
     #[cfg(feature = "harness")]
     fn PostMessageW(hwnd: isize, msg: u32, wparam: usize, lparam: isize) -> i32;
+    #[cfg(feature = "harness")]
+    fn GetSystemMenu(hwnd: isize, revert: i32) -> isize;
+    #[cfg(feature = "harness")]
+    fn GetMenuItemCount(menu: isize) -> i32;
+    #[cfg(feature = "harness")]
+    fn GetMenuItemID(menu: isize, position: i32) -> u32;
+    #[cfg(feature = "harness")]
+    fn GetMenuStringW(menu: isize, item: u32, buf: *mut u16, len: i32, flags: u32) -> i32;
 }
 
 /// Win32's MSG, for the dialog apartment's loop. Laid out to match
@@ -21431,7 +21443,13 @@ fn mirror_frame(window: &Window) -> windows_core::Result<()> {
 /// Whether kaya writes this caption's drag regions itself: a mirrored
 /// window, and a caption carrying a tab row.
 fn caption_drags_by_hand(titlebar: &TitleBar) -> bool {
-    frame_mirrored() || doctabs::caption_row(titlebar).is_some()
+    frame_mirrored() || doctabs::caption_row(titlebar).is_some() || caption_mark(titlebar).is_some()
+}
+
+fn caption_mark(titlebar: &TitleBar) -> Option<Image> {
+    let holder = titlebar.LeftHeader().ok()?.cast::<Grid>().ok()?;
+    let children = holder.Children().ok()?;
+    (0..children.Size().ok()?).find_map(|i| children.GetAt(i).ok()?.cast::<Image>().ok())
 }
 
 /// A MIRRORED WINDOW READS ITS DRAG REGIONS MIRRORED, and the TitleBar
@@ -21449,8 +21467,22 @@ fn publish_caption_passthrough(id: bindings::Microsoft::UI::XamlWindowId, titleb
     let scale = root.RasterizationScale()?;
     let mut rects = Vec::new();
     let mut parts: Vec<FrameworkElement> = Vec::new();
-    for header in [titlebar.LeftHeader(), titlebar.RightHeader()].into_iter().flatten() {
-        parts.push(header.cast()?);
+    if let Ok(left) = titlebar.LeftHeader() {
+        match left.cast::<Grid>() {
+            Ok(holder) => {
+                let children = holder.Children()?;
+                for i in 0..children.Size()? {
+                    let child = children.GetAt(i)?;
+                    if child.cast::<Image>().is_err() {
+                        parts.push(child.cast()?);
+                    }
+                }
+            }
+            Err(_) => parts.push(left.cast()?),
+        }
+    }
+    if let Ok(right) = titlebar.RightHeader() {
+        parts.push(right.cast()?);
     }
     if let Some(view) = doctabs::caption_row(titlebar) {
         parts.extend(doctabs::row_click_parts(&view)?);
@@ -21477,6 +21509,38 @@ fn publish_caption_passthrough(id: bindings::Microsoft::UI::XamlWindowId, titleb
     let source = InputNonClientPointerSource::GetForWindowId(id)?;
     if source.GetRegionRects(NonClientRegionKind::Passthrough)?[..] != rects[..] {
         source.SetRegionRects(NonClientRegionKind::Passthrough, &rects)?;
+    }
+    Ok(())
+}
+
+fn publish_caption_icon(id: bindings::Microsoft::UI::XamlWindowId, titlebar: &TitleBar) -> windows_core::Result<()> {
+    use bindings::Microsoft::UI::Input::{InputNonClientPointerSource, NonClientRegionKind};
+    use bindings::Windows::Graphics::RectInt32;
+    let Ok(root) = titlebar.XamlRoot() else { return Ok(()) };
+    let Ok(ground) = root.Content() else { return Ok(()) };
+    let scale = root.RasterizationScale()?;
+    let mut rects = Vec::new();
+    if let Some(mark) = caption_mark(titlebar) {
+        let element: FrameworkElement = mark.cast()?;
+        let (w, h) = (element.ActualWidth()?, element.ActualHeight()?);
+        if w > 0.0 && h > 0.0 && mark.cast::<UIElement>()?.Visibility()? == Visibility::Visible {
+            let b = mark.cast::<UIElement>()?.TransformToVisual(&ground)?.TransformBounds(bindings::Windows::Foundation::Rect {
+                X: 0.0,
+                Y: 0.0,
+                Width: w as f32,
+                Height: h as f32,
+            })?;
+            rects.push(RectInt32 {
+                X: (f64::from(b.X) * scale).round() as i32,
+                Y: (f64::from(b.Y) * scale).round() as i32,
+                Width: (f64::from(b.Width) * scale).round() as i32,
+                Height: (f64::from(b.Height) * scale).round() as i32,
+            });
+        }
+    }
+    let source = InputNonClientPointerSource::GetForWindowId(id)?;
+    if source.GetRegionRects(NonClientRegionKind::Icon)?[..] != rects[..] {
+        source.SetRegionRects(NonClientRegionKind::Icon, &rects)?;
     }
     Ok(())
 }
@@ -21575,6 +21639,185 @@ fn nc_hit(hwnd: isize, x: i32, y: i32) -> isize {
         let lp = ((y as u32 as isize & 0xffff) << 16) | (x as u32 as isize & 0xffff);
         SendMessageW(target, WM_NCHITTEST, 0, lp)
     }
+}
+
+/// `expect_caption_menu`'s read (docs/deferred.md, the caption mark's system
+/// menu): the mark as the window's automation peers publish it (no UI
+/// Automation client may attach to a guest, docs/traps.md), the hit test
+/// the child window under its centre answers, and what the press that
+/// answer means opens.
+#[cfg(feature = "harness")]
+fn caption_menu_read(hwnd: isize, name: &str, mark: Result<(i32, i32, i32, i32), String>) -> Result<String, String> {
+    const WM_NCHITTEST: u32 = 0x0084;
+    const WM_NCLBUTTONDOWN: u32 = 0x00A1;
+    const WM_NCLBUTTONUP: u32 = 0x00A2;
+    const WM_CANCELMODE: u32 = 0x001F;
+    const HTSYSMENU: isize = 3;
+    let (x, y, w, h) = mark?;
+    let (cx, cy) = (x + w / 2, y + h / 2);
+    let mut at = Point32 { x: cx, y: cy };
+    // SAFETY: a live HWND and a stack POINT; the hit test is a query.
+    let (child, code) = unsafe {
+        ScreenToClient(hwnd, &mut at);
+        let child = ChildWindowFromPointEx(hwnd, at, 0x0001);
+        let target = if child == 0 { hwnd } else { child };
+        let lp = ((cy as u32 as isize & 0xffff) << 16) | (cx as u32 as isize & 0xffff);
+        (target, SendMessageW(target, WM_NCHITTEST, 0, lp))
+    };
+    let class = class_name(child);
+    if code != HTSYSMENU {
+        return Err(format!(
+            "the caption's mark ({w}x{h} at {x},{y}, its automation peer's bounds on screen) answers hit test {code} from its \
+             window {class:?} at its centre {cx},{cy}, not HTSYSMENU (3), the answer whose press opens the window menu"
+        ));
+    }
+    let lp = ((cy as u32 as isize & 0xffff) << 16) | (cx as u32 as isize & 0xffff);
+    WinUiStage::foreground_guest("the caption mark's press");
+    // SAFETY: posts to a live HWND of this process.
+    unsafe {
+        PostMessageW(child, WM_NCLBUTTONDOWN, code as usize, lp);
+        PostMessageW(child, WM_NCLBUTTONUP, code as usize, lp);
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    let menu = loop {
+        if let Some(menu) = process_menu_window() {
+            break menu;
+        }
+        if std::time::Instant::now() > deadline {
+            return Err(format!(
+                "the caption's mark answers HTSYSMENU from {class:?}, and no menu window of this process \
+                 appeared within 3 s of the press at {cx},{cy}; the foreground is {}",
+                WinUiStage::foreground_holder()
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    const MN_GETHMENU: u32 = 0x01E1;
+    // SAFETY: a live menu window of this process; the message is a query.
+    let opened = menu_items(unsafe { SendMessageW(menu, MN_GETHMENU, 0, 0) });
+    let own = menu_items(unsafe { GetSystemMenu(hwnd, 0) });
+    // SAFETY: a live HWND of this process; DefWindowProc ends its menu.
+    unsafe { SendMessageW(hwnd, WM_CANCELMODE, 0, 0) };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while process_menu_window().is_some() {
+        if std::time::Instant::now() > deadline {
+            return Err(format!("the window menu ({opened}) was still open 2 s after WM_CANCELMODE"));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    if opened != own {
+        return Err(format!("the mark's press opened the menu {opened}, and the window's own system menu is {own}"));
+    }
+    Ok(format!("caption mark {name:?} {w}x{h} answers HTSYSMENU; its press opens the window menu {opened}"))
+}
+
+/// The caption's Image peers as `(name, rect in screen pixels)`, walked
+/// from the TitleBar's own peer.
+#[cfg(feature = "harness")]
+fn caption_mark_peer(core: &CoreState, name: &str) -> windows_core::Result<Result<(i32, i32, i32, i32), String>> {
+    use bindings::Microsoft::UI::Xaml::Automation::Peers::{AutomationControlType, AutomationPeer, FrameworkElementAutomationPeer};
+    let Some(titlebar) = core.window_titlebars.get(&0) else {
+        return Ok(Err("the primary window has no promoted caption, so it carries no mark".to_owned()));
+    };
+    let mut stack: Vec<AutomationPeer> = vec![FrameworkElementAutomationPeer::CreatePeerForElement(&titlebar.cast::<UIElement>()?)?];
+    let mut seen = Vec::new();
+    while let Some(peer) = stack.pop() {
+        if peer.GetAutomationControlType()? == AutomationControlType::Image {
+            let named = peer.GetName()?.to_string();
+            if named == name {
+                // THE PEER ANSWERS IN THE ISLAND'S DIP, from the content's
+                // top left (measured 16,16 on the VM at scale 1, where UI
+                // Automation's own read was 76,69 on screen).
+                let r = peer.GetBoundingRectangle()?;
+                let scale = titlebar.XamlRoot()?.RasterizationScale()?;
+                let px = |v: f32| (f64::from(v) * scale).round() as i32;
+                let origin = window_hwnd(core, 0).map(client_origin).unwrap_or(Point32 { x: 0, y: 0 });
+                return Ok(Ok((origin.x + px(r.X), origin.y + px(r.Y), px(r.Width), px(r.Height))));
+            }
+            seen.push(named);
+        }
+        if let Ok(children) = peer.GetChildren() {
+            for i in 0..children.Size()? {
+                stack.push(children.GetAt(i)?);
+            }
+        }
+    }
+    Ok(Err(format!(
+        "the caption's automation peers hold {} Image peer(s) ({seen:?}) and none is named {name:?}, \
+         the app's declared name the caption's mark carries",
+        seen.len()
+    )))
+}
+
+/// What the window's non-client input publishes, in client pixels, and
+/// where its client area sits on screen.
+#[cfg(feature = "harness")]
+fn caption_icon_regions(core: &CoreState) -> windows_core::Result<String> {
+    use bindings::Microsoft::UI::Input::{InputNonClientPointerSource, NonClientRegionKind};
+    let target = winui_window(core, 0)?;
+    let source = InputNonClientPointerSource::GetForWindowId(target.AppWindow()?.Id()?)?;
+    let fmt = |kind| -> windows_core::Result<String> {
+        Ok(source
+            .GetRegionRects(kind)?
+            .iter()
+            .map(|r| format!("{},{} {}x{}", r.X, r.Y, r.Width, r.Height))
+            .collect::<Vec<_>>()
+            .join(" "))
+    };
+    let origin = window_hwnd(core, 0).map(client_origin).unwrap_or(Point32 { x: 0, y: 0 });
+    Ok(format!(
+        "the non-client input publishes Icon [{}] and Passthrough [{}], client origin {},{} on screen",
+        fmt(NonClientRegionKind::Icon)?,
+        fmt(NonClientRegionKind::Passthrough)?,
+        origin.x,
+        origin.y
+    ))
+}
+
+#[cfg(feature = "harness")]
+fn class_name(hwnd: isize) -> String {
+    let mut class = [0u16; 128];
+    // SAFETY: a stack buffer of the length passed.
+    let n = unsafe { GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32) };
+    String::from_utf16_lossy(&class[..n.max(0) as usize])
+}
+
+/// A visible popup menu window (`#32768`) owned by this process.
+#[cfg(feature = "harness")]
+fn process_menu_window() -> Option<isize> {
+    unsafe extern "system" fn visit(hwnd: isize, found: isize) -> i32 {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        if pid == std::process::id() && unsafe { IsWindowVisible(hwnd) } != 0 && class_name(hwnd) == "#32768" {
+            unsafe { *(found as *mut isize) = hwnd };
+            return 0;
+        }
+        1
+    }
+    let mut found: isize = 0;
+    unsafe { EnumWindows(Some(visit), &mut found as *mut isize as isize) };
+    (found != 0).then_some(found)
+}
+
+/// A menu's items as `id:text|...`, the mnemonic marks and the chord
+/// column dropped, a separator as `-`.
+#[cfg(feature = "harness")]
+fn menu_items(menu: isize) -> String {
+    const MF_BYPOSITION: u32 = 0x0400;
+    if menu == 0 {
+        return "<no menu handle>".to_owned();
+    }
+    let count = unsafe { GetMenuItemCount(menu) };
+    let mut items = Vec::new();
+    for i in 0..count.max(0) {
+        let id = unsafe { GetMenuItemID(menu, i) };
+        let mut buf = [0u16; 128];
+        let n = unsafe { GetMenuStringW(menu, i as u32, buf.as_mut_ptr(), buf.len() as i32, MF_BYPOSITION) };
+        let text = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
+        let text = text.split('\t').next().unwrap_or_default().replace('&', "");
+        items.push(if text.is_empty() { "-".to_owned() } else { format!("{id:#x}:{text}") });
+    }
+    if items.is_empty() { format!("<{count} items>") } else { items.join("|") }
 }
 
 fn window_hwnd(core: &CoreState, window: u64) -> Option<isize> {
@@ -28680,6 +28923,26 @@ impl crate::harness::Stage for WinUiStage {
     /// (Cargo.toml, the Win32_UI_Accessibility note). The button is found by
     /// the declared AUMID, or by the window's title while it still groups
     /// under the exe.
+    fn caption_menu(&self) -> Result<String, String> {
+        let read = Self::on_ui_read(|core| {
+            let name = APP_IDENTITY.with_borrow(|slot| slot.as_ref().map(|id| id.name.clone()));
+            let Some(name) = name else { return Ok(None) };
+            let mark = caption_mark_peer(core, &name)?;
+            let regions = caption_icon_regions(core)?;
+            Ok(Some((window_hwnd(core, 0), name, mark.map_err(|why| format!("{why}; {regions}")).map(|m| (m, regions)))))
+        })
+        .map_err(|e| format!("the window could not be read: {e}"))?;
+        let Some((hwnd, name, mark)) = read else {
+            return Err("this app declared no identity, so its caption carries no mark".to_owned());
+        };
+        let Some(hwnd) = hwnd else { return Err("the primary window has no HWND".to_owned()) };
+        let (mark, regions) = match mark {
+            Ok((m, r)) => (Ok(m), r),
+            Err(e) => (Err(e), String::new()),
+        };
+        caption_menu_read(hwnd, &name, mark).map_err(|why| format!("{why}; {regions}"))
+    }
+
     fn badge(&self) -> String {
         let title = self.window_title(0).replace('\'', "''");
         let aumid = declared_app_id().unwrap_or_default().replace('\'', "''");

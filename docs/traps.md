@@ -19702,3 +19702,35 @@ left to the control. The read is WinUI's `document_row` under every
 `expect_documents` (the scroll buttons DRAWN, judged up the visual tree: the
 scroll viewer hides them by collapsing a panel above them, and the buttons'
 own Visibility stays Visible); watched red with `reflow` cut.
+
+## The caption mark's window menu on WinUI
+
+Measured 2026-10-29 on the VM (a real SendInput click on the mark of the
+identity guest, the guest held by a settle):
+
+- AN ICON RECT INSIDE THE TITLEBAR CONTROL'S PASSTHROUGH LOSES. With
+  `SetRegionRects(NonClientRegionKind::Icon, …)` published and the control
+  still writing its own passthrough over the whole LeftHeader, the top-level
+  HWND answers HTSYSMENU at the mark, but `WindowFromPoint` there is the
+  content bridge (`Microsoft.UI.Content.DesktopChildSiteBridge`) answering
+  HTCLIENT, and the click opens nothing. Leaving the mark OUT of the
+  passthrough makes the child under it `InputNonClientPointerSource`,
+  answering 3, and the click opens the window menu. Hit tests asked of the
+  TOP-LEVEL window say nothing about this; ask the child under the point
+  (`nc_hit`, `caption_menu_read`).
+- A POSTED WM_NCLBUTTONDOWN(HTSYSMENU) TO THE TOP-LEVEL OPENS THE MENU
+  WHATEVER THE REGIONS SAY. A guard that posts a constant code is vacuous;
+  `expect_caption_menu` posts the code the child under the mark ANSWERED.
+- AFTER THE HARNESS'S FOREGROUND DANCE (`foreground_guest`) the same child
+  answers HTCAPTION (2) at the mark for at least 3 s, in all six languages,
+  where a plain `SetForegroundWindow` keeps HTSYSMENU and a real click still
+  opens the menu. So the hit test is read BEFORE the dance and the press is
+  posted after it.
+- The mark's automation peer answers `GetBoundingRectangle` in the island's
+  DIP from the client's top left (16,16 at scale 1, where UI Automation's
+  read was 76,69 on screen).
+- UI Automation reads the system menu (#32768) as a Pane with no children;
+  `MN_GETHMENU` and `GetMenuStringW` read its items. And a UI Automation
+  client reading the GUEST'S OWN window killed the Java guest with
+  0x8001010d on the first draft of the step (the file-dialog entry above);
+  the mark is read through its peer instead.

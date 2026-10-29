@@ -203,6 +203,8 @@ the input system's precedence that **cannot be measured until the binding
 exists**. The estimate is one filter change plus one measurement, not one
 filter change.
 
+**SUPERSEDED 2026-10-29** (docs/deferred.md, the caption mark's system menu, struck): the Icon rect inside the control's passthrough measured LOSING, so kaya writes a marked caption's drag regions itself and a click on the mark opens the window menu. What follows is the state this report found.
+
 **The current behaviour, stated plainly:** clicking the mark does nothing,
 double-clicking it does nothing, and the window's system menu is still
 reachable the two ways it always was — Alt+Space and a right-click on the
@@ -527,14 +529,16 @@ still carry the identity depth stubs the previous slice logged.
 
 ## 12. WHAT THE COORDINATOR MUST CARRY FORWARD
 
-1. **The caption-icon affordance is two bindgen filter entries plus a
+1. (DONE 2026-10-29; docs/deferred.md, the caption mark's system menu.)
+   **The caption-icon affordance is two bindgen filter entries plus a
    measurement away** (§4): `Microsoft.UI.Input.InputNonClientPointerSource`
    and `NonClientRegionKind` in `tools/winui-bindgen`'s filter, then
    `SetRegionRects(NonClientRegionKind.Icon, [rect])` on every layout pass,
    then a measurement of whether an `Icon` rect registered INSIDE the
    control's own passthrough rect wins. Until then, clicking the mark does
    nothing, which is stated rather than hidden.
-2. **The read gap is closed by a wall, not by a scene** (§7). If the
+2. (DONE 2026-10-29: `expect_caption_menu` reads the mark's automation peer.)
+   **The read gap is closed by a wall, not by a scene** (§7). If the
    maintainer wants it scene-visible, the shape is a new harness verb, not
    a wider `expect_app_icon` string.
 3. **Any thread-local holding a XAML object in this backend needs the

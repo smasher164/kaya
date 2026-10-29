@@ -1777,9 +1777,29 @@ def expect_arms(text, pattern, end_marker):
 # it cannot pass vacuously — the process dies naming the scene and the
 # platform. Without this the rule would push a half-built backend into
 # faking an observation.
+# AND AN ARM THAT ONLY REFUSES cannot pass either: a lane's own verb
+# (expect_caption_menu) fails on every other host, with no branch that
+# could skip the failure.
+REFUSAL_BRANCH = re.compile(r"\b(if|guard|switch|when|for|while|else)\b|\?\?|\?:")
+
+
 def records_or_refuses(body, appender):
+    head, _, rest = body.partition("\n")
+    if "failures." in rest and not REFUSAL_BRANCH.search(rest):
+        return True
     return (appender in body or "epthStub(" in body
             or "epth_stub(" in body)
+
+
+for _shape, _body, _want in (
+        ("an unconditional refusal",
+         '"expect_x" -> {\n    failures.add("expect_x: not here")\n}', True),
+        ("a refusal behind a branch", '"expect_x" -> {\n    if (a) failures.add("no")\n}', False),
+        ("a guarded refusal", 'case "expect_x":\n    guard ok else { failures.append("no") }', False)):
+    if records_or_refuses(_body, "observed.add(") != _want:
+        fail(f"self-test: records_or_refuses misjudges {_shape}")
+    else:
+        print(f"check-verbs: self-test OK (records_or_refuses judges {_shape})")
 
 
 for verb, body in expect_arms(swift, r'case "(expect[a-z_]*)":',

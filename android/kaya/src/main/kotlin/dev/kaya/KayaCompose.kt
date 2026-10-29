@@ -13834,6 +13834,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 "fullscreen (docs/fullscreen-plan.md §2); the phone " +
                                 "lanes drop the user half of the scene")
                     }
+                    "expect_caption_menu" -> {
+                        failures.add(
+                            "expect_caption_menu: Windows' verb, which only the windows lane " +
+                                "appends (tools/lib/lanes/win.py MODS); Android draws no caption")
+                    }
                     "expect_titlebar", "move_pointer" -> {
                         failures.add(
                             "${parts[0]}: GTK's verb, which only the linux lane appends " +

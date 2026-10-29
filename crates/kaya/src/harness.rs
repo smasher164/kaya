@@ -769,6 +769,11 @@ pub enum Step {
     /// The badge the PLATFORM shows on the app's icon reads this text, ""
     /// for none (docs/app-badge-plan.md §4).
     ExpectBadge(String),
+    /// The app's mark in a promoted caption, found through UI Automation, and
+    /// the window menu a click on it opens, compared with the window's own
+    /// system menu (docs/deferred.md, the caption mark's system menu).
+    /// Windows'; the windows lane appends it (tools/lib/lanes/win.py MODS).
+    ExpectCaptionMenu,
     /// `expect_video_ink video#0 "C83C1E"`: the video view's centre as the
     /// WINDOW SERVER composited it, in sRGB, within VIDEO_INK_TOLERANCE per
     /// channel (docs/media-plan.md §8 ruling 2): a player's picture is in
@@ -1433,6 +1438,7 @@ impl Step {
             | Step::ExpectNotification(..)
             | Step::ExpectNoNotification(..)
             | Step::ExpectBadge(..)
+            | Step::ExpectCaptionMenu
             | Step::SessionSend(..)
             | Step::ExpectNowPlaying(..)
             | Step::ExpectNowPlayingArt(..)
@@ -1628,6 +1634,7 @@ impl Step {
             Step::ExpectNotification { .. } => true,
             Step::ExpectNoNotification { .. } => true,
             Step::ExpectBadge { .. } => true,
+            Step::ExpectCaptionMenu => true,
             Step::ExpectVideoInk(..) => true,
             Step::ExpectVideoBox(..) => true,
             Step::ExpectVideoCorner(..) => true,
@@ -2615,6 +2622,13 @@ pub trait Stage: Send + 'static {
     /// The badge the PLATFORM shows on the app's icon, "" for none: its own
     /// record, never kaya's copy of the count (docs/app-badge-plan.md §4).
     fn badge(&self) -> String;
+    /// `expect_caption_menu`'s read: the mark, the hit test its centre
+    /// answers, and the menu that answer opens.
+    fn caption_menu(&self) -> Result<String, String> {
+        Err("expect_caption_menu is Windows' verb, which only the windows lane appends \
+             (tools/lib/lanes/win.py MODS): this backend draws no app mark in a caption"
+            .to_owned())
+    }
     /// The video view's centre pixel as the window server composited the
     /// window, converted to sRGB, as `RRGGBB`; `<…>` saying what was
     /// measured when there is no picture to read (docs/media-plan.md §3).
@@ -4043,6 +4057,12 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectNoNotification(id)
             }
             "expect_badge" => Step::ExpectBadge(parse_string(rest)?),
+            "expect_caption_menu" => {
+                if !rest.trim().is_empty() {
+                    return Err(format!("expect_caption_menu takes no argument: {line:?}"));
+                }
+                Step::ExpectCaptionMenu
+            }
             "pick_emoji" => Step::PickEmoji(parse_string(rest)?),
             "notification_activate" => {
                 let id = rest.trim().parse::<u64>().map_err(|_| {
@@ -7016,6 +7036,7 @@ fn run_with_log(
                 Ok(got) => Err(format!("player {n} open {got}, wanted {want}")),
                 Err(why) => Err(format!("player {n}: {why}")),
             })),
+            Step::ExpectCaptionMenu => Some(stage.caption_menu()),
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
                 if got == *want {

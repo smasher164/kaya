@@ -927,8 +927,9 @@ ORDER = [
 # camera would answer each other in_use, and nothing else in the lane opens
 # them. The runner keeps the lane's devices up around every block holding one.
 # The flyout group: two context-menu legs at once take the foreground from
-# each other at every open (docs/traps.md, the flyout a neighbour dismissed).
-SERIAL_GROUPS = {"camera": ("capture", "capture_denied"), "flyout": ("music_context", "rowmenu")}
+# each other at every open (docs/traps.md, the flyout a neighbour dismissed);
+# identity's window menu is one more (its caption mark's press).
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied"), "flyout": ("music_context", "rowmenu", "identity")}
 
 
 def serial_group(leg):
@@ -1041,6 +1042,9 @@ def wired_scenes():
 # has no selection of its own to move.
 MODS = {
     "tracks": {"cut": "press down", "keep": "expect_tint expect_rows"},
+    # THE CAPTION MARK OPENS THE WINDOW MENU (docs/deferred.md, the caption
+    # mark's system menu): no other lane draws a mark in its caption.
+    "identity": {"append": "expect_caption_menu"},
 }
 
 
@@ -1055,10 +1059,14 @@ def staged_scenes(scenes_dir, out_dir):
         if cut is None:
             shipped.append(path)
             continue
-        prefix, dropped = scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="windows")
+        if "cut" in cut:
+            prefix, dropped = scene_cut.scene_prefix(path, cut["cut"], cut["keep"], who="windows")
+        else:
+            prefix, dropped = path.read_text(encoding="utf-8").splitlines(), []
         for line in dropped:
             if line.strip():
                 print(f"deploy-win: NOT RUN on this host (cut at `{cut['cut']}`): {path.stem}: {line.strip()}")
+        prefix += [step.strip() for step in cut.get("append", "").split(";") if step.strip()]
         staged = pathlib.Path(out_dir) / path.name
         staged.write_text("\n".join(prefix) + "\n", encoding="utf-8")
         shipped.append(staged)

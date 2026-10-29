@@ -12760,6 +12760,10 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("\(prefix)fullscreen \(got), wanted \(want)")
                 }
+            case "expect_caption_menu":
+                failures.append(
+                    "expect_caption_menu: Windows' verb, which only the windows lane appends "
+                        + "(tools/lib/lanes/win.py MODS); a macOS caption carries no app mark")
             case "expect_titlebar", "move_pointer":
                 failures.append(
                     "\(parts[0]): GTK's verb, which only the linux lane appends "
