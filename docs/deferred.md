@@ -9,6 +9,15 @@ Landed history lives in git; this file only carries what is still open.
 scroll/nav breadth, matrix-speed, and backend-roster sagas landed and
 moved to git history; their traps live in docs/traps.md.)
 
+## RULING — a font picker with family and face, native on three platforms and kaya-drawn on two (docs/font-picker-plan.md, proposed 2026-10-29)
+KEY: font picker, show_font_dialog, font_dialog_result, list_font_faces, font_weight, font_italic, font_width, NSFontPanel, UIFontPickerViewController, GtkFontDialog, expect_face face
+
+Proposed with measurements on every lane; §10 asks seven questions (the Mac's
+live panel versus one answer, code fonts only on the Mac, what Bold means over
+a thin or heavy face, synthesis, oblique, GNOME's size row, listing faces).
+Nothing is built. Replaces docs/code-surface-plan.md M5. Closing this entry
+also closes the iOS family-list entry below, whose trigger is this ruling.
+
 ## BUILD — document tabs over surfaces, native on each platform (docs/doctabs-plan.md, ruled 2026-10-28): every backend, the nine bindings and the C floor built, the scene and the editor's tabs green in 48 legs on five lanes (2026-10-28); the WinUI tab row in the title bar (2026-10-29); the review page open
 KEY: doctabs, document tabs, add_document, select_document, close_document, set_document_prop, add_region, DOCUMENT_PROPS, dprop, region_edge, new_document, document_selected, document_close_requested, documents_close_requested, document_closed, new_document_requested, document_moved, DocumentRef, DocumentProp, RegionEdge, KayaDocumentModel, KayaRegionModel, KayaDocumentRoot, KayaDocumentResponder, KayaRegionSlot, kayaPlaceRegions, kayaMoveRegionHost, expect_documents, expect_document, expect_document_dirty, move_to_new_window, close_native_window, doctabs.steps, check-doctabs, DEPTH STUB doctabs
 
