@@ -46,11 +46,12 @@ three things no gate holds yet:
     fontpick scene reads labels and a textarea only, which is why it stayed
     green; a scene step reading an entry at a missing bold is the wall, and
     the drawing is the open half.
-  - **The macOS 26 font panel still shows its size field and its B I U
-    effects menu** in the toolbar although kaya's mode mask leaves size and
-    effects out. They are ignored (the answer is a family and a face), but a
-    user can change them to no effect. Unmeasured: whether any public route
-    hides them in the toolbar form of the panel.
+  - ~~**The macOS 26 font panel still shows its size field and its B I U
+    effects menu**~~ — FIXED 2026-10-29: the panel asks its modes of the
+    responder chain, never of NSFontManager's target, so the agent joins it as
+    the application's next responder and the toolbar keeps typography and
+    search (docs/traps.md, the font panel's mode mask); the Mac's
+    `expect_font_dialog` fails while a masked item shows.
   - **The WinUI picker's face row and preview fall below its family list** in
     a small window (556 by 378 in the capture), out of view; the list is a
     fixed 260 px. The dialog wants to give the list what is left after the

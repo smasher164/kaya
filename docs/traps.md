@@ -19799,3 +19799,19 @@ kaya builds sets `KeyboardAcceleratorPlacementMode::Hidden`
 (`hide_accelerator_tip`); the WinUI bar read behind `expect_menu_bar`
 refuses a top-level row with an accelerator whose mode is not Hidden,
 watched red on menus_rust with the setter cut.
+
+## The font panel's mode mask is asked of the responder chain (measured 2026-10-29)
+
+The macOS 26 font panel showed its size field and its B I U effects menu
+although kaya's agent answered `validModesForFontPanel` without them. The
+panel asks its modes of the responder chain and never of
+`NSFontManager.target`, which is where the agent sat (a plain NSObject): a
+probe with the agent only as the target was asked 0 times, with the agent
+as the main window's first responder 5 times. The lanes' guests never
+activate (the entry above, a Mac guest has no key window), so there is no
+main window and a window-level join is asked nothing either; set as
+`NSApp.nextResponder` the agent is asked 5 to 10 times, active or not, and
+the toolbar keeps only typography and search. A panel made key in the turn
+it is created, with the agent only on a window, was asked nothing.
+`expect_font_dialog` on the Mac fails while the panel's toolbar still
+holds a masked item (kayaFontPanelUnmasked), watched red with the join cut.

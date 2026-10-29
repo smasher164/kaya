@@ -10418,6 +10418,18 @@ func kayaFontDialogVerdict(_ listed: [(String, Bool)]?, _ want: String) -> (Stri
         return views(cell).compactMap { ($0 as? NSTextField)?.stringValue }.filter { !$0.isEmpty }.last ?? ""
     }
 
+    /// The toolbar items the agent's mode mask leaves out that the panel still
+    /// shows, or nil (docs/font-picker-plan.md §4.3).
+    @MainActor func kayaFontPanelUnmasked(_ panel: NSFontPanel, _ agent: KayaFontPanelAgent) -> String? {
+        guard let toolbar = panel.toolbar else { return nil }
+        var masked = ["NSFontPanelFontSizeToolbarItem", "NSFontPanelBIUSToolbarItem"]
+        if agent.codeLocked { masked.append(kayaCollectionsToolbarItem) }
+        let shown = toolbar.items.map(\.itemIdentifier.rawValue).filter(masked.contains)
+        if shown.isEmpty { return nil }
+        let modes = agent.validModesForFontPanel(panel).rawValue
+        return "the font panel shows \(shown.joined(separator: ", ")), which the agent's mode mask \(modes) leaves out"
+    }
+
     /// Whether any face of a family is fixed-pitch, by the font manager's own trait.
     func kayaFamilyFixedPitch(_ family: String) -> Bool {
         (NSFontManager.shared.availableMembers(ofFontFamily: family) ?? []).contains {
@@ -10437,6 +10449,7 @@ func kayaFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
             guard let table = kayaFontPanelTables(panel).families else {
                 return .failure("the font panel shows no families list")
             }
+            if let masked = kayaFontPanelUnmasked(panel, agent) { return .failure(masked) }
             let installed = Set(NSFontManager.shared.availableFontFamilies)
             let names = (0..<table.numberOfRows).map { kayaFontPanelCell(table, $0) }.filter(installed.contains)
             return .success(names.map { ($0, kayaFamilyFixedPitch($0)) })
@@ -26088,8 +26101,10 @@ func kayaRegularFace(_ family: String) -> KayaFace {
     /// kaya's own Cancel and Choose in the accessory view, the panel's clicks
     /// kept to this agent, the size and effects masked off, and with
     /// `code_only` the Fixed Width collection selected and its popup masked
-    /// off so the user cannot leave it.
-    @MainActor final class KayaFontPanelAgent: NSObject, NSFontChanging {
+    /// off so the user cannot leave it. The panel asks its modes of the
+    /// responder chain, never of NSFontManager's target, so the agent joins
+    /// the chain at the application (docs/traps.md, the font panel's mode mask).
+    @MainActor final class KayaFontPanelAgent: NSResponder, NSFontChanging {
         let dialog: UInt64
         let faces: Bool
         let codeOnly: Bool
@@ -26110,6 +26125,25 @@ func kayaRegularFace(_ family: String) -> KayaFace {
             self.dialog = dialog
             self.faces = faces
             self.codeOnly = codeOnly
+            super.init()
+        }
+
+        required init?(coder: NSCoder) { nil }
+
+        func joinChain() {
+            nextResponder = NSApp.nextResponder
+            NSApp.nextResponder = self
+        }
+
+        func leaveChain() {
+            var at: NSResponder = NSApp
+            while let next = at.nextResponder {
+                if next === self {
+                    at.nextResponder = nextResponder
+                    return
+                }
+                at = next
+            }
         }
 
         func changeFont(_ sender: NSFontManager?) {
@@ -26144,6 +26178,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
             }
             panel?.accessoryView = nil
             panel?.orderOut(nil)
+            leaveChain()
             manager.target = previousTarget
             kayaFontAgent = nil
             kayaEmitFontChoice(dialog, family, face)
@@ -26199,6 +26234,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
         kayaFontAgent = agent
         agent.previousTarget = manager.target as AnyObject?
         manager.target = agent
+        agent.joinChain()
         let start: NSFont =
             !family.isEmpty && kayaFamilyPresent(family)
             ? kayaResolveFace(family: family, mono: false, want: initial, size: 13).font as NSFont
@@ -26226,28 +26262,29 @@ func kayaRegularFace(_ family: String) -> KayaFace {
         ) { _ in
             MainActor.assumeIsolated { kayaFontAgent?.cancel() }
         }
-        // The masks are asked when the panel BECOMES KEY (measured), so it is
-        // made key, never only ordered front.
-        panel.makeKeyAndOrderFront(nil)
-        guard codeOnly else { return }
+        // The collection is chosen before the panel is made key, so the user
+        // never meets the popup the mask then hides.
+        panel.orderFront(nil)
         var tries = 0
-        func lock() {
+        func settle() {
             guard kayaFontAgent === agent, !agent.answered else { return }
-            if let why = kayaSelectFixedWidth(panel) {
-                tries += 1
-                if tries < 10 {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { lock() }
-                    return
+            if codeOnly {
+                if let why = kayaSelectFixedWidth(panel) {
+                    tries += 1
+                    if tries < 10 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { settle() }
+                        return
+                    }
+                    agent.codeOffWhy = why
+                    kayaDiag(
+                        "kaya: the font picker shows every family, not code fonts only: \(why); Fixed Width stays one click away in its collections")
+                } else {
+                    agent.codeLocked = true
                 }
-                agent.codeOffWhy = why
-                kayaDiag(
-                    "kaya: the font picker shows every family, not code fonts only: \(why); Fixed Width stays one click away in its collections")
-                return
             }
-            agent.codeLocked = true
             panel.makeKeyAndOrderFront(nil)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { lock() }
+        DispatchQueue.main.async { settle() }
     #else
         kayaPresentFontPicker(window: window, dialog: dialog, codeOnly: codeOnly, faces: faces, family: family, initial: initial)
     #endif
