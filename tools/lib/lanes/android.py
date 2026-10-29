@@ -234,7 +234,7 @@ LEGS = {
         "netimage-jvm", "netimage_http-jvm",
         "grounds-jvm", "shapes-jvm", "cards-jvm", "tracks-jvm", "dock-jvm",
         "capture-jvm", "capture_denied-jvm",
-        "codesurface-jvm",
+        "codesurface-jvm", "fontpick-jvm",
     ],
     "go": [
         "go", "a11y-go", "a11yrows-go",
@@ -265,7 +265,7 @@ LEGS = {
         "netimage-go", "netimage_http-go",
         "grounds-go", "shapes-go", "cards-go", "tracks-go", "dock-go",
         "capture-go", "capture_denied-go",
-        "codesurface-go",
+        "codesurface-go", "fontpick-go",
     ],
     "python": [
         "varied-python", "portfolio-python", "music_home-python", "music_playlist-python",

@@ -3803,8 +3803,12 @@ public final class KayaApp {
         }
     }
 
-    func fileDialogResult(_ id: UInt64, _ files: [KayaPickedFile]) {
+    func retireFileSlot(_ id: UInt64) {
         if liveFileDialog == id { liveFileDialog = 0 }
+    }
+
+    func fileDialogResult(_ id: UInt64, _ files: [KayaPickedFile]) {
+        retireFileSlot(id)
         if let handler = fileDialogs.removeValue(forKey: id) {
             dispatch { try build { tx in try handler(tx, files) } }
         }
@@ -3822,7 +3826,7 @@ public final class KayaApp {
     }
 
     func fontDialogResult(_ id: UInt64, _ choice: KayaFontChoice?) {
-        if liveFileDialog == id { liveFileDialog = 0 }
+        retireFileSlot(id)
         if let handler = fontDialogs.removeValue(forKey: id) {
             dispatch { try build { tx in try handler(tx, choice) } }
         }

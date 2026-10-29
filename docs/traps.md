@@ -4,6 +4,33 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A RichEditBox's own FontWeight over a Bold run (measured 2026-10-29)
+
+On the WinUI lane's fontpick legs a textarea in a Light face (Cascadia Mono
+ExtraLight, 200) carried a Bold run over 0:4, and 2 of 6 pooled legs read
+the run back at 200 with no simulation, the failure picture showing it
+drawn light while the Italic run beside it stayed slanted. kaya wrote the
+face twice: through TOM (the document's default format and every run's
+weight, Bold as max(700, the face's)) and through the control's own
+`FontWeight`, `FontStyle` and `FontStretch`. The control's change reached
+the document AFTER the runs were written, over every run's weight; the
+slope survived because `FontStyle` did not change (Normal to Normal). With
+the control's weight and slope no longer written for a textarea (the TOM
+writes alone; `FontStretch` stays on the control, where the read takes it),
+no Bold run read light in 72 leg runs (twelve runs of the six). A face on a RichEditBox is the
+document's, never the control's.
+
+## A ContentDialog presented before the island is live, again (measured 2026-10-29)
+
+The font picker's ContentDialog met the alert arm's 2026-07-22 failure
+(the "Scripted settles" entry below): presented 150 ms after the scene was
+ready, `Content().XamlRoot()` answered null in 4 of 42 pooled leg runs, which
+windows-rs reports as HRESULT 0, "The operation completed successfully" -
+a sentence naming no call. The picker now takes the alert arm's route
+(present from the root's Loaded) and names each call that can fail
+(`fontpick::at`); 30 leg runs since, none failed. Any new ContentDialog or popup arm wants both from the
+start.
+
 ## A UITextView scrolled to its end clips the caret, and TextKit 2 takes the scroll back (measured 2026-10-27)
 
 With the keyboard bar up (docs/phone-format-plan.md §2) the iOS editor's

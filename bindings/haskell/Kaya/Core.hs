@@ -418,6 +418,7 @@ data FontFace = FontFace
     width :: !Int,
     name :: !Text
   }
+  deriving (Eq, Show)
 
 -- | A family and one of its faces: the font picker's answer.
 data FontChoice = FontChoice
@@ -426,6 +427,7 @@ data FontChoice = FontChoice
     italic :: !Bool,
     width :: !Int
   }
+  deriving (Eq, Show)
 
 -- | WHAT THE USER DID WITH AN ALERT: an action by its 0-based index, or
 -- the dismissal that names none.

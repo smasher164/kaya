@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints badge emoji fontpick"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints badge emoji"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1679,6 +1679,20 @@ for proto in x11 wayland; do
     # over Light, and GtkFontDialog's code fonts.
     run "$proto" fontpick-rust env KAYA_SELFTEST=fontpick \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/fontpick"
+    run "$proto" fontpick-python env KAYA_SELFTEST=fontpick KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/fontpick.py
+    run "$proto" fontpick-js env KAYA_SELFTEST=fontpick KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/fontpick.ts
+    run "$proto" fontpick-go env KAYA_SELFTEST=fontpick \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" fontpick-csharp env KAYA_SELFTEST=fontpick KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" fontpick-ocaml env KAYA_SELFTEST=fontpick KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/fontpick.exe
+    run "$proto" fontpick-haskell env KAYA_SELFTEST=fontpick \
+        tools/linux/a11y-leg.sh "$(hs_bin fontpick)"
+    run "$proto" fontpick-java env KAYA_SELFTEST=fontpick KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE SEGMENTED CONTROL (docs/segmented-plan.md), through a11y-leg.sh for
     # its expect_ax.
     run "$proto" segmented-rust env KAYA_SELFTEST=segmented \

@@ -52,6 +52,9 @@ public final class Main {
             case "codesurface":
                 app = Codesurface::app;
                 break;
+            case "fontpick":
+                app = Fontpick::app;
+                break;
             case "segmented":
                 app = Segmented::app;
                 break;
@@ -265,9 +268,14 @@ public final class Main {
             case "scrollto":
                 app = ScrollTo::app;
                 break;
-            default:
+            case "":
+            case "1":
+            case "milestone2":
                 app = Milestone2::app;
                 break;
+            default:
+                throw new IllegalStateException("kaya: the Java guests have no scene \"" + scene
+                        + "\"; register it in guests/java/dev/kaya/guests/Main.java");
         }
         new Thread(app, "kaya-app").start();
         System.exit(KayaRing.run());

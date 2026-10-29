@@ -59,6 +59,7 @@ static class Program
             case "autofill": AutofillScene.Run(); break;
             case "reveal": RevealScene.Run(); break;
             case "codesurface": CodesurfaceScene.Run(); break;
+            case "fontpick": FontpickScene.Run(); break;
             case "segmented": SegmentedScene.Run(); break;
             case "expander": ExpanderScene.Run(); break;
             case "safearea": SafeareaScene.Run(); break;
@@ -113,7 +114,10 @@ static class Program
             case "netimage": NetimageScene.Run(); break;
             case "netimage_http": NetimageHttpScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
-            default: Milestone2Scene.Run(); break;
+            case null: case "1": case "milestone2": Milestone2Scene.Run(); break;
+            default:
+                throw new InvalidOperationException(
+                    $"kaya: the C# guests have no scene \"{System.Environment.GetEnvironmentVariable("KAYA_SELFTEST")}\"; register it in guests/csharp/Program.cs");
         }
     }
 }

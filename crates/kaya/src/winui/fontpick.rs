@@ -134,7 +134,20 @@ thread_local! {
 const PREVIEW: &str = "The quick brown fox jumps over the lazy dog";
 
 fn style_selected(button: &Button, on: bool) -> windows_core::Result<()> {
-    button.SetStyle(&theme_resource::<Style>(if on { "AccentButtonStyle" } else { "DefaultButtonStyle" })?)
+    let key = if on { "AccentButtonStyle" } else { "DefaultButtonStyle" };
+    button.SetStyle(&at(&format!("the theme's {key}"), theme_resource::<Style>(key))?)
+}
+
+/// A step's failure named by its call; windows-rs answers a null interface as
+/// HRESULT 0, "The operation completed successfully", which names nothing.
+fn at<T>(what: &str, result: windows_core::Result<T>) -> windows_core::Result<T> {
+    result.map_err(|e| {
+        if e.code().is_ok() {
+            windows_core::Error::new(windows_core::HRESULT(0x8000_4003u32 as i32), format!("{what} answered null"))
+        } else {
+            windows_core::Error::new(e.code(), format!("{what}: {}", e.message()))
+        }
+    })
 }
 
 fn text_block(text: &str, family: &str, face: Option<FontFace>) -> windows_core::Result<TextBlock> {
@@ -211,7 +224,26 @@ fn select_face(face: FontFace) -> windows_core::Result<()> {
 /// drawn in itself, the chosen family's faces, a preview line, Cancel and
 /// Choose (§4.3). Answered once, from ShowAsync's completion.
 pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpec) -> windows_core::Result<()> {
-    let host = winui_window(core, spec.window.0)?;
+    let host = at("the host window", winui_window(core, spec.window.0))?;
+    let root: FrameworkElement = at("the host window's content", host.Content())?.cast()?;
+    // docs/traps.md, a ContentDialog presented before the island is live.
+    let Ok(xaml_root) = root.XamlRoot() else {
+        #[cfg(feature = "harness")]
+        crate::vtrace::line("font picker waits for the root's Loaded: its XamlRoot is not live");
+        let cell = std::sync::Mutex::new(Some(spec));
+        root.Loaded(&RoutedEventHandler::new(move |_, _| {
+            if let Some(spec) = cell.lock().unwrap().take() {
+                CORE.with_borrow_mut(|core| {
+                    let core = core.as_mut().expect("core state initialized");
+                    if let Err(e) = present(core, spec) {
+                        crate::fault::report(format!("kaya: presenting the font picker once the window loaded failed: {e}"));
+                    }
+                });
+            }
+            Ok(())
+        }))?;
+        return Ok(());
+    };
     let dialog = ContentDialog::new()?;
     dialog.SetTitle(&PropertyValue::CreateString(&HSTRING::from("Font"))?)?;
     dialog.SetPrimaryButtonText(&HSTRING::from("Choose"))?;
@@ -291,7 +323,7 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
             Ok(())
         })
     }))?;
-    dialog.SetXamlRoot(&host.Content()?.XamlRoot()?)?;
+    dialog.SetXamlRoot(&xaml_root)?;
     PICKER.with_borrow_mut(|picker| {
         *picker = Some(Picker {
             dialog: dialog.clone(),
@@ -306,11 +338,12 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     });
     let initial = (!spec.family.is_empty()).then(|| names.iter().find(|n| n.eq_ignore_ascii_case(&spec.family)).cloned()).flatten();
     if let Some(name) = initial {
-        select_family(&name, Some(FontFace { weight: spec.weight, italic: spec.italic, width: spec.width }))?;
+        let keep = Some(FontFace { weight: spec.weight, italic: spec.italic, width: spec.width });
+        at(&format!("selecting the initial family {name}"), select_family(&name, keep))?;
     }
     let sink = core.occurrences.clone();
     let id = spec.dialog;
-    let op = dialog.ShowAsync()?;
+    let op = at("ContentDialog.ShowAsync", dialog.ShowAsync())?;
     op.SetCompleted(&windows_future::AsyncOperationCompletedHandler::new(
         move |op: windows_core::Ref<'_, windows_future::IAsyncOperation<ContentDialogResult>>, _status| {
             let chosen = op.ok()?.GetResults()? == ContentDialogResult::Primary;

@@ -23,9 +23,10 @@ object GuestStart : KayaGuestStart {
         // A SCENE IS REGISTERED HERE AS SOON AS ITS GUEST EXISTS, even
         // when no leg runs it yet: whether a leg runs is the Compose
         // arm's question (tools/check-stubs.py reads the backend, not
-        // this selector), and an unregistered name silently runs
-        // milestone2 against the other scene's script.
-        val scene = when (System.getenv("KAYA_SELFTEST")) {
+        // this selector). An unregistered name is refused below.
+        val selftest = System.getenv("KAYA_SELFTEST")
+        val scene = when (selftest) {
+            null, "milestone2" -> Milestone2::app
             "a11y" -> A11y::app
             "a11yrows" -> A11yRows::app
             "entry" -> Entry::app
@@ -67,6 +68,7 @@ object GuestStart : KayaGuestStart {
             "autofill" -> Autofill::app
             "reveal" -> Reveal::app
             "codesurface" -> Codesurface::app
+            "fontpick" -> Fontpick::app
             "segmented" -> Segmented::app
             "expander" -> Expander::app
             "safearea" -> Safearea::app
@@ -118,7 +120,7 @@ object GuestStart : KayaGuestStart {
             // create_window, never by silently running milestone2.
             "window" -> Window::app
             "panels" -> Panels::app
-            else -> Milestone2::app
+            else -> error("kaya: the JVM host has no scene \"$selftest\"; register its guest in android/javahost's MainActivity.kt")
         }
         // KAYA STARTS THE APP THREAD, not this shell — a configuration
         // change re-runs onCreate in the same process (KayaRing.startGuest).

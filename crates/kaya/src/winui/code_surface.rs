@@ -183,7 +183,10 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
         let current_weight = match widget {
             NativeWidget::Label { block, .. } => block.FontWeight()?.Weight,
             NativeWidget::Entry(field) => field.FontWeight()?.Weight,
-            NativeWidget::Textarea(field) => field.FontWeight()?.Weight,
+            NativeWidget::Textarea(field) => {
+                let weight = field.TextDocument()?.GetDefaultCharacterFormat()?.Weight().unwrap_or(400);
+                if weight > 0 { weight as u16 } else { 400 }
+            }
             _ => 400,
         };
         let faced = face.weight.is_some() || face.italic || face.width.is_some();
@@ -229,9 +232,8 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
             NativeWidget::Textarea(field) => {
                 field.SetFontFamily(&family)?;
                 field.SetFontSize(size)?;
+                // docs/traps.md, a RichEditBox's own FontWeight over a Bold run.
                 if faced {
-                    field.SetFontWeight(weight)?;
-                    field.SetFontStyle(slope)?;
                     field.SetFontStretch(stretch)?;
                 }
                 // THE DOCUMENT'S OWN FORMAT TOO: a rich textarea's runs are

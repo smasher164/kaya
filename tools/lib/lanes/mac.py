@@ -58,6 +58,8 @@ SCENES = [
     "codesurface",
     # docs/doctabs-plan.md §5.
     "doctabs",
+    # docs/font-picker-plan.md §7.
+    "fontpick",
 ]
 # Depth-slice scenes: a rust example + steps exist, the language sweep
 # has not landed — built and run rust-only until their guests arrive,
@@ -65,9 +67,7 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture",
-                # The font picker (docs/font-picker-plan.md §8), rust-only at depth.
-                "fontpick"]
+                "capture"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -327,7 +327,7 @@ ORDER = [
     ("tints", ("rust",)),
     ("codesurface", LANGS),
     # docs/font-picker-plan.md §7.
-    ("fontpick", ("rust",)),
+    ("fontpick", LANGS),
     # The skin (docs/styling-pass-plan.md §5): grounds, shapes, cards, the
     # track table and the dock.
     ("grounds", LANGS + ("c",)),

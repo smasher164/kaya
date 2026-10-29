@@ -53,6 +53,8 @@ SWIFT_ENTRIES = [
     "grounds", "shapes", "cards", "tracks", "dock",
     # The code surface (docs/code-surface-plan.md §5).
     "codesurface",
+    # The font picker (docs/font-picker-plan.md §7).
+    "fontpick",
 ]
 
 # The go suite: the swift roster entry for entry minus the two
@@ -78,7 +80,7 @@ GO_SCENES = [
     "safearea",
     "netimage", "netimage_http",
     "grounds", "shapes", "cards", "tracks", "dock",
-    "codesurface",
+    "codesurface", "fontpick",
 ]
 
 # CPython embedded in ONE bundle carrying every python scene
