@@ -94,7 +94,7 @@ pub(super) fn stretch_keyword(width: u8) -> &'static str {
 /// and ignored (Q6, RULED). Answered once, its id retired first.
 pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpec) {
     let parent = gtk_window(core, spec.window.0);
-    let title = format!("kaya font {}", spec.dialog.0);
+    let title = "Font".to_owned();
     let dialog = gtk4::FontDialog::builder().title(&title).modal(true).build();
     if spec.code_only {
         let filter = gtk4::CustomFilter::new(|item| {
@@ -191,14 +191,15 @@ pub(super) fn measured_fixed_pitch(family: &str) -> bool {
     same(a) && same(b) && (narrow - wide).abs() <= 1
 }
 
-/// The open picker's window, found by the title kaya gave it.
+/// The open picker's window: GtkFontDialog's own GtkFontChooserDialog, the one
+/// visible while kaya's request is live.
 #[cfg(feature = "harness")]
 pub(super) fn dialog_window(core: &CoreState) -> Option<gtk4::Window> {
-    let title = core.live_font_dialog.borrow().clone()?;
+    core.live_font_dialog.borrow().as_ref()?;
     gtk4::Window::list_toplevels()
         .into_iter()
         .filter_map(|w| w.downcast::<gtk4::Window>().ok())
-        .find(|w| w.is_visible() && w.title().is_some_and(|t| t == title))
+        .find(|w| w.is_visible() && w.type_().name() == "GtkFontChooserDialog")
 }
 
 #[cfg(feature = "harness")]
