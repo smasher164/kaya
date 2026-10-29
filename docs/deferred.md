@@ -1357,7 +1357,26 @@ the sweep red on two over-long lines (fixed in b02e72b5), and android 907 net
 against 870 with the sweep 611 against 600. The android row's remaining cost
 and the sweep's are the open duration work.
 
-## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen twice 2026-10-29, in the 8aa99928 matrix and on codesurface-swift)
+## DEFECT — clipboard-java-wayland: a files seed expired with the guest's own window focused the whole leg (seen once 2026-10-29, the e2d4a307 matrix under a throttled host)
+KEY: clipboard-java-wayland, seed files EXPIRED, focus ring, KAYA_EXCLUSIVE_LEGS, data_offer, wl_keyboard.enter
+
+The matrix of e2d4a307 (host load 138, thermal pressure HEAVY) read
+clipboard-java-wayland red at its `files` seed: `seed files EXPIRED ms=5003
+rounds=439 expected=text/uri-list foreign_listed=true`, the text and image
+seeds before it settled in 1 ms. The focus ring (flightrec run
+20261029T223912Z-008146) names the guest's own window (pid 224349) focused
+at both samples of the leg, so this is not the stolen-seat case the closed
+2026-09-18 entry fixed; the ring's second sample lists no keyboard device on
+the seat, where the first lists wtype's virtual keyboard. What the bundle
+cannot say is whether the compositor sent this client the new data_offer at
+all, so the recorder wants the client's own wl_data_device.selection events
+(WAYLAND_DEBUG on the guest, filtered to the data device) beside the ring
+before a second sighting is read. clipboard-java-wayland is also not in
+run-suites.sh's KAYA_EXCLUSIVE_LEGS, where the python, js and rust wayland
+clipboard legs run alone (the ocaml one is named open in the 2026-09-18
+entry); whether the JVM leg belongs there is the maintainer's question.
+
+## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 
 The matrix read `textarea@code gutter reads 18 19 20 21, wanted shows 39`

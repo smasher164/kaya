@@ -26,7 +26,7 @@ object GuestStart : KayaGuestStart {
         // this selector). An unregistered name is refused below.
         val selftest = System.getenv("KAYA_SELFTEST")
         val scene = when (selftest) {
-            null, "milestone2" -> Milestone2::app
+            null, "1", "milestone2" -> Milestone2::app
             "a11y" -> A11y::app
             "a11yrows" -> A11yRows::app
             "entry" -> Entry::app
