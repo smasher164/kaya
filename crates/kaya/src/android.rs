@@ -893,6 +893,16 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 fn_ptr: present_font_families as *mut _,
             },
             NativeMethod {
+                name: "fontFaces".into(),
+                sig: "(Ljava/lang/String;Ljava/lang/String;)V".into(),
+                fn_ptr: present_font_faces as *mut _,
+            },
+            NativeMethod {
+                name: "fontDialogResult".into(),
+                sig: "(JLjava/lang/String;IZI)V".into(),
+                fn_ptr: present_font_dialog_result as *mut _,
+            },
+            NativeMethod {
                 name: "captureDevicesBegin".into(),
                 sig: "()V".into(),
                 fn_ptr: present_capture_devices_begin as *mut _,
@@ -2810,6 +2820,30 @@ extern "system" fn present_capture_permission(mut env: JNIEnv, _class: JClass, k
 extern "system" fn present_font_families(mut env: JNIEnv, _class: JClass, names: JString) {
     let names = jstring_text(&mut env, &names, "font families");
     unsafe { crate::capi::kaya_font_families(names.as_ptr(), names.len()) }
+}
+
+/// KayaPresent.fontFaces (docs/font-picker-plan.md §4.4).
+extern "system" fn present_font_faces(mut env: JNIEnv, _class: JClass, family: JString, faces: JString) {
+    let family = jstring_text(&mut env, &family, "font family");
+    let faces = jstring_text(&mut env, &faces, "font faces");
+    unsafe { crate::capi::kaya_font_faces(family.as_ptr(), family.len(), faces.as_ptr(), faces.len()) }
+}
+
+/// KayaPresent.fontDialogResult (docs/font-picker-plan.md §4.2).
+extern "system" fn present_font_dialog_result(
+    mut env: JNIEnv, _class: JClass, dialog: jlong, family: JString, weight: jint, italic: jni::sys::jboolean, width: jint,
+) {
+    let family = jstring_text(&mut env, &family, "font dialog family");
+    unsafe {
+        crate::capi::kaya_emit_font_dialog_result(
+            dialog as u64,
+            family.as_ptr(),
+            family.len(),
+            weight.max(0) as u32,
+            u32::from(italic != 0),
+            width.max(0) as u32,
+        )
+    }
 }
 
 extern "system" fn present_capture_devices_begin(_env: JNIEnv, _class: JClass) {

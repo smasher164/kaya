@@ -124,6 +124,8 @@ LEGS = {
         # The code surface, and at twice the text size
         # (docs/code-surface-plan.md §5; SCENE_TEXT_SCALE).
         "codesurface-compose", "codesurfacebig-compose",
+        # The font picker, the kaya-drawn sheet (docs/font-picker-plan.md §7).
+        "fontpick-compose",
         # The segmented control (docs/segmented-plan.md §6).
         "segmented-compose",
         # The expander (docs/expander-plan.md §5).

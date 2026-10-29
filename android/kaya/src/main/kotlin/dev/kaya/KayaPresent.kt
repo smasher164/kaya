@@ -203,6 +203,10 @@ object KayaPresent {
     @JvmStatic external fun capturePermission(kind: Int, permission: Int, detail: String)
     /** docs/code-surface-plan.md M3: the installed families, `\n`-joined. */
     @JvmStatic external fun fontFamilies(names: String)
+    /** docs/font-picker-plan.md §4.4: a family's faces as `weight\titalic\twidth\tname` lines. */
+    @JvmStatic external fun fontFaces(family: String, faces: String)
+    /** docs/font-picker-plan.md §4.2: the picker's one answer; an empty family is cancel. */
+    @JvmStatic external fun fontDialogResult(dialog: Long, family: String, weight: Int, italic: Boolean, width: Int)
     @JvmStatic external fun captureDevicesBegin()
     @JvmStatic external fun captureDevice(id: String, name: String, kind: Int, facing: Int, preferred: Boolean)
     @JvmStatic external fun captureDevicesEnd()

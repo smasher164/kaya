@@ -117,6 +117,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -223,6 +224,7 @@ import androidx.compose.material3.LocalContentColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.ModalBottomSheetProperties
 import androidx.compose.material3.SheetState
@@ -808,6 +810,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var monospaced by mutableStateOf(false)
     var family by mutableStateOf("")
     var textScale by mutableStateOf(1.0)
+    /** docs/font-picker-plan.md §2.3: the face; 0 is unset. */
+    var fontWeight by mutableStateOf(0)
+    var fontItalic by mutableStateOf(false)
+    var fontWidth by mutableStateOf(0)
     /** A button's glyph in place of its title (docs/composer-plan.md §2); 0 = none. */
     var symbol by mutableStateOf(0L)
     /** An image's bound in dp (docs/photo-attach-plan.md §2); 0 = none. */
@@ -2029,6 +2035,11 @@ object KayaSceneModel {
     val regions = androidx.compose.runtime.mutableStateListOf<KayaRegion>()
     val regionIndex = HashMap<Long, KayaRegion>()
     var documentsListShown by mutableStateOf(false)
+    /** docs/font-picker-plan.md §4.3: the open font picker and its sheet. */
+    internal var fontPicker by mutableStateOf<KayaFontPicker?>(null)
+    var fontSheetWindow: android.view.Window? = null
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    var fontSheetState: androidx.compose.material3.SheetState? = null
     var documentsSheetWindow: android.view.Window? = null
     @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
     var documentsSheetState: androidx.compose.material3.SheetState? = null
@@ -3747,6 +3758,12 @@ object KayaCompose {
     // The phone's documents list (docs/doctabs-plan.md §1.6): the bar's
     // button, the sheet's "+", and each row and its close.
     const val DOCUMENTS_TAG = "kaya:documents"
+    /** The font picker's controls (docs/font-picker-plan.md §4.3). */
+    const val FONT_SEARCH_TAG = "kaya:font-search"
+    const val FONT_FAMILY_TAG = "kaya:font-family"
+    const val FONT_FACE_TAG = "kaya:font-face"
+    const val FONT_CHOOSE_TAG = "kaya:font-choose"
+    const val FONT_CANCEL_TAG = "kaya:font-cancel"
     const val NEW_DOCUMENT_TAG = "kaya:new-document"
     const val DOCUMENT_ROW_TAG = "kaya:document-row"
     const val DOCUMENT_CLOSE_TAG = "kaya:document-close"
@@ -4960,7 +4977,9 @@ object KayaCompose {
                         PROP_MONOSPACED -> KayaSceneModel.nodes[id]!!.monospaced = readBool(b)
                         PROP_FAMILY -> KayaSceneModel.nodes[id]!!.family = readString(b)
                         PROP_TEXT_SCALE -> KayaSceneModel.nodes[id]!!.textScale = readF64(b)
-                        PROP_FONT_WEIGHT, PROP_FONT_ITALIC, PROP_FONT_WIDTH -> depthStub("fontpick")
+                        PROP_FONT_WEIGHT -> KayaSceneModel.nodes[id]!!.fontWeight = readF64(b).toInt()
+                        PROP_FONT_ITALIC -> KayaSceneModel.nodes[id]!!.fontItalic = readBool(b)
+                        PROP_FONT_WIDTH -> KayaSceneModel.nodes[id]!!.fontWidth = readF64(b).toInt()
                         PROP_TINT -> KayaSceneModel.nodes[id]!!.labelTint = readI64(b)
                         PROP_FOLLOWS_END ->
                             KayaSceneModel.nodes[id]!!.followsEnd = readBool(b)
@@ -5467,7 +5486,18 @@ object KayaCompose {
                 APPLY_REQUEST_PERMISSION -> kayaCaptureRequestPermission(b.int)
                 APPLY_WATCH_CAPTURE_DEVICES -> kayaCaptureWatchDevices(b.int != 0)
                 APPLY_LIST_FONT_FAMILIES -> kayaListFontFamilies()
-                APPLY_PRESENT_FONT_DIALOG, APPLY_LIST_FONT_FACES -> depthStub("fontpick")
+                APPLY_PRESENT_FONT_DIALOG -> {
+                    b.long // window: 0, the one surface on this host
+                    val dialog = b.long
+                    val codeOnly = b.int != 0
+                    val faces = b.int != 0
+                    val weight = b.int
+                    val italic = b.int != 0
+                    val width = b.int
+                    b.int
+                    kayaPresentFontPicker(dialog, codeOnly, faces, readString(b), KayaFontFace(weight, italic, width))
+                }
+                APPLY_LIST_FONT_FACES -> kayaListFontFaces(readString(b))
                 APPLY_ADD_DOCUMENT -> {
                     b.long // window: 0, the one surface on this host
                     val did = b.long
@@ -9470,6 +9500,142 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             val labels = drawn.labels
             kayaGutterVerdict(kayaPairGutter(fragments, labels), clause)
         }
+
+    /** `<weight> <upright|italic> <width> [synthesized]`, harness.rs's parse_face_words. */
+    private fun kayaParseFaceWords(text: String): Pair<KayaFontFace, Boolean>? {
+        val w = text.trim().split(Regex("\\s+"))
+        if (w.size != 3 && !(w.size == 4 && w[3] == "synthesized")) return null
+        val weight = w[0].toIntOrNull()?.takeIf { it in 1..1000 } ?: return null
+        if (w[1] != "upright" && w[1] != "italic") return null
+        val width = w[2].toIntOrNull()?.takeIf { it in 1..9 } ?: return null
+        return KayaFontFace(weight, w[1] == "italic", width) to (w.size == 4)
+    }
+
+    private fun kayaFaceWordsText(face: KayaFontFace, synthesized: Boolean): String =
+        face.words + if (synthesized) " synthesized" else ""
+
+    /**
+     * expect_face face's read (docs/font-picker-plan.md §2.5): the run at the
+     * range (or the text's start) shaped through the layout's own resolver,
+     * the font minikin shaped it to and its fake bold and fake italic flags.
+     */
+    private fun kayaDrawnFaceReading(activity: ComponentActivity, spec: String, range: String?, want: String): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
+            val wantText = if (want.startsWith("label")) kayaTextTarget(want)?.text
+                ?: return@onUi null to ": no such label $want" else want
+            val (wantFace, wantSynth) = kayaParseFaceWords(wantText)
+                ?: return@onUi null to ": $want says \"$wantText\", not `<weight> <upright|italic> <width> [synthesized]`"
+            val layout = kayaTextKindLayout(node) ?: return@onUi null to ": no laid-out text"
+            val input = layout.layoutInput
+            val text = input.text
+            var from = 0
+            var to = minOf(1, text.length)
+            if (range != null) {
+                val bounds = range.split(":")
+                from = kayaUtf16Offset(text.text, bounds.getOrNull(0)?.toIntOrNull() ?: -1)
+                to = kayaUtf16Offset(text.text, bounds.getOrNull(1)?.toIntOrNull() ?: -1)
+                if (bounds.size != 2 || from < 0 || to <= from || to > text.length) {
+                    return@onUi null to ": range $range is not inside the laid-out text (${text.length} UTF-16 units)"
+                }
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return@onUi null to ": shaping unread on API ${Build.VERSION.SDK_INT}"
+            var style = input.style.toSpanStyle()
+            for (span in text.spanStyles) if (span.start <= from && span.end >= to && span.end > span.start) style = style.merge(span.item)
+            val typeface = input.fontFamilyResolver.resolve(
+                style.fontFamily, style.fontWeight ?: FontWeight.Normal, style.fontStyle ?: FontStyle.Normal,
+                style.fontSynthesis ?: androidx.compose.ui.text.font.FontSynthesis.All,
+            ).value as? android.graphics.Typeface ?: return@onUi null to ": resolved to no platform typeface"
+            val paint = android.graphics.Paint().apply { this.typeface = typeface; textSize = 100f }
+            val run = if (to > from) text.text.substring(from, to) else "M"
+            val glyphs = android.graphics.text.TextRunShaper.shapeTextRun(run, 0, run.length, 0, run.length, 0f, 0f, false, paint)
+            if (glyphs.glyphCount() == 0) return@onUi null to ": the run shaped to no glyphs"
+            val font = glyphs.getFont(0)
+            val face = kayaFaceOf(font)
+            val fakeBold = glyphs.getFakeBold(0)
+            val fakeItalic = glyphs.getFakeItalic(0)
+            val drawn = KayaFontFace(if (fakeBold) maxOf(face.weight, 700) else face.weight, face.italic || fakeItalic, face.width)
+            val synth = fakeBold || fakeItalic
+            val family = kayaFontFamilyName(font.buffer, font.ttcIndex) ?: "unnamed"
+            val said = "${kayaFaceWordsText(drawn, synth)} ($family, ${font.file?.name ?: "in memory"}, fake bold $fakeBold, fake italic $fakeItalic)"
+            if (drawn == wantFace && synth == wantSynth) said to ""
+            else null to " reads $said, wanted ${kayaFaceWordsText(wantFace, wantSynth)}"
+        }
+
+    /** The open font picker's sheet's semantics nodes carrying [tag], top
+     *  to bottom; null while no picker is up and settled. MAIN THREAD ONLY. */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class,
+        androidx.compose.material3.ExperimentalMaterial3Api::class)
+    private fun kayaFontSheetNodes(tag: String): List<SemanticsNode>? {
+        val window = KayaSceneModel.fontSheetWindow ?: return null
+        val state = KayaSceneModel.fontSheetState ?: return null
+        if (state.currentValue != SheetValue.Expanded || state.targetValue != SheetValue.Expanded) return null
+        val root = kayaComposeRoot(window.decorView) as? RootForTest ?: return null
+        root.measureAndLayoutForTest()
+        val out = mutableListOf<SemanticsNode>()
+        fun walk(n: SemanticsNode, depth: Int) {
+            if (depth > 64) return
+            if (n.config.getOrNull(SemanticsProperties.TestTag) == tag) out.add(n)
+            n.children.forEach { walk(it, depth + 1) }
+        }
+        walk(root.semanticsOwner.rootSemanticsNode, 0)
+        return out.sortedWith(compareBy({ it.boundsInRoot.top }, { it.boundsInRoot.left }))
+    }
+
+    private fun kayaNodeText(n: SemanticsNode): String =
+        n.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text } ?: ""
+
+    /** expect_font_dialog's read: the rows the open sheet shows, each with
+     *  its family's fixed pitch measured; closed when no picker is up. */
+    private fun kayaFontDialogReading(activity: ComponentActivity, want: String): Pair<String?, String> =
+        onUi(activity) {
+            if (KayaSceneModel.fontPicker == null && KayaSceneModel.fontSheetWindow == null) {
+                return@onUi if (want == "closed") "closed" to "" else null to ": no font picker is open"
+            }
+            val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled"
+            val listed = rows.map { kayaNodeText(it) }.filter { it.isNotEmpty() }.distinct()
+            when {
+                want == "closed" -> null to ": a font picker is open, listing ${listed.size} families"
+                want == "open" -> "open, listing ${listed.size} families" to ""
+                listed.isEmpty() -> null to ": the open picker lists no families"
+                else -> {
+                    val proportional = listed.filter { !kayaCodeFamily(it) }
+                    if (proportional.isEmpty()) "code only, ${listed.size} monospaced families" to ""
+                    else null to ": the open picker lists ${proportional.size} proportional families of ${listed.size}: " +
+                        proportional.take(8).joinToString(", ")
+                }
+            }
+        }
+
+    /** pick_font: the family's row, the face's chip, then Choose, each by
+     *  its own click action; or Cancel. Null once the presses went out. */
+    private fun kayaPickFont(activity: ComponentActivity, choice: Pair<String, KayaFontFace>?): String? {
+        fun click(tag: String, match: (SemanticsNode) -> Boolean): String? = onUi(activity) {
+            val nodes = kayaFontSheetNodes(tag) ?: return@onUi "the font picker is not up and settled"
+            val node = nodes.firstOrNull(match) ?: return@onUi "no $tag matches among ${nodes.map { kayaNodeText(it) }}"
+            val press = node.config.getOrNull(SemanticsActions.OnClick)?.action ?: return@onUi "$tag carries no click"
+            press.invoke()
+            null
+        }
+        fun clickSoon(tag: String, match: (SemanticsNode) -> Boolean): String? {
+            var why = click(tag, match)
+            val deadline = System.nanoTime() + 3_000_000_000L
+            while (why != null && System.nanoTime() < deadline) {
+                Thread.sleep(100)
+                why = click(tag, match)
+            }
+            return why
+        }
+        if (choice == null) return clickSoon(KayaCompose.FONT_CANCEL_TAG) { true }
+        val (family, face) = choice
+        clickSoon(KayaCompose.FONT_FAMILY_TAG) { kayaNodeText(it) == family }?.let { return it }
+        if (onUi(activity) { KayaSceneModel.fontPicker?.faces == true }) {
+            clickSoon(KayaCompose.FONT_FACE_TAG) {
+                it.config.getOrNull(SemanticsProperties.StateDescription) == face.words
+            }?.let { return it }
+        }
+        return clickSoon(KayaCompose.FONT_CHOOSE_TAG) { true }
+    }
 
     /** The laid-out text of a label, an entry or a textarea. */
     private fun kayaTextKindLayout(node: KayaNode): androidx.compose.ui.text.TextLayoutResult? =
@@ -15064,7 +15230,24 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 ?: failures.add("${parts[1]} gutter ${got.second}")
                         }
                     }
-                    "expect_face" -> {
+                    "expect_face" -> if (parts.contains("face")) {
+                        // docs/font-picker-plan.md §2.5: harness.rs's drawn_face_verdict.
+                        val at = parts.indexOf("face")
+                        val range = if (at == 3) parts[2] else null
+                        val want = parts.drop(at + 1).joinToString(" ")
+                        if ((at != 2 && at != 3) || want.isEmpty()) {
+                            failures.add("expect_face wants `<target> [<range>] face <face>`: $line")
+                        } else {
+                            var got = kayaDrawnFaceReading(activity, parts[1], range, want)
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaDrawnFaceReading(activity, parts[1], range, want)
+                            }
+                            val what = parts[1] + (range?.let { " $it" } ?: "") + " face"
+                            got.first?.let { observed.add("$what $it") } ?: failures.add("$what${got.second}")
+                        }
+                    } else {
                         // docs/code-surface-plan.md M4: harness.rs's face_verdict.
                         val want = parts.getOrElse(2) { "" }
                         if (parts.size != 3 || want !in listOf("monospaced", "proportional", "named")) {
@@ -15096,7 +15279,70 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 ?: failures.add("${parts[1]} ${parts[2]} weight${got.second}")
                         }
                     }
-                    "pick_font", "expect_font_dialog" -> depthStub("fontpick")
+                    "expect_font_dialog" -> {
+                        // docs/font-picker-plan.md §7: harness.rs's font_dialog_verdict.
+                        val want = parts.getOrElse(1) { "" }
+                        if (parts.size != 2 || want !in listOf("open", "closed", "code_only")) {
+                            failures.add("expect_font_dialog is one of open, closed, code_only: $line")
+                        } else {
+                            var got = kayaFontDialogReading(activity, want)
+                            val deadline = System.nanoTime() + 8_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(150)
+                                got = kayaFontDialogReading(activity, want)
+                            }
+                            got.first?.let { observed.add("font dialog $it") }
+                                ?: failures.add("font dialog${got.second}")
+                        }
+                    }
+                    "pick_font" -> {
+                        // docs/font-picker-plan.md §7: the sheet's own controls, then
+                        // the sheet gone (harness.rs's rule).
+                        val arg = parts.drop(1).joinToString(" ")
+                        var refused: String? = null
+                        val choice: Pair<String, KayaFontFace>? = when {
+                            arg == "cancel" -> null
+                            arg.startsWith("label") -> {
+                                val text = onUi(activity) { kayaTextTarget(arg)?.text } ?: ""
+                                val bits = text.trim().split(Regex("\\s+"), limit = 4)
+                                val face = if (bits.size == 4) kayaParseFaceWords(bits.take(3).joinToString(" ")) else null
+                                if (face == null || face.second) {
+                                    refused = "pick_font: $arg says \"$text\", not `<weight> <slope> <width> <family>`"
+                                    null
+                                } else bits[3].trim() to face.first
+                            }
+                            else -> {
+                                val close = arg.indexOf('"', 1)
+                                val face = if (arg.startsWith("\"") && close > 0) kayaParseFaceWords(arg.substring(close + 1)) else null
+                                if (face == null || face.second) {
+                                    refused = "pick_font wants cancel, a label or \"<family>\" <face>: $line"
+                                    null
+                                } else arg.substring(1, close) to face.first
+                            }
+                        }
+                        if (refused != null) {
+                            failures.add(refused!!)
+                        } else {
+                            kayaAwaitQuiet()
+                            val answered = kayaBatches
+                            val why = kayaPickFont(activity, choice)
+                            if (why != null) {
+                                failures.add("pick_font: $why")
+                            } else {
+                                val deadline = System.nanoTime() + 8_000_000_000L
+                                var gone = false
+                                while (System.nanoTime() < deadline) {
+                                    if (onUi(activity) { KayaSceneModel.fontPicker == null && KayaSceneModel.fontSheetWindow == null }) {
+                                        gone = true
+                                        break
+                                    }
+                                    Thread.sleep(100)
+                                }
+                                if (gone) kayaAwaitAnswer(answered)
+                                else failures.add("pick_font: the picker is still open, so the press was swallowed")
+                            }
+                        }
+                    }
                     "expect_scaled" -> {
                         // docs/code-surface-plan.md S3: harness.rs's ExpectScaled.
                         val want = parts.getOrNull(2)?.toDoubleOrNull()
@@ -17183,6 +17429,10 @@ internal data class KayaRichPalette(
     val link: Color,
     val quote: Color,
     val code: Color,
+    /** Bold's weight over the node's own face, and the family a Code run
+     *  keeps (docs/font-picker-plan.md §3). */
+    val bold: FontWeight = FontWeight.Bold,
+    val codeFamily: FontFamily = FontFamily.Monospace,
 )
 
 /** The run table cut into maximal segments of constant attributes — the
@@ -17237,9 +17487,9 @@ internal fun kayaRichSpanStyle(
             "heading3" -> 1.15.em
             else -> androidx.compose.ui.unit.TextUnit.Unspecified
         },
-        fontWeight = if (bold) FontWeight.Bold else null,
+        fontWeight = if (bold) palette.bold else null,
         fontStyle = if (attrs.containsKey("italic")) FontStyle.Italic else null,
-        fontFamily = if (mono) FontFamily.Monospace else null,
+        fontFamily = if (mono) palette.codeFamily else null,
         textDecoration =
             if (decorations.isEmpty()) null else TextDecoration.combine(decorations),
     )
@@ -20415,7 +20665,9 @@ private fun KayaRenderCore(
                 val palette = KayaRichPalette(
                     link = MaterialTheme.colorScheme.primary,
                     quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
-                    code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA))
+                    code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA),
+                    bold = kayaNodeBold(node, LocalTextStyle.current),
+                    codeFamily = kayaNodeCodeFamily(node))
                 // richSeq is the composition state a run change moves: the
                 // table itself is a plain field.
                 val document = remember(node, node.text, node.richSeq, palette) {
@@ -20801,7 +21053,9 @@ fun KayaTextField(
     val palette = KayaRichPalette(
         link = MaterialTheme.colorScheme.primary,
         quote = LocalContentColor.current.copy(alpha = KAYA_RICH_QUOTE_ALPHA),
-        code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA))
+        code = LocalContentColor.current.copy(alpha = KAYA_RICH_CODE_ALPHA),
+        bold = kayaNodeBold(node, LocalTextStyle.current),
+        codeFamily = kayaNodeCodeFamily(node))
     val richSeq = node.richSeq
     val cap = KayaSceneModel.keyboardFieldCap?.takeIf { !singleLine && it.first == node.id }?.second
     val output = remember(node, node.rich, richSeq, palette) {
@@ -21652,7 +21906,7 @@ internal fun kayaListFontFamilies() {
 }
 
 internal fun kayaNodeFontSet(node: KayaNode): Boolean =
-    node.monospaced || node.family.isNotEmpty() || node.textScale != 1.0
+    node.monospaced || node.family.isNotEmpty() || node.textScale != 1.0 || kayaNodeFaceSet(node)
 
 /** A text kind's own face and size over [base], the style the platform
  *  gives it: an installed `family`, else the monospaced role, and the size
@@ -21667,7 +21921,7 @@ internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextSt
     var style = base
     if (family != null) style = style.copy(fontFamily = family)
     if (node.textScale != 1.0) style = style.copy(fontSize = size * node.textScale.toFloat())
-    return style
+    return kayaNodeFaceStyle(node, style)
 }
 
 /** What a text layout draws at when its style names no size: Compose's own
@@ -22861,6 +23115,7 @@ fun KayaRoot() {
     // inside its parent sheet's content (docs/sheet-plan.md).
     KayaSheetHost(null)
     KayaDocumentsSheet()
+    KayaFontSheet()
     KayaEmojiPanel()
     KayaColorSheet()
 
@@ -26522,5 +26777,408 @@ private fun KayaPickerField(node: KayaNode, a11y: Modifier, boxFill: Modifier, f
         dismissButton = { TextButton(onClick = { open = false }) { Text("Cancel") } },
     ) {
         DatePicker(state = dateState)
+    }
+}
+
+// --- THE FACE AND THE FONT PICKER (docs/font-picker-plan.md) ---
+
+/** A face as kaya names it on every platform (§2.2). */
+internal data class KayaFontFace(val weight: Int, val italic: Boolean, val width: Int) {
+    val words: String get() = "$weight ${if (italic) "italic" else "upright"} $width"
+}
+
+/** One installed face of a family: what it is, its name and its font file. */
+internal class KayaFamilyFace(val face: KayaFontFace, val name: String, val font: android.graphics.fonts.Font)
+
+/** A `wdth` percentage as the nearest OpenType width class. */
+internal fun kayaWidthClass(percent: Float): Int {
+    val steps = floatArrayOf(50f, 62.5f, 75f, 87.5f, 100f, 112.5f, 125f, 150f, 200f)
+    var best = 5
+    var distance = Float.MAX_VALUE
+    for ((i, step) in steps.withIndex()) {
+        if (Math.abs(step - percent) < distance) { distance = Math.abs(step - percent); best = i + 1 }
+    }
+    return best
+}
+
+/** The face a system font file entry is: its declared style, a variable
+ *  instance's `wght`, `ital`, `slnt` and `wdth` where it sets them. */
+internal fun kayaFaceOf(font: android.graphics.fonts.Font): KayaFontFace {
+    var weight = font.style.weight
+    var italic = font.style.slant == android.graphics.fonts.FontStyle.FONT_SLANT_ITALIC
+    var width = 5
+    for (axis in font.axes ?: emptyArray()) {
+        when (axis.tag) {
+            "wght" -> weight = axis.styleValue.toInt()
+            "ital" -> if (axis.styleValue != 0f) italic = true
+            "slnt" -> if (axis.styleValue != 0f) italic = true
+            "wdth" -> width = kayaWidthClass(axis.styleValue)
+        }
+    }
+    return KayaFontFace(weight.coerceIn(1, 1000), italic, width)
+}
+
+private var kayaFamilyFacesCache: Map<String, List<KayaFamilyFace>>? = null
+
+/** Every installed family's faces, by the name its font files' name table
+ *  carries, one per face, sorted by weight, slope and width. A TTC member
+ *  past the first is left out: Compose's file fonts open index 0 only. */
+internal fun kayaAllFamilyFaces(): Map<String, List<KayaFamilyFace>> {
+    kayaFamilyFacesCache?.let { return it }
+    val out = HashMap<String, MutableList<KayaFamilyFace>>()
+    fun add(font: android.graphics.fonts.Font) {
+        val name = kayaFontFamilyName(font.buffer, font.ttcIndex) ?: return
+        val face = kayaFaceOf(font)
+        val list = out.getOrPut(name) { ArrayList() }
+        if (list.none { it.face == face }) list.add(KayaFamilyFace(face, kayaFaceName(face), font))
+    }
+    // A VARIABLE FONT'S NAMED ENTRIES are fonts.xml's alone: SystemFonts
+    // answers one Font per file (measured, API 35: Roboto as 400 and its
+    // condensed twin), while fonts.xml declares Roboto-Regular.ttf eighteen
+    // times, by wght and ital.
+    for (font in kayaFontsXmlFonts()) if (font.ttcIndex == 0) add(font)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        for (font in android.graphics.fonts.SystemFonts.getAvailableFonts()) {
+            if (font.file == null || font.ttcIndex != 0) continue
+            add(font)
+        }
+    }
+    val sorted = out.mapValues { (_, list) ->
+        list.sortedWith(compareBy<KayaFamilyFace> { it.face.weight }.thenBy { if (it.face.italic) 1 else 0 }.thenBy { it.face.width })
+    }
+    kayaFamilyFacesCache = sorted
+    return sorted
+}
+
+/** Every <font> fonts.xml declares, built with its weight, slope and axes. */
+internal fun kayaFontsXmlFonts(): List<android.graphics.fonts.Font> {
+    val out = ArrayList<android.graphics.fonts.Font>()
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return out
+    val xml = java.io.File("/system/etc/fonts.xml")
+    if (!xml.canRead()) return out
+    try {
+        val parser = android.util.Xml.newPullParser()
+        xml.inputStream().use { stream ->
+            parser.setInput(stream, null)
+            var weight = 400
+            var italic = false
+            var index = 0
+            val axes = StringBuilder()
+            var file = StringBuilder()
+            var inFont = false
+            while (parser.next() != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                when (parser.eventType) {
+                    org.xmlpull.v1.XmlPullParser.START_TAG -> when (parser.name) {
+                        "font" -> {
+                            inFont = true
+                            weight = parser.getAttributeValue(null, "weight")?.toIntOrNull() ?: 400
+                            italic = parser.getAttributeValue(null, "style") == "italic"
+                            index = parser.getAttributeValue(null, "index")?.toIntOrNull() ?: 0
+                            axes.setLength(0)
+                            file = StringBuilder()
+                        }
+                        "axis" -> if (inFont) {
+                            val tag = parser.getAttributeValue(null, "tag")
+                            val value = parser.getAttributeValue(null, "stylevalue")
+                            if (tag != null && value != null) {
+                                if (axes.isNotEmpty()) axes.append(", ")
+                                axes.append("'").append(tag).append("' ").append(value)
+                            }
+                        }
+                    }
+                    org.xmlpull.v1.XmlPullParser.TEXT -> if (inFont) file.append(parser.text)
+                    org.xmlpull.v1.XmlPullParser.END_TAG -> if (parser.name == "font") {
+                        inFont = false
+                        val path = java.io.File("/system/fonts", file.toString().trim())
+                        if (path.canRead()) {
+                            try {
+                                val builder = android.graphics.fonts.Font.Builder(path)
+                                    .setWeight(weight.coerceIn(1, 1000))
+                                    .setSlant(if (italic) android.graphics.fonts.FontStyle.FONT_SLANT_ITALIC
+                                        else android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT)
+                                    .setTtcIndex(index)
+                                if (axes.isNotEmpty()) builder.setFontVariationSettings(axes.toString())
+                                out.add(builder.build())
+                            } catch (e: java.io.IOException) {
+                                android.util.Log.w("kaya", "fonts.xml names ${path.path}, which would not open: ${e.message}")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.w("kaya", "fonts.xml could not be read: ${e.message}")
+    }
+    return out
+}
+
+/** A face's display name, from its weight's CSS keyword and its slope. */
+internal fun kayaFaceName(face: KayaFontFace): String {
+    val w = when {
+        face.weight < 150 -> "Thin"
+        face.weight < 250 -> "ExtraLight"
+        face.weight < 350 -> "Light"
+        face.weight < 450 -> "Regular"
+        face.weight < 550 -> "Medium"
+        face.weight < 650 -> "SemiBold"
+        face.weight < 750 -> "Bold"
+        face.weight < 850 -> "ExtraBold"
+        else -> "Black"
+    }
+    val wd = when (face.width) { 1, 2 -> "Compressed "; 3, 4 -> "Condensed "; 6, 7 -> "Expanded "; 8, 9 -> "Extended "; else -> "" }
+    return wd + if (face.italic) (if (w == "Regular") "Italic" else "$w Italic") else w
+}
+
+/** The faces of a family the app named: an installed family by its name, or
+ *  a fonts.xml generic (`monospace`, `sans-serif`), which resolves to the
+ *  family its typeface shapes to. */
+internal fun kayaFamilyFaces(name: String): List<KayaFamilyFace> {
+    val all = kayaAllFamilyFaces()
+    all[name]?.let { return it }
+    all.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.let { return it.value }
+    if (name in KAYA_GENERIC_FAMILIES) {
+        val shaped = kayaShapedFace(android.graphics.Typeface.create(name, android.graphics.Typeface.NORMAL))?.family
+        if (shaped != null) all[shaped]?.let { return it }
+    }
+    return emptyList()
+}
+
+/** The CSS Fonts 4 font matching algorithm, §5.2: width, then slope, then
+ *  weight (harness.rs's FontFace::matched). */
+internal fun kayaMatchFace(faces: List<KayaFontFace>, want: KayaFontFace): KayaFontFace? {
+    if (faces.isEmpty()) return null
+    val widths = faces.map { it.width }.toSortedSet()
+    val width = if (want.width in widths) want.width else {
+        val narrower = widths.filter { it < want.width }.sortedDescending()
+        val wider = widths.filter { it > want.width }
+        (if (want.width <= 5) narrower + wider else wider + narrower).first()
+    }
+    val pool = faces.filter { it.width == width }
+    val italic = if (pool.any { it.italic == want.italic }) want.italic else !want.italic
+    val weights = pool.filter { it.italic == italic }.map { it.weight }.toSortedSet()
+    val w = want.weight
+    val chosen = when {
+        w in weights -> w
+        w in 400..500 -> (weights.filter { it in (w + 1)..500 } + weights.filter { it < w }.sortedDescending() +
+            weights.filter { it > 500 }).first()
+        w < 400 -> (weights.filter { it < w }.sortedDescending() + weights.filter { it > w }).first()
+        else -> (weights.filter { it > w } + weights.filter { it < w }.sortedDescending()).first()
+    }
+    return pool.first { it.italic == italic && it.weight == chosen }
+}
+
+/** The family a node's face resolves in: its installed `family`, else the
+ *  platform's monospaced face, else the platform's own. */
+internal fun kayaNodeFaceFamily(node: KayaNode): String =
+    node.family.takeIf { it.isNotEmpty() && kayaInstalledFamilyMap().containsKey(it) }
+        ?: if (node.monospaced) "monospace" else "sans-serif"
+
+internal fun kayaNodeFaceSet(node: KayaNode): Boolean = node.fontWeight != 0 || node.fontItalic || node.fontWidth != 0
+
+/** A Compose family of a family's faces at the width the matcher chose:
+ *  Compose's own font matcher is the CSS one for weight and slope, and its
+ *  FontSynthesis draws a slope or a bold the family lacks (§2.4). */
+internal fun kayaFaceFontFamily(faces: List<KayaFamilyFace>, width: Int): FontFamily? {
+    val fonts = faces.filter { it.face.width == width }.mapNotNull { f ->
+        val file = f.font.file ?: return@mapNotNull null
+        val weight = FontWeight(f.face.weight)
+        val style = if (f.face.italic) FontStyle.Italic else FontStyle.Normal
+        val axes = f.font.axes
+        if (axes.isNullOrEmpty()) androidx.compose.ui.text.font.Font(file, weight, style)
+        else androidx.compose.ui.text.font.Font(
+            file, weight, style,
+            androidx.compose.ui.text.font.FontVariation.Settings(
+                *axes.map { androidx.compose.ui.text.font.FontVariation.Setting(it.tag, it.styleValue) }.toTypedArray()))
+    }
+    return if (fonts.isEmpty()) null else FontFamily(fonts)
+}
+
+/** The family and face a node draws in, applied over [style]; the style
+ *  untouched when the node asks for no face. */
+internal fun kayaNodeFaceStyle(node: KayaNode, style: androidx.compose.ui.text.TextStyle): androidx.compose.ui.text.TextStyle {
+    if (!kayaNodeFaceSet(node)) return style
+    val want = KayaFontFace(
+        if (node.fontWeight != 0) node.fontWeight else (style.fontWeight?.weight ?: 400),
+        node.fontItalic,
+        if (node.fontWidth != 0) node.fontWidth else 5)
+    val faces = kayaFamilyFaces(kayaNodeFaceFamily(node))
+    val matched = kayaMatchFace(faces.map { it.face }, want)
+    val family = matched?.let { kayaFaceFontFamily(faces, it.width) } ?: style.fontFamily
+    return style.copy(
+        fontFamily = family,
+        fontWeight = FontWeight(want.weight),
+        fontStyle = if (want.italic) FontStyle.Italic else FontStyle.Normal,
+        fontSynthesis = androidx.compose.ui.text.font.FontSynthesis.All,
+    )
+}
+
+/** What a rich run's Bold draws at over a node: at least 700 (Q3). */
+internal fun kayaNodeBold(node: KayaNode, base: androidx.compose.ui.text.TextStyle): FontWeight =
+    FontWeight(maxOf(700, if (node.fontWeight != 0) node.fontWeight else (base.fontWeight?.weight ?: 400)))
+
+/** The family a Code run keeps: a document's own named fixed-pitch family. */
+internal fun kayaNodeCodeFamily(node: KayaNode): FontFamily {
+    if (node.family.isEmpty() || !node.monospaced) return FontFamily.Monospace
+    val installed = kayaInstalledFamilyMap()[node.family] ?: return FontFamily.Monospace
+    val faces = kayaFamilyFaces(node.family)
+    return kayaFaceFontFamily(faces, 5) ?: installed
+}
+
+/** list_font_faces (docs/font-picker-plan.md §4.4). */
+internal fun kayaListFontFaces(family: String) {
+    val lines = kayaFamilyFaces(family).joinToString("\n") {
+        "${it.face.weight}\t${if (it.face.italic) 1 else 0}\t${it.face.width}\t${it.name}"
+    }
+    KayaPresent.fontFaces(family, lines)
+}
+
+/** A family drawing Latin at one advance: i against W at its regular face,
+ *  and the letters its own (an emoji or symbol font draws neither). */
+internal fun kayaCodeFamily(name: String): Boolean {
+    val faces = kayaFamilyFaces(name)
+    val regular = kayaMatchFace(faces.map { it.face }, KayaFontFace(400, false, 5)) ?: return false
+    val font = faces.first { it.face == regular }.font
+    val typeface = android.graphics.Typeface.CustomFallbackBuilder(
+        android.graphics.fonts.FontFamily.Builder(font).build()).build()
+    val paint = android.graphics.Paint().apply { this.typeface = typeface; textSize = 100f }
+    if (!paint.hasGlyph("i") || !paint.hasGlyph("W")) return false
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        val glyphs = android.graphics.text.TextRunShaper.shapeTextRun("iW", 0, 2, 0, 2, 0f, 0f, false, paint)
+        if (glyphs.glyphCount() == 0 || glyphs.getFont(0).file?.path != font.file?.path) return false
+    }
+    return Math.abs(paint.measureText("iiiii") - paint.measureText("WWWWW")) < 0.5f
+}
+
+/** The open font picker: what it lists and what the user selected (§4.3). */
+internal class KayaFontPicker(val dialog: Long, val codeOnly: Boolean, val faces: Boolean, val families: List<String>) {
+    var query by mutableStateOf("")
+    var family by mutableStateOf<String?>(null)
+    var face by mutableStateOf<KayaFontFace?>(null)
+}
+
+internal const val KAYA_FONT_PREVIEW = "The quick brown fox jumps over the lazy dog"
+
+/** PRESENT_FONT_DIALOG: the kaya-drawn bottom sheet (Android has no font
+ *  picker): a search field, the families each drawn in itself, the chosen
+ *  family's faces as chips, a preview, Cancel and Choose. */
+internal fun kayaPresentFontPicker(dialog: Long, codeOnly: Boolean, faces: Boolean, family: String, initial: KayaFontFace) {
+    val names = kayaInstalledFamilyMap().keys.filter { !codeOnly || kayaCodeFamily(it) }.sorted()
+    val picker = KayaFontPicker(dialog, codeOnly, faces, names)
+    names.firstOrNull { it.equals(family, ignoreCase = true) }?.let { kayaSelectFontFamily(picker, it, initial) }
+    KayaSceneModel.fontPicker = picker
+}
+
+internal fun kayaSelectFontFamily(picker: KayaFontPicker, name: String, keep: KayaFontFace?) {
+    picker.family = name
+    val faces = kayaFamilyFaces(name).map { it.face }
+    picker.face = (keep?.let { kayaMatchFace(faces, it) }) ?: kayaMatchFace(faces, KayaFontFace(400, false, 5))
+}
+
+/** The picker's one answer: the selection on Choose, the empty family on
+ *  Cancel, a swipe down or the back gesture. */
+internal fun kayaFontAnswer(picker: KayaFontPicker, chosen: Boolean) {
+    if (KayaSceneModel.fontPicker !== picker) return
+    KayaSceneModel.fontPicker = null
+    val family = picker.family.takeIf { chosen }
+    val face = when {
+        family == null -> null
+        picker.faces -> picker.face
+        else -> kayaMatchFace(kayaFamilyFaces(family).map { it.face }, KayaFontFace(400, false, 5))
+    }
+    if (family == null || face == null) {
+        KayaPresent.fontDialogResult(picker.dialog, "", 0, false, 0)
+    } else {
+        KayaPresent.fontDialogResult(picker.dialog, family, face.weight, face.italic, face.width)
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun KayaFontSheet() {
+    val picker = KayaSceneModel.fontPicker ?: return
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    KayaSceneModel.fontSheetState = state
+    androidx.compose.runtime.DisposableEffect(picker) {
+        onDispose {
+            KayaSceneModel.fontSheetState = null
+            KayaSceneModel.fontSheetWindow = null
+        }
+    }
+    ModalBottomSheet(onDismissRequest = { kayaFontAnswer(picker, false) }, sheetState = state) {
+        val view = LocalView.current
+        androidx.compose.runtime.SideEffect {
+            KayaSceneModel.fontSheetWindow = (view.parent as? DialogWindowProvider)?.window
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 16.dp)) {
+            Text("Font", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = picker.query,
+                onValueChange = { picker.query = it },
+                placeholder = { Text("Search") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag(KayaCompose.FONT_SEARCH_TAG),
+            )
+            val shown = picker.families.filter { picker.query.isEmpty() || it.contains(picker.query, ignoreCase = true) }
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                items(shown.size, key = { shown[it] }) { i ->
+                    val name = shown[i]
+                    val own = remember(name) { kayaFaceFontFamily(kayaFamilyFaces(name), 5) }
+                    Text(
+                        name,
+                        fontFamily = own,
+                        style = MaterialTheme.typography.bodyLarge,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag(KayaCompose.FONT_FAMILY_TAG)
+                            .selectable(selected = picker.family == name, onClick = { kayaSelectFontFamily(picker, name, null) })
+                            .background(if (picker.family == name) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                            .padding(vertical = 12.dp, horizontal = 8.dp),
+                    )
+                }
+            }
+            val family = picker.family
+            if (picker.faces && family != null) {
+                val faces = kayaFamilyFaces(family)
+                val drawn = remember(family) { faces.associate { it.face to kayaFaceFontFamily(faces, it.face.width) } }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp)) {
+                    for (f in faces) {
+                        FilterChip(
+                            selected = picker.face == f.face,
+                            onClick = { picker.face = f.face },
+                            label = {
+                                Text(f.name, fontFamily = drawn[f.face], fontWeight = FontWeight(f.face.weight),
+                                    fontStyle = if (f.face.italic) FontStyle.Italic else FontStyle.Normal)
+                            },
+                            modifier = Modifier.padding(end = 6.dp).testTag(KayaCompose.FONT_FACE_TAG)
+                                .semantics { stateDescription = f.face.words },
+                        )
+                    }
+                }
+            }
+            val face = picker.face
+            Text(
+                KAYA_FONT_PREVIEW,
+                fontFamily = family?.let { name -> kayaFamilyFaces(name).let { kayaFaceFontFamily(it, face?.width ?: 5) } },
+                fontWeight = face?.let { FontWeight(it.weight) },
+                fontStyle = face?.let { if (it.italic) FontStyle.Italic else FontStyle.Normal },
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = { kayaFontAnswer(picker, false) }, modifier = Modifier.testTag(KayaCompose.FONT_CANCEL_TAG)) {
+                    Text("Cancel")
+                }
+                Spacer(Modifier.width(8.dp))
+                Button(
+                    onClick = { kayaFontAnswer(picker, true) },
+                    enabled = family != null,
+                    modifier = Modifier.testTag(KayaCompose.FONT_CHOOSE_TAG),
+                ) {
+                    Text("Choose")
+                }
+            }
+        }
     }
 }
