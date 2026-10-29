@@ -243,6 +243,9 @@ pub enum MenuState {
     /// The radio group's selected option index (the choice contract's
     /// 0-based add order), asserted on the GROUP's path.
     Value(usize),
+    /// A nested radio group's label drawn as a section heading directly
+    /// above its first option, read off the real chrome.
+    Titled,
 }
 
 /// Which axis of a menu item's state a step reads — what the stage's
@@ -252,6 +255,7 @@ pub enum MenuAspect {
     Enablement,
     Checkedness,
     Value,
+    Title,
 }
 
 impl MenuState {
@@ -261,6 +265,7 @@ impl MenuState {
             MenuState::Enabled | MenuState::Disabled => MenuAspect::Enablement,
             MenuState::Checked | MenuState::Unchecked => MenuAspect::Checkedness,
             MenuState::Value(_) => MenuAspect::Value,
+            MenuState::Titled => MenuAspect::Title,
         }
     }
 
@@ -273,6 +278,7 @@ impl MenuState {
             MenuState::Checked => "checked".to_owned(),
             MenuState::Unchecked => "unchecked".to_owned(),
             MenuState::Value(n) => format!("value {n}"),
+            MenuState::Titled => "titled".to_owned(),
         }
     }
 }
@@ -5729,6 +5735,7 @@ fn parse_menu_state(spec: &str) -> Result<MenuState, String> {
         "disabled" => return Ok(MenuState::Disabled),
         "checked" => return Ok(MenuState::Checked),
         "unchecked" => return Ok(MenuState::Unchecked),
+        "titled" => return Ok(MenuState::Titled),
         _ => {}
     }
     if let Some((word, index)) = spec.split_once(char::is_whitespace) {
@@ -5743,7 +5750,7 @@ fn parse_menu_state(spec: &str) -> Result<MenuState, String> {
         }
     }
     Err(format!(
-        "expect_menu wants enabled|disabled|checked|unchecked|value N, got {spec:?}"
+        "expect_menu wants enabled|disabled|checked|unchecked|titled|value N, got {spec:?}"
     ))
 }
 
@@ -11875,6 +11882,7 @@ mod tests {
                 MenuAspect::Enablement => "disabled".to_owned(),
                 MenuAspect::Checkedness => "checked".to_owned(),
                 MenuAspect::Value => "value 1".to_owned(),
+                MenuAspect::Title => "titled".to_owned(),
             }
         }
         fn menu_symbol(&self, _: &str) -> String {
@@ -14220,6 +14228,12 @@ mod tests {
         assert_eq!(MenuState::Unchecked.aspect(), MenuAspect::Checkedness);
         assert_eq!(MenuState::Value(0).aspect(), MenuAspect::Value);
         assert_eq!(MenuState::Value(2).spelling(), "value 2");
+        assert_eq!(
+            parse("expect_menu \"View>Font\" titled").unwrap(),
+            vec![Step::ExpectMenu("View>Font".into(), MenuState::Titled)]
+        );
+        assert_eq!(MenuState::Titled.aspect(), MenuAspect::Title);
+        assert!(parse("expect_menu \"View>Font\" titled \"Font\"").is_err());
     }
 
     /// Malformed paths die at parse, not as a bewildering "no such

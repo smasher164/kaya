@@ -787,6 +787,8 @@ struct CoreState {
     /// copy's keys ARE the noun — a flat per-item map is the wrong-noun
     /// bug (docs/traps.md). Separators and NESTED radio groups mint none.
     menu_natives: HashMap<(MenuAttachment, u64), MenuNative>,
+    /// Each radio group's row vector, for the title read.
+    menu_group_rows: HashMap<(MenuAttachment, u64), windows_collections::IVector<MenuFlyoutItemBase>>,
     /// The window shell (the ratified lowering): the TITLEBAR's Auto row at
     /// the top of a shell Grid, the MenuBar in the Auto row under it, the
     /// window's real content in the Star-row slot beneath both. Built once per
@@ -9619,6 +9621,7 @@ fn rebuild_menus(core: &mut CoreState) -> windows_core::Result<()> {
         menu_probe();
     }
     core.menu_natives.clear();
+    core.menu_group_rows.clear();
     core.menu_shortcuts.clear();
     let windows: Vec<(u64, Vec<u64>)> = core
         .menu_windows
@@ -9805,7 +9808,14 @@ fn build_menu_items(
             MenuItemKind::RadioGroup => {
                 // Inline with the platform's checkmark idiom: the options join
                 // the enclosing vector directly (RadioMenuFlyoutItem.GroupName
-                // per radio group); the GROUP mints no chrome of its own here.
+                // per radio group). A bar's top-level group is titled by its
+                // MenuBarItem; anywhere else its label heads its options.
+                let bar_top = matches!(attachment, MenuAttachment::Window(w)
+                    if core.menu_windows.get(&w).is_some_and(|roots| roots.contains(&id)));
+                if !bar_top && !children.is_empty() {
+                    dest.Append(&menu_heading(&label)?.cast::<MenuFlyoutItemBase>()?)?;
+                }
+                core.menu_group_rows.insert((attachment, id), dest.clone());
                 for (index, &option) in children.iter().enumerate() {
                     let (option_label, option_shortcut, option_symbol) = {
                         let m = &core.menu_models[&option];
@@ -9839,6 +9849,34 @@ fn build_menu_items(
 
 
 
+
+/// A radio group's title row: Fluent has no menu section header, so the
+/// title is a disabled item (no focus, no invoke) whose disabled foreground
+/// is the secondary text fill, in semibold, published to UIA as a heading.
+fn menu_heading(label: &str) -> windows_core::Result<MenuFlyoutItem> {
+    let theme = |key: &str| {
+        format!(
+            "<ResourceDictionary x:Key=\"{key}\">\
+             <StaticResource x:Key=\"MenuFlyoutItemForegroundDisabled\" ResourceKey=\"TextFillColorSecondaryBrush\"/>\
+             </ResourceDictionary>"
+        )
+    };
+    let markup = format!(
+        "<MenuFlyoutItem xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" \
+         xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" IsEnabled=\"False\" FontWeight=\"SemiBold\">\
+         <MenuFlyoutItem.Resources><ResourceDictionary><ResourceDictionary.ThemeDictionaries>{}{}\
+         </ResourceDictionary.ThemeDictionaries></ResourceDictionary></MenuFlyoutItem.Resources></MenuFlyoutItem>",
+        theme("Default"),
+        theme("Light")
+    );
+    let item: MenuFlyoutItem = XamlReader::Load(&HSTRING::from(markup))?.cast()?;
+    item.SetText(&HSTRING::from(label))?;
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetHeadingLevel(
+        &item,
+        bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationHeadingLevel::Level2,
+    )?;
+    Ok(item)
+}
 
 // --- The chord route (Win32) -------------------------------------------
 //
@@ -17235,6 +17273,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // peer, so a surviving entry would stay invoke-capable
                 // with the dead row's noun.
                 purge_context_natives(&mut core.menu_natives, id.0);
+                purge_context_natives(&mut core.menu_group_rows, id.0);
                 if core.open_context.as_ref().is_some_and(|(w, _)| *w == id.0) {
                     core.open_context = None;
                 }
@@ -22060,6 +22099,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             context_labels: HashMap::new(),
             context_flyouts: HashMap::new(),
             menu_natives: HashMap::new(),
+            menu_group_rows: HashMap::new(),
             menubars: HashMap::new(),
             menu_slots: HashMap::new(),
             menu_shells: HashMap::new(),
@@ -25721,6 +25761,45 @@ impl crate::harness::Stage for WinUiStage {
                     Some(_) => "unchecked".to_owned(),
                     None => "no such item".to_owned(),
                 },
+                MenuAspect::Title => {
+                    let model = &core.menu_models[&item];
+                    if model.kind != MenuItemKind::RadioGroup {
+                        return Ok("not a radio group".to_owned());
+                    }
+                    if core.open_context.is_none() && roots.contains(&item) {
+                        return Ok("a top-level radio group is its menu; expect_menu_bar reads its title".to_owned());
+                    }
+                    let Some(&first) = model.children.first() else {
+                        return Ok("a radio group with no options draws no heading".to_owned());
+                    };
+                    let (Some(rows), Some(MenuNative::Option(radio))) = (
+                        core.menu_group_rows.get(&(attachment, item)),
+                        core.menu_natives.get(&(attachment, first)),
+                    ) else {
+                        return Ok("its options were not built".to_owned());
+                    };
+                    let mut at = 0u32;
+                    if !rows.IndexOf(&radio.cast::<MenuFlyoutItemBase>()?, &mut at)? {
+                        return Ok("its first option is not in its menu's rows".to_owned());
+                    }
+                    if at == 0 {
+                        return Ok("nothing sits above its first option".to_owned());
+                    }
+                    let above = rows.GetAt(at - 1)?;
+                    let label = menu_label(core, attachment, item);
+                    match above.cast::<MenuFlyoutItem>() {
+                        Ok(row) if !row.IsEnabled()? && row.Text()?.to_string() == label => "titled".to_owned(),
+                        Ok(row) => format!(
+                            "above its first option sits {:?}, {}",
+                            row.Text()?.to_string(),
+                            if row.IsEnabled()? { "enabled" } else { "disabled" }
+                        ),
+                        Err(_) if above.cast::<MenuFlyoutSeparator>().is_ok() => {
+                            "a separator sits directly above its first option".to_owned()
+                        }
+                        Err(_) => "above its first option sits a row that is not a plain item".to_owned(),
+                    }
+                }
                 MenuAspect::Value => {
                     // The group's value IS its checked option, read
                     // from the REAL radio rows (the checkmark idiom).

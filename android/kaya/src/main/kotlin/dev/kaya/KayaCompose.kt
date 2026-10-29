@@ -10560,6 +10560,34 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
     }
 
     /**
+     * The `titled` read: the composed heading row a nested radio group
+     * draws, its text and its place directly above the first option.
+     * MAIN THREAD ONLY.
+     */
+    private fun kayaMenuTitleRead(activity: ComponentActivity, path: String): String {
+        val item = kayaResolveMenuPath(path)?.first ?: return "no such item"
+        if (item.kind != MENU_KIND_RADIO_GROUP) return "not a radio group"
+        if (KayaSceneModel.openContextWidget == null && item.parent == null) {
+            return "a top-level radio group is its menu; expect_menu_bar reads its title"
+        }
+        val first = item.children.firstOrNull()
+            ?: return "a radio group with no options draws no heading"
+        kayaPresentMenuRow(item)
+        val heading = kayaMenuRowNode(activity, kayaMenuTag(item.id))
+            ?: return kayaMenuRowMissing(item)
+        val option = kayaMenuRowNode(activity, kayaMenuTag(first.id))
+            ?: return kayaMenuRowMissing(first)
+        val text = heading.config.getOrNull(SemanticsProperties.Text)
+            ?.firstOrNull()?.text ?: ""
+        if (text != item.label) return "its heading row reads \"$text\""
+        val gap = option.boundsInRoot.top - heading.boundsInRoot.bottom
+        if (gap < -1f || gap > option.boundsInRoot.height) {
+            return "its heading row is ${gap}px from its first option"
+        }
+        return "titled"
+    }
+
+    /**
      * Present the surface this item's row materializes on, so there is
      * something for [kayaMenuSymbolRead] to read. Idempotent: the step
      * wrapper calls the read again every 20ms until the frame lands.
@@ -16287,12 +16315,20 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val head = quotedHead(line.substring(parts[0].length))
                         val want = head?.second ?: ""
                         val wantValid = want == "enabled" || want == "disabled" ||
-                            want == "checked" || want == "unchecked" ||
+                            want == "checked" || want == "unchecked" || want == "titled" ||
                             Regex("value \\d+").matches(want)
                         if (head == null || !wantValid) {
                             failures.add(
                                 "expect_menu wants a quoted path and " +
-                                    "enabled|disabled|checked|unchecked|value N: $line")
+                                    "enabled|disabled|checked|unchecked|titled|value N: $line")
+                        } else if (want == "titled") {
+                            val got = onUi(activity) { kayaMenuTitleRead(activity, head.first) }
+                            if (got == want) {
+                                onUi(activity) { kayaDismissPresentedMenuRow() }
+                                observed.add("menu \"${head.first}\" $want")
+                            } else {
+                                failures.add("menu \"${head.first}\" reads \"$got\", wanted \"$want\"")
+                            }
                         } else {
                             val path = head.first
                             val got = onUi(activity) {
@@ -23525,7 +23561,23 @@ fun KayaMenuRows(
                     enabled = kayaMenuEffectivelyEnabled(item),
                     onClick = { onDrill(item) },
                 )
-            KayaCompose.MENU_KIND_RADIO_GROUP -> KayaRadioRows(item, noun, onClose)
+            KayaCompose.MENU_KIND_RADIO_GROUP -> {
+                if (item.children.isNotEmpty()) {
+                    // The top-level group header's shape, so a nested
+                    // group's title reads like its menu's.
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                            .testTag(kayaMenuTag(item.id))
+                            .semantics(mergeDescendants = true) {},
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        KayaSymbolIcon(item.symbol)
+                        Text(label)
+                    }
+                }
+                KayaRadioRows(item, noun, onClose)
+            }
             KayaCompose.MENU_KIND_TOGGLE ->
                 DropdownMenuItem(
                     text = { Text(label) },

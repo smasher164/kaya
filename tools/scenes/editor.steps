@@ -290,6 +290,7 @@ menu_activate "View>Line Numbers"
 expect_gutter textarea@buffer-2 on
 expect_menu "View>Line Numbers" checked
 expect_menu "View>Font" value 0
+expect_menu "View>Font" titled
 
 # ---- the unsaved-work guard, from two doors ------------------------
 #

@@ -11259,6 +11259,34 @@ fn set_row_symbol(row: &gio::MenuItem, symbol: i64) {
 /// A radio group's option rows: each option carries its OWN stateful action
 /// plus its index as target — GMenu renders the radio idiom from exactly
 /// that shape, and the per-option action is what lets ONE option gray.
+/// The `label` of the GMenu section whose first row fires `action_suffix`,
+/// searched through sections and submenus of the model the bar renders.
+fn menu_section_heading(model: &gio::MenuModel, action_suffix: &str) -> Option<String> {
+    use gtk4::gio::prelude::MenuModelExt;
+    let attr = |model: &gio::MenuModel, i: i32, name: &str| {
+        model
+            .item_attribute_value(i, name, Some(glib::VariantTy::STRING))
+            .and_then(|v| v.get::<String>())
+            .unwrap_or_default()
+    };
+    for i in 0..model.n_items() {
+        if let Some(section) = model.item_link(i, "section") {
+            if section.n_items() > 0 && attr(&section, 0, "action").ends_with(action_suffix) {
+                return Some(attr(model, i, "label"));
+            }
+            if let Some(found) = menu_section_heading(&section, action_suffix) {
+                return Some(found);
+            }
+        }
+        if let Some(submenu) = model.item_link(i, "submenu") {
+            if let Some(found) = menu_section_heading(&submenu, action_suffix) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 fn append_radio_options(reg: &MenuRegistry, group: u64, prefix: &str, into: &gio::Menu) {
     use gtk4::glib::prelude::ToVariant;
     for (index, &option) in reg.items[&group].children.iter().enumerate() {
@@ -22226,6 +22254,10 @@ impl crate::harness::Stage for GtkStage {
             ) {
                 for i in 0..model.n_items() {
                     if let Some(section) = model.item_link(i, "section") {
+                        let heading = attr(model, i, "label");
+                        if !heading.is_empty() {
+                            out.push(crate::harness::BarItem { label: heading, chord: String::new(), role: String::new() });
+                        }
                         items(&section, reg, app, out);
                         continue;
                     }
@@ -23191,6 +23223,30 @@ impl crate::harness::Stage for GtkStage {
             };
             let item = &reg.items[&id];
             match aspect {
+                MenuAspect::Title => {
+                    if item.kind != MenuItemKind::RadioGroup {
+                        return "not a radio group".to_owned();
+                    }
+                    if open.is_none() && roots.contains(&id) {
+                        return "a top-level radio group is its menu; expect_menu_bar reads its title".to_owned();
+                    }
+                    let Some(&first) = item.children.first() else {
+                        return "a radio group with no options draws no heading".to_owned();
+                    };
+                    let model: gio::MenuModel = match open {
+                        Some(anchor) => core.context_menus[&anchor].model.clone().upcast(),
+                        None => match core.menu_models.get(&0) {
+                            Some(model) => model.clone().upcast(),
+                            None => return "the window has no menu model".to_owned(),
+                        },
+                    };
+                    match menu_section_heading(&model, &format!(".kmi-{first}")) {
+                        None => "no section of the menu model holds its options".to_owned(),
+                        Some(heading) if heading.is_empty() => "its options' section carries no heading".to_owned(),
+                        Some(heading) if heading == menu_label(&reg, &labels, id) => "titled".to_owned(),
+                        Some(heading) => format!("its options' section is headed {heading:?}"),
+                    }
+                }
                 MenuAspect::Enablement => {
                     // The REAL action's flag where one exists (it carries
                     // the inherited AND), including a radio option's own

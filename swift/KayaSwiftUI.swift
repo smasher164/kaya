@@ -9742,6 +9742,7 @@ private func kayaParseMenuState(_ spec: String) -> (KayaMenuAspect, String)? {
     switch s {
     case "enabled", "disabled": return (.enablement, s)
     case "checked", "unchecked": return (.checkedness, s)
+    case "titled": return (.title, s)
     default:
         let bits = s.split(separator: " ", omittingEmptySubsequences: true)
         // value takes a 0-BASED index (harness.rs parses usize; a
@@ -30454,7 +30455,7 @@ func kayaMenuChanged() {
 /// One aspect of a menu item's state, spelled in the steps grammar's own words
 /// — what expect_menu byte-compares. TOTAL: a missing item reads as a short
 /// description, a retryable mismatch.
-enum KayaMenuAspect { case enablement, checkedness, value }
+enum KayaMenuAspect { case enablement, checkedness, value, title }
 
 func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> String {
     switch aspect {
@@ -30464,6 +30465,8 @@ func kayaModelMenuState(_ item: KayaMenuItemModel, _ aspect: KayaMenuAspect) -> 
         return item.checked ? "checked" : "unchecked"
     case .value:
         return "value \(Int(item.value))"
+    case .title:
+        return "this host reads no heading off a context menu"
     }
 }
 
@@ -32135,6 +32138,12 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
         case .checkedness:
             guard let nsItem = kayaOwnedNSMenuItem(item.id) else { return "no such item" }
             return nsItem.state == .on ? "checked" : "unchecked"
+        case .title:
+            guard item.kind == menuKindRadioGroup else { return "not a radio group" }
+            if kayaPresentedCatalog().contains(where: { $0.id == item.id }) {
+                return "a top-level radio group is its menu; expect_menu_bar reads its title"
+            }
+            return kayaNSGroupHeading(item)
         case .value:
             // The group's value IS its checked option, read from the real items
             // (the checkmark idiom).
@@ -32146,6 +32155,13 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             return "no checked option"
         }
     #else
+        if aspect == .title {
+            guard item.kind == menuKindRadioGroup else { return "not a radio group" }
+            if kayaPresentedCatalog().contains(where: { $0.id == item.id }) {
+                return "a top-level radio group is its menu; expect_menu_bar reads its title"
+            }
+            return kayaIOSGroupHeading(item)
+        }
         return kayaModelMenuState(item, aspect)
     #endif
 }
@@ -32257,7 +32273,7 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
     /// radio_group materializes INLINE with the checkmark idiom.
     func kayaBuildNSMenuItems(
         into menu: NSMenu, children: [KayaMenuItemModel], noun: [UInt8]? = nil,
-        labels: [UInt64: String] = [:]
+        labels: [UInt64: String] = [:], titlesGroups: Bool = true
     ) {
         func tag(_ id: UInt64) -> Any {
             noun.map { KayaContextPick(item: id, noun: $0) } ?? NSNumber(value: id)
@@ -32280,6 +32296,9 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 holder.submenu = submenu
                 menu.addItem(holder)
             case menuKindRadioGroup:
+                if titlesGroups && !child.children.isEmpty {
+                    menu.addItem(kayaSectionHeader(kayaMenuLabel(child, labels)))
+                }
                 for (index, option) in child.children.enumerated() {
                     let nsItem = NSMenuItem(
                         title: option.label,
@@ -32323,6 +32342,34 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
                 break  // radio_option outside its group: the closed grammar forbids it
             }
         }
+    }
+
+    /// A radio group's title row: AppKit's section header from macOS 14, the
+    /// disabled titled item it replaced before that.
+    func kayaSectionHeader(_ title: String) -> NSMenuItem {
+        if #available(macOS 14, *) { return NSMenuItem.sectionHeader(title: title) }
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        return item
+    }
+
+    /// The `titled` read: the row directly above the group's first option in
+    /// the real menu.
+    func kayaNSGroupHeading(_ group: KayaMenuItemModel) -> String {
+        guard let first = group.children.first else {
+            return "a radio group with no options draws no heading"
+        }
+        guard let option = kayaOwnedNSMenuItem(first.id), let menu = option.menu else {
+            return "its first option is not on the bar"
+        }
+        let at = menu.index(of: option)
+        guard at > 0 else { return "nothing sits above its first option" }
+        let above = menu.items[at - 1]
+        if above.isSeparatorItem { return "a separator sits directly above its first option" }
+        let header: Bool
+        if #available(macOS 14, *) { header = above.isSectionHeader } else { header = !above.isEnabled }
+        if header && above.title == group.label { return "titled" }
+        return "above its first option sits \"\(above.title)\", \(header ? "a section header" : "not a section header")"
     }
 
     /// One place applies a SEMANTIC ICON to a native item, so every leaf and
@@ -32547,7 +32594,8 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             // checkmark idiom — the same inline materialization, one level up.
             kayaBuildNSMenuItems(
                 into: submenu,
-                children: top.kind == menuKindRadioGroup ? [top] : top.children)
+                children: top.kind == menuKindRadioGroup ? [top] : top.children,
+                titlesGroups: top.kind != menuKindRadioGroup)
             holder.submenu = submenu
             let at = min(max(last + 1, kayaMenuInsertionIndex(mainMenu.items)), mainMenu.items.count)
             mainMenu.insertItem(holder, at: at)
@@ -32621,7 +32669,8 @@ func kayaMenuStateRead(_ path: String, _ aspect: KayaMenuAspect) -> String {
             kayaMergedLeftovers[ObjectIdentifier(merged.shown)] = merged.dress.items.map(ObjectIdentifier.init)
         }
         kayaBuildNSMenuItems(
-            into: merged.shown, children: top.kind == menuKindRadioGroup ? [top] : top.children)
+            into: merged.shown, children: top.kind == menuKindRadioGroup ? [top] : top.children,
+            titlesGroups: top.kind != menuKindRadioGroup)
         kayaOwnedMenuItems += merged.shown.items
         let labels = Set(merged.shown.items.filter { !$0.isSeparatorItem }.map(\.title))
         var roleActions: [Selector] = []
@@ -33351,6 +33400,38 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
     /// bar asks), and no API returns the built menu. So the read runs the
     /// lowering itself over the system's real menus from the last build, in
     /// a builder of kaya's own (docs/traps.md, the iOS menu bar no API reads).
+    /// The `titled` read: the title of the inline UIMenu that holds the
+    /// group's options in the bar UIKit was handed.
+    func kayaIOSGroupHeading(_ group: KayaMenuItemModel) -> String {
+        guard let first = group.children.first else {
+            return "a radio group with no options draws no heading"
+        }
+        guard let root = kayaSystemMenuRoot else {
+            return "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system)"
+        }
+        let builder = KayaMenuTreeBuilder(root: root)
+        kayaLowerCatalogMenus(builder)
+        func find(_ menu: UIMenu) -> UIMenu? {
+            for case let sub as UIMenu in menu.children {
+                if sub.options.contains(.displayInline),
+                    let action = sub.children.first as? UIAction, action.title == first.label,
+                    sub.children.count == group.children.count
+                {
+                    return sub
+                }
+                if let hit = find(sub) { return hit }
+            }
+            return nil
+        }
+        guard let holder = find(builder.root) else {
+            return "no inline menu of the built bar holds its options"
+        }
+        if holder.title == group.label { return "titled" }
+        return holder.title.isEmpty
+            ? "the inline menu holding its options carries no title"
+            : "the inline menu holding its options is titled \"\(holder.title)\""
+    }
+
     func kayaBuiltMenuBar() -> [KayaBarMenu]? {
         guard let root = kayaSystemMenuRoot else { return nil }
         let builder = KayaMenuTreeBuilder(root: root)
@@ -33423,6 +33504,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         var out: [(label: String, chord: String, role: String)] = []
         for element in elements {
             if let menu = element as? UIMenu, menu.options.contains(.displayInline) {
+                if !menu.title.isEmpty { out.append((menu.title, "", "")) }
                 out += kayaFlatCommands(menu.children)
             } else if let menu = element as? UIMenu {
                 out.append((menu.title, "", ""))
@@ -33550,7 +33632,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         case menuKindRadioGroup:
             return UIMenu(
                 title: item.label, identifier: UIMenu.Identifier("dev.kaya.menu.\(item.id)"),
-                children: [kayaCatalogRadio(item)])
+                children: [kayaCatalogRadio(item, titled: false)])
         default:
             return nil
         }
@@ -33631,7 +33713,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
 
     /// A radio group: options inline, exactly one `.on` — the choice contract's
     /// selected index, the same state the inline Picker shows in the compact arm.
-    private func kayaCatalogRadio(_ group: KayaMenuItemModel) -> UIMenuElement {
+    private func kayaCatalogRadio(_ group: KayaMenuItemModel, titled: Bool = true) -> UIMenuElement {
         let enabled = kayaMenuEffectiveEnabled(group)
         let options = group.children.enumerated().map {
             (index, option) -> UIMenuElement in
@@ -33642,7 +33724,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
             if !enabled { action.attributes = .disabled }
             return action
         }
-        return UIMenu(title: group.label, options: .displayInline, children: options)
+        return UIMenu(title: titled ? group.label : "", options: .displayInline, children: options)
     }
 
     /// The catalog is live, so every structural append and every prop write must
