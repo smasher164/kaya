@@ -122,7 +122,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
-                "listrow", "stampbefore", "tints", "badge", "emoji",
+                "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji",
                 "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -473,6 +473,9 @@ ORDER = [
      "listrow_rust",
      # A sibling stamped before a textarea (docs/traps.md, the positional loop).
      "stampbefore_rust",
+     # A focus set in its target's mount transaction (docs/traps.md, the
+     # materialization class).
+     "mountfocus_rust",
      # The platform tints on a filled container, light and dark
      # (docs/tints-plan.md).
      "tints_rust",

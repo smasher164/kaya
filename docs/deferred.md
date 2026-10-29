@@ -6159,7 +6159,16 @@ reach.
   so a broken bindings.rs fails in seconds rather than on the VM. What
   is missing is PROVENANCE: nothing proves the checked-in file is what
   the generator would emit.
-- Mount-transaction focus negative test: the Focus command now
+- ~~Mount-transaction focus negative test~~ — CLOSED 2026-10-29:
+  tools/scenes/mountfocus.steps (guests/rust/mountfocus.rs, on all five
+  lanes) focuses the second of two entries ahead of its mount in the
+  mount transaction and asserts expect_focused entry@target; watched red
+  with the deferral cut (one substitution each, restored by copy, sha256
+  equal) on WinUI ("entry@target does not hold focus", the Loaded defer
+  as `if true`) and on GTK x11 and wayland (the map defer as `if true`).
+  Focusing AFTER the mount passes on GTK without the deferral
+  (grab_focus needs a root, not a mapping), which is why the scene
+  focuses first. As filed: the Focus command now
   defers until the element is loaded/mapped on WinUI/GTK (the
   materialization class, traps.md), but no scene issues focus IN the
   mount tx — the entry scene focuses from the add fold, long after

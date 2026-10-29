@@ -1,0 +1,5 @@
+# A focus set in the transaction that mounts its target reaches it
+# (docs/traps.md, the materialization class): the second entry, so the
+# window's own first-focusable default cannot pass it.
+expect_title "mountfocus"
+expect_focused entry@target

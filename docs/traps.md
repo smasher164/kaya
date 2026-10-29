@@ -2522,7 +2522,9 @@ the same patterns return through interpreter drop-downs
   immune by architecture — presentation derives from model state.
   When ADDING an apply-path call, ask: does this need a live tree,
   a layout pass, or an island? If yes, it rides a readiness event,
-  one-shot, or it is a bug that a fast guest will find.
+  one-shot, or it is a bug that a fast guest will find. The focus arm's
+  wall is tools/scenes/mountfocus.steps (a focus ahead of its target's
+  mount; on GTK only that order needs the map defer).
 
 - **Parallel lanes can hand a container a stale dune artifact.** With
   validate-all's lanes concurrent, the linux container's incremental

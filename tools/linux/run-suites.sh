@@ -84,7 +84,7 @@ OFF_SCENES="chatkeyboard taskskeyboard autofillkeyboard chatkeyboardland editork
 # waits on the bindings sweep too (docs/tasks-s3-plan.md §6 step 3);
 # `richtext`, `ownundo` and `richlabel` wait on the eight other bindings'
 # Document/Edit/Format spelling (docs/rich-text-plan.md §4 step 3, §14, §15).
-DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore tints badge emoji"
+DEPTH_SCENES="windowed canvas sizepolicy dnd tooltips tasks notify richtext ownundo richlabel notes richrows format flexshrink listrow stampbefore mountfocus tints badge emoji"
 BUILD_EXAMPLES=()
 for s in $SCENES $DEPTH_SCENES; do BUILD_EXAMPLES+=(--example "$s"); done
 
@@ -1546,6 +1546,8 @@ for proto in x11 wayland; do
         "$CARGO_TARGET_DIR/debug/examples/listrow"
     run "$proto" stampbefore-rust env KAYA_SELFTEST=stampbefore \
         tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/stampbefore"
+    run "$proto" mountfocus-rust env KAYA_SELFTEST=mountfocus \
+        "$CARGO_TARGET_DIR/debug/examples/mountfocus"
     # The platform tints, light and dark (docs/tints-plan.md).
     run "$proto" tints-rust env KAYA_SELFTEST=tints \
         "$CARGO_TARGET_DIR/debug/examples/tints"

@@ -611,6 +611,10 @@ name = "stampbefore"
 path = "../../guests/rust/stampbefore.rs"
 
 [[example]]
+name = "mountfocus"
+path = "../../guests/rust/mountfocus.rs"
+
+[[example]]
 name = "tints"
 path = "../../guests/rust/tints.rs"
 
