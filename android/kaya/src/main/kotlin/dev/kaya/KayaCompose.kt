@@ -1924,6 +1924,10 @@ object KayaSceneModel {
     /** The keyboard bar's own height while it shows, which the content box
      * stands above (docs/phone-format-plan.md §2). */
     var keyboardBarHeight by mutableStateOf(0.dp)
+    /** The bar's row scroll, which the harness reads and drives. */
+    val keyboardBarScroll = androidx.compose.foundation.ScrollState(0)
+    /** Whether the bar's last draw drew its trailing fade. */
+    var keyboardBarFadeDrawn = false
     /** The window content inset (wprop 8, docs/styling-plan.md D3), in
      * DP — layout, not appearance; 0 is full bleed. */
     var windowInset by mutableStateOf(16.0)
@@ -9769,6 +9773,116 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             if (got == want) said to "" else null to " reads $said, wanted $want"
         }
 
+    /** expect_keyboard_bar_fade: what the bar's last draw drew, and how far
+     * its row runs past the right edge, in dp. */
+    private fun kayaBarFadeReading(activity: ComponentActivity, want: Boolean): Pair<String?, String> {
+        val (fade, past) = onUi(activity) {
+            val bar = KayaSceneModel.keyboardBarScroll
+            val density = activity.resources.displayMetrics.density
+            KayaSceneModel.keyboardBarFadeDrawn to (bar.maxValue - bar.value) / density.toDouble()
+        }
+        val runs = past > 0.5
+        val said = "fade ${if (fade) "drawn" else "not drawn"}, the row " +
+            (if (runs) "runs %.1f past its right edge".format(java.util.Locale.ROOT, past) else "ends inside its right edge")
+        return when {
+            fade != runs -> null to "keyboard bar disagrees with itself: $said"
+            fade != want -> null to "keyboard bar $said, wanted the fade ${if (want) "on" else "off"}"
+            else -> "keyboard bar $said" to ""
+        }
+    }
+
+    /** expect_no_overscroll: where the text's last line ends against the
+     * field as it shows on screen, its frame less its top padding at each
+     * end, in px. */
+    private fun kayaTextFootReading(activity: ComponentActivity, spec: String): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to "has no such target"
+            val layout = kayaTextLayouts[node.id]?.invoke() ?: return@onUi null to "has no laid-out text"
+            val box = kayaTextBoxes[node.id] ?: return@onUi null to "has no text box recorded"
+            val frame = kayaNodeFrames[node.id] ?: return@onUi null to "has no frame recorded"
+            val last = layout.lineCount - 1
+            val end = layout.getLineBottom(last).toDouble()
+            val line = end - layout.getLineTop(last)
+            val pad = box.top - frame.top
+            val viewport = (frame.height - 2 * pad).toDouble()
+            val offset = node.scrollState.value.toDouble()
+            val context = " (the field's text box ${box.height()}px of a ${frame.height.toInt()}px frame, scroll ${node.scrollState.value} of ${node.scrollState.maxValue})"
+            val v = kayaOverscrollVerdict(viewport, offset, end, line)
+            if (v.first == null) null to v.second + context else v.first to ""
+        }
+
+    /** harness.rs's overscroll_verdict, the same sentences. */
+    private fun kayaOverscrollVerdict(viewport: Double, offset: Double, end: Double, line: Double): Pair<String?, String> {
+        val f = { x: Double -> "%.1f".format(java.util.Locale.ROOT, x) }
+        if (viewport <= 0 || line <= 0) return null to "has no viewport to read (viewport ${f(viewport)}, line ${f(line)})"
+        val shown = end - offset
+        val below = viewport - shown
+        val said = "last line ends at ${f(shown)} of a ${f(viewport)} viewport (scrolled ${f(offset)}, text ${f(end)} tall, line ${f(line)})"
+        if (end > viewport + 0.5) {
+            if (below > line + 0.5) return null to "is scrolled past its end: ${f(below)} empty below its $said"
+        } else if (offset > 0.5) {
+            return null to "is scrolled ${f(offset)} though its text fits: $said"
+        }
+        return "ends flush: $said" to ""
+    }
+
+    /** expect_caret_contrast: the caret as the window's own pixels show it,
+     * photographed over more than one blink, against the ground at the end
+     * of the caret's row. The caret must sit at a line's end. */
+    private fun kayaCaretReading(activity: ComponentActivity, spec: String): Pair<String?, String> {
+        data class At(val x: Int, val top: Int, val bottom: Int, val ground: Int, val read: KayaHighlights)
+        val at = onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null
+            val layout = kayaTextLayouts[node.id]?.invoke() ?: return@onUi null
+            val box = kayaTextBoxes[node.id] ?: return@onUi null
+            val sel = node.textState.selection
+            if (!sel.collapsed) return@onUi null
+            val cursor = layout.getCursorRect(sel.end.coerceIn(0, layout.layoutInput.text.length))
+            val scroll = node.scrollState.value
+            val decor = activity.window.decorView
+            val loc = IntArray(2)
+            decor.getLocationInWindow(loc)
+            val read = KayaHighlights(
+                text = "", surfaceOffset = android.graphics.Point(loc[0], loc[1]),
+                surfaceSize = android.graphics.Point(decor.width, decor.height))
+            At(box.left + cursor.center.x.toInt(), box.top + cursor.top.toInt() - scroll,
+                box.top + cursor.bottom.toInt() - scroll, box.right - 3, read)
+        } ?: return null to "has no collapsed caret laid out in a text box"
+        val box = android.graphics.Rect(minOf(at.x - 2, at.ground), at.top, maxOf(at.x + 3, at.ground + 1), at.bottom)
+        val mid = (at.top + at.bottom) / 2
+        val grounds = ArrayList<Int>()
+        val carets = ArrayList<Int>()
+        repeat(10) {
+            val shot = kayaPhotograph(activity, box, at.read)
+            if (shot != null) {
+                shot.at(at.ground, mid)?.let { grounds.add(it and 0xFFFFFF) }
+                for (dx in -1..1) shot.at(at.x + dx, mid)?.let { carets.add(it and 0xFFFFFF) }
+                shot.bitmap.recycle()
+            }
+            Thread.sleep(130)
+        }
+        val ground = grounds.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+            ?: return null to "could not photograph the window at the caret"
+        fun distance(a: Int, b: Int) = (0..2).sumOf { kotlin.math.abs(((a shr (8 * it)) and 0xFF) - ((b shr (8 * it)) and 0xFF)) }
+        val caret = carets.maxByOrNull { distance(it, ground) }
+        val where = "pixels at (${at.x}, $mid) over ${grounds.size} frames, ground at (${at.ground}, $mid)"
+        if (caret == null || distance(caret, ground) < 9) {
+            return null to "draws no caret: every frame reads %06X there, the ground's colour ($where)".format(ground)
+        }
+        val ratio = kayaContrastRatio(caret, ground)
+        val said = "%06X on %06X, %.2f:1 ($where)".format(java.util.Locale.ROOT, caret, ground, ratio)
+        return if (ratio + 1e-9 < 3.0) null to "is $said, under the 3.0:1 floor" else said to ""
+    }
+
+    private fun kayaContrastRatio(a: Int, b: Int): Double {
+        fun lum(rgb: Int): Double {
+            fun lin(c: Int): Double { val v = c / 255.0; return if (v <= 0.04045) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4) }
+            return 0.2126 * lin((rgb shr 16) and 0xFF) + 0.7152 * lin((rgb shr 8) and 0xFF) + 0.0722 * lin(rgb and 0xFF)
+        }
+        val (la, lb) = lum(a) to lum(b)
+        return (maxOf(la, lb) + 0.05) / (minOf(la, lb) + 0.05)
+    }
+
     /** expect_scaled's read (S3): the size the layout drew in against the
      *  size the platform's style gave the kind, both in sp. */
     private fun kayaScaledReading(activity: ComponentActivity, spec: String, want: Double, said: String): Pair<String?, String> =
@@ -9780,7 +9894,10 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             val size = (if (drawn.isSpecified) drawn else KAYA_COMPOSE_DEFAULT_TEXT_SIZE).value.toDouble()
             val ratio = size / base
             val text = "%.2f of %.2f, %.3fx".format(java.util.Locale.ROOT, size, base, ratio)
-            if (Math.abs(ratio - want) <= want * 0.02) text to ""
+            if (kayaIsTextField(node) && base < kayaFieldFloorSp - 0.01)
+                null to " reads %.2f of the platform's %.2f, under Material's text-field size %.2f sp (bodyLarge)".format(
+                    java.util.Locale.ROOT, size, base, kayaFieldFloorSp)
+            else if (Math.abs(ratio - want) <= want * 0.02) text to ""
             else null to " reads %.2f of the platform's %.2f, %.3fx, wanted ${said}x".format(java.util.Locale.ROOT, size, base, ratio)
         }
 
@@ -13348,6 +13465,65 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 val read = onUi(activity) { kayaKeyboardBarRead(activity) }
                                 failures.add("keyboard_bar_press: no button \"${head.first}\" on the keyboard bar; the bar reads $read")
                             }
+                        }
+                    }
+                    "expect_keyboard_bar_fade" -> {
+                        // harness.rs's fade_verdict (docs/phone-format-plan.md §2).
+                        val want = parts.getOrNull(1)
+                        if (parts.size != 2 || (want != "on" && want != "off")) {
+                            failures.add("expect_keyboard_bar_fade wants on or off: $line")
+                        } else {
+                            var got = kayaBarFadeReading(activity, want == "on")
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(50)
+                                got = kayaBarFadeReading(activity, want == "on")
+                            }
+                            got.first?.let { observed.add(it) } ?: failures.add(got.second)
+                        }
+                    }
+                    "scroll_keyboard_bar" -> {
+                        val where = parts.getOrNull(1)
+                        if (parts.size != 2 || (where != "start" && where != "end")) {
+                            failures.add("scroll_keyboard_bar wants start or end: $line")
+                        } else {
+                            kayaAwaitQuiet()
+                            val bar = KayaSceneModel.keyboardBarScroll
+                            onUi(activity) {
+                                kotlinx.coroutines.MainScope().launch {
+                                    bar.scrollTo(if (where == "end") bar.maxValue else 0)
+                                }
+                            }
+                        }
+                    }
+                    "expect_no_overscroll" -> {
+                        // harness.rs's overscroll_verdict (docs/editor-plan.md E7).
+                        if (parts.size != 2) {
+                            failures.add("expect_no_overscroll wants a target: $line")
+                        } else {
+                            var got = kayaTextFootReading(activity, parts[1])
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaTextFootReading(activity, parts[1])
+                            }
+                            got.first?.let { observed.add("${parts[1]} $it") }
+                                ?: failures.add("${parts[1]} ${got.second}")
+                        }
+                    }
+                    "expect_caret_contrast" -> {
+                        // harness.rs's caret_verdict (docs/editor-plan.md E7).
+                        if (parts.size != 2) {
+                            failures.add("expect_caret_contrast wants a target: $line")
+                        } else {
+                            var got = kayaCaretReading(activity, parts[1])
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaCaretReading(activity, parts[1])
+                            }
+                            got.first?.let { observed.add("${parts[1]} caret $it") }
+                                ?: failures.add("${parts[1]} caret ${got.second}")
                         }
                     }
                     "expect_safe" -> {
@@ -20960,7 +21136,8 @@ private fun KayaRenderCore(
         // over a multiline field. One composable serves both kinds —
         // they differed only in two arguments, and a second copy is a
         // second place for the echo guard to be got wrong.
-        KayaCompose.KIND_TEXTAREA -> KayaTextField(node, a11y, boxFill, singleLine = false)
+        KayaCompose.KIND_TEXTAREA -> KayaTextField(
+            node, a11y, boxFill, singleLine = false, tall = flexVertical == true && node.grow > 0)
         KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
         KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER ->
             KayaPickerField(node, a11y, boxFill, fieldFills)
@@ -21080,6 +21257,9 @@ fun KayaTextField(
      * button, the Search IME action and no capitalization.
      */
     search: Boolean = false,
+    /** A textarea grown on a column's axis: its cell is its viewport, so no
+     * line cap (docs/editor-plan.md E7). */
+    tall: Boolean = false,
 ) {
     val focusRequester = remember { FocusRequester() }
     val inComposer = LocalKayaInComposer.current
@@ -21182,7 +21362,7 @@ fun KayaTextField(
             }
         }
     }
-    val fieldStyle = kayaNodeStyle(node, LocalTextStyle.current.copy(color = LocalContentColor.current))
+    val fieldStyle = kayaNodeStyle(node, kayaFieldBase())
     BasicTextField(
         state = node.textState,
         inputTransformation = input,
@@ -21198,13 +21378,14 @@ fun KayaTextField(
             if (singleLine) TextFieldLineLimits.SingleLine
             else if (cap != null) TextFieldLineLimits.MultiLine(
                 minHeightInLines = 1,
-                maxHeightInLines = if (node.maxLines > 0) node.maxLines else KAYA_TEXTAREA_LINES)
+                maxHeightInLines = if (node.maxLines > 0) node.maxLines else if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES)
             // A GROWING textarea is one line at rest and grows to its own cap
             // (docs/grow-lines-plan.md).
             else if (node.maxLines > 0) TextFieldLineLimits.MultiLine(
                 minHeightInLines = 1, maxHeightInLines = node.maxLines)
             else TextFieldLineLimits.MultiLine(
-                minHeightInLines = 3, maxHeightInLines = KAYA_TEXTAREA_LINES),
+                minHeightInLines = if (tall) 1 else 3,
+                maxHeightInLines = if (tall) Int.MAX_VALUE else KAYA_TEXTAREA_LINES),
         // The viewport's REAL state, owned here rather than remembered
         // inside the field, because reveal drives it and expect_revealed
         // reads it — the same ScrollState `expect_at_end` already reads
@@ -21250,6 +21431,9 @@ fun KayaTextField(
         onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
         interactionSource = interaction,
         textStyle = fieldStyle,
+        // Material's TextField caret (docs/editor-plan.md E7): foundation's
+        // default is black in both appearances.
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         modifier = a11y
             .then(if (singleLine && !search) kayaContentHint(node.id, node.contentType) else Modifier)
             .then(if (cap != null) Modifier.sizeIn(maxHeight = with(LocalDensity.current) { cap.toDp() }) else Modifier)
@@ -21973,6 +22157,22 @@ internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextSt
     if (node.textScale != 1.0) style = style.copy(fontSize = size * node.textScale.toFloat())
     return kayaNodeFaceStyle(node, style)
 }
+
+/** A text field's style: Material's text-field size, bodyLarge (what M3's
+ * TextField draws at), where the ambient style names none
+ * (docs/editor-plan.md E7). */
+@Composable
+internal fun kayaFieldBase(): androidx.compose.ui.text.TextStyle {
+    val ambient = LocalTextStyle.current
+    val floor = MaterialTheme.typography.bodyLarge.fontSize
+    kayaFieldFloorSp = floor.value
+    return ambient.copy(
+        color = LocalContentColor.current,
+        fontSize = if (ambient.fontSize.isSpecified) ambient.fontSize else floor)
+}
+
+/** Material's text-field size in sp, as the theme last gave it. */
+internal var kayaFieldFloorSp = 0f
 
 /** What a text layout draws at when its style names no size: Compose's own
  *  default (foundation's DefaultFontSize). */
@@ -23553,8 +23753,28 @@ private fun KayaKeyboardBar(modifier: Modifier) {
             .onGloballyPositioned { KayaSceneModel.keyboardBarHeight = with(density) { it.size.height.toDp() } }
             .testTag(KayaCompose.KEYBOARD_BAR_TAG),
     ) {
+        // THE TRAILING FADE (docs/phone-format-plan.md §2, ruled 2026-10-30):
+        // drawn while the row runs past the right edge, gone at its end.
+        val scroll = KayaSceneModel.keyboardBarScroll
         Row(
-            modifier = Modifier.horizontalScroll(rememberScrollState()).height(48.dp).padding(horizontal = 4.dp),
+            modifier = Modifier
+                .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    val fade = scroll.value < scroll.maxValue
+                    KayaSceneModel.keyboardBarFadeDrawn = fade
+                    if (fade) {
+                        val width = KAYA_KEYBOARD_BAR_FADE.toPx()
+                        drawRect(
+                            Brush.horizontalGradient(
+                                listOf(Color.Transparent, Color.Black),
+                                startX = size.width - width, endX = size.width),
+                            topLeft = androidx.compose.ui.geometry.Offset(size.width - width, 0f),
+                            size = androidx.compose.ui.geometry.Size(width, size.height),
+                            blendMode = androidx.compose.ui.graphics.BlendMode.DstOut)
+                    }
+                }
+                .horizontalScroll(scroll).height(48.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             menus.forEachIndexed { index, menu ->
@@ -23564,6 +23784,8 @@ private fun KayaKeyboardBar(modifier: Modifier) {
         }
     }
 }
+
+private val KAYA_KEYBOARD_BAR_FADE = 24.dp
 
 @Composable
 private fun KayaKeyboardBarGap() {
@@ -26112,7 +26334,8 @@ private fun KayaSecureField(node: KayaNode, a11y: Modifier, fill: Modifier) {
         },
         onTextLayout = { layout -> kayaTextLayouts[node.id] = layout },
         interactionSource = interaction,
-        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        textStyle = kayaFieldBase(),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         // docs/traps.md, the Compose secure field's accessibility text.
         modifier = Modifier
             .semantics { if (!revealed) editableText = AnnotatedString("\u2022".repeat(node.textState.text.length)) }
@@ -26202,7 +26425,8 @@ private fun KayaNumberField(node: KayaNode, a11y: Modifier, fill: Modifier) {
             performDefaultAction()
         },
         interactionSource = interaction,
-        textStyle = LocalTextStyle.current.copy(color = LocalContentColor.current),
+        textStyle = kayaFieldBase(),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(MaterialTheme.colorScheme.primary),
         modifier = a11y
             .then(fill)
             .widthIn(min = if (node.numberFormat == "number") 0.dp else 180.dp)

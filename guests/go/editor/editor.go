@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"runtime"
 	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	kaya "dev.kaya/bindings/go"
 )
@@ -158,6 +160,20 @@ func tally(n int) string {
 	return fmt.Sprintf("%d matches", n)
 }
 
+// Where the caret is, as VS Code's status bar says it: "Ln 51, Col 1", with
+// the selection's size in characters when there is one.
+func position(text string, sel kaya.TextRange) string {
+	end := min(max(sel.End, 0), len(text))
+	start := min(max(sel.Start, 0), end)
+	head := text[:end]
+	at := fmt.Sprintf("Ln %d, Col %d", strings.Count(head, "\n")+1,
+		utf8.RuneCountInString(head[strings.LastIndexByte(head, '\n')+1:])+1)
+	if start < end {
+		at += fmt.Sprintf(" (%d selected)", utf8.RuneCountInString(text[start:end]))
+	}
+	return at
+}
+
 // One open document: its buffer, find bar and status line, and the state
 // they describe (docs/doctabs-plan.md §5).
 type document struct {
@@ -174,6 +190,7 @@ type document struct {
 	sel         kaya.Selection
 	buffer      kaya.Widget
 	status      kaya.Signal[string]
+	where       kaya.Signal[string]
 	count       kaya.Signal[string]
 	countTint   kaya.Signal[kaya.Tint]
 	// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
@@ -413,6 +430,7 @@ func App() *kaya.App {
 				// A PROGRAMMATIC WRITE does not echo, so the fold is by hand;
 				// it also spends the field's native undo history.
 				tx.SetText(d.buffer, body)
+				tx.Write(d.where, position(d.text, d.sel.Range))
 				tx.Focus(d.buffer)
 				tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
 				mark(tx, d)
@@ -437,6 +455,7 @@ func App() *kaya.App {
 		d := &document{id: uint64(made), n: made, zoom: 4, numbers: true}
 		docs = append(docs, d)
 		d.status = tx.Signal("new file")
+		d.where = tx.Signal(position("", kaya.TextRange{}))
 		d.count = tx.Signal("")
 		d.countTint = tx.Signal(kaya.TintNone)
 		tx.AddDocument(d.id).Title(untitled).Select().
@@ -453,6 +472,7 @@ func App() *kaya.App {
 			d.buffer = tx.Textarea(func(tx *kaya.Tx, s string) {
 				// Every user edit arrives here, a native undo included.
 				d.text = s
+				tx.Write(d.where, position(d.text, d.sel.Range))
 				mark(tx, d)
 				refind(tx, d)
 			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich().LineNumbers(true).Monospaced(true)
@@ -487,6 +507,7 @@ func App() *kaya.App {
 			tx.Row(func() {
 				tx.Label(d.status).TextScale(0.85).Grow(1).A11yID(id("status"))
 				tx.Label(d.count).TextScale(0.85).BindTint(d.countTint).A11yID(id("matches"))
+				tx.Label(d.where).TextScale(0.85).A11yID(id("position"))
 			}).Inset(6).A11yID(id("statusbar"))
 		}).Align(kaya.AlignStretch).Spacing(0))
 
@@ -511,18 +532,9 @@ func App() *kaya.App {
 		})
 		d.buffer.OnSelection(func(tx *kaya.Tx, sel kaya.Selection) {
 			d.sel = sel
+			tx.Write(d.where, position(d.text, sel.Range))
 			if active == d {
 				marks(tx, d)
-			}
-		})
-		d.buffer.OnFormat(func(tx *kaya.Tx, f kaya.Format) {
-			switch {
-			case f.Removed:
-				tx.Write(d.status, fmt.Sprintf("%s off %d:%d", f.Name, f.Range.Start, f.Range.End))
-			case f.Name == "block":
-				tx.Write(d.status, fmt.Sprintf("%s %d:%d", f.Value, f.Range.Start, f.Range.End))
-			default:
-				tx.Write(d.status, fmt.Sprintf("%s %d:%d", f.Name, f.Range.Start, f.Range.End))
 			}
 		})
 		tx.SetLineNumbers(d.buffer, d.numbers)

@@ -1441,6 +1441,11 @@ moved and TextKit 2's drawn layout did not follow it. The next read wants
 the laid-out fragments' range beside the offset (what the viewport layout
 controller last laid out), to tell a stale layout from a stale draw.
 
+Third sighting, codesurface-swift in edfix's filtered run 2026-10-30
+(flightrec run 20261030T204125Z-049991), the same 18-21 then 25-28 with
+"viewport y 854-950 of content 950"; green on the rerun right after. The read
+that tells a stale layout from a stale draw is still not built.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 

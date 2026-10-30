@@ -22615,6 +22615,23 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    /// docs/editor-plan.md E7: GtkTextView's visible rect against the
+    /// buffer end's line, both in buffer coordinates.
+    fn text_foot(&self, target: crate::harness::Target) -> Result<crate::harness::TextFoot, String> {
+        Self::on_main(move |core| {
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let view = widget.downcast::<gtk4::TextView>().map_err(|_| "not a textarea".to_owned())?;
+            let band = view.visible_rect();
+            let (y, h) = view.line_yrange(&view.buffer().end_iter());
+            Ok(crate::harness::TextFoot {
+                viewport: f64::from(band.height()),
+                offset: f64::from(band.y()),
+                end: f64::from(y + h),
+                line: f64::from(h),
+            })
+        })
+    }
+
     /// docs/code-surface-plan.md M4: the font Pango resolved, a label's off
     /// its own layout's first run (the face that drew it, fallback included),
     /// an entry's and a textarea's by loading the description the widget's

@@ -25036,6 +25036,17 @@ impl crate::harness::Stage for WinUiStage {
         .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
 
+    /// docs/editor-plan.md E7 (winui/code_surface.rs).
+    fn text_foot(&self, t: crate::harness::Target) -> Result<crate::harness::TextFoot, String> {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textarea_ids.len()) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            code_surface::read::text_foot(core, core.textarea_ids[i])
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
     /// docs/code-surface-plan.md M4.
     fn face(&self, t: crate::harness::Target) -> Result<crate::harness::FaceRead, String> {
         Self::on_ui_read(move |core| match target_widget_id(core, t) {

@@ -254,7 +254,7 @@ LEGS = {
         # (docs/safe-area-plan.md A5, A17).
         "chatkeyboard-go", "chatkeyboardland-go",
         # The editor's Format menu above the keyboard (docs/phone-format-plan.md §4).
-        "editorkeyboard-go",
+        "editorkeyboard-go", "editorkeyboarddark-go",
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go", "doctabs-go",
         "format-go", "formatde-go", "formatar-go",
@@ -353,6 +353,8 @@ FLAGS = {
     "music_headerdark-python": {"scene": "music_header", "appearance": "dark"},
     "music_artistdark-python": {"scene": "music_artist", "appearance": "dark"},
     "music_dockdark-python": {"scene": "music_dock", "appearance": "dark"},
+    # The caret against the dark buffer (docs/editor-plan.md E7).
+    "editorkeyboarddark-go": {"scene": "editorkeyboard", "appearance": "dark"},
     # The one leg on the 1280dp tablet, and the two appended claims the
     # shared file may not carry — the split literal, and the BACK rule
     # (with both panes on screen back reveals nothing, so it must not

@@ -1,7 +1,7 @@
 # Formatting on the phones, and a Bold that toggles
 
 Status: BUILT 2026-10-27; §5's selection menu RULED 2026-10-27 as a later slice (the maintainer, 2026-10-27: "yes you understood
-me correctly on the iphone proposal"). Two asks from the editor's review
+me correctly on the iphone proposal"); the bar's trailing fade RULED 2026-10-30 (§2; the maintainer: "i like A"). Two asks from the editor's review
 (docs/editor-plan.md §2b): on a phone the Format menu sits below the fold of
 the overflow while the keyboard is up, and every Format command only turns a
 style on.
@@ -48,6 +48,14 @@ bar draws, its label where it has none; four symbols join the vocabulary for
 the editor's tools: `bold`, `italic`, `underline`, `strikethrough`.
 
 The app does not branch on platform: it marks the menu it already has.
+
+The bar is one row that scrolls sideways. While the row runs past the right
+edge, its last 24 pt fade out, and the fade goes once the row is scrolled to
+its end, so a cut item reads as more to come (ruled 2026-10-30 over fitting
+the row and moving the rest into a More menu, and over a symbol for a nested
+menu). `expect_keyboard_bar_fade on|off` reads the fade and refuses one that
+disagrees with the row's overflow; `scroll_keyboard_bar start|end` moves the
+row as a swipe would.
 
 ## §3 — The selection's formatting: `text_selected` (built)
 

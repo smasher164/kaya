@@ -534,6 +534,24 @@ pub(super) mod read {
         Ok(Some(crate::harness::pair_gutter(&fragments, &labels)))
     }
 
+    /// E7 (docs/editor-plan.md): the template's ScrollViewer against the
+    /// story's last character's row, both in the gutter walk's coordinates.
+    pub(in super::super) fn text_foot(core: &CoreState, id: u64) -> windows_core::Result<Result<crate::harness::TextFoot, String>> {
+        let Some(NativeWidget::Textarea(field)) = core.widgets.get(&WidgetId(id)) else {
+            return Ok(Err("not a textarea".to_owned()));
+        };
+        let viewer = template_scroll(field)?;
+        let units = story_units(field)?;
+        let doc = field.TextDocument()?;
+        let (top, height) = row_box(&doc, units.len().saturating_sub(1) as i32)?;
+        Ok(Ok(crate::harness::TextFoot {
+            viewport: viewer.ViewportHeight()?,
+            offset: viewer.VerticalOffset()?,
+            end: top + height,
+            line: height,
+        }))
+    }
+
     /// Whether DirectWrite calls an installed family monospaced.
     fn monospaced(family: &str) -> bool {
         use windows::Win32::Graphics::DirectWrite::*;

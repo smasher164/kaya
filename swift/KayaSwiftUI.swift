@@ -10089,6 +10089,47 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
             format: " (clip view y %.1f-%.1f in the window, %.1f-%.1f shown; the textarea's slot %@)",
             clip.minY, clip.maxY, shown.minY, shown.maxY, slot)
     }
+
+    /// expect_no_overscroll (docs/editor-plan.md E7): the visible rect
+    /// against the text's last layout fragment, laid out first, in the text
+    /// view's coordinates: (viewport, offset, end, line).
+    @MainActor func kayaTextFoot(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
+        guard let view = kayaMacTextViews[node.id]?.view else { return .failure("no text view on screen") }
+        guard let layout = view.textLayoutManager else { return .failure("the text view has no TextKit 2 layout") }
+        layout.ensureLayout(for: layout.documentRange)
+        var last: NSTextLayoutFragment?
+        layout.enumerateTextLayoutFragments(from: layout.documentRange.endLocation, options: [.reverse, .ensuresLayout]) {
+            last = $0
+            return false
+        }
+        guard let fragment = last else { return .failure("no layout fragment at the text's end") }
+        let frame = fragment.layoutFragmentFrame
+        let line = fragment.textLineFragments.last?.typographicBounds.height ?? frame.height
+        let visible = view.visibleRect
+        return .success((Double(visible.height), Double(visible.minY), Double(frame.maxY + view.textContainerOrigin.y), Double(line)))
+    }
+
+    /// expect_caret_contrast: the insertion point's colour against the ground
+    /// the text view draws, or its scroll view's, resolved in its appearance.
+    @MainActor func kayaCaretColors(_ node: KayaNode) -> KayaRead<(UInt32, UInt32, String)> {
+        guard let view = kayaMacTextViews[node.id]?.view else { return .failure("no text view on screen") }
+        var out: KayaRead<(UInt32, UInt32, String)> = .failure("no ground drawn under the text view")
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            let ground: (NSColor, String)? =
+                view.drawsBackground ? (view.backgroundColor, "the text view's backgroundColor")
+                : view.enclosingScrollView.flatMap { $0.drawsBackground ? ($0.backgroundColor, "its scroll view's backgroundColor") : nil }
+                ?? view.window.map { ($0.backgroundColor, "the window's backgroundColor") }
+            guard let ground else { return }
+            out = .success((kayaRGB(view.insertionPointColor), kayaRGB(ground.0), "insertionPointColor on " + ground.1))
+        }
+        return out
+    }
+
+    func kayaRGB(_ color: NSColor) -> UInt32 {
+        let c = color.usingColorSpace(.sRGB) ?? color
+        let byte = { (v: CGFloat) in UInt32(max(0, min(255, (v * 255).rounded()))) }
+        return byte(c.redComponent) << 16 | byte(c.greenComponent) << 8 | byte(c.blueComponent)
+    }
 #else
     /// The gutter as drawn beside the text as UIKit lays it out: the rows come
     /// from the text view's own UITextInput geometry (`firstRect(for:)` and
@@ -10148,7 +10189,77 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
             view.contentOffset.y + view.bounds.height, view.contentSize.height, view.adjustedContentInset.bottom,
             view.isFirstResponder ? "yes" : "no")
     }
+
+    /// expect_no_overscroll (docs/editor-plan.md E7): the caret rect at the
+    /// text's end, laid out first, against the bounds less the adjusted
+    /// insets: (viewport, offset, end, line).
+    @MainActor func kayaTextFoot(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
+        guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+        if let layout = view.textLayoutManager { layout.ensureLayout(for: layout.documentRange) }
+        let caret = view.caretRect(for: view.endOfDocument)
+        guard !caret.isNull, caret.height > 0 else { return .failure("no caret rect at the text's end") }
+        let inset = view.adjustedContentInset
+        return .success((
+            Double(view.bounds.height - inset.top - inset.bottom), Double(view.contentOffset.y + inset.top),
+            Double(caret.maxY), Double(caret.height)))
+    }
+
+    /// expect_caret_contrast: the text view's tint (UIKit's caret colour)
+    /// against the first opaque background at or above it, both resolved in
+    /// its trait collection.
+    @MainActor func kayaCaretColors(_ node: KayaNode) -> KayaRead<(UInt32, UInt32, String)> {
+        guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+        let traits = view.traitCollection
+        var at: UIView? = view
+        while let here = at {
+            if let ground = here.backgroundColor?.resolvedColor(with: traits), ground.cgColor.alpha > 0.99 {
+                let caret = view.tintColor.resolvedColor(with: traits)
+                return .success((kayaRGB(caret), kayaRGB(ground), "tintColor on the backgroundColor of a \(type(of: here))"))
+            }
+            at = here.superview
+        }
+        return .failure("no opaque background at or above the text view")
+    }
+
+    func kayaRGB(_ color: UIColor) -> UInt32 {
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let byte = { (v: CGFloat) in UInt32(max(0, min(255, (v * 255).rounded()))) }
+        return byte(r) << 16 | byte(g) << 8 | byte(b)
+    }
 #endif
+
+
+/// harness.rs's overscroll_verdict, the same sentences.
+func kayaOverscrollVerdict(_ read: (Double, Double, Double, Double)) -> (String?, String) {
+    let (viewport, offset, end, line) = read
+    let f = { (x: Double) in String(format: "%.1f", x) }
+    if viewport <= 0 || line <= 0 { return (nil, "has no viewport to read (viewport \(f(viewport)), line \(f(line)))") }
+    let shown = end - offset
+    let below = viewport - shown
+    let said = "last line ends at \(f(shown)) of a \(f(viewport)) viewport (scrolled \(f(offset)), text \(f(end)) tall, line \(f(line)))"
+    if end > viewport + 0.5 {
+        if below > line + 0.5 { return (nil, "is scrolled past its end: \(f(below)) empty below its \(said)") }
+    } else if offset > 0.5 {
+        return (nil, "is scrolled \(f(offset)) though its text fits: \(said)")
+    }
+    return ("ends flush: \(said)", "")
+}
+
+/// harness.rs's caret_verdict: WCAG's relative luminance and a 3:1 floor.
+func kayaCaretVerdict(_ read: (UInt32, UInt32, String)) -> (String?, String) {
+    func lum(_ rgb: UInt32) -> Double {
+        func lin(_ c: UInt32) -> Double {
+            let v = Double(c & 0xff) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * lin(rgb >> 16) + 0.7152 * lin(rgb >> 8) + 0.0722 * lin(rgb)
+    }
+    let (a, b) = (lum(read.0), lum(read.1))
+    let ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
+    let said = String(format: "%06X on %06X, %.2f:1 (%@)", read.0, read.1, ratio, read.2)
+    return ratio + 1e-9 < 3 ? (nil, "is \(said), under the 3.0:1 floor") : (said, "")
+}
 
 
 /// The text style a text kind's size is measured against (S3).
@@ -11590,6 +11701,74 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("keyboard bar \(gotBar), wanted \(wantBar)")
                 }
+            case "expect_keyboard_bar_fade":
+                // harness.rs fade_verdict (docs/phone-format-plan.md §2).
+                guard parts.count == 2, parts[1] == "on" || parts[1] == "off" else {
+                    failures.append("expect_keyboard_bar_fade wants on or off: \(line)")
+                    break
+                }
+                let wantFade = parts[1] == "on"
+                func fadeVerdict() -> (String?, String) {
+                    guard let (fade, past) = DispatchQueue.main.sync(execute: { kayaKeyboardBarFadeRead() }) else {
+                        return (nil, "keyboard bar fade: no keyboard bar is up")
+                    }
+                    let runs = past > 0.5
+                    let said = "fade \(fade ? "drawn" : "not drawn"), the row "
+                        + (runs ? String(format: "runs %.1f past its right edge", past) : "ends inside its right edge")
+                    if fade != runs { return (nil, "keyboard bar disagrees with itself: \(said)") }
+                    if fade != wantFade { return (nil, "keyboard bar \(said), wanted the fade \(parts[1])") }
+                    return ("keyboard bar \(said)", "")
+                }
+                var fadeRead = fadeVerdict()
+                let fadeDeadline = Date().addingTimeInterval(5)
+                while fadeRead.0 == nil && Date() < fadeDeadline {
+                    Thread.sleep(forTimeInterval: 0.05)
+                    fadeRead = fadeVerdict()
+                }
+                if let ok = fadeRead.0 { observed.append(ok) } else { failures.append(fadeRead.1) }
+            case "scroll_keyboard_bar":
+                guard parts.count == 2, parts[1] == "start" || parts[1] == "end" else {
+                    failures.append("scroll_keyboard_bar wants start or end: \(line)")
+                    break
+                }
+                kayaAwaitQuiet()
+                let toEnd = parts[1] == "end"
+                if !DispatchQueue.main.sync(execute: { kayaKeyboardBarScroll(toEnd) }) {
+                    failures.append("scroll_keyboard_bar: no keyboard bar is up")
+                }
+            case "expect_no_overscroll", "expect_caret_contrast":
+                // harness.rs overscroll_verdict and caret_verdict (docs/editor-plan.md E7).
+                guard parts.count == 2 else {
+                    failures.append("\(parts[0]) wants a target: \(line)")
+                    break
+                }
+                let overscroll = parts[0] == "expect_no_overscroll"
+                func footRead() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTarget(parts[1], "textarea", kayaScene.textareas) else {
+                            return (nil, "no such target")
+                        }
+                        if overscroll {
+                            switch kayaTextFoot(node) {
+                            case .failure(let why): return (nil, why)
+                            case .success(let read): return kayaOverscrollVerdict(read)
+                            }
+                        }
+                        switch kayaCaretColors(node) {
+                        case .failure(let why): return (nil, "caret: " + why)
+                        case .success(let read):
+                            let v = kayaCaretVerdict(read)
+                            return (v.0.map { "caret " + $0 }, "caret " + v.1)
+                        }
+                    }
+                }
+                var foot = footRead()
+                let footDeadline = Date().addingTimeInterval(5)
+                while foot.0 == nil && Date() < footDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    foot = footRead()
+                }
+                if let ok = foot.0 { observed.append("\(parts[1]) \(ok)") } else { failures.append("\(parts[1]) \(foot.1)") }
             case "keyboard_bar_press":
                 // harness.rs Step::KeyboardBarPress.
                 let pressRest = String(line.dropFirst(parts[0].count + 1))
@@ -29192,6 +29371,8 @@ struct KayaRootFrameReader: View {
     /// docs/phone-format-plan.md §2: no software keyboard, so no bar.
     @MainActor func kayaKeyboardBarRead() -> String { "none" }
     @MainActor func kayaKeyboardBarPress(_ label: String) -> Bool { false }
+    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double)? { nil }
+    @MainActor func kayaKeyboardBarScroll(_ end: Bool) -> Bool { false }
     @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? { nil }
     @MainActor func kayaFrameMoved() {}
     @MainActor func kayaPanReading() -> String? { nil }
@@ -39190,9 +39371,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 
     /// The bar UIKit carries above the keyboard: one button per item of the
     /// marked menus, a gap between groups.
-    final class KayaKeyboardBar: UIInputView {
+    final class KayaKeyboardBar: UIInputView, UIScrollViewDelegate {
         let scroll = UIScrollView()
         let stack = UIStackView()
+        /// THE TRAILING FADE (docs/phone-format-plan.md §2, ruled 2026-10-30):
+        /// the mask of a still container, so it stays at the edge while the
+        /// row scrolls under it, installed only while the row runs past it.
+        let clip = UIView()
+        let fade = CAGradientLayer()
         /// The item each button is, for a nested press (§4).
         var models: [ObjectIdentifier: KayaMenuItemModel] = [:]
         var drawn = ""
@@ -39205,15 +39391,25 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             stack.spacing = 4
             stack.alignment = .center
             scroll.showsHorizontalScrollIndicator = false
+            scroll.delegate = self
+            clip.translatesAutoresizingMaskIntoConstraints = false
             scroll.translatesAutoresizingMaskIntoConstraints = false
             stack.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(scroll)
+            fade.startPoint = CGPoint(x: 0, y: 0.5)
+            fade.endPoint = CGPoint(x: 1, y: 0.5)
+            fade.colors = [UIColor.black.cgColor, UIColor.black.cgColor, UIColor.clear.cgColor]
+            addSubview(clip)
+            clip.addSubview(scroll)
             scroll.addSubview(stack)
             NSLayoutConstraint.activate([
-                scroll.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
-                scroll.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
-                scroll.topAnchor.constraint(equalTo: topAnchor),
-                scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+                clip.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor),
+                clip.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor),
+                clip.topAnchor.constraint(equalTo: topAnchor),
+                clip.bottomAnchor.constraint(equalTo: bottomAnchor),
+                scroll.leadingAnchor.constraint(equalTo: clip.leadingAnchor),
+                scroll.trailingAnchor.constraint(equalTo: clip.trailingAnchor),
+                scroll.topAnchor.constraint(equalTo: clip.topAnchor),
+                scroll.bottomAnchor.constraint(equalTo: clip.bottomAnchor),
                 scroll.heightAnchor.constraint(equalToConstant: 48),
                 stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor, constant: 8),
                 stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor, constant: -8),
@@ -39224,6 +39420,27 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
 
         required init?(coder: NSCoder) { fatalError("kaya: the keyboard bar is built in code") }
+
+        /// How far the row runs past its right edge, in points.
+        var past: CGFloat { scroll.contentSize.width - scroll.contentOffset.x - scroll.bounds.width }
+
+        func placeFade() {
+            let width = clip.bounds.width
+            guard width > 0 else { return }
+            fade.frame = clip.bounds
+            let start = NSNumber(value: Double(max(0, (width - 24) / width)))
+            fade.locations = [0, start, 1]
+            clip.layer.mask = past > 0.5 ? fade : nil
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            placeFade()
+        }
+
+        func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            placeFade()
+        }
 
         func rebuild(_ menus: [KayaMenuItemModel], _ signature: String) {
             guard signature != drawn else { return }
@@ -39328,6 +39545,27 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
         else { return "none" }
         return bar.reading()
+    }
+
+    /// expect_keyboard_bar_fade: whether the bar's container wears the fade
+    /// mask, and how far its row runs past the right edge.
+    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double)? {
+        guard kayaKeyboardInWindow() != nil, let window = kayaHarnessWindow(),
+            let text = kayaFirstResponderText(window),
+            let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
+        else { return nil }
+        bar.layoutIfNeeded()
+        return (bar.clip.layer.mask != nil, Double(bar.past))
+    }
+
+    @MainActor func kayaKeyboardBarScroll(_ end: Bool) -> Bool {
+        guard let window = kayaHarnessWindow(), let text = kayaFirstResponderText(window),
+            let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
+        else { return false }
+        let right = max(0, bar.scroll.contentSize.width - bar.scroll.bounds.width)
+        bar.scroll.setContentOffset(CGPoint(x: end ? right : 0, y: 0), animated: false)
+        bar.placeFade()
+        return true
     }
 
     @MainActor func kayaKeyboardBarPress(_ label: String) -> Bool {

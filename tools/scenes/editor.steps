@@ -14,11 +14,11 @@ expect_documents "untitled"
 expect_document_dirty "untitled" false
 # The window is named by the document in front.
 expect_title "untitled"
-# THE SAME TWO LABELS IN CHILD ORDER, which the creation-ordered
+# THE SAME LABELS IN CHILD ORDER, which the creation-ordered
 # registries cannot see. This is what fails if the find bar is ever
 # mounted at launch again: its row would land between the buffer and
 # this one, and the row's children would read in the wrong order.
-expect_order row@statusbar-1 "new file|"
+expect_order row@statusbar-1 "new file||Ln 1, Col 1"
 
 # THE BUFFER FILLS THE WINDOW: this app opened with a 240x96 box in the
 # corner of a 640x420 window while every SHARE assertion passed, because
@@ -45,6 +45,8 @@ expect_menu "Edit>Undo" disabled
 expect_focused textarea#0
 type "alpha 1 beta 22"
 expect textarea#0 "alpha 1 beta 22"
+# The caret's line and column, as VS Code's status bar says them.
+expect label@position-1 "Ln 1, Col 16"
 # A code editor's surface (docs/code-surface-plan.md): numbered lines in
 # the platform's monospaced face.
 expect_gutter textarea#0 shows 1
@@ -161,6 +163,7 @@ expect label@matches-2 "1 of 4"
 expect_tint label@matches-2 none
 expect_highlights textarea@buffer-2 "28:29=3|656:659=140|1256:1258=12|1295:1297=99"
 expect_selection textarea@buffer-2 "28:29=3"
+expect label@position-2 "Ln 3, Col 6 (1 selected)"
 # The `offscreen` line is what makes the `visible` one mean anything: on
 # a document that fits, containment is true before anything scrolls.
 expect_revealed textarea@buffer-2 1295:1297 offscreen
@@ -179,10 +182,14 @@ click button#1
 click button#1
 expect label@matches-2 "4 of 4"
 expect_selection textarea@buffer-2 "1295:1297=99"
+expect label@position-2 "Ln 52, Col 24 (2 selected)"
 expect_revealed textarea@buffer-2 1295:1297 visible
 # The walk scrolled the last line in, so a line is cut by the viewport's top:
 # its number is clipped with its text, never drawn outside the box.
 expect_gutter textarea@buffer-2 shows 52
+# AND NO FURTHER: the last line sits at the viewport's foot, never above an
+# empty band (docs/editor-plan.md E7).
+expect_no_overscroll textarea@buffer-2
 # AND THE WALK WRAPS, both ways.
 click button#1
 expect label@matches-2 "1 of 4"
@@ -193,7 +200,7 @@ expect label@matches-2 "4 of 4"
 #
 # The buffer is rich from launch, and the Format menu formats the WIDGET'S
 # OWN SELECTION (§7): the find above left "99" selected, the widget answers
-# each act, and the status line says what it heard. Formatting is the
+# each act. Formatting is the
 # widget's, never the file's, so `dirty` does not move. Each act is reached
 # both ways a person reaches it: Bold and Body by their chords, the rest by
 # their menu paths (on a phone, the overflow's Format group). The Format
@@ -204,43 +211,38 @@ expect label@matches-2 "4 of 4"
 expect_menu "Format>Bold" enabled
 expect_menu "Format>Bold" unchecked
 shortcut "primary+b"
-expect label@status-2 "bold 1295:1297"
 expect_runs textarea@buffer-2 "1295:1297 bold"
 expect_menu "Format>Bold" checked
 menu_activate "Format>Italic"
-expect label@status-2 "italic 1295:1297"
 expect_runs textarea@buffer-2 "1295:1297 bold|1295:1297 italic"
 expect_menu "Format>Italic" checked
 # BOLD ON BOLD TEXT TAKES IT OFF.
 shortcut "primary+b"
-expect label@status-2 "bold off 1295:1297"
 expect_runs textarea@buffer-2 "1295:1297 italic"
 expect_menu "Format>Bold" unchecked
 expect_menu "Format>Italic" checked
 shortcut "primary+b"
-expect label@status-2 "bold 1295:1297"
 # A HALF-BOLD SELECTION IS NOT BOLD, and Bold on it bolds all of it (Word's
 # and Pages' rule). `format` selects the range through the widget; taking
 # off an underline nobody put on changes no run.
 format textarea@buffer-2 1294:1297 underline off
-expect label@status-2 "underline off 1294:1297"
+expect label@position-2 "Ln 52, Col 24 (3 selected)"
 expect_menu "Format>Bold" unchecked
 expect_menu "Format>Italic" unchecked
 shortcut "primary+b"
-expect label@status-2 "bold 1294:1297"
 expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Bold" checked
 menu_activate "Format>Paragraph Style>Heading 1"
-expect label@status-2 "heading1 1274:1297"
 expect_runs textarea@buffer-2 "1274:1297 block=heading1|1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" checked
 expect_menu "Format>Paragraph Style>Body" unchecked
 shortcut "primary+alt+0"
-expect label@status-2 "block off 1274:1297"
 expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" unchecked
 expect_menu "Format>Paragraph Style>Body" checked
 expect_document_dirty "notes" false
+# The status bar: the last message, the find's tally and the caret's place.
+expect_order row@statusbar-2 "saved, 1297 bytes|4 of 4|Ln 52, Col 24 (3 selected)"
 
 # ---- a declared set is bound to the text it was declared against ---
 #
@@ -272,8 +274,6 @@ expect entry#last ""
 expect label@matches-2 "no matches"
 click button#last
 expect label@matches-2 ""
-# The status line carries the last act the buffer answered (§8).
-expect_order row@statusbar-2 "block off 1274:1297|"
 # The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), around one line.
 expect_inset row@statusbar-2 6
 expect_height_fits row@statusbar-2

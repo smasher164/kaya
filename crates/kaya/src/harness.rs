@@ -1066,6 +1066,13 @@ pub enum Step {
     /// `keyboard_bar_press "<label>"`: press that button of the keyboard bar
     /// through the platform's own action route. An action, silent like click.
     KeyboardBarPress(String),
+    /// `expect_keyboard_bar_fade on|off`: the trailing fade the bar draws while
+    /// its row runs past the right edge (docs/phone-format-plan.md §2), and
+    /// only then.
+    ExpectKeyboardBarFade(bool),
+    /// `scroll_keyboard_bar start|end`: scroll the bar's row to either end, as
+    /// a finger's swipe would. An action.
+    ScrollKeyboardBar(bool),
     /// `expect_safe <target> [safe|bleeds]`: the target's frame lies inside the
     /// platform's safe area and above the keyboard (`safe`), or, for a widget
     /// with `bleed`, reaches the window's edge on its touching sides (`bleeds`);
@@ -1236,6 +1243,13 @@ pub enum Step {
     /// fragment to its number: a logical line's first fragment carries its
     /// own, a wrapped continuation none.
     ExpectGutter(Target, GutterClause),
+    /// A textarea is not scrolled past its end: with text taller than the
+    /// viewport, its last line ends within one line of the viewport's foot;
+    /// with text that fits, it is not scrolled at all.
+    ExpectNoOverscroll(Target),
+    /// A text field's caret colour against the ground it is drawn on, held to
+    /// [`CARET_CONTRAST_FLOOR`].
+    ExpectCaretContrast(Target),
     /// The face a text kind's toolkit RESOLVED, `monospaced` or
     /// `proportional` (docs/code-surface-plan.md M4).
     ExpectFace(Target, String),
@@ -1417,6 +1431,7 @@ impl Step {
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectGutter(t, _) | Step::ExpectFace(t, _) | Step::ExpectScaled(t, _) => vec![t],
+            Step::ExpectNoOverscroll(t) | Step::ExpectCaretContrast(t) => vec![t],
             Step::ExpectWeight(t, _, _) => vec![t],
             Step::ExpectFontFace(t, _, _, label) => std::iter::once(t).chain(label.as_mut()).collect(),
             Step::PickFont(PickWant::Label(label)) => vec![label],
@@ -1506,6 +1521,8 @@ impl Step {
             | Step::ExpectKeyboard(_)
             | Step::ExpectKeyboardBar(_)
             | Step::KeyboardBarPress(_)
+            | Step::ExpectKeyboardBarFade(_)
+            | Step::ScrollKeyboardBar(_)
             | Step::ExpectInsets(_)
             | Step::ExpectSystemBars(_)
             | Step::ExpectToastAnnounced(..)
@@ -1721,6 +1738,8 @@ impl Step {
             Step::ExpectKeyboard(..) => true,
             Step::ExpectKeyboardBar(..) => true,
             Step::KeyboardBarPress(..) => false,
+            Step::ExpectKeyboardBarFade(..) => true,
+            Step::ScrollKeyboardBar(..) => false,
             Step::ExpectSafe(..) => true,
             Step::ExpectInsets(..) => true,
             Step::ExpectGroundReach(..) => true,
@@ -1756,6 +1775,7 @@ impl Step {
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
             Step::ExpectGutter { .. } | Step::ExpectFace { .. } | Step::ExpectScaled { .. } => true,
+            Step::ExpectNoOverscroll(_) | Step::ExpectCaretContrast(_) => true,
             Step::ExpectWeight { .. } => true,
             Step::ExpectFontFace { .. } | Step::ExpectFontDialog(_) => true,
             Step::PickFont(_) => false,
@@ -2141,6 +2161,97 @@ pub(crate) fn gutter_verdict(read: Option<&GutterRead>, clause: GutterClause) ->
         Ok(format!("{said}: {line}"))
     } else {
         Err(format!("reads {line}, wanted {said}"))
+    }
+}
+
+/// A textarea's foot, every number in the viewport's units: the viewport's
+/// height, how far it is scrolled, where the last line ends measured from
+/// the text's top, and that line's height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextFoot {
+    pub viewport: f64,
+    pub offset: f64,
+    pub end: f64,
+    pub line: f64,
+}
+
+pub(crate) fn overscroll_verdict(read: &TextFoot) -> Result<String, String> {
+    let TextFoot { viewport, offset, end, line } = *read;
+    if viewport <= 0.0 || line <= 0.0 {
+        return Err(format!("has no viewport to read (viewport {viewport:.1}, line {line:.1})"));
+    }
+    let shown = end - offset;
+    let below = viewport - shown;
+    let said = format!(
+        "last line ends at {shown:.1} of a {viewport:.1} viewport (scrolled {offset:.1}, text {end:.1} tall, line {line:.1})"
+    );
+    if end > viewport + 0.5 {
+        if below > line + 0.5 {
+            return Err(format!("is scrolled past its end: {below:.1} empty below its {said}"));
+        }
+    } else if offset > 0.5 {
+        return Err(format!("is scrolled {offset:.1} though its text fits: {said}"));
+    }
+    Ok(format!("ends flush: {said}"))
+}
+
+/// The keyboard bar's row: whether its trailing fade is drawn, and how far
+/// its content runs past the right edge, in points.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BarFade {
+    pub fade: bool,
+    pub past: f64,
+}
+
+pub(crate) fn fade_verdict(read: &BarFade, want: bool) -> Result<String, String> {
+    let runs = read.past > 0.5;
+    let said = format!(
+        "fade {}, the row {}",
+        if read.fade { "drawn" } else { "not drawn" },
+        if runs { format!("runs {:.1} past its right edge", read.past) } else { "ends inside its right edge".to_owned() }
+    );
+    if read.fade != runs {
+        return Err(format!("keyboard bar disagrees with itself: {said}"));
+    }
+    if read.fade != want {
+        return Err(format!("keyboard bar {said}, wanted the fade {}", if want { "on" } else { "off" }));
+    }
+    Ok(format!("keyboard bar {said}"))
+}
+
+/// WCAG 2.2's non-text contrast (1.4.11): a caret is a graphical object the
+/// user needs to see.
+pub(crate) const CARET_CONTRAST_FLOOR: f64 = 3.0;
+
+/// A caret's colour and its ground's, each 0xRRGGBB, with what each was read
+/// off.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CaretColors {
+    pub caret: u32,
+    pub ground: u32,
+    pub source: String,
+}
+
+fn relative_luminance(rgb: u32) -> f64 {
+    let lin = |c: u32| {
+        let c = f64::from(c & 0xff) / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(rgb >> 16) + 0.7152 * lin(rgb >> 8) + 0.0722 * lin(rgb)
+}
+
+pub(crate) fn contrast_ratio(a: u32, b: u32) -> f64 {
+    let (la, lb) = (relative_luminance(a), relative_luminance(b));
+    (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+pub(crate) fn caret_verdict(read: &CaretColors) -> Result<String, String> {
+    let ratio = contrast_ratio(read.caret, read.ground);
+    let said = format!("{:06X} on {:06X}, {ratio:.2}:1 ({})", read.caret, read.ground, read.source);
+    if ratio + 1e-9 < CARET_CONTRAST_FLOOR {
+        Err(format!("is {said}, under the {CARET_CONTRAST_FLOOR}:1 floor"))
+    } else {
+        Ok(said)
     }
 }
 
@@ -3083,6 +3194,16 @@ pub trait Stage: Send + 'static {
     fn keyboard_bar(&self) -> Result<String, String> {
         Ok("none".to_owned())
     }
+    /// The keyboard bar's row against its fade: whether the fade is drawn,
+    /// and how far the row's content runs past its right edge.
+    fn keyboard_bar_fade(&self) -> Result<BarFade, String> {
+        Err("this backend draws no keyboard bar (docs/safe-area-plan.md A13)".to_owned())
+    }
+    /// Scroll the keyboard bar's row to its start or its end.
+    fn scroll_keyboard_bar(&self, end: bool) -> Result<(), String> {
+        let _ = end;
+        Err("this backend draws no keyboard bar (docs/safe-area-plan.md A13)".to_owned())
+    }
     /// Press the keyboard bar's button with this label the way a finger does;
     /// false when no such button is on screen.
     fn keyboard_bar_press(&self, _label: &str) -> bool {
@@ -3348,6 +3469,18 @@ pub trait Stage: Send + 'static {
     fn gutter(&self, target: Target) -> Result<Option<GutterRead>, String> {
         let _ = target;
         Err("expect_gutter is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
+    /// Where a textarea's text ends against the viewport that shows it, in
+    /// the viewport's own units (`expect_no_overscroll`).
+    fn text_foot(&self, target: Target) -> Result<TextFoot, String> {
+        let _ = target;
+        Err("expect_no_overscroll is a depth slice on this backend (docs/editor-plan.md E7)".to_owned())
+    }
+    /// The caret colour a text field draws and the ground under it, each
+    /// 0xRRGGBB, and where each was read (`expect_caret_contrast`).
+    fn caret_colors(&self, target: Target) -> Result<CaretColors, String> {
+        let _ = target;
+        Err("expect_caret_contrast is a depth slice on this backend (docs/editor-plan.md E7)".to_owned())
     }
     /// The face the toolkit resolved for a text kind, read off the font the
     /// widget holds, and the family the app asked for, "" for none
@@ -4841,6 +4974,16 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }),
             "expect_keyboard_bar" => Step::ExpectKeyboardBar(parse_string(rest)?),
             "keyboard_bar_press" => Step::KeyboardBarPress(parse_string(rest)?),
+            "expect_keyboard_bar_fade" => match rest.trim() {
+                "on" => Step::ExpectKeyboardBarFade(true),
+                "off" => Step::ExpectKeyboardBarFade(false),
+                _ => return Err(format!("expect_keyboard_bar_fade wants on or off: {line:?}")),
+            },
+            "scroll_keyboard_bar" => match rest.trim() {
+                "start" => Step::ScrollKeyboardBar(false),
+                "end" => Step::ScrollKeyboardBar(true),
+                _ => return Err(format!("scroll_keyboard_bar wants start or end: {line:?}")),
+            },
             "expect_safe" => {
                 let (target, word) = match rest.split_once(char::is_whitespace) {
                     Some((t, w)) => (t, w.trim()),
@@ -5344,6 +5487,8 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     state.to_owned(),
                 )
             }
+            "expect_no_overscroll" => Step::ExpectNoOverscroll(parse_target(rest.trim())?),
+            "expect_caret_contrast" => Step::ExpectCaretContrast(parse_target(rest.trim())?),
             "expect_gutter" => {
                 let mut parts = rest.split_whitespace();
                 let target = parts.next().ok_or_else(|| format!("expect_gutter wants a target: {line:?}"))?;
@@ -7454,6 +7599,10 @@ fn run_with_log(
                     Err(why) => Some(Err(why)),
                 }
             }
+            Step::ScrollKeyboardBar(end) => {
+                await_quiet();
+                stage.scroll_keyboard_bar(*end).err().map(|why| Err(format!("scroll_keyboard_bar: {why}")))
+            }
             Step::KeyboardBarPress(label) => {
                 await_quiet();
                 let answered = crate::scene::answers();
@@ -7537,6 +7686,10 @@ fn run_with_log(
                     if got { "on" } else { "off" },
                     if *want { "on" } else { "off" }
                 )),
+            })),
+            Step::ExpectKeyboardBarFade(want) => Some(poll(|| {
+                let read = stage.keyboard_bar_fade().map_err(|why| format!("keyboard bar fade: {why}"))?;
+                fade_verdict(&read, *want)
             })),
             Step::ExpectKeyboardBar(want) => Some(poll(|| match stage.keyboard_bar() {
                 Err(why) => Err(why),
@@ -8768,6 +8921,16 @@ fn run_with_log(
                     Err(why) => Err(format!("{what} gutter: {why}")),
                     Ok(read) => gutter_verdict(read.as_ref(), *clause).map_err(|why| format!("{what} gutter {why}")),
                 }
+            })),
+            Step::ExpectNoOverscroll(target) => Some(poll(|| {
+                let what = target_spec(target);
+                let read = stage.text_foot(*target).map_err(|why| format!("{what}: {why}"))?;
+                overscroll_verdict(&read).map_err(|why| format!("{what} {why}"))
+            })),
+            Step::ExpectCaretContrast(target) => Some(poll(|| {
+                let what = target_spec(target);
+                let read = stage.caret_colors(*target).map_err(|why| format!("{what} caret: {why}"))?;
+                caret_verdict(&read).map_err(|why| format!("{what} caret {why}"))
             })),
             Step::ExpectFace(target, want) => Some(poll(|| {
                 let what = format!("{} face", target_spec(target));
@@ -12855,6 +13018,34 @@ mod tests {
         let (code, verdict) = rx.recv().unwrap();
         assert_eq!(code, 1);
         assert!(verdict.contains("splits"), "{verdict}");
+    }
+
+    /// docs/editor-plan.md E7: each branch of the two editor reads.
+    #[test]
+    fn overscroll_and_caret_verdicts() {
+        let foot = |viewport, offset, end| TextFoot { viewport, offset, end, line: 16.0 };
+        assert!(overscroll_verdict(&foot(360.0, 472.0, 832.0)).is_ok());
+        assert!(overscroll_verdict(&foot(360.0, 480.0, 832.0)).is_ok());
+        assert!(overscroll_verdict(&foot(360.0, 736.0, 832.0)).unwrap_err().starts_with("is scrolled past its end: 264.0 empty below"));
+        assert!(overscroll_verdict(&foot(360.0, 0.0, 200.0)).is_ok());
+        assert!(overscroll_verdict(&foot(360.0, 20.0, 200.0)).unwrap_err().starts_with("is scrolled 20.0 though its text fits"));
+        assert!(overscroll_verdict(&foot(0.0, 0.0, 200.0)).unwrap_err().starts_with("has no viewport"));
+        assert!(parse("expect_no_overscroll textarea@buffer-2").is_ok());
+        let caret = |caret, ground| CaretColors { caret, ground, source: "test".into() };
+        assert_eq!(caret_verdict(&caret(0x000000, 0x323534)).unwrap_err(),
+            "is 000000 on 323534, 1.69:1 (test), under the 3:1 floor");
+        assert!(caret_verdict(&caret(0x4FDBC8, 0x323534)).is_ok());
+        assert!((contrast_ratio(0xFFFFFF, 0x000000) - 21.0).abs() < 1e-9);
+        assert!(parse("expect_caret_contrast textarea#0").is_ok());
+        let bar = |fade, past| BarFade { fade, past };
+        assert!(fade_verdict(&bar(true, 80.0), true).is_ok());
+        assert!(fade_verdict(&bar(false, 0.0), false).is_ok());
+        assert_eq!(fade_verdict(&bar(false, 80.0), true).unwrap_err(),
+            "keyboard bar disagrees with itself: fade not drawn, the row runs 80.0 past its right edge");
+        assert!(fade_verdict(&bar(true, 0.0), true).unwrap_err().starts_with("keyboard bar disagrees"));
+        assert!(fade_verdict(&bar(true, 80.0), false).unwrap_err().ends_with("wanted the fade off"));
+        assert!(parse("expect_keyboard_bar_fade maybe").is_err());
+        assert!(parse("scroll_keyboard_bar end").is_ok());
     }
 
     /// docs/code-surface-plan.md G5: the column check, each disagreement

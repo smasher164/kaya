@@ -23,6 +23,7 @@ MODEL = "KayaSceneModel"
 # (field, why a plain read from a composable is safe). Each must still be
 # read by some composable, or the gate says the exemption is stale.
 EXEMPT = {
+    "keyboardBarScroll": "a ScrollState, itself snapshot state, assigned once",
     "alertTitle": "written before alertId (state) in APPLY_PRESENT_ALERT; "
                   "the ordering is asserted below",
     "alertMessage": "same",

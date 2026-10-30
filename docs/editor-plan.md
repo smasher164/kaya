@@ -78,6 +78,31 @@ that file, edit it, undo, save, find with a regex, and be warned about
 unsaved work on close. Each of those is a step in the scene, on five
 platforms, plus artifacts a human can watch.
 
+### E7 — what the screenshots review found (2026-10-30)
+
+The maintainer's review of the editor on five lanes, light and dark, ruled
+these fixed, each with a read that fails without the fix:
+
+- `expect_caret_contrast <field>`: the caret's colour against the ground
+  under it, at WCAG 1.4.11's 3:1 floor for non-text contrast. Compose reads
+  the window's pixels at the caret over more than one blink (foundation's
+  default caret was black on the dark buffer); iOS reads the text view's tint
+  against its first opaque background, the Mac its insertion point colour.
+  GTK and WinUI answer that the read is a depth slice; the phones' scene
+  (editorkeyboard.steps) carries it, dark as well on Android.
+- `expect_no_overscroll <textarea>`: with text taller than the viewport, the
+  last line ends within one line of the viewport's foot; with text that
+  fits, nothing is scrolled. Compose capped every textarea's own scrolling
+  viewport at six lines, so a grown one scrolled its last line to the top of
+  a 114 px band inside a 291 px box; a textarea grown on a column's axis now
+  takes its cell.
+- The status bar shows the caret's line and column, as VS Code's does
+  ("Ln 51, Col 1", "(2 selected)" with a selection), in a label of its own on
+  the right; messages (saved, opened, zoom, font) keep the left label.
+- Android's text fields draw at Material's text-field size, bodyLarge
+  (16 sp), where they drew at foundation's 14 sp; `expect_scaled` refuses a
+  text field whose platform size is under it.
+
 ## §2 — sequencing
 
 1. The app + the scene + the mac leg green.
