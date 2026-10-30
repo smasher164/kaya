@@ -21587,6 +21587,26 @@ fn clip_kind_offered(kind: &str, formats: &gdk::ContentFormats) -> bool {
     }
 }
 
+/// On wayland, start this client's own data device and keyboard on GDK's
+/// connection (once) and mark where their events stand, for a seed's expiry
+/// to say what they heard after the write (crates/kaya/src/gtk/wlwatch.rs).
+#[cfg(feature = "harness")]
+fn wl_heard_mark() -> Option<usize> {
+    if !linux_wayland_session() {
+        return None;
+    }
+    let display = GtkStage::on_main(|core| {
+        use gtk4::prelude::{Cast, WidgetExt};
+        use gtk4::glib::translate::ToGlibPtr;
+        let display = WidgetExt::display(&core.window);
+        display.downcast::<gdk4_wayland::WaylandDisplay>().ok().map(|wl| unsafe {
+            gdk4_wayland::ffi::gdk_wayland_display_get_wl_display(wl.to_glib_none().0) as usize
+        })
+    })?;
+    wlwatch::start(display as *mut std::ffi::c_void);
+    Some(wlwatch::mark())
+}
+
 #[cfg(feature = "harness")]
 fn clip_app_view(kind: &str) -> ClipView {
     let kind = kind.to_owned();
@@ -28370,6 +28390,8 @@ impl crate::harness::Stage for GtkStage {
             ),
         };
         let focus = clipboard_focus("clipboard_seed");
+        #[cfg(feature = "harness")]
+        let heard_from = wl_heard_mark();
         let before = clip_app_view(kind);
         foreign_clip_write(mime, bytes);
         let started = std::time::Instant::now();
@@ -28380,6 +28402,10 @@ impl crate::harness::Stage for GtkStage {
         let mut view = before.clone();
         loop {
             rounds += 1;
+            #[cfg(feature = "harness")]
+            if heard_from.is_some() {
+                wlwatch::pump();
+            }
             if !foreign_listed {
                 targets = foreign_clip_targets();
                 foreign_listed = targets.contains(expected);
@@ -28412,6 +28438,10 @@ impl crate::harness::Stage for GtkStage {
                 // carry the kind. Each says only what this loop measured.
                 let ms = started.elapsed().as_millis();
                 let seen = clip_one_line(&targets);
+                #[cfg(feature = "harness")]
+                let heard = heard_from.map(|from| format!(" {}", wlwatch::report(from, started))).unwrap_or_default();
+                #[cfg(not(feature = "harness"))]
+                let heard = String::new();
                 let cause = if !foreign_listed {
                     format!(
                         "the writer's own offer never listed {expected:?} — the last \
@@ -28442,7 +28472,7 @@ impl crate::harness::Stage for GtkStage {
                     "seed {kind}{focus} EXPIRED ms={ms} rounds={rounds} expected={expected} \
                      foreign_listed={foreign_listed} foreign_targets={seen:?} \
                      app_formats={:?} app_generation={}->{} gtk_window_active={}->{} \
-                     app_is_own_writer={}",
+                     app_is_own_writer={}{heard}",
                     view.formats,
                     before.generation,
                     view.generation,
@@ -28457,7 +28487,7 @@ impl crate::harness::Stage for GtkStage {
                 crate::vtrace::dump("clipboard_seed expired");
                 panic!(
                     "kaya: clipboard_seed {kind} was not readable by this process {ms}ms \
-                     and {rounds} rounds after the foreign writer exited: {cause}"
+                     and {rounds} rounds after the foreign writer exited: {cause}.{heard}"
                 );
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
@@ -30675,6 +30705,8 @@ mod secure_text;
 mod doctabs;
 mod fontpick;
 mod soup_drain;
+#[cfg(feature = "harness")]
+mod wlwatch;
 
 mod gtk_media {
     use super::*;

@@ -19843,3 +19843,19 @@ takes what is left. A pass that bounded the content to the viewport by hand
 read green with its bound cut, so it was not kept. With the floor at three
 rows (96 px) the preview still ended at 301 of 257; the floor is 48 px and
 the preview 18 pt.
+
+## A headless sway seat has no keyboard except while wtype runs (measured 2026-10-29)
+
+The linux lane's wayland legs run on a headless sway whose seat advertises no
+keyboard capability (`wl_seat.capabilities` 0) until wtype adds a virtual
+keyboard, and loses it when wtype exits. A wl_keyboard a client asks for
+while the seat has none heard no enter after the seat gained one, even
+asked again after the gain, and no enter came while the window held sway's
+focus; one asked for while wtype held a keyboard on the seat heard the enter
+the focus request sent, and a leave on a workspace switch. The clipboard
+selection reaches the focused client regardless (data_offer and selection
+arrive within a seed round of the write). So "this client's keyboard heard
+no enter (the seat offers none)" is the lane's normal state, not a fault;
+gtk_window_active=false on every seed says the same from GDK's side. Read in
+crates/kaya/src/gtk/wlwatch.rs's report, whose branches were each forced to
+print (docs/deferred.md, clipboard-java-wayland).

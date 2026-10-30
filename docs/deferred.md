@@ -1394,10 +1394,26 @@ the seat, where the first lists wtype's virtual keyboard. What the bundle
 cannot say is whether the compositor sent this client the new data_offer at
 all, so the recorder wants the client's own wl_data_device.selection events
 (WAYLAND_DEBUG on the guest, filtered to the data device) beside the ring
-before a second sighting is read. clipboard-java-wayland is also not in
-run-suites.sh's KAYA_EXCLUSIVE_LEGS, where the python, js and rust wayland
-clipboard legs run alone (the ocaml one is named open in the 2026-09-18
-entry); whether the JVM leg belongs there is the maintainer's question.
+before a second sighting is read.
+
+The recorder now carries it (2026-10-29): on wayland the seed starts a data
+device and a keyboard of this client's own on GDK's connection
+(crates/kaya/src/gtk/wlwatch.rs), and an expiry appends what they heard
+after the write: each data_offer with its mime types, the offer the last
+selection event named, whether this client's keyboard holds the seat's focus
+and what the seat offers, and every event with its time from the write.
+Every branch was forced to print on clipboard-java-wayland: the offer
+delivered (`data_offer #… [text/plain,…]; the selection names offer #…`), no
+offer (the writer cut: `NO data_offer reached this client since the
+write`), the keyboard holding the focus and leaving it (wtype keeping a
+keyboard on the seat; a workspace switch), and the watcher failing to start.
+What the forced runs measured on the way: the lane's headless seat offers
+NO keyboard except while wtype runs (`the seat offers none`), so neither GDK
+nor kaya's keyboard hears an enter, and the selection reaches the client all
+the same (docs/traps.md, a headless sway seat). Read that clause first on
+the next sighting. The leg stays in the pool: one sighting at host load 138
+is not a measured reason to run it alone (the maintainer's rule that every
+exclusive leg needs one).
 
 ## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
