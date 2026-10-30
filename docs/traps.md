@@ -19859,3 +19859,17 @@ no enter (the seat offers none)" is the lane's normal state, not a fault;
 gtk_window_active=false on every seed says the same from GDK's side. Read in
 crates/kaya/src/gtk/wlwatch.rs's report, whose branches were each forced to
 print (docs/deferred.md, clipboard-java-wayland).
+
+## A documents window's root window came back on screen (measured 2026-10-29)
+
+tools/mac/menu-shot.py drew the editor's own root window as a blank frame
+beside its document. The picture was true: the window server listed that
+root on screen (`kCGWindowIsOnscreen` 1, alpha 1). The root's registration
+puts the window on screen one main-queue turn later when AppKit has not (the
+URL launch fix in KayaWindowAccessor's register), and the editor's first document
+ordered the root out within that turn, so the deferred order brought it back
+behind the document in every Mac app with documents. The deferred order now
+skips a root its documents took over (kayaHiddenRoots), and the Mac's
+`expect_documents` fails while such a root is visible, which the editor leg
+did as shipped (watched red with the skip cut). The shot tool already
+composes only the window server's on-screen windows of the guest's pid.

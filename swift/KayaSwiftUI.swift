@@ -5045,9 +5045,11 @@ var kayaTearingDown: Set<UInt64> = []
             // A window with documents IS its documents' NSWindows
             // (docs/doctabs-plan.md §3); its own root window stays hidden.
             if kayaScene.windows[windowId]?.documents.isEmpty == false {
+                kayaHiddenRoots[windowId] = KayaWeakWindow(window)
                 if window.isVisible { window.orderOut(nil) }
                 return
             }
+            kayaHiddenRoots.removeValue(forKey: windowId)
             kayaKeepFullscreenDoor(windowId, window)
             if kayaNSWindows[windowId] !== window {
                 kayaDiag("register wid=\(windowId) num=\(window.windowNumber)")
@@ -5134,7 +5136,10 @@ var kayaTearingDown: Set<UInt64> = []
                 // `isVisible` guard leaves the plain path — already on
                 // screen by AppKit's own doing — untouched.
                 DispatchQueue.main.async {
-                    if !window.isVisible {
+                    // A root its documents took over in the meantime stays
+                    // hidden (docs/traps.md, the root window shown beside
+                    // its documents).
+                    if !window.isVisible && kayaHiddenRoots[windowId]?.window !== window {
                         window.orderFrontRegardless()
                         kayaDiag(
                             "windowshow wid=\(windowId) num=\(window.windowNumber) "
@@ -14624,7 +14629,10 @@ private func kayaRunScript(_ script: String) {
                 let want = kayaQuoted(Array(parts[1...]))
                 #if os(macOS)
                     let got = DispatchQueue.main.sync { kayaDocumentTitlesRead() }
-                    if let got, kayaBytesEqual(got.joined(separator: "|"), want) {
+                    let shownRoots = DispatchQueue.main.sync { kayaShownHiddenRoots() }
+                    if !shownRoots.isEmpty {
+                        failures.append("documents: " + shownRoots.joined(separator: "; "))
+                    } else if let got, kayaBytesEqual(got.joined(separator: "|"), want) {
                         observed.append("documents \"\(want)\"")
                     } else if let got {
                         let witness = DispatchQueue.main.sync { kayaStripWitness() }
@@ -24444,6 +24452,25 @@ let kayaSkinTolerance = 0.06
     held.append(view)
     kayaSkinAnchors[id] = held
 }
+
+#if os(macOS)
+    /// A window's own root NSWindow, hidden while its documents are its
+    /// NSWindows (docs/doctabs-plan.md §3).
+    final class KayaWeakWindow {
+        weak var window: NSWindow?
+        init(_ window: NSWindow) { self.window = window }
+    }
+    var kayaHiddenRoots: [UInt64: KayaWeakWindow] = [:]
+
+    /// The roots shown although their window still has documents.
+    func kayaShownHiddenRoots() -> [String] {
+        kayaHiddenRoots.compactMap { wid, held in
+            guard let root = held.window, root.isVisible, kayaScene.windows[wid]?.documents.isEmpty == false
+            else { return nil }
+            return "window \(wid)'s own root window (number \(root.windowNumber)) is on screen beside its documents"
+        }
+    }
+#endif
 
 final class KayaWeakView {
     #if os(macOS)
@@ -40172,6 +40199,7 @@ func kayaRegisterDocumentWindow(_ did: UInt64, _ window: NSWindow) {
     } else {
         if let primary = kayaNSWindows[wid] {
             window.setFrame(primary.frame, display: false)
+            kayaHiddenRoots[wid] = KayaWeakWindow(primary)
             primary.orderOut(nil)
         }
         kayaNSWindows[wid] = window
