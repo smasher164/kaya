@@ -10077,6 +10077,17 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
         let labels = gutter.drawn.map { ($0.number, $0.mid) }
         return .success(kayaPairGutter(fragments, labels))
     }
+    /// Where the text is clipped against where the layout put the textarea,
+    /// both in the window.
+    @MainActor func kayaGutterContext(_ node: KayaNode) -> String {
+        guard let view = kayaMacTextViews[node.id]?.view, let scroll = view.enclosingScrollView else { return "" }
+        let clip = kayaHarnessRect(scroll.contentView.bounds, in: scroll.contentView)
+        let shown = kayaAnchorClips(scroll.contentView, clip)
+        let slot = kayaNodeFrames[node.id].map { String(format: "y %.1f-%.1f", $0.minY, $0.maxY) } ?? "unrecorded"
+        return String(
+            format: " (clip view y %.1f-%.1f in the window, %.1f-%.1f shown; the textarea's slot %@)",
+            clip.minY, clip.maxY, shown.minY, shown.maxY, slot)
+    }
 #else
     /// The gutter as drawn beside the text as UIKit lays it out: the rows come
     /// from the text view's own UITextInput geometry (`firstRect(for:)` and
@@ -15953,9 +15964,7 @@ private func kayaRunScript(_ script: String) {
                         case .failure(let why): verdict = (nil, why)
                         case .success(let read): verdict = kayaGutterVerdict(read, clause)
                         }
-                        #if os(iOS)
-                            if verdict.0 == nil { return (nil, verdict.1 + kayaGutterContext(node)) }
-                        #endif
+                        if verdict.0 == nil { return (nil, verdict.1 + kayaGutterContext(node)) }
                         return verdict
                     }
                 }
@@ -37988,6 +37997,15 @@ private struct KayaMacTextarea: NSViewRepresentable {
             NSMaxRange(range) <= length
         {
             coordinator.revealDone = revealSeq
+            // THE LAYOUT BELOW THE VIEWPORT IS AN ESTIMATE (docs/traps.md, a
+            // TextKit 2 scroll to a range the view has never shown).
+            if let layout = view.textLayoutManager,
+                let content = layout.textContentManager,
+                let end = content.location(content.documentRange.location, offsetBy: NSMaxRange(range)),
+                let laid = NSTextRange(location: content.documentRange.location, end: end)
+            {
+                layout.ensureLayout(for: laid)
+            }
             // A scroll disturbs neither the selection nor a composition
             // (measured, F6), so reveal has no refusal arm and needs none.
             view.scrollRangeToVisible(range)

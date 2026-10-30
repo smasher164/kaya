@@ -14808,7 +14808,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     val box = if (spec.startsWith("row@")) target(spec, "row", KayaSceneModel.rows)
                                         else target(spec, "column", KayaSceneModel.columns)
                                     box ?: return@onUi Pair(false, null)
-                                    val r = kayaFillBoxes[box.id] ?: return@onUi Pair(true, null)
+                                    val r = kayaFillBoxes[box.id]
+                                        ?: return@onUi Pair(true, kayaNodeFrames[box.id])
                                     return@onUi Pair(true, androidx.compose.ui.geometry.Rect(
                                         r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat()))
                                 }

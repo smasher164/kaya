@@ -2031,6 +2031,15 @@ the same patterns return through interpreter drop-downs
   `editor.steps` reveals the LAST match of a document far taller than
   the viewport, which is where an estimate has the most room to be
   wrong; `ranges.steps` reveals mid-document and cannot catch it.
+  THE MAC ARM HAD THE SAME MISS (measured 2026-10-30), hidden by the
+  layout: with the editor's column gap of 8pt the last line happened to
+  land inside the clip, and with the gap removed the gutter read lines
+  32 to 51 under a clip of y 88-378 that equalled the textarea's slot, so
+  nothing overlapped it; the scroll was short. The same ensureLayout
+  fixed it. On that run `expect_revealed ... visible` PASSED while line
+  52 was wholly below the clip: the mac read is AppKit's accessibility
+  visible character range, which reported the range visible, so only
+  `expect_gutter shows 52` caught the miss.
 - **A text segment's frame is in the CONTAINER's coordinate space, not
   the view's.** They differ by `textContainerInset` — 8pt top on a
   stock UITextView — so a visibility read that intersects segment frames

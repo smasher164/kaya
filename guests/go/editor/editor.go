@@ -142,6 +142,11 @@ func docName(dest *kaya.PickedFile) string {
 
 const findKey = "bar"
 
+// The default face, a family each platform's code-only picker lists so Font…
+// opens on it: Apple's `monospaced` face is SF Mono, which no picker lists
+// (docs/font-picker-plan.md §6).
+var codeFamilies = []string{"Menlo", "Cascadia Mono", "DejaVu Sans Mono", "Droid Sans Mono"}
+
 // Spelled rather than formatted: "1 matches" is what a person reads.
 func tally(n int) string {
 	switch n {
@@ -205,9 +210,8 @@ func App() *kaya.App {
 		// The View menu's state (docs/code-surface-plan.md §4), shown for the
 		// active document.
 		numbersOn kaya.Signal[bool]
-		// The face every document wears, the app's preference
-		// (docs/font-picker-plan.md §6); no family is the platform's
-		// monospaced face.
+		// The face every document wears, the app's preference, else the
+		// first installed of codeFamilies (docs/font-picker-plan.md §6).
 		font kaya.FontChoice
 		// The Format menu's check marks: what holds over the active buffer's
 		// selection (docs/phone-format-plan.md §3).
@@ -474,15 +478,17 @@ func App() *kaya.App {
 					done = icon("done", "Close find bar", kaya.SymbolClose)
 				})
 				row.SetInset(bar, 8)
+				row.SetA11yID(bar, "findbar")
 			}
 
 			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) takes this row's
-			// margin with it (docs/deferred.md, the inset entry).
+			// margin with it (docs/deferred.md, the inset entry). One line of
+			// small text, as compact as a code editor's status bar.
 			tx.Row(func() {
-				tx.Label(d.status).Grow(1).A11yID(id("status"))
-				tx.Label(d.count).BindTint(d.countTint).A11yID(id("matches"))
-			}).Inset(8).A11yID(id("statusbar"))
-		}).Align(kaya.AlignStretch))
+				tx.Label(d.status).TextScale(0.85).Grow(1).A11yID(id("status"))
+				tx.Label(d.count).TextScale(0.85).BindTint(d.countTint).A11yID(id("matches"))
+			}).Inset(6).A11yID(id("statusbar"))
+		}).Align(kaya.AlignStretch).Spacing(0))
 
 		// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever
 		// stamped.
@@ -526,12 +532,32 @@ func App() *kaya.App {
 		return d
 	}
 
+	app.OnFontFamilies(func(tx *kaya.Tx, families []string) {
+		if font.Family != "" {
+			return
+		}
+		for _, want := range codeFamilies {
+			for _, have := range families {
+				if have == want {
+					font = kaya.FontChoice{Family: want, Weight: 400, Width: 5}
+					for _, d := range docs {
+						wear(tx, d)
+					}
+					return
+				}
+			}
+		}
+	})
+
 	app.Build(func(tx *kaya.Tx) {
 		font = kaya.FontChoice{
 			Family: kaya.Prefs().GetString("font.family", ""),
 			Weight: int(kaya.Prefs().GetI64("font.weight", 400)),
 			Italic: kaya.Prefs().GetBool("font.italic", false),
 			Width:  int(kaya.Prefs().GetI64("font.width", 5)),
+		}
+		if font.Family == "" {
+			tx.ListFontFamilies()
 		}
 		// Before anything mounts (the set-once wall); a REQUEST, not a rule.
 		tx.BrandAccent(0x0F7B6C)
