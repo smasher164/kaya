@@ -652,7 +652,7 @@ def self_test():
          "SHIPPED 2026-10-06 (f835b14e)", "commit f835b14e"),
         ("commit-features", "features", r"\(7b228406, fe1e93e2\)",
          "(7b228406, fe1e93e9)", "commit fe1e93e9"),
-        ("base", "editorial", r"\nbase = '955d4106'", "\nbase = '955d4109'",
+        ("base", "editorial", r"\nbase = '[0-9a-f]{7,40}'", "\nbase = '955d4109'",
          "commit 955d4109"),
         ("menu-slug", "editorial", r'href="#item-hscroll"', 'href="#item-hscroll_gone"',
          "#item-hscroll_gone links"),

@@ -2,14 +2,14 @@
 # (docs/HACKING.md, Roadmap). Text fields are HTML. {review:<name>} names a [reviews] entry;
 # #item-<slug> must name a feature in features.toml; blockers and soft are feature slugs.
 
-base = '2dadc3b5'
+base = '311de26a'
 title = 'What kaya builds next'
 lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
-state = "Since the 2026-10-06 read the password field shipped whole on five platforms and in nine bindings: the secure field (2026-10-07), autofill content hints with logins shared through [links] hosts (10-07, 10-08), and the show-password toggle with an eye the keyboard reaches (10-08). The Linux lane moved to Debian forky and GTK 4.24, with the libsoup, GTK sink and GLib launch defects it surfaced fixed in kaya; the full matrix reads ALL PASS in 1439 s. Then three controls shipped the same way: the segmented control (10-08), the toast with its one-time Undo (10-08, 10-09) and the expander (10-09), each green on the full matrix. Safe areas and keyboard avoidance on the phones are ruled (2026-10-11) and being built."
+state = "Since the 2026-10-11 read the phones' safe areas and keyboard avoidance shipped (10-11, 10-12), then images from the network (10-13) and the styling pass toward an app-skinned look (10-16), each on five platforms and in nine bindings. The fourth demo app followed: Aurora Music, a Python music client over a Jamendo catalogue, built screen by screen through 10-26 with every review ruling taken (library, playlist, the album's vivid header, the artist page, search, the dock with Now Playing, Liked Songs, context menus). Its styling then went back into the chat app, the task manager and the text editor (10-26, 10-27). The text editor grew into a real document editor: a Format menu and a format bar above the phone keyboard (10-27), line numbers that hold their lines, document tabs native on every platform (10-28), and one Font… opening the platform's own font picker with family and style, Menlo by default and a compact status bar (10-29, 10-30). Every slice ended on a review page the maintainer read."
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
-menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager and the chat app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's choice of what comes before it. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
-recommended_next = 'Safe-area insets and keyboard avoidance'
-recommended_note = "Ruled 2026-10-11 and being built (docs/safe-area-plan.md); then the media player demo app with its two new pieces, images from the network and a styling pass toward the look the maintainer asked for on 2026-10-08. The video editor waits on nothing and stays held behind these."
+menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
+recommended_next = 'The video editor'
+recommended_note = "Every piece its plan names has been built since 2026-10-06, and it was held only while user-facing features came first; the list the maintainer drew from then (passwords, the segmented control, the toast, the expander, safe areas, network images, the styling pass, the music app, document tabs, the font picker) is done. The alternatives worth weighing: session restoration with recent files, which every document app now wants and which document tabs make more pressing; the far end of a call, which finishes the chat app; or a filtered list, which the music app's and the task manager's searches both hand-write today. The two below with a star need a ruling first."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -30,6 +30,14 @@ aspect = 'https://claude.ai/artifact/SR71ZiQgSF4QGMXX6WyLUL'
 reader = 'https://claude.ai/artifact/Gwtwpt5BogkAd8aTwswXRX'
 capture = 'https://claude.ai/artifact/5Pb49ub6dhKPfGaP7k8RHB'
 segmented = 'https://claude.ai/artifact/SCGLn3k2KshTDjhNWTUm4y'
+safearea = 'https://claude.ai/artifact/Skqv1HJC29yya5djjYFVPf'
+netimages = 'https://claude.ai/artifact/Da15r8emgFfRC3jC6yNjvN'
+styling = 'https://claude.ai/artifact/VZN2zZ5imPZqvzvMVWpdJR'
+music = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
+restyle = 'https://claude.ai/artifact/LYPGimfXNrSWgyfNRqMMLj'
+editorfmt = 'https://claude.ai/artifact/7PtETtTpi3bPZscDSSQwJ7'
+doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
+fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -139,12 +147,11 @@ text = 'SHIPPED 2026-10-06 (f835b14b): <code>drag &lt;src&gt; to &lt;dst&gt; at 
 [[menu]]
 title = '<b>The video editor itself</b>'
 star = false
-status = 'held'
+status = 'open'
 size = 'XL'
 unblocks = 'the third forcing app'
 plan = 'docs/video-editor-plan.md'
-held = 'the maintainer is choosing user-facing features to build first (2026-10-06)'
-text = "in Rust (ruling 1, 2026-09-29), one screen at a time with its scenes shared verbatim (docs/video-editor-plan.md §6): the media bin, a timeline drawn on one canvas with filmstrips and waveforms from the reader, range trim handles, a playhead in timecode, and a program monitor that cuts between two players at the playhead. Composition and export are not promised (plan §8). XL. Every ruling in the plan's §7 is taken and every piece it names is built, the last two on 2026-10-05 and 10-06. Held: the maintainer wants more user-facing features before the editor starts (2026-10-06), and is choosing which."
+text = "in Rust (ruling 1, 2026-09-29), one screen at a time with its scenes shared verbatim (docs/video-editor-plan.md §6): the media bin, a timeline drawn on one canvas with filmstrips and waveforms from the reader, range trim handles, a playhead in timecode, and a program monitor that cuts between two players at the playhead. Composition and export are not promised (plan §8). XL. Every ruling in the plan's §7 is taken and every piece it names is built, the last two on 2026-10-05 and 10-06. It was held on 2026-10-06 while user-facing features came first; that list is done (2026-10-30), so it waits only on the maintainer's pick."
 
 [[menu]]
 title = "<b>The far end of a call: the peer's picture and voice</b>"
@@ -212,20 +219,74 @@ plan = 'docs/segmented-plan.md'
 text = "SHIPPED 2026-10-08 (bfa9456c; review {review:segmented}): a third choice kind beside select and radio, the platform's own segmented control where it has one (SwiftUI, Material 3, libadwaita's toggle group) and a SelectorBar on WinUI; the slice also made radio's and select's harness reads come from the screen."
 
 [[menu]]
+title = '<a href="#item-safe_area">Safe-area insets and keyboard avoidance</a>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the chat app and the editor on the phones'
+plan = 'docs/safe-area-plan.md'
+review = 'safearea'
+text = "SHIPPED 2026-10-12 (d0ffa7b6 depth, f9308f01 breadth, 21e638c5; review {review:safearea}): A1-A16 ruled 2026-10-11; a <code>bleed</code> prop for art under the system bars, content kept clear of the notch and the home indicator, and a focused field kept above the keyboard, a text area shrinking down to one line, on the phones, with the desktops answering the same reads."
+
+[[menu]]
+title = '<b>The media player demo: Aurora Music</b>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the fourth demo app'
+plan = 'docs/media-player-plan.md'
+review = 'music'
+text = "SHIPPED 2026-10-17 to 10-26 (6a0fb1bf first screen, 3b4610c0 the album header; final review {review:music}): a Python music client over a Jamendo catalogue with the person's own client id, the lanes served a twelve-track snapshot; library, playlist, the album's vivid header from the cover's palette, the artist page, search, the dock with Now Playing and media keys, Liked Songs, context menus. Rulings M1-M26 all taken."
+
+[[menu]]
+title = '<b>The text editor as a real document editor</b>'
+star = false
+status = 'shipped'
+size = 'M'
+unblocks = 'the text editor'
+plan = 'docs/phone-format-plan.md'
+review = 'editorfmt'
+text = "SHIPPED 2026-10-27 (ea3bfdb9, c4d645a9, e68916a9, 92268e2e, cad803fc; review {review:editorfmt}): a real document with its formatting in a Format menu, each style a toggle with the platform's check mark, the format bar above a phone's keyboard, line numbers that stay level with their lines on every platform, and a <code>hidden</code> prop that takes a widget out of the layout."
+
+[[menu]]
+title = '<a href="#item-doctabs">Document tabs</a>'
+star = false
+status = 'shipped'
+size = 'L to XL'
+unblocks = 'the text editor; every document app'
+plan = 'docs/doctabs-plan.md'
+review = 'doctabs'
+text = "SHIPPED 2026-10-28 (ba0e20a4 depth, be682d02 the editor; review {review:doctabs}): one document-tabs concept over surfaces, native on each platform: the Mac's own window tabs through public API only, AdwTabView on GNOME, a TabView in the Windows title bar, and a list of open documents from the phones' top bar; on five platforms, in nine bindings and on the C floor. The editor opens one tab per document."
+
+[[menu]]
+title = '<b>The font picker: a family and a style</b>'
+star = false
+status = 'shipped'
+size = 'L'
+unblocks = 'the text editor'
+plan = 'docs/font-picker-plan.md'
+review = 'fontpicker'
+text = "SHIPPED 2026-10-29 (6b348a23 depth, e2d4a307 the editor, 311de26a; review {review:fontpicker}): each platform's own picker on the Mac (the floating font panel on its Fixed Width list), the iPhone and GNOME, kaya's own on Windows and Android, optionally code fonts only, answering a family and a style by weight, slope and width, with a missing bold or italic drawn by kaya; on five platforms and in nine bindings. The editor's View has one Font…, Menlo by default, and the picker opens on the current font."
+
+[[menu]]
 title = 'Images from the network'
-star = true
-status = 'open'
+star = false
+status = 'shipped'
 size = 'M'
 unblocks = 'the media player (album art); feeds and galleries'
-text = "Album art, avatars and thumbnails come over HTTP, and kaya's images come only from bundled assets or the app's bytes. A remote image source with a cache, a placeholder while loading and a stated failure, in both zones so a table row's art loads per row. Needs a design pass."
+plan = 'docs/network-images-plan.md'
+review = 'netimages'
+text = "SHIPPED 2026-10-13 (69773421 depth, 29d6e229 breadth; review {review:netimages}): N1-N17 ruled as recommended; kaya fetches nothing itself, the app hands over bytes per row, with a placeholder while loading and a stated failure, in both zones, on five platforms and in nine bindings. The music app's art and the chat app's round pictures use it."
 
 [[menu]]
 title = 'A styling pass toward an app-skinned look'
-star = true
-status = 'open'
+star = false
+status = 'shipped'
 size = 'L'
 unblocks = 'the media player'
-text = "The maintainer, 2026-10-08, after an egui Spotify client: push kaya as far as possible towards styling a media client like that. It loosens DESIGN.md's brand-tier ceiling again, as the semantic tints did on 2026-09-25: gradient and image surface backgrounds, image shapes (a round avatar, rounded art), card surfaces with hover and selection, image and two-line cells in a table, a bar docked under the panes; tokens over raw values wherever the platforms share one, native controls kept. Every capability is a ruling of his; the demo app decides the order."
+plan = 'docs/styling-pass-plan.md'
+review = 'styling'
+text = "SHIPPED 2026-10-16 (a6964201 depth, 50e27735 breadth; review {review:styling}): Y1-Y11 ruled 2026-10-15; gradient and image grounds, image shapes, activatable cards with hover and selection, image and two-line table cells and a docked bar, native controls kept, on five platforms and in nine bindings. First asked for by the maintainer on 2026-10-08, after an egui Spotify client: push kaya as far as possible towards styling a media client like that. It loosens DESIGN.md's brand-tier ceiling again, as the semantic tints did on 2026-09-25: gradient and image surface backgrounds, image shapes (a round avatar, rounded art), card surfaces with hover and selection, image and two-line cells in a table, a bar docked under the panes; tokens over raw values wherever the platforms share one, native controls kept. Every capability is a ruling of his; the demo app decides the order."
 
 [[menu]]
 title = 'Restyle the earlier demo apps with the styling pass'
@@ -233,12 +294,13 @@ star = false
 status = 'open'
 size = 'M each'
 unblocks = 'the text editor, the portfolio, the task manager and the chat app'
-text = "The maintainer, 2026-10-15: once the styling pass is built (docs/styling-pass-plan.md, ruled 2026-10-15), go back to each earlier demo app and apply its vocabulary (data-colour grounds, image grounds with overlay panels, activatable cards with hover and selection, image shapes, tinted labels, the dock) to push each into its own unique, interesting look, within Y1's line that controls stay the platform's. After the media player, which drives the pass's build order."
+review = 'restyle'
+text = "BEGUN 2026-10-26 (5d7df248, facf3a63; review {review:restyle}): the music app's row styling in the chat app, the task manager's Projects screen and the editor's format bar, round pictures in the chat app, the editor's find bar on the basis of Sublime Text, Zed and VS Code. The portfolio and a unique look for each app are what is left. First asked for by the maintainer on 2026-10-15: once the styling pass is built (docs/styling-pass-plan.md, ruled 2026-10-15), go back to each earlier demo app and apply its vocabulary (data-colour grounds, image grounds with overlay panels, activatable cards with hover and selection, image shapes, tinted labels, the dock) to push each into its own unique, interesting look, within Y1's line that controls stay the platform's."
 
 [[demo]]
 name = 'The text editor'
 grp = 'docs/editor-plan.md; written in Go on purpose, the first forcing app'
-shipped = 'everything it asked for: a textarea with find, highlight and select, undo, file dialogs, clipboard, menus and shortcuts, dirty titles, the toolbar'
+shipped = 'everything it asked for: a textarea with find, highlight and select, undo, file dialogs, clipboard, menus and shortcuts, dirty titles, the toolbar; since 2026-10-27 a real document with a Format menu, a format bar over the phone keyboard and line numbers, document tabs (10-28) and the platform font picker (10-29)'
 waits = 'nothing'
 then_tier = 'shipped'
 then = ''
@@ -271,16 +333,16 @@ then = ', calls next after the far end'
 name = 'The video editor'
 grp = 'docs/video-editor-plan.md, the ratified third forcing artifact'
 shipped = "canvas with an image op, horizontal scroll, fullscreen, the number field with one typed-number rule and the timecode formatter, the colour picker, the range and vertical slider, the media player and video view with audio, captions and the media session, the media reader's filmstrips and waveforms, sliders with step, ticks and the committed value, drag and drop (row reorder with its insertion indicator and auto-scroll, cross-app drags on the desktops, a drop's point read on every lane), undo, pickers, file dialogs and picked-file reads, collections and tables, sheets"
-waits = "nothing built: every ruling in the plan's §7 is taken, the app's language Rust. It is held while the maintainer picks user-facing features to build first (2026-10-06)"
+waits = "nothing: every ruling in the plan's §7 is taken and every piece it names is built, the app's language Rust. Held 2026-10-06 while user-facing features came first; that list is done"
 then = 'the app one screen at a time (XL), when the maintainer picks it'
 
 [[demo]]
 name = 'The media player'
 grp = 'docs/media-player-plan.md; a music client styled toward the egui Spotify screenshot (the maintainer, 2026-10-08), over a public catalogue'
 shipped = 'the media player with audio and Now Playing on every platform, media keys, sliders, tables, the three-pane window, the search field, the secure field and autofill for sign-in, the segmented control for its filter chips, the toast'
-waits = "the maintainer's rulings on the design pass (docs/media-player-plan.md §8, proposed 2026-10-17); images from the network and the styling pass, which it waited on, are built"
-then_tier = 'next'
-then = 'the app one screen at a time (M for the app, L for the styling pass), after safe areas'
+waits = "nothing: built as Aurora Music 2026-10-17 to 10-26, every ruling M1-M26 taken"
+then_tier = 'shipped'
+then = ''
 
 [[proposed]]
 name = '2. A feed reader'
@@ -328,7 +390,7 @@ blockers = ['tree', 'charts']
 name = 'Notes / text editor'
 grp = 'Obsidian, Apple Notes, Apostrophe'
 has = 'textarea with find, highlight and select, undo, file dialogs, clipboard, menus, dirty titles'
-blocked = 'tree sidebar, spellcheck, session restoration (rich text and the search field shipped)'
+blocked = 'tree sidebar, spellcheck, session restoration and recent files (rich text, the search field, document tabs and the font picker shipped)'
 blockers = ['tree', 'spellcheck', 'restoration']
 
 [[archetype]]
@@ -372,14 +434,14 @@ blockers = ['file_assoc']
 name = 'Developer tool'
 grp = 'TablePlus, Postman, git clients'
 has = 'panes to three columns, textarea with find, auxiliary windows, menus and shortcuts'
-blocked = 'tree view, syntax-highlighted text, document tabs, restoration, auto-update'
+blocked = 'tree view, syntax-highlighted text, restoration, auto-update (document tabs shipped 2026-10-28)'
 blockers = ['tree', 'doctabs', 'restoration', 'auto_update']
 
 [[archetype]]
 name = 'Video editor'
 grp = 'the ratified third forcing artifact (docs/video-editor-plan.md)'
 has = "canvas with an image op, sliders with steps and ticks, the range, drag and drop, undo, pickers, the media player and video view, the media reader, horizontal scroll, the number field with the timecode formatter, a drop's point, the colour picker, fullscreen"
-blocked = "nothing: the timecode formatter (2026-10-05) and the drop point (2026-10-06) shipped; the app waits on the maintainer's choice of what comes first"
+blocked = "nothing: the timecode formatter (2026-10-05) and the drop point (2026-10-06) shipped; the app waits only on the maintainer's pick"
 blockers = []
 
 [[archetype]]
@@ -663,11 +725,11 @@ text = "Calibrated on kaya's delivery record below, not guessed: a native-everyw
 
 [[tier]]
 id = 'shipped'
-lede = "Delivered since this page was first written on 2026-09-05, each with a review page and a matrix green on all five lanes. They came off the top of the order: the search field, the settings vocabulary (switch, badge, hyperlink, splash), notifications with the closed-app click, settings with window memory and the app's data, app links, and rich text (the editing surface, rich labels, named acts, the template zone), the compliance pass and sheets; then three the chat app pulled up from Later: the emoji picker, the badge on the app's icon and swipe actions on rows. From 2026-09-28 to 10-04 the video editor's pieces and media followed: horizontal scroll, fullscreen, the colour picker, the number field with its stepper, audio and video playback, and the camera, whose photo picker half shipped with the chat app and whose capture half on 2026-10-03. The timecode formatter and a drop's point followed on 2026-10-05 and 10-06, neither with a card of its own, and the full plain matrix was ALL PASS on 2026-10-06. Packaging shipped its first half and stays on hold for the second."
+lede = "Delivered since this page was first written on 2026-09-05, each with a review page and a matrix green on all five lanes. They came off the top of the order: the search field, the settings vocabulary (switch, badge, hyperlink, splash), notifications with the closed-app click, settings with window memory and the app's data, app links, and rich text (the editing surface, rich labels, named acts, the template zone), the compliance pass and sheets; then three the chat app pulled up from Later: the emoji picker, the badge on the app's icon and swipe actions on rows. From 2026-09-28 to 10-04 the video editor's pieces and media followed: horizontal scroll, fullscreen, the colour picker, the number field with its stepper, audio and video playback, and the camera, whose photo picker half shipped with the chat app and whose capture half on 2026-10-03. The timecode formatter and a drop's point followed on 2026-10-05 and 10-06, neither with a card of its own, and the full plain matrix was ALL PASS on 2026-10-06. Packaging shipped its first half and stays on hold for the second. From 2026-10-11 to 10-30: safe areas and keyboard avoidance, and document tabs native on every platform."
 
 [[tier]]
 id = 'now'
-lede = 'Need 4 or 5 at a cost of S or M, or need 5 at L. The three items that made up this tier on 2026-09-21 were the compliance pass, and it shipped on 2026-09-24: dynamic type, localization and RTL mirroring sit under Shipped now. Nothing else qualifies by the rule, so the next slice comes from the menu above, where the maintainer is choosing among user-facing features before the video editor; its three starred items need a ruling first.'
+lede = 'Need 4 or 5 at a cost of S or M, or need 5 at L. The three items that made up this tier on 2026-09-21 were the compliance pass, and it shipped on 2026-09-24: dynamic type, localization and RTL mirroring sit under Shipped now. Nothing else qualifies by the rule, so the next slice comes from the menu above, where the video editor is recommended now that the user-facing features chosen first have shipped; its three starred items need a ruling first.'
 
 [[tier]]
 id = 'next'

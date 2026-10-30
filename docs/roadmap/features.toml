@@ -363,6 +363,8 @@ need_why = "VS Code, Notion, Obsidian, Postman; MAUI tabbed windows (30 votes); 
 parity_why = 'NSWindow tabbing, AdwTabBar, WinUI TabView, Material tabs; egui and iced compose their own'
 shape = 'window prop: a tab strip over pushed roots'
 kaya = 'NSWindow tabbing / TabView, AdwTabBar, WinUI TabView, Material tabs. Distinct from sections, which are a fixed set of app areas: these are opened and closed by the user, reordered by drag. An editor and a dev tool both want them. Study 2026-10-28 (docs/native-tabs-study.md): a Mac tab is a window, a GNOME or WinUI tab is a view in one window, phones have none. RULED 2026-10-28 (the maintainer: "I agree with your recommendations"): option C, one document-tabs concept over surfaces, native everywhere (Mac NSWindow tabs through public API only, AdwTabView, WinUI TabView, a list of open documents on phones); re-priced L to XL from M because each Mac tab is a whole window, so shared chrome (toolbar, sidebar) is duplicated per tab window there; built when the editor needs documents in tabs (docs/editor-plan.md). Until then AppKit automatic tabbing is off (option A).'
+shipped = true
+shipped_note = '2026-10-28 (ba0e20a4, be682d02): document tabs over surfaces, the Mac window tabs through public API, AdwTabView, a TabView in the Windows title bar, a list of open documents on the phones; the editor opens one tab per document · <a href="https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13">review page</a>'
 
 [[feature]]
 slug = 'safe_area'
@@ -376,6 +378,8 @@ need_why = 'not scored by the survey; the chat composer at the bottom of a phone
 parity_why = 'every mobile-targeting toolkit; not a concept on the desktop-first ones'
 shape = 'scene proof + a scroll behaviour'
 kaya = 'SwiftUI and Compose (imePadding) avoid the keyboard when told; kaya reports iOS window metrics already. Owed: a scene with an entry at the bottom proving it stays visible with the keyboard up, on both phones.'
+shipped = true
+shipped_note = '2026-10-12 (d0ffa7b6, f9308f01, 21e638c5): the <code>bleed</code> prop, content clear of the notch and home indicator, a focused field above the keyboard and a text area shrinking to the room left, on both phones · <a href="https://claude.ai/artifact/Skqv1HJC29yya5djjYFVPf">review page</a>'
 
 [[feature]]
 slug = 'segmented'
@@ -962,7 +966,7 @@ shape = 'a cascade or token set'
 kaya = "GTK CSS, Avalonia selectors, MAUI styles. Refused by DESIGN's styling ceiling: zero arbitrary styling, roles plus a brand tier. Listed for parity honesty; the ruling stands unless an app forces it."
 tier = 'hold'
 tier_reason = "refused by DESIGN's styling ceiling"
-amended = "2026-09-25 (60faea36, 4d000f54): a closed vocabulary of platform tints on a filled container role, for the chat app's bubbles; arbitrary styling stays refused"
+amended = "2026-09-25 (60faea36, 4d000f54): a closed vocabulary of platform tints on a filled container role, for the chat app's bubbles; 2026-10-16 (a6964201, 50e27735): the styling pass's closed vocabulary of grounds, image shapes, cards and a dock for the music app; arbitrary styling stays refused"
 
 [[feature]]
 slug = 'collection_pipelines'
