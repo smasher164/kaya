@@ -133,6 +133,8 @@ struct Picker {
     layout: Grid,
     #[cfg(feature = "harness")]
     face_scroll: ScrollViewer,
+    #[cfg(feature = "harness")]
+    asked: String,
     faces_on: bool,
     list: Grid,
     scroll: ScrollViewer,
@@ -425,6 +427,8 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
             layout: layout.clone(),
             #[cfg(feature = "harness")]
             face_scroll: face_scroll.clone(),
+            #[cfg(feature = "harness")]
+            asked: spec.family.clone(),
             faces_on: spec.faces,
             list,
             scroll,
@@ -603,6 +607,37 @@ pub(super) mod read {
                 }
             }
             Ok(Ok(Some(out)))
+        })
+    }
+
+    /// The row the open picker lights with the accent style, and whether the
+    /// list shows it whole.
+    pub(in super::super) fn selected() -> windows_core::Result<Result<Option<crate::harness::SelectedFamily>, String>> {
+        PICKER.with_borrow(|picker| -> windows_core::Result<Result<Option<crate::harness::SelectedFamily>, String>> {
+            let Some(picker) = picker.as_ref() else { return Ok(Ok(None)) };
+            if !picker.dialog.IsLoaded()? {
+                return Ok(Ok(None));
+            }
+            let Some(scroller) = dialog_scroller(&picker.layout)? else {
+                return Ok(Err("the picker's content sits in no scroller of the dialog's".to_owned()));
+            };
+            let list: FrameworkElement = picker.scroll.cast()?;
+            let (from, to) = shown_span(&list, &scroller)?;
+            let to = to.min(picker.scroll.ViewportHeight()?);
+            let accent: windows_core::IUnknown = theme_resource::<Style>("AccentButtonStyle")?.cast()?;
+            let mut read = crate::harness::SelectedFamily { asked: picker.asked.clone(), selected: None, shown: false };
+            for (name, button) in &picker.rows {
+                let lit = button.Style().ok().and_then(|s| s.cast::<windows_core::IUnknown>().ok()).is_some_and(|s| s == accent);
+                if !lit || button.Visibility()? != Visibility::Visible {
+                    continue;
+                }
+                let top = button.TransformToVisual(&list)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
+                let bottom = top + button.ActualHeight()?;
+                read.selected = Some(name.clone());
+                read.shown = top >= from - 0.5 && bottom <= to + 0.5;
+                break;
+            }
+            Ok(Ok(Some(read)))
         })
     }
 

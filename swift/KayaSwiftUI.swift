@@ -10077,6 +10077,7 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
         let labels = gutter.drawn.map { ($0.number, $0.mid) }
         return .success(kayaPairGutter(fragments, labels))
     }
+
     /// Where the text is clipped against where the layout put the textarea,
     /// both in the window.
     @MainActor func kayaGutterContext(_ node: KayaNode) -> String {
@@ -10417,6 +10418,53 @@ func kayaFontDialogVerdict(_ listed: [(String, Bool, Bool)]?, _ want: String) ->
         + proportional.prefix(8).joined(separator: ", "))
 }
 
+/// harness.rs's SelectedFamily: the family the app asked the picker to open
+/// on, the family its list selects, and whether that row is wholly in view.
+struct KayaSelectedFamily {
+    let asked: String
+    let selected: String?
+    let shown: Bool
+    /// What the read saw, where the lane can say more than the three facts.
+    var seen = ""
+}
+
+/// harness.rs's font_dialog_selected_verdict.
+func kayaFontDialogSelectedVerdict(_ read: KayaSelectedFamily?) -> (String?, String) {
+    guard let read else { return (nil, ": no font picker is open") }
+    if read.asked.isEmpty { return (nil, ": the app asked the picker to open on no family") }
+    guard let got = read.selected else {
+        return (nil, ": the picker selects no family; it was asked for \(read.asked)\(read.seen)")
+    }
+    if got.caseInsensitiveCompare(read.asked) != .orderedSame {
+        return (nil, ": the picker selects \(got); it was asked for \(read.asked)")
+    }
+    if !read.shown { return (nil, ": the picker selects \(got), its row out of the list's view") }
+    return ("selects \(got)", "")
+}
+
+/// What the open picker's list selects; nil when no picker is open.
+func kayaFontDialogSelected() -> KayaRead<KayaSelectedFamily?> {
+    #if os(macOS)
+        return DispatchQueue.main.sync {
+            guard let agent = kayaFontAgent, !agent.answered, let panel = NSFontManager.shared.fontPanel(false),
+                panel.isVisible
+            else { return .success(nil) }
+            guard let table = kayaFontPanelTables(panel).families else {
+                return .failure("the font panel shows no families list")
+            }
+            let row = table.selectedRow
+            guard row >= 0 else { return .success(KayaSelectedFamily(asked: agent.asked, selected: nil, shown: false)) }
+            let rect = table.rect(ofRow: row)
+            let view = table.visibleRect
+            return .success(KayaSelectedFamily(
+                asked: agent.asked, selected: kayaFontPanelCell(table, row),
+                shown: rect.minY >= view.minY - 0.5 && rect.maxY <= view.maxY + 0.5))
+        }
+    #else
+        return kayaIOSFontDialogSelected()
+    #endif
+}
+
 #if os(macOS)
     /// The font panel's tables: its families list and its faces list, told
     /// apart by what their rows name.
@@ -10555,6 +10603,24 @@ func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
         var advances = [CGSize](repeating: .zero, count: 2)
         CTFontGetAdvancesForGlyphs(font, .horizontal, glyphs, &advances, 2)
         return abs(advances[0].width - advances[1].width) < 0.01
+    }
+
+    /// The remote picker's selected row, read by the resident XCUITest driver:
+    /// one line per row, its text, whether it is selected, whether the
+    /// picker's list shows it whole.
+    func kayaIOSFontDialogSelected() -> KayaRead<KayaSelectedFamily?> {
+        guard let asked = DispatchQueue.main.sync(execute: { kayaFontPickerDelegate?.asked }) else { return .success(nil) }
+        let (ok, lines) = KayaSimdrive.ask("fontselected")
+        guard ok else { return .failure(lines.first ?? "simdrive refused fontselected without saying why") }
+        guard lines.first == "Fonts" else { return .failure("the font picker is not on screen yet") }
+        let rows = lines.dropFirst().map { $0.components(separatedBy: "\t") }
+        guard let row = rows.first(where: { $0.count >= 3 && $0[1] == "1" }) else {
+            let seen = rows.map { "\($0.first ?? "") images [\($0.count > 3 ? $0[3] : "")]" }
+            return .success(KayaSelectedFamily(
+                asked: asked, selected: nil, shown: false,
+                seen: " (no row selected or checkmarked: " + seen.joined(separator: "; ") + ")"))
+        }
+        return .success(KayaSelectedFamily(asked: asked, selected: row[0], shown: row[2] == "1"))
     }
 
     func kayaIOSPickFont(_ choice: (String, KayaFace)?) -> String? {
@@ -16023,11 +16089,17 @@ private func kayaRunScript(_ script: String) {
             case "expect_font_dialog":
                 // docs/font-picker-plan.md §7: harness.rs's font_dialog_verdict.
                 let want = parts.count == 2 ? String(parts[1]) : ""
-                guard ["open", "closed", "code_only"].contains(want) else {
-                    failures.append("expect_font_dialog is one of open, closed, code_only: \(line)")
+                guard ["open", "closed", "code_only", "selected"].contains(want) else {
+                    failures.append("expect_font_dialog is one of open, closed, code_only, selected: \(line)")
                     break
                 }
                 func readDialog() -> (String?, String) {
+                    if want == "selected" {
+                        switch kayaFontDialogSelected() {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let read): return kayaFontDialogSelectedVerdict(read)
+                        }
+                    }
                     switch kayaFontDialogFamilies() {
                     case .failure(let why): return (nil, ": \(why)")
                     case .success(let listed): return kayaFontDialogVerdict(listed, want)
@@ -26315,6 +26387,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
         let dialog: UInt64
         let faces: Bool
         let codeOnly: Bool
+        var asked = ""
         /// The collection is chosen and its popup may be masked off.
         var codeLocked = false
         /// Why the code-only filter is off, when it is.
@@ -26438,6 +26511,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
     #if os(macOS)
         let manager = NSFontManager.shared
         let agent = KayaFontPanelAgent(dialog: dialog, faces: faces, codeOnly: codeOnly)
+        agent.asked = family
         kayaFontAgent = agent
         agent.previousTarget = manager.target as AnyObject?
         manager.target = agent
@@ -26506,12 +26580,14 @@ func kayaRegularFace(_ family: String) -> KayaFace {
     {
         let dialog: UInt64
         let faces: Bool
+        let asked: String
         var answered = false
         weak var picker: UIFontPickerViewController?
 
-        init(dialog: UInt64, faces: Bool) {
+        init(dialog: UInt64, faces: Bool, asked: String) {
             self.dialog = dialog
             self.faces = faces
+            self.asked = asked
         }
 
         func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
@@ -26555,7 +26631,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
             picker.selectedFontDescriptor =
                 (kayaResolveFace(family: family, mono: false, want: initial, size: 17).font as UIFont).fontDescriptor
         }
-        let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces)
+        let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces, asked: family)
         delegate.picker = picker
         picker.delegate = delegate
         kayaFontPickerDelegate = delegate

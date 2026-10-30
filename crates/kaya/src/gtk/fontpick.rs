@@ -106,8 +106,7 @@ pub(super) fn stretch_keyword(width: u8) -> &'static str {
 /// and ignored (Q6, RULED). Answered once, its id retired first.
 pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpec) {
     let parent = gtk_window(core, spec.window.0);
-    let title = "Font".to_owned();
-    let dialog = gtk4::FontDialog::builder().title(&title).modal(true).build();
+    let dialog = gtk4::FontDialog::builder().title("Font").modal(true).build();
     if spec.code_only {
         let filter = gtk4::CustomFilter::new(|item| {
             let family = item
@@ -118,7 +117,7 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
         });
         dialog.set_filter(Some(&filter));
     }
-    *core.live_font_dialog.borrow_mut() = Some(title);
+    *core.live_font_dialog.borrow_mut() = Some(spec.family.clone());
     let live = core.live_font_dialog.clone();
     let sink = core.occurrences.clone();
     let id = spec.dialog;
@@ -250,6 +249,43 @@ pub(super) fn listed_families(window: &gtk4::Window) -> Result<Vec<String>, Stri
         }
     }
     Ok(names)
+}
+
+/// What the open picker's list selects: the selection model's item, and
+/// whether a row the list shows in its SELECTED state lies wholly inside it.
+#[cfg(feature = "harness")]
+pub(super) fn selected(core: &CoreState, window: &gtk4::Window) -> Result<crate::harness::SelectedFamily, String> {
+    let asked = core.live_font_dialog.borrow().clone().unwrap_or_default();
+    let mut all = Vec::new();
+    descendants(window.upcast_ref(), &mut all);
+    let list = all
+        .iter()
+        .filter_map(|w| w.downcast_ref::<gtk4::ListView>())
+        .find(|l| l.is_mapped())
+        .ok_or("the picker shows no list")?;
+    let model = list.model().ok_or("the picker's list has no model")?;
+    let picked = model.selection();
+    let selected = (!picked.is_empty()).then(|| model.item(picked.nth(0))).flatten().and_then(|item| {
+        item.downcast_ref::<pango::FontFamily>()
+            .cloned()
+            .or_else(|| item.downcast_ref::<pango::FontFace>().and_then(|f| f.family().into()))
+            .map(|f| f.name().to_string())
+    });
+    let height = f64::from(list.height());
+    let mut rows = Vec::new();
+    let mut child = list.first_child();
+    while let Some(c) = child {
+        rows.push(c.clone());
+        child = c.next_sibling();
+    }
+    let shown = rows.iter().any(|row| {
+        row.is_mapped()
+            && row.state_flags().contains(gtk4::StateFlags::SELECTED)
+            && row.compute_bounds(list).is_some_and(|b| {
+                f64::from(b.y()) >= -0.5 && f64::from(b.y() + b.height()) <= height + 0.5
+            })
+    });
+    Ok(crate::harness::SelectedFamily { asked, selected, shown })
 }
 
 /// Choose in the open picker: its chooser set to the font, then its own OK;

@@ -6487,7 +6487,8 @@ struct CoreState {
     /// apply arm applies it. Setting it on a dialog already on screen is
     /// silently ignored.
     live_file_dialog: std::rc::Rc<RefCell<Option<GtkLiveFileDialog>>>,
-    /// The open font picker's window title (docs/font-picker-plan.md §4.3).
+    /// The family the open font picker was asked to open on, "" for none
+    /// (docs/font-picker-plan.md §4.3).
     live_font_dialog: std::rc::Rc<RefCell<Option<String>>>,
     pending_dialog_dir: std::rc::Rc<RefCell<Option<String>>>,
     /// The command-catalog registry (DESIGN.md, Menus). Rc'd so the
@@ -22698,6 +22699,13 @@ impl crate::harness::Stage for GtkStage {
                 alias: fontpick::is_alias(&name),
                 name,
             }).collect()))
+        })
+    }
+
+    fn font_dialog_selected(&self) -> Result<Option<crate::harness::SelectedFamily>, String> {
+        Self::on_main(move |core| {
+            let Some(window) = fontpick::dialog_window(core) else { return Ok(None) };
+            fontpick::selected(core, &window).map(Some)
         })
     }
 

@@ -1926,7 +1926,34 @@ pub(crate) fn drawn_face_verdict(read: &DrawnFace, want: &FaceWords) -> Result<S
 }
 
 /// What `expect_font_dialog` may say (docs/font-picker-plan.md §7).
-pub const FONT_DIALOG_STATES: [&str; 3] = ["open", "closed", "code_only"];
+pub const FONT_DIALOG_STATES: [&str; 4] = ["open", "closed", "code_only", "selected"];
+
+/// What an open picker selects, read off its own list: the family the app
+/// asked it to open on, the family its list selects, and whether that row is
+/// wholly in the list's view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SelectedFamily {
+    pub asked: String,
+    pub selected: Option<String>,
+    pub shown: bool,
+}
+
+/// `expect_font_dialog selected`: the picker opens on the family it was asked
+/// for, its row selected and in view.
+pub(crate) fn font_dialog_selected_verdict(read: Option<&SelectedFamily>) -> Result<String, String> {
+    let Some(read) = read else { return Err("no font picker is open".into()) };
+    if read.asked.is_empty() {
+        return Err("the app asked the picker to open on no family".into());
+    }
+    match &read.selected {
+        None => Err(format!("the picker selects no family; it was asked for {}", read.asked)),
+        Some(got) if !got.eq_ignore_ascii_case(&read.asked) => {
+            Err(format!("the picker selects {got}; it was asked for {}", read.asked))
+        }
+        Some(got) if !read.shown => Err(format!("the picker selects {got}, its row out of the list's view")),
+        Some(got) => Ok(format!("selects {got}")),
+    }
+}
 
 /// One family an open picker lists: its name, its own fixed-pitch trait, and
 /// whether it is a generic alias (fonts.xml's `monospace`, fontconfig's
@@ -3335,6 +3362,10 @@ pub trait Stage: Send + 'static {
     /// read off the picker's list; None when no picker is open.
     fn font_dialog_families(&self) -> Result<Option<Vec<ListedFamily>>, String> {
         Err("expect_font_dialog is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
+    }
+    /// What the open picker's list selects; None when no picker is open.
+    fn font_dialog_selected(&self) -> Result<Option<SelectedFamily>, String> {
+        Err("expect_font_dialog selected is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
     }
     /// Choose in the open picker through its own controls, or cancel.
     fn pick_font(&self, choice: Option<&crate::protocol::FontChoice>) -> Result<(), String> {
@@ -8759,6 +8790,10 @@ fn run_with_log(
                 let read = stage.font_face(*target, *range).map_err(|why| format!("{what}: {why}"))?;
                 drawn_face_verdict(&read, &want).map_err(|why| format!("{what} {why}"))
             })),
+            Step::ExpectFontDialog(want) if want == "selected" => Some(poll(|| {
+                let read = stage.font_dialog_selected().map_err(|why| format!("font dialog: {why}"))?;
+                font_dialog_selected_verdict(read.as_ref()).map_err(|why| format!("font dialog: {why}"))
+            })),
             Step::ExpectFontDialog(want) => Some(poll(|| {
                 let listed = stage.font_dialog_families().map_err(|why| format!("font dialog: {why}"))?;
                 font_dialog_verdict(listed.as_deref(), want).map_err(|why| format!("font dialog: {why}"))
@@ -12903,10 +12938,21 @@ mod tests {
         assert!(font_dialog_verdict(Some(&[]), "code_only").is_err());
         assert!(font_dialog_verdict(None, "open").is_err());
         assert!(font_dialog_verdict(None, "closed").is_ok());
+        let sel = |asked: &str, selected: Option<&str>, shown| SelectedFamily {
+            asked: asked.into(),
+            selected: selected.map(Into::into),
+            shown,
+        };
+        assert_eq!(font_dialog_selected_verdict(Some(&sel("Menlo", Some("Menlo"), true))).unwrap(), "selects Menlo");
+        assert!(font_dialog_selected_verdict(Some(&sel("", Some("Menlo"), true))).unwrap_err().contains("no family"));
+        assert!(font_dialog_selected_verdict(Some(&sel("Menlo", None, true))).unwrap_err().contains("selects no family"));
+        assert!(font_dialog_selected_verdict(Some(&sel("Menlo", Some("Monaco"), true))).unwrap_err().contains("selects Monaco"));
+        assert!(font_dialog_selected_verdict(Some(&sel("Menlo", Some("Menlo"), false))).unwrap_err().contains("out of the list's view"));
+        assert!(font_dialog_selected_verdict(None).is_err());
         let steps = parse(
             "expect_face label@x face 300 upright 5\nexpect_face textarea@d 0:4 face label@want\n\
              pick_font \"Menlo\" 700 italic 5\npick_font cancel\npick_font label@pick\nexpect_font_dialog code_only\n\
-             pick_font first 400 upright 5",
+             pick_font first 400 upright 5\nexpect_font_dialog selected",
         )
         .unwrap();
         assert!(matches!(&steps[0], Step::ExpectFontFace(_, None, Some(_), None)));
@@ -12916,6 +12962,7 @@ mod tests {
         assert!(matches!(&steps[4], Step::PickFont(PickWant::Label(_))));
         assert!(matches!(&steps[5], Step::ExpectFontDialog(s) if s == "code_only"));
         assert!(matches!(&steps[6], Step::PickFont(PickWant::First(f)) if f.weight == 400 && !f.italic));
+        assert!(matches!(&steps[7], Step::ExpectFontDialog(s) if s == "selected"));
         assert!(parse("pick_font first 400 upright").is_err());
         assert!(parse("expect_font_dialog shown").is_err());
         assert!(parse("expect_face label@x face 300 upright").is_err());

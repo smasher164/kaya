@@ -3761,6 +3761,7 @@ object KayaCompose {
     /** The font picker's controls (docs/font-picker-plan.md §4.3). */
     const val FONT_SEARCH_TAG = "kaya:font-search"
     const val FONT_FAMILY_TAG = "kaya:font-family"
+    const val FONT_LIST_TAG = "kaya:font-list"
     const val FONT_FACE_TAG = "kaya:font-face"
     const val FONT_CHOOSE_TAG = "kaya:font-choose"
     const val FONT_CANCEL_TAG = "kaya:font-cancel"
@@ -9588,7 +9589,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
     /** expect_font_dialog's read: the rows the open sheet shows, each with
      *  its family's fixed pitch measured; closed when no picker is up. */
     private fun kayaFontDialogReading(activity: ComponentActivity, want: String): Pair<String?, String> =
-        onUi(activity) {
+        if (want == "selected") kayaFontDialogSelected(activity) else onUi(activity) {
             if (KayaSceneModel.fontPicker == null && KayaSceneModel.fontSheetWindow == null) {
                 return@onUi if (want == "closed") "closed" to "" else null to ": no font picker is open"
             }
@@ -9610,6 +9611,27 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                 }
             }
         }
+
+    /** expect_font_dialog selected (harness.rs's font_dialog_selected_verdict):
+     *  the row the sheet shows in its Selected state, and whether the list
+     *  shows it whole. */
+    private fun kayaFontDialogSelected(activity: ComponentActivity): Pair<String?, String> = onUi(activity) {
+        val picker = KayaSceneModel.fontPicker ?: return@onUi null to ": no font picker is open"
+        val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled"
+        val list = kayaFontSheetNodes(KayaCompose.FONT_LIST_TAG)?.firstOrNull()
+            ?: return@onUi null to ": the font picker shows no list"
+        val row = rows.firstOrNull { it.config.getOrNull(SemanticsProperties.Selected) == true }
+        val view = list.boundsInRoot
+        when {
+            picker.asked.isEmpty() -> null to ": the app asked the picker to open on no family"
+            row == null -> null to ": the picker selects no family; it was asked for ${picker.asked}"
+            !kayaNodeText(row).equals(picker.asked, ignoreCase = true) ->
+                null to ": the picker selects ${kayaNodeText(row)}; it was asked for ${picker.asked}"
+            row.boundsInRoot.top < view.top - 0.5f || row.boundsInRoot.bottom > view.bottom + 0.5f ->
+                null to ": the picker selects ${kayaNodeText(row)}, its row out of the list's view"
+            else -> "selects ${kayaNodeText(row)}" to ""
+        }
+    }
 
     /** pick_font: the family's row, the face's chip, then Choose, each by
      *  its own click action; or Cancel. Null once the presses went out. */
@@ -15287,8 +15309,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     "expect_font_dialog" -> {
                         // docs/font-picker-plan.md §7: harness.rs's font_dialog_verdict.
                         val want = parts.getOrElse(1) { "" }
-                        if (parts.size != 2 || want !in listOf("open", "closed", "code_only")) {
-                            failures.add("expect_font_dialog is one of open, closed, code_only: $line")
+                        if (parts.size != 2 || want !in listOf("open", "closed", "code_only", "selected")) {
+                            failures.add("expect_font_dialog is one of open, closed, code_only, selected: $line")
                         } else {
                             var got = kayaFontDialogReading(activity, want)
                             val deadline = System.nanoTime() + 8_000_000_000L
@@ -27079,7 +27101,9 @@ internal fun kayaCodeFamily(name: String): Boolean {
 }
 
 /** The open font picker: what it lists and what the user selected (§4.3). */
-internal class KayaFontPicker(val dialog: Long, val codeOnly: Boolean, val faces: Boolean, val families: List<String>) {
+internal class KayaFontPicker(
+    val dialog: Long, val codeOnly: Boolean, val faces: Boolean, val families: List<String>, val asked: String,
+) {
     var query by mutableStateOf("")
     var family by mutableStateOf<String?>(null)
     var face by mutableStateOf<KayaFontFace?>(null)
@@ -27093,7 +27117,7 @@ internal const val KAYA_FONT_PREVIEW = "The quick brown fox jumps over the lazy 
 internal fun kayaPresentFontPicker(dialog: Long, codeOnly: Boolean, faces: Boolean, family: String, initial: KayaFontFace) {
     val names = kayaInstalledFamilyMap().keys
         .filter { !codeOnly || (it !in KAYA_GENERIC_FAMILIES && kayaCodeFamily(it)) }.sorted()
-    val picker = KayaFontPicker(dialog, codeOnly, faces, names)
+    val picker = KayaFontPicker(dialog, codeOnly, faces, names, family)
     names.firstOrNull { it.equals(family, ignoreCase = true) }?.let { kayaSelectFontFamily(picker, it, initial) }
     KayaSceneModel.fontPicker = picker
 }
@@ -27150,7 +27174,13 @@ fun KayaFontSheet() {
                 modifier = Modifier.fillMaxWidth().testTag(KayaCompose.FONT_SEARCH_TAG),
             )
             val shown = picker.families.filter { picker.query.isEmpty() || it.contains(picker.query, ignoreCase = true) }
-            androidx.compose.foundation.lazy.LazyColumn(Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+            val listState = androidx.compose.foundation.lazy.rememberLazyListState(
+                initialFirstVisibleItemIndex = shown.indexOf(picker.family).coerceAtLeast(0),
+            )
+            androidx.compose.foundation.lazy.LazyColumn(
+                Modifier.fillMaxWidth().heightIn(max = 280.dp).testTag(KayaCompose.FONT_LIST_TAG),
+                state = listState,
+            ) {
                 items(shown.size, key = { shown[it] }) { i ->
                     val name = shown[i]
                     val own = remember(name) { kayaFaceFontFamily(kayaFamilyFaces(name), 5) }

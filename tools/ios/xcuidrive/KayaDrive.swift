@@ -789,6 +789,21 @@ final class KayaDrive: XCTestCase {
         case "fontstate":
             guard fontPickerUp(a) else { return (true, "") }
             return (true, (["Fonts"] + fontRows(a).map { $0.0 }).joined(separator: "\n"))
+        case "fontselected":
+            // Each row: its text, 1 when the cell is selected or carries a
+            // checkmark, 1 when the list shows it whole, and the cell's images.
+            guard fontPickerUp(a) else { return (true, "") }
+            let table = a.tables.firstMatch.frame
+            var out = ["Fonts"]
+            for cell in a.tables.firstMatch.cells.allElementsBoundByIndex {
+                guard let text = cell.staticTexts.allElementsBoundByIndex.first?.label, !text.isEmpty,
+                      text != "Manage Fonts" else { continue }
+                let images = cell.images.allElementsBoundByIndex.map { $0.identifier.isEmpty ? $0.label : $0.identifier }
+                let marked = cell.isSelected || images.contains { $0.lowercased().contains("checkmark") }
+                let whole = table.minY - 0.5 <= cell.frame.minY && cell.frame.maxY <= table.maxY + 0.5
+                out.append([text, marked ? "1" : "0", whole ? "1" : "0", images.joined(separator: ",")].joined(separator: "\t"))
+            }
+            return (true, out.joined(separator: "\n"))
         case "fontchoose_b64":
             // "<family>\t<face>": the family's row, then with faces the style's.
             guard words.count == 2, let data = Data(base64Encoded: words[1]),

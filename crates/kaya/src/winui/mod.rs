@@ -25060,6 +25060,10 @@ impl crate::harness::Stage for WinUiStage {
         Self::on_ui_bare(fontpick::read::families).unwrap_or_else(|e| Err(format!("unreadable: {e}")))
     }
 
+    fn font_dialog_selected(&self) -> Result<Option<crate::harness::SelectedFamily>, String> {
+        Self::on_ui_bare(fontpick::read::selected).unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
     fn pick_font(&self, choice: Option<&crate::protocol::FontChoice>) -> Result<(), String> {
         let choice = choice.cloned();
         Self::on_ui_bare(move || fontpick::read::pick(choice)).unwrap_or_else(|e| Err(format!("unreadable: {e}")))
