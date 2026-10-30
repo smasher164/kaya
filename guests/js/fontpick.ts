@@ -31,6 +31,10 @@ function uprightOnly(faces: readonly kaya.FontFace[]): number | null {
   return faces.find((f) => f.width === 5)?.weight ?? null;
 }
 
+function noBold(faces: readonly kaya.FontFace[]): boolean {
+  return faces.length > 0 && faces.every((f) => f.weight < 600);
+}
+
 function same(a: kaya.FontChoice | null, b: kaya.FontChoice): boolean {
   return a !== null && a.family === b.family && a.weight === b.weight && a.italic === b.italic
     && a.width === b.width;
@@ -40,6 +44,7 @@ const app = new kaya.App();
 let queue: string[] = [];
 let light: [string, [number, number, number]] | null = null;
 let plain: [string, number] | null = null;
+let boldless: string | null = null;
 let mono: string | null = null;
 let asked: kaya.FontChoice | null = null;
 
@@ -64,7 +69,8 @@ kaya.onFontFaces((family, faces) => {
     const p = uprightOnly(faces);
     if (p !== null) plain = [family, p];
   }
-  if (light === null || plain === null) {
+  if (boldless === null && noBold(faces)) boldless = family;
+  if (light === null || plain === null || boldless === null) {
     const next = queue.pop();
     if (next !== undefined) kaya.listFontFaces(next);
     else ready.set("faces: none suit");
@@ -75,6 +81,7 @@ kaya.onFontFaces((family, faces) => {
   exact.family(lf).fontWeight(lw);
   between.family(lf).fontWeight(a + Math.floor((b - a) / 2));
   synth.family(pf).fontWeight(pw).fontItalic(true);
+  heavy.family(boldless).fontWeight(700);
   doc.family(lf).fontWeight(lw);
   doc.setDocument(new kaya.Document(DOC).bold([0, 4]).italic([10, 16]));
   want[0]!.set(words(lw, false, 5));
@@ -82,6 +89,7 @@ kaya.onFontFaces((family, faces) => {
   want[2]!.set(`${words(pw, true, 5)} synthesized`);
   want[3]!.set(words(700, false, 5));
   want[4]!.set(words(lw, true, 5));
+  want[6]!.set(`${words(700, false, 5)} synthesized`);
   if (asked !== null) {
     pick.set(`${words(asked.weight, asked.italic, asked.width)} ${asked.family}`);
     want[5]!.set(words(asked.weight, asked.italic, asked.width));
@@ -102,14 +110,15 @@ function onPick(): void {
   kaya.chooseFont({ codeOnly: true, faces: true, ...(asked !== null ? { initial: asked } : {}), onResult: onChosen });
 }
 
-const { ready, want, pick, picked, exact, between, synth, doc, chosen } = app.window({ title: "fontpick" }, () => {
+const { ready, want, pick, picked, exact, between, synth, heavy, doc, chosen } = app.window({ title: "fontpick" }, () => {
   const ready = kaya.signal("faces: -");
-  const want = [0, 1, 2, 3, 4, 5].map(() => kaya.signal("-"));
+  const want = [0, 1, 2, 3, 4, 5, 6].map(() => kaya.signal("-"));
   const pick = kaya.signal("-");
   const picked = kaya.signal("picked: -");
   let exact!: kaya.Widget;
   let between!: kaya.Widget;
   let synth!: kaya.Widget;
+  let heavy!: kaya.Widget;
   let doc!: kaya.Widget;
   let chosen!: kaya.Widget;
   kaya.column(() => {
@@ -117,9 +126,10 @@ const { ready, want, pick, picked, exact, between, synth, doc, chosen } = app.wi
     exact = kaya.label("Exact").a11yId("exact");
     between = kaya.label("Between").a11yId("between");
     synth = kaya.label("Slanted").a11yId("synth");
+    heavy = kaya.entry().a11yId("heavy").setText("Heavy");
     doc = kaya.textarea({ rich: true }).a11yId("doc");
     chosen = kaya.label("Chosen").a11yId("chosen");
-    ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick"].forEach((id, i) => {
+    ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick", "want_heavy"].forEach((id, i) => {
       kaya.label({ bind: want[i]! }).a11yId(id);
     });
     kaya.label({ bind: pick }).a11yId("pick");
@@ -129,7 +139,7 @@ const { ready, want, pick, picked, exact, between, synth, doc, chosen } = app.wi
       kaya.button("pick", { onClick: onPick }).a11yId("pick_button");
     });
   });
-  return { ready, want, pick, picked, exact, between, synth, doc, chosen };
+  return { ready, want, pick, picked, exact, between, synth, heavy, doc, chosen };
 });
 
 app.run();

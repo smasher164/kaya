@@ -38,6 +38,11 @@ fn upright_only(faces: &[NamedFace]) -> Option<u16> {
     faces.iter().find(|f| f.face.width == 5).map(|f| f.face.weight)
 }
 
+/// A family with no face at 600 or above.
+fn no_bold(faces: &[NamedFace]) -> bool {
+    !faces.is_empty() && faces.iter().all(|f| f.face.weight < 600)
+}
+
 #[derive(Clone)]
 enum Msg {
     Find,
@@ -52,7 +57,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tx.window(kaya::DEFAULT_WINDOW).title("fontpick");
         let sig = |tx: &mut kaya::Tx, v: &str| tx.signal(v.to_string());
         let ready = sig(tx, "faces: -");
-        let want = [sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-")];
+        let want = [sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-"), sig(tx, "-")];
         let pick = sig(tx, "-");
         let picked = sig(tx, "picked: -");
         let (root, ids) = tx
@@ -64,10 +69,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let between = tx.label(text).a11y_id("between").id();
                 let text = sig(tx, "Slanted");
                 let synth = tx.label(text).a11y_id("synth").id();
+                let heavy = tx.entry().a11y_id("heavy").id();
+                tx.set_text(heavy, "Heavy");
                 let doc = tx.textarea().rich().a11y_id("doc").id();
                 let text = sig(tx, "Chosen");
                 let chosen = tx.label(text).a11y_id("chosen").id();
-                for (signal, id) in want.iter().zip(["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick"]) {
+                for (signal, id) in want.iter().zip(["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick", "want_heavy"]) {
                     tx.label(*signal).a11y_id(id);
                 }
                 tx.label(pick).a11y_id("pick");
@@ -78,19 +85,20 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let open = tx.button("pick").a11y_id("pick_button").id();
                     msgs.on_click(open, Msg::Pick);
                 });
-                [exact, between, synth, doc, chosen]
+                [exact, between, synth, heavy, doc, chosen]
             })
             .into_parts();
         tx.mount(root);
         (ready, want, pick, picked, ids)
     });
-    let (ready, want, pick, picked, [exact, between, synth, doc, chosen]) = s;
+    let (ready, want, pick, picked, [exact, between, synth, heavy, doc, chosen]) = s;
     msgs.on_font_families(|families| Msg::Families(families.to_vec()));
     msgs.on_font_faces(|family, faces| Msg::Faces(family.to_owned(), faces.to_vec()));
 
     let mut queue: Vec<String> = Vec::new();
     let mut light: Option<(String, (u16, u16, u16))> = None;
     let mut plain: Option<(String, u16)> = None;
+    let mut boldless: Option<String> = None;
     let mut mono: Option<String> = None;
     let mut asked: Option<FontChoice> = None;
     let tasks = ctx.tasks();
@@ -124,7 +132,10 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 if plain.is_none() {
                     plain = upright_only(&faces).map(|w| (family.clone(), w));
                 }
-                if light.is_none() || plain.is_none() {
+                if boldless.is_none() && no_bold(&faces) {
+                    boldless = Some(family.clone());
+                }
+                if light.is_none() || plain.is_none() || boldless.is_none() {
                     match queue.pop() {
                         Some(next) => ctx.apply(|tx| tx.list_font_faces(next)),
                         None => ctx.apply(|tx| tx.write(ready, "faces: none suit".to_string())),
@@ -133,6 +144,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 }
                 let (lf, (lw, a, b)) = light.clone().unwrap();
                 let (pf, pw) = plain.clone().unwrap();
+                let hf = boldless.clone().unwrap();
                 let face = |weight, italic| FontFace { weight, italic, width: 5 };
                 ctx.apply(|tx| {
                     tx.family(exact, lf.as_str());
@@ -142,6 +154,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.family(synth, pf.as_str());
                     tx.font_weight(synth, pw);
                     tx.font_italic(synth, true);
+                    tx.family(heavy, hf.as_str());
+                    tx.font_weight(heavy, 700);
                     tx.family(doc, lf.as_str());
                     tx.font_weight(doc, lw);
                     tx.set_document(doc, &kaya::Document::new(DOC).bold(0..4).italic(10..16));
@@ -150,6 +164,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.write(want[2], format!("{} synthesized", words(face(pw, true))));
                     tx.write(want[3], words(face(700, false)));
                     tx.write(want[4], words(face(lw, true)));
+                    tx.write(want[6], format!("{} synthesized", words(face(700, false))));
                     if let Some(c) = &asked {
                         tx.write(pick, format!("{} {}", words(c.face), c.family));
                         tx.write(want[5], words(c.face));

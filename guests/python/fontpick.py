@@ -32,8 +32,12 @@ def upright_only(faces):
     return next((f.weight for f in faces if f.width == 5), None)
 
 
+def no_bold(faces):
+    return bool(faces) and all(f.weight < 600 for f in faces)
+
+
 app = kaya.App()
-state = {"queue": [], "light": None, "plain": None, "mono": None, "asked": None}
+state = {"queue": [], "light": None, "plain": None, "heavy": None, "mono": None, "asked": None}
 
 
 def on_families(families):
@@ -57,7 +61,9 @@ def on_faces(family, faces):
     if state["plain"] is None:
         found = upright_only(faces)
         state["plain"] = (family, found) if found is not None else None
-    if state["light"] is None or state["plain"] is None:
+    if state["heavy"] is None and no_bold(faces):
+        state["heavy"] = family
+    if state["light"] is None or state["plain"] is None or state["heavy"] is None:
         if state["queue"]:
             kaya.list_font_faces(state["queue"].pop())
         else:
@@ -68,6 +74,7 @@ def on_faces(family, faces):
     exact.family(lf).font_weight(lw)
     between.family(lf).font_weight(a + (b - a) // 2)
     synth.family(pf).font_weight(pw).font_italic(True)
+    heavy.family(state["heavy"]).font_weight(700)
     doc.family(lf).font_weight(lw)
     doc.set_document(kaya.Document(DOC).bold(range(0, 4)).italic(range(10, 16)))
     want[0].set(words(lw, False, 5))
@@ -75,6 +82,7 @@ def on_faces(family, faces):
     want[2].set(f"{words(pw, True, 5)} synthesized")
     want[3].set(words(700, False, 5))
     want[4].set(words(lw, True, 5))
+    want[6].set(f"{words(700, False, 5)} synthesized")
     c = state["asked"]
     if c is not None:
         pick.set(f"{words(c.weight, c.italic, c.width)} {c.family}")
@@ -102,7 +110,7 @@ kaya.on_font_faces(on_faces)
 
 with app.window(title="fontpick"):
     ready = kaya.signal("faces: -")
-    want = [kaya.signal("-") for _ in range(6)]
+    want = [kaya.signal("-") for _ in range(7)]
     pick = kaya.signal("-")
     picked = kaya.signal("picked: -")
     with kaya.column():
@@ -110,10 +118,11 @@ with app.window(title="fontpick"):
         exact = kaya.label("Exact").a11y_id("exact")
         between = kaya.label("Between").a11y_id("between")
         synth = kaya.label("Slanted").a11y_id("synth")
+        heavy = kaya.entry().a11y_id("heavy").set_text("Heavy")
         doc = kaya.textarea(rich=True).a11y_id("doc")
         chosen = kaya.label("Chosen").a11y_id("chosen")
         for signal, ident in zip(want, ["want_exact", "want_between", "want_synth", "want_bold",
-                                        "want_italic", "want_pick"]):
+                                        "want_italic", "want_pick", "want_heavy"]):
             kaya.label(bind=signal).a11y_id(ident)
         kaya.label(bind=pick).a11y_id("pick")
         kaya.label(bind=picked).a11y_id("picked")

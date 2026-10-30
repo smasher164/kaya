@@ -28,11 +28,15 @@ let upright_only (faces : Font_face.t list) =
   if faces = [] || List.exists (fun (f : Font_face.t) -> f.italic) faces then None
   else Option.map (fun (f : Font_face.t) -> f.weight) (List.find_opt (fun (f : Font_face.t) -> f.width = 5) faces)
 
+let no_bold (faces : Font_face.t list) =
+  faces <> [] && List.for_all (fun (f : Font_face.t) -> f.weight < 600) faces
+
 let () =
   let app = Kaya_app.create () in
   let queue = ref [] in
   let light = ref None in
   let plain = ref None in
+  let boldless = ref None in
   let mono_family = ref None in
   let asked : Font_choice.t option ref = ref None in
   let widgets = ref None in
@@ -61,8 +65,9 @@ let () =
          asked := Option.map (fun (f : Font_face.t) -> { Font_choice.family; weight = f.weight; italic = f.italic; width = f.width }) face);
       if !light = None then light := Option.map (fun l -> (family, l)) (light_family faces);
       if !plain = None then plain := Option.map (fun w -> (family, w)) (upright_only faces);
-      match (!widgets, !light, !plain) with
-      | Some (_, want, pick, _, exact, between, synth, doc, _), Some (lf, (lw, a, b)), Some (pf, pw) ->
+      if !boldless = None && no_bold faces then boldless := Some family;
+      match (!widgets, !light, !plain, !boldless) with
+      | Some (_, want, pick, _, exact, between, synth, heavy, doc, _), Some (lf, (lw, a, b)), Some (pf, pw), Some hf ->
           set_family exact lf;
           set_font_weight exact lw;
           set_family between lf;
@@ -70,6 +75,8 @@ let () =
           set_family synth pf;
           set_font_weight synth pw;
           set_font_italic synth true;
+          set_family heavy hf;
+          set_font_weight heavy 700;
           set_family doc lf;
           set_font_weight doc lw;
           set_document doc (Document.create doc_text |> Document.bold (0, 4) |> Document.italic (10, 16));
@@ -79,19 +86,20 @@ let () =
           say 2 (words pw true 5 ^ " synthesized");
           say 3 (words 700 false 5);
           say 4 (words lw true 5);
+          say 6 (words 700 false 5 ^ " synthesized");
           Option.iter
             (fun (c : Font_choice.t) ->
               write pick (words c.weight c.italic c.width ^ " " ^ c.family);
               say 5 (words c.weight c.italic c.width))
             !asked;
-          Option.iter (fun (ready, _, _, _, _, _, _, _, _) -> write ready "faces: found") !widgets
-      | Some (ready, _, _, _, _, _, _, _, _), _, _ -> if not (next ()) then write ready "faces: none suit"
-      | None, _, _ -> ());
+          Option.iter (fun (ready, _, _, _, _, _, _, _, _, _) -> write ready "faces: found") !widgets
+      | Some (ready, _, _, _, _, _, _, _, _, _), _, _, _ -> if not (next ()) then write ready "faces: none suit"
+      | None, _, _, _ -> ());
 
   let on_chosen choice =
     match !widgets with
     | None -> ()
-    | Some (_, _, _, picked, _, _, _, _, chosen) -> (
+    | Some (_, _, _, picked, _, _, _, _, _, chosen) -> (
         match choice with
         | None -> write picked "picked: cancelled"
         | Some (c : Font_choice.t) ->
@@ -107,23 +115,25 @@ let () =
   build app (fun () ->
       window ~title:"fontpick" ();
       let ready = signal Scalar.Str "faces: -" in
-      let want = List.init 6 (fun _ -> signal Scalar.Str "-") in
+      let want = List.init 7 (fun _ -> signal Scalar.Str "-") in
       let pick = signal Scalar.Str "-" in
       let picked = signal Scalar.Str "picked: -" in
       let ready_label = label ~bind:ready ~a11y_id:"ready" () in
       let exact = label ~text:"Exact" ~a11y_id:"exact" () in
       let between = label ~text:"Between" ~a11y_id:"between" () in
       let synth = label ~text:"Slanted" ~a11y_id:"synth" () in
+      let heavy = entry ~a11y_id:"heavy" () in
+      set_text heavy "Heavy";
       let doc = textarea ~rich:true ~a11y_id:"doc" () in
       let chosen = label ~text:"Chosen" ~a11y_id:"chosen" () in
-      widgets := Some (ready, want, pick, picked, exact, between, synth, doc, chosen);
+      widgets := Some (ready, want, pick, picked, exact, between, synth, heavy, doc, chosen);
       mount
         (column
-           ([ w ready_label; w exact; w between; w synth; w doc; w chosen ]
+           ([ w ready_label; w exact; w between; w synth; w heavy; w doc; w chosen ]
            @ List.map2
                (fun s id -> w (label ~bind:s ~a11y_id:id ()))
                want
-               [ "want_exact"; "want_between"; "want_synth"; "want_bold"; "want_italic"; "want_pick" ]
+               [ "want_exact"; "want_between"; "want_synth"; "want_bold"; "want_italic"; "want_pick"; "want_heavy" ]
            @ [
                w (label ~bind:pick ~a11y_id:"pick" ());
                w (label ~bind:picked ~a11y_id:"picked" ());

@@ -31,16 +31,19 @@ static class FontpickScene
         return null;
     }
 
+    static bool NoBold(IReadOnlyList<FontFace> faces) => faces.Count > 0 && faces.All(f => f.Weight < 600);
+
     public static void Run()
     {
         var app = new KayaApp();
         Signal ready = default, pick = default, picked = default;
-        var want = new Signal[6];
-        Widget exact = default, between = default, synth = default, doc = default, chosen = default;
+        var want = new Signal[7];
+        Widget exact = default, between = default, synth = default, heavy = default, doc = default, chosen = default;
 
         var queue = new List<string>();
         (string Family, (int L, int A, int B) Faces)? light = null;
         (string Family, int Weight)? plain = null;
+        string? boldless = null;
         string? mono = null;
         FontChoice? asked = null;
 
@@ -69,7 +72,8 @@ static class FontpickScene
             }
             if (light == null && LightFamily(faces) is { } l) light = (family, l);
             if (plain == null && UprightOnly(faces) is { } w) plain = (family, w);
-            if (light == null || plain == null)
+            if (boldless == null && NoBold(faces)) boldless = family;
+            if (light == null || plain == null || boldless == null)
             {
                 if (queue.Count > 0) Next(t);
                 else t.Write(ready, "faces: none suit");
@@ -84,6 +88,8 @@ static class FontpickScene
             t.SetFamily(synth, pf);
             t.SetFontWeight(synth, pw);
             t.SetFontItalic(synth, true);
+            t.SetFamily(heavy, boldless);
+            t.SetFontWeight(heavy, 700);
             t.SetFamily(doc, lf);
             t.SetFontWeight(doc, lw);
             t.SetDocument(doc, new Document(Doc).Bold(TextRange.In(Doc, 0, 4)).Italic(TextRange.In(Doc, 10, 6)));
@@ -92,6 +98,7 @@ static class FontpickScene
             t.Write(want[2], $"{Words(pw, true, 5)} synthesized");
             t.Write(want[3], Words(700, false, 5));
             t.Write(want[4], Words(lw, true, 5));
+            t.Write(want[6], $"{Words(700, false, 5)} synthesized");
             if (asked is { } c)
             {
                 t.Write(pick, $"{Words(c.Weight, c.Italic, c.Width)} {c.Family}");
@@ -130,11 +137,14 @@ static class FontpickScene
                 tx.SetA11yId(between, "between");
                 synth = tx.Label("Slanted");
                 tx.SetA11yId(synth, "synth");
+                heavy = tx.Entry();
+                tx.SetA11yId(heavy, "heavy");
+                tx.SetText(heavy, "Heavy");
                 doc = tx.Textarea(rich: true);
                 tx.SetA11yId(doc, "doc");
                 chosen = tx.Label("Chosen");
                 tx.SetA11yId(chosen, "chosen");
-                string[] ids = ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick"];
+                string[] ids = ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick", "want_heavy"];
                 for (int i = 0; i < ids.Length; i++) tx.SetA11yId(tx.Label(bind: want[i]), ids[i]);
                 tx.SetA11yId(tx.Label(bind: pick), "pick");
                 tx.SetA11yId(tx.Label(bind: picked), "picked");

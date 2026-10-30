@@ -10376,7 +10376,7 @@ func kayaDrawn(_ family: String, _ face: KayaFace, synthItalic: Bool, synthBold:
         let drawn = node.kind == kindLabel ? kayaLabelDrawn[node.id] : nil
         let shear = CTFontGetMatrix(font as CTFont).c != 0 || (drawn?.shear ?? false)
         let synthItalic = !face.italic && shear
-        let synthBold = drawn?.overlay ?? false
+        let synthBold = node.kind == kindLabel ? drawn?.overlay ?? false : kayaEntryFields[node.id]?.field.map(kayaFieldStroked) ?? false
         let name = CTFontCopyPostScriptName(font as CTFont) as String
         return .success(kayaDrawn(
             CTFontCopyFamilyName(font as CTFont) as String, face, synthItalic: synthItalic, synthBold: synthBold,
@@ -25757,6 +25757,169 @@ struct KayaNodeFontModifier: ViewModifier {
     }
 }
 
+#if os(macOS)
+    typealias KayaPlatformField = NSTextField
+    typealias KayaPlatformView = NSView
+#else
+    typealias KayaPlatformField = UITextField
+    typealias KayaPlatformView = UIView
+#endif
+
+/// The text field drawn over an anchor that shares its frame: the smallest
+/// one in the anchor's window holding the anchor's centre.
+@MainActor func kayaFieldOver(_ anchor: KayaPlatformView) -> KayaPlatformField? {
+    #if os(macOS)
+        guard let root = anchor.window?.contentView else { return nil }
+        let rect = anchor.convert(anchor.bounds, to: nil)
+        func frame(_ v: NSView) -> CGRect { v.convert(v.bounds, to: nil) }
+    #else
+        guard let root = anchor.window else { return nil }
+        let rect = anchor.convert(anchor.bounds, to: nil)
+        func frame(_ v: UIView) -> CGRect { v.convert(v.bounds, to: nil) }
+    #endif
+    let centre = CGPoint(x: rect.midX, y: rect.midY)
+    var best: KayaPlatformField?
+    func walk(_ v: KayaPlatformView) {
+        if let field = v as? KayaPlatformField, frame(field).contains(centre),
+            best.map({ frame(field).width * frame(field).height < frame($0).width * frame($0).height }) ?? true
+        {
+            best = field
+        }
+        v.subviews.forEach(walk)
+    }
+    walk(root)
+    return best
+}
+
+/// An entry's synthesized bold (docs/font-picker-plan.md §2.4): SwiftUI's
+/// TextField takes no stroke, so it goes on the platform field's text, and on
+/// the field editor's while editing, after every change SwiftUI makes, since
+/// SwiftUI's own writes drop it (measured, docs/traps.md, an entry's
+/// synthesized bold).
+@MainActor func kayaStrokeField(_ field: KayaPlatformField, _ on: Bool) {
+    func stroked(_ text: NSAttributedString?) -> NSAttributedString? {
+        guard let text, text.length > 0 else { return nil }
+        let has = (text.attribute(.strokeWidth, at: 0, effectiveRange: nil) as? NSNumber).map { $0.doubleValue < 0 } ?? false
+        guard has != on else { return nil }
+        let out = NSMutableAttributedString(attributedString: text)
+        let all = NSRange(location: 0, length: out.length)
+        if on { out.addAttribute(.strokeWidth, value: kayaSyntheticBoldStroke, range: all) } else {
+            out.removeAttribute(.strokeWidth, range: all)
+        }
+        return out
+    }
+    #if os(macOS)
+        if let editor = field.currentEditor() as? NSTextView, let storage = editor.textStorage {
+            if stroked(storage) != nil {
+                let all = NSRange(location: 0, length: storage.length)
+                if on { storage.addAttribute(.strokeWidth, value: kayaSyntheticBoldStroke, range: all) } else {
+                    storage.removeAttribute(.strokeWidth, range: all)
+                }
+            }
+            if on { editor.typingAttributes[.strokeWidth] = kayaSyntheticBoldStroke } else {
+                editor.typingAttributes.removeValue(forKey: .strokeWidth)
+            }
+        } else if let next = stroked(field.attributedStringValue) {
+            field.attributedStringValue = next
+        }
+    #else
+        if on { field.defaultTextAttributes[.strokeWidth] = kayaSyntheticBoldStroke } else {
+            field.defaultTextAttributes.removeValue(forKey: .strokeWidth)
+        }
+        if let next = stroked(field.attributedText) {
+            let selection = field.selectedTextRange
+            field.attributedText = next
+            field.selectedTextRange = selection
+        }
+    #endif
+}
+
+/// Whether an entry's field draws a synthesized bold: the stroke on its text.
+@MainActor func kayaFieldStroked(_ field: KayaPlatformField) -> Bool {
+    #if os(macOS)
+        let text = (field.currentEditor() as? NSTextView)?.textStorage ?? field.attributedStringValue
+    #else
+        let text = field.attributedText ?? NSAttributedString()
+    #endif
+    guard text.length > 0 else { return false }
+    return ((text.attribute(.strokeWidth, at: 0, effectiveRange: nil) as? NSNumber)?.doubleValue ?? 0) < 0
+}
+
+/// Each entry's platform field as its bold anchor last found it: SwiftUI
+/// puts no a11y_id on a mac TextField's NSTextField.
+final class KayaWeakField {
+    weak var field: KayaPlatformField?
+    init(_ field: KayaPlatformField) { self.field = field }
+}
+@MainActor var kayaEntryFields: [UInt64: KayaWeakField] = [:]
+
+/// The anchor behind an entry that strokes its field after each update and
+/// whenever SwiftUI puts a new anchor in the window.
+final class KayaEntryBoldAnchor: KayaPlatformView {
+    var on = false
+    var node: UInt64 = 0
+    func apply() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let field = kayaFieldOver(self) else { return }
+            kayaEntryFields[self.node] = KayaWeakField(field)
+            kayaStrokeField(field, self.on)
+        }
+    }
+    #if os(macOS)
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+    #else
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            apply()
+        }
+    #endif
+}
+
+struct KayaEntryBoldHolder: View {
+    let node: UInt64
+    let on: Bool
+    let text: String
+    let editing: Bool
+    var body: some View {
+        KayaEntryBold(node: node, on: on, text: text, editing: editing).accessibilityHidden(true).allowsHitTesting(false)
+    }
+}
+
+#if os(macOS)
+    struct KayaEntryBold: NSViewRepresentable {
+        let node: UInt64
+        let on: Bool
+        let text: String
+        let editing: Bool
+        func makeNSView(context: Context) -> KayaEntryBoldAnchor { KayaEntryBoldAnchor() }
+        func updateNSView(_ anchor: KayaEntryBoldAnchor, context: Context) {
+            anchor.node = node
+            anchor.on = on
+            anchor.apply()
+        }
+    }
+#else
+    struct KayaEntryBold: UIViewRepresentable {
+        let node: UInt64
+        let on: Bool
+        let text: String
+        let editing: Bool
+        func makeUIView(context: Context) -> KayaEntryBoldAnchor {
+            let view = KayaEntryBoldAnchor()
+            view.isUserInteractionEnabled = false
+            return view
+        }
+        func updateUIView(_ anchor: KayaEntryBoldAnchor, context: Context) {
+            anchor.node = node
+            anchor.on = on
+            anchor.apply()
+        }
+    }
+#endif
+
 /// What a label's font modifier last DREW: a sheared font, and the second
 /// pass of a synthesized bold. expect_face reads it, since accessibility
 /// publishes the font's name and neither (docs/font-picker-plan.md §2.5).
@@ -36245,6 +36408,8 @@ struct KayaEntry: View {
         )
         .textFieldStyle(.roundedBorder)
         .modifier(KayaNodeFontModifier(node: node, style: .body))
+        .background(
+            KayaEntryBoldHolder(node: node.id, on: kayaNodeFaceResolution(node, .body)?.synthBold ?? false, text: node.text, editing: focused))
         // 200 stands in for the intrinsic width every other toolkit's entry
         // has in a ROW; a grower keeps its track, and IN A COLUMN a text
         // field fills the width — an input region, not content (DESIGN.md

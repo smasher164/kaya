@@ -34,11 +34,15 @@ uprightOnly faces
   | null faces || any (.italic) faces = Nothing
   | otherwise = (.weight) <$> find (\f -> f.width == 5) faces
 
+noBold :: [FontFace] -> Bool
+noBold faces = not (null faces) && all (\f -> f.weight < 600) faces
+
 main :: IO ()
 main = kayaMain $ \app -> do
   queueRef <- newIORef ([] :: [Text])
   lightRef <- newIORef Nothing
   plainRef <- newIORef Nothing
+  boldlessRef <- newIORef Nothing
   monoRef <- newIORef Nothing
   askedRef <- newIORef Nothing
   widgetsRef <- newIORef Nothing
@@ -67,12 +71,14 @@ main = kayaMain $ \app -> do
       else return ()
     modifyIORef' lightRef (\l -> if isJust l then l else (,) family <$> lightFamily faces)
     modifyIORef' plainRef (\p -> if isJust p then p else (,) family <$> uprightOnly faces)
+    modifyIORef' boldlessRef (\h -> if isJust h || not (noBold faces) then h else Just family)
     light <- readIORef lightRef
     plain <- readIORef plainRef
-    Just (ready, want, pick, _, exact, between, synth, doc, _) <- readIORef widgetsRef
+    boldless <- readIORef boldlessRef
+    Just (ready, want, pick, _, exact, between, synth, heavy, doc, _) <- readIORef widgetsRef
     asked <- readIORef askedRef
-    case (light, plain) of
-      (Just (lf, (lw, a, b)), Just (pf, pw)) -> submitTx app $ do
+    case (light, plain, boldless) of
+      (Just (lf, (lw, a, b)), Just (pf, pw), Just hf) -> submitTx app $ do
         setFamily exact lf
         setFontWeight exact lw
         setFamily between lf
@@ -80,6 +86,8 @@ main = kayaMain $ \app -> do
         setFamily synth pf
         setFontWeight synth pw
         setFontItalic synth True
+        setFamily heavy hf
+        setFontWeight heavy 700
         setFamily doc lf
         setFontWeight doc lw
         setDocument app doc (italicRun (10, 16) . boldRun (0, 4) $ documentOf docText)
@@ -89,6 +97,7 @@ main = kayaMain $ \app -> do
         say 2 (wordsOf pw True 5 <> " synthesized")
         say 3 (wordsOf 700 False 5)
         say 4 (wordsOf lw True 5)
+        say 6 (wordsOf 700 False 5 <> " synthesized")
         case asked of
           Just c -> do
             writeSignal pick (wordsOf c.weight c.italic c.width <> " " <> c.family)
@@ -100,7 +109,7 @@ main = kayaMain $ \app -> do
         submitTx app (maybe (writeSignal ready "faces: none suit") listFontFaces next)
 
   let onChosen choice = do
-        Just (_, _, _, picked, _, _, _, _, chosen) <- readIORef widgetsRef
+        Just (_, _, _, picked, _, _, _, _, _, chosen) <- readIORef widgetsRef
         asked <- readIORef askedRef
         submitTx app $ case choice of
           Nothing -> writeSignal picked "picked: cancelled"
@@ -117,12 +126,14 @@ main = kayaMain $ \app -> do
   widgets <- buildTx app $ do
     window primary [WTitle "fontpick"]
     ready <- signalText "faces: -"
-    want <- mapM (const (signalText "-")) [1 .. 6 :: Int]
+    want <- mapM (const (signalText "-")) [1 .. 7 :: Int]
     pick <- signalText "-"
     picked <- signalText "picked: -"
     exact <- labelText "Exact" [A11yId "exact"]
     between <- labelText "Between" [A11yId "between"]
     synth <- labelText "Slanted" [A11yId "synth"]
+    heavy <- entry [A11yId "heavy"]
+    setText heavy "Heavy"
     doc <- textarea [Rich True, A11yId "doc"]
     chosen <- labelText "Chosen" [A11yId "chosen"]
     root <-
@@ -131,13 +142,14 @@ main = kayaMain $ \app -> do
           pure exact,
           pure between,
           pure synth,
+          pure heavy,
           pure doc,
           pure chosen
         ]
           ++ zipWith
             (\s i -> labelBound s [A11yId i])
             want
-            ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick"]
+            ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick", "want_heavy"]
           ++ [ labelBound pick [A11yId "pick"],
                labelBound picked [A11yId "picked"],
                row
@@ -152,5 +164,5 @@ main = kayaMain $ \app -> do
                  ]
              ]
     mount root
-    return (ready, want, pick, picked, exact, between, synth, doc, chosen)
+    return (ready, want, pick, picked, exact, between, synth, heavy, doc, chosen)
   writeIORef widgetsRef (Just widgets)

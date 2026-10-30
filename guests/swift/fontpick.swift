@@ -28,6 +28,10 @@ func fontpickUprightOnly(_ faces: [KayaFontFace]) -> Int? {
     return faces.first(where: { $0.width == 5 })?.weight
 }
 
+func fontpickNoBold(_ faces: [KayaFontFace]) -> Bool {
+    !faces.isEmpty && faces.allSatisfy { $0.weight < 600 }
+}
+
 KayaApp.run { app in
     var ready: KayaSignal?
     var pick: KayaSignal?
@@ -35,12 +39,14 @@ KayaApp.run { app in
     var exact: KayaWidget?
     var between: KayaWidget?
     var synth: KayaWidget?
+    var heavy: KayaWidget?
     var doc: KayaWidget?
     var chosen: KayaWidget?
 
     var queue: [String] = []
     var light: (String, (Int, Int, Int))?
     var plain: (String, Int)?
+    var boldless: String?
     var mono: String?
     var asked: KayaFontChoice?
 
@@ -60,7 +66,9 @@ KayaApp.run { app in
         }
         if light == nil, let l = fontpickLight(faces) { light = (family, l) }
         if plain == nil, let w = fontpickUprightOnly(faces) { plain = (family, w) }
-        guard let light, let plain, let ready, let exact, let between, let synth, let doc else {
+        if boldless == nil, fontpickNoBold(faces) { boldless = family }
+        guard let light, let plain, let boldless, let ready, let exact, let between, let synth, let heavy, let doc
+        else {
             if let next = queue.popLast() {
                 t.listFontFaces(next)
             } else if let ready {
@@ -77,6 +85,8 @@ KayaApp.run { app in
         t.setFamily(synth, pf)
         t.setFontWeight(synth, pw)
         t.setFontItalic(synth, true)
+        t.setFamily(heavy, boldless)
+        t.setFontWeight(heavy, 700)
         t.setFamily(doc, lf)
         t.setFontWeight(doc, lw)
         t.setDocument(doc, KayaDocument(fontpickDoc).bold(0..<4).italic(10..<16))
@@ -85,6 +95,7 @@ KayaApp.run { app in
         t.write(want[2], .str(fontpickWords(pw, true, 5) + " synthesized"))
         t.write(want[3], .str(fontpickWords(700, false, 5)))
         t.write(want[4], .str(fontpickWords(lw, true, 5)))
+        t.write(want[6], .str(fontpickWords(700, false, 5) + " synthesized"))
         if let c = asked, let pick {
             t.write(pick, .str("\(fontpickWords(c.weight, c.italic, c.width)) \(c.family)"))
             t.write(want[5], .str(fontpickWords(c.weight, c.italic, c.width)))
@@ -96,7 +107,7 @@ KayaApp.run { app in
         tx.window(title: "fontpick")
         let readySignal = tx.signal(.str("faces: -"))
         ready = readySignal
-        want = (0..<6).map { _ in tx.signal(.str("-")) }
+        want = (0..<7).map { _ in tx.signal(.str("-")) }
         let pickSignal = tx.signal(.str("-"))
         pick = pickSignal
         let pickedSignal = tx.signal(.str("picked: -"))
@@ -111,13 +122,18 @@ KayaApp.run { app in
             let s = tx.label("Slanted")
             tx.setA11yId(s, "synth")
             synth = s
+            let h = tx.entry()
+            tx.setA11yId(h, "heavy")
+            tx.setText(h, "Heavy")
+            heavy = h
             let d = tx.textarea(rich: true)
             tx.setA11yId(d, "doc")
             doc = d
             let c = tx.label("Chosen")
             tx.setA11yId(c, "chosen")
             chosen = c
-            let ids = ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick"]
+            let ids = ["want_exact", "want_between", "want_synth", "want_bold", "want_italic", "want_pick",
+                       "want_heavy"]
             for (signal, id) in zip(want, ids) { tx.setA11yId(tx.label(bind: signal), id) }
             tx.setA11yId(tx.label(bind: pickSignal), "pick")
             tx.setA11yId(tx.label(bind: pickedSignal), "picked")

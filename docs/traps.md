@@ -19815,3 +19815,19 @@ the toolbar keeps only typography and search. A panel made key in the turn
 it is created, with the agent only on a window, was asked nothing.
 `expect_font_dialog` on the Mac fails while the panel's toolbar still
 holds a masked item (kayaFontPanelUnmasked), watched red with the join cut.
+
+## An entry's synthesized bold on Apple: SwiftUI drops the stroke at every write (measured 2026-10-29)
+
+A SwiftUI TextField takes no stroke and no overlay, so the Mac and iOS drew
+no synthesized bold in an entry (Q4). A probe set a negative stroke width on
+the mac TextField's own NSTextField (`AppKitTextField`): it draws bold until
+SwiftUI writes the string again, and SwiftUI writes it on a model change, on
+the first typed character and at the end of editing, each dropping the
+stroke; reapplied after each, it holds. SwiftUI also puts no
+accessibility identifier on that NSTextField, so the field is found from an
+anchor behind the TextField by geometry (kayaFieldOver) and the read takes
+the field the anchor last found (kayaEntryFields). A new anchor can arrive
+with no window and no update after it, so the anchor reapplies when it
+reaches a window; without that the leg read 400 upright. Held by the
+fontpick scene's `entry@heavy`, watched red with the stroke cut on the Mac
+and iOS.

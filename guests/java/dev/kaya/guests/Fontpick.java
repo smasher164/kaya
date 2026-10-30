@@ -53,12 +53,17 @@ public final class Fontpick {
         return null;
     }
 
+    static boolean noBold(List<KayaApp.FontFace> faces) {
+        return !faces.isEmpty() && faces.stream().allMatch(f -> f.weight() < 600);
+    }
+
     static final class State {
         final List<String> queue = new ArrayList<>();
         String lightFamily;
         int[] light;
         String plainFamily;
         Integer plain;
+        String boldless;
         String mono;
         KayaApp.FontChoice asked;
         KayaApp.Signal<String> ready;
@@ -68,6 +73,7 @@ public final class Fontpick {
         KayaApp.Widget exact;
         KayaApp.Widget between;
         KayaApp.Widget synth;
+        KayaApp.Widget heavy;
         KayaApp.Widget doc;
         KayaApp.Widget chosen;
 
@@ -106,7 +112,8 @@ public final class Fontpick {
                 s.plain = uprightOnly(faces);
                 if (s.plain != null) s.plainFamily = family;
             }
-            if (s.light == null || s.plain == null) {
+            if (s.boldless == null && noBold(faces)) s.boldless = family;
+            if (s.light == null || s.plain == null || s.boldless == null) {
                 if (!s.queue.isEmpty()) {
                     s.next(t);
                 } else {
@@ -125,6 +132,8 @@ public final class Fontpick {
             t.setFamily(s.synth, s.plainFamily);
             t.setFontWeight(s.synth, pw);
             t.setFontItalic(s.synth, true);
+            t.setFamily(s.heavy, s.boldless);
+            t.setFontWeight(s.heavy, 700);
             t.setFamily(s.doc, s.lightFamily);
             t.setFontWeight(s.doc, lw);
             t.setDocument(s.doc, new KayaApp.Document(DOC)
@@ -135,6 +144,7 @@ public final class Fontpick {
             t.write(s.want.get(2), words(pw, true, 5) + " synthesized");
             t.write(s.want.get(3), words(700, false, 5));
             t.write(s.want.get(4), words(lw, true, 5));
+            t.write(s.want.get(6), words(700, false, 5) + " synthesized");
             KayaApp.FontChoice c = s.asked;
             if (c != null) {
                 t.write(s.pick, words(c.weight(), c.italic(), c.width()) + " " + c.family());
@@ -146,7 +156,7 @@ public final class Fontpick {
         app.build(tx -> {
             tx.window(0).title("fontpick");
             s.ready = tx.signal("faces: -");
-            for (int i = 0; i < 6; i++) s.want.add(tx.signal("-"));
+            for (int i = 0; i < 7; i++) s.want.add(tx.signal("-"));
             s.pick = tx.signal("-");
             s.picked = tx.signal("picked: -");
             tx.mount(tx.column(col -> {
@@ -154,10 +164,12 @@ public final class Fontpick {
                 s.exact = tx.label("Exact").a11yId("exact");
                 s.between = tx.label("Between").a11yId("between");
                 s.synth = tx.label("Slanted").a11yId("synth");
+                s.heavy = tx.entry().a11yId("heavy");
+                tx.setText(s.heavy, "Heavy");
                 s.doc = tx.textarea().rich().a11yId("doc");
                 s.chosen = tx.label("Chosen").a11yId("chosen");
                 List<String> ids = List.of("want_exact", "want_between", "want_synth", "want_bold",
-                        "want_italic", "want_pick");
+                        "want_italic", "want_pick", "want_heavy");
                 for (int i = 0; i < ids.size(); i++) tx.label(s.want.get(i)).a11yId(ids.get(i));
                 tx.label(s.pick).a11yId("pick");
                 tx.label(s.picked).a11yId("picked");

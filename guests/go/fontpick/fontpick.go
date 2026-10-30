@@ -72,15 +72,27 @@ func uprightOnly(faces []kaya.FontFace) (int, bool) {
 	return 0, false
 }
 
+func noBold(faces []kaya.FontFace) bool {
+	if len(faces) == 0 {
+		return false
+	}
+	for _, f := range faces {
+		if f.Weight >= 600 {
+			return false
+		}
+	}
+	return true
+}
+
 func App() *kaya.App {
 	app := kaya.NewApp()
 
 	var ready, pick, picked kaya.Signal[string]
-	var want [6]kaya.Signal[string]
-	var exact, between, synth, text, chosen kaya.Widget
+	var want [7]kaya.Signal[string]
+	var exact, between, synth, heavy, text, chosen kaya.Widget
 
 	var queue []string
-	var lightName, plainName, monoName string
+	var lightName, plainName, monoName, heavyName string
 	var lw, la, lb, pw int
 	var asked *kaya.FontChoice
 
@@ -129,7 +141,10 @@ func App() *kaya.App {
 				plainName, pw = family, w
 			}
 		}
-		if lightName == "" || plainName == "" {
+		if heavyName == "" && noBold(faces) {
+			heavyName = family
+		}
+		if lightName == "" || plainName == "" || heavyName == "" {
 			if len(queue) > 0 {
 				next := queue[len(queue)-1]
 				queue = queue[:len(queue)-1]
@@ -146,6 +161,8 @@ func App() *kaya.App {
 		tx.SetFamily(synth, plainName)
 		tx.SetFontWeight(synth, pw)
 		tx.SetFontItalic(synth, true)
+		tx.SetFamily(heavy, heavyName)
+		tx.SetFontWeight(heavy, 700)
 		tx.SetFamily(text, lightName)
 		tx.SetFontWeight(text, lw)
 		tx.SetDocument(text, kaya.NewDocument(doc).Bold(0, 4).Italic(10, 16))
@@ -154,6 +171,7 @@ func App() *kaya.App {
 		tx.Write(want[2], words(pw, true, 5)+" synthesized")
 		tx.Write(want[3], words(700, false, 5))
 		tx.Write(want[4], words(lw, true, 5))
+		tx.Write(want[6], words(700, false, 5)+" synthesized")
 		if asked != nil {
 			tx.Write(pick, words(asked.Weight, asked.Italic, asked.Width)+" "+asked.Family)
 			tx.Write(want[5], words(asked.Weight, asked.Italic, asked.Width))
@@ -191,10 +209,12 @@ func App() *kaya.App {
 			exact = tx.LabelText("Exact").A11yID("exact")
 			between = tx.LabelText("Between").A11yID("between")
 			synth = tx.LabelText("Slanted").A11yID("synth")
+			heavy = tx.Entry(nil).A11yID("heavy")
+			tx.SetText(heavy, "Heavy")
 			text = tx.Textarea(nil).Rich().A11yID("doc")
 			chosen = tx.LabelText("Chosen").A11yID("chosen")
 			for i, id := range []string{"want_exact", "want_between", "want_synth", "want_bold",
-				"want_italic", "want_pick"} {
+				"want_italic", "want_pick", "want_heavy"} {
 				tx.Label(want[i]).A11yID(id)
 			}
 			tx.Label(pick).A11yID("pick")
