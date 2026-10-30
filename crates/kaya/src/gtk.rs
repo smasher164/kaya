@@ -22669,13 +22669,14 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
-    fn font_dialog_families(&self) -> Result<Option<Vec<(String, bool)>>, String> {
+    fn font_dialog_families(&self) -> Result<Option<Vec<crate::harness::ListedFamily>>, String> {
         Self::on_main(move |core| {
             let Some(window) = fontpick::dialog_window(core) else { return Ok(None) };
             let families = fontpick::listed_families(&window)?;
-            Ok(Some(families.into_iter().map(|f| {
-                let fixed = fontpick::measured_fixed_pitch(&f);
-                (f, fixed)
+            Ok(Some(families.into_iter().map(|name| crate::harness::ListedFamily {
+                fixed: fontpick::measured_fixed_pitch(&name),
+                alias: fontpick::is_alias(&name),
+                name,
             }).collect()))
         })
     }

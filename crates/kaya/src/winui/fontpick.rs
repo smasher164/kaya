@@ -115,9 +115,19 @@ fn families(code_only: bool) -> Vec<String> {
     crate::capi::font_family_list(&names.join("\n"))
 }
 
+/// The family list's height: what the dialog has left after the search,
+/// the faces and the preview, between a row and a half and 260 px, so a
+/// small window keeps the faces and the preview in view.
+const LIST_MIN: f64 = 48.0;
+const LIST_MAX: f64 = 260.0;
+
 /// The open picker: its dialog, its rows and what is selected in them.
 struct Picker {
     dialog: ContentDialog,
+    #[cfg(feature = "harness")]
+    layout: Grid,
+    #[cfg(feature = "harness")]
+    face_scroll: ScrollViewer,
     faces_on: bool,
     rows: Vec<(String, Button)>,
     face_rows: Vec<(FontFace, Button)>,
@@ -251,9 +261,13 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     dialog.SetDefaultButton(ContentDialogButton::Primary)?;
     let layout = Grid::new()?;
     let rows = layout.RowDefinitions()?;
-    for height in [GridUnitType::Auto, GridUnitType::Pixel, GridUnitType::Auto, GridUnitType::Auto] {
+    for height in [GridUnitType::Auto, GridUnitType::Star, GridUnitType::Auto, GridUnitType::Auto] {
         let row = RowDefinition::new()?;
-        row.SetHeight(GridLength { Value: if height == GridUnitType::Pixel { 260.0 } else { 1.0 }, GridUnitType: height })?;
+        row.SetHeight(GridLength { Value: 1.0, GridUnitType: height })?;
+        if height == GridUnitType::Star {
+            row.SetMinHeight(LIST_MIN)?;
+            row.SetMaxHeight(LIST_MAX)?;
+        }
         rows.Append(&row)?;
     }
     let search = TextBox::new()?;
@@ -291,9 +305,9 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     face_scroll.SetContent(&face_grid)?;
     let preview = TextBlock::new()?;
     preview.SetText(&HSTRING::from(PREVIEW))?;
-    preview.SetFontSize(20.0)?;
+    preview.SetFontSize(18.0)?;
     preview.SetTextWrapping(TextWrapping::Wrap)?;
-    preview.SetMargin(Thickness { Left: 0.0, Top: 12.0, Right: 0.0, Bottom: 0.0 })?;
+    preview.SetMargin(Thickness { Left: 0.0, Top: 8.0, Right: 0.0, Bottom: 0.0 })?;
     for (i, element) in [
         search.cast::<FrameworkElement>()?,
         scroll.cast::<FrameworkElement>()?,
@@ -327,6 +341,10 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     PICKER.with_borrow_mut(|picker| {
         *picker = Some(Picker {
             dialog: dialog.clone(),
+            #[cfg(feature = "harness")]
+            layout: layout.clone(),
+            #[cfg(feature = "harness")]
+            face_scroll: face_scroll.clone(),
             faces_on: spec.faces,
             rows: row_buttons,
             face_rows: Vec::new(),
@@ -374,20 +392,70 @@ pub(super) mod read {
     use super::*;
     use bindings::Microsoft::UI::Xaml::Automation::Peers::{ButtonAutomationPeer, FrameworkElementAutomationPeer};
 
-    /// The rows the open picker shows, each with DirectWrite's fixed pitch.
-    pub(in super::super) fn families() -> windows_core::Result<Option<Vec<(String, bool)>>> {
-        PICKER.with_borrow(|picker| -> windows_core::Result<Option<Vec<(String, bool)>>> {
-            let Some(picker) = picker.as_ref() else { return Ok(None) };
+    /// The dialog's own scroller around the picker's content.
+    fn dialog_scroller(layout: &Grid) -> windows_core::Result<Option<ScrollViewer>> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let mut at: bindings::Microsoft::UI::Xaml::DependencyObject = layout.cast()?;
+        for _ in 0..32 {
+            let Ok(parent) = VisualTreeHelper::GetParent(&at) else { return Ok(None) };
+            if let Ok(scroller) = parent.cast::<ScrollViewer>() {
+                return Ok(Some(scroller));
+            }
+            at = parent;
+        }
+        Ok(None)
+    }
+
+    /// The picker's faces row and preview that fall below what the dialog
+    /// shows without scrolling, or None.
+    fn out_of_view(picker: &Picker) -> windows_core::Result<Option<String>> {
+        let Some(scroller) = dialog_scroller(&picker.layout)? else {
+            return Ok(Some("the picker's content sits in no scroller of the dialog's".to_owned()));
+        };
+        let viewport = scroller.ViewportHeight()?;
+        let mut below = Vec::new();
+        let parts: [(&str, FrameworkElement); 2] = [
+            ("faces row", picker.face_scroll.cast()?),
+            ("preview", picker.preview.cast()?),
+        ];
+        for (what, element) in parts {
+            if what == "faces row" && !picker.faces_on {
+                continue;
+            }
+            let top = element.TransformToVisual(&scroller)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
+            let bottom = top + element.ActualHeight()?;
+            if bottom > viewport + 1.0 {
+                below.push(format!("{what} ends at {bottom:.0}"));
+            }
+        }
+        Ok((!below.is_empty()).then(|| {
+            format!("the picker's {}, past the {viewport:.0} px the dialog shows", below.join(" and the "))
+        }))
+    }
+
+    /// The rows the open picker shows, each with DirectWrite's fixed pitch;
+    /// an error while its faces row or preview is out of the dialog's view.
+    pub(in super::super) fn families() -> windows_core::Result<Result<Option<Vec<crate::harness::ListedFamily>>, String>> {
+        PICKER.with_borrow(|picker| -> windows_core::Result<Result<Option<Vec<crate::harness::ListedFamily>>, String>> {
+            let Some(picker) = picker.as_ref() else { return Ok(Ok(None)) };
             if !picker.dialog.IsLoaded()? {
-                return Ok(None);
+                return Ok(Ok(None));
+            }
+            if let Some(why) = out_of_view(picker)? {
+                return Ok(Err(why));
             }
             let mut out = Vec::new();
             for (name, button) in &picker.rows {
                 if button.Visibility()? == Visibility::Visible {
-                    out.push((name.clone(), family(name).as_ref().is_some_and(code)));
+                    // DirectWrite's system collection holds installed families only.
+                    out.push(crate::harness::ListedFamily {
+                        name: name.clone(),
+                        fixed: family(name).as_ref().is_some_and(code),
+                        alias: false,
+                    });
                 }
             }
-            Ok(Some(out))
+            Ok(Ok(Some(out)))
         })
     }
 

@@ -1928,19 +1928,38 @@ pub(crate) fn drawn_face_verdict(read: &DrawnFace, want: &FaceWords) -> Result<S
 /// What `expect_font_dialog` may say (docs/font-picker-plan.md §7).
 pub const FONT_DIALOG_STATES: [&str; 3] = ["open", "closed", "code_only"];
 
+/// One family an open picker lists: its name, its own fixed-pitch trait, and
+/// whether it is a generic alias (fonts.xml's `monospace`, fontconfig's
+/// `Monospace`), the platform's role face under a family's name, rather than
+/// an installed family. The code-only list offers installed families only
+/// (docs/font-picker-plan.md §4.3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ListedFamily {
+    pub name: String,
+    pub fixed: bool,
+    pub alias: bool,
+}
+
 /// expect_font_dialog's verdict over what the open picker lists, each
 /// family with its own fixed-pitch trait, read off the platform's fonts.
-pub(crate) fn font_dialog_verdict(listed: Option<&[(String, bool)]>, want: &str) -> Result<String, String> {
+pub(crate) fn font_dialog_verdict(listed: Option<&[ListedFamily]>, want: &str) -> Result<String, String> {
     match (listed, want) {
         (None, "closed") => Ok("closed".into()),
         (None, _) => Err("no font picker is open".into()),
         (Some(families), "closed") => Err(format!("a font picker is open, listing {} families", families.len())),
         (Some(families), "open") => Ok(format!("open, listing {} families", families.len())),
         (Some(families), _) => {
-            let proportional: Vec<&str> =
-                families.iter().filter(|(_, mono)| !mono).map(|(name, _)| name.as_str()).collect();
+            let proportional: Vec<&str> = families.iter().filter(|f| !f.fixed).map(|f| f.name.as_str()).collect();
+            let aliases: Vec<&str> = families.iter().filter(|f| f.alias).map(|f| f.name.as_str()).collect();
             if families.is_empty() {
                 Err("the open picker lists no families".into())
+            } else if !aliases.is_empty() {
+                Err(format!(
+                    "the open picker lists generic aliases, not installed families ({} of {}): {}",
+                    aliases.len(),
+                    families.len(),
+                    aliases.join(", ")
+                ))
             } else if proportional.is_empty() {
                 Ok(format!("code only, {} monospaced families", families.len()))
             } else {
@@ -3314,7 +3333,7 @@ pub trait Stage: Send + 'static {
     }
     /// The open font picker's families, each with its own fixed-pitch trait,
     /// read off the picker's list; None when no picker is open.
-    fn font_dialog_families(&self) -> Result<Option<Vec<(String, bool)>>, String> {
+    fn font_dialog_families(&self) -> Result<Option<Vec<ListedFamily>>, String> {
         Err("expect_font_dialog is a depth slice on this backend (docs/font-picker-plan.md §8)".to_owned())
     }
     /// Choose in the open picker through its own controls, or cancel.
@@ -8761,7 +8780,7 @@ fn run_with_log(
                         let first = poll_named("pick_font first", || match stage.font_dialog_families() {
                             Ok(Some(listed)) => listed
                                 .first()
-                                .map(|(family, _)| family.clone())
+                                .map(|f| f.name.clone())
                                 .ok_or_else(|| "pick_font first: the open picker lists no families".to_owned()),
                             Ok(None) => Err("pick_font first: no font picker is open".to_owned()),
                             Err(why) => Err(format!("pick_font first: {why}")),
@@ -12874,10 +12893,13 @@ mod tests {
             .unwrap_err()
             .contains("reads 400 italic 5 synthesized"));
         assert!(drawn_face_verdict(&drawn(300, false, false, false), &parse_face_words("300 upright 5").unwrap()).is_ok());
-        let mono = vec![("Menlo".to_string(), true), ("Monaco".to_string(), true)];
+        let listed = |name: &str, fixed, alias| ListedFamily { name: name.into(), fixed, alias };
+        let mono = vec![listed("Menlo", true, false), listed("Monaco", true, false)];
         assert!(font_dialog_verdict(Some(&mono), "code_only").is_ok());
-        let mixed = vec![("Menlo".to_string(), true), ("Helvetica".to_string(), false)];
+        let mixed = vec![listed("Menlo", true, false), listed("Helvetica", false, false)];
         assert!(font_dialog_verdict(Some(&mixed), "code_only").unwrap_err().contains("Helvetica"));
+        let aliased = vec![listed("Droid Sans Mono", true, false), listed("monospace", true, true)];
+        assert!(font_dialog_verdict(Some(&aliased), "code_only").unwrap_err().contains("generic aliases, not installed families (1 of 2): monospace"));
         assert!(font_dialog_verdict(Some(&[]), "code_only").is_err());
         assert!(font_dialog_verdict(None, "open").is_err());
         assert!(font_dialog_verdict(None, "closed").is_ok());

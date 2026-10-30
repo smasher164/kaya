@@ -10385,11 +10385,16 @@ func kayaDrawn(_ family: String, _ face: KayaFace, synthItalic: Bool, synthBold:
 }
 
 /// harness.rs's font_dialog_verdict.
-func kayaFontDialogVerdict(_ listed: [(String, Bool)]?, _ want: String) -> (String?, String) {
+func kayaFontDialogVerdict(_ listed: [(String, Bool, Bool)]?, _ want: String) -> (String?, String) {
     guard let listed else { return want == "closed" ? ("closed", "") : (nil, ": no font picker is open") }
     if want == "closed" { return (nil, ": a font picker is open, listing \(listed.count) families") }
     if want == "open" { return ("open, listing \(listed.count) families", "") }
     if listed.isEmpty { return (nil, ": the open picker lists no families") }
+    let aliases = listed.filter(\.2).map(\.0)
+    if !aliases.isEmpty {
+        return (nil, ": the open picker lists generic aliases, not installed families (\(aliases.count) of \(listed.count)): "
+            + aliases.joined(separator: ", "))
+    }
     let proportional = listed.filter { !$0.1 }.map(\.0)
     if proportional.isEmpty { return ("code only, \(listed.count) monospaced families", "") }
     return (nil, ": the open picker lists \(proportional.count) proportional families of \(listed.count): "
@@ -10440,7 +10445,9 @@ func kayaFontDialogVerdict(_ listed: [(String, Bool)]?, _ want: String) -> (Stri
 
 /// The open picker's families with each one's fixed-pitch trait, nil when
 /// no picker is open.
-func kayaFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
+/// Each family the open picker lists: its name, its fixed pitch, and whether
+/// it is not an installed family (harness.rs's ListedFamily).
+func kayaFontDialogFamilies() -> KayaRead<[(String, Bool, Bool)]?> {
     #if os(macOS)
         return DispatchQueue.main.sync {
             guard let agent = kayaFontAgent, !agent.answered, let panel = NSFontManager.shared.fontPanel(false),
@@ -10452,7 +10459,7 @@ func kayaFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
             if let masked = kayaFontPanelUnmasked(panel, agent) { return .failure(masked) }
             let installed = Set(NSFontManager.shared.availableFontFamilies)
             let names = (0..<table.numberOfRows).map { kayaFontPanelCell(table, $0) }.filter(installed.contains)
-            return .success(names.map { ($0, kayaFamilyFixedPitch($0)) })
+            return .success(names.map { ($0, kayaFamilyFixedPitch($0), false) })
         }
     #else
         return kayaIOSFontDialogFamilies()
@@ -10513,12 +10520,13 @@ func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
 #if !os(macOS)
     /// iOS reads the remote picker through the resident XCUITest driver; a
     /// family's fixed pitch is measured here, i against M in its first face.
-    func kayaIOSFontDialogFamilies() -> KayaRead<[(String, Bool)]?> {
+    func kayaIOSFontDialogFamilies() -> KayaRead<[(String, Bool, Bool)]?> {
         if DispatchQueue.main.sync(execute: { kayaFontPickerDelegate == nil }) { return .success(nil) }
         let (ok, lines) = KayaSimdrive.ask("fontstate")
         guard ok else { return .failure(lines.first ?? "simdrive refused fontstate without saying why") }
         guard lines.first == "Fonts" else { return .failure("the font picker is not on screen yet") }
-        return .success(lines.dropFirst().map { ($0, kayaMeasuredFixedPitch($0)) })
+        let installed = Set(UIFont.familyNames)
+        return .success(lines.dropFirst().map { ($0, kayaMeasuredFixedPitch($0), !installed.contains($0)) })
     }
 
     /// Whether a family draws i and M at one advance, in its own face.

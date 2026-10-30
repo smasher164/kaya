@@ -252,7 +252,7 @@ the app would see two shapes of answer. Q1.
 
 | backend | mechanism |
 |---|---|
-| Mac | `NSFontManager.shared.fontPanel(true)`, the initial font through `setSelectedFont`, an accessory view with Cancel (Escape) and Choose (Return); the mask `[.face]` (or `[]` when `faces` is false) applied by making the panel key; for `code_only`, a process collection of fixed-pitch descriptors (the Mac's "Fixed Width" collection and the descriptor match agree: 13 families) selected per Q2. The answer is read from `selectedFont`: family, then OS/2 weight, italic bit and width class. Floating or a sheet: Q1b |
+| Mac | `NSFontManager.shared.fontPanel(true)`, the initial font through `setSelectedFont`, an accessory view with Cancel (Escape) and Choose (Return); the mask `[.face]` (or `[]` when `faces` is false) answered by kaya's agent as the application's next responder, since the panel asks the responder chain and never NSFontManager's target (docs/traps.md, the font panel's mode mask); for `code_only`, a process collection of fixed-pitch descriptors (the Mac's "Fixed Width" collection and the descriptor match agree: 13 families) selected per Q2. The answer is read from `selectedFont`: family, then OS/2 weight, italic bit and width class. Floating or a sheet: Q1b |
 | iOS | `UIFontPickerViewController` with `includeFaces = faces`, `filteredTraits = .traitMonoSpace` when `code_only`, presented as a sheet; `didPickFont` resolves the descriptor to a UIFont and reads its OS/2 table, then kaya dismisses; `didCancel` answers cancel. This is also the one door to fonts a user installed through a font app (docs/deferred.md, the iOS family list entry), which the picker lists and `UIFont.familyNames` does not (from Apple's documentation; nothing is installed on the simulator) |
 | GTK | `GtkFontDialog` with a monospace `GtkCustomFilter` when `code_only` (which must also drop the emoji family, measured passing Pango's test); `faces` false is `choose_family`; `faces` true is `choose_font`, whose SIZE row is shown and ignored (GtkFontDialog has no family-and-face call without size; `choose_face` shows one family's faces only, and two dialogs in a row is not a picker). The PangoFontDescription's weight, style and stretch are the answer; "Dismissed by user" is cancel |
 | WinUI | a ContentDialog: a search box, a ListView of families each drawn in itself, a faces list, a preview line, Cancel and Choose. Families from DirectWrite's system collection (the same list as `list_font_families`, so a pick always names a listed family); faces from each IDWriteFontFamily's fonts with SIMULATED ones dropped (WPF lists a simulated Oblique beside every real face, measured; DirectWrite flags them with `GetSimulations`); `code_only` by `IDWriteFont1::IsMonospacedFont` (an advance-width test caught Webdings and CJK fonts, measured, so it is not used) |
@@ -261,6 +261,21 @@ the app would see two shapes of answer. Q1.
 Both kaya-drawn pickers are built from the same core facts as the list: the
 core sorts families and faces once (by weight, then upright before italic,
 then width), so the two read the same.
+
+THE CODE-ONLY RULE (2026-10-29, from the review captures): `code_only` lists
+the INSTALLED families whose regular face is fixed pitch by the platform's own
+test, whatever script they are for, and no generic alias. The Mac's Fixed
+Width collection (Q2) lists Lantinghei TC, Osaka and PCMyungjo, CJK families
+whose Latin is fixed pitch; DirectWrite's `IsMonospacedFont` and Pango's
+`is_monospace` are the same per-face test, so every platform counts them, and
+they stay. fonts.xml's `monospace` and `serif-monospace` and fontconfig's
+`Monospace` are the platform's role face under a family's name: `list_font_families`
+keeps them (M3: an app may name them in `family`), but a picker's answer is
+kept as the user's family, and `monospaced` already gives the role face, so
+the Android sheet and the GNOME filter leave them out. `expect_font_dialog
+code_only` fails on a listed alias. Leaving the CJK families out would need a
+kaya collection on the Mac in place of Fixed Width, which is a ruling, not
+taken.
 
 ### 4.4 Listing faces without the picker
 

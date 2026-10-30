@@ -61,11 +61,23 @@ pub(super) fn list_font_faces(core: &mut CoreState, family: &str) {
     });
 }
 
-/// A code font for the picker: Pango's monospace flag AND the Latin it is
-/// for, since Pango calls Noto Color Emoji monospace (measured) and it has no
-/// letters.
+/// A fontconfig alias (Monospace): a family whose every face is synthesized
+/// (measured), the role face under a family's name.
+fn alias_family(family: &pango::FontFamily) -> bool {
+    let faces = family.list_faces();
+    !faces.is_empty() && faces.iter().all(|face| face.is_synthesized())
+}
+
+#[cfg(feature = "harness")]
+pub(super) fn is_alias(name: &str) -> bool {
+    pango_family(name).is_some_and(|f| alias_family(&f))
+}
+
+/// A code font for the picker: an installed family (no alias), Pango's
+/// monospace flag AND the Latin it is for, since Pango calls Noto Color Emoji
+/// monospace (measured) and it has no letters.
 pub(super) fn code_family(family: &pango::FontFamily) -> bool {
-    if !family.is_monospace() {
+    if !family.is_monospace() || alias_family(family) {
         return false;
     }
     let context = gtk4::Label::new(None).pango_context();
@@ -186,7 +198,7 @@ pub(super) fn measured_fixed_pitch(family: &str) -> bool {
     let (wide, b) = width("MMMMMMMMMM");
     // A fontconfig alias (Monospace) lists only synthesized faces (measured)
     // and draws in the family it names, so its run reports that family.
-    let alias = pango_family(family).is_some_and(|f| f.list_faces().iter().all(|face| face.is_synthesized()));
+    let alias = pango_family(family).is_some_and(|f| alias_family(&f));
     let same = |f: Option<String>| f.is_some_and(|f| alias || f.eq_ignore_ascii_case(family));
     same(a) && same(b) && (narrow - wide).abs() <= 1
 }

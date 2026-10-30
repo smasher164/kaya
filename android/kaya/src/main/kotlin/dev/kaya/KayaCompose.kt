@@ -9598,6 +9598,10 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                 want == "closed" -> null to ": a font picker is open, listing ${listed.size} families"
                 want == "open" -> "open, listing ${listed.size} families" to ""
                 listed.isEmpty() -> null to ": the open picker lists no families"
+                listed.any { it in KAYA_GENERIC_FAMILIES } -> listed.filter { it in KAYA_GENERIC_FAMILIES }.let { aliases ->
+                    null to ": the open picker lists generic aliases, not installed families (${aliases.size} of ${listed.size}): " +
+                        aliases.joinToString(", ")
+                }
                 else -> {
                     val proportional = listed.filter { !kayaCodeFamily(it) }
                     if (proportional.isEmpty()) "code only, ${listed.size} monospaced families" to ""
@@ -27086,7 +27090,8 @@ internal const val KAYA_FONT_PREVIEW = "The quick brown fox jumps over the lazy 
  *  picker): a search field, the families each drawn in itself, the chosen
  *  family's faces as chips, a preview, Cancel and Choose. */
 internal fun kayaPresentFontPicker(dialog: Long, codeOnly: Boolean, faces: Boolean, family: String, initial: KayaFontFace) {
-    val names = kayaInstalledFamilyMap().keys.filter { !codeOnly || kayaCodeFamily(it) }.sorted()
+    val names = kayaInstalledFamilyMap().keys
+        .filter { !codeOnly || (it !in KAYA_GENERIC_FAMILIES && kayaCodeFamily(it)) }.sorted()
     val picker = KayaFontPicker(dialog, codeOnly, faces, names)
     names.firstOrNull { it.equals(family, ignoreCase = true) }?.let { kayaSelectFontFamily(picker, it, initial) }
     KayaSceneModel.fontPicker = picker

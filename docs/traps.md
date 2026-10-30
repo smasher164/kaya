@@ -19831,3 +19831,15 @@ with no window and no update after it, so the anchor reapplies when it
 reaches a window; without that the leg read 400 upright. Held by the
 fontpick scene's `entry@heavy`, watched red with the stroke cut on the Mac
 and iOS.
+
+## The WinUI ContentDialog gives its content a finite height (measured 2026-10-29)
+
+The kaya-drawn font picker's family list was a fixed 260 px row, and in the
+lane's 556 by 378 window the faces row and the preview fell past what the
+dialog showed (faces ending at 407 and the preview at 436 of a 257 px
+viewport). A star row (a row and a half to 260 px) is enough: the dialog's
+ContentScrollViewer measures its content at its own height, so the list
+takes what is left. A pass that bounded the content to the viewport by hand
+read green with its bound cut, so it was not kept. With the floor at three
+rows (96 px) the preview still ended at 301 of 257; the floor is 48 px and
+the preview 18 pt.

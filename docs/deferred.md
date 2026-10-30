@@ -32,30 +32,28 @@ collection not chosen).
   - ~~**The eight other bindings and the C floor**~~ — BUILT 2026-10-29: the three props on widgets, rows and templates, a family's faces with its handler, and the picker with a callback or an awaitable where the binding has one, in Python, Go, C#, Java, Swift, OCaml, Haskell and JS (check-sugar-surface's font clause, 54 spellings watched red); the C floor is the generated wire, as for the code surface; a fontpick guest in each language on every lane that runs it (the Mac 9, Linux 8 on x11 and wayland, Windows 6, iOS swift and go, Android jvm and go), all green. The pooled Windows legs found the picker presented before the island was live (docs/traps.md, a ContentDialog presented before the island is live), and the Android JVM host, the Java desktop guests and the C# guests now refuse a scene they do not register rather than running milestone2.
   - ~~**The editor's Font…**~~ — BUILT 2026-10-29 (the maintainer, 2026-10-29: "I think we can drop the short list"): one View item, Font…, opening the picker with code fonts and faces; the choice dresses every open document and is kept in the app's preferences (font.family, font.weight, font.italic, font.width); the Font radio group and its list of code fonts are gone. editor.steps cancels the picker and then picks the first listed family's 400 upright 5 (`pick_font first`), reading the buffer named and at that face; the `titled` guard the group carried moved to commands.steps (`expect_menu "View>Sort" titled`), watched red on all five lanes with the heading cut.
 
-## GAP — three font picker findings from the review captures (2026-10-29, docs/font-picker-plan.md Q4 and §4.3)
+## ~~GAP — three font picker findings from the review captures (2026-10-29, docs/font-picker-plan.md Q4 and §4.3)~~ CLOSED 2026-10-29: all three fixed, each with a read that fails on it (below), and the code-only lists ruled to installed families by §4.3's rule
 KEY: synthesized bold, entry, TextField, kayaLabelDrawn, NSFontPanel toolbar, size field, ContentDialog face row, font picker review
 
 The review page's captures (claude.ai/artifact/6RrGZauKea4rQyycBPn3oC) show
 three things no gate holds yet:
 
-  - **An Apple entry draws no synthesized bold.** Q4 rules a missing bold
-    synthesized on all five; on the Mac and iOS kaya draws it on a label (a
-    second pass a hair apart) and in a text view (stroked), but a SwiftUI
-    TextField takes no overlay or stroke, so an entry asking 700 of a family
-    with no bold draws regular. GNOME, WinUI and Compose draw it. The
-    fontpick scene reads labels and a textarea only, which is why it stayed
-    green; a scene step reading an entry at a missing bold is the wall, and
-    the drawing is the open half.
+  - ~~**An Apple entry draws no synthesized bold.**~~ — FIXED 2026-10-29: the
+    stroke goes on the TextField's own platform field after every write
+    SwiftUI makes (docs/traps.md, an entry's synthesized bold), and the
+    fontpick scene holds an entry asking 700 of a family with no bold to
+    `700 upright 5 synthesized` in all nine languages on every lane.
   - ~~**The macOS 26 font panel still shows its size field and its B I U
     effects menu**~~ — FIXED 2026-10-29: the panel asks its modes of the
     responder chain, never of NSFontManager's target, so the agent joins it as
     the application's next responder and the toolbar keeps typography and
     search (docs/traps.md, the font panel's mode mask); the Mac's
     `expect_font_dialog` fails while a masked item shows.
-  - **The WinUI picker's face row and preview fall below its family list** in
-    a small window (556 by 378 in the capture), out of view; the list is a
-    fixed 260 px. The dialog wants to give the list what is left after the
-    face row and preview.
+  - ~~**The WinUI picker's face row and preview fall below its family list**~~
+    — FIXED 2026-10-29: the family list takes what the dialog has left, a
+    row and a half to 260 px, and the WinUI `expect_font_dialog` fails while
+    the faces row or the preview ends past what the dialog shows (in the
+    lane's 556 by 378 window: past 257 px with the list held at 260).
 
 ## DEFER — the Mac font panel before macOS 26 lists every family under code_only (docs/font-picker-plan.md Q2; 2026-10-29)
 KEY: NSFontPanelCollectionsToolbarItem, kayaSelectFixedWidth, Fixed Width, code_only, macOS 13, macOS 15, font panel collections column
