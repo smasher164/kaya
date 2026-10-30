@@ -34,7 +34,7 @@ static class A11yrowsScene
                         head.SetRole(title, Role.Heading);
                         head.SetA11yId(title, head.Title);
                     });
-                    head.SetInset(bar, 8);
+                    head.SetInset(bar, (8, 12));
                 }
                 heads.InsertFresh(tx, new Item("Heading one"));
                 heads.InsertFresh(tx, new Item("Heading two"));

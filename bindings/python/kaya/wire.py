@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xd4526bbce915c1b5
+SPEC_HASH = 0x721721bd5ae0c2aa
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -157,6 +157,7 @@ PROP_TEXT_SCALE = 72
 PROP_FONT_WEIGHT = 73
 PROP_FONT_ITALIC = 74
 PROP_FONT_WIDTH = 75
+PROP_INSET_X = 76
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -2264,6 +2265,21 @@ def tx_bind_font_width(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_font_width_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_FONT_WIDTH, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_inset_x(widget_id: int, inset_x: float) -> bytes:
+    """set_property with a constant inset_x value (float)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_INSET_X, SOURCE_CONST) + _enc.value(inset_x))
+
+
+def tx_bind_inset_x(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound inset_x value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_INSET_X, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_inset_x_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INSET_X, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

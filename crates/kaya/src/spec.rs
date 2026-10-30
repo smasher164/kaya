@@ -348,6 +348,11 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     ("font_weight", 73, PropKind::F64),
     ("font_italic", 74, PropKind::Bool),
     ("font_width", 75, PropKind::F64),
+    // THE INSET PAIR (docs/styling-plan.md D3, ruled 2026-10-30): a
+    // container's leading and trailing padding apart from `inset`'s top and
+    // bottom, in DIP; unset, the sides take `inset`. The bindings spell the
+    // two as one inset with a vertical and a horizontal value.
+    ("inset_x", 76, PropKind::F64),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4819,6 +4824,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("font_weight", 73),
                 ("font_italic", 74),
                 ("font_width", 75),
+                ("inset_x", 76),
             ],
         },
         EnumSpec {
@@ -6052,6 +6058,7 @@ mod tests {
                     ("prop", "font_weight") => wire::PROP_FONT_WEIGHT,
                     ("prop", "font_italic") => wire::PROP_FONT_ITALIC,
                     ("prop", "font_width") => wire::PROP_FONT_WIDTH,
+                    ("prop", "inset_x") => wire::PROP_INSET_X,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,

@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xd4526bbce915c1b5
+let kayaSpecHash: UInt64 = 0x721721bd5ae0c2aa
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -270,6 +270,7 @@ private let propAccepts: UInt32 = 15
 /// Semantic emphasis (docs/styling-plan.md D4); the variant values follow.
 private let propRole: UInt32 = 16
 private let propInset: UInt32 = 17
+private let propInsetX: UInt32 = 76
 /// The pickers' slots (docs/datetime-plan.md D2): packed-decimal I64s —
 /// YYYYMMDD for the three dates, HHMM for the time — and a minute count.
 private let propDate: UInt32 = 19
@@ -862,6 +863,8 @@ final class KayaNode: Identifiable {
     /// bounds and its children, uniform. 0 = flush, every container's default.
     var inset: Double = 0
     var insetSet = false
+    /// inset_x, the inset pair's sides (docs/styling-plan.md D3).
+    var insetX: Double?
     /// A filled container's tint (docs/tints-plan.md T2); 0 = not filled.
     var filled: Int64 = 0
     /// docs/styling-pass-plan.md Y2-Y7: a container's ground, a gradient's
@@ -1066,7 +1069,7 @@ final class KayaNode: Identifiable {
     var vacant: Bool {
         if hidden { return true }
         // A grown empty box is a spacer, which takes its share on purpose.
-        guard kind == kindColumn || kind == kindRow, grow == 0, filled == 0, ground == 0, !insetSet, !activatable,
+        guard kind == kindColumn || kind == kindRow, grow == 0, filled == 0, ground == 0, !insetSet, insetX == nil, !activatable,
             tableColumns.isEmpty
         else { return false }
         return children.allSatisfy { $0.vacant }
@@ -7175,6 +7178,9 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.inset =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                     kayaScene.nodes[id]!.insetSet = true
+                case (propInsetX, valueF64):
+                    kayaScene.nodes[id]!.insetX =
+                        raw.loadUnaligned(fromByteOffset: body + 24, as: Double.self)
                 case (propSymbol, valueI64):
                     kayaScene.nodes[id]!.symbol =
                         raw.loadUnaligned(fromByteOffset: body + 24, as: Int64.self)
@@ -11708,7 +11714,7 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 let wantFade = parts[1] == "on"
-                func fadeVerdict() -> (String?, String) {
+                let fadeVerdict = { () -> (String?, String) in
                     guard let (fade, past) = DispatchQueue.main.sync(execute: { kayaKeyboardBarFadeRead() }) else {
                         return (nil, "keyboard bar fade: no keyboard bar is up")
                     }
@@ -11743,7 +11749,7 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 let overscroll = parts[0] == "expect_no_overscroll"
-                func footRead() -> (String?, String) {
+                let footRead = { () -> (String?, String) in
                     DispatchQueue.main.sync {
                         guard let node = kayaTarget(parts[1], "textarea", kayaScene.textareas) else {
                             return (nil, "no such target")
@@ -15564,47 +15570,40 @@ private func kayaRunScript(_ script: String) {
                 // The content inset, MEASURED as the halved gap between the
                 // padding container's outer extent and the offer inside it —
                 // RELATIVE, since absolute offers cannot be byte-frozen across
-                // platforms (docs/styling-plan.md D3).
-                if parts.count >= 3 {
-                    let wantInset = String(parts[2])
-                    let spec = parts[1]
-                    let gotInset = DispatchQueue.main.sync { () -> String in
-                        guard let node = kayaAnyTarget(spec) else {
-                            return "no such target \(spec)"
-                        }
-                        guard let outer = kayaInsetOuter[node.id],
-                            let inner = kayaInsetInner[node.id],
-                            outer.width > 0, inner.width > 0
-                        else {
+                // platforms (docs/styling-plan.md D3). harness.rs's grammar:
+                // an optional container, then one value or the inset pair.
+                let targeted = parts.count >= 2 && Int(parts[1]) == nil
+                let numbers = parts.dropFirst(targeted ? 2 : 1).map(String.init)
+                guard (1...2).contains(numbers.count), numbers.allSatisfy({ Int($0) != nil }) else {
+                    failures.append("expect_inset wants one or two whole layout units, optionally after a container target: \(line)")
+                    break
+                }
+                let wantInset = numbers.count == 2 && numbers[0] == numbers[1] ? numbers[0] : numbers.joined(separator: " ")
+                let spec = targeted ? String(parts[1]) : ""
+                let gotInset = DispatchQueue.main.sync { () -> String in
+                    let outer: CGSize
+                    let inner: CGSize
+                    if targeted {
+                        guard let node = kayaAnyTarget(Substring(spec)) else { return "no such target \(spec)" }
+                        guard let o = kayaInsetOuter[node.id], let i = kayaInsetInner[node.id] else {
                             return "no layout recorded for \(spec)"
                         }
-                        let x = ((outer.width - inner.width) / 2).rounded()
-                        let y = ((outer.height - inner.height) / 2).rounded()
-                        return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
-                    }
-                    if gotInset == wantInset {
-                        observed.append("inset \(spec) \(wantInset)")
+                        (outer, inner) = (o, i)
                     } else {
-                        failures.append(
-                            "inset \(spec) \(gotInset), wanted \(wantInset)")
+                        (outer, inner) = (kayaOuterSize, kayaAvailableSize)
                     }
+                    guard outer.width > 0, inner.width > 0 else {
+                        return targeted ? "no layout recorded for \(spec)" : "no layout recorded"
+                    }
+                    let x = Int(((outer.width - inner.width) / 2).rounded())
+                    let y = Int(((outer.height - inner.height) / 2).rounded())
+                    return x == y ? "\(y)" : "\(y) \(x)"
+                }
+                let insetLabel = targeted ? "inset \(spec)" : "inset"
+                if gotInset == wantInset {
+                    observed.append("\(insetLabel) \(wantInset)")
                 } else {
-                    let wantInset = String(parts[1])
-                    let gotInset = DispatchQueue.main.sync { () -> String in
-                        let outer = kayaOuterSize
-                        let inner = kayaAvailableSize
-                        guard outer.width > 0, inner.width > 0 else {
-                            return "no layout recorded"
-                        }
-                        let x = ((outer.width - inner.width) / 2).rounded()
-                        let y = ((outer.height - inner.height) / 2).rounded()
-                        return x == y ? "\(Int(x))" : "\(Int(x))x\(Int(y)) (axes disagree)"
-                    }
-                    if gotInset == wantInset {
-                        observed.append("inset \(wantInset)")
-                    } else {
-                        failures.append("inset \(gotInset), wanted \(wantInset)")
-                    }
+                    failures.append("\(insetLabel) \(gotInset), wanted \(wantInset)")
                 }
             case "expect_root_fills":
                 // The mounted root fills the area the window offered it — the
@@ -22934,7 +22933,7 @@ private struct KayaGroupedSections: View {
         if let margin {
             content()
                 .modifier(KayaInsetReader(id: margin.id, outer: false))
-                .padding(margin.inset)
+                .padding(kayaInsetEdges(margin, margin.inset))
                 .modifier(KayaInsetReader(id: margin.id, outer: true))
         } else {
             content()
@@ -23119,11 +23118,11 @@ struct KayaInsetPadding: ViewModifier {
 
     func body(content: Content) -> some View {
         if phoneDock != nil {
-            content.padding(.horizontal, node.insetSet ? node.inset : 0)
+            content.padding(.horizontal, node.insetX ?? (node.insetSet ? node.inset : 0))
         } else if case let reach = kayaListRowReach(node), reach > 0 {
             content.padding(.horizontal, kayaFilledDefaultInset).padding(.vertical, reach)
         } else {
-            content.padding(kayaFilledInset(node))
+            content.padding(kayaInsetEdges(node, kayaFilledInset(node)))
         }
     }
 }
@@ -23812,6 +23811,13 @@ let kayaFollowSlack: Double = 22
 /// none: Apple has no token for either (docs/probes/platform-tokens-2026-09-25.md).
 let kayaFilledRadius: CGFloat = 12
 let kayaFilledDefaultInset: Double = 10
+
+/// The inset pair (docs/styling-plan.md D3): `vertical` on the top and bottom,
+/// the node's inset_x on the sides when it declares one.
+@MainActor func kayaInsetEdges(_ node: KayaNode, _ vertical: Double) -> EdgeInsets {
+    let sides = node.insetX ?? vertical
+    return EdgeInsets(top: vertical, leading: sides, bottom: vertical, trailing: sides)
+}
 
 /// An activatable container takes it too, so its hover and selected surface
 /// do not run flush against its content (the 2026-10-17 preview); a declared
@@ -30249,7 +30255,7 @@ struct KayaRender: View {
             }
             .coordinateSpace(name: "kaya-grid-\(node.id)")
             .modifier(KayaInsetReader(id: node.id, outer: false))
-            .padding(node.inset)
+            .padding(kayaInsetEdges(node, node.inset))
             .modifier(KayaInsetReader(id: node.id, outer: true))
         case kindGrid:
             // The 2D layout contract: SwiftUI's own Grid — columns take their
@@ -30286,7 +30292,7 @@ struct KayaRender: View {
             }
             .coordinateSpace(name: "kaya-grid-\(node.id)")
             .modifier(KayaInsetReader(id: node.id, outer: false))
-            .padding(node.inset)
+            .padding(kayaInsetEdges(node, node.inset))
             .modifier(KayaInsetReader(id: node.id, outer: true))
         case kindRadio:
             // The choice contract in its inline presentation. The dressed floor
@@ -32750,7 +32756,7 @@ struct KayaExpander: View {
                 }
             } else {
                 VStack(alignment: .leading, spacing: node.spacing) { kayaExpanderBody }
-                    .padding(node.insetSet ? node.inset : 0)
+                    .padding(kayaInsetEdges(node, node.insetSet ? node.inset : 0))
             }
         } label: {
             kayaExpanderLabel(open)

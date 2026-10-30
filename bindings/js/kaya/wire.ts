@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xd4526bbce915c1b5n;
+export const SPEC_HASH = 0x721721bd5ae0c2aan;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -150,6 +150,7 @@ export const PROP_TEXT_SCALE = 72;
 export const PROP_FONT_WEIGHT = 73;
 export const PROP_FONT_ITALIC = 74;
 export const PROP_FONT_WIDTH = 75;
+export const PROP_INSET_X = 76;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -3036,6 +3037,24 @@ export function tx_bind_font_width(widget_id: number, signal_id: number): Uint8A
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_font_width_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_FONT_WIDTH); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant inset_x value. */
+export function tx_set_inset_x(widget_id: number, inset_x: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET_X); enc.u32(SOURCE_CONST); enc.value(inset_x);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound inset_x value. */
+export function tx_bind_inset_x(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET_X); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_inset_x_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET_X); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

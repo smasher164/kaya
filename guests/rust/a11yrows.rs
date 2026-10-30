@@ -28,7 +28,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         t.role(title, kaya::Role::Heading);
                         t.a11y_id(title, kaya::Field::element());
                     });
-                    head.inset(bar, 8.0);
+                    head.inset(bar, (8.0, 12.0));
                 }
                 tx.insert_fresh(&heads, "Heading one");
                 tx.insert_fresh(&heads, "Heading two");

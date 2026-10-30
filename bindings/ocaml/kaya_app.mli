@@ -799,6 +799,11 @@ val bind_help : widget -> string signal -> unit
 val bind_placeholder : widget -> string signal -> unit
 val set_inset : widget -> float -> unit
 
+(** The inset pair: the top and bottom, then the leading and trailing sides,
+    CSS padding's two-value form (docs/styling-plan.md D3). The sugar spells
+    it [~inset_pair:(6.0, 14.0)]. *)
+val set_inset_pair : widget -> float * float -> unit
+
 (* A container's cross-axis child placement. *)
 type align = Start | Center | End | Stretch | Baseline
 
@@ -1598,7 +1603,7 @@ val grid :
   ?help:string ->
   ?help_bind:string signal ->
   ?spacing:float ->
-  ?inset:float ->
+  ?inset:float -> ?inset_pair:float * float ->
   ?columns_when:size_class * int ->
   ?columns_auto:float -> (unit -> widget) list -> unit -> widget
 
@@ -1613,7 +1618,7 @@ val labeled :
   ?a11y_label_bind:string signal ->
   ?help:string ->
   ?help_bind:string signal ->
-  ?spacing:float -> ?inset:float -> (unit -> widget) list -> unit -> widget
+  ?spacing:float -> ?inset:float -> ?inset_pair:float * float -> (unit -> widget) list -> unit -> widget
 
 (* An EXPANDER (docs/expander-plan.md): [~text] is the header the user
    activates, the children its body, kept alive while collapsed; the
@@ -1637,7 +1642,7 @@ val expander :
   ?help_bind:string signal ->
   ?a11y_hint:string ->
   ?spacing:float ->
-  ?align:align -> ?inset:float -> (unit -> widget) list -> unit -> widget
+  ?align:align -> ?inset:float -> ?inset_pair:float * float -> (unit -> widget) list -> unit -> widget
 
 val spacer : ?grow:float -> unit -> widget
 
@@ -1651,7 +1656,7 @@ val column :
   ?help:string ->
   ?help_bind:string signal ->
   ?spacing:float ->
-  ?align:align -> ?inset:float -> ?filled:Tint.t ->
+  ?align:align -> ?inset:float -> ?inset_pair:float * float -> ?filled:Tint.t ->
   ?ground_gradient:color ->
   ?ground_gradient_bind:color signal ->
   ?ground_image:bytes ->
@@ -1687,7 +1692,7 @@ val row :
   ?help_bind:string signal ->
   ?spacing:float ->
   ?align:align ->
-  ?inset:float ->
+  ?inset:float -> ?inset_pair:float * float ->
   ?filled:Tint.t ->
   ?ground_gradient:color ->
   ?ground_gradient_bind:color signal ->
@@ -2930,7 +2935,7 @@ module Tpl : sig
     ?help_field:('c, string) field ->
     ?a11y_level:int ->
     ?level:int ->
-    ?inset:float ->
+    ?inset:float -> ?inset_pair:float * float ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->
@@ -2955,7 +2960,7 @@ module Tpl : sig
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
     ?a11y_level:int ->
-    ?inset:float ->
+    ?inset:float -> ?inset_pair:float * float ->
     ?columns_auto:float -> (unit -> node) list -> unit -> node
 
   val labeled :
@@ -3001,7 +3006,7 @@ module Tpl : sig
     ?help:string ->
     ?help_bind:string signal ->
     ?help_field:('f, string) field ->
-    ?a11y_level:int -> ?level:int -> ?inset:float -> (unit -> node) list -> unit -> node
+    ?a11y_level:int -> ?level:int -> ?inset:float -> ?inset_pair:float * float -> (unit -> node) list -> unit -> node
 
   val spacer : ?grow:float -> unit -> node
 
@@ -3017,7 +3022,7 @@ module Tpl : sig
     ?help:string ->
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
-    ?a11y_level:int -> ?level:int -> ?inset:float ->
+    ?a11y_level:int -> ?level:int -> ?inset:float -> ?inset_pair:float * float ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->
@@ -3056,7 +3061,7 @@ module Tpl : sig
     ?help_field:('c, string) field ->
     ?a11y_level:int ->
     ?level:int ->
-    ?inset:float ->
+    ?inset:float -> ?inset_pair:float * float ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->

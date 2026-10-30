@@ -798,6 +798,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var selectedDeclared by mutableStateOf(false)
     var labelTint by mutableStateOf(0L)
     var insetSet by mutableStateOf(false)
+    /** inset_x, the inset pair's sides (docs/styling-plan.md D3). */
+    var insetX by mutableStateOf<Double?>(null)
     /** A scroll that keeps its end in view while its content grows
      * (docs/follow-end-plan.md). */
     var followsEnd by mutableStateOf(false)
@@ -873,7 +875,7 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     val vacant: Boolean get() = hidden ||
         // A grown empty box is a spacer, which takes its share on purpose.
         (kind == KayaCompose.KIND_COLUMN || kind == KayaCompose.KIND_ROW) && grow == 0.0 && filled == 0L && ground == 0L &&
-            !insetSet && !activatable && tableColumns.isEmpty() && children.all { it.vacant }
+            !insetSet && insetX == null && !activatable && tableColumns.isEmpty() && children.all { it.vacant }
 }
 
 /**
@@ -932,11 +934,16 @@ const val KAYA_FILLED_DEFAULT_INSET = 12.0
  * sides only, by its own inset or none, and the bar sets the vertical rhythm. */
 @Composable
 fun kayaInsetPadding(node: KayaNode): Modifier {
-    if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (if (node.insetSet) node.inset else 0.0).dp)
+    if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (node.insetX ?: if (node.insetSet) node.inset else 0.0).dp)
     val reach = kayaListRowReach(node)
     if (reach > 0.0) return Modifier.padding(horizontal = KAYA_FILLED_DEFAULT_INSET.dp, vertical = reach.dp)
-    return Modifier.padding(kayaFilledInset(node).dp)
+    return kayaInsetEdges(node, kayaFilledInset(node))
 }
+
+/** The inset pair (docs/styling-plan.md D3): [vertical] on the top and
+ * bottom, the node's inset_x on the sides when it declares one. */
+fun kayaInsetEdges(node: KayaNode, vertical: Double): Modifier =
+    Modifier.padding(horizontal = (node.insetX ?: vertical).dp, vertical = vertical.dp)
 
 /** A LIST'S ROW (docs/list-row-plan.md): an activatable row or column stacked
  * in a column, with no inset or fill of its own, pads its top and bottom by
@@ -3524,7 +3531,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xd4526bbce915c1b5uL
+    private const val SPEC_HASH: ULong = 0x721721bd5ae0c2aauL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3924,6 +3931,7 @@ object KayaCompose {
      * does not fit, so every value arriving here is already legal. */
     private const val PROP_ROLE = 16
     private const val PROP_INSET = 17
+    private const val PROP_INSET_X = 76
 
     // The pickers' slots (docs/datetime-plan.md D2/D3/D4): three packed
     // decimal I64s — YYYYMMDD for a date, HHMM for a time — and a count.
@@ -5080,6 +5088,7 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.inset = readF64(b)
                             KayaSceneModel.nodes[id]!!.insetSet = true
                         }
+                        PROP_INSET_X -> KayaSceneModel.nodes[id]!!.insetX = readF64(b)
                         PROP_DATE -> KayaSceneModel.nodes[id]!!.date = readI64(b)
                         PROP_TIME -> KayaSceneModel.nodes[id]!!.time = readI64(b)
                         PROP_MIN_DATE -> KayaSceneModel.nodes[id]!!.minDate = readI64(b)
@@ -15719,54 +15728,48 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         }
                     }
                     "expect_inset" -> {
-                        // The window content inset, MEASURED: the halved
-                        // gap between the padding container's outer
-                        // extent and the offer inside it, in DP, RELATIVE
-                        // because absolute offers cannot be byte-frozen
-                        // across platforms (docs/styling-plan.md D3).
-                        // `expect_inset N` is the WINDOW's pair,
-                        // `expect_inset <target> N` a CONTAINER's own.
-                        if (parts.size >= 3) {
-                            val spec = parts[1]
-                            val want = parts[2]
-                            val node = kayaWidgetTarget(spec)
-                            val got = if (node == null) {
+                        // The content inset, MEASURED: the halved gap between
+                        // the padding container's outer extent and the offer
+                        // inside it, in DP, RELATIVE because absolute offers
+                        // cannot be byte-frozen across platforms
+                        // (docs/styling-plan.md D3). harness.rs's grammar: an
+                        // optional container, then one value or the inset pair.
+                        val targeted = parts.size >= 2 && parts[1].toIntOrNull() == null
+                        val numbers = parts.drop(if (targeted) 2 else 1)
+                        if (numbers.size !in 1..2 || numbers.any { it.toIntOrNull() == null }) {
+                            failures.add("expect_inset wants one or two whole layout units, optionally after a container target: $line")
+                        } else {
+                            val want = if (numbers.size == 2 && numbers[0] == numbers[1]) numbers[0] else numbers.joinToString(" ")
+                            val spec = if (targeted) parts[1] else ""
+                            val node = if (targeted) kayaWidgetTarget(spec) else null
+                            val got = if (targeted && node == null) {
                                 "no such target $spec"
                             } else {
                                 onUi(activity) {
-                                    val density =
-                                        activity.resources.displayMetrics.density
-                                    val outer = kayaInsetOuter[node.id]
-                                    val inner = kayaInsetInner[node.id]
-                                    if (outer == null || inner == null) {
-                                        "no layout recorded for $spec"
+                                    val density = activity.resources.displayMetrics.density
+                                    val pair = if (node != null) {
+                                        val outer = kayaInsetOuter[node.id]
+                                        val inner = kayaInsetInner[node.id]
+                                        if (outer == null || inner == null) null
+                                        else Pair(outer.first - inner.first, outer.second - inner.second)
                                     } else {
-                                        val x = Math.round(
-                                            (outer.first - inner.first) / 2 / density)
-                                        val y = Math.round(
-                                            (outer.second - inner.second) / 2 / density)
-                                        if (x == y) "$x" else "${x}x$y (axes disagree)"
+                                        val outer = kayaOuterSize
+                                        val inner = kayaAvailableSize
+                                        if (outer.width <= 0 || inner.width <= 0) null
+                                        else Pair((outer.width - inner.width).toDouble(), (outer.height - inner.height).toDouble())
+                                    }
+                                    if (pair == null) {
+                                        if (targeted) "no layout recorded for $spec" else "no layout recorded"
+                                    } else {
+                                        val x = Math.round(pair.first / 2 / density)
+                                        val y = Math.round(pair.second / 2 / density)
+                                        if (x == y) "$y" else "$y $x"
                                     }
                                 }
                             }
-                            if (got == want) observed.add("inset $spec $want")
-                            else failures.add("inset $spec $got, wanted $want")
-                        } else {
-                            val want = parts[1]
-                            val got = onUi(activity) {
-                                val density = activity.resources.displayMetrics.density
-                                val outer = kayaOuterSize
-                                val inner = kayaAvailableSize
-                                if (outer.width <= 0 || inner.width <= 0) {
-                                    "no layout recorded"
-                                } else {
-                                    val x = Math.round((outer.width - inner.width) / 2 / density)
-                                    val y = Math.round((outer.height - inner.height) / 2 / density)
-                                    if (x == y) "$x" else "${x}x$y (axes disagree)"
-                                }
-                            }
-                            if (got == want) observed.add("inset $want")
-                            else failures.add("inset $got, wanted $want")
+                            val label = if (targeted) "inset $spec" else "inset"
+                            if (got == want) observed.add("$label $want")
+                            else failures.add("$label $got, wanted $want")
                         }
                     }
                     "expect_root_fills" -> {
@@ -20309,7 +20312,7 @@ private fun KayaRenderCore(
                 modifier = boxFill.then(a11y).onGloballyPositioned {
                     kayaInsetOuter[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
-                }.padding(node.inset.dp).onGloballyPositioned {
+                }.then(kayaInsetEdges(node, node.inset)).onGloballyPositioned {
                     kayaInsetInner[node.id] =
                         Pair(it.size.width.toDouble(), it.size.height.toDouble())
                 },
@@ -20763,7 +20766,7 @@ private fun KayaRenderCore(
                     }
                 ListItem(
                     headlineContent = { KayaRender(label) },
-                    modifier = boxFill.then(a11y).padding(node.inset.dp),
+                    modifier = boxFill.then(a11y).then(kayaInsetEdges(node, node.inset)),
                     supportingContent = supporting,
                     trailingContent = trailing,
                     // The row takes the ground it stands on: the derived
@@ -26231,7 +26234,7 @@ internal fun KayaExpander(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
         )
         AnimatedVisibility(visible = open, modifier = Modifier.onFocusChanged { bodyHolds = it.hasFocus }) {
             Column(
-                Modifier.fillMaxWidth().padding(node.inset.dp),
+                Modifier.fillMaxWidth().then(kayaInsetEdges(node, node.inset)),
                 verticalArrangement = Arrangement.spacedBy(node.spacing.dp),
             ) {
                 node.laidOut.forEachIndexed { i, child ->

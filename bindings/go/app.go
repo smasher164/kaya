@@ -932,19 +932,36 @@ func (tx *Tx) SetWrap(w Widget, on bool) {
 }
 
 // SetInset sets a container's own padding — DIP between its bounds and
-// its children, uniform on all four sides (docs/styling-plan.md D3).
-// Containers only. The dynamic path; the chain is the declarative one.
-func (tx *Tx) SetInset(w Widget, pad float64) {
+// its children (docs/styling-plan.md D3): one value for all four sides, or
+// two, the top and bottom then the leading and trailing sides (CSS
+// padding's two-value form). Containers only. The dynamic path; the chain
+// is the declarative one.
+func (tx *Tx) SetInset(w Widget, pad float64, sides ...float64) {
 	tx.emit(TxSetInset(w.id, pad))
+	if h, ok := insetSides(sides); ok {
+		tx.emit(TxSetInsetX(w.id, h))
+	}
+}
+
+// insetSides is the inset pair's optional second value.
+func insetSides(sides []float64) (float64, bool) {
+	switch len(sides) {
+	case 0:
+		return 0, false
+	case 1:
+		return sides[0], true
+	}
+	panic("kaya: an inset is one value or two (vertical, horizontal)")
 }
 
 // Inset pads this container at construction — the declarative chain:
-// tx.Row(...).Inset(8). Same transaction discipline as Grow.
-func (w Widget) Inset(pad float64) Widget {
+// tx.Row(...).Inset(8), or Inset(6, 14) for the pair. Same transaction
+// discipline as Grow.
+func (w Widget) Inset(pad float64, sides ...float64) Widget {
 	if w.tx == nil || w.tx.closed {
 		panic("kaya: Inset on a widget outside its build transaction — use Tx.SetInset inside a live transaction")
 	}
-	w.tx.SetInset(w, pad)
+	w.tx.SetInset(w, pad, sides...)
 	return w
 }
 
@@ -6074,8 +6091,11 @@ func (t *Tpl) SetRole(n Node, role Role) {
 // children, uniform on all four sides (docs/styling-plan.md D3). Const
 // for SetRole's reason; containers only, and the root says so at
 // declare time.
-func (t *Tpl) SetInset(n Node, pad float64) {
+func (t *Tpl) SetInset(n Node, pad float64, sides ...float64) {
 	t.tx.emit(TxSetInset(n.id, pad))
+	if h, ok := insetSides(sides); ok {
+		t.tx.emit(TxSetInsetX(n.id, h))
+	}
 }
 
 // LabelText creates a label with constant text in the blueprint. The

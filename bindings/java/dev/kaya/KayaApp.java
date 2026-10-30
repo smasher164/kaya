@@ -4926,6 +4926,15 @@ public final class KayaApp {
             return this;
         }
 
+        /** The inset pair: the top and bottom, then the leading and
+         * trailing sides, CSS padding's two-value form
+         * (docs/styling-plan.md D3). */
+        public Widget inset(double vertical, double horizontal) {
+            inset(vertical);
+            tx.emit(KayaWire.txSetInsetX(id, horizontal));
+            return this;
+        }
+
         /** This container's cross-axis child placement at construction:
          * tx.row(() -> {...}).align(Align.BASELINE). */
         public Widget align(Align align) {
@@ -6876,6 +6885,11 @@ public final class KayaApp {
             t.setInset(n, pad);
         }
 
+        /** The inset pair ({@link Tpl#setInset(Node, double, double)}). */
+        public void setInset(Node n, double vertical, double horizontal) {
+            t.setInset(n, vertical, horizontal);
+        }
+
         /** One of this row's nodes' accessibility identifier
          * ({@link Tpl#setA11yId(Node, String)}). */
         public void setA11yId(Node n, String id) {
@@ -7634,6 +7648,14 @@ public final class KayaApp {
          */
         public void setInset(Widget w, double pad) {
             emit(KayaWire.txSetInset(w.id, pad));
+        }
+
+        /** The inset pair: the top and bottom, then the leading and
+         * trailing sides, CSS padding's two-value form
+         * (docs/styling-plan.md D3). */
+        public void setInset(Widget w, double vertical, double horizontal) {
+            emit(KayaWire.txSetInset(w.id, vertical));
+            emit(KayaWire.txSetInsetX(w.id, horizontal));
         }
 
         /**
@@ -10503,6 +10525,13 @@ public final class KayaApp {
          */
         public void setInset(Node n, double pad) {
             tx.emit(KayaWire.txSetInset(n.id, pad));
+        }
+
+        /** The inset pair: the top and bottom, then the leading and
+         * trailing sides (docs/styling-plan.md D3). */
+        public void setInset(Node n, double vertical, double horizontal) {
+            tx.emit(KayaWire.txSetInset(n.id, vertical));
+            tx.emit(KayaWire.txSetInsetX(n.id, horizontal));
         }
 
         // THE ACCESSIBILITY PROPS, one setter per source. A CONSTANT ID

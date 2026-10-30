@@ -2002,6 +2002,27 @@ impl BreakpointSetters {
 /// its statement — chain construction props on it and end with
 /// [`Widget::id`] where the handle must outlive the chain. A container's
 /// body result rides along as `out`.
+/// A container's inset (docs/styling-plan.md D3): `8.0` for all four sides,
+/// or `(6.0, 14.0)` for the top and bottom, then the leading and trailing
+/// sides, as CSS padding's two-value form reads.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Inset {
+    pub vertical: f64,
+    pub horizontal: Option<f64>,
+}
+
+impl From<f64> for Inset {
+    fn from(pad: f64) -> Self {
+        Inset { vertical: pad, horizontal: None }
+    }
+}
+
+impl From<(f64, f64)> for Inset {
+    fn from((vertical, horizontal): (f64, f64)) -> Self {
+        Inset { vertical, horizontal: Some(horizontal) }
+    }
+}
+
 pub struct Widget<'t, 'b, R = ()> {
     out: R,
     id: WidgetId,
@@ -2071,7 +2092,7 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
     /// This container's own padding — the chained spelling of
     /// [`Tx::inset`]. The window's inset is [`WindowRef::inset`]; this is
     /// the same number one level down.
-    pub fn inset(self, pad: f64) -> Self {
+    pub fn inset(self, pad: impl Into<Inset>) -> Self {
         self.tx.inset(self.id, pad);
         self
     }
@@ -3349,10 +3370,15 @@ impl<'a> Tx<'a> {
         self.set(widget, Prop::Spacing, gap);
     }
 
-    /// A container's own padding, uniform on all four sides. Containers
-    /// only. See [`Prop::Inset`].
-    pub fn inset(&mut self, widget: WidgetId, pad: f64) {
-        self.set(widget, Prop::Inset, pad);
+    /// A container's own padding: one value for all four sides, or the
+    /// pair `(vertical, horizontal)` (docs/styling-plan.md D3). Containers
+    /// only. See [`Prop::Inset`] and [`Prop::InsetX`].
+    pub fn inset(&mut self, widget: WidgetId, pad: impl Into<Inset>) {
+        let pad = pad.into();
+        self.set(widget, Prop::Inset, pad.vertical);
+        if let Some(sides) = pad.horizontal {
+            self.set(widget, Prop::InsetX, sides);
+        }
     }
 
     /// A container's cross-axis child placement (the normalized
@@ -5792,7 +5818,7 @@ impl<'b> Row<'_, 'b> {
         self.tpl().role(node, role)
     }
 
-    pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
+    pub fn inset(&mut self, node: TemplateNodeId, pad: impl Into<Inset>) {
         self.tpl().inset(node, pad)
     }
 
@@ -10085,8 +10111,12 @@ impl<'b> Tpl<'_, 'b> {
     /// [`Widget::inset`] spells in the live zone (docs/styling-plan.md D3).
     /// Const for [`Self::role`]'s reason; container kinds only, and the root
     /// says so at declare time.
-    pub fn inset(&mut self, node: TemplateNodeId, pad: f64) {
-        self.set(node, Prop::Inset, pad);
+    pub fn inset(&mut self, node: TemplateNodeId, pad: impl Into<Inset>) {
+        let pad = pad.into();
+        self.set(node, Prop::Inset, pad.vertical);
+        if let Some(sides) = pad.horizontal {
+            self.set(node, Prop::InsetX, sides);
+        }
     }
 
     /// A stamped node's flex weight within its stamped row or column, the

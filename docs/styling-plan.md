@@ -159,6 +159,24 @@ and are not removed by inset 0; content extends to the safe-area edge,
 and the platform keeps flowing like itself. Two facts, one knob, and
 the knob is fully honorable.
 
+#### The inset pair (ruled 2026-10-30)
+KEY: inset pair, inset_x, prop 76, InsetX, expect_inset two values, KayaInset, inset_pair, InsetPair, setInsetPair
+
+A container's `inset` takes its leading and trailing sides apart from its
+top and bottom (the maintainer, 2026-10-30, for the editor's status bar,
+whose text sat 6 pt from a macOS 26 window's rounded corner). Every binding
+spells it as one inset with a vertical and a horizontal value, CSS
+padding's two-value form: Rust `.inset((6.0, 14.0))`, Go `.Inset(6, 14)`,
+Python `inset=(6, 14)`, JS `inset: [6, 14]`, Swift `KayaInset(6, 14)`, C#
+`(6, 14)`, Java `inset(6, 14)`, OCaml `~inset_pair:(6., 14.)`, Haskell
+`InsetPair 6 14`; one value still means all four sides. On the wire the
+pair is `inset` plus a second prop, `inset_x` (76), which only the pair
+writes; unset, the sides take `inset`. The C floor writes the two props
+itself (`kaya_tx_set_inset_x`). `expect_inset <container> 6 14` reads the
+two halved gaps; a backend prints one number when they agree. Held by
+a11yrows.steps, whose stamped row asks (8, 12) in all ten guests, and the
+editor's status bar (6, 14).
+
 ### D4 — the role vocabulary opens with three (ratified)
 
 `destructive` (buttons), `prominent` (buttons — the one-primary-action

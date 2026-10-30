@@ -20,7 +20,7 @@ app.window({ title: "a11yrows" }, () => {
     // props below are CONST in every binding.
     const heads = kaya.collection();
     for (const head of heads) {
-      kaya.row({ inset: 8 }, () => {
+      kaya.row({ inset: [8, 12] }, () => {
         kaya.label({ bind: head }).role(kaya.Role.HEADING).a11yId(head);
       });
     }

@@ -792,6 +792,16 @@ enum Role : long
 /// A context action's swipe on its row: at most one item per edge takes the
 /// full swipe; where a platform has no row swipe the action stays in the
 /// context menu (docs/swipe-actions-plan.md R1-R3).
+/// <summary>A container's inset (docs/styling-plan.md D3): a number for all
+/// four sides, or <c>(6, 14)</c> for the top and bottom then the leading and
+/// trailing sides, CSS padding's two-value form.</summary>
+public readonly record struct Inset(double Vertical, double? Horizontal)
+{
+    public static implicit operator Inset(double all) => new(all, null);
+    public static implicit operator Inset((double Vertical, double Horizontal) pair) =>
+        new(pair.Vertical, pair.Horizontal);
+}
+
 public enum Swipe : long
 {
     Leading = KayaWire.SwipeLeading,
@@ -4589,8 +4599,11 @@ sealed class Tx : IDisposable
     /// A container's own padding: DIP between its bounds and its
     /// children, uniform on all four sides. Containers only, spacing's
     /// kinds exactly.
-    public void SetInset(Widget w, double pad) =>
-        Records.Add(KayaWire.TxSetInset(w.Id, pad));
+    public void SetInset(Widget w, Inset pad)
+    {
+        Records.Add(KayaWire.TxSetInset(w.Id, pad.Vertical));
+        if (pad.Horizontal is double sides) Records.Add(KayaWire.TxSetInsetX(w.Id, sides));
+    }
 
     /// A container's cross-axis child placement (the normalized default
     /// is Align.Start). Containers only; baseline is rows-only.
@@ -5852,7 +5865,7 @@ sealed class Tx : IDisposable
     /// ambient stack). `inset:` is this container's own padding.
     public void Column(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, Tint? filled = null, Color? groundGradient = null,
+        Inset? inset = null, Tint? filled = null, Color? groundGradient = null,
         byte[]? groundImage = null, Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf<object?>(KayaWire.KindColumn, c => { body(c); return null; },
             grow, spacing, align, inset, filled: filled, groundGradient: groundGradient,
@@ -5860,7 +5873,7 @@ sealed class Tx : IDisposable
 
     public T Column<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, Tint? filled = null, Color? groundGradient = null,
+        Inset? inset = null, Tint? filled = null, Color? groundGradient = null,
         byte[]? groundImage = null, Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf(KayaWire.KindColumn, body, grow, spacing, align, inset, filled: filled,
             groundGradient: groundGradient, groundImage: groundImage, onActivate: onActivate,
@@ -5874,7 +5887,7 @@ sealed class Tx : IDisposable
     /// and buttons (docs/composer-plan.md §4).
     public void Row(
         Action<Widget> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
+        Inset? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
         Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
         Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         Row<object?>(c => { body(c); return null; },
@@ -5883,7 +5896,7 @@ sealed class Tx : IDisposable
 
     public T Row<T>(
         Func<Widget, T> body, double? grow = null, double? spacing = null, Align? align = null,
-        double? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
+        Inset? inset = null, SizeClass? stackWhen = null, Tint? filled = null,
         Role? role = null, Color? groundGradient = null, byte[]? groundImage = null,
         Action<Tx>? onActivate = null, Action<Tx>? onSelect = null) =>
         ContainerOf(KayaWire.KindRow, c =>
@@ -5919,19 +5932,19 @@ sealed class Tx : IDisposable
     /// the window's SIZE CLASS is the named one, reverting on leaving it
     /// (docs/adaptive-layout-plan.md D6.2).
     public void Grid(int columns, Action<Widget> body, double? spacing = null,
-        double? grow = null, double? inset = null, (SizeClass, int)? columnsWhen = null) =>
+        double? grow = null, Inset? inset = null, (SizeClass, int)? columnsWhen = null) =>
         Grid<object?>(columns, c => { body(c); return null; }, spacing, grow, inset,
             columnsWhen);
 
     public T Grid<T>(int columns, Func<Widget, T> body, double? spacing = null,
-        double? grow = null, double? inset = null, (SizeClass, int)? columnsWhen = null)
+        double? grow = null, Inset? inset = null, (SizeClass, int)? columnsWhen = null)
     {
         var parent = Widget(KayaWire.KindGrid);
         Records.Add(KayaWire.TxSetColumns(parent.Id, columns));
         if (columnsWhen is (SizeClass when, int count)) ColumnsWhen(parent, when, count);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (grow is double g) SetGrow(parent, g);
-        if (inset is double pad) SetInset(parent, pad);
+        if (inset is Inset pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
         try { return body(parent); }
         finally { App.Parents.RemoveAt(App.Parents.Count - 1); }
@@ -5943,31 +5956,31 @@ sealed class Tx : IDisposable
     /// new state; SetSummary and SetExpanded take a signal too.
     public void Expander(string text, Action<Widget> body, string? summary = null,
         bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
-        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        double? spacing = null, double? grow = null, Align? align = null, Inset? inset = null) =>
         ExpanderOf<object?>(w => SetText(w, text), c => { body(c); return null; }, summary,
             expanded, symbol, onToggle, spacing, grow, align, inset);
 
     public T Expander<T>(string text, Func<Widget, T> body, string? summary = null,
         bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
-        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        double? spacing = null, double? grow = null, Align? align = null, Inset? inset = null) =>
         ExpanderOf(w => SetText(w, text), body, summary, expanded, symbol, onToggle, spacing,
             grow, align, inset);
 
     public void Expander(Signal text, Action<Widget> body, string? summary = null,
         bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
-        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        double? spacing = null, double? grow = null, Align? align = null, Inset? inset = null) =>
         ExpanderOf<object?>(w => BindText(w, text), c => { body(c); return null; }, summary,
             expanded, symbol, onToggle, spacing, grow, align, inset);
 
     public T Expander<T>(Signal text, Func<Widget, T> body, string? summary = null,
         bool? expanded = null, Symbol? symbol = null, Action<Tx, bool>? onToggle = null,
-        double? spacing = null, double? grow = null, Align? align = null, double? inset = null) =>
+        double? spacing = null, double? grow = null, Align? align = null, Inset? inset = null) =>
         ExpanderOf(w => BindText(w, text), body, summary, expanded, symbol, onToggle, spacing,
             grow, align, inset);
 
     T ExpanderOf<T>(Action<Widget> header, Func<Widget, T> body, string? summary,
         bool? expanded, Symbol? symbol, Action<Tx, bool>? onToggle, double? spacing,
-        double? grow, Align? align, double? inset) =>
+        double? grow, Align? align, Inset? inset) =>
         ContainerOf(KayaWire.KindExpander, c =>
         {
             header(c);
@@ -5982,30 +5995,30 @@ sealed class Tx : IDisposable
     /// the body declares, with an optional trailing button after it. A
     /// column of nothing but these renders as the platform's form.
     public void Labeled(string label, Action<Widget> body, double? spacing = null,
-        double? grow = null, double? inset = null) =>
+        double? grow = null, Inset? inset = null) =>
         LabeledOf<object?>(() => Label(label), c => { body(c); return null; },
             spacing, grow, inset);
 
     public T Labeled<T>(string label, Func<Widget, T> body, double? spacing = null,
-        double? grow = null, double? inset = null) =>
+        double? grow = null, Inset? inset = null) =>
         LabeledOf(() => Label(label), body, spacing, grow, inset);
 
     public void Labeled(Signal label, Action<Widget> body, double? spacing = null,
-        double? grow = null, double? inset = null) =>
+        double? grow = null, Inset? inset = null) =>
         LabeledOf<object?>(() => Label(bind: label), c => { body(c); return null; },
             spacing, grow, inset);
 
     public T Labeled<T>(Signal label, Func<Widget, T> body, double? spacing = null,
-        double? grow = null, double? inset = null) =>
+        double? grow = null, Inset? inset = null) =>
         LabeledOf(() => Label(bind: label), body, spacing, grow, inset);
 
     T LabeledOf<T>(Action name, Func<Widget, T> body, double? spacing, double? grow,
-        double? inset)
+        Inset? inset)
     {
         var parent = Widget(KayaWire.KindLabeled);
         if (spacing is double gap) SetSpacing(parent, gap);
         if (grow is double g) SetGrow(parent, g);
-        if (inset is double pad) SetInset(parent, pad);
+        if (inset is Inset pad) SetInset(parent, pad);
         App.Parents.Add(parent.Id);
         name();
         try { return body(parent); }
@@ -6023,7 +6036,7 @@ sealed class Tx : IDisposable
 
     T ContainerOf<T>(
         uint kind, Func<Widget, T> body, double? grow = null, double? spacing = null,
-        Align? align = null, double? inset = null, SizeClass? stackWhen = null,
+        Align? align = null, Inset? inset = null, SizeClass? stackWhen = null,
         Tint? filled = null, Color? groundGradient = null, byte[]? groundImage = null,
         Action<Tx>? onActivate = null, Action<Tx>? onSelect = null)
     {
@@ -6036,7 +6049,7 @@ sealed class Tx : IDisposable
         if (groundImage != null) SetGroundImage(parent, groundImage);
         if (onActivate != null) OnActivate(parent, onActivate);
         if (onSelect != null) OnSelect(parent, onSelect);
-        if (inset is double pad) SetInset(parent, pad);
+        if (inset is Inset pad) SetInset(parent, pad);
         if (stackWhen is SizeClass when) StackWhen(parent, when);
         App.Parents.Add(parent.Id);
         try { return body(parent); }
@@ -7744,8 +7757,11 @@ sealed class Tpl
     /// children, uniform on all four sides — the same number the live
     /// Tx.SetInset spells. Const for SetRole's reason. Containers only,
     /// and the root says so at declare time.
-    public void SetInset(Node n, double pad) =>
-        tx.Records.Add(KayaWire.TxSetInset(n.Id, pad));
+    public void SetInset(Node n, Inset pad)
+    {
+        tx.Records.Add(KayaWire.TxSetInset(n.Id, pad.Vertical));
+        if (pad.Horizontal is double sides) tx.Records.Add(KayaWire.TxSetInsetX(n.Id, sides));
+    }
 
     // Construction sugar, template flavor: the argument's type picks the
     // addressable source (constant, signal, or element field); handlers

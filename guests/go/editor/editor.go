@@ -503,12 +503,13 @@ func App() *kaya.App {
 
 			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) takes this row's
 			// margin with it (docs/deferred.md, the inset entry). One line of
-			// small text, as compact as a code editor's status bar.
+			// small text, as compact as a code editor's status bar, its sides
+			// clear of the window's rounded corner (docs/editor-plan.md E7).
 			tx.Row(func() {
 				tx.Label(d.status).TextScale(0.85).Grow(1).A11yID(id("status"))
 				tx.Label(d.count).TextScale(0.85).BindTint(d.countTint).A11yID(id("matches"))
 				tx.Label(d.where).TextScale(0.85).A11yID(id("position"))
-			}).Inset(6).A11yID(id("statusbar"))
+			}).Inset(6, 14).A11yID(id("statusbar"))
 		}).Align(kaya.AlignStretch).Spacing(0))
 
 		// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever

@@ -538,7 +538,7 @@ pub enum Step {
     /// inside the window's height where macOS's titlebar sits outside it
     /// (docs/styling-plan.md D3). `expect_inset N` reads the WINDOW's pair;
     /// `expect_inset <target> N` reads a CONTAINER's own.
-    ExpectInset { target: Option<Target>, units: u32 },
+    ExpectInset { target: Option<Target>, units: u32, sides: Option<u32> },
     /// The RESOLVED typeface family, read off the real views rather than
     /// echoed back from the request (docs/styling-plan.md Slice 2b). Every
     /// platform's font API renders SOMETHING for a family it does not have,
@@ -2255,6 +2255,12 @@ pub(crate) fn caret_verdict(read: &CaretColors) -> Result<String, String> {
     }
 }
 
+/// An inset as `expect_inset` spells it: one number when every side agrees,
+/// else top-and-bottom then leading-and-trailing (docs/styling-plan.md D3).
+pub(crate) fn inset_reading(vertical: i64, horizontal: i64) -> String {
+    if vertical == horizontal { format!("{vertical}") } else { format!("{vertical} {horizontal}") }
+}
+
 /// A reading whose first word is the verdict and whose rest is what the
 /// reader measured, held to the wanted word.
 fn word_reading(got: &str, want: &str, what: impl Fn() -> String) -> Result<String, String> {
@@ -2714,8 +2720,8 @@ pub trait Stage: Send + 'static {
     fn mounted(&self) -> bool;
     /// The window content inset, MEASURED from real layout — the gap
     /// between the padding container's outer extent and its children's
-    /// offer, halved — as whole layout units ("16"), or the backend's own
-    /// words when the two axes disagree.
+    /// offer, halved — as whole layout units in [`inset_reading`]'s spelling
+    /// ("16", or "6 14" when the sides differ from the top and bottom).
     fn inset(&self) -> String;
     /// A CONTAINER's own content inset, the same halved-gap measurement one
     /// level down (its outer extent against its children's offer).
@@ -4187,22 +4193,26 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::ExpectAligned(parse_target(target)?, parse_string(text)?)
             }
             "expect_inset" => {
-                let rest = rest.trim();
-                if let Ok(units) = rest.parse() {
-                    Step::ExpectInset { target: None, units }
-                } else {
-                    let (target, units) =
-                        rest.split_once(char::is_whitespace).ok_or_else(|| {
-                            format!(
-                                "expect_inset wants whole layout units, optionally \
-                                 after a container target: {line:?}"
-                            )
-                        })?;
-                    Step::ExpectInset {
-                        target: Some(parse_target(target)?),
-                        units: units.trim().parse().map_err(|_| {
-                            format!("expect_inset wants whole layout units: {line:?}")
-                        })?,
+                // `expect_inset [<container>] <units> [<sides>]`: the inset
+                // pair's two values, top and bottom then leading and trailing
+                // (docs/styling-plan.md D3); one value is all four sides.
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let (target, numbers) = match words.first() {
+                    Some(w) if w.parse::<u32>().is_err() => (Some(parse_target(w)?), &words[1..]),
+                    _ => (None, &words[..]),
+                };
+                let numbers: Vec<u32> = numbers
+                    .iter()
+                    .map(|n| n.parse())
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| format!("expect_inset wants whole layout units: {line:?}"))?;
+                match numbers[..] {
+                    [units] => Step::ExpectInset { target, units, sides: None },
+                    [units, sides] => Step::ExpectInset { target, units, sides: Some(sides) },
+                    _ => {
+                        return Err(format!(
+                            "expect_inset wants one or two whole layout units, optionally after a container target: {line:?}"
+                        ))
                     }
                 }
             }
@@ -7938,12 +7948,12 @@ fn run_with_log(
                     }))
                 }
             }
-            Step::ExpectInset { target, units } => Some(poll(|| {
+            Step::ExpectInset { target, units, sides } => Some(poll(|| {
                 let (got, subject) = match target {
                     Some(t) => (stage.container_inset(*t), target_spec(t)),
                     None => (stage.inset(), String::new()),
                 };
-                let want = format!("{units}");
+                let want = inset_reading(i64::from(*units), i64::from(sides.unwrap_or(*units)));
                 let label = if subject.is_empty() {
                     "inset".to_string()
                 } else {

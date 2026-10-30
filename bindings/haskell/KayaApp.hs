@@ -253,6 +253,7 @@ module KayaApp
     bindSource,
     setSpacing,
     setInset,
+    setInsetPair,
     setAlign,
     setFilled,
     setMaxLines,
@@ -2985,6 +2986,14 @@ setSpacing (Widget w) gap = emitB (W.txSetSpacing w gap)
 setInset :: Widget -> Double -> Build ()
 setInset (Widget w) pad = emitB (W.txSetInset w pad)
 
+-- | The inset pair: the top and bottom, then the leading and trailing sides,
+-- CSS padding's two-value form (docs\/styling-plan.md D3). The declarative
+-- spelling is the 'InsetPair' attr.
+setInsetPair :: Widget -> Double -> Double -> Build ()
+setInsetPair (Widget w) vertical horizontal = do
+  emitB (W.txSetInset w vertical)
+  emitB (W.txSetInsetX w horizontal)
+
 -- Construction props are a closed GADT indexed by widget class:
 -- container-only props on a leaf are type errors before they are scene
 -- errors.
@@ -3410,6 +3419,9 @@ data Attr (c :: WClass) where
   -- | This container's own padding, between its bounds and its children — the
   -- window inset one level down.
   Inset :: Double -> Attr 'BoxW
+  -- | The inset pair: the top and bottom, then the leading and trailing
+  -- sides (docs\/styling-plan.md D3).
+  InsetPair :: Double -> Double -> Attr 'BoxW
   -- | This container's cross-axis child placement. Containers only,
   -- held by the index like 'Spacing'.
   Align :: Align -> Attr 'BoxW
@@ -3601,6 +3613,7 @@ applyAttr (ColumnsAuto minWidth) w = setColumnsAuto w minWidth
 applyAttr (Wrap on) w = setWrap w on
 applyAttr (Spacing gap) w = setSpacing w gap
 applyAttr (Inset pad) w = setInset w pad
+applyAttr (InsetPair vertical horizontal) w = setInsetPair w vertical horizontal
 applyAttr (Align a) w = setAlign w a
 applyAttr (Filled t) w = setFilled w t
 applyAttr (GroundGradient c) (Widget n) = do
@@ -4923,6 +4936,8 @@ data TplAttr where
   -- window inset two levels up and the live 'Inset' one zone down, the
   -- same number and the same prop.
   TplInset :: Double -> TplAttr
+  -- | The stamped inset pair, the live 'InsetPair' one zone down.
+  TplInsetPair :: Double -> Double -> TplAttr
   -- | This stamped copy's accessibility IDENTIFIER — the authored key
   -- automation addresses it by, never spoken. THREE CONSTRUCTORS PER STR
   -- PROP, the live 'Attr''s pair plus the row's own field: a
@@ -5112,6 +5127,9 @@ applyTplAttr (TplTintField (KField i)) (Node n) = emitT (W.txBindTintElement n 0
 applyTplAttr (TplColumnsAuto minWidth) n = setColumnsAuto n minWidth
 applyTplAttr (TplWrap on) n = setWrap n on
 applyTplAttr (TplInset pad) n = setNodeInset n pad
+applyTplAttr (TplInsetPair vertical horizontal) (Node n) = do
+  emitT (W.txSetInset n vertical)
+  emitT (W.txSetInsetX n horizontal)
 applyTplAttr (TplA11yId v) n = bindStrSource a11yIdProp n v
 applyTplAttr (TplA11yIdBound src) n = bindStrSource a11yIdProp n src
 applyTplAttr (TplA11yIdField src) n = bindStrSource a11yIdProp n src

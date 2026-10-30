@@ -32,7 +32,7 @@ public final class A11yRows {
                         head.setRole(title, KayaApp.Role.HEADING);
                         head.setA11yId(title, head.value());
                     });
-                    head.setInset(bar, 8.0);
+                    head.setInset(bar, 8.0, 12.0);
                 }
             }));
 

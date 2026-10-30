@@ -58,8 +58,8 @@ DOORS = [
       ".padding(top = KAYA_DOCK_PAD_Y, bottom = KAYA_DOCK_PAD_Y + if (KayaSceneModel.dockPlayer != 0L) KAYA_DOCK_LINE else 0.dp),",
       "CompositionLocalProvider(LocalKayaPhoneDock provides true) { KayaRender(root) }"], ["Color("]),
     ("phone dock inset", "fun kayaInsetPadding(node: KayaNode): Modifier {",
-     ["if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (if (node.insetSet) node.inset else 0.0).dp)",
-      "return Modifier.padding(kayaFilledInset(node).dp)"], []),
+     ["if (LocalKayaPhoneDock.current) return Modifier.padding(horizontal = (node.insetX ?: if (node.insetSet) node.inset else 0.0).dp)",
+      "return kayaInsetEdges(node, kayaFilledInset(node))"], []),
     # docs/media-player-plan.md M17: the line is the player's own position, drawn
     # in Material's flat form, out of the accessibility tree, with no wire per tick.
     ("dock line", "private fun KayaDockLine(modifier: Modifier) {",

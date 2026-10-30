@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xd4526bbce915c1b5L
+let spec_hash = 0x721721bd5ae0c2aaL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -173,6 +173,7 @@ let prop_text_scale = 72
 let prop_font_weight = 73
 let prop_font_italic = 74
 let prop_font_width = 75
+let prop_inset_x = 76
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -3393,6 +3394,32 @@ let tx_bind_font_width_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_font_width);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant inset_x value. *)
+let tx_set_inset_x widget_id inset_x =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_inset_x);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (F64 inset_x))
+
+(* set_property with a signal-bound inset_x value. *)
+let tx_bind_inset_x widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_inset_x);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_inset_x_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_inset_x);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

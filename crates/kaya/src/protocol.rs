@@ -2579,6 +2579,10 @@ pub enum Prop {
     /// children to hold away from its edge. Spelled in BOTH construction
     /// zones: a stamped row needs it as much as a live one.
     Inset,
+    /// The same container's LEADING AND TRAILING padding, apart from `inset`'s
+    /// top and bottom (docs/styling-plan.md D3, the inset pair, ruled
+    /// 2026-10-30): unset, the sides take `inset`.
+    InsetX,
     /// The container's arrangement axis (docs/adaptive-layout-plan.md
     /// D1/D2): row and column are one node this parameterizes, and the
     /// prop is mutable so a breakpoint diff or a handler toggle is an

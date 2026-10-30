@@ -1417,6 +1417,21 @@ the next sighting. The leg stays in the pool: one sighting at host load 138
 is not a measured reason to run it alone (the maintainer's rule that every
 exclusive leg needs one).
 
+## DEFECT — Android editor-go: View>Font… opened no sheet, and the bundle cannot say why (seen once 2026-10-30)
+KEY: editor-go android, the font picker is not up and settled, file dialog 3 is already live, kayaFontDialog, choose_font compose
+
+In edfix's filtered run (validate-all --only editor,a11yrows, flightrec run
+20261030T221347Z-045118) the first `menu_activate "View>Font…"` answered ok
+and then every font read said "the font picker is not up and settled" for
+the whole ceiling; the second Font… was refused with "file dialog 3 is
+already live", so the core held the first request while no sheet was on
+screen (the app's shot shows the buffer, no sheet). Green on the rerun
+straight after (editor-go, fontpick-go, fontpick-compose). The bundle has no
+line for the request reaching the Compose arm or for the sheet's state, so it
+cannot tell a request that never arrived from a sheet that never composed;
+the recorder needs that line (the Compose font dialog's request and
+presentation in the verb trace) before a second sighting is worth reading.
+
 ## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 

@@ -1460,12 +1460,13 @@ export class Widget extends Handle {
     return this;
   }
 
-  /** This container's own padding, uniform on all four sides. Live-only:
-   * a blueprint is declared once, and a template's inset is the
-   * constructor option. */
-  inset(pad: number): this {
+  /** This container's own padding: one value for all four sides, or
+   * `[vertical, horizontal]` (docs/styling-plan.md D3). Live-only: a
+   * blueprint is declared once, and a template's inset is the constructor
+   * option. */
+  inset(pad: Inset): this {
     this._live("inset()");
-    records().push(wire.tx_set_inset(this.id, Number(pad)));
+    setInset(this, pad);
     return this;
   }
 
@@ -4656,10 +4657,22 @@ function menuRoleValue(role: unknown): string {
 // -------------------------------------------------------------- widgets
 
 export type GrowOption = { grow?: number };
+/** A container's inset: one value for all four sides, or `[vertical,
+ * horizontal]`, CSS padding's two-value form (docs/styling-plan.md D3). */
+export type Inset = number | readonly [number, number];
+
+function setInset(handle: Handle, pad: Inset): void {
+  if (typeof pad === "number") {
+    records().push(wire.tx_set_inset(handle.id, Number(pad)));
+    return;
+  }
+  records().push(wire.tx_set_inset(handle.id, Number(pad[0])));
+  records().push(wire.tx_set_inset_x(handle.id, Number(pad[1])));
+}
 export type ContainerOptions = GrowOption & {
   spacing?: number;
   align?: AlignValue | AlignName;
-  inset?: number;
+  inset?: Inset;
   filled?: TintValue | TintName;
 };
 
@@ -4667,7 +4680,11 @@ function setLayout(handle: Handle, opts: ContainerOptions): void {
   if (opts.grow !== undefined) records().push(wire.tx_set_grow(handle.id, Number(opts.grow)));
   if (opts.spacing !== undefined) records().push(wire.tx_set_spacing(handle.id, Number(opts.spacing)));
   if (opts.align !== undefined) records().push(wire.tx_set_align(handle.id, alignValue(opts.align)));
-  if (opts.inset !== undefined) records().push(wire.tx_set_inset(handle.id, Number(opts.inset)));
+  if (opts.inset !== undefined) {
+    const [vertical, horizontal] = typeof opts.inset === "number" ? [opts.inset, undefined] : opts.inset;
+    records().push(wire.tx_set_inset(handle.id, Number(vertical)));
+    if (horizontal !== undefined) records().push(wire.tx_set_inset_x(handle.id, Number(horizontal)));
+  }
   if (opts.filled !== undefined) records().push(wire.tx_set_filled(handle.id, tintValue(opts.filled)));
 }
 
@@ -4802,7 +4819,7 @@ export function grid<T = void>(columns: number, optsOrBody?: GridOptions | ((gri
   return new Container(handle).run(run);
 }
 
-export type LabeledOptions = GrowOption & { spacing?: number; inset?: number };
+export type LabeledOptions = GrowOption & { spacing?: number; inset?: Inset };
 
 /** A LABELLED ROW (docs/forms-plan.md): `label` names the one control the
  * body declares, with an optional trailing button after it. A column of

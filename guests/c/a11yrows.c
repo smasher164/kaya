@@ -44,6 +44,7 @@ static void build_scene(void) {
     kaya_tx_create_for(&tx, W_FOR_HEADS, C_HEADS);
     kaya_tx_create_widget(&tx, N_BAR, KAYA_KIND_ROW);
     kaya_tx_set_inset(&tx, N_BAR, 8.0);
+    kaya_tx_set_inset_x(&tx, N_BAR, 12.0);
     kaya_tx_create_widget(&tx, N_TITLE, KAYA_KIND_LABEL);
     kaya_tx_bind_text_element(&tx, N_TITLE, 0, F_HEAD);
     kaya_tx_set_role(&tx, N_TITLE, KAYA_ROLE_HEADING);

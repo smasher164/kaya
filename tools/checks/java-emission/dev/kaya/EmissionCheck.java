@@ -119,6 +119,7 @@ public final class EmissionCheck {
         CHAIN.put("href(Signal)", prop(KayaWire.PROP_HREF));
         CHAIN.put("href(String)", prop(KayaWire.PROP_HREF));
         CHAIN.put("inset(double)", prop(KayaWire.PROP_INSET));
+        CHAIN.put("inset(double,double)", prop(KayaWire.PROP_INSET_X));
         CHAIN.put("lineNumbers(boolean)", prop(KayaWire.PROP_LINE_NUMBERS));
         CHAIN.put("lowLabel(String)", prop(KayaWire.PROP_LOW_LABEL));
         CHAIN.put("max(double)", prop(KayaWire.PROP_MAX));

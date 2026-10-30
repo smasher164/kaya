@@ -476,6 +476,8 @@ struct CoreState {
     /// Padding where SwiftUI and Compose nest two boxes — see
     /// `container_padding`, the only thing that writes it.
     container_insets: HashMap<WidgetId, f64>,
+    /// inset_x (prop 76, the inset pair): a container's sides apart from its inset.
+    container_sides: HashMap<WidgetId, f64>,
     /// Each filled container's tint (docs/tints-plan.md T2).
     filled: HashMap<WidgetId, i64>,
     /// The composers (docs/composer-plan.md §4), for their default inset.
@@ -2491,15 +2493,7 @@ fn in_declared_table(core: &CoreState, id: WidgetId) -> bool {
 /// the window inset around the container's own padding — so a root's Padding
 /// is the SUM, and every writer goes through here.
 fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
-    let own = core.container_insets.get(&id).copied().unwrap_or(
-        if core.filled.contains_key(&id) || skin::is_activatable(id) && !in_declared_table(core, id) {
-            FILLED_DEFAULT_INSET
-        } else if core.composers.contains_key(&id) {
-            COMPOSER_INSET
-        } else {
-            0.0
-        },
-    );
+    let own = own_inset(core, id);
     let root = core.mounted_roots.values().any(|&r| r == id);
     // A DECLARED TABLE'S CARD INTERIOR RIDES THIS NUMBER deliberately
     // (TABLE_CARD_XAML): it is the one every track arithmetic already
@@ -2511,6 +2505,27 @@ fn container_padding(core: &CoreState, id: WidgetId) -> f64 {
         0.0
     };
     own + card + if root { core.inset } else { 0.0 }
+}
+
+/// [`container_padding`] for the leading and trailing edges: inset_x in
+/// place of the container's own inset when it declares one.
+fn container_padding_x(core: &CoreState, id: WidgetId) -> f64 {
+    let pad = container_padding(core, id);
+    core.container_sides.get(&id).map_or(pad, |sides| pad - own_inset(core, id) + sides)
+}
+
+/// The container's own term: its declared inset, else the filled, activatable
+/// or composer default.
+fn own_inset(core: &CoreState, id: WidgetId) -> f64 {
+    core.container_insets.get(&id).copied().unwrap_or(
+        if core.filled.contains_key(&id) || skin::is_activatable(id) && !in_declared_table(core, id) {
+            FILLED_DEFAULT_INSET
+        } else if core.composers.contains_key(&id) {
+            COMPOSER_INSET
+        } else {
+            0.0
+        },
+    )
 }
 
 /// A GROWING textarea (docs/grow-lines-plan.md §2): its height is its
@@ -2767,11 +2782,14 @@ fn list_row_reach(core: &CoreState, id: WidgetId) -> f64 {
 
 fn stamp_container_padding(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let pad = container_padding(core, id);
+    let sides = container_padding_x(core, id);
     let reach = list_row_reach(core, id);
     let pad = if reach > 0.0 {
-        Thickness { Left: pad, Top: reach, Right: pad, Bottom: reach }
-    } else {
+        Thickness { Left: sides, Top: reach, Right: sides, Bottom: reach }
+    } else if in_declared_table(core, id) {
         table_row_padding(core, id, pad)
+    } else {
+        Thickness { Left: sides, Top: pad, Right: sides, Bottom: pad }
     };
     match core.widgets.get(&id) {
         Some(
@@ -19113,6 +19131,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.container_insets.insert(id, pad);
                     stamp_container_padding(core, id)?;
                 }
+                (
+                    NativeWidget::Column(_)
+                    | NativeWidget::Row(_)
+                    | NativeWidget::Grid2D(_)
+                    | NativeWidget::Labeled(_)
+                    | NativeWidget::Expander { .. },
+                    Prop::InsetX,
+                    Value::F64(pad),
+                ) => {
+                    core.container_sides.insert(id, pad);
+                    stamp_container_padding(core, id)?;
+                }
                 (NativeWidget::Scroll(viewer), Prop::Axis, Value::I64(v)) => {
                     set_scroll_axis(viewer, v == 0)?;
                 }
@@ -21989,6 +22019,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
         *core = Some(CoreState {
             inset: 16.0,
             container_insets: HashMap::new(),
+            container_sides: HashMap::new(),
             filled: HashMap::new(),
             composers: HashMap::new(),
             tips: HashMap::new(),
@@ -30993,13 +31024,15 @@ impl crate::harness::Stage for WinUiStage {
                 .and_then(|id| core.container_insets.get(id))
                 .copied()
                 .unwrap_or(0.0);
-            let x = (f64::from(origin.X) - own).round() as i64;
+            let own_x = core
+                .mounted_roots
+                .get(&0)
+                .and_then(|id| core.container_sides.get(id))
+                .copied()
+                .unwrap_or(own);
+            let x = (f64::from(origin.X) - own_x).round() as i64;
             let y = (f64::from(origin.Y) - own).round() as i64;
-            Ok(if x == y {
-                format!("{x}")
-            } else {
-                format!("{x}x{y} (axes disagree)")
-            })
+            Ok(crate::harness::inset_reading(y, x))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -31076,11 +31109,7 @@ impl crate::harness::Stage for WinUiStage {
             });
             let x = (f64::from(origin.X) - margin.Left - window_term - card_term).round() as i64;
             let y = (f64::from(origin.Y) - margin.Top - window_term - card_term).round() as i64;
-            Ok(if x == y {
-                format!("{x}")
-            } else {
-                format!("{x}x{y} (axes disagree)")
-            })
+            Ok(crate::harness::inset_reading(y, x))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xd4526bbce915c1b5L;
+    public static final long SPEC_HASH = 0x721721bd5ae0c2aaL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -156,6 +156,7 @@ public final class KayaWire {
     public static final int PROP_FONT_WEIGHT = 73;
     public static final int PROP_FONT_ITALIC = 74;
     public static final int PROP_FONT_WIDTH = 75;
+    public static final int PROP_INSET_X = 76;
     public static final int WPROP_TITLE = 1;
     public static final int WPROP_WIDTH = 2;
     public static final int WPROP_HEIGHT = 3;
@@ -3401,6 +3402,29 @@ public final class KayaWire {
     public static byte[] txBindFontWidthElement(long widgetId, int level, int field) {
         Enc b = begin(TX_KIND_SET_PROPERTY);
         b.putLong(widgetId).putInt(PROP_FONT_WIDTH).putInt(SOURCE_ELEMENT)
+                .putInt(level).putInt(field);
+        return finish(b);
+    }
+
+    /** set_property with a constant inset_x value. */
+    public static byte[] txSetInsetX(long widgetId, double insetX) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INSET_X).putInt(SOURCE_CONST);
+        encodeValue(b, insetX);
+        return finish(b);
+    }
+
+    /** set_property with a signal-bound inset_x value. */
+    public static byte[] txBindInsetX(long widgetId, long signalId) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INSET_X).putInt(SOURCE_SIGNAL).putLong(signalId);
+        return finish(b);
+    }
+
+    /** set_property bound to one field of the element of the enclosing For. */
+    public static byte[] txBindInsetXElement(long widgetId, int level, int field) {
+        Enc b = begin(TX_KIND_SET_PROPERTY);
+        b.putLong(widgetId).putInt(PROP_INSET_X).putInt(SOURCE_ELEMENT)
                 .putInt(level).putInt(field);
         return finish(b);
     }

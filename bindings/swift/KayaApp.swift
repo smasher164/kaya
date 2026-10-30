@@ -4642,10 +4642,12 @@ public final class KayaAppTx {
     }
 
     /// A container's OWN padding: DIP between its bounds and its children,
-    /// uniform on all four sides — the window inset one level down
+    /// `8` for all four sides or `KayaInset(6, 14)` for the top and bottom
+    /// then the sides — the window inset one level down
     /// (docs/styling-plan.md D3).
-    func setInset(_ w: KayaWidget, _ pad: Double) {
-        tx.setInset(w.id, pad)
+    func setInset(_ w: KayaWidget, _ pad: KayaInset) {
+        tx.setInset(w.id, pad.vertical)
+        if let sides = pad.horizontal { tx.setInsetX(w.id, sides) }
     }
 
     /// A container's cross-axis child placement. Containers only; baseline
@@ -5757,7 +5759,7 @@ public final class KayaAppTx {
 
     @discardableResult
     public func column<R>(
-        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: KayaInset? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil,
         onSelect: ((KayaAppTx) throws -> Void)? = nil,
@@ -5796,7 +5798,7 @@ public final class KayaAppTx {
     /// `role: .composer` draws the row as one text field around its field
     /// and buttons (docs/composer-plan.md §4).
     public func row<R>(
-        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: KayaInset? = nil,
         align: KayaAlign? = nil, filled: KayaTint? = nil, role: KayaRole? = nil,
         onActivate: ((KayaAppTx) throws -> Void)? = nil,
         onSelect: ((KayaAppTx) throws -> Void)? = nil,
@@ -5817,7 +5819,7 @@ public final class KayaAppTx {
     /// `spacing` is the inter-cell gap on both axes.
     @discardableResult
     public func grid<R>(
-        columns: Int, spacing: Double? = nil, inset: Double? = nil,
+        columns: Int, spacing: Double? = nil, inset: KayaInset? = nil,
         grow: Double? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
@@ -5840,7 +5842,7 @@ public final class KayaAppTx {
     /// form.
     @discardableResult
     public func labeled<R>(
-        _ label: String, spacing: Double? = nil, inset: Double? = nil,
+        _ label: String, spacing: Double? = nil, inset: KayaInset? = nil,
         grow: Double? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
@@ -5851,7 +5853,7 @@ public final class KayaAppTx {
 
     @discardableResult
     func labeled<R>(
-        _ label: KayaSignal, spacing: Double? = nil, inset: Double? = nil,
+        _ label: KayaSignal, spacing: Double? = nil, inset: KayaInset? = nil,
         grow: Double? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
@@ -5861,7 +5863,7 @@ public final class KayaAppTx {
     }
 
     private func labeledOf<R>(
-        _ children: (KayaWidget) throws -> R, spacing: Double?, inset: Double?, grow: Double?,
+        _ children: (KayaWidget) throws -> R, spacing: Double?, inset: KayaInset?, grow: Double?,
         _ name: () -> Void
     ) rethrows -> R {
         let parent = widget(UInt32(KAYA_KIND_LABELED))
@@ -5884,7 +5886,7 @@ public final class KayaAppTx {
     public func expander<R>(
         _ text: String, summary: String? = nil, expanded: Bool? = nil,
         symbol: KayaSymbol? = nil, onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
-        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: KayaInset? = nil,
         align: KayaAlign? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
@@ -5898,7 +5900,7 @@ public final class KayaAppTx {
     public func expander<R>(
         _ text: KayaSignal, summary: String? = nil, expanded: Bool? = nil,
         symbol: KayaSymbol? = nil, onToggle: ((KayaAppTx, Bool) throws -> Void)? = nil,
-        grow: Double? = nil, spacing: Double? = nil, inset: Double? = nil,
+        grow: Double? = nil, spacing: Double? = nil, inset: KayaInset? = nil,
         align: KayaAlign? = nil,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
@@ -5911,7 +5913,7 @@ public final class KayaAppTx {
     private func expanderOf<R>(
         _ header: (KayaWidget) -> Void, summary: String?, expanded: Bool?,
         symbol: KayaSymbol?, onToggle: ((KayaAppTx, Bool) throws -> Void)?,
-        grow: Double?, spacing: Double?, inset: Double?, align: KayaAlign?,
+        grow: Double?, spacing: Double?, inset: KayaInset?, align: KayaAlign?,
         _ children: (KayaWidget) throws -> R
     ) rethrows -> R {
         try containerOf(
@@ -5936,7 +5938,7 @@ public final class KayaAppTx {
 
     private func containerOf<R>(
         _ kind: UInt32, _ children: (KayaWidget) throws -> R, grow: Double? = nil, spacing: Double? = nil,
-        inset: Double? = nil, align: KayaAlign? = nil, filled: KayaTint? = nil
+        inset: KayaInset? = nil, align: KayaAlign? = nil, filled: KayaTint? = nil
     ) rethrows -> R {
         // Parent before children: creation order is observable (column#N)
         // and statement-shaped construction is parent-first in every
@@ -7468,8 +7470,9 @@ public final class KayaTpl {
 
     /// A stamped CONTAINER's own padding, in DIP between its bounds and
     /// its children.
-    public func setInset(_ n: KayaNodeHandle, _ pad: Double) {
-        tx.tx.setInset(n.id, pad)
+    public func setInset(_ n: KayaNodeHandle, _ pad: KayaInset) {
+        tx.tx.setInset(n.id, pad.vertical)
+        if let sides = pad.horizontal { tx.tx.setInsetX(n.id, sides) }
     }
 
     /// Bind a label's text to one field of the element; KayaField<String>
@@ -8632,4 +8635,25 @@ public final class KayaTpl {
         tx.tx.templateEnd()
         return (n, out)
     }
+}
+
+/// A container's inset (docs/styling-plan.md D3): a number for all four
+/// sides, or `KayaInset(6, 14)` for the top and bottom then the leading and
+/// trailing sides, CSS padding's two-value form.
+public struct KayaInset: ExpressibleByFloatLiteral, ExpressibleByIntegerLiteral, Sendable {
+    public let vertical: Double
+    public let horizontal: Double?
+
+    public init(_ all: Double) {
+        vertical = all
+        horizontal = nil
+    }
+
+    public init(_ vertical: Double, _ horizontal: Double) {
+        self.vertical = vertical
+        self.horizontal = horizontal
+    }
+
+    public init(floatLiteral value: Double) { self.init(value) }
+    public init(integerLiteral value: Int) { self.init(Double(value)) }
 }

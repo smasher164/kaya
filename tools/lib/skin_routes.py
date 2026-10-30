@@ -106,8 +106,8 @@ DOORS = [
      [".environment(\\.kayaPhoneDockArt, kayaPhoneDockArt)", ".padding(.vertical, kayaPhoneDockPadY)",
       ".frame(maxWidth: .infinity, maxHeight: .infinity)"], [".padding(.horizontal"]),
     ("the phone dock's containers", "struct KayaInsetPadding: ViewModifier {",
-     ["if phoneDock != nil {\ncontent.padding(.horizontal, node.insetSet ? node.inset : 0)",
-      "content.padding(kayaFilledInset(node))"], []),
+     ["if phoneDock != nil {\ncontent.padding(.horizontal, node.insetX ?? (node.insetSet ? node.inset : 0))",
+      "content.padding(kayaInsetEdges(node, kayaFilledInset(node)))"], []),
     ("the phone dock's boxed picture", "private struct KayaImageBox: View {",
      ["let box = kayaDockClamp(CGSize(width: node.maxWidth, height: node.maxHeight), dockArt)"], []),
 ]

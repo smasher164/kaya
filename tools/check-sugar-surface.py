@@ -9882,7 +9882,21 @@ check_styling_point(
     r"public void SetInset\(", r"public Widget inset\(",
     r"func setInset\(", r"Inset :: Double -> Attr",
     r"let set_inset \(Widget id\)|let (row|column|grid) [^=]*\?inset",
-    r"^  inset\(pad: number\)")
+    r"^  inset\(pad: Inset\)")
+
+# THE INSET PAIR (docs/styling-plan.md D3, ruled 2026-10-30): the sides apart
+# from the top and bottom, one inset with two values in every binding.
+check_styling_point(
+    "container inset pair",
+    r"pub fn inset\(&mut self, widget: WidgetId, pad: impl Into<Inset>\)",
+    r"^Inset = float \| tuple\[float, float\]",
+    r"func \(w Widget\) Inset\(pad float64, sides \.\.\.float64\)",
+    r"implicit operator Inset\(\(double Vertical, double Horizontal\) pair\)",
+    r"public Widget inset\(double vertical, double horizontal\)",
+    r"public init\(_ vertical: Double, _ horizontal: Double\)",
+    r"InsetPair :: Double -> Double -> Attr",
+    r"let set_inset_pair \(Widget id\)",
+    r"^export type Inset = number \| readonly \[number, number\];")
 
 # EVERY WINDOW HANDLER NEEDS A CONSTRUCT SPELLING TOO — AND NO LOOSE
 # ONE: NO WINDOW ATTRIBUTE LIVES AS A LOOSE FUNCTION OUTSIDE THE

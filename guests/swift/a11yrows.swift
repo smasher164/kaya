@@ -26,7 +26,7 @@ KayaApp.run { app in
                     t.setRole(title, .heading)
                     t.setA11yId(title, KayaField<String>.element)
                 }
-                t.setInset(bar, 8)
+                t.setInset(bar, KayaInset(8, 12))
             }
             return root
         }

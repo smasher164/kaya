@@ -443,7 +443,7 @@ sealed class LineRow
 
     public void SetRole(Node n, Role role) => t.SetRole(n, role);
 
-    public void SetInset(Node n, double pad) => t.SetInset(n, pad);
+    public void SetInset(Node n, Inset pad) => t.SetInset(n, pad);
 
     public void SetFill(Node n, bool on) => t.SetFill(n, on);
 

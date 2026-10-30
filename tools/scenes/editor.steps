@@ -274,8 +274,9 @@ expect entry#last ""
 expect label@matches-2 "no matches"
 click button#last
 expect label@matches-2 ""
-# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), around one line.
-expect_inset row@statusbar-2 6
+# The STATUS ROW'S OWN INSET (docs/styling-plan.md D3), around one line: 6
+# above and below, 14 at the sides, clear of a window's rounded corner.
+expect_inset row@statusbar-2 6 14
 expect_height_fits row@statusbar-2
 
 # ---- the View menu: the gutter and the zoom ------------------------

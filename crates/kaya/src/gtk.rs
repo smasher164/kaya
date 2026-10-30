@@ -181,6 +181,9 @@ fn assert_symbol_icons_resolve(display: &gdk::Display) {
 /// class per DISTINCT value, `kaya-inset-8` and friends, defined in
 /// `CoreState::container_inset_css`.
 const INSET_CLASS: &str = "kaya-inset-";
+/// inset_x's classes (the inset pair, docs/styling-plan.md D3): two classes
+/// so the rule outranks the uniform one whatever their order.
+const SIDES_CLASS: &str = "kaya-sides";
 
 /// Guest-visible text uses LF on every platform, so text is normalized
 /// wherever it escapes toward the guest. GTK's Entry/TextView store a
@@ -6435,6 +6438,7 @@ struct CoreState {
     /// Separate from `inset_css`, which the window arm rewrites whole.
     container_inset_css: gtk4::CssProvider,
     container_insets: BTreeSet<i64>,
+    container_sides: BTreeSet<i64>,
     /// docs/code-surface-plan.md M1, M2, S1: one `kaya-face-<id>` rule per
     /// text widget that asks for its own face or size.
     face_css: gtk4::CssProvider,
@@ -17562,6 +17566,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let body = x.free_body.clone().upcast::<gtk4::Widget>();
                     set_container_inset(core, &body, pad);
                 }
+                (NativeWidget::Expander(x), Prop::InsetX, Value::F64(pad)) => {
+                    let body = x.free_body.clone().upcast::<gtk4::Widget>();
+                    set_container_sides(core, &body, pad);
+                }
                 (NativeWidget::Expander(x), Prop::Align, Value::I64(mode)) => {
                     let body = x.free_body.clone().upcast::<gtk4::Widget>();
                     set_container_align(&body, mode);
@@ -18606,6 +18614,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let widget = row.clone().upcast::<gtk4::Widget>();
                     set_container_inset(core, &widget, pad);
                 }
+                (NativeWidget::Column(container), Prop::InsetX, Value::F64(pad))
+                | (NativeWidget::Row(container), Prop::InsetX, Value::F64(pad)) => {
+                    let widget = container.clone().upcast::<gtk4::Widget>();
+                    set_container_sides(core, &widget, pad);
+                }
+                (NativeWidget::Grid(grid), Prop::InsetX, Value::F64(pad)) => {
+                    let widget = grid.clone().upcast::<gtk4::Widget>();
+                    set_container_sides(core, &widget, pad);
+                }
+                (NativeWidget::Labeled(row), Prop::InsetX, Value::F64(pad)) => {
+                    let widget = row.clone().upcast::<gtk4::Widget>();
+                    set_container_sides(core, &widget, pad);
+                }
                 // A LABELLED ROW'S SPACING IS THE GAP BEFORE ITS TRAILING
                 // ACTION, which is the one gap kaya owns here: the label's
                 // and the control's seats are the platform's, and their gaps
@@ -19302,18 +19323,39 @@ fn set_container_inset(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
     widget.remove_css_class(FILLED_PAD_CLASS);
     widget.remove_css_class(ACTIVATABLE_PAD_CLASS);
     if core.container_insets.insert(px) {
-        let sheet: String = core
-            .container_insets
-            .iter()
-            .map(|n| format!(".{INSET_CLASS}{n} {{ border: {n}px solid transparent; }}\n"))
-            .collect();
-        load_kaya_css(
-            &core.container_inset_css,
-            "container inset",
-            &sheet,
-            &core.css_error,
-        );
+        load_container_insets(core);
     }
+}
+
+/// A container's leading and trailing inset apart from its top and bottom
+/// (prop 76, the inset pair): the same transparent border, its sides only.
+fn set_container_sides(core: &mut CoreState, widget: &gtk4::Widget, pad: f64) {
+    use gtk4::prelude::WidgetExt;
+    let px = pad.round().max(0.0) as i64;
+    for class in widget.css_classes() {
+        if class.starts_with(SIDES_CLASS) {
+            widget.remove_css_class(&class);
+        }
+    }
+    widget.add_css_class(SIDES_CLASS);
+    widget.add_css_class(&format!("{SIDES_CLASS}-{px}"));
+    if core.container_sides.insert(px) {
+        load_container_insets(core);
+    }
+}
+
+fn load_container_insets(core: &CoreState) {
+    let mut sheet: String = core
+        .container_insets
+        .iter()
+        .map(|n| format!(".{INSET_CLASS}{n} {{ border: {n}px solid transparent; }}\n"))
+        .collect();
+    for n in &core.container_sides {
+        sheet.push_str(&format!(
+            ".{SIDES_CLASS}.{SIDES_CLASS}-{n} {{ border-left: {n}px solid transparent; border-right: {n}px solid transparent; }}\n"
+        ));
+    }
+    load_kaya_css(&core.container_inset_css, "container inset", &sheet, &core.css_error);
 }
 
 /// Arm one of kaya's providers to record its parse errors into the shared
@@ -21134,6 +21176,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 bled: Vec::new(),
                 container_inset_css,
                 container_insets: BTreeSet::new(),
+                container_sides: BTreeSet::new(),
                 face_css,
                 faces: std::collections::BTreeMap::new(),
                 skin: skin::Skin {
@@ -29206,11 +29249,7 @@ fn css_inset_of(widget: &gtk4::Widget) -> String {
         return "unallocated".to_owned();
     };
     let (x, y) = ((-bounds.x()).round() as i64, (-bounds.y()).round() as i64);
-    if x == y {
-        format!("{x}")
-    } else {
-        format!("{x}x{y} (axes disagree)")
-    }
+    crate::harness::inset_reading(y, x)
 }
 
 /// The steps-file spelling of a LABEL target, for the `format` refusal

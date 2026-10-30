@@ -555,7 +555,7 @@ static class Program
         FwdAs("TplDragRef", "Draggable", ["Node n"], "n");
         Set("SetDropTarget", ["Node n", "params Op[] ops"], "n, ops");
         Set("SetRole", ["Node n", "Role role"], "n, role");
-        Set("SetInset", ["Node n", "double pad"], "n, pad");
+        Set("SetInset", ["Node n", "Inset pad"], "n, pad");
         Set("SetFill", ["Node n", "bool on"], "n, on");
         Set("SetFormat", ["Node n", "NumberFormat format"], "n, format");
         Set("SetSubmits", ["Node n", "bool on"], "n, on");

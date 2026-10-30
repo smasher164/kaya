@@ -1288,6 +1288,12 @@
 #define KAYA_PROP_INSET 17
 
 /**
+ * A container's leading and trailing padding apart from its inset
+ * (docs/styling-plan.md D3, the inset pair).
+ */
+#define KAYA_PROP_INSET_X 76
+
+/**
  * The arrangement axis (docs/adaptive-layout-plan.md D1): row and
  * column are one node this prop parameterizes.
  */

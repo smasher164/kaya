@@ -1223,6 +1223,7 @@ pub(crate) const PROP_ROLE: u32 = 16;
 /// between its bounds and its children, uniform all sides. Layout,
 /// carried by the spacing kinds.
 pub(crate) const PROP_INSET: u32 = 17;
+pub(crate) const PROP_INSET_X: u32 = 76;
 pub(crate) const PROP_AXIS: u32 = 18;
 /// The pickers' value and range slots, packed-decimal I64s the spec
 /// labels Date/Time (docs/datetime-plan.md D2); the step is a count.
@@ -1934,6 +1935,7 @@ fn prop(raw: u32) -> Prop {
         PROP_ACCEPTS => Prop::Accepts,
         PROP_ROLE => Prop::Role,
         PROP_INSET => Prop::Inset,
+        PROP_INSET_X => Prop::InsetX,
         PROP_AXIS => Prop::Axis,
         PROP_DATE => Prop::Date,
         PROP_TIME => Prop::Time,
@@ -6166,6 +6168,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Accepts => PROP_ACCEPTS,
         Prop::Role => PROP_ROLE,
         Prop::Inset => PROP_INSET,
+        Prop::InsetX => PROP_INSET_X,
         Prop::Axis => PROP_AXIS,
         Prop::A11yHint => PROP_A11Y_HINT,
         Prop::Date => PROP_DATE,

@@ -22,7 +22,7 @@ main = kayaMain $ \app -> do
           -- The template zone is located by the RESULT TYPE 'Tpl Node', and
           -- 'withTplAttrs' is the only way to reach a node.
           each heads $
-            withTplAttrs [TplInset 8] $
+            withTplAttrs [TplInsetPair 8 12] $
               rowOf [withTplAttrs [TplRole Heading, TplA11yIdField element] (label element)]
         ]
     mount root

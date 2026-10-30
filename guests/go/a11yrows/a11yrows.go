@@ -31,7 +31,7 @@ func App() *kaya.App {
 					head.SetRole(title, kaya.RoleHeading)
 					head.BindA11yID(title, head.Value())
 				})
-				head.SetInset(bar, 8)
+				head.SetInset(bar, 8, 12)
 			}
 			tx.InsertFresh(heads, "Heading one") // label#0, row#0
 			tx.InsertFresh(heads, "Heading two") // label#last

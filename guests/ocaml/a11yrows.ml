@@ -22,7 +22,7 @@ let () =
               spend on an id. *)
            each heads (fun () ->
               Tpl.(
-                row ~inset:8.0
+                row ~inset_pair:(8.0, 12.0)
                   [ label ~role:Heading ~bind_field:element ~a11y_id_field:element ]
                   ()));
          ]

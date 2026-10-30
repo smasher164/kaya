@@ -1357,15 +1357,16 @@ class Widget(_Handle):
         normalized default is 8). Containers only."""
         _records().append(wire.tx_set_spacing(self.id, float(gap)))
 
-    def inset(self, pad: float) -> None:
+    def inset(self, pad: Inset) -> None:
         """Set this container's own padding: DIP between its bounds and
-        its children, uniform on all four sides. Containers only, and a
-        negative one is refused.
+        its children, one value for all four sides or a pair, the top and
+        bottom then the leading and trailing sides (docs/styling-plan.md
+        D3). Containers only, and a negative one is refused.
 
         THE DECLARATIVE `inset=` IS THE TEMPLATE ZONE'S SPELLING; this
         dynamic setter stays live-only, since a blueprint is declared
         once and never mutated (tools/checks/py-node-props.py)."""
-        _records().append(wire.tx_set_inset(self.id, float(pad)))
+        _set_inset(self, pad)
 
     def context_menu(self,
                      catalog: ContextCatalog | None = None) -> _MenuScope[None]:
@@ -5297,8 +5298,18 @@ def _set_spacing(handle: _Handle, spacing: float | None) -> None:
     _records().append(wire.tx_set_spacing(handle.id, float(spacing)))
 
 
-def _set_inset(handle: _Handle, inset: float | None) -> None:
+Inset = float | tuple[float, float]
+"""A container's inset: one value for all four sides, or (vertical,
+horizontal), CSS padding's two-value form (docs/styling-plan.md D3)."""
+
+
+def _set_inset(handle: _Handle, inset: Inset | None) -> None:
     if inset is None:
+        return
+    if isinstance(inset, tuple):
+        vertical, horizontal = inset
+        _records().append(wire.tx_set_inset(handle.id, float(vertical)))
+        _records().append(wire.tx_set_inset_x(handle.id, float(horizontal)))
         return
     _records().append(wire.tx_set_inset(handle.id, float(inset)))
 
@@ -5328,7 +5339,7 @@ def scroll(grow: float | None = None, *, follows_end: bool = False,
 
 
 def grid(columns: float, *, grow: float | None = None,
-         spacing: float | None = None, inset: float | None = None,
+         spacing: float | None = None, inset: Inset | None = None,
          columns_when: tuple[SizeClass, int] | None = None) -> _Container:
     """A grid container laying its children out row-major into `columns`
     columns — each column at its NATURAL width, aligned across rows.
@@ -5376,7 +5387,7 @@ def grid(columns: float, *, grow: float | None = None,
 
 def labeled(label: TextSource, *, grow: float | None = None,
             spacing: float | None = None,
-            inset: float | None = None) -> _Labeled:
+            inset: Inset | None = None) -> _Labeled:
     """A LABELLED ROW (docs/forms-plan.md): `label` names the one control
     declared inside, with an optional trailing button after it. A column
     of nothing but these renders as the platform's form.
@@ -5396,7 +5407,7 @@ def expander(text: TextSource, *, summary: TextSource | None = None,
              on_toggle: Handler | None = None,
              grow: float | None = None, spacing: float | None = None,
              align: Align | str | None = None,
-             inset: float | None = None) -> _Container:
+             inset: Inset | None = None) -> _Container:
     """An EXPANDER (docs/expander-plan.md): `text` is the header the user
     activates, the body everything declared inside, laid out as a column
     and kept alive while collapsed. The user's toggle reaches `on_toggle`
@@ -5462,7 +5473,7 @@ def spacer(grow: float = 1.0) -> Widget:
 
 def column(*, grow: float | None = None, spacing: float | None = None,
            align: Align | str | None = None,
-           inset: float | None = None,
+           inset: Inset | None = None,
            filled: Tint | str | None = None,
            ground_gradient: Color | Source | None = None,
            ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
@@ -5537,7 +5548,7 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
 
 
 def row(*, grow: float | None = None, spacing: float | None = None,
-        align: Align | str | None = None, inset: float | None = None,
+        align: Align | str | None = None, inset: Inset | None = None,
         stack_when: SizeClass | None = None,
         filled: Tint | str | None = None,
         role: Role | str | None = None,

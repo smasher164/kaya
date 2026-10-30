@@ -630,4 +630,6 @@ func (sc SumCase[K, V]) SetRole(n Node, role Role) { sc.t.SetRole(n, role) }
 
 // SetInset pads a container this arm stamps; containers only, const
 // only (Tpl.SetInset).
-func (sc SumCase[K, V]) SetInset(n Node, pad float64) { sc.t.SetInset(n, pad) }
+func (sc SumCase[K, V]) SetInset(n Node, pad float64, sides ...float64) {
+	sc.t.SetInset(n, pad, sides...)
+}

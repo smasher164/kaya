@@ -1198,6 +1198,9 @@ pub const KAYA_PROP_ROLE: u32 = 16;
 /// from the window inset): DIP between its bounds and its children,
 /// uniform all sides. Layout, carried by the spacing kinds.
 pub const KAYA_PROP_INSET: u32 = 17;
+/// A container's leading and trailing padding apart from its inset
+/// (docs/styling-plan.md D3, the inset pair).
+pub const KAYA_PROP_INSET_X: u32 = 76;
 /// The arrangement axis (docs/adaptive-layout-plan.md D1): row and
 /// column are one node this prop parameterizes.
 pub const KAYA_PROP_AXIS: u32 = 18;
@@ -1539,6 +1542,7 @@ const _: () = assert!(
         && KAYA_PROP_ACCEPTS == wire::PROP_ACCEPTS
         && KAYA_PROP_ROLE == wire::PROP_ROLE
         && KAYA_PROP_INSET == wire::PROP_INSET
+        && KAYA_PROP_INSET_X == wire::PROP_INSET_X
         && KAYA_PROP_AXIS == wire::PROP_AXIS
         && KAYA_PROP_DATE == wire::PROP_DATE
         && KAYA_PROP_TIME == wire::PROP_TIME
@@ -2196,7 +2200,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 75,
+    crate::spec::PROPS.len() == 76,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

@@ -21,7 +21,7 @@ with app.window(title="a11yrows"):
         # both props below are CONST in every binding.
         heads = kaya.collection()
         for head in heads:
-            with kaya.row(inset=8):
+            with kaya.row(inset=(8, 12)):
                 kaya.label(bind=head).role(kaya.Role.HEADING).a11y_id(head)
         heads.insert_fresh("Heading one")
         heads.insert_fresh("Heading two")

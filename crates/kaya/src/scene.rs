@@ -1617,7 +1617,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // A container's own padding (docs/styling-plan.md D3): spacing's
         // kinds exactly, and for spacing's reason — the prop is about a
         // container's relation to ITS children.
-        Prop::Inset => {
+        Prop::Inset | Prop::InsetX => {
             matches!(
                 kind,
                 WidgetKind::Column
@@ -2311,7 +2311,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Source => ValueType::Blob,
         Prop::Grow => ValueType::F64,
         Prop::Spacing => ValueType::F64,
-        Prop::Inset => ValueType::F64,
+        Prop::Inset | Prop::InsetX => ValueType::F64,
         Prop::Align => ValueType::I64,
         Prop::Filled => ValueType::I64,
         Prop::FollowsEnd => ValueType::Bool,
@@ -3107,7 +3107,7 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     }
     // Same argument as grow's domain: negative padding has no reading,
     // and every backend would invent one.
-    if let (Prop::Inset, Value::F64(pad)) = (prop, value) {
+    if let (Prop::Inset | Prop::InsetX, Value::F64(pad)) = (prop, value) {
         assert!(
             *pad >= 0.0 && pad.is_finite(),
             "kaya: a container's inset must be finite and non-negative, got {pad}"
@@ -13126,6 +13126,20 @@ mod tests {
                 widget: WidgetId(1),
                 prop: Prop::Inset,
                 value: PropValue::Const(Value::F64(8.0)),
+            },
+        ]);
+    }
+
+    #[test]
+    #[should_panic(expected = "container's inset must be finite and non-negative")]
+    fn a_negative_container_inset_x_dies() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Row },
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::InsetX,
+                value: PropValue::Const(Value::F64(-1.0)),
             },
         ]);
     }
