@@ -50,10 +50,12 @@ three things no gate holds yet:
     search (docs/traps.md, the font panel's mode mask); the Mac's
     `expect_font_dialog` fails while a masked item shows.
   - ~~**The WinUI picker's face row and preview fall below its family list**~~
-    — FIXED 2026-10-29: the family list takes what the dialog has left, a
-    row and a half to 260 px, and the WinUI `expect_font_dialog` fails while
-    the faces row or the preview ends past what the dialog shows (in the
-    lane's 556 by 378 window: past 257 px with the list held at 260).
+    — FIXED 2026-10-29: the family list takes what the dialog has left, up
+    to 260 px, in whole rows (two at least; the preview gives way first),
+    and the WinUI `expect_font_dialog` fails while the dialog cuts the faces
+    row or the preview, while the list cuts a row, or while the selected row
+    is out of the list's view (docs/traps.md, the ContentDialog's finite
+    height).
 
 ## DEFER — the Mac font panel before macOS 26 lists every family under code_only (docs/font-picker-plan.md Q2; 2026-10-29)
 KEY: NSFontPanelCollectionsToolbarItem, kayaSelectFixedWidth, Fixed Width, code_only, macOS 13, macOS 15, font panel collections column

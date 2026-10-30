@@ -7,6 +7,8 @@ use std::cell::RefCell;
 use super::*;
 use crate::protocol::{FontChoice, FontFace};
 use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
+use bindings::Microsoft::UI::Xaml::Controls::Border;
+use bindings::Microsoft::UI::Xaml::SizeChangedEventHandler;
 use windows::Win32::Graphics::DirectWrite::*;
 
 fn collection() -> windows_core::Result<IDWriteFontCollection> {
@@ -115,11 +117,14 @@ fn families(code_only: bool) -> Vec<String> {
     crate::capi::font_family_list(&names.join("\n"))
 }
 
-/// The family list's height: what the dialog has left after the search,
-/// the faces and the preview, between a row and a half and 260 px, so a
-/// small window keeps the faces and the preview in view.
-const LIST_MIN: f64 = 48.0;
+/// The family list's room: what the dialog has left after the search, the
+/// faces and the preview, at most 260 px; it shows the whole rows that fit
+/// there, never fewer than FLOOR_ROWS, and the preview gives way first
+/// (docs/font-picker-plan.md §4.3).
 const LIST_MAX: f64 = 260.0;
+const FLOOR_ROWS: f64 = 2.0;
+const ROW_GAP: f64 = 2.0;
+const PART_GAP: f64 = 4.0;
 
 /// The open picker: its dialog, its rows and what is selected in them.
 struct Picker {
@@ -129,6 +134,10 @@ struct Picker {
     #[cfg(feature = "harness")]
     face_scroll: ScrollViewer,
     faces_on: bool,
+    list: Grid,
+    scroll: ScrollViewer,
+    stride: f64,
+    preview_room: Option<f64>,
     rows: Vec<(String, Button)>,
     face_rows: Vec<(FontFace, Button)>,
     face_grid: Grid,
@@ -172,6 +181,68 @@ fn text_block(text: &str, family: &str, face: Option<FontFace>) -> windows_core:
     Ok(block)
 }
 
+/// Every row as tall as the tallest family drawn in itself, and the list's
+/// height the whole rows that fit its room.
+fn fit_list(picker: &mut Picker, room: f64) -> windows_core::Result<()> {
+    if picker.stride <= 0.0 {
+        let mut tallest = 0.0f64;
+        for (_, button) in &picker.rows {
+            tallest = tallest.max(button.ActualHeight()?);
+        }
+        if tallest <= 0.0 {
+            return Ok(());
+        }
+        for (_, button) in &picker.rows {
+            button.SetHeight(tallest)?;
+        }
+        picker.stride = tallest + ROW_GAP;
+    }
+    let floor = FLOOR_ROWS * picker.stride;
+    match picker.preview_room {
+        None if room + 0.5 < floor => {
+            picker.preview_room = Some(picker.preview.ActualHeight()? + PART_GAP);
+            #[cfg(feature = "harness")]
+            crate::vtrace::line(&format!("font picker list: room {room:.1} px under {FLOOR_ROWS} rows of {:.1}; the preview gives way", picker.stride));
+            return picker.preview.SetVisibility(Visibility::Collapsed);
+        }
+        Some(given) if room - given + 0.5 >= floor => {
+            picker.preview_room = None;
+            return picker.preview.SetVisibility(Visibility::Visible);
+        }
+        _ => {}
+    }
+    let whole = ((room + 0.5) / picker.stride).floor().max(FLOOR_ROWS);
+    let shown = whole * picker.stride;
+    picker.scroll.SetHeight(shown)?;
+    #[cfg(feature = "harness")]
+    crate::vtrace::line(&format!(
+        "font picker list: room {room:.1} px, row {:.1} px, {whole} rows, {shown:.1} px",
+        picker.stride
+    ));
+    Ok(())
+}
+
+/// Scroll the selected family's row wholly into the list's view.
+fn reveal_selected(picker: &Picker) -> windows_core::Result<()> {
+    let Some(name) = picker.family.as_deref() else { return Ok(()) };
+    let Some((_, button)) = picker.rows.iter().find(|(n, _)| n == name) else { return Ok(()) };
+    if picker.stride <= 0.0 || button.Visibility()? != Visibility::Visible {
+        return Ok(());
+    }
+    let top = button.TransformToVisual(&picker.list)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
+    let shown = picker.scroll.ViewportHeight()?;
+    let at = picker.scroll.VerticalOffset()?;
+    let to = if top < at {
+        top
+    } else if top + picker.stride > at + shown {
+        top + picker.stride - shown
+    } else {
+        return Ok(());
+    };
+    change_view_along(&picker.scroll, false, to)?;
+    Ok(())
+}
+
 /// Select a family: its row lit, its faces listed, the preview in it.
 fn select_family(name: &str, keep: Option<FontFace>) -> windows_core::Result<()> {
     PICKER.with_borrow_mut(|picker| -> windows_core::Result<()> {
@@ -212,7 +283,7 @@ fn select_family(name: &str, keep: Option<FontFace>) -> windows_core::Result<()>
             picker.preview.SetFontWeight(bindings::Windows::UI::Text::FontWeight { Weight: face.weight })?;
             picker.preview.SetFontStyle(if face.italic { FontStyle::Italic } else { FontStyle::Normal })?;
         }
-        Ok(())
+        reveal_selected(picker)
     })
 }
 
@@ -265,7 +336,6 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
         let row = RowDefinition::new()?;
         row.SetHeight(GridLength { Value: 1.0, GridUnitType: height })?;
         if height == GridUnitType::Star {
-            row.SetMinHeight(LIST_MIN)?;
             row.SetMaxHeight(LIST_MAX)?;
         }
         rows.Append(&row)?;
@@ -296,8 +366,18 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     }
     let scroll = ScrollViewer::new()?;
     scroll.SetContent(&list)?;
+    scroll.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Top)?;
+    let slot = Border::new()?;
+    slot.SetChild(&scroll)?;
+    slot.SizeChanged(&SizeChangedEventHandler::new(move |_, args| {
+        let room = args.as_ref().map(|a| a.NewSize()).transpose()?.map_or(0.0, |s| f64::from(s.Height));
+        PICKER.with_borrow_mut(|picker| picker.as_mut().map_or(Ok(()), |p| fit_list(p, room)))
+    }))?;
+    scroll.SizeChanged(&SizeChangedEventHandler::new(move |_, _| {
+        PICKER.with_borrow(|picker| picker.as_ref().map_or(Ok(()), reveal_selected))
+    }))?;
     let face_grid = Grid::new()?;
-    face_grid.SetMargin(Thickness { Left: 0.0, Top: 8.0, Right: 0.0, Bottom: 0.0 })?;
+    face_grid.SetMargin(Thickness { Left: 0.0, Top: PART_GAP, Right: 0.0, Bottom: 0.0 })?;
     let face_scroll = ScrollViewer::new()?;
     face_scroll.SetHorizontalScrollBarVisibility(ScrollBarVisibility::Auto)?;
     face_scroll.SetVerticalScrollBarVisibility(ScrollBarVisibility::Disabled)?;
@@ -307,10 +387,10 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
     preview.SetText(&HSTRING::from(PREVIEW))?;
     preview.SetFontSize(18.0)?;
     preview.SetTextWrapping(TextWrapping::Wrap)?;
-    preview.SetMargin(Thickness { Left: 0.0, Top: 8.0, Right: 0.0, Bottom: 0.0 })?;
+    preview.SetMargin(Thickness { Left: 0.0, Top: PART_GAP, Right: 0.0, Bottom: 0.0 })?;
     for (i, element) in [
         search.cast::<FrameworkElement>()?,
-        scroll.cast::<FrameworkElement>()?,
+        slot.cast::<FrameworkElement>()?,
         face_scroll.cast::<FrameworkElement>()?,
         preview.cast::<FrameworkElement>()?,
     ]
@@ -346,6 +426,10 @@ pub(super) fn present(core: &mut CoreState, spec: crate::protocol::FontDialogSpe
             #[cfg(feature = "harness")]
             face_scroll: face_scroll.clone(),
             faces_on: spec.faces,
+            list,
+            scroll,
+            stride: 0.0,
+            preview_room: None,
             rows: row_buttons,
             face_rows: Vec::new(),
             face_grid,
@@ -406,31 +490,91 @@ pub(super) mod read {
         Ok(None)
     }
 
-    /// The picker's faces row and preview that fall below what the dialog
-    /// shows without scrolling, or None.
+    /// The span of `element`, in its own coordinates, that every ancestor up
+    /// to the dialog's scroller leaves showing: an ancestor arranged smaller
+    /// than its content clips it (the picker's layout under its own rows, the
+    /// list's slot under a list taller than its room).
+    fn shown_span(element: &FrameworkElement, stop: &ScrollViewer) -> windows_core::Result<(f64, f64)> {
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let stop: windows_core::IUnknown = stop.cast()?;
+        let (mut top, mut bottom) = (0.0f64, element.ActualHeight()?);
+        let mut at: bindings::Microsoft::UI::Xaml::DependencyObject = element.cast()?;
+        for _ in 0..32 {
+            let Ok(parent) = VisualTreeHelper::GetParent(&at) else { break };
+            if let Ok(frame) = parent.cast::<FrameworkElement>() {
+                let y = frame.TransformToVisual(element)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
+                top = top.max(y);
+                bottom = bottom.min(y + frame.ActualHeight()?);
+                if frame.cast::<windows_core::IUnknown>()? == stop {
+                    break;
+                }
+            }
+            at = parent;
+        }
+        Ok((top, bottom))
+    }
+
+    /// The picker's faces row and preview that the dialog does not show
+    /// whole without scrolling, or None.
     fn out_of_view(picker: &Picker) -> windows_core::Result<Option<String>> {
         let Some(scroller) = dialog_scroller(&picker.layout)? else {
             return Ok(Some("the picker's content sits in no scroller of the dialog's".to_owned()));
         };
-        let viewport = scroller.ViewportHeight()?;
-        let mut below = Vec::new();
+        let mut cut = Vec::new();
         let parts: [(&str, FrameworkElement); 2] = [
             ("faces row", picker.face_scroll.cast()?),
             ("preview", picker.preview.cast()?),
         ];
         for (what, element) in parts {
-            if what == "faces row" && !picker.faces_on {
+            if (what == "faces row" && !picker.faces_on) || element.Visibility()? != Visibility::Visible {
                 continue;
             }
-            let top = element.TransformToVisual(&scroller)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
-            let bottom = top + element.ActualHeight()?;
-            if bottom > viewport + 1.0 {
-                below.push(format!("{what} ends at {bottom:.0}"));
+            let height = element.ActualHeight()?;
+            let (top, bottom) = shown_span(&element, &scroller)?;
+            if bottom <= top {
+                cut.push(format!("the {what} shows none of its {height:.1} px (the dialog ends {:.1} px above it)", top - bottom));
+            } else if top > 1.0 || bottom < height - 1.0 {
+                cut.push(format!("the {what} shows {top:.1} to {bottom:.1} of its {height:.1} px"));
             }
         }
-        Ok((!below.is_empty()).then(|| {
-            format!("the picker's {}, past the {viewport:.0} px the dialog shows", below.join(" and the "))
-        }))
+        Ok((!cut.is_empty()).then(|| format!("the dialog cuts the picker: {}", cut.join("; "))))
+    }
+
+    /// A family row the list's shown span cuts, a span that is not a whole
+    /// number of rows, or a selected row out of view; or None.
+    fn list_cut(picker: &Picker) -> windows_core::Result<Option<String>> {
+        let Some(scroller) = dialog_scroller(&picker.layout)? else {
+            return Ok(Some("the picker's content sits in no scroller of the dialog's".to_owned()));
+        };
+        let list: FrameworkElement = picker.scroll.cast()?;
+        let (from, to) = shown_span(&list, &scroller)?;
+        let (from, to) = (from, to.min(picker.scroll.ViewportHeight()?));
+        let shown = to - from;
+        let mut tops = Vec::new();
+        let mut cut = Vec::new();
+        for (name, button) in &picker.rows {
+            if button.Visibility()? != Visibility::Visible {
+                continue;
+            }
+            let top = button.TransformToVisual(&list)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?.Y as f64;
+            let bottom = top + button.ActualHeight()?;
+            tops.push(top);
+            let selected = picker.family.as_deref() == Some(name.as_str());
+            let mark = if selected { "the selected row " } else { "row " };
+            if (top < from - 0.5 && bottom > from + 0.5) || (top < to - 0.5 && bottom > to + 0.5) {
+                cut.push(format!("{mark}{name} spans {top:.1} to {bottom:.1} px across the list's shown {from:.1} to {to:.1} px"));
+            } else if selected && (bottom <= from + 0.5 || top >= to - 0.5) {
+                cut.push(format!("{mark}{name} spans {top:.1} to {bottom:.1} px, outside the list's shown {from:.1} to {to:.1} px"));
+            }
+        }
+        if let [first, second, ..] = tops[..] {
+            let pitch = second - first;
+            let rows = shown / pitch;
+            if pitch > 0.0 && (rows - rows.round()).abs() * pitch > 0.5 {
+                cut.push(format!("the list shows {shown:.1} px, {rows:.2} rows of {pitch:.1} px"));
+            }
+        }
+        Ok((!cut.is_empty()).then(|| format!("the family list cuts a row: {}", cut.join("; "))))
     }
 
     /// The rows the open picker shows, each with DirectWrite's fixed pitch;
@@ -442,6 +586,9 @@ pub(super) mod read {
                 return Ok(Ok(None));
             }
             if let Some(why) = out_of_view(picker)? {
+                return Ok(Err(why));
+            }
+            if let Some(why) = list_cut(picker)? {
                 return Ok(Err(why));
             }
             let mut out = Vec::new();

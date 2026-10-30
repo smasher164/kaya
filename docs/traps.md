@@ -19837,12 +19837,23 @@ and iOS.
 The kaya-drawn font picker's family list was a fixed 260 px row, and in the
 lane's 556 by 378 window the faces row and the preview fell past what the
 dialog showed (faces ending at 407 and the preview at 436 of a 257 px
-viewport). A star row (a row and a half to 260 px) is enough: the dialog's
-ContentScrollViewer measures its content at its own height, so the list
-takes what is left. A pass that bounded the content to the viewport by hand
-read green with its bound cut, so it was not kept. With the floor at three
-rows (96 px) the preview still ended at 301 of 257; the floor is 48 px and
-the preview 18 pt.
+viewport). A star row is enough: the dialog's ContentScrollViewer measures
+its content at its own height (viewport 257 = extent 257: it never scrolls),
+so the list takes what is left, 56 px there with 8 px gaps between the parts.
+A pass that bounded the content to the viewport by hand read green with its
+bound cut, so it was not kept.
+
+Nothing scrolls when the content does not fit: the picker's layout Grid is
+arranged at what it was given (top 63, height 169 in the scroller, ending at
+232) and CLIPS a row past that, so the preview was cut 8 px while it ended at
+240 of the scroller's 257 and a read against the viewport called it shown.
+The same holds one level down: a list taller than its row is clipped by the
+row's slot, and a read inside the list's own ScrollViewer saw whole rows
+there. So the picker's reads measure the span every ancestor up to the
+dialog's scroller leaves showing (fontpick.rs, `shown_span`). The rows are
+30 px (all nine code families on the lane VM), 32 with their gap; three rows
+did not fit with the faces and the preview at 556 by 378, two do with 4 px
+gaps, and below that the preview gives way.
 
 ## A headless sway seat has no keyboard except while wtype runs (measured 2026-10-29)
 
