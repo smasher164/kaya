@@ -10609,7 +10609,10 @@ func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
     /// one line per row, its text, whether it is selected, whether the
     /// picker's list shows it whole.
     func kayaIOSFontDialogSelected() -> KayaRead<KayaSelectedFamily?> {
-        guard let asked = DispatchQueue.main.sync(execute: { kayaFontPickerDelegate?.asked }) else { return .success(nil) }
+        guard let (asked, faces, initial) = DispatchQueue.main.sync(execute: {
+            kayaFontPickerDelegate.map { ($0.asked, $0.faces, $0.initial) }
+        }) else { return .success(nil) }
+        if faces { return kayaIOSFontDialogSelectedStyle(asked, initial) }
         let (ok, lines) = KayaSimdrive.ask("fontselected")
         guard ok else { return .failure(lines.first ?? "simdrive refused fontselected without saying why") }
         guard lines.first == "Fonts" else { return .failure("the font picker is not on screen yet") }
@@ -10621,6 +10624,28 @@ func kayaPickFont(_ choice: (String, KayaFace)?) -> String? {
                 seen: " (no row selected or checkmarked: " + seen.joined(separator: "; ") + ")"))
         }
         return .success(KayaSelectedFamily(asked: asked, selected: row[0], shown: row[2] == "1"))
+    }
+
+    /// With faces the remote picker marks no family row, in any descriptor
+    /// form or timing (measured, docs/font-picker-plan.md §7; RULED
+    /// 2026-10-30, Apple's picker kept): the family counts as selected when
+    /// its style list marks the asked face.
+    func kayaIOSFontDialogSelectedStyle(_ asked: String, _ initial: KayaFace) -> KayaRead<KayaSelectedFamily?> {
+        if asked.isEmpty { return .success(KayaSelectedFamily(asked: asked, selected: nil, shown: false)) }
+        guard let want = kayaFamilyFaces(asked).first(where: { $0.face == initial })?.name else {
+            return .failure("\(asked) has no face \(initial.words) among \(kayaFamilyFaces(asked).map(\.face.words))")
+        }
+        let (ok, lines) = KayaSimdrive.ask("fontstyles_b64 " + Data(asked.utf8).base64EncodedString())
+        guard ok else { return .failure(lines.first ?? "simdrive refused fontstyles without saying why") }
+        guard lines.first == "Styles" else { return .failure("the font picker is not on screen yet") }
+        let rows = lines.dropFirst().map { $0.components(separatedBy: "\t") }
+        guard let row = rows.first(where: { $0.count >= 3 && $0[1] == "1" }), row[0] == want else {
+            let marked = rows.filter { $0.count >= 3 && $0[1] == "1" }.map { $0[0] }
+            return .success(KayaSelectedFamily(
+                asked: asked, selected: nil, shown: false,
+                seen: " (\(asked)'s styles mark \(marked.isEmpty ? "none" : marked.joined(separator: ", ")), not \(want); they list \(rows.map { $0[0] }))"))
+        }
+        return .success(KayaSelectedFamily(asked: asked, selected: asked, shown: row[2] == "1"))
     }
 
     func kayaIOSPickFont(_ choice: (String, KayaFace)?) -> String? {
@@ -26581,13 +26606,15 @@ func kayaRegularFace(_ family: String) -> KayaFace {
         let dialog: UInt64
         let faces: Bool
         let asked: String
+        let initial: KayaFace
         var answered = false
         weak var picker: UIFontPickerViewController?
 
-        init(dialog: UInt64, faces: Bool, asked: String) {
+        init(dialog: UInt64, faces: Bool, asked: String, initial: KayaFace) {
             self.dialog = dialog
             self.faces = faces
             self.asked = asked
+            self.initial = initial
         }
 
         func fontPickerViewControllerDidPickFont(_ viewController: UIFontPickerViewController) {
@@ -26631,7 +26658,7 @@ func kayaRegularFace(_ family: String) -> KayaFace {
             picker.selectedFontDescriptor =
                 (kayaResolveFace(family: family, mono: false, want: initial, size: 17).font as UIFont).fontDescriptor
         }
-        let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces, asked: family)
+        let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces, asked: family, initial: initial)
         delegate.picker = picker
         picker.delegate = delegate
         kayaFontPickerDelegate = delegate

@@ -294,22 +294,25 @@ menu_activate "View>Line Numbers"
 expect_gutter textarea@buffer-2 on
 expect_menu "View>Line Numbers" checked
 # Font… is the platform's picker, code fonts and faces (docs/font-picker-plan.md
-# §6); a cancel changes nothing, a pick dresses the buffer. The default is a
-# code family the picker lists. No code family is installed on every
-# platform, so the pick is the first one listed.
+# §6); it opens on the document's face, a cancel changes nothing, a pick
+# dresses the buffer. The default is a code family the picker lists. No code
+# family is installed on every platform, so the pick is the first one listed.
 menu_activate "View>Font…"
 expect_font_dialog code_only
+expect_font_dialog selected
 pick_font cancel
 expect_font_dialog closed
 expect_face textarea@buffer-2 named
 menu_activate "View>Font…"
 expect_font_dialog code_only
+expect_font_dialog selected
 pick_font first 400 upright 5
 expect_font_dialog closed
 expect_face textarea@buffer-2 named
 expect_face textarea@buffer-2 face 400 upright 5
 menu_activate "View>Font…"
 expect_font_dialog code_only
+expect_font_dialog selected
 pick_font cancel
 expect_font_dialog closed
 

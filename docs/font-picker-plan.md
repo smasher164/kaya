@@ -316,6 +316,18 @@ compose over it by §3, so Bold over a Light document reads 700 and Italic
 keeps Light. Cancel changes nothing. The editor is Go, so its slice is a Go
 guest change plus its scene's steps.
 
+RULED 2026-10-30 (the maintainer: "make a different default, like Menlo"):
+the document's default face is a family the code-only picker LISTS, so Font…
+always opens on it and the user can pick it again. `monospaced` on Apple is
+the hidden `.AppleSystemUIFontMonospaced` (SF Mono), which no picker lists
+(measured: not in NSFontManager's families; Terminal ships its own SF Mono
+files), so the Mac panel opened on "Please select a font." The editor asks
+`list_font_families` once when no font is saved and takes the first installed
+of Menlo, Cascadia Mono, DejaVu Sans Mono and Droid Sans Mono (one per lane
+today), `monospaced` only when none is; a saved choice wins, and the default
+is not saved. Every request passes the current face as `initial`, and
+`expect_font_dialog selected` holds the picker to it.
+
 ## §7 The harness and the scene
 
 - `pick_font "<family>" <weight> <upright|italic> <width>` and `pick_font
@@ -335,7 +347,18 @@ guest change plus its scene's steps.
 - `expect_font_dialog open|closed`, and `expect_font_dialog code_only` which
   reads the families the open picker lists (the Mac panel's family table, the
   GTK list model, iOS's remote tree, kaya's own lists) and fails on one that
-  is not monospaced.
+  is not monospaced. `expect_font_dialog selected` (2026-10-30) reads the row
+  the open picker's list SELECTS and fails unless it is the family the request
+  named in `family` and the list shows that row whole: the Mac families
+  table's selected row against its visible rect, iOS's cell (selected or
+  checkmarked) through the XCUITest driver's `fontselected`, or with faces the
+  asked face marked in that family's style list (`fontstyles_b64` enters the
+  family and walks back: with faces Apple's picker marks no family row in any
+  descriptor form or timing, measured 2026-10-30; RULED that day, the
+  maintainer: "keep apple's picker"), the GTK list
+  view's selection model and its row in the SELECTED state, the WinUI row in
+  the accent style, the Compose row whose semantics say Selected against the
+  list's bounds. A request that named no family fails it too.
 - A `fontpick` scene, every lane, every language: the guest lists
   families and faces and labels a family with three or more weights; it opens
   the picker with `code_only`, the steps check the listing, pick a face,

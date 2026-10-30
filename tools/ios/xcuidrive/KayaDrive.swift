@@ -804,6 +804,40 @@ final class KayaDrive: XCTestCase {
                 out.append([text, marked ? "1" : "0", whole ? "1" : "0", images.joined(separator: ",")].joined(separator: "\t"))
             }
             return (true, out.joined(separator: "\n"))
+        case "fontstyles_b64":
+            // With faces the picker marks the current face in its family's
+            // style list, never a family row (docs/font-picker-plan.md §7): the
+            // family is entered, its styles read as fontselected reads rows,
+            // and the picker walked back to its families.
+            guard words.count == 2, let data = Data(base64Encoded: words[1]),
+                  let family = String(data: data, encoding: .utf8) else { return (false, "fontstyles_b64 <base64>") }
+            guard a.navigationBars["Choose Font"].exists else { return (true, "") }
+            guard let row = fontRows(a).first(where: { $0.0 == family }) else {
+                return (false, "the font picker lists no \(family); it lists \(fontRows(a).map { $0.0 })")
+            }
+            tapCentre(a, row.1)
+            guard waitFor("the styles of \(family)", min(5, budgetNow()), { styleUp(a) }) else {
+                failShot(a, "fontstyles")
+                return (false, "tapping \(family) opened no list of its styles")
+            }
+            _ = waitFor("the styles listed", min(5, budgetNow())) { !fontRows(a).isEmpty }
+            let table = a.tables.firstMatch.frame
+            var out = ["Styles"]
+            for cell in a.tables.firstMatch.cells.allElementsBoundByIndex {
+                guard let text = cell.staticTexts.allElementsBoundByIndex.first?.label, !text.isEmpty else { continue }
+                let images = cell.images.allElementsBoundByIndex.map { $0.identifier.isEmpty ? $0.label : $0.identifier }
+                let marked = cell.isSelected || images.contains { $0.lowercased().contains("checkmark") }
+                let whole = table.minY - 0.5 <= cell.frame.minY && cell.frame.maxY <= table.maxY + 0.5
+                out.append([text, marked ? "1" : "0", whole ? "1" : "0", images.joined(separator: ",")].joined(separator: "\t"))
+            }
+            let back = a.navigationBars["Choose Style"].buttons.firstMatch
+            guard back.exists else { return (false, "\(family)'s style list shows no back button") }
+            back.tap()
+            guard waitFor("the families again", min(5, budgetNow()), { a.navigationBars["Choose Font"].exists }) else {
+                failShot(a, "fontstyles")
+                return (false, "the picker stayed on \(family)'s styles after its back button")
+            }
+            return (true, out.joined(separator: "\n"))
         case "fontchoose_b64":
             // "<family>\t<face>": the family's row, then with faces the style's.
             guard words.count == 2, let data = Data(base64Encoded: words[1]),
