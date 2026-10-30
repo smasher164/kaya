@@ -15924,6 +15924,11 @@ second app writing the same reconciler. Then the design question is a
 derived collection (a predicate over a source collection, stamped like a
 For) versus a hide-without-forgetting prop, and DESIGN.md's own note
 prefers the prop for the second.
+RULED 2026-10-30 by the maintainer: the hide-without-forgetting prop
+("i lean a too"); the app decides what matches, in its own language,
+and the row keeps its place and state while hidden. The trigger's second
+half has fired (the portfolio and the task manager both reconcile by
+hand), so it is queued before the video editor.
 
 ## ~~DEFERRED — a `submitted` occurrence for text fields (Return in an entry, textarea or search field publishes nothing) (recorded 2026-09-06; the chat app is its milestone)~~ — LANDED 2026-09-24 (docs/submit-plan.md): occurrence kind 33 `submitted` carrying the field's text, the Bool prop 37 `submits` on the textarea, four backend arms through the gesture's own door, `on_submit` and `submits` in both zones of all nine bindings, tools/scenes/submit.steps on five lanes and tools/check-submit.py, 21 watched negatives
 KEY: submitted occurrence, submit on Return, QuerySubmitted, onSubmit, search key, occurrence 27, chat app, compose field

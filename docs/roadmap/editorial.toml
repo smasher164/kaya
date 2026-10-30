@@ -184,12 +184,12 @@ text = "only Rust, Go and Python run on all five lanes (Java runs on Android and
 
 [[menu]]
 title = '<a href="#item-collection_pipelines">Rows that hide and lists that filter themselves</a>'
-star = true
-status = 'needs ruling'
+star = false
+status = 'open'
 size = 'M'
 unblocks = 'search in the portfolio and the task manager'
 key = 'filtered view'
-text = "one hole under two ledger entries: no visible prop and no derived collection, so an app with a search box hand-writes a shadow reconciler (the portfolio and the task manager's search both do). The chat app searched its thread by jumping between matches and did not need it, so no demo app waits on it now. M. Fork to rule first: a derived collection stamped like a For, or a hide-without-forgetting prop (DESIGN.md prefers the prop)."
+text = "one hole under two ledger entries: no visible prop and no derived collection, so an app with a search box hand-writes a shadow reconciler (the portfolio and the task manager's search both do). The chat app searched its thread by jumping between matches and did not need it, so no demo app waits on it now. M. RULED 2026-10-30 by the maintainer: a hide-without-forgetting prop, not a derived collection; the app decides what matches in its own language, and a hidden row keeps its place and state."
 
 [[menu]]
 title = '<a href="#item-restoration">Session restoration</a> and <a href="#item-bookmarks">durable file references</a>'
