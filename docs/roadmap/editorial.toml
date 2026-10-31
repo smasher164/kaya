@@ -214,7 +214,7 @@ status = 'open'
 size = 'S each'
 unblocks = 'no app'
 key = 'first line box'
-text = "S each: the checkbox that reads a touch high beside a title's first line on Android, iOS and Windows (deferred 2026-09-24; cap-height centring is the candidate), the Windows launchers derivation, the iOS typeface observation stub, the Windows dnd_java drag face, WinUI swipe items drawn as text only (SwipeItem takes an IconSource, which kaya does not lower symbols to yet), the colour picker's panel scene (<code>pick_color</code>), capture's C floor parsers, and the iOS media session's remote pause seen once leaving the player playing, whose bundle could not say why. Two need a ruling first: how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
+text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the Windows launchers are derived from the roster, the iOS typeface is read, the Windows dnd_java face folded into its successor watch, WinUI swipe items draw their symbols, the colour picker's panel scene (<code>pick_color</code>) runs on five lanes, and capture's C floor parsers and a C capture guest exist. Left: the iOS codesurface gutter defect (the read that tells a stale layout from a stale draw is in place, awaiting a sighting), the iOS media session's remote pause seen once leaving the player playing, and an iOS simulator that never builds the main menu. Three need a ruling: whether to chase the checkbox's low residue on the mac and GTK (the reported HIGH no longer reproduces), how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
 
 [[menu]]
 title = 'Segmented control'
