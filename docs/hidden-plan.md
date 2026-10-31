@@ -62,7 +62,7 @@ The toolkit's own spelling, recorded from the survey of 2026-10-31:
 | GTK 4 | `set_visible(false)`; nothing unparents | everything: the widget stays | the windowed band walk, the grid's index placement, the reads, an AT-SPI rank given to a hidden target |
 | WinUI 3 | `Visibility.Collapsed` on the outer element, no track (reindex VACATED) | everything: nothing recreates the element | a wrapper installed while hidden came up visible; the grid; the reads |
 
-The question parked for the maintainer is Q1 below.
+Q1 below is RULED (a), not yet built.
 
 ## H5 — Inside each container
 
@@ -121,3 +121,5 @@ view comes back (also fixes the same loss under a When or a re-stamp);
 gives them no gap (every column becomes a custom Layout: a broad visual
 risk); (c) record it as a carve-out. RECOMMEND (a). Parked: nothing in
 this pass depends on it, and the scene reads text, which survives.
+RULED 2026-10-31 by the maintainer: (a) ("Yeah that's fine"). Not yet
+built: the native undo stack is not part of (a) and stays lost on a hide.
