@@ -980,6 +980,7 @@ need_why = 'tables that sort and filter themselves; Qt and GTK model objects'
 parity_why = "Qt's proxy models and GTK's list models; the rest leave it to the app"
 shape = 'binding-level derived collections'
 kaya = 'QSortFilterProxyModel, GtkFilterListModel/GtkSortListModel. kaya has collection-derived signals and tables that emit sort_requested; a derived, filtered VIEW of a collection would let the table sort itself.'
+amended = "2026-10-31 (655ba113): the filter half ruled the other way, a row hidden in place by the app's predicate (docs/hidden-plan.md); sort and filter as model objects stay unbuilt"
 
 [[feature]]
 slug = 'global_hotkeys'

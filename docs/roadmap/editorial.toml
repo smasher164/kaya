@@ -36,6 +36,7 @@ styling = 'https://claude.ai/artifact/VZN2zZ5imPZqvzvMVWpdJR'
 music = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
 restyle = 'https://claude.ai/artifact/LYPGimfXNrSWgyfNRqMMLj'
 calls = 'https://claude.ai/artifact/3XqF48GxbBDPMaBBZ9G3EL'
+hiderows = 'https://claude.ai/artifact/V5BWnaBPnCpQNTtyX6qhGN'
 editorfmt = 'https://claude.ai/artifact/7PtETtTpi3bPZscDSSQwJ7'
 doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
 fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
@@ -188,11 +189,14 @@ text = "only Rust, Go and Python run on all five lanes (Java runs on Android and
 [[menu]]
 title = '<a href="#item-collection_pipelines">Rows that hide and lists that filter themselves</a>'
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M'
 unblocks = 'search in the portfolio and the task manager'
 key = 'filtered view'
-text = "one hole under two ledger entries: no visible prop and no derived collection, so an app with a search box hand-writes a shadow reconciler (the portfolio and the task manager's search both do). The chat app searched its thread by jumping between matches and did not need it, so no demo app waits on it now. M. RULED 2026-10-30 by the maintainer: a hide-without-forgetting prop, not a derived collection; the app decides what matches in its own language, and a hidden row keeps its place and state."
+plan = 'docs/hidden-plan.md'
+review = 'hiderows'
+scene = 'tools/scenes/hiderows.steps'
+text = "SHIPPED 2026-10-31 (655ba113; review {review:hiderows}): ruled 2026-10-30, a hide-without-forgetting prop rather than a derived collection. <code>hidden</code> on a row's root hides it in place: the row window counts shown rows only, a hidden row keeps its widget and the text typed into it, and tables, grids and the row reads skip hidden copies on all four backends. The task manager's search, the portfolio's account filter and the search scene write a row field instead of hand-reconciling. The hiderows scene runs in nine languages on five lanes. Open: hidden-plan Q1, SwiftUI's scroll offset and caret on a hidden view, for the maintainer; sorting and filtering as model objects stay the app's."
 
 [[menu]]
 title = '<a href="#item-restoration">Session restoration</a> and <a href="#item-bookmarks">durable file references</a>'
