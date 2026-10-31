@@ -1513,7 +1513,7 @@ chained("stale-viewport", r"viewport\.generation == generation,",
         "a stale viewport generation accepted as current",
         "func kayaCurrentTableGeometry", "stale-cells")
 chained("incomplete-geometry",
-        r"if realized\.isEmpty, !table\.children\.isEmpty \{",
+        r"if realized\.isEmpty, !table\.shownRows\.isEmpty \{",
         "if false {",
         "a table with no realized row accepted as current",
         "func kayaCurrentTableGeometry", "stale-viewport")

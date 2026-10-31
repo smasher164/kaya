@@ -1197,6 +1197,10 @@ The known normalization worklist:
   container's laid-out children and render nothing for it; GTK unshows the
   widget; WinUI collapses the element and gives it no track. rowmenu.steps
   reads both zones with `expect_gap` on every lane in every language.
+  INSIDE A COLLECTION since 2026-10-31 (docs/hidden-plan.md): a row whose
+  root is hidden keeps its place and its copy, the row window counts shown
+  rows only, and tables, grids and the row reads skip hidden copies; a
+  filter is the app's predicate written into a row field.
 - A row centres its children on the cross axis; a column starts them.
   The core emits the row's `align = center` at creation, live and
   template alike, unless the app sets an `align` of its own, so every
@@ -4106,7 +4110,8 @@ feature rather than reconstructed per backend afterward.
   as an occurrence carrying its path. When is For over a zero-or-one
   collection wired to a Bool signal: false to true stamps the template,
   true to false unstamps, a rebuild each time (SwiftUI-if semantics);
-  hide-without-forgetting is a future visible prop, not a second When.
+  hide-without-forgetting is the `hidden` prop (docs/hidden-plan.md), not a
+  second When.
   Scope: elements are scalars at milestone 2 — record values with field
   projection, and sum-typed elements dispatching per-variant templates,
   wait for milestone 3, where multi-field rows make them real; there is

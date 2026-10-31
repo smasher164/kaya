@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu hiderows commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -2612,6 +2612,18 @@ for proto in x11 wayland; do
     run "$proto" rowmenu-ocaml env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/rowmenu.exe
     run "$proto" rowmenu-haskell env KAYA_SELFTEST=rowmenu "$(hs_bin rowmenu)"
     run "$proto" rowmenu-java env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
+        java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" hiderows-rust env KAYA_SELFTEST=hiderows "$CARGO_TARGET_DIR/debug/examples/hiderows"
+    run "$proto" hiderows-python env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
+        python3 guests/python/hiderows.py
+    run "$proto" hiderows-js env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
+        node guests/js/hiderows.ts
+    run "$proto" hiderows-go env KAYA_SELFTEST=hiderows /tmp/go-guests/kaya-go
+    run "$proto" hiderows-csharp env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
+        dotnet exec "$CS_GUEST"
+    run "$proto" hiderows-ocaml env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/hiderows.exe
+    run "$proto" hiderows-haskell env KAYA_SELFTEST=hiderows "$(hs_bin hiderows)"
+    run "$proto" hiderows-java env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" commands-rust env KAYA_SELFTEST=commands \
         "$CARGO_TARGET_DIR/debug/examples/commands"

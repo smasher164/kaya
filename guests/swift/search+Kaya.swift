@@ -7,19 +7,20 @@ import Kaya
 extension SearchItem: KayaRecord {
     /// The prototype Mirror walks for the schema; every field at
     /// its zero value.
-    static let prototype = SearchItem(name: "")
+    static let prototype = SearchItem(name: "", unmatched: false)
 
     init(values: [KayaValue]) {
-        guard case .str(let name) = values[0] else {
+        guard case .str(let name) = values[0], case .bool(let unmatched) = values[1] else {
             preconditionFailure("kaya: SearchItem fields out of order")
         }
-        self.init(name: name)
+        self.init(name: name, unmatched: unmatched)
     }
 }
 
 /// SearchItem's typed field tokens.
 enum SearchItemFields {
     static let name = KayaField<String>(index: 0)
+    static let unmatched = KayaField<Bool>(index: 1)
 }
 
 /// The collection factory; the struct is the schema.
@@ -32,6 +33,7 @@ func searchItemCollection(_ tx: KayaAppTx) -> KayaRecordCollection<SearchItem> {
 struct SearchItemRow {
     let t: KayaTpl
     let name = SearchItemFields.name
+    let unmatched = SearchItemFields.unmatched
 
     @discardableResult
     func label(_ f: KayaField<String>) -> KayaNodeHandle {

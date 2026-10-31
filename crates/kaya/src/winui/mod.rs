@@ -2885,7 +2885,12 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
         Some(c) => c.clone(),
         None => return Ok(()),
     };
-    let rows = (children.len() as i32 + cols - 1) / cols;
+    // docs/hidden-plan.md H5: the shown cells flow into a hidden cell's place.
+    let mut shown = Vec::with_capacity(children.len());
+    for child in &children {
+        shown.push(child.Visibility()? != Visibility::Collapsed);
+    }
+    let rows = (shown.iter().filter(|s| **s).count() as i32 + cols - 1) / cols;
     let coldefs = grid.ColumnDefinitions()?;
     coldefs.Clear()?;
     for _ in 0..cols {
@@ -2906,8 +2911,12 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     }
     let slots = grid.Children()?;
     slots.Clear()?;
-    for (i, child) in children.iter().enumerate() {
-        let i = i as i32;
+    let mut slot = 0i32;
+    for (child, shown) in children.iter().zip(shown) {
+        let i = slot;
+        if shown {
+            slot += 1;
+        }
         let cell = child.cast::<FrameworkElement>()?;
         Grid::SetColumn(&cell, i % cols)?;
         Grid::SetRow(&cell, i / cols)?;
@@ -15104,13 +15113,17 @@ fn swap_element(
     reseat_element(core, id, old, new)
 }
 
-/// Put `new` where `old` sits in whatever holds it, carrying nothing.
+/// Put `new` where `old` sits in whatever holds it, carrying nothing but
+/// the visibility the parent lays out by: the seat's element is what a
+/// hide or a vacancy collapses (docs/hidden-plan.md H4).
 fn reseat_element(
     core: &mut CoreState,
     id: WidgetId,
     old: &UIElement,
     new: &UIElement,
 ) -> windows_core::Result<()> {
+    new.SetVisibility(old.Visibility()?)?;
+    old.SetVisibility(Visibility::Visible)?;
     if let Some(panel) = core.parents.get(&id).cloned() {
         let children = panel.Children()?;
         let mut at = 0u32;
@@ -18427,10 +18440,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 HIDDEN.with_borrow_mut(|h| if *on { h.insert(id.0) } else { h.remove(&id.0) });
                 // A grid's child has no reindex of this kind to collapse it.
                 if let Some(widget) = core.widgets.get(&id) {
+                    let element = widget.element()?;
                     if *on {
-                        widget.element()?.SetVisibility(Visibility::Collapsed)?;
+                        element.SetVisibility(Visibility::Collapsed)?;
                     } else if !VACATED.with_borrow(|v| v.contains(&id.0)) {
-                        widget.element()?.SetVisibility(Visibility::Visible)?;
+                        element.SetVisibility(Visibility::Visible)?;
+                    }
+                    let grid = core.grid_children.iter().find(|(_, kids)| kids.contains(&element)).map(|(g, _)| *g);
+                    if let Some(grid) = grid {
+                        reflow_grid(core, grid)?;
                     }
                 }
                 if let Some(parent) = core.child_order.parent_of(id) {
@@ -23535,13 +23553,26 @@ fn table_rows_in_track_order(
     // THE BAND PANEL, not the container: a windowed table's rows are the
     // scroll host's children (docs/virtualization-plan.md §4), so a walk
     // over the container would find the header and the rule and no row.
-    let Some(grid) = table_of(core, t, |table| table.band.clone()) else {
+    // A plain For's rows are the column's own children, in its tracks
+    // (docs/hidden-plan.md H6), as GTK's and the interpreters' reads walk it.
+    let band = table_of(core, t, |table| table.band.clone());
+    let plain = || {
+        matches!(t.kind, crate::harness::TargetKind::Column)
+            .then(|| crate::harness::try_resolve(t.index, core.columns.len()))
+            .flatten()
+            .map(|i| core.columns[i].clone())
+    };
+    let Some(grid) = band.or_else(plain) else {
         return Ok(None);
     };
     let children = grid.Children()?;
     let mut rows: Vec<(i32, Grid)> = Vec::new();
     for at in 0..children.Size()? {
         let child = children.GetAt(at)?;
+        // docs/hidden-plan.md H6: a hidden row is not one the table shows.
+        if child.Visibility()? == Visibility::Collapsed {
+            continue;
+        }
         let held = skin::inner_of(&child).unwrap_or_else(|| child.clone());
         if let Ok(row) = held.cast::<Grid>() {
             if core.rows.iter().any(|r| r == &row) {
@@ -27390,7 +27421,13 @@ impl crate::harness::Stage for WinUiStage {
             // A For no tier of this backend windows: every row is
             // realized and the first of them is visible at rest, which
             // is what an unreported window answers too.
-            Ok(format!("0 {}", core.child_order.children(WidgetId(id)).len()))
+            let shown = core
+                .child_order
+                .children(WidgetId(id))
+                .iter()
+                .filter(|c| !HIDDEN.with_borrow(|h| h.contains(&c.0)))
+                .count();
+            Ok(format!("0 {shown}"))
         })
         .unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
@@ -27787,7 +27824,7 @@ impl crate::harness::Stage for WinUiStage {
             let mut texts = Vec::new();
             for at in 0..children.Size()? {
                 if let Ok(block) = children.GetAt(at)?.cast::<TextBlock>() {
-                    if core.labels.iter().any(|l| l == &block) {
+                    if core.labels.iter().any(|l| l == &block) && block.Visibility()? != Visibility::Collapsed {
                         texts.push(block.Text()?.to_string());
                     }
                 }
@@ -30071,6 +30108,9 @@ impl crate::harness::Stage for WinUiStage {
             let mut frames = Vec::new();
             for k in 0..children.Size()? {
                 let cell: UIElement = children.GetAt(k)?;
+                if cell.Visibility()? == Visibility::Collapsed {
+                    continue;
+                }
                 let transform = cell.TransformToVisual(&grid.cast::<UIElement>()?)?;
                 let origin = transform.TransformPoint(bindings::Windows::Foundation::Point { X: 0.0, Y: 0.0 })?;
                 let element = cell.cast::<FrameworkElement>()?;
@@ -30095,6 +30135,9 @@ impl crate::harness::Stage for WinUiStage {
             let mut edges: Vec<f64> = Vec::new();
             for k in 0..children.Size()? {
                 let cell: UIElement = children.GetAt(k)?;
+                if cell.Visibility()? == Visibility::Collapsed {
+                    continue;
+                }
                 let transform = cell.TransformToVisual(&grid.cast::<UIElement>()?)?;
                 let origin = transform.TransformPoint(bindings::Windows::Foundation::Point {
                     X: 0.0,

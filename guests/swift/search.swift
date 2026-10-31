@@ -1,20 +1,19 @@
 // The search scene, Swift port — guests/rust/search.rs,
-// tools/scenes/search.steps. The app owns the filter
-// (docs/search-plan.md S9): the visible set is a diff of removes and
-// inserts by key.
+// tools/scenes/search.steps. The app owns the predicate
+// (docs/search-plan.md S9) and each row hides in place
+// (docs/hidden-plan.md).
 
 import Foundation
 import Kaya
 
 struct SearchItem: KayaGen {
     var name: String
+    var unmatched: Bool
 }
 
 let names = ["apple", "banana", "cherry", "mango"]
 
 KayaApp.run { app in
-    var visible = names
-
     app.build { tx in
         tx.window(title: "search")
         let items = searchItemCollection(tx)
@@ -27,24 +26,12 @@ KayaApp.run { app in
                 // language's substring test is true, so the empty query is
                 // spelled out: an empty field shows the whole list.
                 let wanted = names.filter { query.isEmpty || $0.contains(query) }
-                // A DIFF, never clear-and-refill: only the rows whose
-                // membership changed move (docs/search-plan.md S9).
-                for name in visible where !wanted.contains(name) {
-                    items.remove(t, .str(name))
-                }
-                for name in wanted where !visible.contains(name) {
-                    items.insert(t, .str(name), SearchItem(name: name))
-                }
-                // Insertion order is arrival order, so a row coming back lands
-                // last; walking the wanted keys to the end in order puts the
-                // list back in `names` order.
-                for name in wanted {
-                    items.moveToEnd(t, .str(name))
+                for name in names {
+                    items.patch(t, .str(name)).set(\.unmatched, !wanted.contains(name))
                 }
                 t.write(count, .str(query.isEmpty
                     ? "\(names.count) items"
                     : "\(wanted.count) of \(names.count) match"))
-                visible = wanted
             }
             tx.setPlaceholder(find, "Search")
             tx.setA11yId(find, "find")
@@ -52,7 +39,7 @@ KayaApp.run { app in
             tx.setA11yId(tx.label(bind: count), "count")
             // The For IS the list: expect_order reads its label children.
             let list = searchItemEach(tx, items) { row in
-                row.label(row.name)
+                row.t.setHidden(row.label(row.name), row.unmatched)
             }
             tx.setA11yId(list, "list")
             return root
@@ -60,7 +47,7 @@ KayaApp.run { app in
         tx.mount(root)
 
         for name in names {
-            items.insert(tx, .str(name), SearchItem(name: name))
+            items.insert(tx, .str(name), SearchItem(name: name, unmatched: false))
         }
     }
 }

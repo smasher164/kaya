@@ -151,7 +151,8 @@ def generate(tmp):
                        "guests/swift/shapes.swift",
                        "guests/swift/cards.swift",
                        "guests/swift/tracks.swift",
-                       "guests/swift/rowmenu.swift"],
+                       "guests/swift/rowmenu.swift",
+                       "guests/swift/hiderows.swift"],
                       env=env, check=False).returncode != 0:
         return 1
     return 0

@@ -60,6 +60,7 @@ import (
 	"dev.kaya/guests/go/richrows"
 	"dev.kaya/guests/go/richtext"
 	"dev.kaya/guests/go/rowmenu"
+	"dev.kaya/guests/go/hiderows"
 	"dev.kaya/guests/go/safearea"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
@@ -136,6 +137,7 @@ var scenes = map[string]func() *kaya.App{
 	"listdetail":       split.App,
 	"menus":            menus.App,
 	"rowmenu":          rowmenu.App,
+	"hiderows":         hiderows.App,
 	"nav":              nav.App,
 	"netimage":         netimage.App,
 	"grounds":          grounds.App,

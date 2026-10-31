@@ -175,6 +175,9 @@ public final class Main {
             case "rowmenu":
                 app = Rowmenu::app;
                 break;
+            case "hiderows":
+                app = Hiderows::app;
+                break;
             case "commands":
                 app = Commands::app;
                 break;

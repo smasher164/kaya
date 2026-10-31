@@ -78,6 +78,7 @@ static class Program
             case "sections": SectionsScene.Run(); break;
             case "menus": MenusScene.Run(); break;
             case "rowmenu": RowmenuScene.Run(); break;
+            case "hiderows": HiderowsScene.Run(); break;
             case "commands": CommandsScene.Run(); break;
             case "confirm": ConfirmScene.Run(); break;
             case "filedialog": FileDialogScene.Run(); break;

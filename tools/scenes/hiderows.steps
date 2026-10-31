@@ -1,0 +1,25 @@
+# docs/hidden-plan.md: a row that hides keeps its place and its state. A
+# filter is the app's own predicate written into each row's field; the list,
+# the 300-row table and the grid show the rows that match, and a row shown
+# again is the copy it was, the text typed into it still there.
+expect_title "hiderows"
+expect_rows column@notes "alpha|beta|gamma"
+set_text entry@note[beta] "typed in beta"
+set_text search@find_notes "m"
+expect_rows column@notes "gamma"
+expect_window column@notes 0 1
+set_text search@find_notes "zzz"
+expect_window column@notes 0 0
+set_text search@find_notes ""
+expect_rows column@notes "alpha|beta|gamma"
+expect_window column@notes 0 3
+expect entry@note[beta] "typed in beta"
+expect_grid_columns grid@tiles 2
+toggle checkbox@hide_two on
+expect_grid_columns grid@tiles 2
+expect_window column@files 0 300
+set_text search@find_files "99"
+expect_window column@files 0 3
+expect_rows column@files "file 099,99 KB|file 199,199 KB|file 299,299 KB"
+set_text search@find_files ""
+expect_window column@files 0 300

@@ -30,6 +30,8 @@ class Txn:
     side: str
     total: str
     side_tint: kaya.Tint
+    # The account filter hides the row in place (docs/hidden-plan.md).
+    unmatched: bool = False
 
 
 # tools/gen-market.py reads BOOK by ast and generates a history that nets
@@ -323,10 +325,16 @@ def key_of(index):
     return f"t{index:05d}"
 
 
-def cells(row):
+def cells(row, unmatched=False):
     date, _account, ticker, side, _qty, total = row
     return Txn(date=date, ticker=ticker, side=side, total=money(total),
-               side_tint=SIDE_TINT.get(side, kaya.Tint.NONE))
+               side_tint=SIDE_TINT.get(side, kaya.Tint.NONE),
+               unmatched=unmatched)
+
+
+def matches(row):
+    account = view["account"]
+    return account is None or row[1] == account
 
 
 def edge(label, row):
@@ -357,11 +365,10 @@ def net_line(rows):
             + f" = {money(value)}")
 
 
-def selected():
-    """The rows to show, in the order to show them, keyed."""
-    account = view["account"]
-    keyed = [(key_of(i), row) for i, row in enumerate(txns)
-             if account is None or row[1] == account]
+def ordered():
+    """Every row, keyed, in the order to show them; the filter hides what
+    it does not match and removes nothing (docs/hidden-plan.md)."""
+    keyed = [(key_of(i), row) for i, row in enumerate(txns)]
     if view["sort"] is not None:
         column, descending = view["sort"]
         of = (lambda kr: kr[1][0], lambda kr: kr[1][2],
@@ -371,13 +378,15 @@ def selected():
     return keyed
 
 
-def sync(collection, held, want):
-    """Make `collection` hold exactly `want`, in that order.
+def sync(collection, held, want, hidden=None):
+    """Make `collection` hold exactly `want`, in that order, each row
+    hidden where `hidden` (key to bool, the rows' last written state)
+    says the filter does not match it.
 
     Removals and insertions first, and the reordering ONLY if what they
-    left is not already the wanted order: narrowing a filter preserves
-    relative order, and a table that re-sorted itself for nothing would
-    cost one move record per row for no observable change.
+    left is not already the wanted order: a table that re-sorted itself
+    for nothing would cost one move record per row for no observable
+    change.
     """
     wanted = {k for k, _ in want}
     surviving = [k for k in held if k in wanted]
@@ -386,9 +395,14 @@ def sync(collection, held, want):
             collection.remove(k)
     have = set(held)
     for k, row in want:
+        unmatched = hidden is not None and not matches(row)
         if k not in have:
-            collection.insert(k, cells(row))
+            collection.insert(k, cells(row, unmatched))
             surviving.append(k)
+        elif hidden is not None and hidden.get(k) != unmatched:
+            collection.patch(k, unmatched=unmatched)
+        if hidden is not None:
+            hidden[k] = unmatched
     order = [k for k, _ in want]
     if surviving != order:
         for k in order:
@@ -397,9 +411,10 @@ def sync(collection, held, want):
 
 
 def refresh():
-    want = selected()
+    every = ordered()
+    want = [(k, row) for k, row in every if matches(row)]
     # The guest's own bookkeeping: items() is refused at record time.
-    sync(screen["ledger"], screen["in_ledger"], want)
+    sync(screen["ledger"], screen["in_ledger"], every, screen["unmatched"])
     sync(screen["recent"], screen["in_recent"],
          [(key_of(i), row) for i, row in enumerate(txns)][-RECENT:])
     screen["count"].set(f"{len(want)} of {len(txns)} transactions")
@@ -474,14 +489,15 @@ def open_transactions(account=None):
             for row in ledger.columns("Date", "Ticker", "Side", "Total",
                                       on_sort=on_ledger_sort, grow=1,
                                       a11y_id="ledger"):
-                with kaya.row():
+                with kaya.row() as line:
+                    line.hidden(row.unmatched)
                     kaya.label(bind=row.date)
                     kaya.label(bind=row.ticker)
                     kaya.label(bind=row.side, tint=row.side_tint)
                     kaya.label(bind=row.total)
         screen.update(count=count_line, first=first_line, last=last_line,
                       net=net_signal, recent=recent, ledger=ledger,
-                      in_recent=[], in_ledger=[])
+                      in_recent=[], in_ledger=[], unmatched={})
     # THE PUSH LANDS BEFORE THE LEDGER FILLS: the inserts are the NEXT
     # transaction, so a starved host delays the count, not the push.
     app.post(refresh)

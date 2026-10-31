@@ -84,6 +84,7 @@ object GuestStart : KayaGuestStart {
             "sections" -> Sections::app
             "menus" -> Menus::app
             "rowmenu" -> Rowmenu::app
+            "hiderows" -> Hiderows::app
             "commands" -> Commands::app
             "clipboard" -> Clipboard::app
             "background" -> Background::app

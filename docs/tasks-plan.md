@@ -81,7 +81,10 @@ filtered view of a collection (the collection-pipelines gap the parity
 survey named), so v0 keeps ONE COLLECTION PER LIST and the app moves a
 task between them when its fields change, inside one undoable
 transaction — which is exactly the app-side work a filtered view would
-remove, recorded here so the gap has a consumer.
+remove, recorded here so the gap has a consumer. (The search half of
+that gap closed 2026-10-31: a row the search does not match is hidden in
+place, docs/hidden-plan.md; list membership is still one collection per
+list.)
 
 "TODAY" IS FIXED UNDER THE HARNESS: with `KAYA_SELFTEST` set the app
 reads its clock as 2026-09-07 (a Monday), so the scene's Today and

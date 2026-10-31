@@ -358,9 +358,9 @@ NEGATIVES = [
      r"\1",
      "writes richRuns without a richSeq bump"),
     ("a container loop composing its children by position (the shipped defect)",
-     r"node\.children\.forEach \{ child -> androidx\.compose\.runtime\.key\(child\.id\) "
+     r"cells\.forEach \{ child -> androidx\.compose\.runtime\.key\(child\.id\) "
      r"\{ KayaRender\(child\) \} \}",
-     "node.children.forEach { child -> KayaRender(child) }",
+     "cells.forEach { child -> KayaRender(child) }",
      "KayaRender inside a loop with no key()"),
     ("a key() outside the loop rather than inside it",
      r"folded\.forEach \{ androidx\.compose\.runtime\.key\(it\.id\) \{ KayaRender\(it\) \} \}",

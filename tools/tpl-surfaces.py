@@ -2118,7 +2118,7 @@ def facade_csharp():
 # first leaves a nested typed For's body holding the raw Tpl
 # (docs/deferred.md, closed 2026-08-24). The floor is the census
 # discipline; sum surfaces have no `<Rec>Row`.
-CSHARP_TWIN_FLOOR = 27
+CSHARP_TWIN_FLOOR = 29
 
 
 JAVA_TWIN_FLOOR = 21

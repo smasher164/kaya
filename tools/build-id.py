@@ -78,7 +78,7 @@ GATES = {
     # The catalogs and the guests that name their keys both live under
     # guests/ (docs/compliance-plan.md §2.4).
     "check-l10n": ["guests"],
-    "check-universal-props": ["crates", "bindings", "swift", "android"],
+    "check-universal-props": ["crates", "bindings", "swift", "android", "docs/hidden-plan.md"],
     # No binding sits between an authored role and the backends; same for
     # check-native-undo.
     "check-roles": ["crates", "swift", "android"],

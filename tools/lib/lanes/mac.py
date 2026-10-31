@@ -46,6 +46,8 @@ SCENES = [
     "confirm", "nav", "split", "panes", "table", "scroll", "scrollto", "fullscreen",
     "progress",
     "select", "radio", "grid", "textarea", "sections", "menus", "rowmenu",
+    # docs/hidden-plan.md.
+    "hiderows",
     "commands", "a11y", "a11yrows", "filedialog", "clipboard", "undo",
     "dirty", "ranges", "save", "styling", "toolbar", "identity",
     "assets", "sizepolicy", "adaptive", "pickers", "sliders",
@@ -506,6 +508,7 @@ ORDER = [
     ("sections", LANGS),
     ("menus", LANGS),
     ("rowmenu", LANGS),
+    ("hiderows", LANGS),
     ("a11y", LANGS),
     ("commands", LANGS),
     ("stall", LANGS),

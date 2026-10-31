@@ -558,6 +558,72 @@ struct ForSite {
     /// and an unreported window has an unbounded band — every row
     /// realizes (docs/virtualization-plan.md §1).
     window: crate::rowwindow::RowWindow,
+    /// docs/hidden-plan.md H2: per variant, each template root's `hidden`.
+    hide: Vec<Vec<RootHide>>,
+    /// The rows the window sees, rebuilt on demand; None is stale. Only a
+    /// site whose roots can hide keeps one.
+    shown: Option<Shown>,
+}
+
+/// One template root's `hidden` binding (docs/hidden-plan.md H2).
+#[derive(Clone, Copy, PartialEq)]
+enum RootHide {
+    Never,
+    Const(bool),
+    Signal(SignalId),
+    Element { level: u32, field: u32 },
+}
+
+/// A hiding site's rows in order without its hidden ones, and each hidden
+/// row's PLACE: how many shown rows precede it (docs/hidden-plan.md H3).
+struct Shown {
+    order: Vec<Key>,
+    place: HashMap<Key, usize>,
+}
+
+fn hide_rules(bodies: &[Arc<TplBody>]) -> Vec<Vec<RootHide>> {
+    bodies
+        .iter()
+        .map(|body| {
+            body.roots
+                .iter()
+                .map(|root| {
+                    let mut rule = RootHide::Never;
+                    for op in &body.ops {
+                        if let TplOp::SetProp { node, prop: Prop::Hidden, value } = op {
+                            if node == root {
+                                rule = match value {
+                                    PropValue::Const(v) => RootHide::Const(matches!(v, Value::Bool(true))),
+                                    PropValue::Signal(sig) => RootHide::Signal(*sig),
+                                    PropValue::Element { level, field } => {
+                                        RootHide::Element { level: *level, field: *field }
+                                    }
+                                };
+                            }
+                        }
+                    }
+                    rule
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn can_hide(hide: &[Vec<RootHide>]) -> bool {
+    hide.iter()
+        .any(|roots| !roots.is_empty() && roots.iter().all(|r| *r != RootHide::Never && *r != RootHide::Const(false)))
+}
+
+/// The rows a site's window sees: its shown rows when it can hide, else the
+/// whole order. `ensure_shown` runs first.
+fn shown_order<'a>(shown: &'a Option<Shown>, hide: &[Vec<RootHide>], inst: &'a CollInstance) -> &'a [Key] {
+    match shown {
+        Some(sh) => &sh.order,
+        None => {
+            assert!(!can_hide(hide), "kaya: a hiding For's shown rows were read stale (ensure_shown first)");
+            &inst.order
+        }
+    }
 }
 
 struct WhenSite {
@@ -1262,6 +1328,11 @@ pub(crate) struct Scene {
     /// One per textarea declared `rich`; every delta is derived from it
     /// (docs/rich-text-plan.md R1/R4).
     rich: HashMap<WidgetId, RichDoc>,
+    /// Some For's roots hide from a signal, or from an enclosing row's
+    /// field: the writes that can move a site's shown rows without touching
+    /// its instance (docs/hidden-plan.md H2).
+    hide_by_signal: bool,
+    hide_by_outer: bool,
 }
 
 /// The choice kinds: one selection among label-children options. Select
@@ -5606,7 +5677,27 @@ impl Scene {
                     variant,
                     field,
                     value,
-                } => self.update_field_entry(id, path, key, variant, field, value, &mut out),
+                } => {
+                    // docs/hidden-plan.md H4: a filter is a run of field
+                    // writes, and its band is reconciled once for the run.
+                    let site = (id, path.iter().map(Key::from_value).collect::<PathKey>());
+                    let mut moved = self.update_field_entry(id, path.clone(), key, variant, field, value, &mut out);
+                    if group.is_none() {
+                        while let Some((_, TxOp::CollectionUpdateField { id: next, path: at_path, .. })) = queue.front() {
+                            if *next != id || *at_path != path {
+                                break;
+                            }
+                            let Some((_, TxOp::CollectionUpdateField { key, variant, field, value, .. })) = queue.pop_front()
+                            else {
+                                unreachable!("the front was just matched")
+                            };
+                            moved |= self.update_field_entry(id, path.clone(), key, variant, field, value, &mut out);
+                        }
+                    }
+                    if moved {
+                        self.rehide_site(&site, &mut out);
+                    }
+                }
                 TxOp::CollectionRemove { id, path, key } => {
                     let mut keys = vec![key];
                     if group.is_none() {
@@ -6634,6 +6725,17 @@ impl Scene {
             }
             if let Value::Bool(on) = value {
                 self.toggle_whens(id, on, out);
+                if self.hide_by_signal {
+                    let sites: Vec<(CollectionId, PathKey)> = self
+                        .for_sites
+                        .iter()
+                        .filter(|(_, s)| s.hide.iter().flatten().any(|r| *r == RootHide::Signal(id)))
+                        .map(|(site, _)| site.clone())
+                        .collect();
+                    for site in sites {
+                        self.rehide_site(&site, out);
+                    }
+                }
             }
         }
     }
@@ -6738,6 +6840,9 @@ impl Scene {
             if let Some(inst) = self.coll_instances.get_mut(&(*id, path.clone())) {
                 inst.order = order.clone();
             }
+        }
+        for site in self.for_sites.values_mut() {
+            site.shown = None;
         }
     }
 
@@ -7924,6 +8029,9 @@ impl Scene {
         match self.coll_instances.get_mut(&(id, path.clone())) {
             Some(inst) => inst.order = keys.to_vec(),
             None => return,
+        }
+        if let Some(site) = self.for_sites.get_mut(&(id, path.clone())) {
+            site.shown = None;
         }
         let container = match self.for_sites.get(&(id, path.clone())) {
             Some(site) => site.container,
@@ -10197,11 +10305,20 @@ impl Scene {
             (collection, path.clone()),
             ForSite {
                 container,
+                hide: hide_rules(&bodies),
                 bodies,
                 chain: chain.clone(),
                 window: crate::rowwindow::RowWindow::default(),
+                shown: None,
             },
         );
+        for rule in self.for_sites[&(collection, path.clone())].hide.iter().flatten() {
+            match rule {
+                RootHide::Signal(_) => self.hide_by_signal = true,
+                RootHide::Element { level, .. } if *level > 0 => self.hide_by_outer = true,
+                _ => {}
+            }
+        }
         // RECONCILE IS A SEEDED SITE'S ONLY STAMPER: seed_window stamps the
         // band out of the order, so the whole-table walk below must not run
         // beside it. On an UNDECLARED backend nothing is seeded and the walk
@@ -10253,6 +10370,9 @@ impl Scene {
             self.collections.contains_key(&id),
             "kaya: delta on unknown collection {id:?}"
         );
+        if let Some(site) = self.for_sites.get_mut(&(id, path.clone())) {
+            site.shown = None;
+        }
         self.coll_instances
             .get_mut(&(id, path.clone()))
             .unwrap_or_else(|| {
@@ -10480,6 +10600,9 @@ impl Scene {
         check_record(&schema, &record, &format!("update of {id:?}"));
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
+        let site = (id, path.clone());
+        let watched = self.windowed(id, &path) && self.for_sites.get(&site).is_some_and(|s| can_hide(&s.hide));
+        let was_hidden = watched && self.row_hidden(&site, &key);
         let inst = self.instance_mut(id, &path);
         let current = inst
             .entries
@@ -10520,9 +10643,14 @@ impl Scene {
                 self.push_bound_prop(widget, prop, value, out);
             }
         }
+        let moved = watched && self.row_hidden(&site, &key) != was_hidden;
         let entry = (id, path, key);
         self.refresh_drag_binds(&entry, out);
         self.refresh_context_labels(&entry, out);
+        self.rehide_nested(&entry, out);
+        if moved {
+            self.rehide_site(&site, out);
+        }
     }
 
     /// A restamped copy was appended to its container; move it back to
@@ -10579,7 +10707,7 @@ impl Scene {
         field: u32,
         value: Value,
         out: &mut Vec<ApplyOp>,
-    ) {
+    ) -> bool {
         let schema = self.variant_schema(id, variant, "update_field");
         assert!(
             (field as usize) < schema.len(),
@@ -10593,6 +10721,9 @@ impl Scene {
         );
         let path: PathKey = path.iter().map(Key::from_value).collect();
         let key = Key::from_value(&key);
+        let site = (id, path.clone());
+        let watched = self.windowed(id, &path) && self.for_sites.get(&site).is_some_and(|s| can_hide(&s.hide));
+        let was_hidden = watched && self.row_hidden(&site, &key);
         let inst = self.instance_mut(id, &path);
         let (stored, current) = inst
             .entries
@@ -10612,9 +10743,34 @@ impl Scene {
                 }
             }
         }
+        let moved = watched && self.row_hidden(&site, &key) != was_hidden;
         let entry = (id, path, key);
         self.refresh_drag_binds(&entry, out);
         self.refresh_context_labels(&entry, out);
+        if !unchanged {
+            self.rehide_nested(&entry, out);
+        }
+        moved
+    }
+
+    /// docs/hidden-plan.md H2: the sites nested in this row whose roots hide
+    /// by one of its fields.
+    fn rehide_nested(&mut self, entry: &EntryRef, out: &mut Vec<ApplyOp>) {
+        if !self.hide_by_outer {
+            return;
+        }
+        let sites: Vec<(CollectionId, PathKey)> = self
+            .for_sites
+            .iter()
+            .filter(|(_, s)| {
+                s.chain.last() == Some(entry)
+                    && s.hide.iter().flatten().any(|r| matches!(r, RootHide::Element { level, .. } if *level > 0))
+            })
+            .map(|(site, _)| site.clone())
+            .collect();
+        for site in sites {
+            self.rehide_site(&site, out);
+        }
     }
 
     /// A run of consecutive removes from one instance, applied as one: the
@@ -11303,6 +11459,86 @@ impl Scene {
             .is_some_and(|s| s.window.is_bounded())
     }
 
+    /// docs/hidden-plan.md H2: a row is hidden when every root of its copy is.
+    fn row_hidden(&self, site: &(CollectionId, PathKey), key: &Key) -> bool {
+        let Some(s) = self.for_sites.get(site) else {
+            return false;
+        };
+        let Some((variant, record)) = self.coll_instances.get(site).and_then(|i| i.entries.get(key)) else {
+            return false;
+        };
+        let Some(roots) = s.hide.get(*variant as usize) else {
+            return false;
+        };
+        let on = |v: Option<&Value>| matches!(v, Some(Value::Bool(true)));
+        !roots.is_empty()
+            && roots.iter().all(|rule| match *rule {
+                RootHide::Never => false,
+                RootHide::Const(hidden) => hidden,
+                RootHide::Signal(sig) => on(self.signals.get(&sig)),
+                RootHide::Element { level: 0, field } => on(record.get(field as usize)),
+                RootHide::Element { level, field } => s
+                    .chain
+                    .len()
+                    .checked_sub(level as usize)
+                    .and_then(|at| s.chain.get(at))
+                    .and_then(|(id, path, key)| {
+                        self.coll_instances.get(&(*id, path.clone())).and_then(|i| i.entries.get(key))
+                    })
+                    .is_some_and(|(_, outer)| on(outer.get(field as usize))),
+            })
+    }
+
+    /// Rebuild a hiding site's shown rows when they are stale.
+    fn ensure_shown(&mut self, site: &(CollectionId, PathKey)) {
+        let Some(s) = self.for_sites.get(site) else {
+            return;
+        };
+        if s.shown.is_some() || !can_hide(&s.hide) {
+            return;
+        }
+        let mut order = Vec::new();
+        let mut place = HashMap::new();
+        for key in &self.coll_instances[site].order {
+            if self.row_hidden(site, key) {
+                place.insert(key.clone(), order.len());
+            } else {
+                order.push(key.clone());
+            }
+        }
+        self.for_sites.get_mut(site).unwrap().shown = Some(Shown { order, place });
+    }
+
+    /// A row's index among the rows its window sees: a hidden row answers
+    /// its place. O(N) on a hiding site, for the reads that hold `&self`.
+    fn shown_index(&self, site: &(CollectionId, PathKey), key: &Key) -> Option<usize> {
+        let inst = self.coll_instances.get(site)?;
+        let hides = self.for_sites.get(site).is_some_and(|s| can_hide(&s.hide));
+        if !hides {
+            return inst.order.iter().position(|k| k == key);
+        }
+        let mut shown = 0;
+        for k in &inst.order {
+            if k == key {
+                return Some(shown);
+            }
+            if !self.row_hidden(site, k) {
+                shown += 1;
+            }
+        }
+        None
+    }
+
+    /// Something moved what a site's rows hide by without touching its
+    /// instance (a signal, an enclosing row's field): rebuild and reconcile.
+    fn rehide_site(&mut self, site: &(CollectionId, PathKey), out: &mut Vec<ApplyOp>) {
+        if let Some(s) = self.for_sites.get_mut(site) {
+            s.shown = None;
+            s.window.order_moved();
+        }
+        self.reconcile_window(site.0, &site.1, out);
+    }
+
     /// A windowed-capable For on a DECLARED backend starts at the seed rather
     /// than unbounded (docs/deferred.md, the declares-windowing entry).
     /// WINDOWED-CAPABLE IS A DECLARED TABLE — seeding a plain For would cap it
@@ -11649,17 +11885,15 @@ impl Scene {
         self.for_sites.get_mut(&site).unwrap().window.report(first, count);
         let mut out = Vec::new();
         self.reconcile_window(site.0, &site.1, &mut out);
+        self.ensure_shown(&site);
         self.settle_video_views(&out);
         self.settle_image_needs(&out);
         self.need_images_on(&site);
         self.settle_player_holds(&mut out);
         // The viewport is parked on its first visible row (§2.4).
-        let order = &self.coll_instances[&site].order;
-        self.for_sites
-            .get_mut(&site)
-            .unwrap()
-            .window
-            .park(order, first.min(order.len().saturating_sub(1)));
+        let s = self.for_sites.get_mut(&site).unwrap();
+        let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
+        s.window.park(order, first.min(order.len().saturating_sub(1)));
         #[cfg(debug_assertions)]
         self.assert_bands_hold();
         self.lower_skin(&mut out);
@@ -11674,11 +11908,17 @@ impl Scene {
     /// dropped in between has no identity left to hang a height on.
     pub(crate) fn rows_measured(&mut self, target: u64, first: usize, heights: &[f64]) {
         let site = self.window_site(target, "kaya_rows_measured");
-        let order = &self.coll_instances[&site].order;
+        self.ensure_shown(&site);
+        let s = self.for_sites.get_mut(&site).unwrap();
+        let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
         let from = first.min(order.len());
-        let upto = from.saturating_add(heights.len()).min(order.len());
-        let window = &mut self.for_sites.get_mut(&site).unwrap().window;
-        window.measured(from, &order[from..upto], &heights[..upto - from]);
+        let mut upto = from.saturating_add(heights.len()).min(order.len());
+        // docs/hidden-plan.md H3: the kept copies parked after the band are
+        // not rows the band holds, whatever a positional walk measured.
+        if s.window.is_bounded() {
+            upto = upto.min(s.window.band(order.len()).end.max(from));
+        }
+        s.window.measured(from, &order[from..upto], &heights[..upto - from]);
     }
 
     /// The row keyed `key` in the For mounted in `container`: its index in
@@ -11690,10 +11930,7 @@ impl Scene {
         let (site, _) = self.for_sites.iter().find(|(_, s)| s.container == WidgetId(container))?;
         let (collection, path) = site.clone();
         let key = Key::from_value(key);
-        let index = self.coll_instances[&(collection.clone(), path.clone())]
-            .order
-            .iter()
-            .position(|k| *k == key)?;
+        let index = self.shown_index(&(collection, path.clone()), &key)?;
         let copy = self.stamps.get(&(collection, path, key)).and_then(|s| s.roots.first().copied());
         Some((index, copy))
     }
@@ -11706,13 +11943,12 @@ impl Scene {
     pub(crate) fn scroll_to_row(&self, target: u64, key: &Value) -> usize {
         let site = self.window_site(target, "scroll_to_row");
         let key = Key::from_value(key);
-        let order = &self.coll_instances[&site].order;
-        order.iter().position(|k| *k == key).unwrap_or_else(|| {
+        self.shown_index(&site, &key).unwrap_or_else(|| {
             panic!(
                 "kaya: scroll_to_row names key {key:?}, which this collection's {} \
                  rows do not include — the row is addressed as DATA, so an \
                  unrealized row scrolls and a missing one is the caller's bug",
-                order.len()
+                self.coll_instances[&site].order.len()
             )
         })
     }
@@ -11722,8 +11958,10 @@ impl Scene {
     /// and the anchor's outstanding scroll adjustment.
     pub(crate) fn window_geometry(&mut self, target: u64) -> WindowGeometry {
         let site = self.window_site(target, "kaya_window_geometry");
-        let order = &self.coll_instances[&site].order;
-        let window = &mut self.for_sites.get_mut(&site).unwrap().window;
+        self.ensure_shown(&site);
+        let s = self.for_sites.get_mut(&site).unwrap();
+        let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
+        let window = &mut s.window;
         let band = window.band(order.len());
         WindowGeometry {
             first: band.start,
@@ -11742,8 +11980,10 @@ impl Scene {
     pub(crate) fn window_row_of(&mut self, target: u64, widget: u64) -> Option<usize> {
         let (id, path) = self.window_site(target, "kaya_window_row_of");
         let site = (id, path.clone());
-        let order = &self.coll_instances[&site].order;
-        let window = &self.for_sites[&site].window;
+        self.ensure_shown(&site);
+        let s = &self.for_sites[&site];
+        let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
+        let window = &s.window;
         let start = window.band(order.len()).start;
         let (k, key) = window.realized().iter().enumerate().find(|(_, key)| {
             self.stamps
@@ -11762,8 +12002,10 @@ impl Scene {
     /// (docs/virtualization-plan.md §4, the macOS native tier).
     pub(crate) fn row_extent(&mut self, target: u64, index: usize) -> f64 {
         let site = self.window_site(target, "kaya_row_extent");
-        let order = &self.coll_instances[&site].order;
-        self.for_sites[&site].window.row_extent(order, index)
+        self.ensure_shown(&site);
+        let s = &self.for_sites[&site];
+        let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
+        s.window.row_extent(order, index)
     }
 
     /// A windowed site's realized set is exactly the band's rows, and its
@@ -11773,40 +12015,66 @@ impl Scene {
             return;
         }
         let site = (id, path.clone());
-        let total = self.coll_instances[&site].order.len();
-        let band = self.for_sites[&site].window.band(total);
+        self.ensure_shown(&site);
         // BAND-SIZED, never N-sized: this runs on every insert, remove and
         // move of a windowed collection.
-        let desired: Vec<Key> = self.coll_instances[&site].order[band].to_vec();
+        let (desired, band) = {
+            let s = &self.for_sites[&site];
+            let order = shown_order(&s.shown, &s.hide, &self.coll_instances[&site]);
+            let band = s.window.band(order.len());
+            (order[band.clone()].to_vec(), band)
+        };
         let want: std::collections::HashSet<Key> = desired.iter().cloned().collect();
-        let realized = self.for_sites[&(id, path.clone())].window.realized().to_vec();
-        for key in &realized {
-            if !want.contains(key) {
-                if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
-                    self.teardown(stamp, out);
-                }
+        let realized = self.for_sites[&site].window.realized().to_vec();
+        let kept_before = self.for_sites[&site].window.kept().to_vec();
+        let stamped = |scene: &Self, k: &Key| scene.stamps.contains_key(&(id, path.clone(), k.clone()));
+        // docs/hidden-plan.md H3: a hidden copy stays stamped while its place
+        // is inside the band; every other row leaving the band tears down.
+        let mut kept: Vec<Key> = Vec::new();
+        for key in realized.iter().chain(kept_before.iter()) {
+            if want.contains(key) || kept.contains(key) {
+                continue;
+            }
+            let place = self.for_sites[&site].shown.as_ref().and_then(|sh| sh.place.get(key)).copied();
+            if stamped(self, key) && place.is_some_and(|p| band.start <= p && p <= band.end) {
+                kept.push(key.clone());
+            } else if let Some(stamp) = self.stamps.remove(&(id, path.clone(), key.clone())) {
+                self.teardown(stamp, out);
             }
         }
         // Survivors keep their relative order; a survivor whose stamp is
-        // gone (a variant change tore it down) counts as entering.
+        // gone (a variant change tore it down) counts as entering. A kept
+        // row shown again enters already stamped.
         let mut current: Vec<Key> = realized
             .into_iter()
-            .filter(|k| {
-                want.contains(k) && self.stamps.contains_key(&(id, path.clone(), k.clone()))
-            })
+            .filter(|k| want.contains(k) && stamped(self, k))
             .collect();
+        let mut entered = false;
+        for key in &kept_before {
+            if want.contains(key) && stamped(self, key) {
+                current.push(key.clone());
+                entered = true;
+            }
+        }
         for key in &desired {
-            if !self.stamps.contains_key(&(id, path.clone(), key.clone())) {
+            if !stamped(self, key) {
                 self.stamp_entry(id, path, key, out);
                 current.push(key.clone());
+                entered = true;
             }
         }
         self.order_children(id, path, &mut current, &desired, out);
-        self.for_sites
-            .get_mut(&(id, path.clone()))
-            .unwrap()
-            .window
-            .set_realized(desired);
+        if !kept.is_empty() && (entered || kept != kept_before) {
+            let container = self.for_sites[&site].container;
+            for key in &kept {
+                for &child in &self.stamps[&(id, path.clone(), key.clone())].roots {
+                    out.push(ApplyOp::MoveChild { parent: container, child, before: None });
+                }
+            }
+        }
+        let window = &mut self.for_sites.get_mut(&site).unwrap().window;
+        window.set_realized(desired);
+        window.set_kept(kept);
     }
 
     /// The collection's ORDER changed under a windowed site (an insert, a
@@ -11815,6 +12083,7 @@ impl Scene {
     fn window_order_moved(&mut self, id: CollectionId, path: &PathKey, out: &mut Vec<ApplyOp>) {
         if let Some(site) = self.for_sites.get_mut(&(id, path.clone())) {
             site.window.order_moved();
+            site.shown = None;
         }
         self.reconcile_window(id, path, out);
     }
@@ -11905,8 +12174,18 @@ impl Scene {
             if !site.window.is_bounded() {
                 continue;
             }
-            let order = &self.coll_instances[&(*id, path.clone())].order;
+            let full = &self.coll_instances[&(*id, path.clone())].order;
+            let order: Vec<Key> =
+                full.iter().filter(|k| !self.row_hidden(&(*id, path.clone()), k)).cloned().collect();
             let band = site.window.band(order.len());
+            for key in site.window.kept() {
+                assert!(
+                    self.row_hidden(&(*id, path.clone()), key)
+                        && self.stamps.contains_key(&(*id, path.clone(), key.clone())),
+                    "kaya: a windowed For keeps {key:?} stamped though it is shown or has no stamp \
+                     (docs/hidden-plan.md H3)"
+                );
+            }
             assert_eq!(
                 site.window.realized(),
                 &order[band],
@@ -22171,6 +22450,141 @@ Destroy { id: WidgetId(9223372036854775809) }"#;
         assert_eq!(realized(&scene), vec![1, 2, 3, 4, 5]);
         scene.apply(vec![row_insert(9)]);
         assert_eq!(realized(&scene), vec![1, 2, 3, 4, 5, 9]);
+    }
+
+    // --- Hidden rows (docs/hidden-plan.md) ---------------------------------
+
+    /// A For whose row root hides by its own Bool field 1, `n` rows keyed
+    /// 0..n, every row whose key is in `hidden` hidden at insert.
+    fn hiding_scene(n: i64, hidden: &[i64]) -> Scene {
+        let mut scene = Scene::new();
+        scene.declare_windowing();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str, ValueType::Bool]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Hidden, value: PropValue::Element { level: 0, field: 1 } },
+            TxOp::CreateWidget { id: WidgetId(11), kind: WidgetKind::Entry },
+            TxOp::SetProperty { widget: WidgetId(11), prop: Prop::Text, value: PropValue::Element { level: 0, field: 0 } },
+            TxOp::AddChild { parent: WidgetId(10), child: WidgetId(11) },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+        ]);
+        scene.apply(
+            (0..n)
+                .map(|i| TxOp::CollectionInsert {
+                    id: CollectionId(1),
+                    path: vec![],
+                    key: Value::I64(i),
+                    variant: 0,
+                    record: vec![v(&format!("row{i}")), Value::Bool(hidden.contains(&i))],
+                })
+                .collect(),
+        );
+        scene
+    }
+
+    fn hide(keys: &[i64], on: bool) -> Transaction {
+        keys.iter()
+            .map(|k| TxOp::CollectionUpdateField {
+                id: CollectionId(1),
+                path: vec![],
+                key: Value::I64(*k),
+                variant: 0,
+                field: 1,
+                value: Value::Bool(on),
+            })
+            .collect()
+    }
+
+    fn kept(scene: &Scene) -> Vec<i64> {
+        scene.for_sites[&(CollectionId(1), Vec::new())]
+            .window
+            .kept()
+            .iter()
+            .map(|k| match k {
+                Key::I64(n) => *n,
+                other => panic!("unexpected key {other:?}"),
+            })
+            .collect()
+    }
+
+    fn root_of(scene: &Scene, key: i64) -> Option<WidgetId> {
+        scene.stamps.get(&(CollectionId(1), Vec::new(), Key::I64(key))).map(|s| s.roots[0])
+    }
+
+    /// H3: the window counts the rows it shows — the total, the band and
+    /// the positions are over the shown rows alone.
+    #[test]
+    fn a_window_counts_only_its_shown_rows() {
+        let mut scene = hiding_scene(1_000, &[]);
+        scene.window_moved(4, 0, 10);
+        scene.rows_measured(4, 0, &[20.0; 10]);
+        scene.apply(hide(&(0..1_000).filter(|i| i % 10 != 0).collect::<Vec<_>>(), true));
+        let geometry = scene.window_geometry(4);
+        assert_eq!(geometry.total, 100, "one row in ten is shown");
+        assert_eq!(geometry.extent, 100.0 * 20.0, "and only those take extent");
+        assert_eq!(realized(&scene)[..3], [0, 10, 20], "the band holds shown rows only");
+        scene.window_moved(4, 50, 10);
+        assert_eq!(scene.window_geometry(4).offset, 40.0 * 20.0, "positions count shown rows");
+        assert_eq!(scene.scroll_to_row(4, &Value::I64(500)), 50);
+        assert_eq!(scene.scroll_to_row(4, &Value::I64(505)), 51, "a hidden row answers its place");
+    }
+
+    /// H3: a row hidden while realized keeps its copy — the same widget,
+    /// so the same typed text — and is never stamped on entering the band.
+    #[test]
+    fn a_hidden_row_keeps_its_copy_and_a_never_shown_one_is_not_stamped() {
+        let mut scene = hiding_scene(400, &[300]);
+        scene.window_moved(4, 0, 10);
+        let before = root_of(&scene, 3).expect("row 3 is realized");
+        scene.apply(hide(&[3], true));
+        assert!(!realized(&scene).contains(&3));
+        assert_eq!(kept(&scene), vec![3]);
+        scene.apply(hide(&[3], false));
+        assert_eq!(root_of(&scene, 3), Some(before), "shown again, the same copy");
+        assert!(kept(&scene).is_empty());
+        scene.window_moved(4, 290, 10);
+        assert!(root_of(&scene, 300).is_none(), "a hidden row entering the band stays data");
+        assert!(root_of(&scene, 3).is_none(), "and a row far behind the band tears down");
+    }
+
+    /// H3: a kept copy parks after the band's rows, so a positional walk of
+    /// the container sees the band first and a run past it is not a row.
+    #[test]
+    fn a_kept_copy_parks_after_the_band_and_measures_nothing() {
+        let mut scene = hiding_scene(6, &[]);
+        scene.window_moved(4, 0, 6);
+        let ops = scene.apply(hide(&[1], true));
+        let parked = ops.iter().any(|op| {
+            matches!(op, ApplyOp::MoveChild { parent: WidgetId(4), child, before: None } if Some(*child) == root_of(&scene, 1))
+        });
+        assert!(parked, "the kept copy moves to the container's end: {ops:?}");
+        scene.rows_measured(4, 0, &[20.0, 20.0, 20.0, 20.0, 20.0, 0.0]);
+        let geometry = scene.window_geometry(4);
+        assert_eq!(geometry.total, 5);
+        assert!(!geometry.corrected, "the parked copy's zero is not a row's height");
+    }
+
+    /// H4: an unwindowed For stamps every row, hidden ones too: the prop
+    /// is the whole of it there.
+    #[test]
+    fn an_unwindowed_for_stamps_its_hidden_rows() {
+        let mut scene = Scene::new();
+        scene.apply(vec![
+            TxOp::CreateWidget { id: WidgetId(1), kind: WidgetKind::Column },
+            TxOp::CreateCollection { id: CollectionId(1), variants: vec![vec![ValueType::Str, ValueType::Bool]] },
+            TxOp::CreateFor { id: 4, collection: CollectionId(1) },
+            TxOp::CreateWidget { id: WidgetId(10), kind: WidgetKind::Row },
+            TxOp::SetProperty { widget: WidgetId(10), prop: Prop::Hidden, value: PropValue::Element { level: 0, field: 1 } },
+            TxOp::TemplateEnd,
+            TxOp::AddChild { parent: WidgetId(1), child: WidgetId(4) },
+            TxOp::Mount { window: DEFAULT_WINDOW, root: WidgetId(1) },
+            TxOp::CollectionInsert { id: CollectionId(1), path: vec![], key: Value::I64(0), variant: 0, record: vec![v("a"), Value::Bool(true)] },
+        ]);
+        assert!(root_of(&scene, 0).is_some());
     }
 
     // --- The seed (docs/deferred.md, the declares-windowing entry) -------

@@ -11,6 +11,7 @@ static class SearchItemKaya
         tx.CollectionOf<SearchItem>();
 
     public static readonly Field<string> Name = KayaRecords.FieldAt<string>(0);
+    public static readonly Field<bool> Unmatched = KayaRecords.FieldAt<bool>(1);
 
     public static SearchItemKayaPatch Patch(Tx tx, RecordCollection<SearchItem> c, object key) =>
         new SearchItemKayaPatch(c.Patch(tx, key));
@@ -75,6 +76,7 @@ sealed class SearchItemRow
 {
     readonly Tpl t;
     public readonly Field<string> Name = SearchItemKaya.Name;
+    public readonly Field<bool> Unmatched = SearchItemKaya.Unmatched;
 
     internal SearchItemRow(Tpl t) => this.t = t;
 
@@ -610,6 +612,12 @@ sealed class SearchItemKayaPatch
         p.Set(SearchItemKaya.Name, v);
         return this;
     }
+
+    public SearchItemKayaPatch Unmatched(bool v)
+    {
+        p.Set(SearchItemKaya.Unmatched, v);
+        return this;
+    }
 }
 
 sealed class SearchItemKayaPatchIf
@@ -621,6 +629,12 @@ sealed class SearchItemKayaPatchIf
     public SearchItemKayaPatchIf Name(string v)
     {
         p.Set(SearchItemKaya.Name, v);
+        return this;
+    }
+
+    public SearchItemKayaPatchIf Unmatched(bool v)
+    {
+        p.Set(SearchItemKaya.Unmatched, v);
         return this;
     }
 }

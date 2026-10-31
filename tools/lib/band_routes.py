@@ -19,7 +19,7 @@ REPORT = "private func report(_ node: KayaNode) {"
 LAYOUT = "private struct KayaTableLayout: Layout {"
 TABLE = "private struct KayaSynthesizedTable: View {"
 ASK = "let drawnIndex = drawnRow.flatMap { KayaHost.windowRowOf(node.id, $0) }"
-BAND = ": drawnIndex == Int(geometry.first) && node.children.count == Int(geometry.count)"
+BAND = ": drawnIndex == Int(geometry.first) && node.shownRows.count == Int(geometry.count)"
 PUBLISH = "if childrenAreBand {"
 PLACED = "let placementIsChildren = placement.bandRow == drawnRow\n&& (drawnRow == nil || drawnIndex == placement.bandFirst)"
 HOLD = "guard childrenAreBand, placementIsChildren else {"
@@ -60,7 +60,7 @@ def findings(src):
     if len(layout) != 1 or flat("placement.bandFirst = first\nplacement.bandRow = firstRow") not in flat(layout[0]):
         out.append("band report: the layout no longer records which row it placed first")
     table = blocks(src, TABLE)
-    if len(table) != 1 or flat("firstRow: node.children.first?.id") not in flat(table[0]):
+    if len(table) != 1 or flat("firstRow: node.shownRows.first?.id") not in flat(table[0]):
         out.append("band report: the table no longer hands the layout its first child")
     return out
 
@@ -70,7 +70,7 @@ WINDOW = "internal class KayaTableWindow(private val node: KayaNode) {"
 K_REPORT = "fun report() {"
 K_PUBLISH = "private fun publishIfDrawn(drawnIndex: Long?): Boolean {"
 K_ASK = "val drawnIndex = drawnRow?.let { KayaPresent.windowRowOf(node.id, it) }"
-K_BAND = "else drawnIndex == start.toLong() && node.children.size == count"
+K_BAND = "else drawnIndex == start.toLong() && node.shownRows.size == count"
 K_REFUSE = "if (!childrenAreBand) return false"
 K_PLACED = "val placementIsChildren = laidOutRow == drawnRow\n&& (drawnRow == null || drawnIndex == laidOutFirst.toLong())"
 K_HOLD = "if (!childrenAreBand || !placementIsChildren) {"

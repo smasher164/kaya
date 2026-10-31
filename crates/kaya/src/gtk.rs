@@ -5912,7 +5912,7 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
     let rows: Vec<(f64, f64)> = children_of(&content)
         .into_iter()
         .filter(|w| {
-            !w.has_css_class(TABLE_SPACER_CLASS) && !w.has_css_class(KAYA_FOLDED_CLASS)
+            !w.has_css_class(TABLE_SPACER_CLASS) && !w.has_css_class(KAYA_FOLDED_CLASS) && !is_hidden(w)
         })
         .map(|w| (f64::from(w.allocation().y()), row_laid_out_height(&w)))
         .collect();
@@ -10849,8 +10849,14 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
             grid.remove(&c);
         }
     }
-    for (i, child) in children.iter().enumerate() {
-        let i = i as i32;
+    // docs/hidden-plan.md H5: the shown cells flow into a hidden cell's
+    // place; a hidden one stays attached, unshown, so it keeps its state.
+    let mut slot = 0i32;
+    for child in children.iter() {
+        let i = slot;
+        if !is_hidden(child) {
+            slot += 1;
+        }
         // A container fills its cell both ways, a card taking its column and
         // its row's tallest height (docs/media-player-plan.md M16 (1)); a leaf
         // centres in its row, as a row's children do (R5).
@@ -10863,8 +10869,8 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
         grid.attach(child, i % cols, i / cols, 1, 1);
     }
     // docs/traps.md, the GTK auto grid's missing columns.
-    if auto && !children.is_empty() {
-        for col in children.len() as i32..cols {
+    if auto && slot > 0 {
+        for col in slot..cols {
             let filler = gtk4::Box::builder()
                 .name(GRID_FILLER_NAME)
                 .accessible_role(gtk4::AccessibleRole::Presentation)
@@ -18155,6 +18161,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let vacated = unsafe { widget.data::<bool>(VACATED_KEY).is_some_and(|p| *p.as_ref()) };
                     unsafe { widget.set_data(HIDDEN_KEY, on) };
                     widget.set_visible(!on && !vacated);
+                    let grid = core
+                        .grid_children
+                        .iter()
+                        .find(|(_, cells)| cells.contains(&widget))
+                        .map(|(grid, _)| *grid);
+                    if let Some(grid) = grid {
+                        reflow_grid(core, grid);
+                    }
                 }
                 // ACCEPTANCE IS PER-WIDGET (DESIGN.md, Clipboard): the list
                 // drives the paste split and Paste's enablement, both read
@@ -22262,7 +22276,7 @@ fn container_children(core: &CoreState, t: crate::harness::Target) -> usize {
     use crate::harness::TargetKind as K;
     let registry = if t.kind == K::Column { &core.columns } else { &core.rows };
     crate::harness::try_resolve(t.index, registry.len())
-        .map_or(0, |i| children_of(&registry[i]).len())
+        .map_or(0, |i| children_of(&registry[i]).iter().filter(|w| !is_hidden(w)).count())
 }
 
 #[cfg(feature = "harness")]
@@ -24964,6 +24978,7 @@ impl crate::harness::Stage for GtkStage {
             // registries are creation-ordered and cannot see a move.
             table_rows(&core.columns[i])
                 .into_iter()
+                .filter(|row| !is_hidden(row))
                 .map(|row| {
                     // A nested cell reads as its labels joined by `/`
                     // (docs/styling-pass-plan.md Y5), depth first.
@@ -25013,7 +25028,7 @@ impl crate::harness::Stage for GtkStage {
                 cells.iter().map(cell_ink).collect()
             };
             let mut lines = vec![ink(children_of(&header))];
-            lines.extend(table_rows(&column).iter().map(|row| ink(children_of(row))));
+            lines.extend(table_rows(&column).iter().filter(|row| !is_hidden(row)).map(|row| ink(children_of(row))));
             let target: gtk4::Widget = column.clone().upcast();
             let mut edges: Vec<f64> = Vec::new();
             let mut min_drawn = f64::MAX;
@@ -25653,7 +25668,7 @@ impl crate::harness::Stage for GtkStage {
             let mut texts = Vec::new();
             let mut child = registry[i].first_child();
             while let Some(widget) = child {
-                if core.labels.iter().any(|l| *l == widget) {
+                if core.labels.iter().any(|l| *l == widget) && !is_hidden(&widget) {
                     texts.push(label_text(&widget));
                 }
                 child = widget.next_sibling();
@@ -27988,7 +28003,7 @@ impl crate::harness::Stage for GtkStage {
             let mut edges: Vec<i32> = Vec::new();
             let mut child = grid.first_child();
             while let Some(c) = child {
-                if c.widget_name() != GRID_FILLER_NAME {
+                if c.widget_name() != GRID_FILLER_NAME && !is_hidden(&c) {
                     edges.push(c.allocation().x());
                 }
                 child = c.next_sibling();

@@ -613,7 +613,7 @@ PIN_COMPOSE = (
 )
 PIN_GROUND = ("Box(Modifier.drawBehind { if (pinned()) drawRect(ground) }"
               ".padding(bottom = KAYA_TABLE_SEGMENT_GAP))")
-ROWS_SNAPSHOT = "    val rows = node.children.toList()\n"
+ROWS_SNAPSHOT = "    val rows = node.shownRows\n"
 PIN_REPORTER = 'key: "h/\\(col)", generation: generation))'
 PIN_TITLE = ".modifier(KayaHeaderPin(node: node, lead: kayaTableCardInsetY, on: pinned))"
 

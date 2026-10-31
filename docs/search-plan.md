@@ -92,7 +92,8 @@ the entry. But cost tracks NEW SURFACES, not the kind-or-role axis: the
 slider's two props on an existing kind cost 87 file touches and +3,735.
 A search field brings the surfaces §2 names whichever carrier it rides.
 
-**The filter.** kaya has no filtered view over a collection: the
+**The filter.** (Closed 2026-10-31 by the `hidden` prop inside a
+collection, docs/hidden-plan.md.) kaya has no filtered view over a collection: the
 primitives are insert, update, update_field, remove and move; `when`
 binds one app-wide Bool and rebuilds rather than hides; there is no
 `visible` prop. Sorting is the app's ("the platform never sorts the
@@ -235,6 +236,11 @@ Search IME action. Autocorrection stays the platform's default. Desktops
 unchanged.
 
 ### S9 — The filter is the app's (RECOMMEND: app-owned, and open the gap on the ledger)
+
+SUPERSEDED 2026-10-31 (docs/hidden-plan.md): the predicate is still the
+app's, but a row it does not match is hidden in place by a row field
+rather than removed and reinserted; the mirror below is gone from the
+task manager, the portfolio and the search scene.
 
 kaya ships no filtered view in S1. The task manager keeps a mirror of
 each list's visible set and, on every `text_changed`, removes the keys

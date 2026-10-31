@@ -31,6 +31,11 @@ func (p itemPatchBuilder) Name(v string) itemPatchBuilder {
 	return p
 }
 
+func (p itemPatchBuilder) Unmatched(v bool) itemPatchBuilder {
+	p.p.Set(func(t *Item) *bool { return &t.Unmatched }, v)
+	return p
+}
+
 // ItemPatchIf is ItemPatch made only while the entry exists and the
 // guard's field still holds expected; otherwise nothing, and no panic
 // (docs/network-images-plan.md N7). The chain is one record.
@@ -47,6 +52,11 @@ func (p itemPatchIfBuilder) Name(v string) itemPatchIfBuilder {
 	return p
 }
 
+func (p itemPatchIfBuilder) Unmatched(v bool) itemPatchIfBuilder {
+	p.p.Set(func(t *Item) *bool { return &t.Unmatched }, v)
+	return p
+}
+
 // The row surface: one token per wire field, and the template
 // constructors that consume them.
 type itemRow struct {
@@ -55,6 +65,8 @@ type itemRow struct {
 }
 
 func (r itemRow) Name() kaya.Field[string] { return kaya.FieldAt[string](0) }
+
+func (r itemRow) Unmatched() kaya.Field[bool] { return kaya.FieldAt[bool](1) }
 
 func (r itemRow) Row(body func()) kaya.Node { return r.t.Row(body) }
 

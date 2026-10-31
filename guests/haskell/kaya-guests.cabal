@@ -245,6 +245,11 @@ executable rowmenu
   main-is: rowmenu.hs
   build-depends: kaya-guests
 
+executable hiderows
+  import: shared
+  main-is: hiderows.hs
+  build-depends: kaya-guests
+
 executable commands
   import: shared
   main-is: commands.hs

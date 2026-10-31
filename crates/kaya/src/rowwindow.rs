@@ -31,6 +31,9 @@ pub(crate) struct RowWindow {
     /// The realized rows in band order — what the For's container holds.
     /// scene.rs's `reconcile_window` is its only writer.
     realized: Vec<Key>,
+    /// docs/hidden-plan.md H3: hidden rows whose copies stay stamped, parked
+    /// after the band's rows.
+    kept: Vec<Key>,
     /// The PITCH: the first extent this site was ever told about,
     /// presumed for every unmeasured row. Never a constant — one number
     /// cannot be right on five platforms' text metrics (§2.1).
@@ -86,6 +89,14 @@ impl RowWindow {
 
     pub(crate) fn set_realized(&mut self, rows: Vec<Key>) {
         self.realized = rows;
+    }
+
+    pub(crate) fn kept(&self) -> &[Key] {
+        &self.kept
+    }
+
+    pub(crate) fn set_kept(&mut self, rows: Vec<Key>) {
+        self.kept = rows;
     }
 
     /// The band this site's rows are realized in: the visible range plus one

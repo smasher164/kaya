@@ -38,7 +38,7 @@ SCENES = [
     "safearea",
     "toast",
     "sections",
-    "menus", "rowmenu", "commands", "a11y", "a11yrows", "filedialog",
+    "menus", "rowmenu", "hiderows", "commands", "a11y", "a11yrows", "filedialog",
     "clipboard", "undo", "dirty", "ranges", "save", "styling",
     "typeface", "toolbar", "identity", "assets", "adaptive", "dnd", "pickers", "sliders", "tooltips",
     "sheet",
@@ -389,6 +389,8 @@ ORDER = [
      # flyout group; docs/traps.md, the flyout a neighbour dismissed).
      "music_context_python",
      "rowmenu_rust", "rowmenu_python", "rowmenu_js", "rowmenu_go", "rowmenu_csharp", "rowmenu_java",
+     # docs/hidden-plan.md: set_text and toggle through the controls' peers.
+     "hiderows_rust", "hiderows_python", "hiderows_js", "hiderows_go", "hiderows_csharp", "hiderows_java",
     ],
     # THE MEDIA SUITE (docs/media-plan.md §7a), pooled: every player is
     # muted, nothing is typed or pointed at, and the picture is read out of

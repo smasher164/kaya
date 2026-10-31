@@ -1066,6 +1066,9 @@ final class KayaNode: Identifiable {
     /// its table's viewport instead, while every harness read and
     /// addressing path keeps seeing `children`.
     var laidOut: [KayaNode] { children.filter { $0.foldedInto == 0 && !$0.vacant } }
+    /// The children a table, a grid or a For's read counts: hidden copies
+    /// are kept off (docs/hidden-plan.md H3, H5).
+    var shownRows: [KayaNode] { children.filter { !$0.hidden } }
     /// A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
     /// column or row that draws nothing of its own and holds only such boxes
     /// (a When showing no case, an empty For) is laid out by no parent, so
@@ -12752,7 +12755,7 @@ private func kayaRunScript(_ script: String) {
                     return kayaTarget(
                         parts[1], isRow ? "row" : "column",
                         isRow ? kayaScene.rows : kayaScene.columns
-                    )?.children
+                    )?.shownRows
                         .filter { $0.kind == kindLabel }
                         .map { $0.text }
                         .joined(separator: "|")
@@ -12786,7 +12789,7 @@ private func kayaRunScript(_ script: String) {
                 // level deeper, for the shape a creation-order registry misses.
                 let want = kayaQuoted(Array(parts[2...]))
                 let got = DispatchQueue.main.sync { () -> String? in
-                    kayaTarget(parts[1], "column", kayaScene.columns)?.children
+                    kayaTarget(parts[1], "column", kayaScene.columns)?.shownRows
                         .map { row in row.children.compactMap(kayaCellText).joined(separator: ",") }
                         .joined(separator: "|")
                 }
@@ -12962,7 +12965,7 @@ private func kayaRunScript(_ script: String) {
                     guard let geometry = KayaHost.windowGeometry(node.id),
                         geometry.total > 0
                     else {
-                        return "0 \(node.children.count)"
+                        return "0 \(node.shownRows.count)"
                     }
                     return "\(geometry.first) \(geometry.total)"
                 }
@@ -13650,7 +13653,7 @@ private func kayaRunScript(_ script: String) {
                     DispatchQueue.main.sync { () -> String? in
                         guard let grid = kayaTarget(parts[1], "grid", kayaScene.grids) else { return nil }
                         var frames: [CGRect] = []
-                        for cell in grid.children {
+                        for cell in grid.shownRows {
                             guard let f = kayaAnchoredFrame(cell.id) ?? kayaGridCellFrames[cell.id] else {
                                 return "unread: cell \(frames.count + 1) has no laid-out frame"
                             }
@@ -13680,7 +13683,7 @@ private func kayaRunScript(_ script: String) {
                     // leading-edge clusters of the cells ARE the columns, and
                     // clustering within 2pt asserts per-column alignment too.
                     var edges: [Double] = []
-                    for cell in grid.children {
+                    for cell in grid.shownRows {
                         guard let x = kayaCellMinX[cell.id] else {
                             return "cell geometry not recorded"
                         }
@@ -20129,7 +20132,7 @@ func kayaCurrentTableGeometry(_ table: KayaNode) -> KayaCurrentTableGeometry {
     // partial row is incoherence on any tier.
     let columnCount = table.tableColumns.count
     var realized: [[CGRect]] = []
-    for row in table.children {
+    for row in table.shownRows {
         var cells: [CGRect] = []
         for column in table.tableColumns.indices where row.children.indices.contains(column) {
             let key = kayaTableCellKey(row, column, row.children[column])
@@ -20145,11 +20148,11 @@ func kayaCurrentTableGeometry(_ table: KayaNode) -> KayaCurrentTableGeometry {
             return .partialRow(got: cells.count, want: columnCount)
         }
     }
-    if viewport.synthesized, realized.count != table.children.count {
-        return .unrealized(realized: realized.count, declared: table.children.count)
+    if viewport.synthesized, realized.count != table.shownRows.count {
+        return .unrealized(realized: realized.count, declared: table.shownRows.count)
     }
-    if realized.isEmpty, !table.children.isEmpty {
-        return .unrealized(realized: 0, declared: table.children.count)
+    if realized.isEmpty, !table.shownRows.isEmpty {
+        return .unrealized(realized: 0, declared: table.shownRows.count)
     }
     var columnFrames: [[CGRect]] = (0..<columnCount).map { column in
         realized.map { $0[column] }
@@ -20292,7 +20295,7 @@ struct KayaTableSurface: View {
         {
             return CGFloat(geometry.extent)
         }
-        return CGFloat(node.children.count) * kayaNativeRowHeight
+        return CGFloat(node.shownRows.count) * kayaNativeRowHeight
     }
 
     private func kayaNativeTableContentHeight(_ node: KayaNode) -> CGFloat {
@@ -20314,7 +20317,7 @@ struct KayaTableSurface: View {
     }
 #else
     private func kayaNativeTableContentHeight(_ node: KayaNode) -> CGFloat {
-        28 + 5 + CGFloat(node.children.count) * 44 + 5
+        28 + 5 + CGFloat(node.shownRows.count) * 44 + 5
     }
 #endif
 
@@ -20439,7 +20442,7 @@ private struct KayaNativeTable: View {
         }
 
         var body: some View {
-            Table(node.children, sortOrder: sortOrder) {
+            Table(node.shownRows, sortOrder: sortOrder) {
                 TableColumnForEach(specs) { spec in
                     TableColumn(
                         Text(spec.title),
@@ -20476,12 +20479,12 @@ private struct KayaNativeTable: View {
             // starts at a screenful and a tier that never reported would show
             // that screenful forever (docs/deferred.md, declares-windowing).
             .onAppear { reportWholeCollection() }
-            .onChange(of: node.children.count) { reportWholeCollection() }
+            .onChange(of: node.shownRows.count) { reportWholeCollection() }
         }
 
         private func reportWholeCollection() {
             let total = KayaHost.windowGeometry(node.id).map { Int($0.total) } ?? 0
-            KayaHost.windowMoved(node.id, 0, max(total, node.children.count))
+            KayaHost.windowMoved(node.id, 0, max(total, node.shownRows.count))
         }
     }
 #endif
@@ -20841,7 +20844,7 @@ private struct KayaNativeTable: View {
         // --- The data source: the COLLECTION's rows, not the band's. --
 
         func numberOfRows(in tableView: NSTableView) -> Int {
-            total > 0 ? total : node.children.count
+            total > 0 ? total : node.shownRows.count
         }
 
         /// The stamped row at a POSITION in the collection's order, or
@@ -20850,10 +20853,10 @@ private struct KayaNativeTable: View {
             guard index >= 0 else { return nil }
             if total > 0 {
                 let offset = index - first
-                guard offset >= 0, offset < node.children.count else { return nil }
-                return node.children[offset]
+                guard offset >= 0, offset < node.shownRows.count else { return nil }
+                return node.shownRows[offset]
             }
-            return index < node.children.count ? node.children[index] : nil
+            return index < node.shownRows.count ? node.shownRows[index] : nil
         }
 
         /// THE CORE IS THE ONLY ESTIMATOR (§2): measured where this row
@@ -20976,7 +20979,7 @@ private struct KayaNativeTable: View {
         private func applySelection() {
             let base = total > 0 ? first : 0
             var want = IndexSet()
-            for (offset, stamped) in node.children.enumerated() {
+            for (offset, stamped) in node.shownRows.enumerated() {
                 let was = appSelected[stamped.tag]
                 appSelected[stamped.tag] = stamped.selected
                 if was != stamped.selected, was != nil || stamped.selected {
@@ -20995,7 +20998,7 @@ private struct KayaNativeTable: View {
         }
 
         /// Whether this table stamped `row`.
-        func stamps(_ row: KayaNode) -> Bool { node.children.contains { $0 === row } }
+        func stamps(_ row: KayaNode) -> Bool { node.shownRows.contains { $0 === row } }
 
         /// A user's click (`clicks` 1) or double-click (2) on `stamped`'s row
         /// through the table's own doors. The press is the table's
@@ -21009,7 +21012,7 @@ private struct KayaNativeTable: View {
         /// takes the keyboard as a click gives it. No host pointer moves. Nil
         /// when the table answered, else what it did.
         func userClick(_ stamped: KayaNode, clicks: Int) -> String? {
-            guard let offset = node.children.firstIndex(where: { $0 === stamped }) else {
+            guard let offset = node.shownRows.firstIndex(where: { $0 === stamped }) else {
                 return "node \(stamped.id) is not among the native table's realized rows"
             }
             let index = (total > 0 ? first : 0) + offset
@@ -21110,7 +21113,7 @@ private struct KayaNativeTable: View {
         /// The tree's name for this table and the collection position of
         /// `stamped`, for expect_selected's read of the table's own AXRows.
         func axRow(of stamped: KayaNode) -> (table: String, index: Int)? {
-            guard let offset = node.children.firstIndex(where: { $0 === stamped }) else { return nil }
+            guard let offset = node.shownRows.firstIndex(where: { $0 === stamped }) else { return nil }
             return (kayaNativeTableAxId(node.id), (total > 0 ? first : 0) + offset)
         }
 
@@ -21232,7 +21235,7 @@ private struct KayaNativeTable: View {
         private func refresh() {
             guard let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0 else {
                 first = 0
-                realized = node.children.count
+                realized = node.shownRows.count
                 total = 0
                 return
             }
@@ -21449,8 +21452,8 @@ private struct KayaNativeTable: View {
         /// compiled table-tier gate reads this; the harness verb does not.
         func band() -> (first: Int, count: Int, total: Int) {
             refresh()
-            if total > 0 { return (first, min(realized, node.children.count), total) }
-            return (0, node.children.count, node.children.count)
+            if total > 0 { return (first, min(realized, node.shownRows.count), total) }
+            return (0, node.shownRows.count, node.shownRows.count)
         }
 
         /// What expect_window compares: the first VISIBLE row and the
@@ -21482,7 +21485,7 @@ private struct KayaNativeTable: View {
         func firstVisible() -> (first: Int, total: Int) {
             refresh()
             let visible = tableView.rows(in: visibleRect())
-            let declared = total > 0 ? total : node.children.count
+            let declared = total > 0 ? total : node.shownRows.count
             return (visible.length > 0 ? visible.location : 0, declared)
         }
 
@@ -22079,9 +22082,9 @@ typealias KayaTablePlaced = () -> Void
             + " anchor " + (anchorRow.map { "r\($0)" } ?? "none")
             + " landedAt " + (landedAt.map(n) ?? "none")
             + "; r\(focus) top \(focusTop); drawn band \(drawnFirst)+\(pitches.count) children "
-            + (node.children.first.flatMap { KayaHost.windowRowOf(node.id, $0.id) }
-                .map { "r\($0)+\(node.children.count)" } ?? "none")
-            + (placement.bandRow == node.children.first?.id ? "" : " (not the ones placed)")
+            + (node.shownRows.first.flatMap { KayaHost.windowRowOf(node.id, $0.id) }
+                .map { "r\($0)+\(node.shownRows.count)" } ?? "none")
+            + (placement.bandRow == node.shownRows.first?.id ? "" : " (not the ones placed)")
             + " bandTop "
             + "\(n(Double(placement.bandTop))) bandOffset \(n(Double(placement.bandOffset)))"
             + "; core \(core); rows drawn/core " + rows.joined(separator: ", ")
@@ -22172,12 +22175,12 @@ typealias KayaTablePlaced = () -> Void
         guard let geometry = KayaHost.windowGeometry(node.id), geometry.total > 0 else {
             // No core (the gate's probes host this render path with none)
             // or a For it does not know: the bridge.
-            publish(windowed: false, top: 0, bottom: 0, first: 0, total: node.children.count)
+            publish(windowed: false, top: 0, bottom: 0, first: 0, total: node.shownRows.count)
             visible = nil
             return
         }
         let pitches = placement.rowPitches
-        guard viewportHeight > 0, pitches.count == node.children.count else {
+        guard viewportHeight > 0, pitches.count == node.shownRows.count else {
             // The other reader has not landed yet, or the layout has not
             // placed this band. Both resolve on the next turn; the budget
             // is what keeps a table that never gets geometry from spinning
@@ -22191,11 +22194,11 @@ typealias KayaTablePlaced = () -> Void
         // is published only once the children ARE it, and a placement is read
         // only if it placed these children under their own index (docs/traps.md,
         // the band placed under the core's newer index).
-        let drawnRow = node.children.first?.id
+        let drawnRow = node.shownRows.first?.id
         let drawnIndex = drawnRow.flatMap { KayaHost.windowRowOf(node.id, $0) }
         let childrenAreBand = drawnRow == nil
             ? geometry.count == 0
-            : drawnIndex == Int(geometry.first) && node.children.count == Int(geometry.count)
+            : drawnIndex == Int(geometry.first) && node.shownRows.count == Int(geometry.count)
         if childrenAreBand {
             let band = Int(geometry.first)..<Int(geometry.first) + Int(geometry.count)
             var spanned = 0.0
@@ -22335,7 +22338,7 @@ typealias KayaTablePlaced = () -> Void
             return
         }
         landedAt = nil
-        guard anchor >= drawnFirst, anchor < drawnFirst + node.children.count else {
+        guard anchor >= drawnFirst, anchor < drawnFirst + node.shownRows.count else {
             note(node, "r\(anchor) is not in the drawn band; waiting for the band")
             return
         }
@@ -22343,7 +22346,7 @@ typealias KayaTablePlaced = () -> Void
         let k = anchor - drawnFirst
         let pitch = k < placement.rowPitches.count ? Double(placement.rowPitches[k]) : 0
         proxy.scrollTo(
-            KayaRowAnchor(row: node.children[k].id),
+            KayaRowAnchor(row: node.shownRows[k].id),
             anchor: UnitPoint(x: 0, y: Self.parkFraction(
                 header: Double(placement.headerHeight - placement.rowGap / 2), viewport: viewportHeight, pitch: pitch)))
     }
@@ -22826,8 +22829,8 @@ private func kayaGroupedFlatten(
 
 /// A grid whose cells are cards: filled or activatable containers.
 private func kayaIsShelf(_ node: KayaNode) -> Bool {
-    node.kind == kindGrid && !node.children.isEmpty
-        && node.children.allSatisfy { $0.filled != 0 || $0.activatable }
+    node.kind == kindGrid && !node.shownRows.isEmpty
+        && node.shownRows.allSatisfy { $0.filled != 0 || $0.activatable }
 }
 
 private func kayaGroupedSections(_ flow: KayaNode) -> [KayaGroupedSection] {
@@ -23351,10 +23354,10 @@ private struct KayaSynthesizedTable: View {
         KayaTableLayout(
             cols: node.tableColumns.count, colGap: 24, rowGap: node.spacing,
             windowed: window.windowed, top: window.top, bottom: window.bottom,
-            first: window.first, firstRow: node.children.first?.id,
+            first: window.first, firstRow: node.shownRows.first?.id,
             placement: window.placement,
             placed: { window.placed(node) },
-            rowCount: node.children.count,
+            rowCount: node.shownRows.count,
             offsetX: window.columnsOffset
         ) {
             ForEach(Array(node.tableColumns.enumerated()), id: \.offset) { col, title in
@@ -23369,11 +23372,11 @@ private struct KayaSynthesizedTable: View {
                     .modifier(KayaHeaderPin(node: node, lead: kayaTableCardInsetY, on: pinned))
             }
             Divider()
-            ForEach(node.children) { row in
+            ForEach(node.shownRows) { row in
                 KayaTableRowGround(row: row)
                     .id(KayaRowAnchor(row: row.id))
             }
-            ForEach(node.children) { row in
+            ForEach(node.shownRows) { row in
                 ForEach(Array(row.children.enumerated()), id: \.offset) { col, cell in
                     KayaRender(node: cell, flexVertical: false, flexStretch: false)
                         .modifier(KayaTableRowPress(row: row))
@@ -23466,9 +23469,9 @@ private struct KayaSynthesizedTable: View {
                     // seeds a declared table's band and holds its row images'
                     // needs until the first report (docs/traps.md, the hugging
                     // table that never reported).
-                    .task(id: node.children.count) {
+                    .task(id: node.shownRows.count) {
                         let total = KayaHost.windowGeometry(node.id).map { Int($0.total) } ?? 0
-                        KayaHost.windowMoved(node.id, 0, max(total, node.children.count))
+                        KayaHost.windowMoved(node.id, 0, max(total, node.shownRows.count))
                     }
             }
         }
@@ -30266,7 +30269,7 @@ struct KayaRender: View {
             // the cells record their leading edge exactly as the fixed
             // grid's do, so expect_grid_columns reads both the same way.
             KayaAutoGrid(minWidth: node.minColumnWidth, spacing: node.spacing) {
-                ForEach(node.children, id: \.id) { cell in
+                ForEach(node.shownRows, id: \.id) { cell in
                     KayaRender(node: cell, gridCell: true)
                         .background(
                             GeometryReader { g in
@@ -30300,8 +30303,8 @@ struct KayaRender: View {
                 horizontalSpacing: node.spacing, verticalSpacing: node.spacing
             ) {
                 let cols = max(1, node.columns)
-                let rows = stride(from: 0, to: node.children.count, by: cols).map {
-                    Array(node.children[$0..<min($0 + cols, node.children.count)])
+                let rows = stride(from: 0, to: node.shownRows.count, by: cols).map {
+                    Array(node.shownRows[$0..<min($0 + cols, node.shownRows.count)])
                 }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, cells in
                     GridRow {

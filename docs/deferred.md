@@ -15915,8 +15915,17 @@ THE BREADTH SLICE, two worktrees merged 2026-09-05:
   bytes to the generated setters' in both zones. The ANDROID roster waits on
   the Compose arm above.
 
-## GAP — kaya has no filtered view over a collection: every filter is the app's own diff (opened 2026-09-06)
+## ~~GAP — kaya has no filtered view over a collection: every filter is the app's own diff (opened 2026-09-06)~~ — CLOSED 2026-10-31 (docs/hidden-plan.md): `hidden` on a row's root hides it in place; the core's row window counts shown rows only and keeps a realized hidden copy (its widget, its typed text) while its place is in the band; every backend's tables, grids and row reads skip hidden copies; the task manager's search, the portfolio's account filter and the search scene's nine guests write a field instead of diffing; tools/scenes/hiderows.steps on five lanes
 KEY: filtered view, collection pipelines, filter predicate, visible set, search filter, QSortFilterProxyModel, GtkFilterListModel
+
+RESOLUTION (2026-10-31, the maintainer's ruling of 2026-10-30): built as
+docs/hidden-plan.md records, with no new prop, verb or wire record; the
+guards are check-sugar-surface's hidden census and check-universal-props'
+hidden links. The derived-collection half (a sort or filter as a model
+object, the parity survey's "collection pipelines") stays unbuilt: the
+app sorts and decides what matches, in its own language. One question is
+parked for the maintainer there (Q1, SwiftUI's view-local scroll offset
+and caret on a hide).
 
 The collection primitives are insert, update, update_field, remove and
 move; `when` binds one app-wide Bool and rebuilds rather than hides; there

@@ -16,6 +16,7 @@ final class SearchItemKaya {
     }
 
     static final KayaRecords.Field<String> NAME = KayaRecords.fieldAt(0);
+    static final KayaRecords.Field<Boolean> UNMATCHED = KayaRecords.fieldAt(1);
 
     static Patch patch(KayaApp.Tx tx, KayaRecords.Collection<String, Search.SearchItem> c, String key) {
         return new Patch(c.patch(tx, key));
@@ -30,6 +31,11 @@ final class SearchItemKaya {
 
         Patch name(String v) {
             p.set(NAME, v);
+            return this;
+        }
+
+        Patch unmatched(boolean v) {
+            p.set(UNMATCHED, v);
             return this;
         }
     }
@@ -51,6 +57,11 @@ final class SearchItemKaya {
 
         PatchIf name(String v) {
             p.set(NAME, v);
+            return this;
+        }
+
+        PatchIf unmatched(boolean v) {
+            p.set(UNMATCHED, v);
             return this;
         }
     }
@@ -81,6 +92,7 @@ final class SearchItemKaya {
     static final class Row extends KayaApp.RowSurface {
         private final KayaRecords.Collection<String, Search.SearchItem> c;
         final KayaRecords.Field<String> name = NAME;
+        final KayaRecords.Field<Boolean> unmatched = UNMATCHED;
 
         Row(KayaApp.Tpl t, KayaRecords.Collection<String, Search.SearchItem> c) {
             super(t);

@@ -52,6 +52,38 @@ FLEX_LINKS = (
 )
 
 
+# HIDDEN (docs/hidden-plan.md): `hidden` rides any kind, so each backend's
+# arm takes no kind, and the tiers that place a For's copies or a grid's
+# cells by position read the SHOWN children (H3, H5). (file, block, window,
+# needles), the BASELINE_LINKS shape.
+HIDDEN_LINKS = (
+    (SWIFTUI, "struct KayaRender: View {", 3000, ("if node.hidden {",)),
+    (SWIFTUI, "func numberOfRows(in tableView: NSTableView) -> Int {", 800, (
+        "return node.shownRows[offset]",
+    )),
+    (SWIFTUI, "struct KayaSynthesizedTable: View {", 9000, ("rowCount: node.shownRows.count",)),
+    (SWIFTUI, "Table(node.shownRows, sortOrder: sortOrder)", 200, ("Table(node.shownRows",)),
+    (SWIFTUI, "case kindGrid where node.columns == 0:", 4000, (
+        "ForEach(node.shownRows, id: \\.id) { cell in",
+        "let rows = stride(from: 0, to: node.shownRows.count, by: cols)",
+    )),
+    (COMPOSE, "fun KayaRender(\n    node: KayaNode,", 1200, ("if (node.hidden) return",)),
+    (COMPOSE, "KayaCompose.KIND_GRID -> {", 2500, ("val cells = node.shownRows",)),
+    (GTK, "fn reflow_grid(core: &mut CoreState, grid_id: u64) {", 3000,
+     ("if !is_hidden(child) {",)),
+    (GTK, "let rows: Vec<(f64, f64)> = children_of(&content)", 600, (
+        "!w.has_css_class(KAYA_FOLDED_CLASS) && !is_hidden(w)",
+    )),
+    (GTK, "(w, Prop::Hidden, Value::Bool(on)) => {", 1600, ("reflow_grid(core, grid);",)),
+    (WINUI, "if let (Prop::Hidden, Value::Bool(on)) = (prop, &value) {", 1600,
+     ("reflow_grid(core, grid)?;",)),
+    (WINUI, "fn reseat_element(", 800, ("new.SetVisibility(old.Visibility()?)?;",)),
+    (WINUI, "fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {", 2000, (
+        "shown.push(child.Visibility()? != Visibility::Collapsed);",
+    )),
+)
+
+
 # (file, the block that owns the arm, the window, the lines the baseline row
 # keeps): a cell with no text has no baseline and is centred on the FIRST LINE
 # BOX of the cell that set the row's baseline, and a column's baseline is its
@@ -436,6 +468,17 @@ def census(files):
         if needle not in body[start:start + 12000]:
             bad.append(f"{path}: the flex row no longer reads its min-content ({needle!r} missing "
                        f"under {block!r})")
+    for path, block, window, needles in HIDDEN_LINKS:
+        body = code_only(read(path))
+        start = body.find(block)
+        if start < 0:
+            bad.append(f"{path}: the hidden link's block {block!r} is missing "
+                       f"(docs/hidden-plan.md)")
+            continue
+        for needle in needles:
+            if needle not in body[start:start + window]:
+                bad.append(f"{path}: {needle!r} is gone from under {block!r}: a hidden widget or "
+                           f"row is placed, drawn or counted there (docs/hidden-plan.md H3-H5)")
     for path, block, window, needles in BASELINE_LINKS:
         body = code_only(read(path))
         start = body.find(block)
@@ -1080,7 +1123,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 135
+DECLARED = 149
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1558,6 +1601,17 @@ for label, pattern, repl in (
         raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
     print(f"check-universal-props: {label}: {findings[0]}")
     RAN += 1
+
+# HIDDEN's links, one negative each: the needle cut from a copy of its file.
+for path, block, window, needles in HIDDEN_LINKS:
+    for needle in needles:
+        label = f"hidden link {needle[:40]!r}"
+        doctored = g.doctor(label, real[path], re.escape(needle), "kayaCutHidden", want=1)
+        findings = census(load({path: doctored}))
+        if not findings:
+            raise SystemExit(f"check-universal-props: self-test failed: {label} still passed")
+        print(f"check-universal-props: {label}: {findings[0][:160]}")
+        RAN += 1
 
 print(f"check-universal-props: {RAN} watched negative(s) ran")
 if RAN != DECLARED:

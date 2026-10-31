@@ -868,6 +868,10 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
      * seeing [children]. */
     val laidOut: List<KayaNode> get() = children.filter { it.foldedInto == 0L && !it.vacant }
 
+    /** The children a table, a grid or a For's read counts: hidden copies
+     * are kept off (docs/hidden-plan.md H3, H5). */
+    val shownRows: List<KayaNode> get() = children.filter { !it.hidden }
+
     /** A HIDDEN SECTION TAKES NO SPACE (docs/media-player-plan.md M16 (3)): a
      * column or row that draws nothing of its own and holds only such boxes
      * (a When showing no case, an empty For) is composed by no parent, so it
@@ -13842,7 +13846,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             target(
                                 parts[1], if (isRow) "row" else "column",
                                 if (isRow) KayaSceneModel.rows else KayaSceneModel.columns,
-                            )?.children
+                            )?.shownRows
                                 ?.filter { it.kind == KIND_LABEL }
                                 ?.joinToString("|") { it.text }
                         }
@@ -13881,7 +13885,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val want = quoted(parts.drop(2))
                         val got = onUi(activity) {
                             target(parts[1], "column", KayaSceneModel.columns)
-                                ?.children
+                                ?.shownRows
                                 ?.joinToString("|") { row ->
                                     row.children
                                         .mapNotNull { kayaCellText(it) }
@@ -14090,10 +14094,10 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             target(parts[1], "column", KayaSceneModel.columns)?.let { node ->
                                 val window = kayaTableWindows[node.id]
                                 if (window != null) {
-                                    val seen = window.firstVisible(node.children.size)
+                                    val seen = window.firstVisible(node.shownRows.size)
                                     "${seen.first} ${seen.second}"
                                 } else {
-                                    "0 ${node.children.size}"
+                                    "0 ${node.shownRows.size}"
                                 }
                             }
                         }
@@ -15147,7 +15151,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         // cells_even, the same rule and sentences.
                         fun read(): String? = onUi(activity) {
                             val grid = target(parts[1], "grid", KayaSceneModel.grids) ?: return@onUi null
-                            val frames = grid.children.mapIndexed { i, cell ->
+                            val frames = grid.shownRows.mapIndexed { i, cell ->
                                 KayaSceneModel.cellFrames[cell.id]
                                     ?: return@onUi "unread: cell ${i + 1} has no laid-out frame"
                             }
@@ -15173,7 +15177,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             // Geometry, never the model's columns
                             // copy: distinct leading-edge clusters of
                             // the cells ARE the columns.
-                            val edges = grid.children.map {
+                            val edges = grid.shownRows.map {
                                 KayaSceneModel.cellMinX[it.id]
                                     ?: return@onUi "cell geometry not recorded"
                             }.sorted()
@@ -18839,13 +18843,13 @@ internal class KayaTableWindow(private val node: KayaNode) {
         // it is published only once the children ARE it, and a layout is
         // read only if it laid these children out under their own index
         // (docs/traps.md, the band placed under the core's newer index).
-        val drawnRow = node.children.firstOrNull()?.id
+        val drawnRow = node.shownRows.firstOrNull()?.id
         val drawnIndex = drawnRow?.let { KayaPresent.windowRowOf(node.id, it) }
         val childrenAreBand = publishIfDrawn(drawnIndex)
         val placementIsChildren = laidOutRow == drawnRow
             && (drawnRow == null || drawnIndex == laidOutFirst.toLong())
         if (!childrenAreBand || !placementIsChildren) {
-            val held = "held table=${node.id}: children from r" + (drawnIndex ?: "?") + "+${node.children.size}" +
+            val held = "held table=${node.id}: children from r" + (drawnIndex ?: "?") + "+${node.shownRows.size}" +
                 (if (childrenAreBand) "" else " are not the core's band yet") +
                 (if (placementIsChildren) "" else ", the layout has not placed them (laid r$laidOutFirst+${rowTops.size})")
             if (held != lastHeld) {
@@ -18973,8 +18977,8 @@ internal class KayaTableWindow(private val node: KayaNode) {
         KayaPresent.windowGeometry(node.id, slots)
         val start = slots[KayaPresent.GEOMETRY_FIRST].toInt()
         val count = slots[KayaPresent.GEOMETRY_COUNT].toInt()
-        val childrenAreBand = if (node.children.isEmpty()) count == 0
-            else drawnIndex == start.toLong() && node.children.size == count
+        val childrenAreBand = if (node.shownRows.isEmpty()) count == 0
+            else drawnIndex == start.toLong() && node.shownRows.size == count
         if (!childrenAreBand) return false
         if (start != bandStart || count != bandCount) {
             KayaVTrace.note("window", "<- band table=${node.id} $start+$count")
@@ -19154,7 +19158,7 @@ private fun KayaTableSurface(node: KayaNode, modifier: Modifier) {
     // fold's reason below: a measure forced between a row write and the
     // recomposition read the live count against the old children and threw
     // (docs/traps.md, the table measure's live row count).
-    val rows = node.children.toList()
+    val rows = node.shownRows
     // THE FOLD (D7): a stacked row's hugging children render inside this
     // viewport, above row 0, and scroll away with the rows — this
     // backend cannot nest a second vertical scrollable, so they join the
@@ -20339,8 +20343,9 @@ private fun KayaRenderCore(
             // derives the count from the width at the floor, equal shares.
             val autoMinPx = with(LocalDensity.current) { node.minColumnWidth.dp.roundToPx() }
             val auto = node.columns == 0 && autoMinPx > 0
+            val cells = node.shownRows
             androidx.compose.ui.layout.Layout(
-                content = { node.children.forEach { child -> androidx.compose.runtime.key(child.id) { KayaRender(child) } } },
+                content = { cells.forEach { child -> androidx.compose.runtime.key(child.id) { KayaRender(child) } } },
                 // The inset pair brackets the padding (see the column's
                 // note).
                 modifier = boxFill.then(a11y).onGloballyPositioned {
@@ -20368,7 +20373,7 @@ private fun KayaRenderCore(
                 // tallest height (docs/media-player-plan.md M16 (1)): its
                 // height is asked first and it is measured once at the row's.
                 val stretch = BooleanArray(measurables.size) { i ->
-                    auto && share > 0 && node.children[i].kind in
+                    auto && share > 0 && cells[i].kind in
                         setOf(KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW, KayaCompose.KIND_GRID)
                 }
                 val tall = IntArray(measurables.size) { i ->
@@ -20425,8 +20430,8 @@ private fun KayaRenderCore(
                             if (i >= placeables.size) break
                             // A cell centres in its row, as a row's children do (R5).
                             placeables[i].placeRelative(x, y + (rowH[r] - placeables[i].height) / 2)
-                            KayaSceneModel.cellMinX[node.children[i].id] = x
-                            KayaSceneModel.cellFrames[node.children[i].id] =
+                            KayaSceneModel.cellMinX[cells[i].id] = x
+                            KayaSceneModel.cellFrames[cells[i].id] =
                                 intArrayOf(x, y + (rowH[r] - placeables[i].height) / 2,
                                     placeables[i].width, placeables[i].height)
                             x += colW[c] + gapPx

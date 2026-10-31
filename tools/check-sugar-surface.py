@@ -2659,6 +2659,80 @@ for _lang, _rel, _templates in REVEAL_SURFACES:
         _rv_cuts += 1
 print(f"check-sugar-surface: reveal cuts watched red {_rv_cuts}/{_rv_want}")
 
+# --- `hidden`, live zone, in all nine (docs/hidden-plan.md): a constant and
+# a signal on any widget. tpl-surfaces holds the template zone's row field.
+HIDDEN_SURFACES = [
+    ("rust", "crates/kaya/src/app.rs",
+     [r"pub fn {0}\(self, on: impl Into<LiveSource<BoolKind>>\) -> Self",
+      r"pub fn {0}\(&mut self, widget: WidgetId, on: impl Into<LiveSource<BoolKind>>\)"]),
+    ("python", "bindings/python/kaya/__init__.py",
+     [r"^    def {0}\(self: H, on: FlagSource = True\) -> H:"]),
+    ("go", "bindings/go/skin.go",
+     [r"^func \(w Widget\) {1}\(on bool\) Widget",
+      r"^func \(w Widget\) Bind{1}\(s Signal\[bool\]\) Widget"]),
+    ("csharp", "bindings/csharp/KayaApp.cs",
+     [r"public void Set{1}\(Widget w, bool on\)", r"public void Set{1}\(Widget w, Signal s\)"]),
+    ("java", "bindings/java/dev/kaya/KayaApp.java",
+     [r"public Widget {0}\(boolean on\)", r"public Widget {0}\(Signal<Boolean> s\)"]),
+    ("swift", "bindings/swift/KayaApp.swift",
+     [r"public func set{1}\(_ w: KayaWidget, _ on: Bool\)",
+      r"public func set{1}\(_ w: KayaWidget, _ s: KayaSignal\)"]),
+    ("ocaml", "bindings/ocaml/kaya_app.ml",
+     [r"^let set_{0} \(Widget id\) on =", r"^let bind_{0} \(Widget id\) \(s : bool signal\) ="]),
+    ("haskell", "bindings/haskell/KayaApp.hs",
+     [r"^  {1} :: Bool -> Attr c", r"^  {1}Bound :: Signal Bool -> Attr c"]),
+    ("js", "bindings/js/kaya/index.ts",
+     [r"^  {0}\(on: boolean \| Signal<boolean> \| FieldRef = true\): this"]),
+]
+
+
+def check_hidden(fake=None, text_for=None):
+    out = []
+    for lang, rel, templates in HIDDEN_SURFACES:
+        text = text_for(lang, rel) if text_for else read_rel(rel)
+        names = fake or ("hidden", "Hidden")
+        for template in templates:
+            pat = template.format(*names)
+            if not re.search(pat, text, re.M):
+                out.append(f"check-sugar-surface: {lang}'s LIVE zone cannot spell "
+                           f"`hidden` (wanted /{pat}/ in {rel})")
+    return out
+
+
+for _line in check_hidden():
+    print(_line)
+    status = 1
+_hd_want = sum(len(ts) for _, _, ts in HIDDEN_SURFACES)
+_hd_fake = check_hidden(("kayaFakeHidden", "KayaFakeHidden"))
+print(f"check-sugar-surface: fake hidden spellings fired {len(_hd_fake)}/{_hd_want}")
+if len(_hd_fake) != _hd_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_hd_fake)}/{_hd_want} hidden "
+                  f"patterns fired for names that exist nowhere)")
+_hd_cuts = 0
+for _lang, _rel, _templates in HIDDEN_SURFACES:
+    _real = read_rel(_rel)
+    for _template in _templates:
+        _pat = _template.format("hidden", "Hidden")
+        _n = 0
+
+        def _hd_mangle(m):
+            global _n
+            _inner, _k = sub_count(r"(?i)hidden", "kayaCut", m.group(0))
+            _n += _k
+            return _inner
+        _copy = re.sub(_pat, _hd_mangle, _real, flags=re.M)
+        print(f"check-sugar-surface: hidden cut {_lang} /{_template[:30]}.../: "
+              f"{_n} substitution(s)")
+        _found = check_hidden(
+            text_for=lambda lang, rel, _c=_copy, _r=_rel: _c if rel == _r else read_rel(rel))
+        if _n < 1 or not any(f" {_lang}'s " in _f for _f in _found):
+            selftest_exit(f"check-sugar-surface: self-test failed (the {_lang} hidden cut "
+                          f"/{_template[:30]}.../ was not refused)")
+        if (ROOT / _rel).read_text(encoding="utf-8") != _real:
+            selftest_exit(f"check-sugar-surface: {_rel} changed on disk under the hidden cut")
+        _hd_cuts += 1
+print(f"check-sugar-surface: hidden cuts watched red {_hd_cuts}/{_hd_want}")
+
 # --- THE CODE SURFACE, live zone, in all nine (docs/code-surface-plan.md §4)
 # The textarea's gutter, the text kinds' face and size, and the family list's
 # request and handler; tpl-surfaces holds the template zone's three.
@@ -7545,7 +7619,7 @@ discardable = tpl_discardable_probe()
 WANT_DISCARDABLE = """swift-row-member=applied:1 rc:1 named:True
 swift-arm-member=applied:1 rc:1 named:True
 swift-eliminator=applied:1 rc:1 named:True
-swift-census-floor=applied:30 rc:1 named:True"""
+swift-census-floor=applied:31 rc:1 named:True"""
 if discardable != WANT_DISCARDABLE:
     print("check-sugar-surface: SELF-TEST FAIL (the Swift generated-surface "
           "discard census did not catch its watched cuts). Wanted:",
@@ -8310,7 +8384,7 @@ def csharp_facade_probe():
     run("csharp-twin-reader",
         src.replace("sealed class TableItemRow\n",
                     "sealed class TableItemRowGone\n")
-        if n == 1 else src, n, "typed-row reader found only 26")
+        if n == 1 else src, n, "typed-row reader found only 28")
     return "\n".join(lines)
 
 

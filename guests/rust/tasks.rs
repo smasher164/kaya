@@ -103,6 +103,7 @@ mod store {
                         deadline: row.get(5)?,
                         reminder: row.get(6)?,
                         project: row.get(3)?,
+                        unmatched: false,
                     },
                 ))
             });
@@ -222,6 +223,8 @@ struct TaskRow {
     deadline: String,
     reminder: String,
     project: String,
+    /// The list's search hides the row (docs/hidden-plan.md); never stored.
+    unmatched: bool,
 }
 
 #[derive(kaya::KayaGen, Clone, Debug, PartialEq)]
@@ -417,11 +420,10 @@ struct App {
     projects_coll: kaya::Collection<ProjectRow>,
     // Caches of the collections: rebuilt from them after undo and redo.
     tasks: BTreeMap<String, (List, TaskRow)>,
-    // The per-list search (docs/search-plan.md S9, S10): the query, and the
-    // rows it has taken OUT of their collection — the app owns the filter,
-    // and a hidden row lives here and in `tasks`, in no collection.
+    // The per-list search (docs/search-plan.md S9, S10): the app owns the
+    // predicate, and a row it does not match is hidden in place
+    // (docs/hidden-plan.md).
     queries: BTreeMap<List, String>,
-    hidden: BTreeMap<String, (List, TaskRow)>,
     counts: BTreeMap<List, kaya::SignalId>,
     today_badge: kaya::SignalId,
     /// What the last app link did when it named nothing (L4). Empty
@@ -482,7 +484,7 @@ impl App {
 
     fn count_text(&self, list: List) -> String {
         let total = self.tasks.values().filter(|(l, _)| *l == list).count();
-        let hidden = self.hidden.values().filter(|(l, _)| *l == list).count();
+        let hidden = self.tasks.values().filter(|(l, r)| *l == list && r.unmatched).count();
         if self.queries.get(&list).is_some_and(|q| !q.is_empty()) {
             return kaya::tr!("match-count", shown = (total - hidden) as i64, total = total as i64);
         }
@@ -500,36 +502,18 @@ impl App {
         }
     }
 
-    /// The list's visible set follows its query: a DIFF of removes and
-    /// inserts by key, never undoable, the rows back in creation order.
+    /// The list's rows follow its query, each hidden or shown in place;
+    /// never undoable.
     fn apply_filter(&mut self, tx: &mut kaya::Tx, list: List) {
         let coll = self.coll(list);
-        let mut keys: Vec<(u32, String)> = self
-            .tasks
-            .iter()
-            .filter(|(_, (l, _))| *l == list)
-            .map(|(k, _)| (k.trim_start_matches('t').parse::<u32>().unwrap_or(0), k.clone()))
-            .collect();
-        keys.sort();
-        let mut inserted = false;
-        for (_, key) in &keys {
-            let (_, row) = self.tasks[key].clone();
-            let want = self.matches(list, &row);
-            let visible = !self.hidden.contains_key(key);
-            if want && !visible {
-                self.hidden.remove(key);
-                tx.insert(&coll, key.clone(), row);
-                inserted = true;
-            } else if !want && visible {
-                self.hidden.insert(key.clone(), (list, row));
-                tx.remove(&coll, key.clone());
-            }
-        }
-        if inserted {
-            for (_, key) in &keys {
-                if !self.hidden.contains_key(key) {
-                    tx.move_to_end(&coll, key.clone());
-                }
+        let keys: Vec<String> =
+            self.tasks.iter().filter(|(_, (l, _))| *l == list).map(|(k, _)| k.clone()).collect();
+        for key in keys {
+            let (_, row) = self.tasks[&key].clone();
+            let unmatched = !self.matches(list, &row);
+            if row.unmatched != unmatched {
+                tx.update_field(&coll, key.clone(), TaskRow::unmatched(), unmatched);
+                self.tasks.insert(key, (list, TaskRow { unmatched, ..row }));
             }
         }
         self.update_count(tx, list);
@@ -556,35 +540,27 @@ impl App {
         row.captionless = row.caption.is_empty();
         let target = self.list_of(&row);
         let current = self.tasks.get(key).map(|(l, _)| *l);
-        // A row a filter has hidden is in no collection: nothing to patch or
-        // remove; apply_filter below decides whether it comes back.
-        let was_hidden = self.hidden.remove(key).is_some();
+        row.unmatched = !self.matches(target, &row);
         match current {
             Some(cur) if cur == target => {
-                if !was_hidden {
-                    self.coll(cur)
-                        .patch(tx, key.to_string())
-                        .title(row.title.clone())
-                        .caption(row.caption.clone())
-                        .captionless(row.captionless)
-                        .done(row.done)
-                        .notes(row.notes.clone())
-                        .when(row.when.clone())
-                        .deadline(row.deadline.clone())
-                        .reminder(row.reminder.clone())
-                        .project(row.project.clone());
-                }
+                self.coll(cur)
+                    .patch(tx, key.to_string())
+                    .title(row.title.clone())
+                    .caption(row.caption.clone())
+                    .captionless(row.captionless)
+                    .done(row.done)
+                    .notes(row.notes.clone())
+                    .when(row.when.clone())
+                    .deadline(row.deadline.clone())
+                    .reminder(row.reminder.clone())
+                    .project(row.project.clone())
+                    .unmatched(row.unmatched);
             }
             Some(cur) => {
-                if !was_hidden {
-                    tx.remove(&self.coll(cur), key.to_string());
-                }
+                tx.remove(&self.coll(cur), key.to_string());
                 tx.insert(&self.coll(target), key.to_string(), row.clone());
             }
             None => tx.insert(&self.coll(target), key.to_string(), row.clone()),
-        }
-        if was_hidden && current == Some(target) {
-            tx.insert(&self.coll(target), key.to_string(), row.clone());
         }
         self.tasks.insert(key.to_string(), (target, row));
         self.apply_filter(tx, target);
@@ -613,11 +589,7 @@ impl App {
                 self.tasks.insert(String::from_value(&key), (list, row));
             }
         }
-        // The rows a filter holds out of their collections are model too.
-        for (key, entry) in &self.hidden {
-            self.tasks.insert(key.clone(), entry.clone());
-        }
-        // Undo may have put a row back that the filter hides: the diff runs
+        // Undo may have put a row back that the filter hides: the filter runs
         // again, and every count is rewritten from the model.
         for list in [List::Inbox, List::Today, List::Upcoming, List::Anytime] {
             self.apply_filter(tx, list);
@@ -658,7 +630,11 @@ impl App {
     /// second copy would go stale exactly there.
     fn snapshot(&self) -> store::Snapshot {
         store::Snapshot {
-            tasks: self.tasks.iter().map(|(k, (_, row))| (k.clone(), row.clone())).collect(),
+            tasks: self
+                .tasks
+                .iter()
+                .map(|(k, (_, row))| (k.clone(), TaskRow { unmatched: false, ..row.clone() }))
+                .collect(),
             projects: self.projects.clone(),
             order: self.order.clone(),
         }
@@ -832,6 +808,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         // middle (docs/flex-shrink-plan.md
                         // §9; R5's centre unless the app says otherwise).
                         row.align(task_row, kaya::Align::Baseline);
+                        row.hidden(task_row, TaskRow::unmatched());
                     }
                     // The list's column is named so the scene can hold it to
                     // the section's width (R7): a hugging list hides behind
@@ -882,7 +859,6 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         projects_coll,
         tasks: BTreeMap::new(),
         queries: BTreeMap::new(),
-        hidden: BTreeMap::new(),
         counts,
         today_badge,
         link_note,
@@ -942,6 +918,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     deadline: date_field(deadline),
                     reminder: String::new(),
                     project: project.into(),
+                    unmatched: false,
                 };
                 if !project.is_empty() {
                     app.order.get_mut(project).unwrap().push(key.clone());
@@ -1041,6 +1018,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     deadline: String::new(),
                     reminder: String::new(),
                     project: String::new(),
+                    unmatched: false,
                 };
                 ctx.apply(|tx| {
                     tx.undoable(kaya::tr!("undo-add", title = row.title.as_str()));
@@ -1190,12 +1168,9 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     order.retain(|k| *k != key);
                 }
                 app.tasks.remove(&key);
-                let hidden = app.hidden.remove(&key).is_some();
                 ctx.apply(|tx| {
                     tx.undoable(kaya::tr!("undo-delete", title = row.title.as_str()));
-                    if !hidden {
-                        tx.remove(&app.coll(list), key.clone());
-                    }
+                    tx.remove(&app.coll(list), key.clone());
                     app.project_count(tx, &row.project);
                     app.update_count(tx, list);
                 });
@@ -1288,6 +1263,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     deadline: String::new(),
                     reminder: String::new(),
                     project: project.clone(),
+                    unmatched: false,
                 };
                 app.order.entry(project.clone()).or_default().push(key.clone());
                 ctx.apply(|tx| {

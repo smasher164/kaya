@@ -1,13 +1,12 @@
 // The search scene, C# port — guests/rust/search.rs,
-// tools/scenes/search.steps. The app owns the filter
-// (docs/search-plan.md S9): the visible set is a diff of removes and
-// inserts by key.
+// tools/scenes/search.steps. The app owns the predicate
+// (docs/search-plan.md S9) and each row hides in place
+// (docs/hidden-plan.md).
 
-using System.Collections.Generic;
 using System.Linq;
 
 [KayaGen]
-record SearchItem(string Name);
+record SearchItem(string Name, bool Unmatched);
 
 static class SearchScene
 {
@@ -16,7 +15,6 @@ static class SearchScene
     public static void Run()
     {
         var app = new KayaApp();
-        var visible = new List<string>(Names);
 
         app.Build(tx =>
         {
@@ -29,24 +27,12 @@ static class SearchScene
                 var find = tx.Search(onChange: (t, text) =>
                 {
                     var query = text.ToLowerInvariant();
-                    var wanted = Names.Where(n => n.Contains(query)).ToList();
-                    // A DIFF, never clear-and-refill: only the rows whose
-                    // membership changed move (docs/search-plan.md S9).
-                    foreach (var name in visible)
-                        if (!wanted.Contains(name))
-                            t.Remove(items.Collection, name);
-                    foreach (var name in wanted)
-                        if (!visible.Contains(name))
-                            items.Insert(t, name, new SearchItem(name));
-                    // Insertion order is arrival order, so a row coming back
-                    // lands last; walking the wanted keys to the end in
-                    // order puts the list back in Names order.
-                    foreach (var name in wanted)
-                        items.MoveToEnd(t, name);
+                    var wanted = Names.Count(n => n.Contains(query));
+                    foreach (var name in Names)
+                        SearchItemKaya.Patch(t, items, name).Unmatched(!name.Contains(query));
                     t.Write(count, query.Length == 0
                         ? $"{Names.Length} items"
-                        : $"{wanted.Count} of {Names.Length} match");
-                    visible = wanted;
+                        : $"{wanted} of {Names.Length} match");
                 });
                 tx.SetPlaceholder(find, "Search");
                 tx.SetA11yId(find, "find");
@@ -56,14 +42,14 @@ static class SearchScene
                 var list = tx.Each(items.Collection, t =>
                 {
                     var row = new SearchItemRow(t);
-                    row.Label(row.Name);
+                    t.SetHidden(row.Label(row.Name), SearchItemKaya.Unmatched);
                 });
                 tx.SetA11yId(list, "list");
                 return root;
             }));
 
             foreach (var name in Names)
-                items.Insert(tx, name, new SearchItem(name));
+                items.Insert(tx, name, new SearchItem(name, false));
         });
 
         System.Environment.Exit(app.Run());

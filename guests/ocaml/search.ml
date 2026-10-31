@@ -1,11 +1,11 @@
 (* The search scene, OCaml port — guests/rust/search.rs,
-   tools/scenes/search.steps. The app owns the filter
-   (docs/search-plan.md S9): the visible set is a diff of removes and
-   inserts by key. *)
+   tools/scenes/search.steps. The app owns the predicate
+   (docs/search-plan.md S9) and each row hides in place
+   (docs/hidden-plan.md). *)
 
 open Kaya_app
 
-type item = { name : string } [@@deriving kaya_gen]
+type item = { name : string; unmatched : bool } [@@deriving kaya_gen]
 
 let names = [ "apple"; "banana"; "cherry"; "mango" ]
 
@@ -16,7 +16,6 @@ let contains haystack needle =
 
 let () =
   let app = Kaya_app.create () in
-  let visible = ref names in
 
   build app (fun () ->
      window ~title:"search" ();
@@ -26,30 +25,16 @@ let () =
      let on_query text =
        let query = String.lowercase_ascii text in
        let wanted = List.filter (fun name -> contains name query) names in
-       (* A DIFF, never clear-and-refill: only the rows whose membership
-          changed move (docs/search-plan.md S9). *)
        List.iter
          (fun name ->
-           if not (List.mem name wanted) then
-             remove (record_handle items) (Key.str name))
-         !visible;
-       List.iter
-         (fun name ->
-           if not (List.mem name !visible) then
-             insert_record items (Key.str name) { name })
-         wanted;
-       (* Insertion order is arrival order, so a row coming back lands
-          last; walking the wanted keys to the end in order puts the list
-          back in [names] order. *)
-       List.iter
-         (fun name -> move_to_end (record_handle items) (Key.str name))
-         wanted;
+           update_field items (Key.str name) item_unmatched
+             (not (contains name query)))
+         names;
        write count
          (if query = "" then Printf.sprintf "%d items" (List.length names)
           else
             Printf.sprintf "%d of %d match" (List.length wanted)
-              (List.length names));
-       visible := wanted
+              (List.length names))
      in
 
      let root =
@@ -62,7 +47,11 @@ let () =
            (fun () ->
              let w =
                each (record_handle items)
-                 (fun () -> Tpl.(label ~bind_field:item_name ()))
+                 (fun () ->
+                   Tpl.(
+                     let l = label ~bind_field:item_name () in
+                     bind_hidden_field l item_unmatched;
+                     l))
                  ()
              in
              set_a11y_id w "list";
@@ -71,6 +60,8 @@ let () =
          ()
      in
      mount root;
-     List.iter (fun name -> insert_record items (Key.str name) { name }) names);
+     List.iter
+       (fun name -> insert_record items (Key.str name) { name; unmatched = false })
+       names);
 
   exit (run app)

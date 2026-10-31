@@ -521,6 +521,10 @@ per row and a withheld row refused; tpl-surfaces holds the six template
 props in every zone's own block (prop probes d8-d15 watched red),
 counts printed; `on_select` beside `on_activate` in both zones since
 2026-10-18, docs/styling-pass-plan.md Y4's amendment, nine rows watched red)
+AND `hidden` IN THE LIVE ZONE SINCE 2026-10-31 (docs/hidden-plan.md):
+the constant and the signal spelling in all nine, 16 rows, every one
+watched red by a fake name and by a cut in a copy; the template zone's
+row field is tpl-surfaces' `hidden` row.
 
 ## tools/check-universal-props.py
 
@@ -540,6 +544,16 @@ and since 2026-09-29 every Compose Slider and RangeSlider thumb slot takes
 KayaSliderThumb, which carries no semantics modifier, because Material's
 own thumb moves the slider's name off the node TalkBack focuses — seven
 watched negatives, the first the shipped state (docs/traps.md))
+AND `hidden` SINCE 2026-10-31 (docs/hidden-plan.md H3-H5): each
+backend's hidden arm takes no kind, and every tier that places a For's
+copies or a grid's cells by position reads the shown children (the mac
+native table, the synthesized table, iOS's Table, both SwiftUI grids,
+Compose's grid, GTK's grid and band walk, WinUI's grid and the seat a
+wrapper takes over). 14 links, each cut in a copy and watched red. The
+first mac run of tools/scenes/hiderows.steps without them listed the
+hidden copies in expect_rows, counted them in a plain For's
+expect_window and read the hidden cell's stale frame in
+expect_grid_columns.
 
 ## tools/check-roles.py
 
