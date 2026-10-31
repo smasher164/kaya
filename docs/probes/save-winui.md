@@ -78,7 +78,7 @@ because the shared scene cannot reach it.
 
 ## 2. THE LANE
 
-- `tools/guest/run_save_rust.cmd` — new, the checked-in launcher
+- `tools/guest/run_save_rust.cmd (gone)` — new, the checked-in launcher
   check-steps demands for every windows leg.
 - `tools/deploy-win.py`: `DEPTH_SCENES` default `save` (was empty),
   `save_rust` accepted as a single-suite argument, and

@@ -2260,6 +2260,24 @@ for proto in x11 wayland; do
         tools/linux/a11y-leg.sh "$(hs_bin colorpicker)"
     run "$proto" colorpicker-java env KAYA_SELFTEST=colorpicker KAYA_LIB="$LIB" \
         tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE COLOUR PANEL (docs/color-picker-plan.md §5): pick_color opens the
+    # GtkColorDialog the swatch opens and types into its editor's hex entry.
+    run "$proto" colorpanel-rust env KAYA_SELFTEST=colorpanel \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/colorpicker"
+    run "$proto" colorpanel-python env KAYA_SELFTEST=colorpanel KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh python3 guests/python/colorpicker.py
+    run "$proto" colorpanel-js env KAYA_SELFTEST=colorpanel KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh node guests/js/colorpicker.ts
+    run "$proto" colorpanel-go env KAYA_SELFTEST=colorpanel \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    run "$proto" colorpanel-csharp env KAYA_SELFTEST=colorpanel KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" colorpanel-ocaml env KAYA_SELFTEST=colorpanel KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/colorpicker.exe
+    run "$proto" colorpanel-haskell env KAYA_SELFTEST=colorpanel \
+        tools/linux/a11y-leg.sh "$(hs_bin colorpicker)"
+    run "$proto" colorpanel-java env KAYA_SELFTEST=colorpanel KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     # THE RANGE (docs/range-plan.md §5), through a11y-leg.sh for its
     # `expect_ax`; the Arabic leg runs the same guest in every language.
     run "$proto" range-rust env KAYA_SELFTEST=range \

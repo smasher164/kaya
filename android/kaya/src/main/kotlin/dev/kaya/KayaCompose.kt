@@ -12603,6 +12603,36 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else kayaAwaitAnswer(answered)
                         }
                     }
+                    "pick_color" -> {
+                        // The sheet the swatch opens, its hex field's own
+                        // change and its Done (docs/color-picker-plan.md §5).
+                        kayaAwaitQuiet()
+                        val answered = kayaBatches
+                        val hex = parts.getOrNull(2) ?: ""
+                        val opened = onUi(activity) {
+                            target(parts[1], "color_picker", KayaSceneModel.colorPickers)?.also { node ->
+                                KayaSceneModel.colorDraft = KayaColorDraft(node.color, node.alpha)
+                                KayaSceneModel.colorSheetFor = node
+                            } != null
+                        }
+                        var drive: KayaColorSheetDrive? = null
+                        val until = System.currentTimeMillis() + 10_000
+                        while (opened == true && System.currentTimeMillis() < until) {
+                            drive = kayaColorSheetDrive
+                            if (drive != null) break
+                            Thread.sleep(50)
+                        }
+                        when {
+                            opened != true -> failures.add("no such target ${parts[1]}")
+                            drive == null -> failures.add("pick_color ${parts[1]}: the colour sheet never composed in 10 s")
+                            else -> {
+                                onUi(activity) { drive.hex(hex) }
+                                Thread.sleep(300)
+                                onUi(activity) { drive.done() }
+                                kayaAwaitAnswer(answered)
+                            }
+                        }
+                    }
                     "expect_color" -> {
                         // What the swatch DREW, stamped by its composable,
                         // never the model (expect_picker's rule).
@@ -26820,6 +26850,12 @@ internal fun kayaColorSheetClosed(node: KayaNode, draft: KayaColorDraft) {
     kayaColorCommitted(node, kayaColorDraftPacked(draft))
 }
 
+/** The shown sheet's hex field and its Done, for pick_color
+ * (docs/color-picker-plan.md §5, the panel scene). */
+internal class KayaColorSheetDrive(val hex: (String) -> Unit, val done: () -> Unit)
+
+@Volatile internal var kayaColorSheetDrive: KayaColorSheetDrive? = null
+
 /** The shown sheet went away, by Done or by the user's dismissal: once. */
 internal fun kayaColorSheetDismissed(node: KayaNode, draft: KayaColorDraft) {
     if (KayaSceneModel.colorDraft !== draft) return
@@ -26931,6 +26967,17 @@ fun KayaColorSheet() {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
     val palette = remember { KayaPresent.colorPalette() }
+    val hexChanged: (String) -> Unit = { draft.typed(it) }
+    val done: () -> Unit = {
+        scope.launch { state.hide() }.invokeOnCompletion {
+            kayaColorSheetDismissed(node, draft)
+        }
+    }
+    DisposableEffect(draft) {
+        val drive = KayaColorSheetDrive(hexChanged, done)
+        kayaColorSheetDrive = drive
+        onDispose { if (kayaColorSheetDrive === drive) kayaColorSheetDrive = null }
+    }
     ModalBottomSheet(onDismissRequest = { kayaColorSheetDismissed(node, draft) }, sheetState = state) {
         Column(
             Modifier
@@ -26976,7 +27023,7 @@ fun KayaColorSheet() {
                 KayaColorSwatch(current, Modifier.size(56.dp))
                 OutlinedTextField(
                     value = draft.hex,
-                    onValueChange = { draft.typed(it) },
+                    onValueChange = hexChanged,
                     label = { Text("Hex") },
                     singleLine = true,
                     isError = !draft.hexValid,
@@ -27007,11 +27054,7 @@ fun KayaColorSheet() {
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = {
-                    scope.launch { state.hide() }.invokeOnCompletion {
-                        kayaColorSheetDismissed(node, draft)
-                    }
-                }) { Text("Done") }
+                TextButton(onClick = done) { Text("Done") }
             }
         }
     }

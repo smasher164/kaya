@@ -24018,6 +24018,81 @@ impl crate::harness::Stage for GtkStage {
         });
     }
 
+    /// The real surface (docs/color-picker-plan.md §5, the panel scene): the
+    /// swatch's own click opens GtkColorDialog's chooser in this process, its
+    /// custom editor (`show-editor`) holds one GtkEntry that applies sRGB hex
+    /// on activate, and the dialog's Select commits through the button's
+    /// `notify::rgba`, the door a user's choice takes.
+    #[allow(deprecated)]
+    fn pick_color(&self, t: crate::harness::Target, color: crate::Color) -> Result<(), String> {
+        use gtk4::prelude::{Cast, DialogExt, EditableExt, ObjectExt, WidgetExt};
+        fn choosers() -> Vec<gtk4::ColorChooserDialog> {
+            gtk4::Window::list_toplevels()
+                .into_iter()
+                .filter_map(|w| w.downcast::<gtk4::ColorChooserDialog>().ok())
+                .collect()
+        }
+        fn entries(w: &gtk4::Widget, out: &mut Vec<gtk4::Entry>) {
+            if let Some(entry) = w.downcast_ref::<gtk4::Entry>() {
+                out.push(entry.clone());
+            }
+            let mut child = w.first_child();
+            while let Some(c) = child {
+                entries(&c, out);
+                child = c.next_sibling();
+            }
+        }
+        let before = Self::on_main(|_| choosers().len());
+        let clicked = Self::on_main(move |core| {
+            let i = crate::harness::try_resolve(t.index, core.color_pickers.len())?;
+            core.color_pickers[i].swatch.emit_clicked();
+            Some(())
+        });
+        if clicked.is_none() {
+            return Err("no such colour picker".to_owned());
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let shown = Self::on_main(|_| choosers().iter().filter(|d| d.is_visible()).count());
+            if shown > 0 {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                return Err(format!(
+                    "the swatch's click opened no colour chooser in 10 s ({before} before the click, \
+                     {} now, none visible)",
+                    Self::on_main(|_| choosers().len())
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let hex = format!("#{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+        Self::on_main(|_| {
+            if let Some(dialog) = choosers().into_iter().find(|d| d.is_visible()) {
+                dialog.set_property("show-editor", true);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        Self::on_main(move |_| {
+            let Some(dialog) = choosers().into_iter().find(|d| d.is_visible()) else {
+                return Err("the colour chooser closed before its editor was reached".to_owned());
+            };
+            let mut found = Vec::new();
+            entries(dialog.upcast_ref(), &mut found);
+            let shown: Vec<_> = found.iter().filter(|e| e.is_mapped()).collect();
+            let Some(entry) = shown.first() else {
+                return Err(format!(
+                    "the chooser's editor shows no hex entry ({} entries in the dialog, none mapped)",
+                    found.len()
+                ));
+            };
+            entry.set_text(&hex);
+            entry.emit_activate();
+            dialog.response(gtk4::ResponseType::Ok);
+            Ok(())
+        })
+    }
+
     fn color_value(&self, t: crate::harness::Target) -> String {
         Self::on_main(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.color_pickers.len()) else {

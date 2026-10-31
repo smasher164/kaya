@@ -411,6 +411,10 @@ pub enum Step {
     /// A user's colour choice through the picker's commit door, WITHOUT
     /// opening the surface (docs/color-picker-plan.md §5).
     SetColor(Target, crate::Color),
+    /// `pick_color <target> RRGGBB`: open the picker's real surface, type
+    /// the hex into the surface's own sRGB hex field and close it the way a
+    /// user commits (docs/color-picker-plan.md §5, the panel scene).
+    PickColor(Target, crate::Color),
     /// The CONTROL's colour, `RRGGBBAA`, read back from the platform
     /// control (expect_picker's shape and reason).
     ExpectColor(Target, String),
@@ -1363,6 +1367,7 @@ impl Step {
             | Step::SetTime(t, _)
             | Step::ExpectPicker(t, _)
             | Step::SetColor(t, _)
+            | Step::PickColor(t, _)
             | Step::ExpectColor(t, _)
             | Step::ExpectValue(t, _)
             | Step::SetText(t, _)
@@ -1579,6 +1584,7 @@ impl Step {
             Step::SetTime { .. } => false,
             Step::ExpectPicker { .. } => true,
             Step::SetColor { .. } => false,
+            Step::PickColor { .. } => false,
             Step::ExpectColor { .. } => true,
             Step::ExpectValue { .. } => true,
             Step::Unfocus { .. } => false,
@@ -3021,6 +3027,10 @@ pub trait Stage: Send + 'static {
     /// Choose `emoji` in the emoji picker the app's command opened, through
     /// the picker's own route; Err naming what it found when none is open.
     fn pick_emoji(&self, emoji: &str) -> Result<(), String>;
+    /// Open the colour picker's real surface, enter `color`'s RRGGBB in the
+    /// surface's own hex field and close it as a user commits; Err naming
+    /// what it found when the surface or its field is not there.
+    fn pick_color(&self, target: Target, color: crate::Color) -> Result<(), String>;
     /// Activate a delivered notification: the shade's real tap where a test
     /// reaches it, the backend's own activation path where it cannot.
     fn activate_notification(&self, notification: u64);
@@ -3844,6 +3854,19 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 Step::SetColor(
                     parse_target(target)?,
                     color.trim().parse().map_err(|why| format!("set_color: {why} in {line:?}"))?,
+                )
+            }
+            "pick_color" => {
+                let (target, hex) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("pick_color wants a target and RRGGBB: {line:?}"))?;
+                let hex = hex.trim();
+                if hex.len() != 6 {
+                    return Err(format!("pick_color: the surface's hex field takes RRGGBB, six digits, not {hex:?}"));
+                }
+                Step::PickColor(
+                    parse_target(target)?,
+                    format!("{hex}FF").parse().map_err(|why| format!("pick_color: {why} in {line:?}"))?,
                 )
             }
             "expect_color" => {
@@ -6783,6 +6806,17 @@ fn run_with_log(
                 stage.set_color(*t, *c);
                 await_answer(answered);
                 None
+            }
+            Step::PickColor(t, c) => {
+                await_quiet();
+                let answered = crate::scene::answers();
+                match stage.pick_color(*t, *c) {
+                    Ok(()) => {
+                        await_answer(answered);
+                        None
+                    }
+                    Err(why) => Some(Err(format!("pick_color {}: {why}", target_spec(t)))),
+                }
             }
             Step::ExpectColor(t, want) => Some(match t.kind {
                 TargetKind::ColorPicker => poll(|| {
@@ -12108,6 +12142,9 @@ mod tests {
         fn captions_absent(&self, _item: &str) -> bool {
             false
         }
+        fn pick_color(&self, _target: Target, _color: crate::Color) -> Result<(), String> {
+            Ok(())
+        }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
         }
@@ -13686,6 +13723,9 @@ mod tests {
         fn captions_absent(&self, _item: &str) -> bool {
             false
         }
+        fn pick_color(&self, _target: Target, _color: crate::Color) -> Result<(), String> {
+            Ok(())
+        }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())
         }
@@ -14268,6 +14308,9 @@ mod tests {
         }
         fn captions_absent(&self, _item: &str) -> bool {
             false
+        }
+        fn pick_color(&self, _target: Target, _color: crate::Color) -> Result<(), String> {
+            Ok(())
         }
         fn pick_emoji(&self, _emoji: &str) -> Result<(), String> {
             Ok(())

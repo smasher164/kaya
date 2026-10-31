@@ -259,7 +259,8 @@ where python is alone), each with a checked-in generated launcher
 tools/guest/run_<scene>_js.cmd of one shape that tools/check-steps.py
 holds (CRLF, the pinned node on PATH, KAYA_LIB, the flat guest, the
 leg's own out file); tools/check-staging.py derives the shipped .ts
-from each launcher.
+from each launcher. (Since 2026-10-31 the launchers are derived by tools/lib/win_launchers.py
+and no longer checked in.)
 
 ## §6 Open
 

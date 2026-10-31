@@ -2023,7 +2023,7 @@ on the mac lane. What breadth owes:
     picker lands opaque. Only AppKit's well does it by itself; GTK, WinUI,
     Compose and UIKit each do it in the arm (plan §4, measured per platform).
 
-## BUILD — the colour picker's panel scene: `pick_color` and a `colorpanel` scene (docs/color-picker-plan.md §5)
+## ~~BUILD — the colour picker's panel scene: `pick_color` and a `colorpanel` scene (docs/color-picker-plan.md §5)~~ COMPLETE 2026-10-31 (the residue pass): `pick_color <target> RRGGBB` opens the platform's own surface, types the hex into its own field and closes it as a user commits, and tools/scenes/colorpanel.steps runs the colour picker's guests with it on five lanes (mac 9 legs as a HOST_VERBS panel leg, linux 16, windows 6, iOS 3, android 3), each backend watched red; the as-built routes are below
 KEY: pick_color, colorpanel, HexTextBox, show-editor, HOST_VERBS colour panel, colour panel hex field
 
 `set_color` drives every backend's commit door without opening a surface; no
@@ -2044,6 +2044,24 @@ measured 2026-09-28 and not built:
   - Compose: the sheet's hex field through the IME (a testTag and the entry
     verbs' typing driver; not coordinates, since the sheet moves ~50px when the
     keyboard opens), then Done.
+
+AS BUILT 2026-10-31. Mac: the well activates the shared panel in RGB
+sliders with the well's colour in sRGB first, since the hex field reads the
+panel colour's OWN space (measured: a Display P3 colour shows its P3
+components, and E01B24 typed after a P3 colour landed as F5000D), then the
+`Hex Color #` field's own action; the verb refuses naming the colour and
+space the panel took when they differ. iOS: the swatch's action presents the
+controller and the xcui driver's `colorhex_b64` taps Sliders, empties the
+six-digit field and types, then taps close. GTK: the swatch's click opens
+the chooser in process, `show-editor`, the editor's one GtkEntry activated,
+and the dialog's OK. WinUI: ShowAt on the swatch button, the template's
+HexTextBox written once it exists, Hide. Compose: the sheet the swatch opens,
+its hex field's own onValueChange and its Done (a programmatic write into
+the field's change, not the IME). Watched red, each restored by sha256: GTK
+answering Cancel, WinUI never hiding, Compose never pressing Done ("label#0
+reads color: none"), the driver retyping the held hex on iOS ("color:
+336699FF"), and on the mac the sRGB step swapped for Display P3 ("took E01B24
+as F5000DFF in Display P3") and the field's action cut ("as 336699FF").
 
 ## ~~BUILD — the number field (docs/number-field-plan.md), depth on the mac (2026-09-28); the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings are the breadth slice~~ COMPLETE 2026-09-28: every item below LANDED; validate-all --only numberfield ALL PASS (76 legs, five lanes) and the full matrix green on four lanes, the mac's only non-green legs the two fullscreen display legs NOT RUN on a busy host and passed by hand after
 KEY: number field, number_field, KIND_NUMBER_FIELD, numberfield, numberfieldde, parse_number, number_text, number_commit, number_step, expect_value, unfocus, nudge, fmt:field, DEPTH STUB numberfield
@@ -2412,7 +2430,7 @@ KEY: selection menu, edit menu, extra-menu, SelectionFlyout,
 appendTextContextMenuComponents, editMenuForTextIn, keyboard_bar,
 merging authored items into native text-control menus.
 
-## DEFER — the checkbox reads a touch high beside the title's first line on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page)
+## RULING WANTED — the checkbox beside a title's first line: reported a touch high on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page), measured 2026-10-27 at 0, 1 and 0 px there and LOW on the mac (1.25 pt) and GTK (2.5 px); whether to chase the low residue is the open question (2026-10-31)
 
 The first-line-box rule (docs/flex-shrink-plan.md §10, landed 24ae2bdc)
 centres a textless cell on the geometric middle of the provider's first
@@ -2439,6 +2457,22 @@ mac's unlabeled checkbox stopped counting as text: Android 0px, Windows
 0px, iOS 1px at 3x, macOS 2.5px at 2x (1.25pt; it was 9.5px, the box's
 centre on the baseline), GTK 2.5px at 1x, all LOW, not high. The
 cap-height centre would close the mac and GTK residue; still deferred.
+THE RESIDUE PASS, 2026-10-31, stopped here for a ruling rather than build:
+the report this entry was opened for (HIGH on Android, iOS and Windows) no
+longer reproduces by the 2026-10-27 measurement, and cap-height centring is
+one rule on all five backends, so it would move the three that read 0-1 px
+today in order to fix the two that read low. The options:
+(a) close it as measured: the platforms the maintainer named are centred to
+a pixel, and the mac's 1.25 pt and GTK's 2.5 px low are the residue he said
+he would live with; (b) cap-height centring everywhere (baseline minus half
+the cap height, from UIFont.capHeight, Pango's metrics, DirectWrite's
+capHeight and Compose's Paragraph), measured before and after on all five
+with an `expect_ink`-style read of the box centre against a capital's ink as
+the guard, accepting that Android and Windows move; (c) a per-backend
+correction only where the measurement is off, which breaks the one-rule
+invariant and so is not recommended. Recommended: (a), unless the next
+review page shows the mac or GTK box visibly low, then (b) with the
+measurement first.
 KEY: first line box,
 textless cell, cap height, checkbox too high, kayaFirstLabel,
 baselineLayout, first_line_metrics, text_line, lineCentre.
@@ -2544,8 +2578,22 @@ than a verb of its own. What breadth still owes, held open here:
     phones (the GAP entry above, ruling asked) and two glibc facts on the
     record there: ar_EG counts in ASCII digits and abbreviates Monday to
     one letter.
-  - **FOLLOW-UP — the windows launchers are 300 checked-in near-copies**
-    (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
+  - ~~**FOLLOW-UP — the windows launchers are 300 checked-in near-copies**~~
+    DONE 2026-10-31 (the residue pass): tools/lib/win_launchers.py derives
+    every leg's launcher from tools/lib/lanes/win.py (a shape per language,
+    and the few facts the roster lacked as small tables: locales, the music
+    identity, python's -P, the two witnesses), deploy-win writes them to
+    target/win-launchers and ships them, check-steps, check-staging and
+    check-app-identity read the derivation, and the 555 checked-in files
+    are gone. Every leg's environment came out identical to its old file;
+    four lines were made one on purpose (the Go copy in the leg's own
+    directory with resources.pri beside it, resources.pri beside python
+    everywhere, java's copy through `where java`, the old files naming a
+    jdk-17 directory while the VM runs jdk-21, and every C# leg on cs-out),
+    and the full windows lane ran 553 of 553 green on them. GUARD: deploy-win
+    refuses a leg the derivation cannot shape before anything ships, and
+    check-staging's N2 (a leg in a language with no shape), N2b, N2c and
+    N7b-N7i now perturb the derivation, each watched. Was: (the maintainer, 2026-09-23: "do we need to be using a bunch of batch
     scripts like that?"): every leg is a tools/guest/run_<leg>.cmd because
     schtasks starts a command line and the environment has to be set
     before the guest, but the files are templated by language and could be
@@ -9046,7 +9094,7 @@ Slice 2b — depth then breadth, the standing pattern):
   works. docs/styling/typeface-winui-arm.md.
   The LEG WIRING this arm was scoped out of touching CLOSED 2026-08-16
   (`31ace6b`): `typeface` is in deploy-win's SCENES, `run_suite
-  typeface_rust` runs, and `tools/guest/run_typeface_*.cmd` are checked
+  typeface_rust` runs, and `tools/guest/run_typeface_*.cmd (gone)` are checked
   in for five languages. Windows is the second lane (after mac) where
   the scene's byte-frozen family resolves, so no per-platform row is
   needed here.
@@ -9531,7 +9579,7 @@ C3's new arm derives the asset-relative form from the manifest rather
 than spelling it, so there is still one source of truth. C3 also gained
 the watched negative it had never had.
 
-The lane side went with it: the five `tools/guest/run_identity_*.cmd`
+The lane side went with it: the five `tools/guest/run_identity_*.cmd (gone)`
 launchers lost their `KAYA_ICON_FILE` lines the way the typeface ones
 did, the emulator legs stopped carrying the extra, and the iOS lane
 stopped staging a second copy of the mark into the data container.

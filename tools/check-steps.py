@@ -37,6 +37,7 @@ import flightrec_lane
 from packaging import windows as win_package
 import scene_cut
 import secure_scan
+import win_launchers
 
 # Line-buffered stdout: the probes and helper scripts write to the same
 # fd, and block-buffered prints would land AFTER output they preceded.
@@ -2968,9 +2969,9 @@ for lane, scenes in java_dialog_rosters.items():
 
 
 # EVERY WINDOWS LEG NEEDS ITS LAUNCHER: the .cmd files deploy-win
-# schedules are CHECKED IN under tools/guest, and a leg whose launcher is
-# missing does not fail — schtasks starts nothing and the runner waits out
-# its full 300s timeout. NO LEG RUNS TWICE: a name submitted twice runs
+# schedules are DERIVED by tools/lib/win_launchers.py, and a leg with none
+# does not fail — schtasks starts nothing and the runner waits out its full
+# 300s timeout. NO LEG RUNS TWICE: a name submitted twice runs
 # the scene twice against one output file, the second verdict silently
 # replacing the first.
 def duplicate_legs(legs, path):
@@ -3113,30 +3114,26 @@ def launchers():
     for leg in win_lane.legs():
         # The module roster covers the milestone2 bare legs too
         # (run_rust.cmd and kin), which a <scene>_<lang> pattern cannot.
-        path = ROOT / "tools" / "guest" / win_lane.launcher(leg)
-        if not path.is_file():
+        try:
+            text = win_launchers.text(win_lane, win_lane.launcher(leg))
+        except (KeyError, ValueError) as e:
             print(f'check-steps: the win lane wires leg "{leg}" but '
-                  f"tools/guest/{win_lane.launcher(leg)} does not "
-                  f"exist — that leg would wait out its whole timeout "
+                  f"tools/lib/win_launchers.py derives no launcher for it "
+                  f"({e}) — that leg would wait out its whole timeout "
                   f"in silence", file=sys.stderr)
             failed = 1
             continue
         inner = None
         if leg in win_lane.PACKAGED_LEGS:
-            inner_path = ROOT / "tools" / "guest" / win_lane.packaged_inner(leg)
-            if inner_path.is_file():
-                inner = inner_path.read_text(encoding="utf-8", errors="replace")
-        for problem in launcher_problems(
-                leg, path.read_text(encoding="utf-8", errors="replace"),
-                inner):
+            inner = win_launchers.text(win_lane, win_lane.packaged_inner(leg))
+        for problem in launcher_problems(leg, text, inner):
             print(f"check-steps: {problem}", file=sys.stderr)
             failed = 1
     return failed
 
 
 # Watched: a launcher whose verb-trace line is cut must be named.
-_launcher_text = (ROOT / "tools/guest" / win_lane.launcher("todos_rust")
-                  ).read_text(encoding="utf-8", errors="replace")
+_launcher_text = win_launchers.text(win_lane, win_lane.launcher("todos_rust"))
 _cut, _n = sub_count(re.escape(verb_trace_line("todos_rust")) + r"\r?\n", "",
                      _launcher_text)
 print(f"check-steps: self-test the todos_rust launcher's verb-trace line cut, "
@@ -3207,6 +3204,8 @@ for _p in sorted((ROOT / "tools/guest").glob("*.ps1")) + sorted(
         (ROOT / "tools/guest").glob("*.cmd")):
     _ansi += ansi_payload_problems(
         _p.name, _p.read_text(encoding="utf-8", errors="replace"))
+for _name in win_launchers.names(win_lane):
+    _ansi += ansi_payload_problems(_name, win_launchers.text(win_lane, _name))
 print(f"check-steps: {len(list((ROOT / 'tools/guest').glob('*.ps1')))} guest "
       f".ps1 and {len(list((ROOT / 'tools/guest').glob('*.cmd')))} .cmd read "
       f"for non-ASCII outside a comment")
@@ -3356,10 +3355,8 @@ if packaged_invoker(_invoker):
 # Watched: every clause of the packaged pair, each perturbed on a COPY of the
 # real files with the substitution count printed.
 _pkg_leg = "notifypkg_rust"
-_pkg_outer = (ROOT / "tools/guest" / win_lane.launcher(_pkg_leg)).read_text(
-    encoding="utf-8", errors="replace")
-_pkg_inner = (ROOT / "tools/guest" / win_lane.packaged_inner(_pkg_leg)).read_text(
-    encoding="utf-8", errors="replace")
+_pkg_outer = win_launchers.text(win_lane, win_lane.launcher(_pkg_leg))
+_pkg_inner = win_launchers.text(win_lane, win_lane.packaged_inner(_pkg_leg))
 if launcher_problems(_pkg_leg, _pkg_outer, _pkg_inner):
     selftest_fail("the real packaged launcher pair was refused")
 if not launcher_problems(_pkg_leg, _pkg_outer, None):
@@ -3615,9 +3612,7 @@ print(f"check-steps: {len(win_lane.RELAUNCH_DOOR)} windows relaunch door(s), "
 # EVERY JS LAUNCHER HAS ONE SHAPE: CRLF (cmd.exe reads a lone LF as part
 # of the command), the pinned node on PATH, KAYA_LIB naming the shipped
 # dll, KAYA_SELFTEST naming the scene (1 for the bare milestone2 leg),
-# and the flat guest run into the leg's own out file. Generated once and
-# checked in, so a hand edit cannot drift one of forty near-identical
-# files.
+# and the flat guest run into the leg's own out file (tools/lib/win_launchers.py).
 def js_launchers(files, node_version):
     bad = []
     if not files:
@@ -3725,8 +3720,8 @@ if not js_launchers([("run_todos_js.cmd", _ok.replace(b"todos.ts", b"feed.ts"))]
 if not js_launchers([], _node_version_s):
     selftest_fail("an EMPTY JS launcher census passed")
 out = js_launchers(
-    [(p.name, p.read_bytes()) for p in sorted((ROOT / "tools" / "guest").glob("run_*.cmd"))
-     if p.name.endswith("_js.cmd") or p.name == "run_js.cmd"],
+    [(n, win_launchers.text(win_lane, n).encode("ascii")) for n in win_launchers.names(win_lane)
+     if n.endswith("_js.cmd") or n == "run_js.cmd"],
     _node_version_s)
 if out:
     print("check-steps: a JS launcher strays from the one shape the lane "
@@ -5053,8 +5048,8 @@ out = go_desktop_scenes(
      ("tools/linux/run-suites.sh", "runner",
       read_rel("tools/linux/run-suites.sh")),
      ("tools/guest", "cmd-dir",
-      [(str(p.relative_to(ROOT)), p.read_text(encoding="utf-8"))
-       for p in sorted((ROOT / "tools" / "guest").glob("*_go.cmd"))])])
+      [(f"tools/lib/win_launchers.py {n}", win_launchers.text(win_lane, n))
+       for n in win_launchers.names(win_lane) if n.endswith("_go.cmd")])])
 if out:
     print("check-steps: a desktop Go leg selects a scene the one Go "
           "binary does not carry (guests/go/cmd/scenes.go's table):",

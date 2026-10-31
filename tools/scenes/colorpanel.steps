@@ -1,0 +1,10 @@
+# The colour picker's own surfaces (docs/color-picker-plan.md §5, the panel
+# scene): pick_color opens the platform's panel, types the sRGB hex into the
+# panel's own field and closes it the way a user commits; colorpicker.steps'
+# set_color never opens one. The app hears the choice once.
+expect_title "colorpicker"
+expect_color color_picker#0 "336699FF"
+expect label#0 "color: none"
+pick_color color_picker#0 E01B24
+expect label#0 "color: E01B24FF"
+expect_color color_picker#0 "E01B24FF"

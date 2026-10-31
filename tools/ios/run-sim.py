@@ -1493,6 +1493,8 @@ BRIDGE_VERBS = frozenset((
     # The font picker is a remote view the driver reads and taps
     # (docs/font-picker-plan.md §7).
     "pick_font", "expect_font_dialog",
+    # The colour picker is a remote view too (docs/color-picker-plan.md §4.2).
+    "pick_color",
 ))
 
 

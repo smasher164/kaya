@@ -5,8 +5,9 @@ core, the generators, the harness, the SwiftUI arm, the Rust binding and
 tools/scenes/colorpicker.steps on the mac lane); the BREADTH BUILT 2026-09-28
 (the GTK, WinUI and Compose arms, the iOS legs and the other eight bindings;
 colorpicker on all five lanes). §4 is MEASURED on every platform and AMENDS
-§5, marked below. `pick_color` and its panel scene are docs/deferred.md's
-"BUILD — the colour picker's panel scene". The roadmap's fourth piece for the
+§5, marked below. `pick_color` and its panel scene were docs/deferred.md's
+"BUILD — the colour picker's panel scene", complete 2026-10-31 on five lanes
+(the routes as built are in that entry). The roadmap's fourth piece for the
 video editor ("a new kind, native on four lanes and synthesized on
 Android"; docs/deferred.md's forcing-app entry names the colour picker
 among the editor's triggers), where the inspector sets a title's colour,

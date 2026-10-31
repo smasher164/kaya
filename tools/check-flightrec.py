@@ -3154,7 +3154,11 @@ for label, before, after, want in (
         ("shade panel", "New panel State:|", "Lost panel State:|", "shade history dropped"),
         ("shade focus", "should be (?:visible and )?focusable|", "should be lost|",
          "shade history dropped"),
-        ("shade order", "lines = sorted({", "lines = list({", "not oldest first"),
+        # Reversed, not unsorted: a set's order is the hash seed's, and a list
+        # of one happened to come out sorted (the residue pass, 2026-10-31).
+        ("shade order", "lines = sorted({(m.group(1), m.group(2)) for m in stamped if m})",
+         "lines = sorted({(m.group(1), m.group(2)) for m in stamped if m}, reverse=True)",
+         "not oldest first"),
         ("shade status", "    if status:\n", "    if False:\n", "read failure lost"),
         ("shade attribution", "oldest first. History can predate this leg",
          "oldest first. History belongs to this leg", "current-leg attribution")):

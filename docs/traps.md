@@ -19547,8 +19547,9 @@ on the VM, and the first rowmenu run had none: the scheduled task started
 nothing, every leg waited out its whole 316 s ceiling with "timed out waiting
 for output", and the bundle could say only that no window and no verb trace
 ever came. deploy-win now refuses before any deploy when a rostered leg has no
-launcher, naming the leg; copy a sibling scene's launcher for the language and
-rename the scene in it.
+launcher, naming the leg. Since 2026-10-31 every launcher is derived from the
+roster by tools/lib/win_launchers.py, so a rostered leg has one unless its
+language or special case has no shape there, which is what the refusal names.
 
 ## The flyout a neighbour dismissed (measured 2026-10-26)
 

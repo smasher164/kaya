@@ -240,6 +240,7 @@ public final class Main {
                 app = NumberField::app;
                 break;
             case "colorpicker":
+            case "colorpanel":
                 app = ColorPicker::app;
                 break;
             case "range":

@@ -37,6 +37,7 @@ import (
 	"dev.kaya/guests/go/grid"
 	"dev.kaya/guests/go/grounds"
 	"dev.kaya/guests/go/grow"
+	"dev.kaya/guests/go/hiderows"
 	"dev.kaya/guests/go/identity"
 	"dev.kaya/guests/go/layout"
 	"dev.kaya/guests/go/media"
@@ -60,7 +61,6 @@ import (
 	"dev.kaya/guests/go/richrows"
 	"dev.kaya/guests/go/richtext"
 	"dev.kaya/guests/go/rowmenu"
-	"dev.kaya/guests/go/hiderows"
 	"dev.kaya/guests/go/safearea"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
@@ -149,6 +149,7 @@ var scenes = map[string]func() *kaya.App{
 	"timecode":         timecode.App,
 	"numberfield":      numberfield.App,
 	"colorpicker":      colorpicker.App,
+	"colorpanel":       colorpicker.App,
 	"numberfieldde":    numberfield.App,
 	"sheet":            sheet.App,
 	"format":           format.App,

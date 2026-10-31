@@ -26353,6 +26353,83 @@ impl crate::harness::Stage for WinUiStage {
         });
     }
 
+    /// The real surface (docs/color-picker-plan.md §4.4, §5): the swatch's
+    /// flyout shown on its button, the template's `HexTextBox` written once
+    /// the template has run, and the flyout hidden, so the commit is the
+    /// flyout's Closed door a user's dismissal takes.
+    fn pick_color(&self, t: crate::harness::Target, color: crate::Color) -> Result<(), String> {
+        fn hex_box(element: &UIElement) -> windows_core::Result<Option<TextBox>> {
+            use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+            if let Ok(found) = element.cast::<TextBox>() {
+                if found.Name()?.to_string() == "HexTextBox" {
+                    return Ok(Some(found));
+                }
+            }
+            for i in 0..VisualTreeHelper::GetChildrenCount(element)? {
+                if let Ok(child) = VisualTreeHelper::GetChild(element, i)?.cast::<UIElement>() {
+                    if let Some(found) = hex_box(&child)? {
+                        return Ok(Some(found));
+                    }
+                }
+            }
+            Ok(None)
+        }
+        // THE BUTTON MUST BE IN THE TREE: ShowAt on a swatch with no XamlRoot
+        // yet throws (the first step of a filtered run reached it first).
+        let rooted = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let state = Self::on_ui_read(move |core| {
+                let Some(i) = crate::harness::try_resolve(t.index, core.color_picker_ids.len()) else {
+                    return Ok(Err("no such colour picker".to_owned()));
+                };
+                let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+                Ok(Ok(swatch.button.XamlRoot().is_ok() && swatch.button.IsLoaded()?))
+            })
+            .map_err(|e| format!("the swatch would not answer: {e}"))??;
+            if state {
+                break;
+            }
+            if std::time::Instant::now() > rooted {
+                return Err("the swatch button never joined the window's tree (no XamlRoot in 10 s)".to_owned());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Self::on_ui_read(move |core| {
+            let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+            let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+            swatch.flyout.ShowAt(&swatch.button.cast::<FrameworkElement>()?)
+        })
+        .map_err(|e| format!("the flyout would not show: {e}"))?;
+        let hex = format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let wanted = hex.clone();
+            let wrote = Self::on_ui_read(move |core| {
+                let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+                let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+                let Some(field) = hex_box(&swatch.picker.cast()?)? else {
+                    return Ok(false);
+                };
+                field.SetText(&HSTRING::from(&*wanted))?;
+                Ok(true)
+            })
+            .map_err(|e| format!("the hex box would not take the text: {e}"))?;
+            if wrote {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                return Err("the flyout's ColorPicker never ran its template: no HexTextBox in 10 s".to_owned());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        Self::on_ui_read(move |core| {
+            let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+            let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+            swatch.flyout.Hide()
+        })
+        .map_err(|e| format!("the flyout would not hide: {e}"))
+    }
+
     fn color_value(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.color_picker_ids.len()) else {

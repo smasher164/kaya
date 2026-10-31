@@ -94,7 +94,7 @@ LEGS = {
         # Under ar-EG, what a typed number may contain (§3 rule 5).
         "numberfieldar-compose",
         # The colour picker's synthesized sheet (docs/color-picker-plan.md §6).
-        "colorpicker-compose",
+        "colorpicker-compose", "colorpanel-compose",
         # The range and the rotated fader, and under ar-EG (docs/range-plan.md
         # §5); MODS drops the keyboard's lines.
         "range-compose", "rangertl-compose",
@@ -232,7 +232,7 @@ LEGS = {
         "assets-jvm", "dnd-jvm", "pickers-jvm", "sliders-jvm", "tooltips-jvm",
         "sheet-jvm", "doctabs-jvm",
         "format-jvm", "formatde-jvm", "formatar-jvm",
-        "timecode-jvm", "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm",
+        "timecode-jvm", "numberfield-jvm", "numberfieldde-jvm", "colorpicker-jvm", "colorpanel-jvm",
         "range-jvm", "rangertl-jvm",
         "media_formats-jvm", "media_delivery-jvm", "media_session-jvm",
         "media_tracks-jvm", "media_feed-jvm", "media_reader-jvm",
@@ -264,7 +264,7 @@ LEGS = {
         "dnd-go", "pickers-go", "sliders-go", "tooltips-go",
         "sheet-go", "doctabs-go",
         "format-go", "formatde-go", "formatar-go",
-        "timecode-go", "numberfield-go", "numberfieldde-go", "colorpicker-go",
+        "timecode-go", "numberfield-go", "numberfieldde-go", "colorpicker-go", "colorpanel-go",
         "range-go", "rangertl-go",
         "media_formats-go", "media_delivery-go", "media_session-go",
         "media_tracks-go", "media_feed-go", "media_reader-go",

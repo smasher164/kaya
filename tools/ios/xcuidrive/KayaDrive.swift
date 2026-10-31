@@ -648,6 +648,38 @@ final class KayaDrive: XCTestCase {
             guard words.count == 2, let key = keys[words[1]] else { return (false, "key tab|space|up|down") }
             a.typeKey(key, modifierFlags: [])
             return (true, "pressed \(words[1])")
+        case "colorhex_b64":
+            // pick_color (docs/color-picker-plan.md §4.2, §5): the presented
+            // UIColorPickerViewController's Sliders tab, its sRGB hex field
+            // (no identifier; the one text field holding six hex digits)
+            // emptied and typed, then the picker's own close.
+            guard words.count == 2, let data = Data(base64Encoded: words[1]),
+                  let hex = String(data: data, encoding: .utf8) else { return (false, "colorhex_b64 <base64>") }
+            let sliders = a.buttons["Sliders"].firstMatch
+            guard sliders.waitForExistence(timeout: min(8, budgetNow())) else {
+                return (false, "no Sliders tab: the colour picker is not presented (buttons=\(a.buttons.count))")
+            }
+            sliders.tap()
+            let isHex = { (v: String) in v.count == 6 && v.allSatisfy(\.isHexDigit) }
+            var field: XCUIElement?
+            let until = Date().addingTimeInterval(min(5, budgetNow()))
+            while field == nil && Date() < until {
+                field = a.textFields.allElementsBoundByIndex.first { isHex(($0.value as? String) ?? "") }
+                if field == nil { Thread.sleep(forTimeInterval: 0.1) }
+            }
+            guard let field else {
+                let seen = a.textFields.allElementsBoundByIndex.map { "\($0.value ?? "")" }
+                return (false, "the Sliders tab shows no hex field (text fields: \(seen))")
+            }
+            field.tap()
+            let held = (field.value as? String) ?? ""
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: held.count) + hex + "\n")
+            let close = a.buttons["close"].firstMatch
+            guard close.waitForExistence(timeout: min(5, budgetNow())) else {
+                return (false, "typed \(hex), but the picker shows no close button")
+            }
+            close.tap()
+            return (true, "typed \(hex) over \(held) and closed the picker")
         case "keyboard_done":
             // The number field's Done on the keyboard's toolbar
             // (docs/number-field-plan.md §4.2), a real tap on the toolbar's

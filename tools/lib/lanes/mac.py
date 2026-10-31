@@ -115,7 +115,7 @@ GUEST_STEM = {"listdetail": "split", "taskspersist": "tasks", "windowmem": "spli
               "media_formats": "media", "media_delivery": "media",
               "media_session": "media", "media_tracks": "media", "media_feed": "media",
               "media_picked": "media", "media_timeout": "media",
-              "media_reader": "media", "capture_denied": "capture",
+              "media_reader": "media", "capture_denied": "capture", "colorpanel": "colorpicker",
               "music_home": "music", "music_playlist": "music", "music_header": "music",
               "music_dock": "music", "music_artist": "music", "music_search": "music",
               "music_context": "music"}
@@ -243,6 +243,9 @@ ORDER = [
     # set_color never opens the shared panel, so the everyday scene pools
     # (docs/color-picker-plan.md §5).
     ("colorpicker", LANGS),
+    # pick_color opens the shared NSColorPanel on the host's screen, so the
+    # panel scene is a HOST_VERBS leg (§5).
+    ("colorpanel", LANGS),
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     ("submit", LANGS),
     ("gallery", LANGS),
@@ -610,6 +613,7 @@ HOST_VERBS = {
                                "taking the host's keyboard"),
     "open_link": ("takeover", "activates the guest through LaunchServices, "
                               "taking the host's keyboard"),
+    "pick_color": ("panel", "opens the shared colour panel on the host's screen"),
     "user_fullscreen": ("takeover", "moves the host's display"),
     "expect_fullscreen": ("takeover", "moves the host's display"),
 }

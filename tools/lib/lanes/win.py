@@ -341,6 +341,10 @@ ORDER = [
      # the flyout never shown (docs/color-picker-plan.md §5).
      "colorpicker_rust", "colorpicker_python", "colorpicker_js", "colorpicker_go",
      "colorpicker_csharp", "colorpicker_java",
+     # The colour panel shows the swatch's flyout, which another window's
+     # foreground light-dismisses: the flyout group's one at a time.
+     "colorpanel_rust", "colorpanel_python", "colorpanel_js", "colorpanel_go",
+     "colorpanel_csharp", "colorpanel_java",
      # The sliders pool for the pickers' reason: `set_value` drives the
      # CONTROL's own property, no real mouse and no OS-global chrome. RUST
      # ALONE while the eight bindings' sugar is the parallel worktree
@@ -952,7 +956,8 @@ ORDER = [
 # The flyout group: two context-menu legs at once take the foreground from
 # each other at every open (docs/traps.md, the flyout a neighbour dismissed);
 # identity's window menu is one more (its caption mark's press).
-SERIAL_GROUPS = {"camera": ("capture", "capture_denied", "chatcall"), "flyout": ("music_context", "rowmenu", "identity")}
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied", "chatcall"),
+                 "flyout": ("music_context", "rowmenu", "identity", "colorpanel")}
 
 
 def serial_group(leg):
@@ -988,7 +993,7 @@ GUEST_STEM = {"listdetail": "split", "formatde": "format", "formatar": "format",
               "taskspersist": "tasks", "links": "tasks", "tasksrtl": "tasks",
               "tasksbig": "tasks", "formatbig": "format", "codesurfacebig": "codesurface", "clock24": "format",
               "scrollrtl": "scroll", "numberfieldde": "numberfield", "numberfieldar": "numberfield",
-              "rangertl": "range",
+              "rangertl": "range", "colorpanel": "colorpicker",
               "media_formats": "media", "media_delivery": "media", "media_session": "media",
               "media_tracks": "media", "media_feed": "media", "media_picked": "media",
               "media_timeout": "media", "media_reader": "media", "capture_denied": "capture",

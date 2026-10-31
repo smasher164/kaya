@@ -106,7 +106,7 @@ static class Program
             case "sliders": SlidersScene.Run(); break;
             case "timecode": TimecodeScene.Run(); break;
             case "numberfield": case "numberfieldde": NumberFieldScene.Run(); break;
-            case "colorpicker": ColorPickerScene.Run(); break;
+            case "colorpicker": case "colorpanel": ColorPickerScene.Run(); break;
             case "range": case "rangertl": RangeScene.Run(); break;
             case "media": case "media_formats": case "media_delivery": case "media_session":
             case "media_tracks": case "media_feed": case "media_reader": Media.MediaScene.Run(); break;

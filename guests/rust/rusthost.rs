@@ -282,7 +282,7 @@ fn app(ctx: kaya::AppCtx) {
         // One guest under two locales, format's shape.
         Ok("timecode") => timecode::app(ctx),
         Ok("numberfield") | Ok("numberfieldde") | Ok("numberfieldar") => numberfield::app(ctx),
-        Ok("colorpicker") => colorpicker::app(ctx),
+        Ok("colorpicker") | Ok("colorpanel") => colorpicker::app(ctx),
         Ok("range") | Ok("rangertl") => range::app(ctx),
         Ok("media_formats") | Ok("media_delivery") | Ok("media_session") | Ok("media_tracks") | Ok("media_feed")
         | Ok("media_picked") | Ok("media_timeout") | Ok("media_reader") => {

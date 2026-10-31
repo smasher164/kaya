@@ -35,7 +35,7 @@ SWIFT_ENTRIES = [
     # (docs/compliance-plan.md §6): one app, three scripts (SCENE_LOCALE).
     "format", "formatde:format", "formatar:format",
     "numberfield", "numberfieldde:numberfield", "timecode",
-    "colorpicker",
+    "colorpicker", "colorpanel:colorpicker",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md §4).
     "range", "rangertl:range",
     # The media suite, one guest (docs/media-plan.md §7a).
@@ -72,7 +72,7 @@ GO_SCENES = [
     "table", "dnd", "pickers", "sliders", "tooltips", "sheet", "doctabs",
     "format", "formatde", "formatar",
     "numberfield", "numberfieldde", "timecode",
-    "colorpicker",
+    "colorpicker", "colorpanel",
     "range", "rangertl",
     "media_formats", "media_delivery", "media_session", "media_tracks",
     "media_feed", "media_reader",
@@ -206,8 +206,9 @@ RUST_SCENES = [
     "richrows",
     # The number field (docs/number-field-plan.md §4.2), and under de-DE.
     "numberfield", "numberfieldde", "timecode", "numberfieldar",
-    # The colour picker (docs/color-picker-plan.md §4.2).
-    "colorpicker",
+    # The colour picker (docs/color-picker-plan.md §4.2), and its panel
+    # typed through the xcui driver (§5).
+    "colorpicker", "colorpanel",
     # The range and the rotated fader, and under ar-EG (docs/range-plan.md
     # §4.2, §4.3).
     "range", "rangertl",
@@ -527,7 +528,7 @@ RUST_EXAMPLE = {"listdetail": "split", "taskspersist": "tasks",
                 "media_session": "media", "media_tracks": "media",
                 "media_feed": "media", "media_picked": "media",
                 "media_timeout": "media", "media_reader": "media",
-                "capture_denied": "capture",
+                "capture_denied": "capture", "colorpanel": "colorpicker",
                 "taskskeyboard": "tasks", "autofillkeyboard": "autofill"}
 
 # The scenes whose guest declares a media session: their bundles carry

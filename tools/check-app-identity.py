@@ -692,10 +692,9 @@ def check(root):
         if not re.search(r'expect_now_playing_app\s+"%s"' % re.escape(own.name), scene_text):
             bad.append(f"tools/scenes: no scene reads the {stem} app's name \"{own.name}\" back "
                        f"(expect_now_playing_app) — {rel}'s name would ship unobserved")
-        for cmd in sorted((root / CMD_LAUNCHERS).glob("*.cmd")):
-            body = cmd.read_text(encoding="utf-8")
+        for name, body in windows_launchers(root):
             if f"\\{stem}.py" in body and f"set KAYA_IDENTITY={asset}" not in body:
-                bad.append(f"{cmd.relative_to(root).as_posix()}: runs {stem}.py without "
+                bad.append(f"{name} (tools/lib/win_launchers.py): runs {stem}.py without "
                            f"`set KAYA_IDENTITY={asset}`, so the process declares the default app")
         for n, line in enumerate(suites.splitlines(), 1):
             if re.match(r'\s+run "\$proto" ', line) and f"guests/python/{stem}.py" in "".join(
@@ -1199,6 +1198,21 @@ def ls_identity_findings(root):
 
 
 # ---------------------------------------------------------- self-tests
+def windows_launchers(root):
+    """Every windows leg launcher as tools/lib/win_launchers.py derives it
+    from `root`'s own copies of it and the lane module."""
+    import importlib.util
+
+    def load(rel, name):
+        spec = importlib.util.spec_from_file_location(name, root / rel)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    win = load("tools/lib/lanes/win.py", "kaya_identity_win_lane")
+    launchers = load("tools/lib/win_launchers.py", "kaya_identity_launchers")
+    return [(n, launchers.text(win, n)) for n in launchers.names(win)]
+
+
 def fresh(name):
     """A shadow root of symlinks the checker can read."""
     dst = g.scratch() / name
@@ -1486,8 +1500,8 @@ g.negative("an app's name no scene reads back", lambda p=s: check(p),
 
 # N17b — a Windows launcher that starts the music app as the default one.
 s = fresh("cmdunnamed")
-doctor_shadow("the launcher's identity cut", s, "tools/guest/run_music_dock_python.cmd",
-              r"set KAYA_IDENTITY=[^\r\n]*\r?\n", "")
+doctor_shadow("the launcher's identity cut", s, "tools/lib/win_launchers.py",
+              r'IDENTITIES = \{"music": "identities/music.toml"\}', "IDENTITIES = {}")
 g.negative("a launcher starting an app with its own file as the default",
            lambda p=s: check(p), want="without `set KAYA_IDENTITY=")
 

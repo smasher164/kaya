@@ -12243,6 +12243,29 @@ private func kayaRunScript(_ script: String) {
                 }
                 DispatchQueue.main.sync { kayaDriveColor(colorNode, well, packed) }
                 kayaAwaitAnswer(answered)
+            case "pick_color":
+                // The picker's real surface (docs/color-picker-plan.md §5, the
+                // panel scene): opened from the swatch, the hex typed into the
+                // surface's own sRGB field, closed as a user commits.
+                kayaAwaitQuiet()
+                let answered = kayaAnswers()
+                let hex = parts.count > 2 ? String(parts[2]) : ""
+                guard hex.count == 6, kayaParseColor(hex + "FF") != nil else {
+                    failures.append("pick_color wants RRGGBB, got \(hex.isEmpty ? "nothing" : hex)")
+                    break
+                }
+                let colorNode = DispatchQueue.main.sync {
+                    kayaTarget(parts[1], "color_picker", kayaScene.colorPickers)
+                }
+                guard let colorNode, let well = kayaAwaitOnMain({ kayaColorWells[colorNode.id] }) else {
+                    failures.append("no such target \(parts[1])")
+                    break
+                }
+                if let why = kayaPickColor(well, hex) {
+                    failures.append("pick_color \(parts[1]): \(why)")
+                    break
+                }
+                kayaAwaitAnswer(answered)
             case "expect_color":
                 // The CONTROL's colour, never the node's (expect_picker's rule).
                 let want = kayaQuoted(Array(parts[2...]))
@@ -19735,6 +19758,48 @@ func kayaColorCommitted(_ node: KayaNode, _ packed: Int64) {
         well.sendAction(well.action, to: well.target)
     }
 
+    /// The shared NSColorPanel, opened by the well as a click opens it, in
+    /// its RGB sliders with the sRGB space chosen (§4.1: the hex field reads
+    /// the panel's own space), the hex typed into its field and the panel
+    /// closed. Nil, or what it found instead.
+    func kayaPickColor(_ well: NSColorWell, _ hex: String) -> String? {
+        DispatchQueue.main.sync {
+            well.activate(true)
+            let panel = NSColorPanel.shared
+            panel.mode = .RGB
+            // THE HEX FIELD READS THE COLOUR'S OWN SPACE (§4.1; measured
+            // 2026-10-31: a Display P3 colour shows its P3 components), so
+            // the panel takes the well's colour in sRGB first.
+            if let srgb = well.color.usingColorSpace(.sRGB) { panel.color = srgb }
+            panel.orderFront(nil)
+        }
+        Thread.sleep(forTimeInterval: 0.5)
+        return DispatchQueue.main.sync { () -> String? in
+            let panel = NSColorPanel.shared
+            guard let content = panel.contentView else { return "the shared colour panel has no content view" }
+            var fields: [NSTextField] = []
+            func walk(_ view: NSView) {
+                if let field = view as? NSTextField, field.isEditable { fields.append(field) }
+                for sub in view.subviews { walk(sub) }
+            }
+            walk(content)
+            let isHex = { (s: String) in s.count == 6 && s.allSatisfy(\.isHexDigit) }
+            guard let field = fields.first(where: { isHex($0.stringValue) }) else {
+                return "the panel shows no hex field (editable fields: \(fields.map(\.stringValue)))"
+            }
+            field.stringValue = hex
+            _ = field.sendAction(field.action, to: field.target)
+            let landed = panel.color
+            well.deactivate()
+            panel.orderOut(nil)
+            let spelled = kayaColorOf(landed).map { kayaSpelledColor($0) } ?? "no sRGB reading"
+            if spelled.prefix(6) != hex.uppercased() {
+                return "the panel took \(hex) as \(spelled) in \(landed.colorSpace.localizedName ?? "an unnamed space")"
+            }
+            return nil
+        }
+    }
+
     func kayaColorControlValue(_ well: NSColorWell) -> Int64? {
         kayaColorOf(well.color)
     }
@@ -19873,6 +19938,35 @@ func kayaColorCommitted(_ node: KayaNode, _ packed: Int64) {
         guard let held = kayaColorOf(kayaUIColor(packed), opaque: !node.alpha) else { return }
         well.selectedColor = kayaUIColor(held)
         kayaColorCommitted(node, held)
+    }
+
+    /// The swatch's own picker, presented as a tap presents it, and its
+    /// remote Sliders hex field typed through the xcui driver, which then
+    /// closes it (§4.2). Nil, or what it found instead.
+    func kayaPickColor(_ well: UIColorWell, _ hex: String) -> String? {
+        let opened = DispatchQueue.main.sync { () -> Bool in
+            guard let swatch = well.superview as? UIControl else { return false }
+            swatch.sendActions(for: .touchUpInside)
+            return true
+        }
+        guard opened else { return "the well is not inside its swatch control" }
+        Thread.sleep(forTimeInterval: 1.0)
+        let (ok, lines) = KayaSimdrive.ask("colorhex_b64 \(Data(hex.utf8).base64EncodedString())", timeout: 60)
+        if !ok { return "the driver did not type the hex: \(lines.first ?? "no reason given")" }
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            let shown = DispatchQueue.main.sync { () -> Bool in
+                var top = well.window?.rootViewController
+                while let next = top?.presentedViewController {
+                    if next is UIColorPickerViewController { return true }
+                    top = next
+                }
+                return false
+            }
+            if !shown { return nil }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        return "the picker is still open after the driver closed it"
     }
 
     func kayaColorControlValue(_ well: UIColorWell) -> Int64? {

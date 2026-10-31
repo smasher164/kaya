@@ -58,6 +58,7 @@ import lane_health
 import secure_scan
 import walls
 import media_server
+import win_launchers
 import contextlib
 import deploy_args
 
@@ -140,15 +141,16 @@ if only.active() and SUITE == "all" and not LEGS:
     LEGS = only.matches(lane.legs())
     only.summary("deploy-win", len(LEGS))
     SUITE = "only"
-# A ROSTERED LEG WITHOUT ITS LAUNCHER RAN NOTHING AND WAITED OUT ITS WHOLE
-# CEILING, six legs at 316 s each with a bundle that could only say no output
-# came (docs/traps.md, the leg with no launcher).
-_unlaunched = [leg for leg in lane.legs()
-               if not (ROOT / "tools/guest" / lane.launcher(leg)).is_file()]
-if _unlaunched:
-    die("deploy-win: no launcher for " + ", ".join(_unlaunched) + " — every leg the roster "
-        "names runs tools/guest/" + lane.launcher("<leg>") + "; copy a sibling scene's "
-        "launcher for the same language and rename the scene in it")
+# EVERY LEG'S LAUNCHER IS DERIVED FROM THE ROSTER (tools/lib/win_launchers.py)
+# and written here before anything ships; a leg it cannot derive refuses now
+# rather than waiting out its whole ceiling with no launcher (docs/traps.md,
+# the leg with no launcher).
+LAUNCHERS_DIR = ROOT / "target/win-launchers"
+try:
+    LAUNCHERS = win_launchers.materialize(lane, LAUNCHERS_DIR)
+except (KeyError, ValueError) as _e:
+    die(f"deploy-win: {_e} — every leg the roster names gets its launcher from "
+        f"tools/lib/win_launchers.py; give its language or its special case a shape there")
 
 TARGET = ROOT / "target/aarch64-pc-windows-msvc/release"
 SDK = ROOT / "third_party/winappsdk"
@@ -1212,6 +1214,7 @@ def deploy_artifacts():
             + [ROOT / "go.mod", ROOT / "crates/kaya/include/kaya.h"]
             + [WINVCAM / lane.CAPTURE_LANE_EXE, WINVCAM / lane.CAPTURE_DLL]
             + sorted((ROOT / "tools/guest").glob("*.cmd"))
+            + LAUNCHERS
             + sorted((ROOT / "tools/guest").glob("*.vbs"))
             + [ROOT / "tools/guest/shot.ps1",
                ROOT / "tools/guest/shot-window.ps1",
@@ -1238,7 +1241,7 @@ def deploy_stamp():
     # unchanged sources would otherwise reuse stale classes (caught
     # 2026-07-24: adding `javac -encoding UTF-8` fixed nothing until the
     # stamp was cleared by hand).
-    inputs = ([SELF, LANE_MODULE]
+    inputs = ([SELF, LANE_MODULE, ROOT / "tools/lib/win_launchers.py"]
               + deploy_artifacts()
               + sorted((ROOT / "bindings/go").glob("*.go"))
               + sorted((ROOT / "guests/csharp").glob("*.cs"))
@@ -2880,13 +2883,13 @@ if any(lane.media_leg(leg) for leg in queued_legs()):
     _base = f"http://{lane.MEDIA_HOST}:{_port}"
     for _leg in queued_legs():
         if lane.media_leg(_leg):
-            _named = media_url_of(ROOT / "tools/guest" / lane.launcher(_leg))
+            _named = media_url_of(LAUNCHERS_DIR / lane.launcher(_leg))
             if _named != _base:
-                die(f"deploy-win: tools/guest/{lane.launcher(_leg)} hands its "
+                die(f"deploy-win: {lane.launcher(_leg)} (tools/lib/win_launchers.py) hands its "
                     f"guest KAYA_MEDIA_URL={_named}, and this lane serves the "
                     f"media suite at {_base} (tools/lib/lanes/win.py "
                     f"MEDIA_HOST, tools/lib/media_server.py LANE_PORTS). "
-                    f"Set the launcher's line to that URL.")
+                    f"The derivation's URL is wrong.")
     MEDIA.enter_context(media_server.serving(
         host=lane.MEDIA_HOST, port=_port,
         log=ROOT / "target/windows-media-server.log"))

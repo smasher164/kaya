@@ -524,8 +524,8 @@ compose_color_watched("a Compose hue slider committing", gate.doctor(
 # 18. COMPOSE: THE HEX FIELD'S TYPING COMMITS.
 compose_color_watched("a Compose hex field committing per keystroke", gate.doctor(
     "a door in the hex field", REAL[COMPOSE],
-    r"onValueChange = \{ draft\.typed\(it\) \}",
-    "onValueChange = { draft.typed(it); kayaColorSheetClosed(node, draft) }"),
+    r"val hexChanged: \(String\) -> Unit = \{ draft\.typed\(it\) \}",
+    "val hexChanged: (String) -> Unit = { draft.typed(it); kayaColorSheetClosed(node, draft) }"),
     "kayaColorSheetClosed is called")
 
 # 19. COMPOSE: A SLIDER CLOSES THE SHEET.

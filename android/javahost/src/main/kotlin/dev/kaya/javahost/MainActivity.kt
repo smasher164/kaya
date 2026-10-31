@@ -48,7 +48,7 @@ object GuestStart : KayaGuestStart {
             "timecode" -> Timecode::app
             "numberfield" -> NumberField::app
             "numberfieldde" -> NumberField::app
-            "colorpicker" -> ColorPicker::app
+            "colorpicker", "colorpanel" -> ColorPicker::app
             "range" -> Range::app
             "rangertl" -> Range::app
             "media_formats", "media_delivery", "media_session", "media_tracks", "media_feed", "media_reader" -> Media::app

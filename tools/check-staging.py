@@ -34,6 +34,14 @@ def load_win_lane(path):
     return mod
 
 
+def load_launchers(path):
+    """tools/lib/win_launchers.py from a PATH, the same discipline."""
+    spec = importlib.util.spec_from_file_location("kaya_launchers_shadow", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def load_mac_lane(path):
     """The mac lane's tables, the same discipline."""
     spec = importlib.util.spec_from_file_location("kaya_mac_lane_shadow",
@@ -98,18 +106,19 @@ def check(root):
     exes = (set(win_lane.SCENES) | set(win_lane.DEPTH_SCENES)
             | set(win_lane.GO_ONLY_SCENES))
     pys = set(win_lane.SCENES) | set(win_lane.PY_ONLY_SCENES)
-    # A suite's ARTIFACT is what its checked-in launcher names, not the
-    # suite's own word: listdetail runs split.exe (two scenes, one guest),
-    # so the launcher is the only honest derivation source.
+    # A suite's ARTIFACT is what its launcher names, not the suite's own
+    # word: listdetail runs split.exe (two scenes, one guest), so the
+    # launcher tools/lib/win_launchers.py derives is the source.
+    launchers = load_launchers(root / "tools/lib/win_launchers.py")
     for suite in [leg for block in win_lane.ORDER for leg in block]:
-        launcher = root / "tools" / "guest" / win_lane.launcher(suite)
-        if not launcher.is_file():
+        try:
+            body = launchers.text(win_lane, win_lane.launcher(suite))
+        except (KeyError, ValueError) as e:
             fail(f"tools/lib/lanes/win.py wires leg {suite} but "
-                 f"tools/guest/{win_lane.launcher(suite)} does not exist — "
+                 f"tools/lib/win_launchers.py derives no launcher for it ({e}) — "
                  f"the scheduled task would start nothing and the leg "
                  f"waits out its whole deadline")
             continue
-        body = launcher.read_text(encoding="utf-8", errors="replace")
         for e in re.finditer(r"(?:^|[\s\\])([a-z0-9_]+)\.exe\b", body,
                              re.M):
             base = e.group(1)
@@ -122,7 +131,7 @@ def check(root):
                 continue
             scene = base[:-3] if base.endswith("_go") else base
             if scene not in exes:
-                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                fail(f"{win_lane.launcher(suite)} runs "
                      f"{base}.exe but {scene} is in none of the win lane "
                      f"module's SCENES / DEPTH_SCENES / GO_ONLY_SCENES, "
                      f"so the deploy never builds or ships it — add "
@@ -133,7 +142,7 @@ def check(root):
             if name not in pys or not (
                 root / "guests" / "python" / f"{name}.py"
             ).is_file():
-                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                fail(f"{win_lane.launcher(suite)} runs "
                      f"{name}.py but {name} is not a shipped python guest "
                      f"(SCENES / PY_ONLY_SCENES with "
                      f"guests/python/{name}.py) — the deploy never stages "
@@ -146,7 +155,7 @@ def check(root):
             if name not in set(win_lane.SCENES) or not (
                 root / "guests" / "js" / f"{name}.ts"
             ).is_file():
-                fail(f"tools/guest/{win_lane.launcher(suite)} runs "
+                fail(f"{win_lane.launcher(suite)} runs "
                      f"{name}.ts but {name} is not a shipped JS guest "
                      f"(SCENES with guests/js/{name}.ts) — the deploy "
                      f"never stages it")
@@ -237,39 +246,43 @@ def check(root):
     # own start, and shares it with nobody. NO LEG CAN SEE THIS: two legs
     # with one state home pass alone and corrupt each other only when the
     # pool happens to overlap them.
-    guest = root / "tools" / "guest"
     homes = {}
     scened = 0
-    for path in sorted(guest.glob("run_*.cmd")) + sorted(guest.glob("pkg_*.cmd")):
-        text = path.read_text(encoding="utf-8", errors="replace")
+    derived = []
+    for name in launchers.names(win_lane):
+        try:
+            derived.append((name, launchers.text(win_lane, name)))
+        except (KeyError, ValueError):
+            continue
+    for name, text in derived:
         if "set KAYA_SELFTEST=" not in text:
             # No scene, no harness scratch: the two dnd witnesses start kaya
             # with the variable REMOVED, and a packaged leg's outer launcher
             # carries no environment at all (its inner one does).
             continue
         scened += 1
-        leg = path.name[4:-4]
+        leg = name[4:-4]
         want = f"C:\\kaya\\legs\\{leg}\\state"
         home = None
         for line in text.splitlines():
             if line.startswith("set XDG_STATE_HOME="):
                 home = line[len("set XDG_STATE_HOME="):].strip()
         if home is None:
-            fail(f"tools/guest/{path.name} runs a scene and sets no "
+            fail(f"{name} runs a scene and sets no "
                  f"XDG_STATE_HOME — it would share the app's one harness "
                  f"tree with every other leg, and whichever act one ran "
                  f"next would empty this leg's database under it")
             continue
         if home != want:
-            fail(f"tools/guest/{path.name} sets XDG_STATE_HOME={home!r}, "
+            fail(f"{name} sets XDG_STATE_HOME={home!r}, "
                  f"which is not its own {want!r} — a state home that names "
                  f"another leg is the shared tree again with extra steps")
         if f"rmdir /s /q C:\\kaya\\legs\\{leg}" not in text:
-            fail(f"tools/guest/{path.name} never clears "
+            fail(f"{name} never clears "
                  f"C:\\kaya\\legs\\{leg} — act one must start from an "
                  f"empty tree or a relaunch scene reads what the LAST run "
                  f"left and passes without measuring this one")
-        homes.setdefault(home, []).append(path.name)
+        homes.setdefault(home, []).append(name)
     if scened < 200:
         fail(f"only {scened} guest launcher(s) run a scene at all — this "
              f"census read almost nothing and would agree with anything")
@@ -332,11 +345,12 @@ def check(root):
         fail(f"{warm_rel} deletes goguest.exe after building it, so every Go "
              f"leg refuses with nothing to copy")
     go_launchers = 0
-    for path in sorted(guest.glob("run_*.cmd")):
-        text = path.read_text(encoding="utf-8", errors="replace")
+    for name, text in derived:
+        if not name.startswith("run_"):
+            continue
         runs = re.findall(r"^(\S*\w+_go\.exe) > C:\\kaya\\out_", text, re.M)
         if "dev.kaya/guests/go/cmd" in text:
-            fail(f"tools/guest/{path.name} builds the Go guest itself — a link "
+            fail(f"{name} builds the Go guest itself — a link "
                  f"per leg on the VM's cores; it runs a copy of go-warm's "
                  f"C:\\kaya\\goguest.exe instead")
         if not runs:
@@ -344,7 +358,7 @@ def check(root):
         go_launchers += 1
         exe = runs[0] if runs[0].startswith("C:\\") else f"C:\\kaya\\{runs[0]}"
         if f"copy /y C:\\kaya\\goguest.exe {exe} >nul 2>&1 || goto nocopy" not in text:
-            fail(f"tools/guest/{path.name} runs {runs[0]} without first copying "
+            fail(f"{name} runs {runs[0]} without first copying "
                  f"C:\\kaya\\goguest.exe to {exe}, so it runs whatever an earlier "
                  f"lane left under that name")
     if go_launchers < 60:
@@ -525,6 +539,7 @@ def check(root):
 
 SHADOW_RELS = ["tools/deploy-win.py", "tools/lib/flightrec_lane.py",
                "tools/lib/lanes/win.py", "tools/lib/lanes/mac.py",
+               "tools/lib/win_launchers.py",
                "tools/linux/run-suites.sh", "tools/ios/Info.plist.in",
                "tools/scenes", "tools/guest", "guests/python", "tools/ios/pyhost.c",
                "android/pyhost/src/main/kotlin/dev/kaya/pyhost/MainActivity.kt",
@@ -573,21 +588,21 @@ negative(
 negative(
     "N2", "wired a suite with no launcher", "tools/lib/lanes/win.py",
     r'^     "windowed_rust",$',
-    '     "windowed_rust",\n     "ghost_python",',
-    "run_ghost_python.cmd does not exist",
+    '     "windowed_rust",\n     "ghost_cobol",',
+    "derives no launcher for it",
     "N2 (a windows suite whose scheduled task would start nothing)")
 
 negative(
     "N2b", "pointed a launcher at an unbuilt exe",
-    "tools/guest/run_listdetail_rust.cmd",
-    r"split\.exe", "ghostexe.exe",
+    "tools/lib/lanes/win.py",
+    r'"listdetail": "split"', '"listdetail": "ghostexe"',
     "ghostexe is in none of",
     "N2b (a launcher naming an exe the deploy never builds)")
 
 negative(
     "N2c", "pointed a JS launcher at an unshipped guest",
-    "tools/guest/run_listdetail_js.cmd",
-    r"split\.ts", "ghostts.ts",
+    "tools/lib/lanes/win.py",
+    r'"listdetail": "split"', '"listdetail": "ghostts"',
     "ghostts is not a shipped JS guest",
     "N2c (a JS launcher naming a .ts the deploy never stages)")
 
@@ -703,37 +718,38 @@ negative(
     "does not empty the leg's state home",
     "N7g (a linux leg starting from the last run's tree)")
 
+_LAUNCHERS = "tools/lib/win_launchers.py"
 negative(
-    "N7b", "gave two legs one state home", "tools/guest/run_todos_go.cmd",
-    r"^set XDG_STATE_HOME=C:\\kaya\\legs\\todos_go",
-    "set XDG_STATE_HOME=C:\\\\kaya\\\\legs\\\\todos_rust",
+    "N7b", "gave two legs one state home", _LAUNCHERS,
+    r'f"set XDG_STATE_HOME=C:\\\\kaya\\\\legs\\\\\{leg\}\\\\state"',
+    r'"set XDG_STATE_HOME=C:\\\\kaya\\\\legs\\\\todos_rust\\\\state"',
     "share the state home",
     "N7b (two legs whose act one empties the other's tree)")
 
 negative(
-    "N7c", "took a leg's state home away", "tools/guest/run_todos_go.cmd",
-    r"^set XDG_STATE_HOME=.*\r?\n", "",
+    "N7c", "took a leg's state home away", _LAUNCHERS,
+    r'^ +f"set XDG_STATE_HOME=.*\]\n', "             ]\n",
     "sets no XDG_STATE_HOME",
     "N7c (a leg sharing the app's one harness tree with every other)")
 
 negative(
-    "N7d", "left the leg's tree from the last run",
-    "tools/guest/run_todos_go.cmd",
-    r"^rmdir /s /q C:\\kaya\\legs\\todos_go 2>nul\r?\n", "",
+    "N7d", "left the leg's tree from the last run", _LAUNCHERS,
+    r'^    lines = \[f"rmdir /s /q C:\\\\kaya\\\\legs\\\\\{leg\} 2>nul",\n +',
+    "    lines = [",
     "never clears",
     "N7d (a leg that reads what the last run left)")
 
 negative(
-    "N7h", "put a per-leg Go build back", "tools/guest/run_todos_go.cmd",
-    r"^copy /y C:\\kaya\\goguest\.exe C:\\kaya\\todos_go\.exe >nul 2>&1 \|\| goto nocopy\r?$",
-    "go build -o C:\\\\kaya\\\\todos_go.exe dev.kaya/guests/go/cmd",
+    "N7h", "put a per-leg Go build back", _LAUNCHERS,
+    r'f"copy /y C:\\\\kaya\\\\goguest\.exe \{exe\} >nul 2>&1 \|\| goto nocopy"',
+    r'f"go build -o {exe} dev.kaya/guests/go/cmd"',
     "builds the Go guest itself",
     "N7h (a Go leg linking the guest on the VM again)")
 
 negative(
-    "N7i", "ran a Go exe it never copied", "tools/guest/run_todos_go.cmd",
-    r"^copy /y C:\\kaya\\goguest\.exe C:\\kaya\\todos_go\.exe ",
-    "copy /y C:\\\\kaya\\\\goguest.exe C:\\\\kaya\\\\ghost_go.exe ",
+    "N7i", "ran a Go exe it never copied", _LAUNCHERS,
+    r'f"copy /y C:\\\\kaya\\\\goguest\.exe \{exe\} >nul',
+    r'f"copy /y C:\\\\kaya\\\\goguest.exe C:\\\\kaya\\\\ghost_go.exe >nul',
     "without first copying",
     "N7i (a Go leg running whatever an earlier lane left)")
 

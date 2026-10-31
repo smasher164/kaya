@@ -288,7 +288,7 @@ own evidence that the perturbed code ran.
 
 `tools/deploy-win.py` runs depth scenes by NAME, and this charge withheld
 tools/** edits, so the leg was driven by hand: `schtasks` running a
-scratchpad `.cmd` shaped exactly like `tools/guest/run_styling_rust.cmd`.
+scratchpad `.cmd` shaped exactly like `tools/guest/run_styling_rust.cmd (gone)`.
 That is the same path a wired leg takes, minus the pool slot.
 
     check-steps: scene "typeface" has no live legs in tools/deploy-win.py
@@ -302,7 +302,7 @@ tools/**, all one-liners:
 2. `run_suite typeface_rust` in the depth-scene block beside
    `run_suite dirty_rust` (~line 1545). Pooled: no typed input beyond
    `set_text`, no window close, nothing foreground-sensitive.
-3. `tools/guest/run_typeface_rust.cmd`, four lines, the styling
+3. `tools/guest/run_typeface_rust.cmd (gone)`, four lines, the styling
    launcher's shape:
 
        @echo off
