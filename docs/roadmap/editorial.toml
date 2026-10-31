@@ -7,9 +7,9 @@ title = 'What kaya builds next'
 lede = 'Every open item scored three ways: how many apps need it, how many of fifteen GUI frameworks ship it, and what a slice of that shape has cost kaya on its own record. The order below follows from the scores; the cards say why each one landed where it did.'
 state = "Since the 2026-10-11 read the phones' safe areas and keyboard avoidance shipped (10-11, 10-12), then images from the network (10-13) and the styling pass toward an app-skinned look (10-16), each on five platforms and in nine bindings. The fourth demo app followed: Aurora Music, a Python music client over a Jamendo catalogue, built screen by screen through 10-26 with every review ruling taken (library, playlist, the album's vivid header, the artist page, search, the dock with Now Playing, Liked Songs, context menus). Its styling then went back into the chat app, the task manager and the text editor (10-26, 10-27). The text editor grew into a real document editor: a Format menu and a format bar above the phone keyboard (10-27), line numbers that hold their lines, document tabs native on every platform (10-28), and one Font… opening the platform's own font picker with family and style, Menlo by default and a compact status bar (10-29, 10-30). Every slice ended on a review page the maintainer read."
 menu_heading = 'The menu: the pieces first, then the apps they unblock'
-menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage follows: capture and audio playback are built, and the one piece between them and a call is the far end, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
+menu_lede = "Every framework piece is its own entry, in the order recommended, and each names the demo app it unblocks; the apps follow, each listing what it still waits on, so an app is never picked with its pieces unbuilt. A star marks a piece that needs a ruling before any arm is written. With the task manager, the chat app and the music app shipped, the one demo app left is the video editor. Every ruling its plan asked is taken and every piece it names is built, the last two (the timecode formatter and a drop's point) on 2026-10-05 and 10-06, so the editor waits only on the maintainer's pick. The chat app's calls stage shipped on 2026-10-31 with the far end of a call, the peer's picture and voice. Read out of the surface promised against the surface built, the ledger's open headlines and the maintainer's own evidence order; the editor's pieces, the media reader and capture shipped between the reads and stay listed with their dates."
 recommended_next = 'The video editor'
-recommended_note = "Every piece its plan names has been built since 2026-10-06, and it was held only while user-facing features came first; the list the maintainer drew from then (passwords, the segmented control, the toast, the expander, safe areas, network images, the styling pass, the music app, document tabs, the font picker) is done. The alternatives worth weighing: session restoration with recent files, which every document app now wants and which document tabs make more pressing; the far end of a call, which finishes the chat app; or a filtered list, which the music app's and the task manager's searches both hand-write today. The two below with a star need a ruling first."
+recommended_note = "Every piece its plan names has been built since 2026-10-06, and it was held only while user-facing features came first; the list the maintainer drew from then (passwords, the segmented control, the toast, the expander, safe areas, network images, the styling pass, the music app, document tabs, the font picker) is done. The alternatives worth weighing: session restoration with recent files, which every document app now wants and which document tabs make more pressing; or a filtered list, which the music app's and the task manager's searches both hand-write today. The two below with a star need a ruling first."
 demo_heading = 'The demo apps, and what each still waits on'
 proposed_heading = 'Proposed: more demo apps, as milestones'
 proposed_lede = "Proposed 2026-09-28 at the maintainer's ask, not ruled. Each demo is a milestone that forces a set of pieces no shipped app needs, taken from the archetype table below; the order puts the one that shares the most with the video editor first, so its pieces are built once for both. The webcam and the microphone (the maintainer, 2026-09-28: at least one demo must use them) go into the chat app as calls rather than a demo of their own, the way Signal and Slack carry them: the conversation, the simulated peer and the notifications are already there. The photo gallery and the video editor's voiceover would use the same capture piece more lightly. Nothing here starts until the maintainer picks."
@@ -35,6 +35,7 @@ netimages = 'https://claude.ai/artifact/Da15r8emgFfRC3jC6yNjvN'
 styling = 'https://claude.ai/artifact/VZN2zZ5imPZqvzvMVWpdJR'
 music = 'https://claude.ai/artifact/8xxAYSybH7th52nzpteUGE'
 restyle = 'https://claude.ai/artifact/LYPGimfXNrSWgyfNRqMMLj'
+calls = 'https://claude.ai/artifact/3XqF48GxbBDPMaBBZ9G3EL'
 editorfmt = 'https://claude.ai/artifact/7PtETtTpi3bPZscDSSQwJ7'
 doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
 fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
@@ -120,7 +121,7 @@ size = 'XL'
 unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
 review = 'capture'
-text = "SHIPPED 2026-10-03 (a459c6e8 design, 503002c3 depth, 8f363563 breadth, e0223160 the Windows legs; review {review:capture}): a capture object the app holds, its live self-view shown by the same video view a player uses, frames and samples handed to the app on kaya's capture thread, device lists and the permission prompt, on five platforms and in nine bindings. The lanes run synthetic devices in each platform's own path (the emulator's cameras, PipeWire nodes, a virtual camera and loopback driver installed once on the Windows VM) and inside kaya on the mac and the iOS simulator, behind a wall that refuses a real device under the harness. All five design rulings and the build's eight choices were ruled 2026-10-02 and 10-03. The self-view's size became one core rule on 10-03 and the <code>aspect</code> tile on 10-04 (3423e045, 66352411, 9e9449a4, 955d4106; review {review:aspect}). Left: the C floor's parsers and the far end below."
+text = "SHIPPED 2026-10-03 (a459c6e8 design, 503002c3 depth, 8f363563 breadth, e0223160 the Windows legs; review {review:capture}): a capture object the app holds, its live self-view shown by the same video view a player uses, frames and samples handed to the app on kaya's capture thread, device lists and the permission prompt, on five platforms and in nine bindings. The lanes run synthetic devices in each platform's own path (the emulator's cameras, PipeWire nodes, a virtual camera and loopback driver installed once on the Windows VM) and inside kaya on the mac and the iOS simulator, behind a wall that refuses a real device under the harness. All five design rulings and the build's eight choices were ruled 2026-10-02 and 10-03. The self-view's size became one core rule on 10-03 and the <code>aspect</code> tile on 10-04 (3423e045, 66352411, 9e9449a4, 955d4106; review {review:aspect}). Left: the C floor's parsers. The far end below shipped 2026-10-31."
 
 [[menu]]
 title = '<b>The timecode formatter</b>'
@@ -156,23 +157,25 @@ text = "in Rust (ruling 1, 2026-09-29), one screen at a time with its scenes sha
 [[menu]]
 title = "<b>The far end of a call: the peer's picture and voice</b>"
 star = false
-status = 'open'
+status = 'shipped'
 size = 'L to XL'
 unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
 key = 'far end'
-plan_built_part = "the plan's Status names the depth and breadth of capture as built; §5's far end is the unbuilt part"
-text = "ruled 2026-10-02 (docs/capture-plan.md §5, §9 ruling 4) and not built: the surface widget taking the app's CPU frames for the peer's picture, and a voice output object playing the peer's samples on the same voice path as the capture, so the platform's echo canceller has its reference (Apple's voice-processing I/O, Android's voice-communication path, Windows' Communications category; on Linux only where the desktop loads PipeWire's echo-cancel module, a carve-out stated once). L to XL. The surface in frames mode is media-plan §7's next piece too, so this builds it once for both. Unblocks the chat app's calls."
+review = 'calls'
+plan_built_part = "the plan's Status names capture and §5's far end as built"
+text = "SHIPPED 2026-10-31 (ef377436; review {review:calls}): a `surface` widget kind showing the NV12 frames an app submits from any thread, and a voice output playing the 48 kHz mono samples the app writes on the same voice path as the capture, so the platform's echo canceller has its reference (Apple's voice-processing I/O, Android's voice-communication path, Windows' Communications category; on Linux the echo-cancel sink where PipeWire lists one, a carve-out stated once). Five platforms, nine bindings and the C floor; the farend scene reads the peer's picture by pixel and its tone by what the platform pulled. Its settled choices are capture-plan §11, for the maintainer to ratify. The surface in frames mode (media-plan §7) is still to build on it."
 
 [[menu]]
 title = "<b>The chat app's calls stage</b>"
 star = false
-status = 'open'
+status = 'shipped'
 size = 'M'
 unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
+review = 'calls'
 plan_built_part = "stage C10 is capture-plan §8; the plan's BUILT is capture itself"
-text = "accepted 2026-09-28 (stage C10, docs/capture-plan.md §8): a voice and video call from a conversation in the Go app, the self-preview, the device pickers, mute and camera off, the simulated peer answering with a test pattern and a tone through the app's loopback transport, and an incoming call as an ordinary notification; CallKit and Android's call service stay out. M once the far end is built."
+text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Open: the self-view's size and the buttons as text or symbols, rulings on the review page; the settled choices are capture-plan §12."
 
 [[menu]]
 title = '<b>Six more languages on a phone</b>'
@@ -325,9 +328,9 @@ then = ''
 name = 'The chat app'
 grp = 'docs/chat-plan.md; Slack, Signal'
 shipped = "everything it asked for: the submitted occurrence, scroll-to, tints on a filled container, a scroll that follows its end, a growing composer with icon-only buttons, notifications that open a conversation and take a reply, the unread count on the app's icon, the emoji picker, photo attachments, swipe actions, search inside a thread, and a queue for a dropped connection"
-waits = "nothing for what it shipped. Calls, accepted 2026-09-28 (a voice and video call from a conversation, a live self-preview, a choice of camera and microphone, the simulated peer answering with a test pattern and a tone, an incoming call as an ordinary notification): camera and microphone capture shipped 2026-10-03 and audio playback 2026-09-30; what is left is the far end (docs/capture-plan.md §5), the surface taking the app's frames for the peer's picture and a voice output object with the platform's echo cancelling for the peer's voice, neither built, then stage C10. The real webcam and microphone are tried by the maintainer by hand on his laptop."
+waits = "nothing for what it shipped. Calls, accepted 2026-09-28 (a voice and video call from a conversation, a live self-preview, a choice of camera and microphone, the simulated peer answering with a test pattern and a tone, an incoming call as an ordinary notification): shipped 2026-10-31 as stage C10 on the far end (docs/capture-plan.md §5, §8), after camera and microphone capture (2026-10-03) and audio playback (2026-09-30). The real webcam and microphone are tried by the maintainer by hand on his laptop."
 then_tier = 'shipped'
-then = ', calls next after the far end'
+then = ', calls included'
 
 [[demo]]
 name = 'The video editor'
@@ -396,8 +399,8 @@ blockers = ['tree', 'spellcheck', 'restoration']
 [[archetype]]
 name = 'Chat / messaging'
 grp = 'Slack, Discord, Signal'
-has = 'the chat app: tints on a filled container, a thread that follows its end, a growing composer, notifications with a reply field, the icon badge, the emoji picker, photo attachments, swipe actions, thread search, a reconnect queue'
-blocked = "nothing for text chat; calls wait on the far end (the peer's picture and voice), voice notes later"
+has = 'the chat app: tints on a filled container, a thread that follows its end, a growing composer, notifications with a reply field, the icon badge, the emoji picker, photo attachments, swipe actions, thread search, a reconnect queue, voice and video calls'
+blocked = "nothing for text chat or calls (shipped 2026-10-31); voice notes later"
 blockers = []
 
 [[archetype]]
