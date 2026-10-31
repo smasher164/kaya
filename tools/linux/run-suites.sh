@@ -2635,18 +2635,23 @@ for proto in x11 wayland; do
     run "$proto" rowmenu-haskell env KAYA_SELFTEST=rowmenu "$(hs_bin rowmenu)"
     run "$proto" rowmenu-java env KAYA_SELFTEST=rowmenu KAYA_LIB="$LIB" \
         java -cp /tmp/java-guests dev.kaya.guests.Main
-    run "$proto" hiderows-rust env KAYA_SELFTEST=hiderows "$CARGO_TARGET_DIR/debug/examples/hiderows"
+    # Through a11y-leg.sh: its caret read goes to the accessibility bus.
+    run "$proto" hiderows-rust env KAYA_SELFTEST=hiderows \
+        tools/linux/a11y-leg.sh "$CARGO_TARGET_DIR/debug/examples/hiderows"
     run "$proto" hiderows-python env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
-        python3 guests/python/hiderows.py
+        tools/linux/a11y-leg.sh python3 guests/python/hiderows.py
     run "$proto" hiderows-js env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
-        node guests/js/hiderows.ts
-    run "$proto" hiderows-go env KAYA_SELFTEST=hiderows /tmp/go-guests/kaya-go
+        tools/linux/a11y-leg.sh node guests/js/hiderows.ts
+    run "$proto" hiderows-go env KAYA_SELFTEST=hiderows \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     run "$proto" hiderows-csharp env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
-        dotnet exec "$CS_GUEST"
-    run "$proto" hiderows-ocaml env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" _build-linux/default/guests/ocaml/hiderows.exe
-    run "$proto" hiderows-haskell env KAYA_SELFTEST=hiderows "$(hs_bin hiderows)"
+        tools/linux/a11y-leg.sh dotnet exec "$CS_GUEST"
+    run "$proto" hiderows-ocaml env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
+        tools/linux/a11y-leg.sh _build-linux/default/guests/ocaml/hiderows.exe
+    run "$proto" hiderows-haskell env KAYA_SELFTEST=hiderows \
+        tools/linux/a11y-leg.sh "$(hs_bin hiderows)"
     run "$proto" hiderows-java env KAYA_SELFTEST=hiderows KAYA_LIB="$LIB" \
-        java -cp /tmp/java-guests dev.kaya.guests.Main
+        tools/linux/a11y-leg.sh java -cp /tmp/java-guests dev.kaya.guests.Main
     run "$proto" commands-rust env KAYA_SELFTEST=commands \
         "$CARGO_TARGET_DIR/debug/examples/commands"
     run "$proto" commands-c env KAYA_SELFTEST=commands /tmp/c-guests/commands

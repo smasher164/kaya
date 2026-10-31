@@ -20,10 +20,11 @@ let () =
   let app = Kaya_app.create () in
 
   build app (fun () ->
-     window ~title:"hiderows" ();
+     window ~title:"hiderows" ~width:480.0 ~height:760.0 ();
      let note_rows = collection_of hiderows_note_record in
      let file_rows = collection_of hiderows_file_record in
      let two = signal Scalar.Bool false in
+     let pane = signal Scalar.Bool false in
      let find_notes query =
        List.iter
          (fun title ->
@@ -72,13 +73,34 @@ let () =
        bind_hidden l two;
        l
      in
+     let card i () = label ~bind:(signal Scalar.Str (Printf.sprintf "card %d" i)) () in
+     let draft = textarea ~a11y_id:"draft" ~a11y_label:"Draft" () in
+     let hideable =
+       column
+         [
+           scroll ~axis:Horizontal ~a11y_id:"strip" [ row (List.init 20 (fun i -> card (i + 1))) ];
+           w draft;
+         ]
+         ()
+     in
+     bind_hidden hideable pane;
+     let select_first () =
+       focus draft;
+       select_range draft (0, 5)
+     in
      let root =
        column
          [
            search ~placeholder:"Find notes" ~a11y_id:"find_notes" ~on_change:find_notes;
            w note_list;
            grid ~columns:2 ~a11y_id:"tiles" [ label ~text:"one"; second; label ~text:"three" ];
-           checkbox ~a11y_id:"hide_two" ~text:"Hide two" ~on_toggle:(fun on -> write two on);
+           w hideable;
+           row
+             [
+               checkbox ~a11y_id:"hide_two" ~text:"Hide two" ~on_toggle:(fun on -> write two on);
+               checkbox ~a11y_id:"hide_pane" ~text:"Hide pane" ~on_toggle:(fun on -> write pane on);
+             ];
+           button ~a11y_id:"select_first" ~text:"select first" ~on_click:select_first;
            search ~placeholder:"Find files" ~a11y_id:"find_files" ~on_change:find_files;
            w table;
          ]

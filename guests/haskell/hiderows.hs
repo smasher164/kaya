@@ -33,10 +33,11 @@ fileName i = T.pack (printf "file %03d" i)
 main :: IO ()
 main = kayaMain $ \app -> do
   _ <- buildTx app $ do
-    window primary [WTitle "hiderows"]
+    window primary [WTitle "hiderows", WSize 480 760]
     noteRows <- collectionOf @HiderowsNote
     fileRows <- collectionOf @HiderowsFile
     two <- signalBool False
+    pane <- signalBool False
     let findNotes query = submitTx app $
           forM_ notes $ \t ->
             updateField noteRows (textKey t) (field @"unmatched" @HiderowsNote) (not (query `T.isInfixOf` t))
@@ -53,7 +54,26 @@ main = kayaMain $ \app -> do
     setA11yId noteList "notes"
     tiles <- grid 2 [labelText "one" [], labelText "two" [HiddenBound two], labelText "three" []]
     setA11yId tiles "tiles"
-    hideTwo <- checkboxOn "Hide two" (\on -> submitTx app (writeSignal two on)) [A11yId "hide_two"]
+    draft <- textareaOn (\_ -> pure ()) [A11yId "draft", A11yLabel "Draft"]
+    let mkCard i = do
+          caption <- signalText ("card " <> tshow (i :: Int))
+          labelBound caption
+    hideable <-
+      column
+        [HiddenBound pane]
+        [ scroll [Axis AxisHorizontal, A11yId "strip"] (row (map mkCard [1 .. 20])),
+          pure draft
+        ]
+    controls <-
+      row
+        [ checkboxOn "Hide two" (\on -> submitTx app (writeSignal two on)) [A11yId "hide_two"],
+          checkboxOn "Hide pane" (\on -> submitTx app (writeSignal pane on)) [A11yId "hide_pane"]
+        ]
+    selectFirst <-
+      buttonOn
+        "select first"
+        (submitTx app (focusWidget draft >> selectRange draft (0, 5)))
+        [A11yId "select_first"]
     findFilesField <- searchOn findFiles [Placeholder "Find files", A11yId "find_files"]
     (table, _) <-
       forEach (recordHandle fileRows) $
@@ -68,7 +88,9 @@ main = kayaMain $ \app -> do
         [ pure findNotesField,
           pure noteList,
           pure tiles,
-          pure hideTwo,
+          pure hideable,
+          pure controls,
+          pure selectFirst,
           pure findFilesField,
           pure table
         ]

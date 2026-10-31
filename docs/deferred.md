@@ -1460,6 +1460,12 @@ restart on sim-0 alone (`simctl spawn <udid> launchctl kickstart` of
 SpringBoard) brings buildMenu back, or whether the lane should check one
 menu build per device at preflight and name the device that refuses.
 
+Seen again 2026-10-31 (hidekeep): editor-go red with the same sentence on
+kaya-sim-1 (45F06B45, its verb trace's container path) in a filtered run,
+then on sim-0 twice, once with swift/KayaSwiftUI.swift swapped back to
+86f0e15e's, so the change in hand did not cause it and the device-only
+reading no longer holds: sim-1 has refused too.
+
 ## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 

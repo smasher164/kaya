@@ -22,12 +22,18 @@ function findFiles(query: string): void {
   for (let i = 0; i < 300; i++) files.patch(fileName(i), { unmatched: !fileName(i).includes(query) });
 }
 
-const { notes, files } = app.window({ title: "hiderows" }, () => {
+function selectFirst(): void {
+  draft.focus();
+  draft.selectRange([0, 5]);
+}
+
+const { notes, files, draft } = app.window({ title: "hiderows", width: 480, height: 760 }, () => {
   const notes = kaya.collection(Note);
   const files = kaya.collection(File);
   const two = kaya.signal(false);
+  const pane = kaya.signal(false);
 
-  kaya.column(() => {
+  const draft = kaya.column(() => {
     kaya.search({ placeholder: "Find notes", onChange: findNotes }).a11yId("find_notes");
     for (const note of notes.rows({ a11yId: "notes" })) {
       kaya.row((line) => {
@@ -42,7 +48,23 @@ const { notes, files } = app.window({ title: "hiderows" }, () => {
       kaya.label("two").hidden(two);
       kaya.label("three");
     });
-    kaya.checkbox("Hide two", { onToggle: (on: boolean) => two.set(on) }).a11yId("hide_two");
+    const draft = kaya.column((hideable) => {
+      hideable.hidden(pane);
+      kaya.scroll({ axis: kaya.Axis.HORIZONTAL }, (strip) => {
+        strip.a11yId("strip");
+        kaya.row(() => {
+          for (let i = 1; i <= 20; i++) {
+            kaya.label({ bind: kaya.signal(`card ${i}`) });
+          }
+        });
+      });
+      return kaya.textarea().a11yId("draft").a11yLabel("Draft");
+    });
+    kaya.row(() => {
+      kaya.checkbox("Hide two", { onToggle: (on: boolean) => two.set(on) }).a11yId("hide_two");
+      kaya.checkbox("Hide pane", { onToggle: (on: boolean) => pane.set(on) }).a11yId("hide_pane");
+    });
+    kaya.button("select first", { onClick: selectFirst }).a11yId("select_first");
     kaya.search({ placeholder: "Find files", onChange: findFiles }).a11yId("find_files");
     for (const file of files.columns(["Name", "Size"], { grow: 1, a11yId: "files" })) {
       kaya.row((line) => {
@@ -51,11 +73,12 @@ const { notes, files } = app.window({ title: "hiderows" }, () => {
         kaya.label({ bind: file.size });
       });
     }
+    return draft;
   });
 
   for (const title of NOTES) notes.insert(title, Note({ title, unmatched: false }));
   for (let i = 0; i < 300; i++) files.insert(fileName(i), File({ name: fileName(i), size: `${i} KB`, unmatched: false }));
-  return { notes, files };
+  return { notes, files, draft };
 });
 
 app.run();

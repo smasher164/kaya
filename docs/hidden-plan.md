@@ -57,12 +57,12 @@ The toolkit's own spelling, recorded from the survey of 2026-10-31:
 
 | backend | how it hides | what it keeps | what this pass fixes |
 |---|---|---|---|
-| SwiftUI (mac, iOS) | the node renders `EmptyView` and leaves `laidOut` (KayaNode.vacant); SwiftUI has no hidden-without-removal (List rows are removed, `.hidden()` keeps the space) | text, expansion, checks, values, focus id: all on KayaNode | table tiers (native NSTableView, synthesized, iOS Table) drew a hidden row whole; the grid chunked hidden cells; expect_order, expect_rows and the plain-For expect_window counted hidden rows |
+| SwiftUI (mac, iOS) | the node renders `EmptyView` and leaves `laidOut` (KayaNode.vacant); SwiftUI has no hidden-without-removal (List rows are removed, `.hidden()` keeps the space) | text, expansion, checks, values, focus id: all on KayaNode; since Q1 also a scroll's offset and a textarea's caret, selection and viewport (H8) | table tiers (native NSTableView, synthesized, iOS Table) drew a hidden row whole; the grid chunked hidden cells; expect_order, expect_rows and the plain-For expect_window counted hidden rows |
 | Compose | `KayaRender` returns early; `laidOut` skips vacant | TextFieldState (text, selection) and scrollState live on the node | KayaTableSurface drew hidden rows; the grid; the same three reads |
 | GTK 4 | `set_visible(false)`; nothing unparents | everything: the widget stays | the windowed band walk, the grid's index placement, the reads, an AT-SPI rank given to a hidden target |
 | WinUI 3 | `Visibility.Collapsed` on the outer element, no track (reindex VACATED) | everything: nothing recreates the element | a wrapper installed while hidden came up visible; the grid; the reads |
 
-Q1 below is RULED (a), not yet built.
+Q1 below is RULED (a) and built (H8).
 
 ## H5 — Inside each container
 
@@ -91,6 +91,40 @@ Java, Swift, OCaml, Haskell and JS do (each has a hiderows guest and
 the search guest converted); the C floor does through kaya.h's
 `tx_set_hidden` packers and element bindings (no C guest, as the
 search scene has none). No can't, no carve-out.
+
+## H8 — What a remounted SwiftUI view restores (Q1)
+
+SwiftUI tears a hidden node's view down, so what lived only in the view
+is kept on KayaNode and put back when a view for the same node is made
+again: after a hide and show, a re-host, or a re-stamp of the same node.
+A When shown again is a fresh copy (H1) and restores nothing.
+
+- A scroll's offset along its axis: recorded when its view disappears,
+  restored one turn after the new viewport appears, through the reader's
+  anchor. The app's pending scroll_to_row is drained after it, so the
+  app's request wins.
+- A textarea's caret and selection: written as the user moves them (and
+  when the app's select_range is performed), restored in the new view's
+  first update, clamped to the text, before the ranges are applied, so a
+  pending select_range wins. The textarea's own viewport origin is
+  recorded at dismantle and restored a turn later.
+- The one-shots (select_range, reveal_range) record the last sequence
+  performed on the node, so a new view never replays a request the user
+  has since moved away from (measured before this: the hidden textarea
+  came back with the app's old selection, 0:5, not the user's caret).
+- A text field's caret is not kept: an unfocused field has no caret on
+  either Apple platform, and hiding moves focus off it (H1).
+
+THE CARVE-OUT, stated once: a textarea's native undo stack is the view's
+and is lost on a hide on SwiftUI (mac and iOS). GTK and WinUI keep the
+widget and its stack with it, Compose's TextFieldState (which holds its
+undo state) lives on the node, and an app that owns its undo (`own_undo`)
+loses nothing on any backend.
+
+tools/scenes/hiderows.steps holds it: scroll@strip and textarea@draft sit
+in a pane hidden by a signal; the strip is scrolled to its end and the
+caret moved with `press up` after the app's select_range, and both are read
+back after a hide and show on every lane.
 
 ## Choices the build settled (for ratification)
 
@@ -121,5 +155,5 @@ view comes back (also fixes the same loss under a When or a re-stamp);
 gives them no gap (every column becomes a custom Layout: a broad visual
 risk); (c) record it as a carve-out. RECOMMEND (a). Parked: nothing in
 this pass depends on it, and the scene reads text, which survives.
-RULED 2026-10-31 by the maintainer: (a) ("Yeah that's fine"). Not yet
-built: the native undo stack is not part of (a) and stays lost on a hide.
+RULED 2026-10-31 by the maintainer: (a) ("Yeah that's fine"). BUILT
+2026-10-31 (H8; the commit that adds KayaScrollMount).

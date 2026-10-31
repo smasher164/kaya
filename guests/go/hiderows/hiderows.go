@@ -30,10 +30,11 @@ func App() *kaya.App {
 	app := kaya.NewApp()
 
 	app.Build(func(tx *kaya.Tx) {
-		tx.Window(0).Title("hiderows")
+		tx.Window(0).Title("hiderows").Size(480, 760)
 		noteRows := NoteCollection(tx)
 		fileRows := FileCollection(tx)
 		two := tx.Signal(false)
+		pane := tx.Signal(false)
 
 		tx.Mount(tx.Column(func() {
 			tx.Search(func(tx *kaya.Tx, query string) {
@@ -56,7 +57,26 @@ func App() *kaya.App {
 				tx.LabelText("two").BindHidden(two)
 				tx.LabelText("three")
 			}).A11yID("tiles")
-			tx.Checkbox("Hide two", func(tx *kaya.Tx, on bool) { tx.Write(two, on) }).A11yID("hide_two")
+			var draft kaya.Widget
+			tx.Column(func() {
+				tx.Scroll(func() {
+					tx.Row(func() {
+						for i := 1; i <= 20; i++ {
+							caption := tx.Signal(fmt.Sprintf("card %d", i))
+							tx.Label(caption)
+						}
+					})
+				}).Axis(kaya.AxisHorizontal).A11yID("strip")
+				draft = tx.Textarea(nil).A11yID("draft").A11yLabel("Draft")
+			}).BindHidden(pane)
+			tx.Row(func() {
+				tx.Checkbox("Hide two", func(tx *kaya.Tx, on bool) { tx.Write(two, on) }).A11yID("hide_two")
+				tx.Checkbox("Hide pane", func(tx *kaya.Tx, on bool) { tx.Write(pane, on) }).A11yID("hide_pane")
+			})
+			tx.Button("select first", func(tx *kaya.Tx) {
+				tx.Focus(draft)
+				tx.SelectRange(draft, kaya.TextRange{Start: 0, End: 5})
+			}).A11yID("select_first")
 			tx.Search(func(tx *kaya.Tx, query string) {
 				for i := 0; i < 300; i++ {
 					FilePatch(fileRows, tx, fileName(i)).Unmatched(!strings.Contains(fileName(i), query))

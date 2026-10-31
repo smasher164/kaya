@@ -23,3 +23,25 @@ expect_window column@files 0 3
 expect_rows column@files "file 099,99 KB|file 199,199 KB|file 299,299 KB"
 set_text search@find_files ""
 expect_window column@files 0 300
+# Q1 (docs/hidden-plan.md): a hidden scroll keeps its offset and a hidden
+# textarea its caret, the ones the user left them at. The caret is the
+# user's, moved by a key after the app's selection: a backend that replayed
+# the app's request on showing reads 0:5, one that kept nothing 0 or 10.
+# Line two starts with line one's three letters, so `press up` lands at 3
+# in any font.
+scroll_end scroll@strip
+expect_at_end scroll@strip
+set_text textarea@draft "abcdef\nab"
+click button@select_first
+expect_focused textarea@draft
+expect_selection textarea@draft "0:5=abcde"
+type "c"
+expect textarea@draft "abcdef\nabc"
+expect_selection textarea@draft "10:10="
+press up
+expect_selection textarea@draft "3:3="
+toggle checkbox@hide_pane on
+toggle checkbox@hide_pane off
+expect textarea@draft "abcdef\nabc"
+expect_selection textarea@draft "3:3="
+expect_at_end scroll@strip

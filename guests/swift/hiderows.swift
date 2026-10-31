@@ -25,10 +25,11 @@ func hiderowsMatches(_ text: String, _ query: String) -> Bool { query.isEmpty ||
 
 KayaApp.run { app in
     app.build { tx in
-        tx.window(title: "hiderows")
+        tx.window(title: "hiderows", width: 480, height: 760)
         let notes = hiderowsNoteCollection(tx)
         let files = hiderowsFileCollection(tx)
         let two = tx.signal(.bool(false))
+        let pane = tx.signal(.bool(false))
 
         let root = tx.column { root in
             let findNotes = tx.search { t, query in
@@ -53,7 +54,30 @@ KayaApp.run { app in
                 return tiles
             }
             tx.setA11yId(tiles, "tiles")
-            tx.setA11yId(tx.checkbox("Hide two") { t, on in t.write(two, .bool(on)) }, "hide_two")
+            let draft = tx.column { hideable -> KayaWidget in
+                tx.setHidden(hideable, pane)
+                tx.scroll(axis: .horizontal) { strip in
+                    tx.setA11yId(strip, "strip")
+                    tx.row { _ in
+                        for i in 1...20 {
+                            tx.label(bind: tx.signal(.str("card \(i)")))
+                        }
+                    }
+                }
+                let editor = tx.textarea()
+                tx.setA11yId(editor, "draft")
+                tx.setA11yLabel(editor, "Draft")
+                return editor
+            }
+            tx.row { _ in
+                tx.setA11yId(tx.checkbox("Hide two") { t, on in t.write(two, .bool(on)) }, "hide_two")
+                tx.setA11yId(tx.checkbox("Hide pane") { t, on in t.write(pane, .bool(on)) }, "hide_pane")
+            }
+            tx.setA11yId(
+                tx.button("select first") { t in
+                    t.focus(draft)
+                    t.selectRange(draft, 0..<5)
+                }, "select_first")
             let findFiles = tx.search { t, query in
                 for i in 0..<300 {
                     let name = hiderowsFileName(i)

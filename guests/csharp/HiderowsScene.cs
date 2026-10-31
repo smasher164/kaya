@@ -21,10 +21,11 @@ static class HiderowsScene
 
         app.Build(tx =>
         {
-            tx.Window(title: "hiderows");
+            tx.Window(title: "hiderows", width: 480, height: 760);
             var notes = HiderowsNoteKaya.Collection(tx);
             var files = HiderowsFileKaya.Collection(tx);
             var two = tx.Signal(false);
+            var pane = tx.Signal(false);
 
             tx.Mount(tx.Column(root =>
             {
@@ -53,7 +54,33 @@ static class HiderowsScene
                     return tiles;
                 });
                 tx.SetA11yId(tiles, "tiles");
-                tx.SetA11yId(tx.Checkbox("Hide two", onToggle: (t, on) => t.Write(two, on)), "hide_two");
+                var draft = tx.Column(hideable =>
+                {
+                    tx.SetHidden(hideable, pane);
+                    tx.Scroll(strip =>
+                    {
+                        tx.SetA11yId(strip, "strip");
+                        tx.Row(_ =>
+                        {
+                            for (int i = 1; i <= 20; i++)
+                                tx.Label(bind: tx.Signal($"card {i}"));
+                        });
+                    }, axis: Axis.Horizontal);
+                    var editor = tx.Textarea();
+                    tx.SetA11yId(editor, "draft");
+                    tx.SetA11yLabel(editor, "Draft");
+                    return editor;
+                });
+                tx.Row(_ =>
+                {
+                    tx.SetA11yId(tx.Checkbox("Hide two", onToggle: (t, on) => t.Write(two, on)), "hide_two");
+                    tx.SetA11yId(tx.Checkbox("Hide pane", onToggle: (t, on) => t.Write(pane, on)), "hide_pane");
+                });
+                tx.SetA11yId(tx.Button("select first", onClick: t =>
+                {
+                    t.Focus(draft);
+                    t.SelectRange(draft, TextRange.Bytes(0, 5));
+                }), "select_first");
                 var findFiles = tx.Search(onChange: (t, query) =>
                 {
                     for (var i = 0; i < 300; i++)

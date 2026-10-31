@@ -1037,6 +1037,13 @@ final class KayaNode: Identifiable {
     var selectSeq = 0
     var revealRequest: NSRange?
     var revealSeq = 0
+    /// docs/hidden-plan.md Q1: what a remounted view restores. The one-shots'
+    /// last performed sequence lives here too, so a new view never replays one.
+    @ObservationIgnored var selectDone = 0
+    @ObservationIgnored var revealDone = 0
+    @ObservationIgnored var keptSelection: NSRange?
+    @ObservationIgnored var keptTextOrigin: CGPoint?
+    @ObservationIgnored var keptScrollFrom: Double?
     /// The app's scroll_to_row on this For's container, PENDING until the
     /// tier can scroll (docs/scroll-to-plan.md S4): a windowed tier parks the
     /// index, a realized one scrolls the copy's root to the viewport's top.
@@ -1523,8 +1530,34 @@ extension KayaSceneModel {
 /// (main actor only).
 var kayaOpenWindow: ((UInt64) -> Void)?
 var kayaDismissWindow: ((UInt64) -> Void)?
-/// The live ScrollViewReader proxies by scroll node id (main actor).
-var kayaScrollProxies: [UInt64: ScrollViewProxy] = [:]
+/// The live ScrollViewReader proxies by scroll node id (main actor), one per
+/// mounted copy, the newest last: a copy that went away takes its own out
+/// (docs/traps.md, the iOS scroll that answered from a dismantled twin).
+var kayaScrollProxies: [UInt64: [(mount: UUID, proxy: ScrollViewProxy)]] = [:]
+func kayaScrollProxy(_ id: UInt64) -> ScrollViewProxy? { kayaScrollProxies[id]?.last?.proxy }
+
+/// One mounted copy of a scroll: registers its proxy while it is on screen, and
+/// restores the node's kept offset when it comes, unless the app scrolled it
+/// since (kayaTryScrollRow clears it: the app's request wins; docs/hidden-plan.md H8).
+struct KayaScrollMount: ViewModifier {
+    let node: KayaNode
+    let proxy: ScrollViewProxy
+    @State private var mount = UUID()
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                kayaScrollProxies[node.id, default: []].removeAll { $0.mount == mount }
+                kayaScrollProxies[node.id, default: []].append((mount, proxy))
+                DispatchQueue.main.async { kayaRestoreScroll(node, proxy) }
+                kayaDrainRowScrolls()
+            }
+            .onDisappear {
+                kayaScrollProxies[node.id]?.removeAll { $0.mount == mount }
+                if kayaScrollProxies[node.id]?.isEmpty ?? true { node.keptScrollFrom = kayaScrollFromStart(node) }
+            }
+    }
+}
 /// Containers holding a scroll_to_row nothing could apply yet (main actor):
 /// drained wherever a scroll proxy, a table window or a table driver
 /// registers or the scrolled content moves (docs/scroll-to-plan.md S4).
@@ -1570,6 +1603,28 @@ func kayaScrollFromStart(_ node: KayaNode) -> Double {
     }
     return kayaScrollMirrored(node)
         ? node.scrollViewportW - node.scrollContentMaxX : node.scrollContentMinX
+}
+
+/// docs/hidden-plan.md Q1: the offset a scroll had when its view went away,
+/// through the reader's anchor (content point f aligns with viewport point f).
+@MainActor func kayaRestoreScroll(_ node: KayaNode, _ proxy: ScrollViewProxy) {
+    guard let from = node.keptScrollFrom else { return }
+    let along = kayaScrollAlong(node)
+    let travel = along.content - along.viewport
+    guard from < -0.5, travel > 0.5 else { return }
+    let f = min(max(-from / travel, 0), 1)
+    let anchor = !kayaScrollHorizontal(node)
+        ? UnitPoint(x: 0, y: f) : UnitPoint(x: kayaScrollMirrored(node) ? 1 - f : f, y: 0)
+    var t = Transaction()
+    t.disablesAnimations = true
+    withTransaction(t) { proxy.scrollTo("kaya-scroll-content-\(node.id)", anchor: anchor) }
+}
+
+/// A kept caret on a text that may have changed while its view was gone.
+func kayaClampKept(_ kept: NSRange?, _ length: Int) -> NSRange? {
+    guard let kept else { return nil }
+    let location = min(kept.location, length)
+    return NSRange(location: location, length: min(kept.length, length - location))
 }
 
 /// Where scrollTo puts the content's trailing end, and a row's leading edge.
@@ -1619,11 +1674,12 @@ func kayaTryScrollRow(_ node: KayaNode) {
         kayaPendingRowScrolls.remove(node.id)
         return
     }
-    guard let proxy = kayaScrollProxies[scroll.id], kayaNodeFrames[request.copy] != nil else {
+    guard let proxy = kayaScrollProxy(scroll.id), kayaNodeFrames[request.copy] != nil else {
         kayaPendingRowScrolls.insert(node.id)
         return
     }
     proxy.scrollTo(request.copy, anchor: kayaScrollRowAnchor(scroll))
+    scroll.keptScrollFrom = nil
     node.scrollRowRequest = nil
     kayaPendingRowScrolls.remove(node.id)
 }
@@ -13800,7 +13856,7 @@ private func kayaRunScript(_ script: String) {
                 kayaAwaitQuiet()
                 DispatchQueue.main.sync {
                     if let node = kayaTarget(parts[1], "scroll", kayaScene.scrolls),
-                        let proxy = kayaScrollProxies[node.id]
+                        let proxy = kayaScrollProxy(node.id)
                     {
                         proxy.scrollTo(
                             "kaya-scroll-content-\(node.id)",
@@ -30557,6 +30613,7 @@ struct KayaRender: View {
                 // docs/traps.md, a sideways shelf widened the window.
                 .modifier(KayaSidewaysIdeal(on: sideways))
                 .coordinateSpace(name: "kaya-scroll-\(node.id)")
+                .modifier(KayaScrollMount(node: node, proxy: proxy))
                 .background(
                     GeometryReader { g in
                         Color.clear
@@ -30564,7 +30621,6 @@ struct KayaRender: View {
                                 node.scrollViewportH = g.size.height
                                 node.scrollViewportW = g.size.width
                                 node.scrollViewportGlobal = g.frame(in: .global)
-                                kayaScrollProxies[node.id] = proxy
                                 kayaDrainRowScrolls()
                             }
                             .onChange(of: g.size) { old, size in
@@ -38085,6 +38141,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
         /// a view update. Remembering the number instead makes a re-run a no-op.
         var selectDone = 0
         var revealDone = 0
+        /// docs/hidden-plan.md Q1: false until the first update restored the
+        /// node's kept caret; the view's own selection is not recorded before.
+        var restored = false
         /// THE TEXT STACK'S OWNER: the text view is initialized with the
         /// CONTAINER, so nothing it holds is documented to keep the content
         /// manager alive, and a widget whose content manager is collected has no
@@ -38172,9 +38231,9 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // R5's transform needs the selection the widget holds, not the one the
         // core last wrote.
         func textViewDidChangeSelection(_ notification: Notification) {
-            guard let node, node.rich, let view = notification.object as? NSTextView else {
-                return
-            }
+            guard let node, let view = notification.object as? NSTextView else { return }
+            if restored, !view.hasMarkedText() { node.keptSelection = view.selectedRange }
+            guard node.rich else { return }
             let text = view.string
             let range = view.selectedRange
             let start = kayaByteOffset(text, range.location)
@@ -38214,6 +38273,10 @@ private struct KayaMacTextarea: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
+    static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
+        if coordinator.restored { coordinator.node?.keptTextOrigin = scroll.contentView.bounds.origin }
+    }
+
     /// A GROWING textarea's height (docs/grow-lines-plan.md): its text's own,
     /// between one line of its font and max_lines of them.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSScrollView, context: Context) -> CGSize? {
@@ -38240,6 +38303,8 @@ private struct KayaMacTextarea: NSViewRepresentable {
         layout.textContainer = container
 
         context.coordinator.content = content
+        context.coordinator.selectDone = node.selectDone
+        context.coordinator.revealDone = node.revealDone
 
         let view = KayaTextView(frame: .zero, textContainer: container)
         view.isEditable = true
@@ -38380,6 +38445,21 @@ private struct KayaMacTextarea: NSViewRepresentable {
         view.setAccessibilityPlaceholderValue(placeholder.isEmpty ? nil : placeholder)
         view.setAccessibilityHelp(a11yHint.isEmpty ? nil : a11yHint)
 
+        // docs/hidden-plan.md Q1: before the ranges, so a pending request wins.
+        if !context.coordinator.restored {
+            context.coordinator.restored = true
+            if !view.hasMarkedText(), let kept = kayaClampKept(node.keptSelection, (view.string as NSString).length) {
+                view.setSelectedRange(kept)
+            }
+            if let origin = node.keptTextOrigin {
+                DispatchQueue.main.async { [weak scroll] in
+                    guard let scroll else { return }
+                    scroll.contentView.scroll(to: origin)
+                    scroll.reflectScrolledClipView(scroll.contentView)
+                }
+            }
+        }
+
         // THE RANGES, IN THE SAME PASS AS THE TEXT PUSH ABOVE — the ordering
         // this widget stopped being a stock TextEditor for: SwiftUI's own push
         // landed a turn later and destroyed everything declared before it.
@@ -38433,6 +38513,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
             NSMaxRange(range) <= length
         {
             coordinator.selectDone = selectSeq
+            node.selectDone = selectSeq
             // D4, AND THE ONLY PARTY THAT CAN ENFORCE IT: an input-method
             // composition is live in the view and on no kaya channel, and
             // honouring a selection COMMITS the marked text mid-word
@@ -38441,12 +38522,14 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 kayaDiag("select_range refused: ime_composition (widget \(node.id))")
             } else {
                 view.setSelectedRange(range)
+                node.keptSelection = range
             }
         }
         if let range = revealRequest, revealSeq != coordinator.revealDone,
             NSMaxRange(range) <= length
         {
             coordinator.revealDone = revealSeq
+            node.revealDone = revealSeq
             // THE LAYOUT BELOW THE VIEWPORT IS AN ESTIMATE (docs/traps.md, a
             // TextKit 2 scroll to a range the view has never shown).
             if let layout = view.textLayoutManager,
@@ -38944,6 +39027,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             /// write during a view update.
             var selectDone = 0
             var revealDone = 0
+            /// docs/hidden-plan.md Q1, the mac coordinator's twin.
+            var restored = false
             /// What the Return seen in `shouldChangeTextIn` will insert past
             /// the end of a heading (docs/rich-text-plan.md R10), stripped
             /// below.
@@ -39026,7 +39111,9 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             // for `typingAttributes`, so the inheritance rule is re-imposed
             // here (docs/traps.md 2026-09-11, the link that swallows).
             func textViewDidChangeSelection(_ textView: UITextView) {
-                guard let node, node.rich else { return }
+                guard let node else { return }
+                if restored, textView.markedTextRange == nil { node.keptSelection = textView.selectedRange }
+                guard node.rich else { return }
                 kayaRearmTyping(textView)
                 let text = textView.text ?? ""
                 let range = textView.selectedRange
@@ -39111,6 +39198,8 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             let view = KayaTextView()
             view.textLayoutManager?.delegate = kayaRichLayoutDelegate
             view.delegate = context.coordinator
+            context.coordinator.selectDone = node.selectDone
+            context.coordinator.revealDone = node.revealDone
             view.font = kayaPlatformFont(.body) ?? UIFont.preferredFont(forTextStyle: .body)
             view.adjustsFontForContentSizeCategory = true
             view.backgroundColor = .clear
@@ -39128,6 +39217,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
 
         static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
+            if coordinator.restored { coordinator.node?.keptTextOrigin = view.contentOffset }
             if let owned = view as? KayaTextView {
                 let cleared = kayaUITextViews[owned.nodeId]?.view === view
                 if cleared { kayaUITextViews[owned.nodeId] = nil }
@@ -39197,6 +39287,18 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             // a recycled view or UIKit re-derives a trait.
             kayaPinPlainText(view)
             kayaAuditPlainTextPins(view)
+            // docs/hidden-plan.md Q1: before the ranges, so a pending request wins.
+            if !context.coordinator.restored {
+                context.coordinator.restored = true
+                if view.markedTextRange == nil,
+                    let kept = kayaClampKept(node.keptSelection, ((view.text ?? "") as NSString).length)
+                {
+                    view.selectedRange = kept
+                }
+                if let origin = node.keptTextOrigin {
+                    DispatchQueue.main.async { [weak view] in view?.setContentOffset(origin, animated: false) }
+                }
+            }
             // THE RANGES, IN THE SAME PASS AS THE TEXT PUSH ABOVE, and in that
             // order: what is declared over a document has to land with the
             // document, not a main-queue turn after it.
@@ -39259,6 +39361,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 NSMaxRange(range) <= length
             {
                 coordinator.selectDone = selectSeq
+                node.selectDone = selectSeq
                 // D4, AND THE ONLY PARTY THAT CAN ENFORCE IT: an input-method
                 // composition is live in the view and on no kaya channel, so
                 // this refuses as a no-op under a named reason — UNIFORM
@@ -39267,12 +39370,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                     kayaDiag("select_range refused: ime_composition (widget \(node.id))")
                 } else {
                     view.selectedRange = range
+                    node.keptSelection = range
                 }
             }
             if let range = revealRequest, revealSeq != coordinator.revealDone,
                 NSMaxRange(range) <= length
             {
                 coordinator.revealDone = revealSeq
+                node.revealDone = revealSeq
                 // THE LAYOUT BELOW THE VIEWPORT IS AN ESTIMATE, AND A SCROLL
                 // COMPUTED AGAINST IT LANDS SHORT: `scrollRangeToVisible` uses
                 // TextKit 2's guess without saying so, measured landing the last

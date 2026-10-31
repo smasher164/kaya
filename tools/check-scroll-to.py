@@ -72,10 +72,15 @@ def swift_findings(source):
             not in fn):
         out.append(f"{SWIFT}: a request the tier cannot apply yet is dropped rather than held — "
                    f"the chat's opening frame is a scroll before the first layout (S4)")
-    proxy_site = src.find("kayaScrollProxies[node.id] = proxy")
+    proxy_site = src.find("kayaScrollProxies[node.id, default: []].append((mount, proxy))")
     if proxy_site < 0 or "kayaDrainRowScrolls()" not in src[proxy_site:proxy_site + 200]:
         out.append(f"{SWIFT}: the scroll proxy's registration does not drain pending scrolls — a "
                    f"held request never lands (S4)")
+    # docs/hidden-plan.md H8: the app's request wins over a remounted copy's
+    # restore, which runs a turn later and finds nothing kept.
+    if "kayaRestoreScroll(node, proxy)" not in src or "scroll.keptScrollFrom = nil" not in fn:
+        out.append(f"{SWIFT}: a row the app scrolled to leaves the kept offset in place, so a "
+                   f"remounted scroll's restore overrides the app's request (H8)")
     verb = block_after(src, "func kayaScrolledTo(_ node: KayaNode, _ key: String)")
     if "kayaNodeFrames[copy.id]" not in verb or "scrollRowRequest" in verb:
         out.append(f"{SWIFT}: expect_scrolled_to must read the copy's reported frame, never the "
@@ -237,14 +242,20 @@ n1 = gate.doctor("the swift scroll wrapped in withAnimation", REAL[SWIFT],
                  "anchor: kayaScrollRowAnchor(scroll)) }\n")
 watched("a SwiftUI scroll that glides", {**REAL, SWIFT: n1}, "never animated")
 n2 = gate.doctor("the swift hold cut", REAL[SWIFT],
-                 r"    guard let proxy = kayaScrollProxies\[scroll\.id\], "
+                 r"    guard let proxy = kayaScrollProxy\(scroll\.id\), "
                  r"kayaNodeFrames\[request\.copy\] != nil else \{\n"
                  r"        kayaPendingRowScrolls\.insert\(node\.id\)\n        return\n    \}\n",
-                 "    guard let proxy = kayaScrollProxies[scroll.id] else { return }\n")
+                 "    guard let proxy = kayaScrollProxy(scroll.id) else { return }\n")
 watched("a SwiftUI request dropped before layout", {**REAL, SWIFT: n2}, "dropped rather than held")
 n3 = gate.doctor("the swift proxy registration no longer draining", REAL[SWIFT],
-                 r"(kayaScrollProxies\[node\.id\] = proxy\n\s*)kayaDrainRowScrolls\(\)\n", r"\1")
+                 r"(kayaScrollProxies\[node\.id, default: \[\]\]\.append\(\(mount, proxy\)\)\n"
+                 r"\s*DispatchQueue\.main\.async \{ kayaRestoreScroll\(node, proxy\) \}\n\s*)"
+                 r"kayaDrainRowScrolls\(\)\n", r"\1")
 watched("a SwiftUI proxy that never drains", {**REAL, SWIFT: n3}, "does not drain")
+n3b = gate.doctor("the swift kept offset left after the app's scroll", REAL[SWIFT],
+                  r"\n    scroll\.keptScrollFrom = nil\n", "\n")
+watched("a SwiftUI restore over the app's scroll", {**REAL, SWIFT: n3b},
+        "overrides the app's request")
 n4 = gate.doctor("the gtk hold cut", REAL[GTK], r"let handler = adj\.connect_changed\(",
                  "let handler = adj.connect_value_changed(")
 watched("a GTK request dropped before layout", {**REAL, GTK: n4}, "dropped rather than held")
@@ -320,7 +331,7 @@ n17 = gate.doctor("the compose park no longer moving the generation", REAL[COMPO
 watched("a Compose park that never moves the generation", {**REAL, COMPOSE: n17},
         "still the latest park")
 
-gate.negatives_ran(21)
+gate.negatives_ran(22)
 
 for line in census(REAL):
     gate.finding(line)

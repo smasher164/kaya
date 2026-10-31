@@ -14,6 +14,11 @@ public final class Hiderows {
     @KayaGen(key = "String")
     record HiderowsFile(String name, String size, boolean unmatched) {}
 
+    /** Java lambdas cannot assign captured locals. */
+    private static final class Refs {
+        KayaApp.Widget draft;
+    }
+
     private static final String[] NOTES = { "alpha", "beta", "gamma" };
 
     private static String fileName(int i) {
@@ -24,10 +29,12 @@ public final class Hiderows {
         KayaApp app = new KayaApp();
 
         app.build(tx -> {
-            tx.window(0).title("hiderows");
+            tx.window(0).title("hiderows").size(480, 760);
             var notes = HiderowsNoteKaya.collection(tx);
             var files = HiderowsFileKaya.collection(tx);
             KayaApp.Signal<Boolean> two = tx.signal(false);
+            KayaApp.Signal<Boolean> pane = tx.signal(false);
+            Refs refs = new Refs();
 
             tx.mount(tx.column(col -> {
                 tx.search((t, query) -> {
@@ -49,7 +56,25 @@ public final class Hiderows {
                     tx.label("two").hidden(two);
                     tx.label("three");
                 }).a11yId("tiles");
-                tx.checkbox("Hide two", (t, on) -> t.write(two, on)).a11yId("hide_two");
+                tx.column(hideable -> {
+                    tx.scroll(strip -> {
+                        tx.row(cards -> {
+                            for (int i = 1; i <= 20; i++) {
+                                KayaApp.Signal<String> caption = tx.signal("card " + i);
+                                tx.label(caption);
+                            }
+                        });
+                    }).axis(KayaApp.Axis.HORIZONTAL).a11yId("strip");
+                    refs.draft = tx.textarea().a11yId("draft").a11yLabel("Draft");
+                }).hidden(pane);
+                tx.row(controls -> {
+                    tx.checkbox("Hide two", (t, on) -> t.write(two, on)).a11yId("hide_two");
+                    tx.checkbox("Hide pane", (t, on) -> t.write(pane, on)).a11yId("hide_pane");
+                });
+                tx.button("select first", t -> {
+                    t.focus(refs.draft);
+                    t.selectRange(refs.draft, KayaApp.TextRange.ofBytes(0, 5));
+                }).a11yId("select_first");
                 tx.search((t, query) -> {
                     for (int i = 0; i < 300; i++) {
                         HiderowsFileKaya.patch(t, files, fileName(i)).unmatched(!fileName(i).contains(query));

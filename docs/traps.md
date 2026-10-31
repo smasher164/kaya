@@ -19941,3 +19941,17 @@ skips a root its documents took over (kayaHiddenRoots), and the Mac's
 `expect_documents` fails while such a root is visible, which the editor leg
 did as shipped (watched red with the skip cut). The shot tool already
 composes only the window server's on-screen windows of the guest's pid.
+
+## The iOS scroll that answered from a dismantled twin (measured 2026-10-31)
+
+On the iOS lane a horizontal scroll inside hiderows' grouped screen did not
+move on `scroll_end`, and `expect_at_end` read "content end 1201 vs viewport
+311" before anything was hidden; the verb itself said ok. Logged at the
+scroll's viewport: its view APPEARED TWICE and one copy DISAPPEARED 50 ms
+later, and `kayaScrollProxies` held whichever copy registered last, which was
+the dismantled one, so scroll_end, scroll_to_row and the hidden-plan restore
+all drove a ScrollViewReader proxy of a view no longer on screen (the
+textarea registry beside it records the same twin-making on iOS). The
+registry now keeps one proxy per mounted copy and a copy that disappears
+takes its own out (KayaScrollMount); tools/scenes/hiderows.steps' strip is
+what reads it.

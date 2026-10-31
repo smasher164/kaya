@@ -681,7 +681,11 @@ latest. AND A SIDEWAYS SCROLL'S NATIVE SWITCH since 2026-09-28
 (docs/hscroll-plan.md §3): no scene sees a backend that keeps the vertical
 switch, since GTK's vertical-only policy widened the window to the strip
 and every verb still passed, and a shared scene may not read a window's
-size; one cut per backend. 19 watched negatives, counts printed)
+size; one cut per backend. AND THE APP'S REQUEST WINS OVER A KEPT
+OFFSET since 2026-10-31 (docs/hidden-plan.md H8): SwiftUI's
+kayaTryScrollRow clears the scroll's kept offset, so a remounted copy's
+restore a turn later cannot undo the app's scroll; hiderows reads the
+restore, and nothing reads the race. 22 watched negatives, counts printed)
 
 ## tools/check-search.py
 
