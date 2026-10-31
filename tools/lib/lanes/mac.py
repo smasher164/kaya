@@ -171,7 +171,7 @@ DARK_LEGS = (("canvasdark-rust-swiftui", "canvas", "rust"),
 # The apps and depth scenes hand-queued OUTSIDE SCENES/DEPTH_SCENES
 # (each would otherwise derive a cargo --example that does not exist):
 # editor is a GO app by design, portfolio and varied are PYTHON alone.
-HAND_QUEUED = {"editor": "go", "chat": "go", "portfolio": "python", "varied": "python",
+HAND_QUEUED = {"editor": "go", "chat": "go", "chatcall": "go", "portfolio": "python", "varied": "python",
                # The task manager's second scene (docs/tasks-s4-plan.md
                # §4): the same rust example under another script, so it
                # derives no --example of its own.
@@ -303,6 +303,10 @@ ORDER = [
     # The chat app: go alone by design (docs/chat-plan.md R1), alone
     # between drains for the keystrokes its compose field takes.
     ("chat", ("go",)),
+    ("drain",),
+    # The chat app's calls (docs/capture-plan.md §8): its devices are the
+    # in-process synthetic ones; it posts the incoming call.
+    ("chatcall", ("go",)),
     ("drain",),
     ("portfolio", ("python",)),
     ("drain",),
@@ -1058,7 +1062,7 @@ RUST_GUESTS = "target/rust-guests"
 # siblings, which is why the staging directory is small).
 BUNDLED_SCENES = {"notify", "tasks", "badge"}
 # The go scenes that post one: the one kaya-go binary, wrapped per scene.
-BUNDLED_GO_SCENES = {"chat"}
+BUNDLED_GO_SCENES = {"chat", "chatcall"}
 GO_GUESTS = "target/go-guests"
 
 

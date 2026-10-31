@@ -44196,7 +44196,7 @@ func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {
 
 /// expect_video_ink's and expect_video_box's target: a video view or a surface.
 func kayaPictureTarget(_ spec: Substring) -> KayaNode? {
-    spec.hasPrefix("surface#") ? kayaTarget(spec, "surface", kayaScene.surfaces) : kayaTarget(spec, "video", kayaScene.videos)
+    spec.hasPrefix("surface") ? kayaTarget(spec, "surface", kayaScene.surfaces) : kayaTarget(spec, "video", kayaScene.videos)
 }
 
 /// What a surface's missed read adds: the core's count of the app's submits

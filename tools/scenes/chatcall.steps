@@ -1,0 +1,50 @@
+# The chat app's calls (docs/capture-plan.md §8, docs/chat-plan.md C10): a
+# video call and a voice call from a conversation, the self-preview, the
+# device pickers, mute and camera off, and the peer answering over the app's
+# loopback transport with a test pattern and a tone (1E5AC8 and 660 Hz, §7);
+# then the peer calls back, an ordinary notification that opens the call's
+# Answer and Decline. The devices are kaya's synthetic ones: camera 1 C83C1E,
+# camera 2 1E5AC8, microphone 1 440 Hz, microphone 2 660 Hz.
+expect_title "chat"
+click row@convo[maya]
+expect_scrolled_to column@thread m27
+# Opening the thread sets the app's badge, whose first set asks for the
+# notification permission the incoming call needs (docs/app-badge-plan.md §4).
+expect_badge "1"
+click button@videocall
+expect label@callstate "Maya · connected"
+expect_capture 0 "frames 640x480 C83C1E, samples 440 Hz"
+expect_video_ink video@selfview "C83C1E"
+expect_video_ink surface@peer "1E5AC8"
+expect_voice 0 "660 Hz"
+# The device pickers: the second camera and the second microphone.
+choose select@camera 1
+expect_capture 0 "frames 640x480 1E5AC8, samples 440 Hz"
+choose select@microphone 1
+expect_capture 0 "frames 640x480 1E5AC8, samples 660 Hz"
+# Mute keeps the microphone open and sends silence; camera off closes the
+# camera and the self-view goes blank, while the peer's picture stays.
+click button@mute
+expect_capture 0 "frames 640x480 1E5AC8, samples silent"
+click button@cameraoff
+expect_capture 0 "frames none, samples silent"
+expect_video_ink video@selfview "none"
+expect_video_ink surface@peer "1E5AC8"
+click button@hangup
+expect_no_target surface@peer
+# A voice call: no picture either way, the tone both ways.
+click button@call
+expect label@callstate "Maya · connected"
+expect_capture 0 "frames none, samples 440 Hz"
+expect_voice 0 "660 Hz"
+expect_no_target surface@peer
+click button@hangup
+# The peer calls back: an ordinary notification, keyed by the conversation.
+expect_notification 7102 "Sam"
+notification_activate 7102
+expect label@callstate "Sam · incoming call"
+click button@answer
+expect label@callstate "Sam · connected"
+expect_voice 0 "660 Hz"
+click button@hangup
+expect_no_notification 7102

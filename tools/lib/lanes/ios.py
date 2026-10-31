@@ -580,6 +580,7 @@ def suite_legs(suite):
         out.append("editor-go")
         out.append("editorkeyboard-go")
         out.append("chat-go")
+        out.append("chatcall-go")
         out.append("chatkeyboard-go")
         out.append("chatkeyboardland-go")
     elif suite == "python":
@@ -611,6 +612,7 @@ def wired_scenes():
     out.add("editor")
     out.add("editorkeyboard")
     out.add("chat")
+    out.add("chatcall")
     out.add("chatkeyboard")
     out.add("chatkeyboardland")
     return out

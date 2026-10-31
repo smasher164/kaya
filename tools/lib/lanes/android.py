@@ -43,7 +43,9 @@ EXCLUSIVE = {
              # with or without the injected tone, read as `samples silent`
              # (docs/traps.md; docs/probes/capture-2026-10-01/compose-measured.md
              # §4): no failed read in 8 quiet runs, most runs beside 14 spinning cores.
-             "capture-compose", "capture-jvm", "capture-go"}
+             "capture-compose", "capture-jvm", "capture-go",
+             # The chat app's calls open the microphone too (docs/capture-plan.md §8).
+             "chatcall-go"}
 
 # ALONE IN THIS LANE, NOT ON THE HOST: the pool empties around each and the token
 # is not taken. clock24-compose sets every phone's 24-hour setting
@@ -56,7 +58,7 @@ ALONE = {"clock24-compose"}
 # and the gate sweep, with nothing else on the host. validate-all runs this
 # lane with KAYA_QUIET=skip and then once more with KAYA_QUIET=only; a lane run
 # by hand runs them in place.
-QUIET = {"capture-compose", "capture-jvm", "capture-go"}
+QUIET = {"capture-compose", "capture-jvm", "capture-go", "chatcall-go"}
 
 # A device setting a scene runs under, `settings put <namespace> <key>
 # <value>` on every phone in the pool before the leg and deleted after
@@ -253,7 +255,7 @@ LEGS = {
         "toolbar-go", "identity-go", "listdetail-go",
         "commands-go", "clipboard-go", "background-go",
         "undo-go", "filedialog-go", "save-go",
-        "dirty-go", "ranges-go", "editor-go", "chat-go",
+        "dirty-go", "ranges-go", "editor-go", "chat-go", "chatcall-go",
         # The chat app with the keyboard up, upright and pinned to landscape
         # (docs/safe-area-plan.md A5, A17).
         "chatkeyboard-go", "chatkeyboardland-go",
@@ -445,6 +447,10 @@ MODS = {
                 "append": 'close_document "a";close_document "untitled 1";expect_documents "";'},
     "chat": {"drop": ((("expect_selected row@convo[maya]", "expect_selected row@convo[sam]"),
                        "expect_tint", "a phone's list sits under the pushed thread"),)},
+    # An Android badge is a launcher's count of the app's notifications, so
+    # the call scene's badge (iOS's permission prompt) reads none before one.
+    "chatcall": {"drop": ((('expect_badge "1"',),
+                           "expect_capture", "an Android badge counts posted notifications"),)},
     # A PHONE HAS NO USER DOOR OUT OF IMMERSIVE MODE (docs/fullscreen-plan.md
     # §2): the swiped-in bars are transient. The cut takes the user half, and
     # the append runs the app's own way back, which reads the insets again.

@@ -199,7 +199,7 @@ def depth_scenes():
 # A guest that exists in Go and only Go BY DESIGN (docs/editor-plan.md
 # — an editor in Rust would be kaya testing itself). Joins the
 # taskkill sweep and nothing per-language.
-GO_ONLY_SCENES = ["editor", "chat"]
+GO_ONLY_SCENES = ["editor", "chat", "chatcall"]
 # Python BY DESIGN: the portfolio (docs/portfolio-plan.md) and the
 # variable-height scene (docs/virtualization-plan.md §5). They join
 # the .py ship and stamp, and no exe family.
@@ -817,6 +817,11 @@ ORDER = [
     [
      "chat_go",
     ],
+    # The chat app's calls (docs/capture-plan.md §8): the lane's virtual
+    # camera and cable, so the capture legs' devices are up around it.
+    [
+     "chatcall_go",
+    ],
     # The far end (docs/capture-plan.md §5): one voice output on the VM's
     # communications endpoint.
     [
@@ -945,7 +950,7 @@ ORDER = [
 # The flyout group: two context-menu legs at once take the foreground from
 # each other at every open (docs/traps.md, the flyout a neighbour dismissed);
 # identity's window menu is one more (its caption mark's press).
-SERIAL_GROUPS = {"camera": ("capture", "capture_denied"), "flyout": ("music_context", "rowmenu", "identity")}
+SERIAL_GROUPS = {"camera": ("capture", "capture_denied", "chatcall"), "flyout": ("music_context", "rowmenu", "identity")}
 
 
 def serial_group(leg):
@@ -1009,7 +1014,7 @@ CODEC_EXTENSIONS = ("Microsoft.HEVCVideoExtension", "Microsoft.AV1VideoExtension
 
 
 def capture_leg(leg):
-    return scene_lang(leg)[0] in ("capture", "capture_denied")
+    return scene_lang(leg)[0] in ("capture", "capture_denied", "chatcall")
 
 
 # THE CAPTURE LEGS' DEVICES (docs/HACKING.md, the Windows capture install):

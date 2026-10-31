@@ -3611,6 +3611,9 @@ if SUITE in ("go", "all"):
                                  BUNDLES / "go-bin"))
     queue_scene_leg("go", "chat", "chat-go", app, "dev.kaya.chatgo",
                     "chat", "chat")
+    # The same app's calls (docs/capture-plan.md §8).
+    queue_scene_leg("go", "chatcall", "chatcall-go", app, "dev.kaya.chatgo",
+                    "chatcall", "chatcall")
     # The same app with the keyboard up (docs/safe-area-plan.md A15).
     queue_scene_leg("go", "chatkeyboard", "chatkeyboard-go", app,
                     "dev.kaya.chatgo", "chatkeyboard", "chatkeyboard")

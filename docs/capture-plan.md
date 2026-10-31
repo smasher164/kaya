@@ -446,3 +446,30 @@ the capture's own input (the maintainer's hand run of §7 item 6 is where the
 canceller is heard); the surface's frames mode (a player as the producer,
 docs/media-plan.md §4); a C guest scene (the floor reaches the far end
 through kaya.h and kaya_wire.h, as the capture's floor does).
+
+## §12. The chat app's calls, as built (C10, 2026-10-31, for the maintainer to ratify)
+
+The calls stage is built in the Go chat app (guests/go/chat/call.go) and read
+by tools/scenes/chatcall.steps on five lanes. What it settled:
+
+1. **The call screen is a page pushed above the thread** (entry 2), so the
+   phones' back gesture and the desktops' back button hang up as Hang up
+   does; the incoming call's Answer and Decline are a page of their own
+   (entry 3). A sheet or a window of its own were the alternatives.
+2. **The thread's header carries text buttons, Call and Video**, beside the
+   connection label. Symbols for them (a phone, a camera) are not in kaya's
+   symbol vocabulary; adding two is a visible choice left to the maintainer.
+3. **The call's media rides its own loopback connection** to the scripted
+   peer, beside the message connection: tagged records of NV12 frames and
+   480-sample chunks each way; the peer reads and drops the app's audio.
+   A ring is one `RING` line on the message connection.
+4. **The incoming call's notification id is the conversation's message
+   notification plus 100** (Sam's is 7102), so a call and a message from
+   one person do not replace each other; activating it withdraws it.
+5. **The call's devices are the first camera and microphone listed**, the
+   pickers move them while the call runs, and a capture failure shows on
+   the call's state line ("Maya · denied").
+6. **Linux runs the call inside the notification desktop's bus**, whose
+   camera portal the lane grants for the app id the leg registers
+   (tools/linux/notify-leg.sh KAYA_NOTIFY_GRANT_CAMERA) under the capture
+   leg's PipeWire and far end.

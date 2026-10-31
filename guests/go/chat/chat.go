@@ -40,9 +40,9 @@ type Photo struct{ Image []byte }
 
 func (Mine) isMessage()    {}
 func (Pending) isMessage() {}
-func (Theirs) isMessage() {}
-func (Reply) isMessage()  {}
-func (Photo) isMessage()  {}
+func (Theirs) isMessage()  {}
+func (Reply) isMessage()   {}
+func (Photo) isMessage()   {}
 
 type message struct {
 	key, text, quote string
@@ -66,6 +66,7 @@ func App() *kaya.App {
 	convs := seed()
 	order := []string{"maya", "sam", "alex"}
 	peer := dialPeer(app, convs, order)
+	phone := &calls{app: app, peer: peer, convs: convs}
 
 	app.Build(func(tx *kaya.Tx) {
 		tx.Window(0).Title("chat").Size(900, 640).Panes(2)
@@ -111,6 +112,8 @@ func App() *kaya.App {
 		}
 
 		connection := tx.Signal("")
+		peer.ring = phone.ring
+		tx.WatchCaptureDevices(true)
 		peer.online = func(tx *kaya.Tx, online bool) {
 			if !online {
 				tx.Write(connection, "Offline")
@@ -259,6 +262,9 @@ func App() *kaya.App {
 					}).Role(kaya.RolePlain).A11yID("newest")
 					tx.Spacer()
 					tx.Label(connection).A11yID("connection")
+					// C10 (docs/capture-plan.md §8): a call and a video call.
+					tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).A11yID("call")
+					tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).A11yID("videocall")
 				})
 				tx.Scroll(func() {
 					thread = MessageCollection(tx)
@@ -387,6 +393,9 @@ func App() *kaya.App {
 
 		app.OnNotificationActivation(func(tx *kaya.Tx, note uint64, result kaya.NotificationResult) {
 			for _, c := range convs {
+				if callNote(c) == note && result.Outcome == kaya.NotificationOutcomeActivated {
+					phone.incoming(tx, c)
+				}
 				if c.note != note {
 					continue
 				}
@@ -518,13 +527,15 @@ func seed() map[string]*conversation {
 // (C9): the app shows it is offline, queues what is sent meanwhile, redials
 // and sends the queue once it is back.
 type peer struct {
-	app     *kaya.App
-	addr    string
-	mu      sync.Mutex
-	conn    net.Conn
-	queue   []string
-	receive func(tx *kaya.Tx, conv, key, text string)
-	online  func(tx *kaya.Tx, online bool)
+	app       *kaya.App
+	addr      string
+	mediaAddr string
+	mu        sync.Mutex
+	conn      net.Conn
+	queue     []string
+	receive   func(tx *kaya.Tx, conv, key, text string)
+	online    func(tx *kaya.Tx, online bool)
+	ring      func(tx *kaya.Tx, conv string)
 }
 
 const dropLine = "\x00drop"
@@ -559,8 +570,14 @@ func dialPeer(app *kaya.App, convs map[string]*conversation, order []string) *pe
 	if err != nil {
 		panic(fmt.Sprintf("chat: the peer could not listen on loopback: %v", err))
 	}
-	p := &peer{app: app, addr: listener.Addr().String()}
-	go serve(listener, p.addr)
+	media, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		panic(fmt.Sprintf("chat: the peer's calls could not listen on loopback: %v", err))
+	}
+	p := &peer{app: app, addr: listener.Addr().String(), mediaAddr: media.Addr().String()}
+	rings := make(chan string, 1)
+	go serve(listener, p.addr, rings)
+	go serveMedia(media, rings)
 	conn, err := net.Dial("tcp", p.addr)
 	if err != nil {
 		panic(fmt.Sprintf("chat: could not reach the peer at %s: %v", p.addr, err))
@@ -575,6 +592,14 @@ func dialPeer(app *kaya.App, convs map[string]*conversation, order []string) *pe
 func (p *peer) read(conn net.Conn) {
 	lines := bufio.NewScanner(conn)
 	for lines.Scan() {
+		if conv, ok := strings.CutPrefix(lines.Text(), "RING\t"); ok {
+			p.app.Post(func(tx *kaya.Tx) {
+				if p.ring != nil {
+					p.ring(tx, conv)
+				}
+			})
+			continue
+		}
 		parts := strings.SplitN(lines.Text(), "\t", 4)
 		if len(parts) != 4 || parts[0] != "MSG" {
 			continue
@@ -615,14 +640,29 @@ func (p *peer) read(conn net.Conn) {
 // Each conversation numbers its peer's messages on its own (p1, p2, ... in
 // every thread), so an answer to one conversation leaves another's keys
 // where the scene expects them.
-func serve(listener net.Listener, addr string) {
+func serve(listener net.Listener, addr string, rings <-chan string) {
 	seq := map[string]int{}
 	away := false
+	var writing sync.Mutex
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
 			return
 		}
+		// A call the peer places rides this connection as one RING line.
+		done := make(chan struct{})
+		go func() {
+			for {
+				select {
+				case conv := <-rings:
+					writing.Lock()
+					fmt.Fprintf(conn, "RING\t%s\n", conv)
+					writing.Unlock()
+				case <-done:
+					return
+				}
+			}
+		}()
 		dropped := false
 		lines := bufio.NewScanner(conn)
 		for !dropped && lines.Scan() {
@@ -641,9 +681,12 @@ func serve(listener net.Listener, addr string) {
 					continue
 				}
 				seq[answer[0]]++
+				writing.Lock()
 				fmt.Fprintf(conn, "MSG\t%s\tp%d\t%s\n", answer[0], seq[answer[0]], answer[1])
+				writing.Unlock()
 			}
 		}
+		close(done)
 		conn.Close()
 		if !dropped {
 			return

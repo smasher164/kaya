@@ -203,6 +203,31 @@ fi
 echo "notify-leg: regime $kaya_regime, app id $kaya_app_id, portal version" \
     "${kaya_portal_version//$'\n'/ }"
 
+# A CALL INSIDE THE NOTIFICATION DESKTOP (docs/capture-plan.md §8): the
+# chat app's camera takes this bus's camera portal, so the lane's grant for
+# the unsandboxed app's empty id is made here, as tools/linux/capture-leg.py
+# makes it on its own bus, and for the app id this leg registers, which the
+# portal then asks under.
+if [ -n "${KAYA_NOTIFY_GRANT_CAMERA:-}" ]; then
+    if ! timeout 30 gdbus call --session \
+        --dest org.freedesktop.impl.portal.PermissionStore \
+        --object-path /org/freedesktop/impl/portal/PermissionStore \
+        --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
+        devices true camera "" "['yes']" >/dev/null \
+        || ! timeout 30 gdbus call --session \
+        --dest org.freedesktop.impl.portal.PermissionStore \
+        --object-path /org/freedesktop/impl/portal/PermissionStore \
+        --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
+        devices true camera "$kaya_app_id" "['yes']" >/dev/null; then
+        echo "notify-leg: the permission store refused the camera grant" >&2
+        kill "$kaya_notifyd" 2>/dev/null
+        [ -n "${DBUS_SESSION_BUS_PID:-}" ] && kill "$DBUS_SESSION_BUS_PID" 2>/dev/null
+        rm -rf "$kaya_home"
+        exit 1
+    fi
+    echo "notify-leg: the camera granted to the empty app id and $kaya_app_id on this leg's bus"
+fi
+
 "$@"
 kaya_status=$?
 

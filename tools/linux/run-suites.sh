@@ -2731,6 +2731,14 @@ for proto in x11 wayland; do
         GDK_DEBUG=no-portals \
         tools/linux/notify-leg.sh portal \
         tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
+    # THE CHAT APP'S CALLS (docs/capture-plan.md §8): the capture leg's
+    # PipeWire, devices and far end around the chat leg's notification
+    # desktop, whose portal bus the camera then takes (granted there).
+    run "$proto" chatcall-go env KAYA_SELFTEST=chatcall KAYA_CAPTURE_FAR_END=1 \
+        KAYA_NOTIFY_GRANT_CAMERA=1 GDK_DEBUG=no-portals \
+        python3 tools/linux/capture-leg.py portal \
+        tools/linux/notify-leg.sh portal \
+        tools/linux/a11y-leg.sh /tmp/go-guests/kaya-go
     drain
     # THE PORTFOLIO APP (docs/portfolio-plan.md): python alone by design.
     # ALONE BETWEEN DRAINS — 15,000 windowed rows are its own load
