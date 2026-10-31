@@ -68,9 +68,11 @@ verb reads what each backend lowered (edge, labels, the full item).
   parent lays out the control. Per edge: a full item alone in an Execute
   collection, the others on that edge staying in the menu (Execute takes one
   item); an edge with no full item reveals all of its items. Each SwipeItem
-  runs the context item through the menu's own activation. The items carry no
-  icon yet: SwipeItem takes an IconSource, and the symbol vocabulary is lowered
-  to IconElements only.
+  runs the context item through the menu's own activation. An item's symbol
+  rides the SwipeItem as a FontIconSource over the Fluent column (since
+  2026-10-31, `symbol_icon_source`; tools/check-symbol-parity.py N11). No
+  scene's swipe item declares a symbol: the chat app's Mark unread and Archive
+  have no concept in the vocabulary, and adding one is the maintainer's call.
 - Apple and GTK keep every swipe item in the context menu (R1, R2).
 - `swipe_action <row> "<item>"` runs the item through its swipe: a real touch
   swipe across the row on Android, and on Windows an injected finger

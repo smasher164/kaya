@@ -1307,6 +1307,23 @@ fn button_icon(value: i64, prominent: bool) -> windows_core::Result<Option<IconE
     Ok(Some(icon.cast()?))
 }
 
+/// The symbol as an IconSource, for the controls that take one rather than
+/// an IconElement (SwipeItem); no FontFamily, as in [`symbol_icon`].
+fn symbol_icon_source(
+    value: i64,
+) -> windows_core::Result<Option<bindings::Microsoft::UI::Xaml::Controls::IconSource>> {
+    let Some(symbol) = symbol_from_wire(value) else {
+        return Ok(None);
+    };
+    let glyph = match fluent_icon(symbol) {
+        FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
+        FluentIcon::Glyph(glyph) => glyph.to_owned(),
+    };
+    let icon = bindings::Microsoft::UI::Xaml::Controls::FontIconSource::new()?;
+    icon.SetGlyph(&HSTRING::from(glyph))?;
+    Ok(Some(icon.cast()?))
+}
+
 const SYMBOL_BUTTON_GLYPH: f64 = 16.0;
 const SYMBOL_BUTTON_GLYPH_PROMINENT: f64 = 14.0;
 
@@ -9497,6 +9514,9 @@ fn sync_swipe_hosts(core: &mut CoreState) -> windows_core::Result<()> {
             for &id in ids {
                 let item = SwipeItem::new()?;
                 item.SetText(&HSTRING::from(menu_label(core, MenuAttachment::Context(widget), id)))?;
+                if let Some(icon) = symbol_icon_source(core.menu_models[&id].symbol)? {
+                    item.SetIconSource(&icon)?;
+                }
                 item.SetBehaviorOnInvoked(SwipeBehaviorOnInvoked::Close)?;
                 item.Invoked(&TypedEventHandler::<SwipeItem, SwipeItemInvokedEventArgs>::new(
                     move |_, _| {

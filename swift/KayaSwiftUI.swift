@@ -10206,11 +10206,33 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
         let units = Array((view.text ?? "").utf16)
         let caret = view.selectedRange
         let line = 1 + units.prefix(min(caret.location, units.count)).filter { $0 == 10 }.count
+        func lineAt(_ offset: Int) -> Int { 1 + units.prefix(max(0, min(offset, units.count))).filter { $0 == 10 }.count }
+        // docs/deferred.md, iOS codesurface-go: what TextKit 2 last laid out
+        // for the viewport, beside the offset, tells a stale layout from a
+        // stale draw.
+        var laid = "viewport layout range \(String(describing: view.textLayoutManager?.textViewportLayoutController.viewportRange))"
+        if let tlm = view.textLayoutManager, let range = tlm.textViewportLayoutController.viewportRange {
+            let from = tlm.offset(from: tlm.documentRange.location, to: range.location)
+            let to = tlm.offset(from: tlm.documentRange.location, to: range.endLocation)
+            var top = CGFloat.infinity
+            var bottom = -CGFloat.infinity
+            var count = 0
+            tlm.enumerateTextLayoutFragments(from: range.location, options: []) { fragment in
+                if fragment.rangeInElement.location.compare(range.endLocation) != .orderedAscending { return false }
+                top = min(top, fragment.layoutFragmentFrame.minY)
+                bottom = max(bottom, fragment.layoutFragmentFrame.maxY)
+                count += 1
+                return true
+            }
+            laid = String(
+                format: "viewport layout range %d-%d (lines %d-%d), %d fragment(s) at y %.0f-%.0f",
+                from, to, lineAt(from), lineAt(max(from, to - 1)), count, top, bottom)
+        }
         return String(
-            format: " (caret %d+%d on line %d of %d; viewport y %.0f-%.0f of content %.0f, inset bottom %.0f; first responder %@)",
+            format: " (caret %d+%d on line %d of %d; viewport y %.0f-%.0f of content %.0f, inset bottom %.0f; first responder %@; %@)",
             caret.location, caret.length, line, 1 + units.filter { $0 == 10 }.count, view.contentOffset.y,
             view.contentOffset.y + view.bounds.height, view.contentSize.height, view.adjustedContentInset.bottom,
-            view.isFirstResponder ? "yes" : "no")
+            view.isFirstResponder ? "yes" : "no", laid)
     }
 
     /// expect_no_overscroll (docs/editor-plan.md E7): the caret rect at the

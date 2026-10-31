@@ -1489,6 +1489,17 @@ Third sighting, codesurface-swift in edfix's filtered run 2026-10-30
 "viewport y 854-950 of content 950"; green on the rerun right after. The read
 that tells a stale layout from a stale draw is still not built.
 
+The read is BUILT 2026-10-31 (the residue pass): a refused iOS gutter read
+now ends with what TextKit 2's viewport layout controller last laid out, its
+range in UTF-16 offsets, the lines it spans, and its fragments' count and y
+extent, beside the scroll offset. Forced red by asking `shows 18` at the
+end: "viewport y 846-942 of content 950 ... viewport layout range 1062-1171
+(lines 36-40), 5 fragment(s) at y 832-933". On the next sighting: a range on
+lines 18-21 with the offset at 846 is a stale LAYOUT (the controller never
+re-laid out for the new offset); a range on lines 36-40 with the gutter
+reading 18-21 is a stale DRAW. Two filtered iOS runs of codesurface (8 legs)
+were green, so no sighting yet; not fixed, the cause not plain.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 
@@ -15621,7 +15632,7 @@ three legs that passed on that run (`search_rust`, `search_js`,
 `search_java`) had their click land after Loaded, 400-500ms before the
 first expect_focused.
 
-## WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` (first sighting 2026-09-05; the linux wayland face was read and fixed 2026-09-07 and the android face ruled and built 2026-09-06 — headline narrowed 2026-09-15, windows `dnd_java` is the one face still unread)
+## ~~WATCH — the dnd scene's keyed drag from a stamped row landed the EARLIER payload, on windows `dnd_java` (first sighting 2026-09-05; the linux wayland face was read and fixed 2026-09-07 and the android face ruled and built 2026-09-06 — headline narrowed 2026-09-15, windows `dnd_java` is the one face still unread)~~ FOLDED 2026-10-31 into "WATCH — a windows drag of a stamped row ended `none` with no drop (dnd_csharp, 2026-10-19)": the same step and the same three readings on the same lane, whose release has been keyed on the destination's own hover at the release point since 2026-10-19 and whose bundle carries each drag's source, hover changes, release and Drop (the instrument this entry asked for); dnd_java has no red in the kept logs since 2026-09-05 and ran 5 of 5 green alone on the VM in the residue pass. The windows face's next sighting is read there
 KEY: dnd_java, dnd-js-wayland, dnd-jvm, windows drag, wayland drag, android drag, item y drag ended none, text target got text hello, touch slop, seven-pixel source, matrix contention
 
 The task manager's third matrix (d5b85612): the windows lane's `dnd_java` leg

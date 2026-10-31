@@ -470,6 +470,9 @@ THE DESKTOP SIGHTINGS ARE NOT CLOSED BY THIS. The windows (`dnd_java`)
 and wayland (`dnd-js-wayland`) readings of the same three strings are to
 be read through their own arms' drag lines before anyone assumes the same
 cause; a mouse has no slop, so a 7px source is a legal target there.
+(The wayland face was read and fixed 2026-09-16; the windows face folded
+2026-10-31 into docs/deferred.md's dnd_csharp WATCH of 2026-10-19, whose
+release waits for the destination's hover and whose bundle reads each drag.)
 
 ## §2 — Probes before arms
 

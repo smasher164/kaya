@@ -196,6 +196,14 @@ def check(texts):
                        f"SwiftUI's {sorted(sw_on)} — one concept filled on one "
                        f"platform and outlined on another")
 
+    # Every symbol-carrying WinUI control draws it: a SwipeItem takes an
+    # IconSource, not the IconElement the menu items take (docs/deferred.md,
+    # WinUI swipe items drawn as text only).
+    swipe = re.search(r"let item = SwipeItem::new\(\)\?;.*?items\.Append", wt2, re.S)
+    if not swipe or "symbol_icon_source(core.menu_models[&id].symbol)" not in swipe.group(0) \
+            or "item.SetIconSource(&icon)" not in swipe.group(0):
+        bad.append(f"{winui}: a swipe item is built without its symbol's IconSource")
+
     if bad:
         return "bad", bad
     return "ok", f"{len(root)} concepts level across six files"
@@ -263,6 +271,12 @@ selftest("N8", SWIFTUI, r'\(symbolRepeatOne, "repeat_one", "repeat\.1", nil\),',
 # N10: the muted row withheld from GTK (docs/media-player-plan.md M16).
 selftest("N10", GTK, r'    \(crate::wire::SYMBOL_MUTED, "audio-volume-muted-symbolic"\),\n', "",
          "no row for SYMBOL_MUTED")
+
+# N11: a swipe item drawn as text only, as shipped before 2026-10-31.
+selftest("N11", WINUI,
+         r"\n\s+if let Some\(icon\) = symbol_icon_source\(core\.menu_models\[&id\]\.symbol\)\? \{"
+         r"\n\s+item\.SetIconSource\(&icon\)\?;\n\s+\}", "",
+         "without its symbol's IconSource")
 
 if status == 0:
     print(f"check-symbol-parity: OK ({payload})")
