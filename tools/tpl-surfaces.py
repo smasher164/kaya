@@ -28,8 +28,16 @@ DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea canvas "
     "date_picker time_picker labeled search number_field color_picker range video "
-    "secure_field segmented expander"
+    "secure_field segmented expander surface"
 ).split()
+
+# Kinds a row template REFUSES in the core, so no template zone offers them:
+# kind -> the refusal's own words in crates/kaya/src/scene.rs, held below so
+# the exemption stands only while the refusal does.
+LIVE_ONLY_KINDS = {
+    # docs/capture-plan.md §5: frames are submitted to a live widget's id.
+    "surface": "is a surface — a surface shows the frames the app submits to",
+}
 
 def wire_kinds(root):
     """The generated wire's kind list, lowercased, sorted."""
@@ -2288,6 +2296,12 @@ def main():
         )
         return 1
     print(f"tpl-surfaces: DEFAULT_KINDS holds the wire's {len(spec)} kinds (a one-short list watched refused)")
+    scene = (pathlib.Path(__file__).resolve().parent.parent / "crates/kaya/src/scene.rs").read_text(encoding="utf-8")
+    for kind, refusal in LIVE_ONLY_KINDS.items():
+        if refusal not in scene:
+            print(f"tpl-surfaces: {kind} is exempt as live-only, but crates/kaya/src/scene.rs no longer "
+                  f"refuses it in a template ({refusal!r}) — offer a template constructor or restore the refusal")
+            status = 1
     for lang, reader, where, minimum, spelling in ZONES:
         try:
             names = reader(None)
@@ -2319,7 +2333,7 @@ def main():
             status = 1
             continue
 
-        missing = [k for k in kinds if not offers(names, k, spelling)]
+        missing = [k for k in kinds if k not in LIVE_ONLY_KINDS and not offers(names, k, spelling)]
         if missing:
             print(
                 f"check-sugar-surface: {lang} has no TEMPLATE-zone constructor "

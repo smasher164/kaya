@@ -1,0 +1,27 @@
+# The far end of a call (docs/capture-plan.md §5): a surface showing the NV12
+# frames the app submits from its own thread, and a voice output playing the
+# samples it writes there on the platform's voice path. The peer is a thread
+# of the app's: 1E5AC8 at 640x480 with 660 Hz, then C83C1E at 1280x720 with
+# 440 Hz, then silence. expect_video_ink reads the composited picture and
+# expect_voice what the platform's voice path pulled, never the app's word.
+expect_title "far end"
+expect label#0 "voice none"
+expect_video_ink surface#0 "none"
+expect_video_box surface#0 "320x240"
+click button#0
+expect label#0 "voice playing"
+expect_video_ink surface#0 "1E5AC8"
+expect_video_box surface#0 "320x240"
+expect_voice 0 "660 Hz"
+click button#1
+expect_video_ink surface#0 "C83C1E"
+# Half of 1280x720 is wider than a phone or this window gives it, so it
+# shrinks to the room it has, keeping its shape (docs/capture-plan.md §3).
+expect_video_box surface#0 "16:9"
+expect_voice 0 "440 Hz"
+click button#2
+expect_voice 0 "silent"
+# Hung up: the voice output is released, and the surface keeps its last frame.
+click button#3
+expect label#0 "voice none"
+expect_video_ink surface#0 "C83C1E"

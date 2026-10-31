@@ -2794,6 +2794,7 @@ public final class KayaApp {
     let media = KayaMediaState()
     let readers = KayaReaderState()
     let captures = KayaCaptureMirror()
+    let voices = KayaVoiceMirror()
     /// The network images' two row handlers and the helpers' feeds (KayaImages.swift).
     let images = KayaImageState()
     var fileDialogs: [UInt64: (KayaAppTx, [KayaPickedFile]) throws -> Void] = [:]
@@ -3968,6 +3969,9 @@ public final class KayaApp {
                 continue
             }
             if readerOccurrence(kind, id, tail, { h in self.dispatch { try self.build(h) } }) {
+                continue
+            }
+            if voiceOccurrence(kind, id, tail, { h in self.dispatch { try self.build(h) } }) {
                 continue
             }
             if captureOccurrence(kind, id, payload, tail, { h in self.dispatch { try self.build(h) } }) {
@@ -5736,6 +5740,18 @@ public final class KayaAppTx {
     public func image(_ source: KayaAsset, grow: Double? = nil) -> KayaWidget {
         let w = widget(UInt32(KAYA_KIND_IMAGE))
         tx.setSource(w.id, source.blob())
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
+    /// A surface (docs/capture-plan.md §5): a rectangle showing the frames
+    /// `surfaceFrames` submits, the last one kept; half their size until laid
+    /// out otherwise, 320x240 before the first. Live zone only.
+    @discardableResult
+    public func surface(fit: KayaFit? = nil, aspect: (Int, Int)? = nil, grow: Double? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_SURFACE))
+        if let fit { tx.setFit(w.id, fit.rawValue) }
+        if let aspect { tx.setAspect(w.id, kayaAspect(aspect.0, aspect.1)) }
         if let grow { setGrow(w, grow) }
         return w
     }

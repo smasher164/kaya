@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x721721bd5ae0c2aaL
+let spec_hash = 0xe3377635dd9a81ccL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -72,6 +72,7 @@ let kind_video = 23
 let kind_secure_field = 24
 let kind_segmented = 25
 let kind_expander = 26
+let kind_surface = 27
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3
@@ -394,6 +395,11 @@ let capture_interruption_none = 0
 let capture_interruption_background = 1
 let capture_interruption_another_app = 2
 let capture_interruption_system_pressure = 3
+let voice_route_none = 0
+let voice_route_voice = 1
+let voice_route_plain = 2
+let voice_route_synthetic = 3
+let voice_route_failed = 4
 let capture_kind_camera = 0
 let capture_kind_microphone = 1
 let permission_prompt = 0
@@ -542,6 +548,8 @@ let tx_kind_set_document_prop = 92
 let tx_kind_add_region = 93
 let tx_kind_show_font_dialog = 94
 let tx_kind_list_font_faces = 95
+let tx_kind_create_voice = 96
+let tx_kind_release_voice = 97
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -623,6 +631,8 @@ let apply_kind_set_document_prop = 80
 let apply_kind_add_region = 81
 let apply_kind_present_font_dialog = 82
 let apply_kind_list_font_faces = 83
+let apply_kind_create_voice = 84
+let apply_kind_release_voice = 85
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -693,6 +703,7 @@ let occ_kind_document_moved = 67
 let occ_kind_documents_detached = 68
 let occ_kind_font_dialog_result = 69
 let occ_kind_font_faces = 70
+let occ_kind_voice_changed = 71
 
 let pad8 b =
   while Buffer.length b mod 8 <> 0 do
@@ -1421,6 +1432,16 @@ let tx_show_font_dialog window dialog code_only faces weight italic width family
 let tx_list_font_faces family =
   finish tx_kind_list_font_faces (fun b ->
       encode_value b family)
+
+(* Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed. *)
+let tx_create_voice voice =
+  finish tx_kind_create_voice (fun b ->
+      Buffer.add_int64_le b voice)
+
+(* Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows. *)
+let tx_release_voice voice =
+  finish tx_kind_release_voice (fun b ->
+      Buffer.add_int64_le b voice)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =
@@ -4071,7 +4092,7 @@ let parse_clip byte at =
    value), None for clicks. None for pad/unknown kinds. *)
 let parse_occurrence byte =
   let kind = u16_at byte 4 in
-  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached && kind <> occ_kind_font_dialog_result && kind <> occ_kind_font_faces then None
+  if kind <> occ_kind_button_clicked && kind <> occ_kind_text_changed && kind <> occ_kind_toggled && kind <> occ_kind_value_changed && kind <> occ_kind_close_requested && kind <> occ_kind_window_closed && kind <> occ_kind_alert_result && kind <> occ_kind_entry_popped && kind <> occ_kind_back_requested && kind <> occ_kind_section_selected && kind <> occ_kind_menu_activated && kind <> occ_kind_menu_toggled && kind <> occ_kind_menu_value_changed && kind <> occ_kind_file_dialog_result && kind <> occ_kind_clipboard_result && kind <> occ_kind_pasted && kind <> occ_kind_undone && kind <> occ_kind_redone && kind <> occ_kind_sort_requested && kind <> occ_kind_draw_requested && kind <> occ_kind_tick && kind <> occ_kind_dropped && kind <> occ_kind_drag_ended && kind <> occ_kind_date_changed && kind <> occ_kind_time_changed && kind <> occ_kind_value_committed && kind <> occ_kind_notification_result && kind <> occ_kind_link_opened && kind <> occ_kind_text_edited && kind <> occ_kind_text_formatted && kind <> occ_kind_sheet_dismissed && kind <> occ_kind_dismiss_requested && kind <> occ_kind_submitted && kind <> occ_kind_notification_replied && kind <> occ_kind_fullscreen_changed && kind <> occ_kind_color_changed && kind <> occ_kind_range_changed && kind <> occ_kind_range_committed && kind <> occ_kind_player_changed && kind <> occ_kind_player_position && kind <> occ_kind_seek_completed && kind <> occ_kind_session_action && kind <> occ_kind_player_tracks && kind <> occ_kind_caption_cue && kind <> occ_kind_video_visibility && kind <> occ_kind_reader_frame && kind <> occ_kind_reader_progress && kind <> occ_kind_reader_peaks && kind <> occ_kind_reader_done && kind <> occ_kind_image_loaded && kind <> occ_kind_capture_changed && kind <> occ_kind_capture_permission && kind <> occ_kind_capture_devices && kind <> occ_kind_capture_overrun && kind <> occ_kind_toast_result && kind <> occ_kind_image_needed && kind <> occ_kind_image_released && kind <> occ_kind_activated && kind <> occ_kind_selection_changed && kind <> occ_kind_font_families && kind <> occ_kind_text_selected && kind <> occ_kind_document_selected && kind <> occ_kind_document_close_requested && kind <> occ_kind_documents_close_requested && kind <> occ_kind_document_closed && kind <> occ_kind_new_document_requested && kind <> occ_kind_document_moved && kind <> occ_kind_documents_detached && kind <> occ_kind_font_dialog_result && kind <> occ_kind_font_faces && kind <> occ_kind_voice_changed then None
   else begin
     let id = id_at byte 8 in
     if kind = occ_kind_alert_result
@@ -4417,6 +4438,20 @@ let parse_occurrence byte =
          at := next
        done);
       Some (kind, 0L, [], None, None, None, List.rev !out)
+    end
+    else if kind = occ_kind_voice_changed
+    then begin
+      (* A flat record: its fields in order, into the tail. *)
+      let at = ref 8 in
+      let out = ref [] in
+      at := !at + 8;
+      out := I64 (Int64.of_int (u32_at byte !at)) :: !out;
+      at := !at + 4;
+      at := !at + 4;
+      (let v, next = parse_value byte !at in
+       out := v :: !out;
+       at := next);
+      Some (kind, Int64.of_int id, [], None, None, None, List.rev !out)
     end
     else if kind = occ_kind_file_dialog_result
     then begin

@@ -19809,6 +19809,34 @@ kaya builds sets `KeyboardAcceleratorPlacementMode::Hidden`
 refuses a top-level row with an accelerator whose mode is not Hidden,
 watched red on menus_rust with the setter cut.
 
+## A debug build's conversion on GTK's frame clock starved its main thread (measured 2026-10-31)
+
+The far end's first GTK arm converted each new surface frame from NV12 to
+RGBA in the frame clock's tick, on GTK's main thread: 1280x720 a frame, 15
+a second, in a debug build, with f64 arithmetic per pixel. Alone on the
+lane it passed every leg; in a filtered matrix (host load 160 to 260) two
+legs' `expect_video_ink surface#0` hops to the main thread never came back
+inside the step ceiling, and the Android leg beside them read its voice at
+268 Hz for 440 (its writer and the AudioTrack each starved in turn: 214560
+samples dropped past the queue, 180960 pulled past its end). The
+conversion now runs at the submit, on the app's own thread, in fixed point
+(farend.rs `upright_rgba`), and the frame clock takes a copy; the voice
+reading keeps only samples the app wrote, so a pull past the queue's end
+is counted, not read as silence spliced into the tone.
+
+## A new occurrence compiled and died on every foreign binding (measured 2026-10-31)
+
+The far end's `voice_changed` built, passed the Rust guests on all five
+lanes, and then killed the Go guest on both phones at its first route
+report: capi.rs `send_occurrences`, the door a backend's report takes to the
+ring every foreign binding reads, matched the occurrences it carries and
+ended in `other => unreachable!(...)`, so a new occurrence missing from its
+list compiled and died at run time, and only off the Rust host (whose
+occurrences take the in-process inbox instead). The flight recorder's leg
+log named it in one line. The match is now exhaustive: every occurrence
+the door never carries is listed in the unreachable arm, so a new one fails
+`cargo build` there.
+
 ## The font panel's mode mask is asked of the responder chain (measured 2026-10-29)
 
 The macOS 26 font panel showed its size field and its B I U effects menu

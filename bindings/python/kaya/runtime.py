@@ -626,6 +626,26 @@ def capture_on_samples(capture: int, on: bool) -> None:
     _lib.kaya_capture_on_samples(capture, fn, capture)
 
 
+# The far end (docs/capture-plan.md §5): a surface's frames and a voice
+# output's samples, from any thread; ctypes drops the GIL for each call.
+_lib.kaya_surface_submit.argtypes = [ctypes.c_uint64, ctypes.c_uint32, ctypes.c_uint32,
+                                     ctypes.c_char_p, ctypes.c_uint32, ctypes.c_char_p,
+                                     ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint32]
+_lib.kaya_surface_submit.restype = ctypes.c_uint32
+_lib.kaya_voice_write.argtypes = [ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t]
+_lib.kaya_voice_write.restype = ctypes.c_uint32
+
+
+def surface_submit(widget: int, width: int, height: int, y: bytes, y_stride: int,
+                   uv: bytes, uv_stride: int, timestamp_ns: int, rotation: int) -> bool:
+    return bool(_lib.kaya_surface_submit(widget, width, height, y, y_stride, uv, uv_stride,
+                                         timestamp_ns, rotation))
+
+
+def voice_write(voice: int, samples: bytes) -> bool:
+    return bool(_lib.kaya_voice_write(voice, samples, len(samples) // 2))
+
+
 def catalog(app: str) -> None:
     _lib.kaya_catalog(app.encode("utf-8"))
 

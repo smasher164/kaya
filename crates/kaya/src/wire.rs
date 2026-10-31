@@ -86,6 +86,8 @@ pub(crate) const TX_SET_DOCUMENT_PROP: u16 = 92;
 pub(crate) const TX_ADD_REGION: u16 = 93;
 pub(crate) const TX_SHOW_FONT_DIALOG: u16 = 94;
 pub(crate) const TX_LIST_FONT_FACES: u16 = 95;
+pub(crate) const TX_CREATE_VOICE: u16 = 96;
+pub(crate) const TX_RELEASE_VOICE: u16 = 97;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -217,6 +219,8 @@ pub(crate) const APPLY_SET_DOCUMENT_PROP: u16 = 80;
 pub(crate) const APPLY_ADD_REGION: u16 = 81;
 pub(crate) const APPLY_PRESENT_FONT_DIALOG: u16 = 82;
 pub(crate) const APPLY_LIST_FONT_FACES: u16 = 83;
+pub(crate) const APPLY_CREATE_VOICE: u16 = 84;
+pub(crate) const APPLY_RELEASE_VOICE: u16 = 85;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -308,6 +312,7 @@ pub(crate) const KIND_VIDEO: u32 = 23;
 pub(crate) const KIND_SECURE_FIELD: u32 = 24;
 pub(crate) const KIND_SEGMENTED: u32 = 25;
 pub(crate) const KIND_EXPANDER: u32 = 26;
+pub(crate) const KIND_SURFACE: u32 = 27;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -484,6 +489,42 @@ pub(crate) const PERMISSIONS: &[(i64, &str)] = &[(0, "prompt"), (1, "granted"), 
 pub(crate) const CAMERA_FACINGS: &[(i64, &str)] = &[(0, "unknown"), (1, "front"), (2, "back"), (3, "external")];
 
 pub(crate) const CAPTURE_COMMANDS: &[(i64, &str)] = &[(1, "start"), (2, "stop")];
+
+pub(crate) const VOICE_ROUTES: &[(i64, &str)] =
+    &[(0, "none"), (1, "voice"), (2, "plain"), (3, "synthetic"), (4, "failed")];
+
+pub(crate) fn voice_route_raw(route: crate::protocol::VoiceRoute) -> u32 {
+    use crate::protocol::VoiceRoute as R;
+    match route {
+        R::None => 0,
+        R::Voice => 1,
+        R::Plain => 2,
+        R::Synthetic => 3,
+        R::Failed => 4,
+    }
+}
+
+pub(crate) fn voice_route_from(raw: u32) -> Option<crate::protocol::VoiceRoute> {
+    use crate::protocol::VoiceRoute as R;
+    Some(match raw {
+        0 => R::None,
+        1 => R::Voice,
+        2 => R::Plain,
+        3 => R::Synthetic,
+        4 => R::Failed,
+        _ => return None,
+    })
+}
+
+/// VOICE_CHANGED { u64 voice; u32 route; u32 reserved; Str detail }.
+pub(crate) fn voice_changed_body(voice: crate::protocol::VoiceId, route: crate::protocol::VoiceRoute, detail: &str) -> Vec<u8> {
+    let mut b = Vec::new();
+    b.extend_from_slice(&voice.0.to_le_bytes());
+    b.extend_from_slice(&voice_route_raw(route).to_le_bytes());
+    b.extend_from_slice(&0u32.to_le_bytes());
+    write_value(&mut b, &Value::Str(detail.to_owned()), &mut Vec::new());
+    b
+}
 
 pub(crate) const CPROPS: &[(i64, &str)] = &[
     (1, "camera"),
@@ -1912,6 +1953,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_SECURE_FIELD => WidgetKind::SecureField,
         KIND_SEGMENTED => WidgetKind::Segmented,
         KIND_EXPANDER => WidgetKind::Expander,
+        KIND_SURFACE => WidgetKind::Surface,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -2543,6 +2585,8 @@ pub fn decode_transaction_with_blobs(
                 TxOp::CaptureCommand { capture, command }
             }
             TX_RELEASE_CAPTURE => TxOp::ReleaseCapture { capture: crate::protocol::CaptureId(r.u64()) },
+            TX_CREATE_VOICE => TxOp::CreateVoice { voice: crate::protocol::VoiceId(r.u64()) },
+            TX_RELEASE_VOICE => TxOp::ReleaseVoice { voice: crate::protocol::VoiceId(r.u64()) },
             TX_REQUEST_PERMISSION => {
                 let kind = capture_kind(r.u32(), "request_permission");
                 let _reserved = r.u32();
@@ -4875,6 +4919,12 @@ impl Writer {
             ApplyOp::ReleaseCapture(capture) => self.record(APPLY_RELEASE_CAPTURE, |b, _| {
                 b.extend_from_slice(&capture.0.to_le_bytes());
             }),
+            ApplyOp::CreateVoice(voice) => self.record(APPLY_CREATE_VOICE, |b, _| {
+                b.extend_from_slice(&voice.0.to_le_bytes());
+            }),
+            ApplyOp::ReleaseVoice(voice) => self.record(APPLY_RELEASE_VOICE, |b, _| {
+                b.extend_from_slice(&voice.0.to_le_bytes());
+            }),
             ApplyOp::RequestPermission(kind) => self.record(APPLY_REQUEST_PERMISSION, |b, _| {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -5640,6 +5690,12 @@ impl Writer {
             TxOp::ReleaseCapture { capture } => self.record(TX_RELEASE_CAPTURE, |b, _| {
                 b.extend_from_slice(&capture.0.to_le_bytes());
             }),
+            TxOp::CreateVoice { voice } => self.record(TX_CREATE_VOICE, |b, _| {
+                b.extend_from_slice(&voice.0.to_le_bytes());
+            }),
+            TxOp::ReleaseVoice { voice } => self.record(TX_RELEASE_VOICE, |b, _| {
+                b.extend_from_slice(&voice.0.to_le_bytes());
+            }),
             TxOp::RequestPermission { kind } => self.record(TX_REQUEST_PERMISSION, |b, _| {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -5934,6 +5990,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::SecureField => KIND_SECURE_FIELD,
         WidgetKind::Segmented => KIND_SEGMENTED,
         WidgetKind::Expander => KIND_EXPANDER,
+        WidgetKind::Surface => KIND_SURFACE,
     }
 }
 

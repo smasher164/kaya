@@ -34,6 +34,8 @@ module KayaRuntime
     imagePixelsRaw,
     captureOnFrame,
     captureOnSamples,
+    surfaceSubmit,
+    voiceWrite,
     captureDriveFrame,
     captureDriveSamples,
     catalogRaw,
@@ -85,7 +87,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
 import Data.Word (Word16, Word32, Word64, Word8)
-import Foreign.C.Types (CBool (..), CDouble (..), CInt (..), CPtrdiff (..), CSize (..))
+import Foreign.C.Types (CBool (..), CChar, CDouble (..), CInt (..), CPtrdiff (..), CSize (..))
 import Foreign.Marshal.Alloc (alloca, allocaBytes, mallocBytes)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullFunPtr, nullPtr, plusPtr, wordPtrToPtr)
 import Foreign.Marshal.Array (allocaArray, peekArray)
@@ -512,6 +514,32 @@ captureOnFrame c on =
 captureOnSamples :: Word64 -> Bool -> IO ()
 captureOnSamples c on =
   c_kaya_capture_on_samples c (if on then captureSamplesTrampoline else nullFunPtr) (wordPtrToPtr (fromIntegral c))
+
+-- The far end (docs/capture-plan.md §5): the core copies a surface's frame
+-- and a voice output's samples before it returns, from any thread.
+foreign import ccall unsafe "kaya_surface_submit"
+  c_kaya_surface_submit :: Word64 -> Word32 -> Word32 -> Ptr CChar -> Word32 -> Ptr CChar -> Word32 -> Word64 -> Word32 -> IO Word32
+
+foreign import ccall unsafe "kaya_voice_write"
+  c_kaya_voice_write :: Word64 -> Ptr Int16 -> CSize -> IO Word32
+
+-- | One NV12 frame onto surface @w@: width, height, the two planes with
+-- their strides, the time and the rotation. False when the surface is gone.
+surfaceSubmit :: Word64 -> Int -> Int -> BS.ByteString -> Int -> BS.ByteString -> Int -> Word64 -> Int -> IO Bool
+surfaceSubmit w width height y yStride uv uvStride at rotation =
+  unsafeUseAsCStringLen y $ \(yp, _) ->
+    unsafeUseAsCStringLen uv $ \(uvp, _) ->
+      (== 1)
+        <$> c_kaya_surface_submit w (fromIntegral width) (fromIntegral height) yp (fromIntegral yStride) uvp
+          (fromIntegral uvStride) at (fromIntegral rotation)
+
+-- | 48 kHz mono s16 samples onto voice output @v@. False once it is released.
+voiceWrite :: Word64 -> [Int16] -> IO Bool
+voiceWrite v samples =
+  let n = length samples
+   in allocaArray (max 1 n) $ \p -> do
+        mapM_ (\(i, s) -> pokeByteOff p (2 * i) s) (zip [0 ..] samples)
+        (== 1) <$> c_kaya_voice_write v p (fromIntegral n)
 
 -- SAFE, so the trampoline's foreign thread can run Haskell while this one
 -- waits in C.

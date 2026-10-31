@@ -7,7 +7,10 @@ the core, the SwiftUI arm on the synthetic devices, the Rust binding, the
 each lane's synthetic source measured first, in
 docs/probes/capture-2026-10-01/{linux,windows,compose,ios}-measured.md), the
 Windows legs still to run; what remains is docs/deferred.md's capture BUILD
-entry. Asked for by the maintainer's
+entry; §5's far end BUILT 2026-10-31 (the `surface` kind fed with the
+app's NV12 frames, the voice output on each platform's voice path, the
+`farend` scene green on five lanes in every binding, the choices it
+settled in §11). Asked for by the maintainer's
 accepted direction of 2026-09-28: calls are a stage of the chat app
 (docs/chat-plan.md), a voice or video call from a conversation with a live
 self-preview and a choice of camera and microphone, the simulated peer
@@ -379,3 +382,67 @@ settle, built a recommendation for each, and the maintainer took all eight
 8. iOS sets the `.playAndRecord` audio category only on the real-device
    path; and JS runs capture callbacks in a worker the capture thread calls
    and waits on.
+
+## §11. The choices the far end's build settled (2026-10-31, for the maintainer to ratify)
+
+The far end (§5) met these questions the plan did not settle; each is built
+as written here and can change on a word:
+
+1. **A surface is fed by its own widget id.** The app takes a handle per
+   surface for the thread its frames arrive on (Rust `ctx.surface_frames(id)`,
+   Go `app.SurfaceFrames(w)`, Python `kaya.surface_frames(w)` and each
+   binding's spelling) and submits the capture's NV12 frame type, so one
+   frame type serves §4 and §5. A submit to a surface that is gone answers
+   false; a malformed frame (odd sides, a rotation other than 0, 90, 180 or
+   270, planes shorter than their strides say) is a scene error naming the
+   surface.
+2. **The backend pulls on its display clock.** The core keeps each surface's
+   last frame; the backend takes it when its clock ticks (SwiftUI's
+   TimelineView(.animation), a GTK tick callback, WinUI's
+   CompositionTarget.Rendering, Compose's withFrameNanos). The Apple arms
+   upload NV12 into pixel buffers from a pool onto an
+   AVSampleBufferDisplayLayer, as §5 names. GTK, WinUI and Compose take the
+   frame from the core already stood upright as RGBA and draw it as a
+   GdkMemoryTexture, a WriteableBitmap and an image bitmap: the self-view's
+   own routes on those two (§3's WinUI row), where §5 named a
+   CompositionDrawingSurface and an ImageWriter, which need the GPU device
+   work the producer research holds.
+3. **A surface's box is the self-view's rule** (§3): half its frames, a
+   rotated frame fitted upright, 320x240 before the first frame; `fit`,
+   `aspect` and `bleed` as a video view's.
+4. **A surface is live-only**: a row template holding one is a scene error,
+   as a row's capture preview is (§10 ruling 2).
+5. **A voice output holds 200 ms ahead of the platform** (KAYA_VOICE_QUEUE_MS):
+   past it the oldest samples drop, and a pull past its end plays silence.
+6. **The route is a closed vocabulary**: `none` until opened, `voice` on the
+   platform's voice path, `plain` played where no echo canceller hears it
+   (Linux without an echo-cancel sink, §5's one carve-out), `synthetic` the
+   harness's in-process engine, `failed`; the backend's measured sentence
+   rides beside it.
+7. **Under the harness on the mac and the iOS simulator the voice output is
+   in-process**: an AVAudioEngine in offline manual rendering, paced at real
+   time, route `synthetic`, since voice-processing I/O opens the microphone
+   and the wall (§7) refuses a real device there. The real path enables
+   voice processing on the engine's output node.
+8. **Each platform's voice path as built**: Android an AudioTrack with
+   USAGE_VOICE_COMMUNICATION and CONTENT_TYPE_SPEECH, float mono at 48 kHz,
+   blocking writes on its own thread (the audio mode is left to the system:
+   MODE_IN_COMMUNICATION needs MODIFY_AUDIO_SETTINGS); WinUI WASAPI shared
+   render on the default eCommunications endpoint with
+   AudioCategory_Communications, event-driven on its own thread; GTK
+   pipewiresink with media.role=Phone, into PipeWire's echo-cancel sink when
+   one is listed.
+9. **`expect_voice <n> "<f> Hz"|silent|none`** reads what the platform pulled
+   in the last second (in 48 kHz, the capture's tone rule), and anything
+   heard must ride a route that plays. The Linux lane loads PipeWire's
+   echo-cancel module and a driving null sink in the leg's own session
+   (tools/linux/capture-leg.py), so the lane exercises `voice`; `plain` was
+   made to print once with the module left out.
+
+Not built with it: the capture's `voice` prop (turning voice processing off
+for music); on Apple's real path the capture's microphone still opens
+through AVCaptureSession, so the voice output's processing engine is not yet
+the capture's own input (the maintainer's hand run of §7 item 6 is where the
+canceller is heard); the surface's frames mode (a player as the producer,
+docs/media-plan.md §4); a C guest scene (the floor reaches the far end
+through kaya.h and kaya_wire.h, as the capture's floor does).

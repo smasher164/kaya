@@ -5131,6 +5131,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::Search => core.searches.iter().map(|w| w.clone().upcast()).collect(),
         K::Range => core.ranges.iter().map(|p| p.group.clone().upcast()).collect(),
         K::Video => core.videos.iter().map(|v| v.overlay.clone().upcast()).collect(),
+        K::Surface => core.surfaces.iter().map(|v| v.overlay.clone().upcast()).collect(),
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
         K::Expander => core.expanders.iter().map(|x| x.control()).collect(),
@@ -6180,6 +6181,9 @@ struct CoreState {
     images: Vec<gtk4::Picture>,
     /// The video views in creation order (docs/media-plan.md §3).
     videos: Vec<gtk_media::GtkVideoView>,
+    /// The surfaces in creation order (docs/capture-plan.md §5): a video
+    /// view's picture and layout fed the app's frames.
+    surfaces: Vec<gtk_media::GtkVideoView>,
     /// The canvases, and their CORE ids beside them: `canvas_probe` asks
     /// the core about a widget id, and `kind#index` is the only address
     /// the harness has (the `column_ids` shape).
@@ -12437,6 +12441,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
         // (their native context menus are dress).
         K::Range => core.ranges[resolve(t.index, core.ranges.len())].group.clone().upcast(),
         K::Video => core.videos[resolve(t.index, core.videos.len())].overlay.clone().upcast(),
+        K::Surface => core.surfaces[resolve(t.index, core.surfaces.len())].overlay.clone().upcast(),
         K::ColorPicker => core.color_pickers[resolve(t.index, core.color_pickers.len())]
             .button
             .clone()
@@ -15446,6 +15451,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.secure_fields.push(field.clone());
                     NativeWidget::Secure(field)
                 }
+                WidgetKind::Surface => {
+                    let view = gtk_media::build_surface(id);
+                    core.surfaces.push(view.clone());
+                    NativeWidget::Video(view)
+                }
                 WidgetKind::Video => {
                     let view = gtk_media::build_video_view(id);
                     core.videos.push(view.clone());
@@ -16136,6 +16146,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 core.time_pickers.retain(|t| !gone(t.button.upcast_ref()));
                 core.images.retain(|p| !gone(p.upcast_ref()));
                 core.videos.retain(|v| !gone(v.overlay.upcast_ref()));
+                core.surfaces.retain(|v| !gone(v.overlay.upcast_ref()));
                 core.scrolls.retain(|s| !gone(s.upcast_ref()));
                 core.progresses.retain(|p| !gone(p.upcast_ref()));
                 core.selects.retain(|d| !gone(d.upcast_ref()));
@@ -17440,6 +17451,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
             doctabs::add_region(core, window.0, region.0, edge)
         }
         ApplyOp::SetVideoCapture { widget, capture } => capture::set_video_capture(core, widget, capture.map(|c| c.0)),
+        ApplyOp::CreateVoice(v) => voice::create(core, v.0),
+        ApplyOp::ReleaseVoice(v) => voice::release(v.0),
         ApplyOp::SetSession { player, offered, playback_state: _, title, artist, album, artwork } => {
             gtk_media::set_session(
                 core,
@@ -21248,6 +21261,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 time_pickers: Vec::new(),
                 images: Vec::new(),
                 videos: Vec::new(),
+                surfaces: Vec::new(),
                 canvases: Vec::new(),
                 canvas_ids: Vec::new(),
                 canvas_clock: false,
@@ -27191,24 +27205,38 @@ impl crate::harness::Stage for GtkStage {
 
     fn video_ink(&self, target: crate::harness::Target) -> String {
         Self::on_main(move |core| {
-            match crate::harness::try_resolve(target.index, core.videos.len()) {
-                Some(i) => gtk_media::video_pixel(&core.videos[i], false),
-                None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+            let views = picture_views(core, target);
+            match crate::harness::try_resolve(target.index, views.len()) {
+                Some(i) => {
+                    let got = gtk_media::video_pixel(&views[i], false);
+                    if target.kind == crate::harness::TargetKind::Surface && got.starts_with('<') {
+                        format!("{got} ({})", crate::farend::surface_detail(views[i].id))
+                    } else {
+                        got
+                    }
+                }
+                None => format!("<no {target:?} among {} such views>", views.len()),
             }
         })
     }
 
     fn video_corner(&self, target: crate::harness::Target) -> String {
-        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
-            Some(i) => gtk_media::video_pixel(&core.videos[i], true),
-            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+        Self::on_main(move |core| {
+            let views = picture_views(core, target);
+            match crate::harness::try_resolve(target.index, views.len()) {
+                Some(i) => gtk_media::video_pixel(&views[i], true),
+                None => format!("<no {target:?} among {} such views>", views.len()),
+            }
         })
     }
 
     fn video_box(&self, target: crate::harness::Target) -> String {
-        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
-            Some(i) => gtk_media::video_box(&core.videos[i]),
-            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+        Self::on_main(move |core| {
+            let views = picture_views(core, target);
+            match crate::harness::try_resolve(target.index, views.len()) {
+                Some(i) => gtk_media::video_box(&views[i]),
+                None => format!("<no {target:?} among {} such views>", views.len()),
+            }
         })
     }
 
@@ -27232,9 +27260,12 @@ impl crate::harness::Stage for GtkStage {
     }
 
     fn video_ground(&self, target: crate::harness::Target) -> String {
-        Self::on_main(move |core| match crate::harness::try_resolve(target.index, core.videos.len()) {
-            Some(i) => gtk_media::video_ground_pixel(&core.videos[i]),
-            None => format!("<no video#{} among {} video views>", target.index, core.videos.len()),
+        Self::on_main(move |core| {
+            let views = picture_views(core, target);
+            match crate::harness::try_resolve(target.index, views.len()) {
+                Some(i) => gtk_media::video_ground_pixel(&views[i]),
+                None => format!("<no {target:?} among {} such views>", views.len()),
+            }
         })
     }
 
@@ -29329,6 +29360,17 @@ fn table_row_box(core: &CoreState, target: crate::harness::Target) -> Option<gtk
     widget.downcast::<gtk4::Box>().ok()
 }
 
+/// The video views or the surfaces a picture read addresses
+/// (docs/capture-plan.md §5).
+#[cfg(all(feature = "harness", target_os = "linux"))]
+fn picture_views(core: &CoreState, target: crate::harness::Target) -> &[gtk_media::GtkVideoView] {
+    if target.kind == crate::harness::TargetKind::Surface {
+        &core.surfaces
+    } else {
+        &core.videos
+    }
+}
+
 /// The widget a `kind#index` target names, from the per-kind registry
 /// every other verb resolves through — creation order, which is what
 /// `kind#index` means.
@@ -29352,6 +29394,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::Range => try_resolve(target.index, core.ranges.len())
             .map(|i| core.ranges[i].group.clone().upcast()),
         K::Video => try_resolve(target.index, core.videos.len()).map(|i| core.videos[i].overlay.clone().upcast()),
+        K::Surface => try_resolve(target.index, core.surfaces.len()).map(|i| core.surfaces[i].overlay.clone().upcast()),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
         K::Expander => try_resolve(target.index, core.expanders.len()).map(|i| core.expanders[i].control()),
@@ -30765,6 +30808,7 @@ fn atspi_promoted_buttons(title: &str) -> Result<Vec<(String, bool)>, AtspiMiss>
 }
 
 mod capture;
+mod voice;
 mod secure_text;
 mod doctabs;
 mod fontpick;
@@ -30957,6 +31001,8 @@ mod gtk_media {
             self_view: Cell<Option<(u32, u32)>>,
             /// The app's packed aspect, 0 for none (docs/media-plan.md §3).
             aspect: Cell<i64>,
+            /// A surface's frames' rotation (docs/capture-plan.md §5).
+            rotation: Cell<u32>,
         }
 
         #[glib::object_subclass]
@@ -30980,7 +31026,7 @@ mod gtk_media {
                 for_size: i32,
             ) -> (i32, i32, i32, i32) {
                 let picture = match self.self_view.get() {
-                    Some(frames) => crate::media::VideoPicture::SelfView { frames, rotation: 0 },
+                    Some(frames) => crate::media::VideoPicture::SelfView { frames, rotation: self.rotation.get() },
                     None => {
                         let (w, h) = widget
                             .downcast_ref::<gtk4::Picture>()
@@ -31024,10 +31070,63 @@ mod gtk_media {
                 self.layout_changed();
             }
 
+            pub fn set_rotation(&self, rotation: u32) {
+                self.imp().rotation.set(rotation);
+            }
+
             pub fn set_aspect(&self, aspect: i64) {
                 self.imp().aspect.set(aspect);
                 self.layout_changed();
             }
+        }
+    }
+
+    /// A surface (docs/capture-plan.md §5): the video view's picture and box
+    /// rule, fed on the frame clock with the app's last frame, stood upright
+    /// as RGBA by the core; the picture keeps it.
+    pub(super) fn build_surface(id: WidgetId) -> GtkVideoView {
+        use gtk4::prelude::WidgetExt;
+        let overlay: gtk4::Overlay =
+            glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::Img).build();
+        let frame: gtk4::Picture =
+            glib::Object::builder().property("accessible-role", gtk4::AccessibleRole::None).build();
+        let layout = video_layout_manager::VideoLayout::default();
+        layout.set_self_view(Some((0, 0)));
+        frame.set_layout_manager(Some(layout.clone()));
+        frame.set_content_fit(gtk4::ContentFit::Contain);
+        overlay.set_child(Some(&frame));
+        let caption = gtk4::Label::new(None);
+        caption.set_visible(false);
+        let seen = std::cell::Cell::new(0u64);
+        let shape = std::cell::Cell::new((0u32, 0u32, 0u32));
+        let shown = frame.clone();
+        overlay.add_tick_callback(move |_, _| {
+            if let Some((w, h, rotation, seq, rgba)) = crate::farend::take_rgba(id, seen.get()) {
+                seen.set(seq);
+                let (uw, uh) = if rotation % 180 == 90 { (h, w) } else { (w, h) };
+                let texture = gdk::MemoryTexture::new(
+                    uw as i32,
+                    uh as i32,
+                    gdk::MemoryFormat::R8g8b8a8,
+                    &glib::Bytes::from_owned(rgba),
+                    (uw * 4) as usize,
+                );
+                shown.set_paintable(Some(&texture));
+                if shape.get() != (w, h, rotation) {
+                    shape.set((w, h, rotation));
+                    layout.set_rotation(rotation);
+                    layout.set_self_view(Some((w, h)));
+                }
+            }
+            glib::ControlFlow::Continue
+        });
+        GtkVideoView {
+            id,
+            overlay,
+            picture: frame,
+            caption,
+            shown: Rc::new(std::cell::Cell::new(None)),
+            capture: Rc::new(std::cell::Cell::new(None)),
         }
     }
 

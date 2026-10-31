@@ -209,6 +209,9 @@ LEGS = {
         # and microphone carrying the synthetic devices
         # (tools/lib/emulator_capture.py).
         "capture-compose", "capture_denied-compose",
+        # The far end (docs/capture-plan.md §5): a voice output on the
+        # emulator's voice path.
+        "farend-compose",
     ],
     "jvm": [
         "jvm", "a11y-jvm", "entry-jvm",
@@ -234,6 +237,7 @@ LEGS = {
         "netimage-jvm", "netimage_http-jvm",
         "grounds-jvm", "shapes-jvm", "cards-jvm", "tracks-jvm", "dock-jvm",
         "capture-jvm", "capture_denied-jvm",
+        "farend-jvm",
         "codesurface-jvm", "fontpick-jvm",
     ],
     "go": [
@@ -265,6 +269,7 @@ LEGS = {
         "netimage-go", "netimage_http-go",
         "grounds-go", "shapes-go", "cards-go", "tracks-go", "dock-go",
         "capture-go", "capture_denied-go",
+        "farend-go",
         "codesurface-go", "fontpick-go",
     ],
     "python": [

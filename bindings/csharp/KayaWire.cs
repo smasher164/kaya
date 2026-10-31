@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0x721721bd5ae0c2aa;
+    public const ulong SpecHash = 0xe3377635dd9a81cc;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -54,6 +54,7 @@ static class KayaWire
     public const uint KindSecureField = 24;
     public const uint KindSegmented = 25;
     public const uint KindExpander = 26;
+    public const uint KindSurface = 27;
     public const uint DrawOpMoveTo = 1;
     public const uint DrawOpLineTo = 2;
     public const uint DrawOpClose = 3;
@@ -376,6 +377,11 @@ static class KayaWire
     public const uint CaptureInterruptionBackground = 1;
     public const uint CaptureInterruptionAnotherApp = 2;
     public const uint CaptureInterruptionSystemPressure = 3;
+    public const uint VoiceRouteNone = 0;
+    public const uint VoiceRouteVoice = 1;
+    public const uint VoiceRoutePlain = 2;
+    public const uint VoiceRouteSynthetic = 3;
+    public const uint VoiceRouteFailed = 4;
     public const uint CaptureKindCamera = 0;
     public const uint CaptureKindMicrophone = 1;
     public const uint PermissionPrompt = 0;
@@ -524,6 +530,8 @@ static class KayaWire
     public const ushort TxKindAddRegion = 93;
     public const ushort TxKindShowFontDialog = 94;
     public const ushort TxKindListFontFaces = 95;
+    public const ushort TxKindCreateVoice = 96;
+    public const ushort TxKindReleaseVoice = 97;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -605,6 +613,8 @@ static class KayaWire
     public const ushort ApplyKindAddRegion = 81;
     public const ushort ApplyKindPresentFontDialog = 82;
     public const ushort ApplyKindListFontFaces = 83;
+    public const ushort ApplyKindCreateVoice = 84;
+    public const ushort ApplyKindReleaseVoice = 85;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -675,6 +685,7 @@ static class KayaWire
     public const ushort OccKindDocumentsDetached = 68;
     public const ushort OccKindFontDialogResult = 69;
     public const ushort OccKindFontFaces = 70;
+    public const ushort OccKindVoiceChanged = 71;
 
     /// A blob value: the u64 handle from kaya_blob_register, consumed
     /// by the next submit; the bytes never ride the record stream.
@@ -1705,6 +1716,22 @@ static class KayaWire
         var w = Begin(out var stream);
         EncodeValue(w, family);
         return Finish(stream, w, TxKindListFontFaces);
+    }
+
+    /// Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed.
+    public static byte[] TxCreateVoice(ulong voice)
+    {
+        var w = Begin(out var stream);
+        w.Write(voice);
+        return Finish(stream, w, TxKindCreateVoice);
+    }
+
+    /// Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows.
+    public static byte[] TxReleaseVoice(ulong voice)
+    {
+        var w = Begin(out var stream);
+        w.Write(voice);
+        return Finish(stream, w, TxKindReleaseVoice);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -4309,7 +4336,7 @@ static class KayaWire
         keys = new List<object>();
         payload = null;
         kind = BitConverter.ToUInt16(rec, 4);
-        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected && kind != OccKindDocumentSelected && kind != OccKindDocumentCloseRequested && kind != OccKindDocumentsCloseRequested && kind != OccKindDocumentClosed && kind != OccKindNewDocumentRequested && kind != OccKindDocumentMoved && kind != OccKindDocumentsDetached && kind != OccKindFontDialogResult && kind != OccKindFontFaces)
+        if (kind != OccKindButtonClicked && kind != OccKindTextChanged && kind != OccKindToggled && kind != OccKindValueChanged && kind != OccKindCloseRequested && kind != OccKindWindowClosed && kind != OccKindAlertResult && kind != OccKindEntryPopped && kind != OccKindBackRequested && kind != OccKindSectionSelected && kind != OccKindMenuActivated && kind != OccKindMenuToggled && kind != OccKindMenuValueChanged && kind != OccKindFileDialogResult && kind != OccKindClipboardResult && kind != OccKindPasted && kind != OccKindUndone && kind != OccKindRedone && kind != OccKindSortRequested && kind != OccKindDrawRequested && kind != OccKindTick && kind != OccKindDropped && kind != OccKindDragEnded && kind != OccKindDateChanged && kind != OccKindTimeChanged && kind != OccKindValueCommitted && kind != OccKindNotificationResult && kind != OccKindLinkOpened && kind != OccKindTextEdited && kind != OccKindTextFormatted && kind != OccKindSheetDismissed && kind != OccKindDismissRequested && kind != OccKindSubmitted && kind != OccKindNotificationReplied && kind != OccKindFullscreenChanged && kind != OccKindColorChanged && kind != OccKindRangeChanged && kind != OccKindRangeCommitted && kind != OccKindPlayerChanged && kind != OccKindPlayerPosition && kind != OccKindSeekCompleted && kind != OccKindSessionAction && kind != OccKindPlayerTracks && kind != OccKindCaptionCue && kind != OccKindVideoVisibility && kind != OccKindReaderFrame && kind != OccKindReaderProgress && kind != OccKindReaderPeaks && kind != OccKindReaderDone && kind != OccKindImageLoaded && kind != OccKindCaptureChanged && kind != OccKindCapturePermission && kind != OccKindCaptureDevices && kind != OccKindCaptureOverrun && kind != OccKindToastResult && kind != OccKindImageNeeded && kind != OccKindImageReleased && kind != OccKindActivated && kind != OccKindSelectionChanged && kind != OccKindFontFamilies && kind != OccKindTextSelected && kind != OccKindDocumentSelected && kind != OccKindDocumentCloseRequested && kind != OccKindDocumentsCloseRequested && kind != OccKindDocumentClosed && kind != OccKindNewDocumentRequested && kind != OccKindDocumentMoved && kind != OccKindDocumentsDetached && kind != OccKindFontDialogResult && kind != OccKindFontFaces && kind != OccKindVoiceChanged)
             return false;
         id = BitConverter.ToUInt64(rec, 8);
         if (kind == OccKindAlertResult)
@@ -4824,6 +4851,30 @@ static class KayaWire
                     }
                     flatAt += 8 + ((vlen + 7) & ~7);
                 }
+            }
+            payload = tail;
+            return true;
+        }
+        if (kind == OccKindVoiceChanged)
+        {
+            // A flat record: its fields in order, into the tail.
+            int flatAt = 8;
+            var tail = new List<object>();
+            flatAt += 8;
+            tail.Add((long)BitConverter.ToUInt32(rec, flatAt));
+            flatAt += 4;
+            flatAt += 4;
+            {
+                uint vtype = BitConverter.ToUInt32(rec, flatAt);
+                int vlen = (int)BitConverter.ToUInt32(rec, flatAt + 4);
+                switch (vtype)
+                {
+                    case ValueBool: tail.Add(rec[flatAt + 8] != 0); break;
+                    case ValueI64: tail.Add(BitConverter.ToInt64(rec, flatAt + 8)); break;
+                    case ValueF64: tail.Add(BitConverter.ToDouble(rec, flatAt + 8)); break;
+                    default: tail.Add(Encoding.UTF8.GetString(rec, flatAt + 8, vlen)); break;
+                }
+                flatAt += 8 + ((vlen + 7) & ~7);
             }
             payload = tail;
             return true;

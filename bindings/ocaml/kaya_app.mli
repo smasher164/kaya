@@ -567,6 +567,16 @@ module Capture_state : sig
   val name : t -> string
 end
 
+(* Where a voice output plays (docs/capture-plan.md §5): [Voice] on the
+   platform's voice path, [Plain] where no echo canceller hears it,
+   [Synthetic] the harness's own engine, [Failed] not at all, [None] until
+   the platform opens it. *)
+module Voice_route : sig
+  type t = None | Voice | Plain | Synthetic | Failed
+
+  val name : t -> string
+end
+
 module Capture_failure : sig
   type t = Denied | Not_found | In_use | Disconnected | Unsupported | Hardware_error | Timeout
 
@@ -1466,6 +1476,46 @@ val video_capture :
   ?bleed:bool ->
   ?a11y_hint:string ->
   ?fit:Fit.t -> ?aspect:int * int -> capture:capture -> unit -> widget
+
+(* A voice output (docs/capture-plan.md §5): it plays what [voice_write]
+   writes on the platform's voice path, where its echo canceller hears it;
+   [on_route] hears the route the platform opened it on and what the
+   backend measured. *)
+type voice
+
+val voice : ?on_route:(Voice_route.t -> string -> unit) -> unit -> voice
+
+(* Stop and forget a voice output; what it still holds is dropped. *)
+val release_voice : voice -> unit
+
+(* A voice output's route as last heard: [None] until the platform opens it. *)
+val voice_route : app -> voice -> Voice_route.t
+
+(* Queue 48 kHz mono s16 samples for the platform's voice path; past 200 ms
+   ahead of it the oldest are dropped. False once released. Any thread; no
+   transaction. *)
+val voice_write : voice -> samples -> bool
+
+(* A surface (docs/capture-plan.md §5): a rectangle showing the frames
+   [surface_submit] submits, the last one kept; half their size until laid
+   out otherwise, 320x240 before the first. Live zone only. *)
+val surface :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?bleed:bool ->
+  ?a11y_hint:string ->
+  ?fit:Fit.t -> ?aspect:int * int -> unit -> widget
+
+(* Show an NV12 frame on a surface once its display clock next ticks,
+   replacing any frame not yet shown; the planes are copied before it
+   returns. False when the surface is gone. Any thread; no transaction. *)
+val surface_submit : widget -> Capture_frame.t -> bool
 
 (* A media reader on a source. *)
 val reader : Media_source.t -> reader

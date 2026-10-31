@@ -2153,6 +2153,7 @@ object KayaSceneModel {
     val colorPickers = ArrayList<KayaNode>()
     val ranges = ArrayList<KayaNode>()
     val videos = ArrayList<KayaNode>()
+    val surfaces = ArrayList<KayaNode>()
     val secureFields = ArrayList<KayaNode>()
     val segmenteds = ArrayList<KayaNode>()
     val expanders = ArrayList<KayaNode>()
@@ -2163,7 +2164,7 @@ object KayaSceneModel {
         buttons, checkboxes, labels, entryWidgets, sliders, images, columns, rows, scrolls,
         progresses, selects, radios, grids, textareas, canvases, datePickers, timePickers,
         labeleds, searches, numberFields, colorPickers, ranges, videos, secureFields,
-        segmenteds, expanders,
+        segmenteds, expanders, surfaces,
     )
 
     fun forget(id: Long) {
@@ -3531,7 +3532,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x721721bd5ae0c2aauL
+    private const val SPEC_HASH: ULong = 0xe3377635dd9a81ccuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3682,6 +3683,8 @@ object KayaCompose {
     private const val APPLY_ADD_REGION = 81
     private const val APPLY_PRESENT_FONT_DIALOG = 82
     private const val APPLY_LIST_FONT_FACES = 83
+    private const val APPLY_CREATE_VOICE = 84
+    private const val APPLY_RELEASE_VOICE = 85
     private const val DPROP_TITLE = 1
     private const val DPROP_TOOLTIP = 2
     private const val DPROP_DIRTY = 3
@@ -3836,6 +3839,7 @@ object KayaCompose {
     const val KIND_SECURE_FIELD = 24
     const val KIND_SEGMENTED = 25
     const val KIND_EXPANDER = 26
+    const val KIND_SURFACE = 27
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -4900,6 +4904,7 @@ object KayaCompose {
                         KIND_COLOR_PICKER -> KayaSceneModel.colorPickers.add(node)
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
+                        KIND_SURFACE -> KayaSceneModel.surfaces.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
                         KIND_EXPANDER -> {
@@ -5512,6 +5517,11 @@ object KayaCompose {
                     kayaPresentFontPicker(dialog, codeOnly, faces, readString(b), KayaFontFace(weight, italic, width))
                 }
                 APPLY_LIST_FONT_FACES -> kayaListFontFaces(readString(b))
+                APPLY_CREATE_VOICE -> {
+                    val vid = b.long
+                    kayaVoices[vid] = KayaVoiceOutput(vid)
+                }
+                APPLY_RELEASE_VOICE -> kayaVoices.remove(b.long)?.release()
                 APPLY_ADD_DOCUMENT -> {
                     b.long // window: 0, the one surface on this host
                     val did = b.long
@@ -10443,6 +10453,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             "color_picker" -> KayaSceneModel.colorPickers
             "range" -> KayaSceneModel.ranges
             "video" -> KayaSceneModel.videos
+            "surface" -> KayaSceneModel.surfaces
             "secure_field" -> KayaSceneModel.secureFields
             "segmented" -> KayaSceneModel.segmenteds
             "expander" -> KayaSceneModel.expanders
@@ -12830,6 +12841,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             else -> failures.add("${parts[1]} is drawn $got, wanted $want")
                         }
                     }
+                    "expect_voice" -> {
+                        // docs/capture-plan.md §5: what the platform's voice
+                        // path pulled, by the core's statistics, and its route.
+                        val said = KayaPresent.voiceHarness(parts[1].toIntOrNull() ?: -1, quoted(parts.drop(2)))
+                        if (said.startsWith("1")) observed.add(said.drop(1)) else failures.add(said.drop(1))
+                    }
                     "expect_capture" -> {
                         // docs/capture-plan.md §7: the core's own statistics of what
                         // passed through the capture, never the app's word.
@@ -12869,7 +12886,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         } else {
                             val (box, why) = onUi(activity) {
                                 kayaVideoScreenBox(activity.window.decorView, vnode) to
-                                    if (vnode.videoCapture != 0L) kayaCaptureFramesWhyNot(vnode) else kayaVideoFramesWhyNot(vnode)
+                                    when {
+                                        vnode.kind == KIND_SURFACE -> kayaSurfaceAccount(vnode)
+                                        vnode.videoCapture != 0L -> kayaCaptureFramesWhyNot(vnode)
+                                        else -> kayaVideoFramesWhyNot(vnode)
+                                    }
                             }
                             val frames = why ?: if (vnode.videoCapture != 0L) "the capture's camera is open and handing frames to the core"
                             else "media3 rendered this item's first frame to the view's surface"
@@ -20728,6 +20749,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_SECURE_FIELD -> KayaSecureField(node, a11y, boxFill)
         KayaCompose.KIND_SEGMENTED -> KayaSegmented(node, a11y, boxFill)
         KayaCompose.KIND_EXPANDER -> KayaExpander(node, a11y, boxFill)
+        KayaCompose.KIND_SURFACE -> KayaSurfaceView(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded

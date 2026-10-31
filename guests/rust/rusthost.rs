@@ -154,6 +154,8 @@ mod range;
 mod media;
 #[path = "capture.rs"]
 mod capture;
+#[path = "farend.rs"]
+mod farend;
 
 #[path = "sheet.rs"]
 mod sheet;
@@ -284,6 +286,7 @@ fn app(ctx: kaya::AppCtx) {
             media::app(ctx)
         }
         Ok("capture") | Ok("capture_denied") => capture::app(ctx),
+        Ok("farend") => farend::app(ctx),
         Ok("sheet") => sheet::app(ctx),
         Ok("doctabs") => doctabs::app(ctx),
         Ok("toast") => toast::app(ctx),

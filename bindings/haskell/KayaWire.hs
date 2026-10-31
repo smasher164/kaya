@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0x721721bd5ae0c2aa
+specHash = 0xe3377635dd9a81cc
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -106,6 +106,8 @@ kindSegmented :: Word32
 kindSegmented = 25
 kindExpander :: Word32
 kindExpander = 26
+kindSurface :: Word32
+kindSurface = 27
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32
@@ -750,6 +752,16 @@ captureInterruptionAnotherApp :: Word32
 captureInterruptionAnotherApp = 2
 captureInterruptionSystemPressure :: Word32
 captureInterruptionSystemPressure = 3
+voiceRouteNone :: Word32
+voiceRouteNone = 0
+voiceRouteVoice :: Word32
+voiceRouteVoice = 1
+voiceRoutePlain :: Word32
+voiceRoutePlain = 2
+voiceRouteSynthetic :: Word32
+voiceRouteSynthetic = 3
+voiceRouteFailed :: Word32
+voiceRouteFailed = 4
 captureKindCamera :: Word32
 captureKindCamera = 0
 captureKindMicrophone :: Word32
@@ -1046,6 +1058,10 @@ txKindShowFontDialog :: Word16
 txKindShowFontDialog = 94
 txKindListFontFaces :: Word16
 txKindListFontFaces = 95
+txKindCreateVoice :: Word16
+txKindCreateVoice = 96
+txKindReleaseVoice :: Word16
+txKindReleaseVoice = 97
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1208,6 +1224,10 @@ applyKindPresentFontDialog :: Word16
 applyKindPresentFontDialog = 82
 applyKindListFontFaces :: Word16
 applyKindListFontFaces = 83
+applyKindCreateVoice :: Word16
+applyKindCreateVoice = 84
+applyKindReleaseVoice :: Word16
+applyKindReleaseVoice = 85
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1348,6 +1368,8 @@ occKindFontDialogResult :: Word16
 occKindFontDialogResult = 69
 occKindFontFaces :: Word16
 occKindFontFaces = 70
+occKindVoiceChanged :: Word16
+occKindVoiceChanged = 71
 
 -- Values self-pad to 8: they concatenate inside record bodies.
 encodeValue :: Value -> Builder
@@ -1759,6 +1781,14 @@ txShowFontDialog window dialog codeOnly faces weight italic width family = wireR
 -- List one installed family's faces, answered once by font_faces (docs/font-picker-plan.md §4.4).
 txListFontFaces :: Value -> Builder
 txListFontFaces family = wireRecord txKindListFontFaces (encodeValue family)
+
+-- Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed.
+txCreateVoice :: Word64 -> Builder
+txCreateVoice voice = wireRecord txKindCreateVoice (word64LE voice)
+
+-- Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows.
+txReleaseVoice :: Word64 -> Builder
+txReleaseVoice voice = wireRecord txKindReleaseVoice (word64LE voice)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64
@@ -3776,7 +3806,7 @@ parseOccurrence ::
   IO (Maybe (Word16, Word64, [Value], Maybe Value, Maybe ClipValues, Maybe DropValues, [Value]))
 parseOccurrence redeem rec = do
   kind <- peekByteOff rec 4 :: IO Word16
-  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies && kind /= occKindTextSelected && kind /= occKindDocumentSelected && kind /= occKindDocumentCloseRequested && kind /= occKindDocumentsCloseRequested && kind /= occKindDocumentClosed && kind /= occKindNewDocumentRequested && kind /= occKindDocumentMoved && kind /= occKindDocumentsDetached && kind /= occKindFontDialogResult && kind /= occKindFontFaces
+  if kind /= occKindButtonClicked && kind /= occKindTextChanged && kind /= occKindToggled && kind /= occKindValueChanged && kind /= occKindCloseRequested && kind /= occKindWindowClosed && kind /= occKindAlertResult && kind /= occKindEntryPopped && kind /= occKindBackRequested && kind /= occKindSectionSelected && kind /= occKindMenuActivated && kind /= occKindMenuToggled && kind /= occKindMenuValueChanged && kind /= occKindFileDialogResult && kind /= occKindClipboardResult && kind /= occKindPasted && kind /= occKindUndone && kind /= occKindRedone && kind /= occKindSortRequested && kind /= occKindDrawRequested && kind /= occKindTick && kind /= occKindDropped && kind /= occKindDragEnded && kind /= occKindDateChanged && kind /= occKindTimeChanged && kind /= occKindValueCommitted && kind /= occKindNotificationResult && kind /= occKindLinkOpened && kind /= occKindTextEdited && kind /= occKindTextFormatted && kind /= occKindSheetDismissed && kind /= occKindDismissRequested && kind /= occKindSubmitted && kind /= occKindNotificationReplied && kind /= occKindFullscreenChanged && kind /= occKindColorChanged && kind /= occKindRangeChanged && kind /= occKindRangeCommitted && kind /= occKindPlayerChanged && kind /= occKindPlayerPosition && kind /= occKindSeekCompleted && kind /= occKindSessionAction && kind /= occKindPlayerTracks && kind /= occKindCaptionCue && kind /= occKindVideoVisibility && kind /= occKindReaderFrame && kind /= occKindReaderProgress && kind /= occKindReaderPeaks && kind /= occKindReaderDone && kind /= occKindImageLoaded && kind /= occKindCaptureChanged && kind /= occKindCapturePermission && kind /= occKindCaptureDevices && kind /= occKindCaptureOverrun && kind /= occKindToastResult && kind /= occKindImageNeeded && kind /= occKindImageReleased && kind /= occKindActivated && kind /= occKindSelectionChanged && kind /= occKindFontFamilies && kind /= occKindTextSelected && kind /= occKindDocumentSelected && kind /= occKindDocumentCloseRequested && kind /= occKindDocumentsCloseRequested && kind /= occKindDocumentClosed && kind /= occKindNewDocumentRequested && kind /= occKindDocumentMoved && kind /= occKindDocumentsDetached && kind /= occKindFontDialogResult && kind /= occKindFontFaces && kind /= occKindVoiceChanged
     then return Nothing
     else do
       ident <- peekByteOff rec 8 :: IO Word64
@@ -4028,6 +4058,15 @@ parseOccurrence redeem rec = do
           n1 <- peekByteOff rec at1 :: IO Word32
           (vs1, _) <- readN (fromIntegral n1) (at1 + 8) []
           return (Just (kind, 0, [], Nothing, Nothing, Nothing, concat [[v0], [VI64 (fromIntegral n1)], vs1]))
+      else if kind == occKindVoiceChanged
+        then do
+          -- A flat record: its fields in order, into the tail.
+          let at0 = 16 :: Int
+          w0 <- peekByteOff rec at0 :: IO Word32
+          let at1 = at0 + 4
+          let at2 = at1 + 4
+          (v2, _) <- parseValue rec at2
+          return (Just (kind, ident, [], Nothing, Nothing, Nothing, concat [[VI64 (fromIntegral w0)], [v2]]))
       else if kind == occKindFileDialogResult
         then do
           -- id, a count, then three Values per file (handle,

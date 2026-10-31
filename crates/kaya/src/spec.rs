@@ -2319,6 +2319,28 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             doc: "List one installed family's faces, answered once by \
                   font_faces (docs/font-picker-plan.md §4.4).",
         },
+        Record {
+            kind: 96,
+            name: "create_voice",
+            fields: &[f("voice", FieldTy::U64)],
+            payload: None,
+            doc: "Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held \
+                  object with no place in the layout that plays the 48 kHz \
+                  mono s16 samples the app writes from any thread \
+                  (kaya_voice_write) on the platform's voice path, the one \
+                  its echo canceller takes as the far end. Its id is \
+                  guest-chosen in its own space; a second create of a live \
+                  id is a scene error. Its route reports in voice_changed.",
+        },
+        Record {
+            kind: 97,
+            name: "release_voice",
+            fields: &[f("voice", FieldTy::U64)],
+            payload: None,
+            doc: "Stop and forget a voice output: what it still holds is \
+                  dropped, a later write is refused, and no occurrence of its \
+                  follows.",
+        },
     ],
     apply: &[
         Record {
@@ -3448,6 +3470,23 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             payload: None,
             doc: "Enumerate one family's faces and answer through \
                   kaya_font_faces (docs/font-picker-plan.md §4.4).",
+        },
+        Record {
+            kind: 84,
+            name: "create_voice",
+            fields: &[f("voice", FieldTy::U64)],
+            payload: None,
+            doc: "Open a platform voice output for `voice` on the voice path \
+                  the platform's captures use, pulling its samples through \
+                  kaya_voice_pull and reporting its route through \
+                  kaya_voice_route (docs/capture-plan.md §5).",
+        },
+        Record {
+            kind: 85,
+            name: "release_voice",
+            fields: &[f("voice", FieldTy::U64)],
+            payload: None,
+            doc: "Stop the platform voice output and drop it.",
         },
     ],
     occurrence: &[
@@ -4622,6 +4661,19 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   sorted by weight, then upright first, then width. A family \
                   the platform lacks answers no faces.",
         },
+        Record {
+            kind: 71,
+            name: "voice_changed",
+            fields: &[f("voice", FieldTy::U64), f("route", FieldTy::U32), f("reserved", FieldTy::U32), f("detail", FieldTy::Value)],
+            payload: None,
+            doc: "A voice output's ROUTE (VOICE_ROUTE) as the platform opened \
+                  it (docs/capture-plan.md §5): `voice` on the platform's \
+                  voice path, where its echo canceller hears it; `plain` \
+                  played where no canceller hears it (Linux without an \
+                  echo-cancel module, the one carve-out); `synthetic` the \
+                  harness's in-process engine; `failed` not playing. \
+                  `detail` is what the backend measured, as a Str.",
+        },
     ],
     enums: &[
         EnumSpec {
@@ -4682,6 +4734,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("secure_field", 24),
                 ("segmented", 25),
                 ("expander", 26),
+                // docs/capture-plan.md §5: the peer's picture, NV12 frames
+                // the app submits from any thread (kaya_surface_submit).
+                ("surface", 27),
             ],
         },
         EnumSpec {
@@ -5227,6 +5282,11 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             variants: &[("none", 0), ("background", 1), ("another_app", 2), ("system_pressure", 3)],
         },
         EnumSpec {
+            // docs/capture-plan.md §5: where a voice output plays.
+            name: "voice_route",
+            variants: &[("none", 0), ("voice", 1), ("plain", 2), ("synthetic", 3), ("failed", 4)],
+        },
+        EnumSpec {
             name: "capture_kind",
             variants: &[("camera", 0), ("microphone", 1)],
         },
@@ -5524,6 +5584,8 @@ mod tests {
             ("add_region", wire::TX_ADD_REGION),
             ("show_font_dialog", wire::TX_SHOW_FONT_DIALOG),
             ("list_font_faces", wire::TX_LIST_FONT_FACES),
+            ("create_voice", wire::TX_CREATE_VOICE),
+            ("release_voice", wire::TX_RELEASE_VOICE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5618,6 +5680,8 @@ mod tests {
                 ("add_region", wire::APPLY_ADD_REGION),
                 ("present_font_dialog", wire::APPLY_PRESENT_FONT_DIALOG),
                 ("list_font_faces", wire::APPLY_LIST_FONT_FACES),
+                ("create_voice", wire::APPLY_CREATE_VOICE),
+                ("release_voice", wire::APPLY_RELEASE_VOICE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says
@@ -5697,6 +5761,7 @@ mod tests {
                 ("documents_detached", crate::ring::REC_DOCUMENTS_DETACHED),
                 ("font_dialog_result", crate::ring::REC_FONT_DIALOG_RESULT),
                 ("font_faces", crate::ring::REC_FONT_FACES),
+                ("voice_changed", crate::ring::REC_VOICE_CHANGED),
             ]
         );
     }
@@ -5949,6 +6014,7 @@ mod tests {
                     ("kind", "secure_field") => wire::KIND_SECURE_FIELD,
                     ("kind", "segmented") => wire::KIND_SEGMENTED,
                     ("kind", "expander") => wire::KIND_EXPANDER,
+                    ("kind", "surface") => wire::KIND_SURFACE,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,
@@ -5974,6 +6040,7 @@ mod tests {
                     ("camera_facing", _) => canvas_pin(wire::CAMERA_FACINGS, name),
                     ("capture_command", _) => canvas_pin(wire::CAPTURE_COMMANDS, name),
                     ("cprop", _) => canvas_pin(wire::CPROPS, name),
+                    ("voice_route", _) => canvas_pin(wire::VOICE_ROUTES, name),
                     ("draw_op", _) => canvas_pin(wire::DRAW_OPS, name),
                     ("paint", _) => canvas_pin(wire::PAINTS, name),
                     ("fill_rule", _) => canvas_pin(wire::FILL_RULES, name),
@@ -6284,6 +6351,7 @@ mod tests {
             ("camera_facing", wire::CAMERA_FACINGS),
             ("capture_command", wire::CAPTURE_COMMANDS),
             ("cprop", wire::CPROPS),
+            ("voice_route", wire::VOICE_ROUTES),
         ];
         for (enum_name, table) in pairs {
             let e = SPEC

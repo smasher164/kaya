@@ -226,6 +226,14 @@ object KayaPresent {
     @JvmStatic external fun captureSelfViewBox(width: Int, height: Int, rotation: Int, aspect: Long): IntArray?
     @JvmStatic external fun videoViewBox(width: Int, height: Int, aspect: Long): IntArray?
     @JvmStatic external fun captureHarness(verb: Int, index: Int, text: String): String
+    /** docs/capture-plan.md §5: a surface's newer frame as upright RGBA, its
+     * width, height, rotation and number in [shape]; a voice output's pull,
+     * route and harness read. */
+    @JvmStatic external fun surfaceTake(widget: Long, seen: Long, shape: LongArray): ByteArray?
+    @JvmStatic external fun surfaceDetail(widget: Long): String
+    @JvmStatic external fun voicePull(voice: Long, rate: Int, channels: Int, out: FloatArray, frames: Int): Int
+    @JvmStatic external fun voiceRoute(voice: Long, route: Int, detail: String)
+    @JvmStatic external fun voiceHarness(index: Int, text: String): String
 
     /** Emit a column-header click: [tag] is the sort tag delivered
      * with the container's SET_COLUMN_HEADERS record, verbatim;

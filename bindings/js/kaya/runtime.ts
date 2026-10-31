@@ -78,6 +78,10 @@ type Floor = {
   captureListen(capture: number, kind: number, cb: ((frame: CaptureFrameRaw) => void) | ((chunk: Int16Array, timestampNs: bigint) => void) | null): void;
   captureDrop(capture: number): void;
   captureTestCall(capture: number): void;
+  // The far end (docs/capture-plan.md §5): a surface's NV12 frame and a
+  // voice output's s16 samples (their bytes), copied before the call returns.
+  surfaceSubmit(widget: number, width: number, height: number, y: Uint8Array, yStride: number, uv: Uint8Array, uvStride: number, timestampNs: number, rotation: number): boolean;
+  voiceWrite(voice: number, samples: Uint8Array): boolean;
   startPump(cb: (record: Uint8Array | null) => void): void;
   exit(code: number): never;
 };
@@ -457,6 +461,16 @@ export function captureListen(kind: number, cb: ((frame: CaptureFrameRaw) => voi
 export function postToApp(message: unknown): void {
   if (CAPTURE_WORKER_OF === null || parentPort === null) throw new Error("kaya: postToApp is a capture worker's way to the app thread — on the app thread, call the handler or app.post(fn)");
   parentPort.postMessage(message);
+}
+
+/** Any thread: one NV12 frame onto a surface (docs/capture-plan.md §5). */
+export function surfaceSubmit(widget: number, frame: CaptureFrameRaw): boolean {
+  return lib.surfaceSubmit(widget, frame.width, frame.height, frame.y, frame.yStride, frame.uv, frame.uvStride, Number(frame.timestampNs), frame.rotation);
+}
+
+/** Any thread: 48 kHz mono s16 samples onto a voice output. */
+export function voiceWrite(voice: number, samples: Int16Array): boolean {
+  return lib.voiceWrite(voice, new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength));
 }
 
 /** On the app thread: forget a released capture's listeners. */

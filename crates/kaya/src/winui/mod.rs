@@ -10,6 +10,7 @@
 mod bindings;
 mod capture;
 mod media;
+mod voice;
 mod reader;
 mod order;
 mod skin;
@@ -16530,6 +16531,12 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 // platform's own — the TextBox template's `DeleteButton` —
                 // and AutoSuggestBox is refused, both measured
                 // (docs/measurements/search-winui-2026-09-06.md).
+                WidgetKind::Surface => {
+                    let video = media::create_surface(core, id.0)?;
+                    let native = NativeWidget::Video { host: video.host.clone(), ax: video.ax.clone() };
+                    media::register_video(core, id.0, video);
+                    native
+                }
                 WidgetKind::Video => {
                     let video = media::create_video(core, id.0)?;
                     let native = NativeWidget::Video { host: video.host.clone(), ax: video.ax.clone() };
@@ -18232,6 +18239,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             doctabs::add_region(core, window.0, region.0, edge)
         }
         ApplyOp::SetVideoCapture { widget, capture } => media::set_video_capture(core, widget.0, capture.map(|c| c.0))?,
+        ApplyOp::CreateVoice(v) => voice::create(v.0),
+        ApplyOp::ReleaseVoice(v) => voice::release(v.0),
         ApplyOp::SetSession { player, offered, playback_state, title, artist, album, artwork } => {
             media::set_session(
                 core,
@@ -23432,6 +23441,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::Search => core.search_ids.get(i).copied(),
         K::Range => core.range_ids.get(i).copied(),
         K::Video => core.media.video_ids.get(i).copied(),
+        K::Surface => core.media.surface_ids.get(i).copied(),
         K::SecureField => core.secure_ids.get(i).copied(),
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.get(i).copied(),
@@ -23733,6 +23743,7 @@ fn target_element(
         K::Search => nth!(core.searches),
         K::Range => nth!(core.ranges),
         K::Video => nth!(media::elements(core)),
+        K::Surface => nth!(media::surface_elements(core)),
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
         K::Expander => nth!(core.expanders),
@@ -23859,6 +23870,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::Search => core.search_ids.clone(),
         K::Range => core.range_ids.clone(),
         K::Video => core.media.video_ids.clone(),
+        K::Surface => core.media.surface_ids.clone(),
         K::SecureField => core.secure_ids.clone(),
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.clone(),
@@ -27748,6 +27760,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::Search => find(core, K::Search, &core.searches, &id),
                 K::Range => find(core, K::Range, &core.ranges, &id),
                 K::Video => find(core, K::Video, &media::elements(core), &id),
+                K::Surface => find(core, K::Surface, &media::surface_elements(core), &id),
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
                 K::Expander => find(core, K::Expander, &core.expanders, &id),
@@ -29010,7 +29023,7 @@ impl crate::harness::Stage for WinUiStage {
     /// every read (docs/media-plan.md §6).
     fn video_ink(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(widget) = media::stage::video_at(core, target.index) else {
+            let Some(widget) = media::stage::picture_at(core, target) else {
                 return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
             };
             let Some(host) = media::stage::host_of(core, widget) else {
@@ -29048,7 +29061,7 @@ impl crate::harness::Stage for WinUiStage {
     /// `PrintWindow(PW_RENDERFULLCONTENT)` print video_ink reads.
     fn video_ground(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(widget) = media::stage::video_at(core, target.index) else {
+            let Some(widget) = media::stage::picture_at(core, target) else {
                 return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
             };
             let Some(host) = media::stage::host_of(core, widget) else {
@@ -29074,7 +29087,7 @@ impl crate::harness::Stage for WinUiStage {
     /// The box's top-left corner, out of the same print video_ink reads.
     fn video_corner(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(widget) = media::stage::video_at(core, target.index) else {
+            let Some(widget) = media::stage::picture_at(core, target) else {
                 return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
             };
             let Some(host) = media::stage::host_of(core, widget) else {
@@ -29095,7 +29108,7 @@ impl crate::harness::Stage for WinUiStage {
     /// expect_video_box's read: the host's laid-out size in DIPs, the view's box.
     fn video_box(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            let Some(widget) = media::stage::video_at(core, target.index) else {
+            let Some(widget) = media::stage::picture_at(core, target) else {
                 return Ok(format!("<this window holds {} video views>", core.media.video_ids.len()));
             };
             let Some(host) = media::stage::host_of(core, widget) else {
@@ -29110,7 +29123,7 @@ impl crate::harness::Stage for WinUiStage {
     fn ax_action(&self, target: crate::harness::Target, name: &str) -> Result<(), String> {
         let name = name.to_owned();
         Self::on_ui_mut(move |core| {
-            let Some(widget) = media::stage::video_at(core, target.index) else {
+            let Some(widget) = media::stage::picture_at(core, target) else {
                 return Ok(Err(format!("this window holds {} video views", core.media.video_ids.len())));
             };
             Ok(media::stage::ax_action(core, widget, &name))
@@ -29160,7 +29173,7 @@ impl crate::harness::Stage for WinUiStage {
 
     fn caption(&self, target: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
-            Ok(media::stage::video_at(core, target.index).map_or_else(String::new, |w| media::stage::caption(core, w)))
+            Ok(media::stage::picture_at(core, target).map_or_else(String::new, |w| media::stage::caption(core, w)))
         })
         .unwrap_or_default()
     }

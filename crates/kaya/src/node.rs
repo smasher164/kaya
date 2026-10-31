@@ -195,6 +195,10 @@ pub unsafe extern "C" fn napi_register_module_v1(env: Env, exports: Value) -> Va
         ("captureListen", capture_listen),
         ("captureDrop", capture_drop),
         ("captureTestCall", capture_test_call),
+        // The far end (docs/capture-plan.md §5): a surface's frame and a
+        // voice output's samples, copied by the core before it returns.
+        ("surfaceSubmit", surface_submit),
+        ("voiceWrite", voice_write),
         ("startPump", start_pump),
         ("exit", exit),
     ];
@@ -376,6 +380,42 @@ unsafe extern "C" fn submit(env: Env, info: CbInfo) -> Value {
     let bytes = try_or_throw!(env, unsafe { bytes_arg(env, v, "submit") });
     unsafe { capi::kaya_submit(bytes.as_ptr(), bytes.len()) };
     unsafe { undefined(env) }
+}
+
+/// `surfaceSubmit(widget, width, height, y, yStride, uv, uvStride,
+/// timestampNs, rotation)`: one NV12 frame, the planes Uint8Arrays.
+unsafe extern "C" fn surface_submit(env: Env, info: CbInfo) -> Value {
+    let [w, width, height, y, y_stride, uv, uv_stride, at, rotation] = unsafe { args::<9>(env, info) };
+    let n = |v, what| unsafe { u64_arg(env, v, what) };
+    let widget = try_or_throw!(env, n(w, "surfaceSubmit's surface"));
+    let width = try_or_throw!(env, n(width, "surfaceSubmit's width")) as u32;
+    let height = try_or_throw!(env, n(height, "surfaceSubmit's height")) as u32;
+    let y_stride = try_or_throw!(env, n(y_stride, "surfaceSubmit's yStride")) as u32;
+    let uv_stride = try_or_throw!(env, n(uv_stride, "surfaceSubmit's uvStride")) as u32;
+    let at = try_or_throw!(env, n(at, "surfaceSubmit's timestampNs"));
+    let rotation = try_or_throw!(env, n(rotation, "surfaceSubmit's rotation")) as u32;
+    let y = try_or_throw!(env, unsafe { bytes_arg(env, y, "surfaceSubmit's y") });
+    let uv = try_or_throw!(env, unsafe { bytes_arg(env, uv, "surfaceSubmit's uv") });
+    if (y.len() as u64) < u64::from(y_stride) * u64::from(height) || (uv.len() as u64) < u64::from(uv_stride) * u64::from(height / 2) {
+        return unsafe {
+            throw(env, "kaya: a surface frame's planes are shorter than its strides and height say (docs/capture-plan.md §4)")
+        };
+    }
+    let ok = unsafe {
+        capi::kaya_surface_submit(widget, width, height, y.as_ptr(), y_stride, uv.as_ptr(), uv_stride, at, rotation)
+    };
+    unsafe { boolean(env, ok == 1) }
+}
+
+/// `voiceWrite(voice, bytes)`: 48 kHz mono s16 samples, their bytes as a
+/// Uint8Array over the app's Int16Array.
+unsafe extern "C" fn voice_write(env: Env, info: CbInfo) -> Value {
+    let [v, bytes] = unsafe { args::<2>(env, info) };
+    let voice = try_or_throw!(env, unsafe { u64_arg(env, v, "voiceWrite's voice") });
+    let bytes = try_or_throw!(env, unsafe { bytes_arg(env, bytes, "voiceWrite's samples") });
+    let samples: Vec<i16> = bytes.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]])).collect();
+    let ok = unsafe { capi::kaya_voice_write(voice, samples.as_ptr(), samples.len()) };
+    unsafe { boolean(env, ok == 1) }
 }
 
 unsafe extern "C" fn blob_register(env: Env, info: CbInfo) -> Value {

@@ -159,6 +159,13 @@ object KayaRing {
      * capture thread; off drops it. */
     @JvmStatic external fun captureOnFrame(capture: Long, on: Boolean)
     @JvmStatic external fun captureOnSamples(capture: Long, on: Boolean)
+    /** The far end (docs/capture-plan.md §5): a surface's NV12 frame and a
+     * voice output's samples, any thread, copied before the call returns. */
+    @JvmStatic external fun surfaceSubmit(
+        widget: Long, width: Int, height: Int, y: ByteArray, yStride: Int,
+        uv: ByteArray, uvStride: Int, timestampNs: Long, rotation: Int,
+    ): Boolean
+    @JvmStatic external fun voiceWrite(voice: Long, samples: ShortArray, count: Int): Boolean
 
     @JvmStatic external fun prefGetI64(key: ByteArray): LongArray?
 

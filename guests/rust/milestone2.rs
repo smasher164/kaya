@@ -130,6 +130,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             | Occurrence::CapturePermission { .. }
             | Occurrence::CaptureDevices { .. }
             | Occurrence::CaptureOverrun { .. }
+            | Occurrence::VoiceChanged { .. }
             | Occurrence::Pasted { .. }
             | Occurrence::InstancePasted { .. }
             | Occurrence::Dropped { .. }

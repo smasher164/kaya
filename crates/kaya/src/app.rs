@@ -16,9 +16,11 @@ use std::sync::{Arc, Mutex};
 mod tasks;
 mod media;
 mod capture;
+mod farend;
 mod images;
 pub use images::RowImages;
 pub use capture::{CaptureReading, CaptureRef};
+pub use farend::{SurfaceFrames, VoiceWriter};
 pub use media::{can_play, Frame, MediaSource, PlayerReading, PlayerRef, ReadError, SessionRef};
 pub use tasks::{
     AlertFutureRef, ClipboardFutureRef, DialogFuture, FileFutureRef, FontFutureRef, SaveFutureRef, TaskOutcome, TaskScope,
@@ -1344,6 +1346,10 @@ pub struct AppCtx {
     captures: RefCell<HashMap<u64, CaptureReading>>,
     capture_permissions: RefCell<HashMap<crate::protocol::CaptureKind, crate::protocol::Permission>>,
     capture_devices: RefCell<Vec<crate::protocol::CaptureDevice>>,
+    /// docs/capture-plan.md §5: voice outputs in their own id space, and
+    /// each one's route as last heard.
+    next_voice: Cell<u64>,
+    voices: RefCell<HashMap<u64, crate::protocol::VoiceRoute>>,
 }
 
 impl AppCtx {
@@ -1389,6 +1395,8 @@ impl AppCtx {
             captures: RefCell::new(HashMap::new()),
             capture_permissions: RefCell::new(HashMap::new()),
             capture_devices: RefCell::new(Vec::new()),
+            next_voice: Cell::new(1),
+            voices: RefCell::new(HashMap::new()),
         }
     }
 
@@ -1465,6 +1473,7 @@ impl AppCtx {
                         Occurrence::CaptureChanged { .. }
                         | Occurrence::CapturePermission { .. }
                         | Occurrence::CaptureDevices { .. } => self.absorb_capture(&occ),
+                        Occurrence::VoiceChanged { .. } => self.absorb_voice(&occ),
                         _ => {}
                     }
                     return occ;
@@ -4279,6 +4288,15 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// A surface (docs/capture-plan.md §5): a rectangle showing the frames
+    /// the app submits through [`AppCtx::surface_frames`], the last one
+    /// kept; half their size until laid out otherwise, 320x240 before the
+    /// first. Live zone only.
+    pub fn surface(&mut self) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Surface);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// A colour picker holding `color` (docs/color-picker-plan.md): the
     /// platform's swatch, opening its colour surface. Settled choices
     /// arrive through `on_color`; `.alpha(true)` allows translucency.
@@ -5964,6 +5982,8 @@ pub struct Messages<M> {
     permission: RefCell<Option<Box<dyn Fn(crate::protocol::CaptureKind, crate::protocol::Permission) -> M>>>,
     #[allow(clippy::type_complexity)]
     capture_devices: RefCell<Option<Box<dyn Fn(&[crate::protocol::CaptureDevice]) -> M>>>,
+    /// docs/capture-plan.md §5: per voice output.
+    voices: RefCell<HashMap<u64, Vec<Mapper<M>>>>,
     #[allow(clippy::type_complexity)]
     font_families: RefCell<Option<Box<dyn Fn(&[String]) -> M>>>,
     #[allow(clippy::type_complexity)]
@@ -6111,6 +6131,7 @@ impl<M> Messages<M> {
             captures: RefCell::new(HashMap::new()),
             permission: RefCell::new(None),
             capture_devices: RefCell::new(None),
+            voices: RefCell::new(HashMap::new()),
             font_families: RefCell::new(None),
             font_faces: RefCell::new(None),
             font_dialogs: RefCell::new(HashMap::new()),
@@ -7255,6 +7276,7 @@ impl<M> Messages<M> {
                 | Occurrence::CapturePermission { .. }
                 | Occurrence::CaptureDevices { .. }
                 | Occurrence::CaptureOverrun { .. } => self.dispatch_capture(&occ),
+                Occurrence::VoiceChanged { .. } => self.dispatch_voice(&occ),
                 Occurrence::FontFamilies { families } => {
                     self.font_families.borrow().as_ref().map(|f| f(families))
                 }
@@ -11366,7 +11388,8 @@ mod tests {
                     | Occurrence::CaptureChanged { .. }
                     | Occurrence::CapturePermission { .. }
                     | Occurrence::CaptureDevices { .. }
-                    | Occurrence::CaptureOverrun { .. } => {}
+                    | Occurrence::CaptureOverrun { .. }
+                    | Occurrence::VoiceChanged { .. } => {}
                     Occurrence::FontFamilies { .. } => {}
                     Occurrence::FontFaces { .. } | Occurrence::FontDialogResult { .. } => {}
                     Occurrence::LinkOpened { .. } => {}

@@ -178,5 +178,13 @@ public final class KayaRing {
 
     public static native void captureOnSamples(long capture, boolean on);
 
+    /** kaya_surface_submit / kaya_voice_write (docs/capture-plan.md §5): a
+     * surface's NV12 frame and a voice output's samples, any thread, copied
+     * before the call returns; false when the target is gone. */
+    public static native boolean surfaceSubmit(long widget, int width, int height, byte[] y, int yStride,
+        byte[] uv, int uvStride, long timestampNs, int rotation);
+
+    public static native boolean voiceWrite(long voice, short[] samples, int count);
+
     private KayaRing() {}
 }

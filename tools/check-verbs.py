@@ -5545,7 +5545,8 @@ def self_view_natural(texts=None):
         need("video_layout", "fn request_mode(", "gtk4::SizeRequestMode::HeightForWidth",
              why="the GTK video view's height does not follow its width")
         need("video_layout", "fn measure(", "return (0, w, -1, -1);",
-             "Some(frames) => crate::media::VideoPicture::SelfView { frames, rotation: 0 },",
+             "Some(frames) => crate::media::VideoPicture::SelfView "
+             "{ frames, rotation: self.rotation.get() },",
              "crate::media::video_view_height(", "(at, at, -1, -1)",
              why="the GTK video view reports a minimum or a height of its own")
     flow = brace_body(t["gtk_media"], "impl LayoutManagerImpl for FlowLayoutInner {")
@@ -5630,7 +5631,7 @@ for key, pattern, repl, label in (
     ("winui", r"\n\s*extent\.SetChild\(&frame\)\?;", "",
      "WinUI's extent not scaled"),
     ("gtk_media", r"Some\(frames\) => crate::media::VideoPicture::SelfView "
-                  r"\{ frames, rotation: 0 \},",
+                  r"\{ frames, rotation: self\.rotation\.get\(\) \},",
      "Some(frames) => crate::media::VideoPicture::Player(frames),",
      "GTK at the frames' full size"),
     ("gtk_media", r"(\"KayaVideoLayout\";[\s\S]*?)gtk4::SizeRequestMode::HeightForWidth",

@@ -189,6 +189,9 @@ pub const KAYA_OCCURRENCE_FONT_DIALOG_RESULT: u16 = 69;
 /// FONT_FACES { Value family; Values: weight, italic, width, name a face }
 /// (docs/font-picker-plan.md §4.4).
 pub const KAYA_OCCURRENCE_FONT_FACES: u16 = 70;
+/// VOICE_CHANGED { u64 voice; u32 route; u32 reserved; Value detail }
+/// (docs/capture-plan.md §5).
+pub const KAYA_OCCURRENCE_VOICE_CHANGED: u16 = 71;
 const _: () = assert!(
     KAYA_OCCURRENCE_PAD == ring::REC_PAD
         && KAYA_OCCURRENCE_BUTTON_CLICKED == ring::REC_BUTTON_CLICKED
@@ -240,6 +243,7 @@ const _: () = assert!(
         && KAYA_OCCURRENCE_DOCUMENTS_DETACHED == ring::REC_DOCUMENTS_DETACHED
         && KAYA_OCCURRENCE_FONT_DIALOG_RESULT == ring::REC_FONT_DIALOG_RESULT
         && KAYA_OCCURRENCE_FONT_FACES == ring::REC_FONT_FACES
+        && KAYA_OCCURRENCE_VOICE_CHANGED == ring::REC_VOICE_CHANGED
         && KAYA_OCCURRENCE_SECTION_SELECTED == ring::REC_SECTION_SELECTED
         && KAYA_OCCURRENCE_MENU_ACTIVATED == ring::REC_MENU_ACTIVATED
         && KAYA_OCCURRENCE_MENU_TOGGLED == ring::REC_MENU_TOGGLED
@@ -406,6 +410,9 @@ pub const KAYA_TX_ADD_REGION: u16 = 93;
 pub const KAYA_TX_SHOW_FONT_DIALOG: u16 = 94;
 /// LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
 pub const KAYA_TX_LIST_FONT_FACES: u16 = 95;
+/// CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
+pub const KAYA_TX_CREATE_VOICE: u16 = 96;
+pub const KAYA_TX_RELEASE_VOICE: u16 = 97;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -761,6 +768,8 @@ const _: () = assert!(
         && KAYA_TX_ADD_REGION == wire::TX_ADD_REGION
         && KAYA_TX_SHOW_FONT_DIALOG == wire::TX_SHOW_FONT_DIALOG
         && KAYA_TX_LIST_FONT_FACES == wire::TX_LIST_FONT_FACES
+        && KAYA_TX_CREATE_VOICE == wire::TX_CREATE_VOICE
+        && KAYA_TX_RELEASE_VOICE == wire::TX_RELEASE_VOICE
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -882,6 +891,9 @@ pub const KAYA_APPLY_ADD_REGION: u16 = 81;
 pub const KAYA_APPLY_PRESENT_FONT_DIALOG: u16 = 82;
 /// LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
 pub const KAYA_APPLY_LIST_FONT_FACES: u16 = 83;
+/// CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
+pub const KAYA_APPLY_CREATE_VOICE: u16 = 84;
+pub const KAYA_APPLY_RELEASE_VOICE: u16 = 85;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1037,6 +1049,8 @@ const _: () = assert!(
         && KAYA_APPLY_ADD_REGION == wire::APPLY_ADD_REGION
         && KAYA_APPLY_PRESENT_FONT_DIALOG == wire::APPLY_PRESENT_FONT_DIALOG
         && KAYA_APPLY_LIST_FONT_FACES == wire::APPLY_LIST_FONT_FACES
+        && KAYA_APPLY_CREATE_VOICE == wire::APPLY_CREATE_VOICE
+        && KAYA_APPLY_RELEASE_VOICE == wire::APPLY_RELEASE_VOICE
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -1101,6 +1115,7 @@ pub const KAYA_KIND_VIDEO: u32 = 23;
 pub const KAYA_KIND_SECURE_FIELD: u32 = 24;
 pub const KAYA_KIND_SEGMENTED: u32 = 25;
 pub const KAYA_KIND_EXPANDER: u32 = 26;
+pub const KAYA_KIND_SURFACE: u32 = 27;
 const _: () = assert!(
     KAYA_KIND_COLUMN == wire::KIND_COLUMN
         && KAYA_KIND_BUTTON == wire::KIND_BUTTON
@@ -1128,6 +1143,7 @@ const _: () = assert!(
         && KAYA_KIND_SECURE_FIELD == wire::KIND_SECURE_FIELD
         && KAYA_KIND_SEGMENTED == wire::KIND_SEGMENTED
         && KAYA_KIND_EXPANDER == wire::KIND_EXPANDER
+        && KAYA_KIND_SURFACE == wire::KIND_SURFACE
 );
 // Completeness, not just agreement: a value pin cannot see a FORGOTTEN
 // export (docs/traps.md, "A value pin cannot see a FORGOTTEN sibling").
@@ -1145,7 +1161,7 @@ const _: () = {
         n
     };
     assert!(
-        kinds == 26,
+        kinds == 27,
         "the spec kind enum grew: export the new KAYA_KIND_* above, extend the pin, and bump          this count"
     );
 };
@@ -1476,7 +1492,7 @@ const _: () = assert!(
 // Completeness for the occurrence exports (docs/traps.md): a new spec
 // occurrence trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::SPEC.occurrence.len() == 70,
+    crate::spec::SPEC.occurrence.len() == 71,
     "spec occurrences grew: export the new KAYA_OCCURRENCE_* above, extend the pin, and \
      bump this count"
 );
@@ -2026,11 +2042,20 @@ pub const KAYA_CPROP_WIDTH: u32 = 3;
 pub const KAYA_CPROP_HEIGHT: u32 = 4;
 pub const KAYA_CPROP_FRAME_RATE: u32 = 5;
 pub const KAYA_CPROP_MUTED: u32 = 6;
+/// Where a voice output plays (docs/capture-plan.md §5).
+pub const KAYA_VOICE_ROUTE_NONE: u32 = 0;
+pub const KAYA_VOICE_ROUTE_VOICE: u32 = 1;
+pub const KAYA_VOICE_ROUTE_PLAIN: u32 = 2;
+pub const KAYA_VOICE_ROUTE_SYNTHETIC: u32 = 3;
+pub const KAYA_VOICE_ROUTE_FAILED: u32 = 4;
 /// How far behind its microphone an app's sample callback falls before
 /// capture_overrun tells it; the samples every callback is handed.
 pub const KAYA_CAPTURE_OVERRUN_MS: u64 = 200;
 pub const KAYA_CAPTURE_SAMPLE_RATE: u32 = 48_000;
 pub const KAYA_CAPTURE_CHUNK: u32 = 480;
+/// How far ahead of the platform a voice output holds the app's samples.
+pub const KAYA_VOICE_QUEUE_MS: u64 = 200;
+const _: () = assert!(KAYA_VOICE_QUEUE_MS == crate::farend::VOICE_QUEUE_MS);
 const _: () = assert!(
     KAYA_CAPTURE_OVERRUN_MS == crate::capture::OVERRUN_MS
         && KAYA_CAPTURE_SAMPLE_RATE == crate::capture::SAMPLE_RATE
@@ -2153,6 +2178,11 @@ const _: () = assert!(
         && vocab_is(wire::CPROPS, "height", KAYA_CPROP_HEIGHT)
         && vocab_is(wire::CPROPS, "frame_rate", KAYA_CPROP_FRAME_RATE)
         && vocab_is(wire::CPROPS, "muted", KAYA_CPROP_MUTED)
+        && vocab_is(wire::VOICE_ROUTES, "none", KAYA_VOICE_ROUTE_NONE)
+        && vocab_is(wire::VOICE_ROUTES, "voice", KAYA_VOICE_ROUTE_VOICE)
+        && vocab_is(wire::VOICE_ROUTES, "plain", KAYA_VOICE_ROUTE_PLAIN)
+        && vocab_is(wire::VOICE_ROUTES, "synthetic", KAYA_VOICE_ROUTE_SYNTHETIC)
+        && vocab_is(wire::VOICE_ROUTES, "failed", KAYA_VOICE_ROUTE_FAILED)
 );
 const _: () = {
     assert!(spec_enum_variants("pprop") == 7, "the spec pprop enum grew: export KAYA_PPROP_*");
@@ -2196,6 +2226,7 @@ const _: () = {
     assert!(spec_enum_variants("camera_facing") == 4, "the spec camera_facing enum grew: export KAYA_CAMERA_FACING_*");
     assert!(spec_enum_variants("capture_command") == 2, "the spec capture_command enum grew: export KAYA_CAPTURE_COMMAND_*");
     assert!(spec_enum_variants("cprop") == 6, "the spec cprop enum grew: export KAYA_CPROP_*");
+    assert!(spec_enum_variants("voice_route") == 5, "the spec voice_route enum grew: export KAYA_VOICE_ROUTE_*");
 };
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
@@ -6332,6 +6363,204 @@ pub unsafe extern "C" fn kaya_capture_on_samples(
     crate::capture::set_sample_sink(crate::protocol::CaptureId(capture), sink);
 }
 
+/// Guest side, FROM ANY THREAD (docs/capture-plan.md §5): show one NV12
+/// frame on surface `widget` (video-range BT.601, the Y plane `y_stride`
+/// bytes a row, the interleaved UV plane `uv_stride` bytes a row at half
+/// resolution; even sides; `rotation` 0, 90, 180 or 270 clockwise to stand
+/// it upright). The core copies it, replacing any frame the backend has not
+/// shown; the backend composites it on its display clock and keeps it.
+/// Answers 1, or 0 when `widget` is no live surface and the frame is dropped.
+///
+/// # Safety
+/// `y` must describe `y_stride * height` readable bytes and `uv`
+/// `uv_stride * (height / 2)`, for the call only.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_surface_submit(
+    widget: u64,
+    width: u32,
+    height: u32,
+    y: *const u8,
+    y_stride: u32,
+    uv: *const u8,
+    uv_stride: u32,
+    timestamp_ns: u64,
+    rotation: u32,
+) -> u32 {
+    assert!(!y.is_null() && !uv.is_null(), "kaya_surface_submit: surface {widget}'s planes are NULL");
+    let frame = crate::capture::CaptureFrame {
+        width,
+        height,
+        y: unsafe { std::slice::from_raw_parts(y, y_stride as usize * height as usize) },
+        y_stride,
+        uv: unsafe { std::slice::from_raw_parts(uv, uv_stride as usize * (height / 2) as usize) },
+        uv_stride,
+        timestamp_ns,
+        rotation,
+    };
+    u32::from(crate::farend::submit(crate::protocol::WidgetId(widget), &frame))
+}
+
+/// Presentation side, on the display clock: whether surface `widget` holds
+/// a frame newer than `seen`; 1 with its width, height and rotation in
+/// `out[0..3]` and its number in `out_seq`, else 0.
+///
+/// # Safety
+/// `out` must be writable for 3 u32s and `out_seq` for one u64.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_surface_newer(widget: u64, seen: u64, out: *mut u32, out_seq: *mut u64) -> u32 {
+    match crate::farend::newer(crate::protocol::WidgetId(widget), seen) {
+        Some((w, h, rotation, seq)) => {
+            unsafe {
+                *out = w;
+                *out.add(1) = h;
+                *out.add(2) = rotation;
+                *out_seq = seq;
+            }
+            1
+        }
+        None => 0,
+    }
+}
+
+/// Presentation side: copy surface `widget`'s last frame into the backend's
+/// buffer when it is still `width` x `height`, rows of `y_stride` and
+/// `uv_stride` bytes; answers its number, or 0 when it has none of that size.
+///
+/// # Safety
+/// `y` must be writable for `y_stride * height` bytes and `uv` for
+/// `uv_stride * (height / 2)`.
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn kaya_surface_copy(
+    widget: u64,
+    width: u32,
+    height: u32,
+    y: *mut u8,
+    y_stride: u32,
+    uv: *mut u8,
+    uv_stride: u32,
+) -> u64 {
+    if y.is_null() || uv.is_null() || y_stride < width || uv_stride < width {
+        return 0;
+    }
+    crate::farend::take(crate::protocol::WidgetId(widget), width, height, |f, seq| {
+        for row in 0..height as usize {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    f.y.as_ptr().add(row * width as usize),
+                    y.add(row * y_stride as usize),
+                    width as usize,
+                )
+            };
+        }
+        for row in 0..(height / 2) as usize {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    f.uv.as_ptr().add(row * width as usize),
+                    uv.add(row * uv_stride as usize),
+                    width as usize,
+                )
+            };
+        }
+        seq
+    })
+    .unwrap_or(0)
+}
+
+/// Presentation side: what a surface's pixel read prints beside a miss
+/// (the app's submits and the backend's takes), into `out`; its length.
+///
+/// # Safety
+/// `out` must be writable for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_surface_detail(widget: u64, out: *mut u8, cap: usize) -> usize {
+    let text = crate::farend::surface_detail(crate::protocol::WidgetId(widget));
+    let n = text.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(text.as_ptr(), out, n) };
+    }
+    text.len()
+}
+
+/// Guest side, FROM ANY THREAD (docs/capture-plan.md §5): queue `count`
+/// samples of 48 kHz mono s16 for voice output `voice`; past
+/// KAYA_VOICE_QUEUE_MS ahead of the platform the oldest are dropped.
+/// Answers 1, or 0 when `voice` is not live and they are dropped.
+///
+/// # Safety
+/// `samples` must describe `count` readable i16s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_voice_write(voice: u64, samples: *const i16, count: usize) -> u32 {
+    if samples.is_null() || count == 0 {
+        return u32::from(crate::farend::write(crate::protocol::VoiceId(voice), &[]));
+    }
+    let samples = unsafe { std::slice::from_raw_parts(samples, count) };
+    u32::from(crate::farend::write(crate::protocol::VoiceId(voice), samples))
+}
+
+/// Presentation side, ON THE PLATFORM'S AUDIO THREAD: fill `frames` frames
+/// of interleaved float at `sample_rate` and `channels` from voice output
+/// `voice`, silence where the app wrote nothing; answers how many frames the
+/// app's samples filled.
+///
+/// # Safety
+/// `out` must be writable for `frames * channels` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_voice_pull(voice: u64, sample_rate: u32, channels: u32, out: *mut f32, frames: usize) -> u32 {
+    if out.is_null() || frames == 0 {
+        return 0;
+    }
+    let out = unsafe { std::slice::from_raw_parts_mut(out, frames * channels.max(1) as usize) };
+    crate::farend::pull(crate::protocol::VoiceId(voice), sample_rate, channels, out) as u32
+}
+
+/// Presentation side: voice output `voice` opened on a KAYA_VOICE_ROUTE_*,
+/// `detail` what the backend measured of it.
+///
+/// # Safety
+/// `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_voice_route(voice: u64, route: u32, detail: *const u8, detail_len: usize) {
+    let detail = unsafe { lossy(detail, detail_len) };
+    let route = crate::wire::voice_route_from(route)
+        .unwrap_or_else(|| panic!("kaya_voice_route: {route} is not a KAYA_VOICE_ROUTE_*"));
+    let mut scene_slot = PRESENTATION_SCENE.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(scene) = scene_slot.as_mut() else { return };
+    let published = scene.voice_route(crate::protocol::VoiceId(voice), route, detail);
+    drop(scene_slot);
+    send_occurrences(published);
+}
+
+/// The harness's `expect_voice` for an interpreter: the `index`th live voice
+/// output against `text`; the sentence into `out`, `ok` whether it passed.
+///
+/// # Safety
+/// As kaya_capture_harness.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn kaya_voice_harness(
+    index: u32,
+    text: *const u8,
+    len: usize,
+    out: *mut u8,
+    cap: usize,
+    ok: *mut u8,
+) -> usize {
+    let text = unsafe { lossy(text, len) };
+    let (good, sentence) = match crate::farend::expect(index as usize, &text) {
+        Ok(s) => (1, s),
+        Err(s) => (0, s),
+    };
+    if !ok.is_null() {
+        unsafe { *ok = good };
+    }
+    let n = sentence.len().min(cap);
+    if n > 0 && !out.is_null() {
+        unsafe { std::ptr::copy_nonoverlapping(sentence.as_ptr(), out, n) };
+    }
+    sentence.len()
+}
+
 /// Presentation side: the system's media controls sent a SESSION_ACTION
 /// (`at_ms` for seek_to). THE CORE ROUTES IT (docs/media-plan.md §5): 0
 /// the app handles it and has been told, 1 play, 2 pause and 3 seek to
@@ -7311,10 +7540,82 @@ fn send_occurrences(occurrences: Vec<crate::protocol::Occurrence>) {
             | crate::protocol::Occurrence::ToastResult { .. }
             | crate::protocol::Occurrence::ImageNeeded { .. }
             | crate::protocol::Occurrence::ImageReleased { .. }
-            | crate::protocol::Occurrence::Undone { .. }) => {
+            | crate::protocol::Occurrence::Undone { .. }
+            | crate::protocol::Occurrence::VoiceChanged { .. }) => {
                 crate::protocol::OccSink::Ring(state.ring.clone()).send(other)
             }
-            other => unreachable!(
+            // EXHAUSTIVE ON PURPOSE, no wildcard: a new occurrence fails
+            // `cargo build` here, the moment to decide whether a backend's
+            // report reaches the foreign bindings through this door (the far
+            // end's voice_changed was a runtime unreachable on the Go host,
+            // docs/traps.md).
+            other @ (crate::protocol::Occurrence::ButtonClicked { .. }
+            | crate::protocol::Occurrence::InstanceButtonClicked { .. }
+            | crate::protocol::Occurrence::Activated { .. }
+            | crate::protocol::Occurrence::InstanceActivated { .. }
+            | crate::protocol::Occurrence::SelectionChanged { .. }
+            | crate::protocol::Occurrence::InstanceSelectionChanged { .. }
+            | crate::protocol::Occurrence::TextChanged { .. }
+            | crate::protocol::Occurrence::InstanceTextChanged { .. }
+            | crate::protocol::Occurrence::Submitted { .. }
+            | crate::protocol::Occurrence::InstanceSubmitted { .. }
+            | crate::protocol::Occurrence::TextEdited { .. }
+            | crate::protocol::Occurrence::InstanceTextEdited { .. }
+            | crate::protocol::Occurrence::TextFormatted { .. }
+            | crate::protocol::Occurrence::InstanceTextFormatted { .. }
+            | crate::protocol::Occurrence::Toggled { .. }
+            | crate::protocol::Occurrence::CloseRequested { .. }
+            | crate::protocol::Occurrence::WindowClosed { .. }
+            | crate::protocol::Occurrence::FileDialogResult { .. }
+            | crate::protocol::Occurrence::AlertResult { .. }
+            | crate::protocol::Occurrence::NotificationResult { .. }
+            | crate::protocol::Occurrence::LinkOpened { .. }
+            | crate::protocol::Occurrence::EntryPopped { .. }
+            | crate::protocol::Occurrence::BackRequested { .. }
+            | crate::protocol::Occurrence::SheetDismissed { .. }
+            | crate::protocol::Occurrence::DismissRequested { .. }
+            | crate::protocol::Occurrence::SectionSelected { .. }
+            | crate::protocol::Occurrence::DocumentSelected { .. }
+            | crate::protocol::Occurrence::DocumentCloseRequested { .. }
+            | crate::protocol::Occurrence::DocumentsCloseRequested { .. }
+            | crate::protocol::Occurrence::DocumentClosed { .. }
+            | crate::protocol::Occurrence::NewDocumentRequested { .. }
+            | crate::protocol::Occurrence::DocumentMoved { .. }
+            | crate::protocol::Occurrence::DocumentsDetached { .. }
+            | crate::protocol::Occurrence::FullscreenChanged { .. }
+            | crate::protocol::Occurrence::SortRequested { .. }
+            | crate::protocol::Occurrence::InstanceSortRequested { .. }
+            | crate::protocol::Occurrence::InstanceDrawRequested { .. }
+            | crate::protocol::Occurrence::InstanceTick { .. }
+            | crate::protocol::Occurrence::InstanceToggled { .. }
+            | crate::protocol::Occurrence::ValueChanged { .. }
+            | crate::protocol::Occurrence::InstanceValueChanged { .. }
+            | crate::protocol::Occurrence::ValueCommitted { .. }
+            | crate::protocol::Occurrence::InstanceValueCommitted { .. }
+            | crate::protocol::Occurrence::DateChanged { .. }
+            | crate::protocol::Occurrence::InstanceDateChanged { .. }
+            | crate::protocol::Occurrence::TimeChanged { .. }
+            | crate::protocol::Occurrence::InstanceTimeChanged { .. }
+            | crate::protocol::Occurrence::ColorChanged { .. }
+            | crate::protocol::Occurrence::InstanceColorChanged { .. }
+            | crate::protocol::Occurrence::RangeChanged { .. }
+            | crate::protocol::Occurrence::InstanceRangeChanged { .. }
+            | crate::protocol::Occurrence::FontDialogResult { .. }
+            | crate::protocol::Occurrence::MenuActivated { .. }
+            | crate::protocol::Occurrence::InstanceMenuActivated { .. }
+            | crate::protocol::Occurrence::MenuToggled { .. }
+            | crate::protocol::Occurrence::InstanceMenuToggled { .. }
+            | crate::protocol::Occurrence::MenuValueChanged { .. }
+            | crate::protocol::Occurrence::InstanceMenuValueChanged { .. }
+            | crate::protocol::Occurrence::ClipboardResult { .. }
+            | crate::protocol::Occurrence::Pasted { .. }
+            | crate::protocol::Occurrence::InstancePasted { .. }
+            | crate::protocol::Occurrence::Dropped { .. }
+            | crate::protocol::Occurrence::InstanceDropped { .. }
+            | crate::protocol::Occurrence::DragEnded { .. }
+            | crate::protocol::Occurrence::InstanceDragEnded { .. }
+            | crate::protocol::Occurrence::Redone { .. }
+            | crate::protocol::Occurrence::Shutdown { .. }) => unreachable!(
                 "send_occurrences carries only the canvas asks, range corrections and the media \
                  occurrences: {other:?}"
             ),
@@ -7971,6 +8272,8 @@ mod tests {
             ("add_region", KAYA_TX_ADD_REGION),
             ("show_font_dialog", KAYA_TX_SHOW_FONT_DIALOG),
             ("list_font_faces", KAYA_TX_LIST_FONT_FACES),
+            ("create_voice", KAYA_TX_CREATE_VOICE),
+            ("release_voice", KAYA_TX_RELEASE_VOICE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -8054,6 +8357,8 @@ mod tests {
             ("add_region", KAYA_APPLY_ADD_REGION),
             ("present_font_dialog", KAYA_APPLY_PRESENT_FONT_DIALOG),
             ("list_font_faces", KAYA_APPLY_LIST_FONT_FACES),
+            ("create_voice", KAYA_APPLY_CREATE_VOICE),
+            ("release_voice", KAYA_APPLY_RELEASE_VOICE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

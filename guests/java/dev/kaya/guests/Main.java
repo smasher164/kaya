@@ -256,6 +256,9 @@ public final class Main {
             case "capture_denied":
                 app = Capture::app;
                 break;
+            case "farend":
+                app = Farend::app;
+                break;
             case "tooltips":
                 app = Tooltips::app;
                 break;

@@ -468,6 +468,10 @@ public final class KayaApp {
     // Captures get their own id space (docs/capture-plan.md §2); the
     // mirror each occurrence moves before any handler runs, the handlers.
     private long nextCapture;
+    // Voice outputs get their own id space (docs/capture-plan.md §5).
+    private long nextVoice;
+    private final Map<Long, VoiceRoute> voiceRoutes = new HashMap<>();
+    private final Map<Long, VoiceRouteHandler> voiceHandlers = new HashMap<>();
     private final Map<Long, CaptureReading> captureReadings = new HashMap<>();
     private final Map<CaptureKind, Permission> permissions = new java.util.EnumMap<>(CaptureKind.class);
     private List<CaptureDevice> captureDeviceList = List.of();
@@ -2475,6 +2479,119 @@ public final class KayaApp {
     @FunctionalInterface
     public interface PermissionHandler {
         void accept(Tx tx, CaptureKind kind, Permission permission);
+    }
+
+    /** Where a voice output plays (docs/capture-plan.md §5): VOICE on the
+     * platform's voice path, PLAIN where no echo canceller hears it,
+     * SYNTHETIC the harness's own engine, FAILED not at all, NONE until the
+     * platform opens it. */
+    public enum VoiceRoute {
+        NONE(KayaWire.VOICE_ROUTE_NONE, "none"),
+        VOICE(KayaWire.VOICE_ROUTE_VOICE, "voice"),
+        PLAIN(KayaWire.VOICE_ROUTE_PLAIN, "plain"),
+        SYNTHETIC(KayaWire.VOICE_ROUTE_SYNTHETIC, "synthetic"),
+        FAILED(KayaWire.VOICE_ROUTE_FAILED, "failed");
+
+        final int wire;
+        final String word;
+
+        VoiceRoute(int wire, String word) {
+            this.wire = wire;
+            this.word = word;
+        }
+
+        @Override
+        public String toString() {
+            return word;
+        }
+
+        static VoiceRoute fromWire(long number) {
+            for (VoiceRoute r : values()) {
+                if (r.wire == number) {
+                    return r;
+                }
+            }
+            throw new IllegalStateException("kaya: voice route " + number
+                    + " is not one this build of the Java binding knows");
+        }
+    }
+
+    /** A voice output (docs/capture-plan.md §5): it plays what its
+     * {@link #writer()} writes on the platform's voice path, where its echo
+     * canceller hears it. */
+    public static final class Voice {
+        final long id;
+
+        Voice(long id) {
+            this.id = id;
+        }
+
+        public long id() {
+            return id;
+        }
+
+        /** The sample handle, for the thread the samples arrive on. */
+        public VoiceWriter writer() {
+            return new VoiceWriter(id);
+        }
+    }
+
+    /** Where a voice output's samples go, from any thread. */
+    public static final class VoiceWriter {
+        final long id;
+
+        VoiceWriter(long id) {
+            this.id = id;
+        }
+
+        /** Queue 48 kHz mono s16 samples for the platform's voice path; past
+         * 200 ms ahead of it the oldest are dropped. False once released.
+         * Any thread; no transaction. */
+        public boolean write(short[] samples) {
+            return KayaRing.voiceWrite(id, samples, samples.length);
+        }
+    }
+
+    /** Where a surface's frames go, from any thread
+     * (docs/capture-plan.md §5). */
+    public static final class SurfaceFrames {
+        final long id;
+
+        SurfaceFrames(long id) {
+            this.id = id;
+        }
+
+        /** Show {@code frame} (NV12, as a capture hands one) once the
+         * surface's display clock next ticks, replacing any frame not yet
+         * shown; the planes are copied before it returns. False when the
+         * surface is gone. Any thread; no transaction. */
+        public boolean submit(CaptureFrame frame) {
+            return KayaRing.surfaceSubmit(id, frame.width(), frame.height(), frame.y(), frame.yStride(),
+                    frame.uv(), frame.uvStride(), frame.timestampNs(), frame.rotation());
+        }
+    }
+
+    /** The voice output's route handler: the route and what the backend
+     * measured of it. */
+    @FunctionalInterface
+    public interface VoiceRouteHandler {
+        void accept(Tx tx, VoiceRoute route, String detail);
+    }
+
+    /** A surface's frame handle, for the thread the frames arrive on. */
+    public SurfaceFrames surfaceFrames(Widget surface) {
+        return new SurfaceFrames(surface.id);
+    }
+
+    /** A voice output's route as last heard: NONE until the platform opens
+     * it. */
+    public VoiceRoute voiceRoute(Voice v) {
+        return voiceRoutes.getOrDefault(v.id, VoiceRoute.NONE);
+    }
+
+    /** The route the platform opened the voice output on. */
+    public void onVoiceRoute(Voice v, VoiceRouteHandler handler) {
+        voiceHandlers.put(v.id, handler);
     }
 
     /**
@@ -8768,6 +8885,27 @@ public final class KayaApp {
             return w;
         }
 
+        /** A voice output (docs/capture-plan.md §5): it plays what its
+         * writer writes on the platform's voice path. */
+        public Voice voice() {
+            Voice v = new Voice(++nextVoice);
+            emit(KayaWire.txCreateVoice(v.id));
+            return v;
+        }
+
+        /** Stop and forget a voice output; what it still holds is dropped. */
+        public void releaseVoice(Voice v) {
+            emit(KayaWire.txReleaseVoice(v.id));
+        }
+
+        /** A surface (docs/capture-plan.md §5): a rectangle showing the
+         * frames {@link KayaApp#surfaceFrames} submits, the last one kept;
+         * half their size until laid out otherwise, 320x240 before the
+         * first. Live zone only. */
+        public Widget surface() {
+            return widget(KayaWire.KIND_SURFACE);
+        }
+
         /** Preview another capture in a live video view, or none (null). */
         public void showCapture(Widget video, Capture capture) {
             emit(KayaWire.txSetCapture(video.id, capture == null ? 0 : capture.id));
@@ -12619,6 +12757,16 @@ public final class KayaApp {
                 CaptureFailedHandler onFail = captureFailed.get(capture);
                 if (state == CaptureState.FAILED && failure.isPresent() && onFail != null) {
                     dispatch(tx -> onFail.accept(tx, failure.get(), detail));
+                }
+            }
+            case KayaWire.OCC_KIND_VOICE_CHANGED -> {
+                List<?> tail = (List<?>) occ.payload;
+                VoiceRoute route = VoiceRoute.fromWire(flatLong(tail, 0));
+                String detail = tail.get(1) instanceof String s ? s : "";
+                voiceRoutes.put(occ.id, route);
+                VoiceRouteHandler handler = voiceHandlers.get(occ.id);
+                if (handler != null) {
+                    dispatch(tx -> handler.accept(tx, route, detail));
                 }
             }
             case KayaWire.OCC_KIND_CAPTURE_PERMISSION -> {

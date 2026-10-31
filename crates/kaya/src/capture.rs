@@ -687,7 +687,7 @@ impl Resampler {
 
 /// The window's dominant frequency by upward zero crossings, or None for
 /// silence.
-fn tone(samples: impl Iterator<Item = i16> + Clone) -> Option<u32> {
+pub(crate) fn tone(samples: impl Iterator<Item = i16> + Clone) -> Option<u32> {
     let mut count = 0usize;
     let mut energy = 0f64;
     let mut crossings = 0usize;

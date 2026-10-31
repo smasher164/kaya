@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0x721721bd5ae0c2aaL;
+    public static final long SPEC_HASH = 0xe3377635dd9a81ccL;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -55,6 +55,7 @@ public final class KayaWire {
     public static final int KIND_SECURE_FIELD = 24;
     public static final int KIND_SEGMENTED = 25;
     public static final int KIND_EXPANDER = 26;
+    public static final int KIND_SURFACE = 27;
     public static final int DRAW_OP_MOVE_TO = 1;
     public static final int DRAW_OP_LINE_TO = 2;
     public static final int DRAW_OP_CLOSE = 3;
@@ -377,6 +378,11 @@ public final class KayaWire {
     public static final int CAPTURE_INTERRUPTION_BACKGROUND = 1;
     public static final int CAPTURE_INTERRUPTION_ANOTHER_APP = 2;
     public static final int CAPTURE_INTERRUPTION_SYSTEM_PRESSURE = 3;
+    public static final int VOICE_ROUTE_NONE = 0;
+    public static final int VOICE_ROUTE_VOICE = 1;
+    public static final int VOICE_ROUTE_PLAIN = 2;
+    public static final int VOICE_ROUTE_SYNTHETIC = 3;
+    public static final int VOICE_ROUTE_FAILED = 4;
     public static final int CAPTURE_KIND_CAMERA = 0;
     public static final int CAPTURE_KIND_MICROPHONE = 1;
     public static final int PERMISSION_PROMPT = 0;
@@ -525,6 +531,8 @@ public final class KayaWire {
     public static final short TX_KIND_ADD_REGION = 93;
     public static final short TX_KIND_SHOW_FONT_DIALOG = 94;
     public static final short TX_KIND_LIST_FONT_FACES = 95;
+    public static final short TX_KIND_CREATE_VOICE = 96;
+    public static final short TX_KIND_RELEASE_VOICE = 97;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -606,6 +614,8 @@ public final class KayaWire {
     public static final short APPLY_KIND_ADD_REGION = 81;
     public static final short APPLY_KIND_PRESENT_FONT_DIALOG = 82;
     public static final short APPLY_KIND_LIST_FONT_FACES = 83;
+    public static final short APPLY_KIND_CREATE_VOICE = 84;
+    public static final short APPLY_KIND_RELEASE_VOICE = 85;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -676,6 +686,7 @@ public final class KayaWire {
     public static final short OCC_KIND_DOCUMENTS_DETACHED = 68;
     public static final short OCC_KIND_FONT_DIALOG_RESULT = 69;
     public static final short OCC_KIND_FONT_FACES = 70;
+    public static final short OCC_KIND_VOICE_CHANGED = 71;
 
     /** A blob value: the u64 handle from kaya_blob_register, consumed
      * by the next submit; the bytes never ride the record stream. */
@@ -1637,6 +1648,20 @@ public final class KayaWire {
     public static byte[] txListFontFaces(Object family) {
         Enc b = begin(TX_KIND_LIST_FONT_FACES);
         encodeValue(b, family);
+        return finish(b);
+    }
+
+    /** Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed. */
+    public static byte[] txCreateVoice(long voice) {
+        Enc b = begin(TX_KIND_CREATE_VOICE);
+        b.putLong(voice);
+        return finish(b);
+    }
+
+    /** Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows. */
+    public static byte[] txReleaseVoice(long voice) {
+        Enc b = begin(TX_KIND_RELEASE_VOICE);
+        b.putLong(voice);
         return finish(b);
     }
 
@@ -4181,7 +4206,7 @@ public final class KayaWire {
     public static Occ parseOccurrence(byte[] rec) {
         ByteBuffer b = ByteBuffer.wrap(rec).order(ByteOrder.LITTLE_ENDIAN);
         short kind = b.getShort(4);
-        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED && kind != OCC_KIND_FONT_DIALOG_RESULT && kind != OCC_KIND_FONT_FACES) {
+        if (kind != OCC_KIND_BUTTON_CLICKED && kind != OCC_KIND_TEXT_CHANGED && kind != OCC_KIND_TOGGLED && kind != OCC_KIND_VALUE_CHANGED && kind != OCC_KIND_CLOSE_REQUESTED && kind != OCC_KIND_WINDOW_CLOSED && kind != OCC_KIND_ALERT_RESULT && kind != OCC_KIND_ENTRY_POPPED && kind != OCC_KIND_BACK_REQUESTED && kind != OCC_KIND_SECTION_SELECTED && kind != OCC_KIND_MENU_ACTIVATED && kind != OCC_KIND_MENU_TOGGLED && kind != OCC_KIND_MENU_VALUE_CHANGED && kind != OCC_KIND_FILE_DIALOG_RESULT && kind != OCC_KIND_CLIPBOARD_RESULT && kind != OCC_KIND_PASTED && kind != OCC_KIND_UNDONE && kind != OCC_KIND_REDONE && kind != OCC_KIND_SORT_REQUESTED && kind != OCC_KIND_DRAW_REQUESTED && kind != OCC_KIND_TICK && kind != OCC_KIND_DROPPED && kind != OCC_KIND_DRAG_ENDED && kind != OCC_KIND_DATE_CHANGED && kind != OCC_KIND_TIME_CHANGED && kind != OCC_KIND_VALUE_COMMITTED && kind != OCC_KIND_NOTIFICATION_RESULT && kind != OCC_KIND_LINK_OPENED && kind != OCC_KIND_TEXT_EDITED && kind != OCC_KIND_TEXT_FORMATTED && kind != OCC_KIND_SHEET_DISMISSED && kind != OCC_KIND_DISMISS_REQUESTED && kind != OCC_KIND_SUBMITTED && kind != OCC_KIND_NOTIFICATION_REPLIED && kind != OCC_KIND_FULLSCREEN_CHANGED && kind != OCC_KIND_COLOR_CHANGED && kind != OCC_KIND_RANGE_CHANGED && kind != OCC_KIND_RANGE_COMMITTED && kind != OCC_KIND_PLAYER_CHANGED && kind != OCC_KIND_PLAYER_POSITION && kind != OCC_KIND_SEEK_COMPLETED && kind != OCC_KIND_SESSION_ACTION && kind != OCC_KIND_PLAYER_TRACKS && kind != OCC_KIND_CAPTION_CUE && kind != OCC_KIND_VIDEO_VISIBILITY && kind != OCC_KIND_READER_FRAME && kind != OCC_KIND_READER_PROGRESS && kind != OCC_KIND_READER_PEAKS && kind != OCC_KIND_READER_DONE && kind != OCC_KIND_IMAGE_LOADED && kind != OCC_KIND_CAPTURE_CHANGED && kind != OCC_KIND_CAPTURE_PERMISSION && kind != OCC_KIND_CAPTURE_DEVICES && kind != OCC_KIND_CAPTURE_OVERRUN && kind != OCC_KIND_TOAST_RESULT && kind != OCC_KIND_IMAGE_NEEDED && kind != OCC_KIND_IMAGE_RELEASED && kind != OCC_KIND_ACTIVATED && kind != OCC_KIND_SELECTION_CHANGED && kind != OCC_KIND_FONT_FAMILIES && kind != OCC_KIND_TEXT_SELECTED && kind != OCC_KIND_DOCUMENT_SELECTED && kind != OCC_KIND_DOCUMENT_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENTS_CLOSE_REQUESTED && kind != OCC_KIND_DOCUMENT_CLOSED && kind != OCC_KIND_NEW_DOCUMENT_REQUESTED && kind != OCC_KIND_DOCUMENT_MOVED && kind != OCC_KIND_DOCUMENTS_DETACHED && kind != OCC_KIND_FONT_DIALOG_RESULT && kind != OCC_KIND_FONT_FACES && kind != OCC_KIND_VOICE_CHANGED) {
             return null;
         }
         long id = b.getLong(8);
@@ -4481,6 +4506,17 @@ public final class KayaWire {
                 }
             }
             return new Occ(kind, 0L, java.util.List.of(), tail);
+        }
+        if (kind == OCC_KIND_VOICE_CHANGED) {
+            // A flat record: its fields in order, into the tail.
+            int[] at = {8};
+            java.util.List<Object> tail = new java.util.ArrayList<>();
+            at[0] += 8;
+            tail.add(Integer.toUnsignedLong(b.getInt(at[0])));
+            at[0] += 4;
+            at[0] += 4;
+            tail.add(parseValue(rec, b, at));
+            return new Occ(kind, id, java.util.List.of(), tail);
         }
         if (kind == OCC_KIND_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

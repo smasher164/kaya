@@ -431,6 +431,14 @@ pub struct KayaHostApi {
     pub capture_nearest_format: unsafe extern "C" fn(*const u32, usize, f64, f64, f64, *mut u32) -> u32,
     pub capture_self_view_box: unsafe extern "C" fn(u32, u32, u32, i64, *mut u32),
     pub video_view_box: unsafe extern "C" fn(u32, u32, i64, *mut u32),
+    /// docs/capture-plan.md §5: a surface's frames on the display clock, a
+    /// voice output's samples on the audio thread, and their reports.
+    pub surface_newer: unsafe extern "C" fn(u64, u64, *mut u32, *mut u64) -> u32,
+    pub surface_copy: unsafe extern "C" fn(u64, u32, u32, *mut u8, u32, *mut u8, u32) -> u64,
+    pub surface_detail: unsafe extern "C" fn(u64, *mut u8, usize) -> usize,
+    pub voice_pull: unsafe extern "C" fn(u64, u32, u32, *mut f32, usize) -> u32,
+    pub voice_route: unsafe extern "C" fn(u64, u32, *const u8, usize),
+    pub voice_harness: unsafe extern "C" fn(u32, *const u8, usize, *mut u8, usize, *mut u8) -> usize,
     /// docs/styling-pass-plan.md Y4: an activatable container pressed.
     pub emit_activated: unsafe extern "C" fn(*const u8, usize),
     /// docs/styling-pass-plan.md Y4, AMENDED 2026-10-17: the user's pick.
@@ -752,6 +760,12 @@ pub(crate) fn run() -> i32 {
         capture_nearest_format: crate::capi::kaya_capture_nearest_format,
         capture_self_view_box: crate::capi::kaya_capture_self_view_box,
         video_view_box: crate::capi::kaya_video_view_box,
+        surface_newer: crate::capi::kaya_surface_newer,
+        surface_copy: crate::capi::kaya_surface_copy,
+        surface_detail: crate::capi::kaya_surface_detail,
+        voice_pull: crate::capi::kaya_voice_pull,
+        voice_route: crate::capi::kaya_voice_route,
+        voice_harness: crate::capi::kaya_voice_harness,
         emit_activated: crate::capi::kaya_emit_activated,
         emit_selection_changed: crate::capi::kaya_emit_selection_changed,
         font_families: crate::capi::kaya_font_families,

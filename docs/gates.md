@@ -501,6 +501,15 @@ kaya_capture_on_samples; Java's rows read KayaRing.captureOnFrame and
 captureOnSamples, its JNI pair), Rust the reference row, green in all
 nine since the breadth slice, a fake-name census firing every row,
 counts printed.
+AND THE FAR END SINCE 2026-10-31 (docs/capture-plan.md §5): each
+binding's hand-written surface calling the voice output's two generated
+record writers, naming the `surface` kind where a surface is made, and
+reaching kaya_surface_submit and kaya_voice_write (Java and JS through
+their own native halves, jvm.rs and node.rs), Rust the reference row, 45
+rows green in all nine, a fake-name census firing every row. A surface
+is LIVE-ONLY: tools/tpl-surfaces.py's LIVE_ONLY_KINDS exempts it from the
+template census only while scene.rs still refuses a template surface,
+by that refusal's own words.
 AND THE SKIN SINCE 2026-10-16 (docs/styling-pass-plan.md Y2-Y8, Y10;
 tools/lib/skin_surface.py): both grounds, an image's shape, a label's
 tint, `selected` and `on_activate` in both zones in each family's own

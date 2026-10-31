@@ -16,18 +16,21 @@ import (
 	"dev.kaya/guests/go/cards"
 	"dev.kaya/guests/go/chat"
 	"dev.kaya/guests/go/clipboard"
+	"dev.kaya/guests/go/codesurface"
 	"dev.kaya/guests/go/colorpicker"
 	"dev.kaya/guests/go/commands"
 	"dev.kaya/guests/go/confirm"
 	"dev.kaya/guests/go/dirty"
-	"dev.kaya/guests/go/doctabs"
 	"dev.kaya/guests/go/dnd"
 	"dev.kaya/guests/go/dock"
+	"dev.kaya/guests/go/doctabs"
 	"dev.kaya/guests/go/editor"
 	"dev.kaya/guests/go/entry"
 	"dev.kaya/guests/go/expander"
+	"dev.kaya/guests/go/farend"
 	"dev.kaya/guests/go/feed"
 	"dev.kaya/guests/go/filedialog"
+	"dev.kaya/guests/go/fontpick"
 	"dev.kaya/guests/go/format"
 	"dev.kaya/guests/go/fullscreen"
 	"dev.kaya/guests/go/gallery"
@@ -38,7 +41,6 @@ import (
 	"dev.kaya/guests/go/layout"
 	"dev.kaya/guests/go/media"
 	"dev.kaya/guests/go/menus"
-	"dev.kaya/guests/go/rowmenu"
 	"dev.kaya/guests/go/milestone2"
 	"dev.kaya/guests/go/nav"
 	"dev.kaya/guests/go/netimage"
@@ -54,11 +56,10 @@ import (
 	"dev.kaya/guests/go/ranges"
 	"dev.kaya/guests/go/reorder"
 	"dev.kaya/guests/go/reveal"
-	"dev.kaya/guests/go/codesurface"
-	"dev.kaya/guests/go/fontpick"
 	"dev.kaya/guests/go/richlabel"
 	"dev.kaya/guests/go/richrows"
 	"dev.kaya/guests/go/richtext"
+	"dev.kaya/guests/go/rowmenu"
 	"dev.kaya/guests/go/safearea"
 	"dev.kaya/guests/go/save"
 	"dev.kaya/guests/go/scroll"
@@ -106,6 +107,7 @@ var scenes = map[string]func() *kaya.App{
 	"background":       background.App,
 	"capture":          capture.App,
 	"capture_denied":   capture.App,
+	"farend":           farend.App,
 	"clipboard":        clipboard.App,
 	"commands":         commands.App,
 	"confirm":          confirm.App,

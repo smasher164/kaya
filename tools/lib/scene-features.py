@@ -184,6 +184,8 @@ VERB_FEATURE = {
     # capture's scene under another name.
     "expect_capture": "capture",
     "answer_permission": "capture",
+    # docs/capture-plan.md §5: the voice output's read is the far end's.
+    "expect_voice": "farend",
     # docs/range-plan.md §5, the same reasoning.
     "expect_thumb": "range",
     "expect_press_takes": "range",

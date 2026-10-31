@@ -806,6 +806,8 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::ReleaseCapture { .. } => UndoVerdict::Refused("release_capture"),
         TxOp::RequestPermission { .. } => UndoVerdict::Refused("request_permission"),
         TxOp::WatchCaptureDevices { .. } => UndoVerdict::Refused("watch_capture_devices"),
+        TxOp::CreateVoice { .. } => UndoVerdict::Refused("create_voice"),
+        TxOp::ReleaseVoice { .. } => UndoVerdict::Refused("release_voice"),
         TxOp::ListFontFamilies => UndoVerdict::Refused("list_font_families"),
         TxOp::ShowFontDialog(_) => UndoVerdict::Refused("show_font_dialog"),
         TxOp::ListFontFaces { .. } => UndoVerdict::Refused("list_font_faces"),
@@ -1131,6 +1133,10 @@ pub(crate) struct Scene {
     /// docs/capture-plan.md §2: every capture's state machine; its
     /// occurrences leave through `asks`.
     captures: crate::capture::Captures,
+    /// docs/capture-plan.md §5: every voice output's lifetime.
+    voices: crate::farend::Voices,
+    /// docs/capture-plan.md §5: the live surfaces, whose frames the core keeps.
+    surfaces: HashSet<WidgetId>,
     /// docs/capture-plan.md §3: the capture each video view previews, at
     /// most one view per capture, and never a view that shows a player.
     video_previews: HashMap<WidgetId, crate::protocol::CaptureId>,
@@ -1557,8 +1563,9 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         Prop::Color => matches!(kind, WidgetKind::ColorPicker | WidgetKind::Column | WidgetKind::Row),
         Prop::Alpha => matches!(kind, WidgetKind::ColorPicker),
         // docs/media-plan.md §3; an image's box (docs/network-images-plan.md N3).
-        Prop::Fit => matches!(kind, WidgetKind::Video | WidgetKind::Image),
-        Prop::Player | Prop::Capture | Prop::Aspect => matches!(kind, WidgetKind::Video),
+        Prop::Fit => matches!(kind, WidgetKind::Video | WidgetKind::Image | WidgetKind::Surface),
+        Prop::Player | Prop::Capture => matches!(kind, WidgetKind::Video),
+        Prop::Aspect => matches!(kind, WidgetKind::Video | WidgetKind::Surface),
         // docs/network-images-plan.md N2.
         Prop::Phase => kind == WidgetKind::Image,
         // docs/autofill-plan.md A1: the two single-line credential kinds.
@@ -1568,7 +1575,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/expander-plan.md K3, K4.
         Prop::Summary | Prop::Expanded => kind == WidgetKind::Expander,
         // docs/safe-area-plan.md A3: the three kinds whose content is a picture.
-        Prop::Bleed => matches!(kind, WidgetKind::Image | WidgetKind::Video | WidgetKind::Canvas),
+        Prop::Bleed => matches!(kind, WidgetKind::Image | WidgetKind::Video | WidgetKind::Canvas | WidgetKind::Surface),
         Prop::Indeterminate => matches!(kind, WidgetKind::Progress),
         Prop::Source => matches!(kind, WidgetKind::Image | WidgetKind::Column | WidgetKind::Row),
         // docs/styling-pass-plan.md Y1: the skin's kinds, no control among them.
@@ -4636,6 +4643,8 @@ impl Scene {
                 TxOp::ReleaseCapture { capture } => self.captures.release(capture, &mut out),
                 TxOp::RequestPermission { kind } => out.push(ApplyOp::RequestPermission(kind)),
                 TxOp::WatchCaptureDevices { on } => out.push(ApplyOp::WatchCaptureDevices(on)),
+                TxOp::CreateVoice { voice } => self.voices.create(voice, &mut out),
+                TxOp::ReleaseVoice { voice } => self.voices.release(voice, &mut out),
                 TxOp::ListFontFamilies => out.push(ApplyOp::ListFontFamilies),
                 TxOp::ListFontFaces { family } => out.push(ApplyOp::ListFontFaces { family }),
                 TxOp::ShowFontDialog(mut spec) => {
@@ -8485,7 +8494,14 @@ impl Scene {
                 ApplyOp::Create { id, kind: WidgetKind::Video, .. } => {
                     self.videos.insert(*id);
                 }
+                ApplyOp::Create { id, kind: WidgetKind::Surface, .. } => {
+                    self.surfaces.insert(*id);
+                    crate::farend::open_surface(*id);
+                }
                 ApplyOp::Destroy { id } => {
+                    if self.surfaces.remove(id) {
+                        crate::farend::close_surface(*id);
+                    }
                     self.videos.remove(id);
                     self.video_shows.remove(id);
                     self.video_previews.remove(id);
@@ -9325,6 +9341,12 @@ impl Scene {
                 let clash = self.template_nodes.insert(id.0, kind).is_some();
                 assert!(!clash, "kaya: template node id {} already exists", id.0);
                 top.current.declared.push(id.0);
+                assert!(
+                    kind != WidgetKind::Surface,
+                    "kaya: template node {} is a surface — a surface shows the frames the app submits to \
+                     a live widget's id, never a row's (docs/capture-plan.md §5)",
+                    id.0
+                );
                 top.current.ops.push(TplOp::Widget { node: id.0, kind });
                 if kind == WidgetKind::Expander {
                     EXPANDERS.store(true, std::sync::atomic::Ordering::Release);
@@ -11453,6 +11475,16 @@ impl Scene {
         self.captures.devices_end()
     }
 
+    /// A backend's route for a voice output (docs/capture-plan.md §5).
+    pub(crate) fn voice_route(
+        &mut self,
+        voice: crate::protocol::VoiceId,
+        route: crate::protocol::VoiceRoute,
+        detail: String,
+    ) -> Vec<Occurrence> {
+        self.voices.route(voice, route, detail)
+    }
+
     pub(crate) fn media_route(&self, action: crate::protocol::SessionAction) -> crate::media::Route {
         self.media.route(action)
     }
@@ -12931,7 +12963,8 @@ mod tests {
     /// tagged always. EXHAUSTIVE OVER THE KIND ENUM rather than a list.
     #[test]
     fn a_stamped_copy_is_tagged_wherever_a_live_one_is() {
-        for kind in WidgetKind::ALL {
+        // A surface is live-only: a template refuses it (docs/capture-plan.md §5).
+        for kind in WidgetKind::ALL.into_iter().filter(|k| *k != WidgetKind::Surface) {
             // The live half: create one, read its Create op's tag. A labelled
             // row is held to its shape at the end of the transaction, so it
             // gets the label and control that shape demands.

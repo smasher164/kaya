@@ -110,6 +110,7 @@ static class Program
             case "media": case "media_formats": case "media_delivery": case "media_session":
             case "media_tracks": case "media_feed": case "media_reader": Media.MediaScene.Run(); break;
             case "capture": case "capture_denied": CaptureScene.Run(); break;
+            case "farend": FarendScene.Run(); break;
             case "adaptive": AdaptiveScene.Run(); break;
             case "netimage": NetimageScene.Run(); break;
             case "netimage_http": NetimageHttpScene.Run(); break;

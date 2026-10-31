@@ -47,6 +47,36 @@ DEVICES = (
 )
 ROUTE = "KAYA_DIAG capture route: "
 GRAPH_KEEP = 30
+# THE FAR END'S VOICE PATH (docs/capture-plan.md §5): with KAYA_CAPTURE_FAR_END
+# set, this leg's PipeWire also carries a null sink driving the graph and
+# PipeWire's echo-cancel module in front of it, the desktop's canceller a
+# voice output plays into (measured 2026-10-31: without a driver node the
+# graph never runs; a null sink with node.driver does).
+FAR_END_CONF = """context.objects = [
+    { factory = adapter
+      args = {
+          factory.name = support.null-audio-sink
+          node.name = "kaya-null-sink"
+          media.class = "Audio/Sink"
+          audio.position = [ FL FR ]
+          node.driver = true
+          node.always-process = true
+          priority.driver = 2000
+      }
+    }
+]
+context.modules = [
+    { name = libpipewire-module-echo-cancel
+      args = {
+          library.name = aec/libspa-aec-webrtc
+          sink.props = { node.name = "echo-cancel-sink" }
+          source.props = { node.name = "echo-cancel-source" }
+          playback.props = { target.object = "kaya-null-sink" }
+      }
+    }
+]
+"""
+FAR_END_NODES = ("kaya-null-sink", "echo-cancel-sink")
 # The processes this leg may leave nothing of, by the name /proc gives.
 STACK = ("pipewire", "wireplumber", "pwsynth", "xdg-desktop-portal", "xdg-desktop-por",
          "xdg-permission-store", "xdg-permission-", "dbus-daemon", "python3")
@@ -174,6 +204,11 @@ def main(argv):
     stack_env["XDG_DATA_HOME"] = str(home / "data")
     stack_env["XDG_CONFIG_HOME"] = str(home / "config")
     stack_env["KAYA_CAPTURE_LEG"] = marker
+    far_end = bool(os.environ.get("KAYA_CAPTURE_FAR_END"))
+    if far_end:
+        drop_in = home / "config" / "pipewire" / "pipewire.conf.d"
+        drop_in.mkdir(parents=True)
+        (drop_in / "kaya-far-end.conf").write_text(FAR_END_CONF, encoding="utf-8")
     dirs = env.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share"
     sessionmgr = [sys.executable, str(WORK / "tools/linux/sessionmgr.py")]
     if regime == "portal":
@@ -223,7 +258,8 @@ def main(argv):
 
         def listed():
             code, said = quiet(["pw-cli", "ls", "Node"], stack_env)
-            return code == 0 and all(f'node.name = "{d[1]}"' in said for d in DEVICES)
+            names = [d[1] for d in DEVICES] + (list(FAR_END_NODES) if far_end else [])
+            return code == 0 and all(f'node.name = "{n}"' in said for n in names)
 
         def defaults():
             code, said = quiet(["pw-metadata", "-n", "default", "0"], stack_env)

@@ -45,6 +45,7 @@ SWIFT_ENTRIES = [
     "media_reader:media",
     # The capture on kaya's in-process synthetic devices (docs/capture-plan.md §7).
     "capture", "capture_denied:capture",
+    "farend",
     "toast",
     "safearea",
     # Network images (docs/network-images-plan.md §6).
@@ -76,6 +77,7 @@ GO_SCENES = [
     "media_formats", "media_delivery", "media_session", "media_tracks",
     "media_feed", "media_reader",
     "capture", "capture_denied",
+    "farend",
     "toast",
     "safearea",
     "netimage", "netimage_http",
@@ -221,6 +223,9 @@ RUST_SCENES = [
     # devices, the simulator having no camera and its microphone being the
     # host's.
     "capture", "capture_denied",
+    # The far end (docs/capture-plan.md §5): the voice output on the
+    # harness's offline engine, as the capture's devices are in-process.
+    "farend",
     # The safe area (docs/safe-area-plan.md §6): `bleed`, and the task manager
     # and the content-type form with the keyboard up.
     "safearea", "taskskeyboard", "autofillkeyboard",

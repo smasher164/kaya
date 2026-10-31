@@ -16,7 +16,7 @@ use super::bindings::Microsoft::UI::Xaml::Media::{SolidColorBrush, Stretch, Visu
 use super::bindings::Microsoft::UI::Xaml::{
     FrameworkElement, HorizontalAlignment, TextWrapping, Thickness, UIElement, VerticalAlignment, Visibility,
 };
-use super::bindings::Windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
+use super::bindings::Windows::Foundation::{EventHandler, TimeSpan, TypedEventHandler, Uri};
 use super::bindings::Windows::Media::ClosedCaptioning::{ClosedCaptionOpacity, ClosedCaptionProperties, ClosedCaptionSize};
 use super::bindings::Windows::Media::Core::{
     CodecCategory, CodecKind, CodecQuery, CodecSubtypes, MediaDecoderStatus, MediaSource, TimedMetadataKind,
@@ -410,6 +410,18 @@ pub(super) struct MediaState {
     awake: bool,
     /// Each open capture's preview (capture.rs).
     capture_previews: HashMap<u64, CapturePreview>,
+    /// The surfaces in creation order, the registry `surface#index` reads,
+    /// and each one's last frame shown (docs/capture-plan.md §5).
+    pub(super) surface_ids: Vec<u64>,
+    surfaces: HashMap<u64, SurfaceShown>,
+    surface_clock: bool,
+}
+
+#[derive(Default)]
+struct SurfaceShown {
+    seen: u64,
+    bitmap: Option<(super::bindings::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap, (u32, u32))>,
+    shape: (u32, u32, u32),
 }
 
 /// An open camera's self-view: the frames' size, whether it mirrors, and the
@@ -1956,6 +1968,12 @@ pub(super) fn elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::
     core.media.video_ids.iter().filter_map(|id| core.media.videos.get(id)).map(|v| v.ax.clone()).collect()
 }
 
+/// The surfaces' elements in creation order (docs/capture-plan.md §5).
+#[cfg(feature = "harness")]
+pub(super) fn surface_elements(core: &CoreState) -> Vec<super::bindings::Microsoft::UI::Xaml::Controls::Image> {
+    core.media.surface_ids.iter().filter_map(|id| core.media.videos.get(id)).map(|v| v.ax.clone()).collect()
+}
+
 /// The view's natural size: the core's box for its picture, a player's
 /// 320x180 until one is known — the SwiftUI arm's `kayaVideoNatural` — no
 /// wider than the room it is given, its height following its width
@@ -1976,7 +1994,86 @@ fn natural_size(video: &WinVideo, shows: crate::media::VideoPicture) -> windows_
     video.host.SetHeight(f64::NAN)
 }
 
+// ---- the surface (docs/capture-plan.md §5) -----------------------------------
+
+/// A surface: the video view's elements and box rule, its picture a bitmap
+/// the app's last frame is written into on the compositor's clock.
+pub(super) fn create_surface(core: &mut CoreState, id: u64) -> windows_core::Result<WinVideo> {
+    use crate::media::VideoPicture;
+    let video = create_video(core, id)?;
+    core.media.video_ids.retain(|v| *v != id);
+    core.media.surface_ids.push(id);
+    core.media.surfaces.insert(id, SurfaceShown::default());
+    natural_size(&video, VideoPicture::SelfView { frames: (0, 0), rotation: 0 })?;
+    if !core.media.surface_clock {
+        core.media.surface_clock = true;
+        let rendering = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            CORE.with(|slot| {
+                if let Ok(mut core) = slot.try_borrow_mut() {
+                    if let Some(core) = core.as_mut() {
+                        crate::fault::guard("the surfaces' frame clock", || show_surfaces(core));
+                    }
+                }
+            });
+            Ok(())
+        });
+        super::bindings::Microsoft::UI::Xaml::Media::CompositionTarget::Rendering(&rendering)?;
+    }
+    Ok(video)
+}
+
+/// Each surface's newer frame, stood upright as RGBA by the core, into its
+/// bitmap as BGRA.
+fn show_surfaces(core: &mut CoreState) {
+    use super::bindings::Microsoft::UI::Xaml::Media::Imaging::WriteableBitmap;
+    use crate::media::VideoPicture;
+    for id in core.media.surface_ids.clone() {
+        let seen = core.media.surfaces.get(&id).map_or(0, |s| s.seen);
+        let Some((w, h, rotation, seq, mut rgba)) = crate::farend::take_rgba(crate::protocol::WidgetId(id), seen) else {
+            continue;
+        };
+        for px in rgba.chunks_exact_mut(4) {
+            px.swap(0, 2);
+        }
+        let (uw, uh) = if rotation % 180 == 90 { (h, w) } else { (w, h) };
+        let shown = (|| -> windows_core::Result<()> {
+            let Some(state) = core.media.surfaces.get_mut(&id) else { return Ok(()) };
+            state.seen = seq;
+            let fresh = state.bitmap.as_ref().is_none_or(|(_, size)| *size != (uw, uh));
+            if fresh {
+                state.bitmap = Some((WriteableBitmap::CreateInstanceWithDimensions(uw as i32, uh as i32)?, (uw, uh)));
+            }
+            let Some((bitmap, _)) = state.bitmap.clone() else { return Ok(()) };
+            let buffer = bitmap.PixelBuffer()?;
+            let count = (uw * uh * 4) as usize;
+            if (buffer.Capacity()? as usize) < count {
+                return Ok(());
+            }
+            let access: windows::Win32::System::WinRT::IBufferByteAccess = buffer.cast()?;
+            // SAFETY: the bitmap's own pixel store, its capacity checked above.
+            unsafe { std::ptr::copy_nonoverlapping(rgba.as_ptr(), access.Buffer()?, count) };
+            bitmap.Invalidate()?;
+            let reshaped = state.shape != (w, h, rotation);
+            state.shape = (w, h, rotation);
+            if let Some(view) = core.media.videos.get(&id) {
+                if fresh {
+                    view.picture.SetSource(&bitmap)?;
+                }
+                if reshaped {
+                    natural_size(view, VideoPicture::SelfView { frames: (w, h), rotation })?;
+                }
+            }
+            Ok(())
+        })();
+        if let Err(e) = shown {
+            eprintln!("KAYA_DIAG winui surface {id}: the frame could not be shown: {}", e.message());
+        }
+    }
+}
+
 pub(super) fn destroy_video(core: &mut CoreState, id: u64) {
+    core.media.surface_ids.retain(|v| *v != id);
+    core.media.surfaces.remove(&id);
     if let Some(i) = core.media.video_ids.iter().position(|v| *v == id) {
         core.media.video_ids.remove(i);
     }
@@ -2584,9 +2681,14 @@ pub(super) mod stage {
         Ok(core.media.players[id].player.Source().is_ok())
     }
 
-    /// The video view registry's widget at `index`.
-    pub(in super::super) fn video_at(core: &CoreState, index: isize) -> Option<u64> {
-        crate::harness::try_resolve(index, core.media.video_ids.len()).map(|i| core.media.video_ids[i])
+    /// The video view's, or the surface's, registry widget a target names.
+    pub(in super::super) fn picture_at(core: &CoreState, target: crate::harness::Target) -> Option<u64> {
+        let ids = if target.kind == crate::harness::TargetKind::Surface {
+            &core.media.surface_ids
+        } else {
+            &core.media.video_ids
+        };
+        crate::harness::try_resolve(target.index, ids.len()).map(|i| ids[i])
     }
 
     pub(in super::super) fn host_of(core: &CoreState, widget: u64) -> Option<Grid> {

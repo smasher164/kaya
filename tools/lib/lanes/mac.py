@@ -67,7 +67,9 @@ SCENES = [
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
                 "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
-                "capture"]
+                "capture",
+                # The far end of a call (docs/capture-plan.md §5), rust-only at depth.
+                "farend"]
 # The C-floor scenes THIS LANE RUNS (guests/c/Makefile keeps the whole
 # list; this is the SCENES= override build_c passes, and check-steps'
 # sweep_c_floor reads it from the other side).
@@ -367,6 +369,7 @@ ORDER = [
     ("media_reader", LANGS),
     ("capture", LANGS),
     ("capture_denied", LANGS),
+    ("farend", LANGS),
     ("toast", LANGS + ("c",)),
     ("expander", LANGS + ("c",)),
     ("safearea", LANGS + ("c",)),

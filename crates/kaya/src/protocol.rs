@@ -113,6 +113,33 @@ pub struct ImageId(pub u64);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CaptureId(pub u64);
 
+/// A voice output's id (docs/capture-plan.md §5): guest-chosen, its own
+/// space, live from create_voice to release_voice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VoiceId(pub u64);
+
+/// Where a voice output plays (spec enum "voice_route").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VoiceRoute {
+    None,
+    Voice,
+    Plain,
+    Synthetic,
+    Failed,
+}
+
+impl VoiceRoute {
+    pub fn name(self) -> &'static str {
+        match self {
+            VoiceRoute::None => "none",
+            VoiceRoute::Voice => "voice",
+            VoiceRoute::Plain => "plain",
+            VoiceRoute::Synthetic => "synthetic",
+            VoiceRoute::Failed => "failed",
+        }
+    }
+}
+
 /// Capture property keys (spec::CAPTURE_PROPS).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CaptureProp {
@@ -1468,6 +1495,8 @@ pub enum Occurrence {
     FontFaces { family: String, faces: Vec<NamedFace> },
     /// The app's sample callback has fallen this far behind the microphone.
     CaptureOverrun { capture: CaptureId, behind_ms: u64 },
+    /// A voice output's route as the platform opened it (docs/capture-plan.md §5).
+    VoiceChanged { voice: VoiceId, route: VoiceRoute, detail: String },
     /// A menu action fired — clicked OR invoked through its shortcut:
     /// ONE occurrence, one dispatch path (DESIGN.md, Menus).
     MenuActivated { item: MenuItemId },
@@ -1860,6 +1889,10 @@ pub enum WidgetKind {
     /// An EXPANDER (docs/expander-plan.md K1): a header the user activates
     /// over a body, its children, laid out as a column.
     Expander,
+    /// A SURFACE (docs/capture-plan.md §5): the NV12 frames the app submits
+    /// from any thread, uploaded and composited on the display clock, the
+    /// last one kept. Reports nothing itself.
+    Surface,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -2156,7 +2189,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 26] = [
+    pub(crate) const ALL: [WidgetKind; 27] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -2183,6 +2216,7 @@ impl WidgetKind {
         WidgetKind::SecureField,
         WidgetKind::Segmented,
         WidgetKind::Expander,
+        WidgetKind::Surface,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -2224,7 +2258,8 @@ impl WidgetKind {
             | WidgetKind::Canvas
             | WidgetKind::Grid
             | WidgetKind::Labeled
-            | WidgetKind::Video => false,
+            | WidgetKind::Video
+            | WidgetKind::Surface => false,
         }
     }
 }
@@ -2971,6 +3006,9 @@ pub enum TxOp {
     ReleaseCapture { capture: CaptureId },
     RequestPermission { kind: CaptureKind },
     WatchCaptureDevices { on: bool },
+    /// docs/capture-plan.md §5: a voice output's lifetime.
+    CreateVoice { voice: VoiceId },
+    ReleaseVoice { voice: VoiceId },
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
     /// keeps the table and does the one match; a malformed or repeated
     /// pattern faults here, like every other declaration refusal.
@@ -3314,6 +3352,9 @@ pub enum ApplyOp {
     RequestPermission(CaptureKind),
     WatchCaptureDevices(bool),
     SetVideoCapture { widget: WidgetId, capture: Option<CaptureId> },
+    /// docs/capture-plan.md §5: a voice output on the platform.
+    CreateVoice(VoiceId),
+    ReleaseVoice(VoiceId),
     /// The PLATFORM's track, counting from 1 in its own listing; 0 turns
     /// its captions off.
     SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },
@@ -3902,6 +3943,9 @@ impl OccSink {
                             &detail,
                         ),
                     );
+                }
+                Occurrence::VoiceChanged { voice, route, detail } => {
+                    ring.push_record(crate::ring::REC_VOICE_CHANGED, &crate::wire::voice_changed_body(voice, route, &detail));
                 }
                 Occurrence::CapturePermission { kind, permission, detail } => {
                     ring.push_record(

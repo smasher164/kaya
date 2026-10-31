@@ -268,6 +268,10 @@ module Kaya.Core
     CaptureDevice (..),
     CaptureFrame (..),
     CaptureOcc (..),
+    Voice (..),
+    VoiceRoute (..),
+    voiceRouteName,
+    voiceRouteOfWire,
     MediaState (..),
     allocP,
     recordHandle,
@@ -478,7 +482,9 @@ data Counters = Counters
     cRead :: !Word64,
     cImage :: !Word64,
     -- The capture's own id space (docs/capture-plan.md §2).
-    cCapture :: !Word64
+    cCapture :: !Word64,
+    -- The voice outputs' own id space (docs/capture-plan.md §5).
+    cVoice :: !Word64
   }
 
 -- One collection instance: the table inside the stamped copy its path
@@ -2136,6 +2142,33 @@ data CaptureFrame = CaptureFrame
 
 data CaptureOcc = CaptureChanged CaptureReading Text | CaptureOverrun Int
 
+-- | A voice output the app holds (docs\/capture-plan.md §5), ids in their
+-- own space: it plays the samples written to it on the platform's voice path.
+newtype Voice = Voice Word64
+  deriving (Eq, Ord, Show)
+
+-- | Where a voice output plays: the platform's voice path, a path no echo
+-- canceller hears, the harness's own engine, nowhere, or not yet opened.
+data VoiceRoute = VoiceRouteNone | VoiceRouteVoice | VoiceRoutePlain | VoiceRouteSynthetic | VoiceRouteFailed
+  deriving (Eq, Show)
+
+voiceRouteName :: VoiceRoute -> Text
+voiceRouteName r = case r of
+  VoiceRouteNone -> "none"
+  VoiceRouteVoice -> "voice"
+  VoiceRoutePlain -> "plain"
+  VoiceRouteSynthetic -> "synthetic"
+  VoiceRouteFailed -> "failed"
+
+voiceRouteOfWire :: Word32 -> VoiceRoute
+voiceRouteOfWire n
+  | n == W.voiceRouteNone = VoiceRouteNone
+  | n == W.voiceRouteVoice = VoiceRouteVoice
+  | n == W.voiceRoutePlain = VoiceRoutePlain
+  | n == W.voiceRouteSynthetic = VoiceRouteSynthetic
+  | n == W.voiceRouteFailed = VoiceRouteFailed
+  | otherwise = error ("kaya: a voice route of " <> show n <> ", which this build does not know")
+
 -- | The binding's media mirror and handler tables, app-thread only.
 data MediaState = MediaState
   { readsInFlight :: IORef (Map.Map Word64 Word64),
@@ -2167,7 +2200,10 @@ data MediaState = MediaState
     -- | docs\/font-picker-plan.md §4.4, §4.2: a family's faces, and the font
     -- picker's one-shot answers by dialog id.
     fontFacesHandler :: IORef (Maybe (Text -> [FontFace] -> IO ())),
-    fontDialogHandlers :: IORef (Map.Map Word64 (Maybe FontChoice -> IO ()))
+    fontDialogHandlers :: IORef (Map.Map Word64 (Maybe FontChoice -> IO ())),
+    -- | docs\/capture-plan.md §5: the voice outputs' routes and handlers.
+    voiceRoutes :: IORef (Map.Map Word64 VoiceRoute),
+    voiceHandlers :: IORef (Map.Map Word64 (VoiceRoute -> Text -> IO ()))
   }
 
 -- | Players get their OWN id space (docs\/media-plan.md §2).

@@ -126,6 +126,9 @@ pub enum TargetKind {
     /// The expander (docs/expander-plan.md K15): `toggle` presses its header,
     /// `expect_expanded` reads the header's state and the body's presence.
     Expander,
+    /// The surface (docs/capture-plan.md §5): `expect_video_ink` and
+    /// `expect_video_box` read the frames it composited as a video view's.
+    Surface,
 }
 
 /// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
@@ -849,6 +852,11 @@ pub enum Step {
     /// tone, `none` for nothing in that second and `silent` for silence —
     /// so no app reports its own evidence.
     ExpectCapture(u32, String),
+    /// `expect_voice <n> "<f> Hz"|"silent"|"none"`: the core's statistics of
+    /// what the platform's voice path pulled from the `n`th live voice
+    /// output in the last second (docs/capture-plan.md §5), and for anything
+    /// heard, the route the backend reported it plays on.
+    ExpectVoice(u32, String),
     /// `answer_permission <camera|microphone> <granted|denied>`: what the
     /// synthetic prompt for that kind answers when the app first asks
     /// (docs/capture-plan.md §7), legal while the kind is still `prompt`.
@@ -1468,6 +1476,7 @@ impl Step {
             | Step::FileDialogGoto(..)
             | Step::CopyAsset(..)
             | Step::ExpectCapture(..)
+            | Step::ExpectVoice(..)
             | Step::AnswerPermission(..)
             | Step::ExpectSaveDialog(..)
             | Step::FileDialogName(..)
@@ -1662,6 +1671,7 @@ impl Step {
             Step::FileDialogGoto(..) => false,
             Step::CopyAsset(..) => false,
             Step::ExpectCapture(..) => true,
+            Step::ExpectVoice(..) => true,
             Step::AnswerPermission(..) => false,
             Step::SwipeAction(..) => false,
             Step::ExpectSwipeActions(..) => true,
@@ -4518,8 +4528,8 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_video_ink wants a video and an RRGGBB string: {line:?}")
                 })?;
                 let target = parse_target(target)?;
-                if target.kind != TargetKind::Video {
-                    return Err(format!("expect_video_ink reads a video view, not {target:?}"));
+                if !matches!(target.kind, TargetKind::Video | TargetKind::Surface) {
+                    return Err(format!("expect_video_ink reads a video view or a surface, not {target:?}"));
                 }
                 let want = parse_string(text)?;
                 if want != VIDEO_INK_NONE
@@ -4536,8 +4546,8 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     format!("expect_video_box wants a video and a \"W:H\" string: {line:?}")
                 })?;
                 let target = parse_target(target)?;
-                if target.kind != TargetKind::Video {
-                    return Err(format!("expect_video_box reads a video view, not {target:?}"));
+                if !matches!(target.kind, TargetKind::Video | TargetKind::Surface) {
+                    return Err(format!("expect_video_box reads a video view or a surface, not {target:?}"));
                 }
                 let want = parse_string(text)?;
                 let part = |s: &str| s.parse::<u32>().ok().filter(|n| (1..=65535).contains(n) && !s.starts_with('0'));
@@ -4651,6 +4661,15 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .parse()
                     .map_err(|_| format!("expect_capture's capture is an index from 0, got {index:?}: {line:?}"))?;
                 Step::ExpectCapture(index, parse_string(text)?)
+            }
+            "expect_voice" => {
+                let (index, text) = rest.trim().split_once(' ').ok_or_else(|| {
+                    format!("expect_voice wants a voice output's index and a quoted reading: {line:?}")
+                })?;
+                let index: u32 = index
+                    .parse()
+                    .map_err(|_| format!("expect_voice's voice output is an index from 0, got {index:?}: {line:?}"))?;
+                Step::ExpectVoice(index, parse_string(text)?)
             }
             "answer_permission" => {
                 let mut words = rest.split_whitespace();
@@ -5800,6 +5819,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "secure_field" => TargetKind::SecureField,
         "segmented" => TargetKind::Segmented,
         "expander" => TargetKind::Expander,
+        "surface" => TargetKind::Surface,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -7356,6 +7376,7 @@ fn run_with_log(
             })),
             Step::CopyAsset(name, path) => Some(crate::assets::copy_asset(name, &expand_path(path))),
             Step::ExpectCapture(index, want) => Some(poll(|| crate::capture::expect(*index as usize, want))),
+            Step::ExpectVoice(index, want) => Some(poll(|| crate::farend::expect(*index as usize, want))),
             Step::AnswerPermission(kind, answer) => Some(
                 crate::capture::answer_permission(*kind, *answer)
                     .map(|()| format!("answer_permission {} {}", kind.name(), answer.name())),
@@ -9602,6 +9623,7 @@ pub(crate) fn target_spec(t: &Target) -> String {
         TargetKind::SecureField => "secure_field",
         TargetKind::Segmented => "segmented",
         TargetKind::Expander => "expander",
+        TargetKind::Surface => "surface",
     };
     if let Some(id) = t.id {
         t.keys.map_or_else(

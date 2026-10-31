@@ -52,6 +52,8 @@ SCENES = [
     "media",
     # The capture (docs/capture-plan.md); capture_denied runs its guest.
     "capture",
+    # The far end of a call (docs/capture-plan.md §5).
+    "farend",
     # Network images (docs/network-images-plan.md §5).
     "netimage", "netimage_http",
     # The skin (docs/styling-pass-plan.md §5).
@@ -814,6 +816,11 @@ ORDER = [
     # submit legs' serial reason (docs/chat-plan.md).
     [
      "chat_go",
+    ],
+    # The far end (docs/capture-plan.md §5): one voice output on the VM's
+    # communications endpoint.
+    [
+     "farend_rust", "farend_python", "farend_js", "farend_go", "farend_csharp", "farend_java",
     ],
     # badge_rust ALONE: every unpackaged kaya process groups under the one
     # declared AUMID, so the taskbar overlay it sets and reads belongs to

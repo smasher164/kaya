@@ -332,6 +332,12 @@
 #define KAYA_OCCURRENCE_FONT_FACES 70
 
 /**
+ * VOICE_CHANGED { u64 voice; u32 route; u32 reserved; Value detail }
+ * (docs/capture-plan.md §5).
+ */
+#define KAYA_OCCURRENCE_VOICE_CHANGED 71
+
+/**
  * Transaction record kinds (guest -> core, via kaya_submit). Layouts,
  * after the common 8-byte header, little-endian, 8-aligned:
  *   CREATE_SIGNAL:     u64 signal_id, value
@@ -571,6 +577,13 @@
  * LIST_FONT_FACES { Value family } (docs/font-picker-plan.md §4.4).
  */
 #define KAYA_TX_LIST_FONT_FACES 95
+
+/**
+ * CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
+ */
+#define KAYA_TX_CREATE_VOICE 96
+
+#define KAYA_TX_RELEASE_VOICE 97
 
 #define KAYA_TX_ADD_SECTION 25
 
@@ -1023,6 +1036,13 @@
  */
 #define KAYA_APPLY_LIST_FONT_FACES 83
 
+/**
+ * CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
+ */
+#define KAYA_APPLY_CREATE_VOICE 84
+
+#define KAYA_APPLY_RELEASE_VOICE 85
+
 #define KAYA_APPLY_ADD_SECTION 15
 
 #define KAYA_APPLY_SELECT_SECTION 16
@@ -1227,6 +1247,8 @@
 #define KAYA_KIND_SEGMENTED 25
 
 #define KAYA_KIND_EXPANDER 26
+
+#define KAYA_KIND_SURFACE 27
 
 /**
  * Property keys.
@@ -2207,6 +2229,19 @@
 #define KAYA_CPROP_MUTED 6
 
 /**
+ * Where a voice output plays (docs/capture-plan.md §5).
+ */
+#define KAYA_VOICE_ROUTE_NONE 0
+
+#define KAYA_VOICE_ROUTE_VOICE 1
+
+#define KAYA_VOICE_ROUTE_PLAIN 2
+
+#define KAYA_VOICE_ROUTE_SYNTHETIC 3
+
+#define KAYA_VOICE_ROUTE_FAILED 4
+
+/**
  * How far behind its microphone an app's sample callback falls before
  * capture_overrun tells it; the samples every callback is handed.
  */
@@ -2215,6 +2250,11 @@
 #define KAYA_CAPTURE_SAMPLE_RATE 48000
 
 #define KAYA_CAPTURE_CHUNK 480
+
+/**
+ * How far ahead of the platform a voice output holds the app's samples.
+ */
+#define KAYA_VOICE_QUEUE_MS 200
 
 /**
  * How often a playing player's position ticks, and how long an open or an
@@ -2964,6 +3004,16 @@ typedef struct KayaHostApi {
   uint32_t (*capture_nearest_format)(const uint32_t*, uintptr_t, double, double, double, uint32_t*);
   void (*capture_self_view_box)(uint32_t, uint32_t, uint32_t, int64_t, uint32_t*);
   void (*video_view_box)(uint32_t, uint32_t, int64_t, uint32_t*);
+  /**
+   * docs/capture-plan.md §5: a surface's frames on the display clock, a
+   * voice output's samples on the audio thread, and their reports.
+   */
+  uint32_t (*surface_newer)(uint64_t, uint64_t, uint32_t*, uint64_t*);
+  uint64_t (*surface_copy)(uint64_t, uint32_t, uint32_t, uint8_t*, uint32_t, uint8_t*, uint32_t);
+  uintptr_t (*surface_detail)(uint64_t, uint8_t*, uintptr_t);
+  uint32_t (*voice_pull)(uint64_t, uint32_t, uint32_t, float*, uintptr_t);
+  void (*voice_route)(uint64_t, uint32_t, const uint8_t*, uintptr_t);
+  uintptr_t (*voice_harness)(uint32_t, const uint8_t*, uintptr_t, uint8_t*, uintptr_t, uint8_t*);
   /**
    * docs/styling-pass-plan.md Y4: an activatable container pressed.
    */
@@ -4397,6 +4447,114 @@ void kaya_capture_on_frame(uint64_t capture, KayaCaptureFrameFn callback, void *
  * As kaya_capture_on_frame.
  */
 void kaya_capture_on_samples(uint64_t capture, KayaCaptureSamplesFn callback, void *ctx);
+
+/**
+ * Guest side, FROM ANY THREAD (docs/capture-plan.md §5): show one NV12
+ * frame on surface `widget` (video-range BT.601, the Y plane `y_stride`
+ * bytes a row, the interleaved UV plane `uv_stride` bytes a row at half
+ * resolution; even sides; `rotation` 0, 90, 180 or 270 clockwise to stand
+ * it upright). The core copies it, replacing any frame the backend has not
+ * shown; the backend composites it on its display clock and keeps it.
+ * Answers 1, or 0 when `widget` is no live surface and the frame is dropped.
+ *
+ * # Safety
+ * `y` must describe `y_stride * height` readable bytes and `uv`
+ * `uv_stride * (height / 2)`, for the call only.
+ */
+uint32_t kaya_surface_submit(uint64_t widget,
+                             uint32_t width,
+                             uint32_t height,
+                             const uint8_t *y,
+                             uint32_t y_stride,
+                             const uint8_t *uv,
+                             uint32_t uv_stride,
+                             uint64_t timestamp_ns,
+                             uint32_t rotation);
+
+/**
+ * Presentation side, on the display clock: whether surface `widget` holds
+ * a frame newer than `seen`; 1 with its width, height and rotation in
+ * `out[0..3]` and its number in `out_seq`, else 0.
+ *
+ * # Safety
+ * `out` must be writable for 3 u32s and `out_seq` for one u64.
+ */
+uint32_t kaya_surface_newer(uint64_t widget, uint64_t seen, uint32_t *out, uint64_t *out_seq);
+
+/**
+ * Presentation side: copy surface `widget`'s last frame into the backend's
+ * buffer when it is still `width` x `height`, rows of `y_stride` and
+ * `uv_stride` bytes; answers its number, or 0 when it has none of that size.
+ *
+ * # Safety
+ * `y` must be writable for `y_stride * height` bytes and `uv` for
+ * `uv_stride * (height / 2)`.
+ */
+uint64_t kaya_surface_copy(uint64_t widget,
+                           uint32_t width,
+                           uint32_t height,
+                           uint8_t *y,
+                           uint32_t y_stride,
+                           uint8_t *uv,
+                           uint32_t uv_stride);
+
+/**
+ * Presentation side: what a surface's pixel read prints beside a miss
+ * (the app's submits and the backend's takes), into `out`; its length.
+ *
+ * # Safety
+ * `out` must be writable for `cap` bytes.
+ */
+uintptr_t kaya_surface_detail(uint64_t widget, uint8_t *out, uintptr_t cap);
+
+/**
+ * Guest side, FROM ANY THREAD (docs/capture-plan.md §5): queue `count`
+ * samples of 48 kHz mono s16 for voice output `voice`; past
+ * KAYA_VOICE_QUEUE_MS ahead of the platform the oldest are dropped.
+ * Answers 1, or 0 when `voice` is not live and they are dropped.
+ *
+ * # Safety
+ * `samples` must describe `count` readable i16s.
+ */
+uint32_t kaya_voice_write(uint64_t voice, const int16_t *samples, uintptr_t count);
+
+/**
+ * Presentation side, ON THE PLATFORM'S AUDIO THREAD: fill `frames` frames
+ * of interleaved float at `sample_rate` and `channels` from voice output
+ * `voice`, silence where the app wrote nothing; answers how many frames the
+ * app's samples filled.
+ *
+ * # Safety
+ * `out` must be writable for `frames * channels` floats.
+ */
+uint32_t kaya_voice_pull(uint64_t voice,
+                         uint32_t sample_rate,
+                         uint32_t channels,
+                         float *out,
+                         uintptr_t frames);
+
+/**
+ * Presentation side: voice output `voice` opened on a KAYA_VOICE_ROUTE_*,
+ * `detail` what the backend measured of it.
+ *
+ * # Safety
+ * `detail` must describe `detail_len` readable UTF-8 bytes, or be NULL with 0.
+ */
+void kaya_voice_route(uint64_t voice, uint32_t route, const uint8_t *detail, uintptr_t detail_len);
+
+/**
+ * The harness's `expect_voice` for an interpreter: the `index`th live voice
+ * output against `text`; the sentence into `out`, `ok` whether it passed.
+ *
+ * # Safety
+ * As kaya_capture_harness.
+ */
+uintptr_t kaya_voice_harness(uint32_t index,
+                             const uint8_t *text,
+                             uintptr_t len,
+                             uint8_t *out,
+                             uintptr_t cap,
+                             uint8_t *ok);
 
 /**
  * Presentation side: the system's media controls sent a SESSION_ACTION

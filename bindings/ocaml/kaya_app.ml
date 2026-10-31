@@ -894,6 +894,25 @@ module Capture_interruption = struct
     | System_pressure -> "system_pressure"
 end
 
+module Voice_route = struct
+  type t = None | Voice | Plain | Synthetic | Failed
+
+  let of_wire n =
+    if n = Kaya_wire.voice_route_none then None
+    else if n = Kaya_wire.voice_route_voice then Voice
+    else if n = Kaya_wire.voice_route_plain then Plain
+    else if n = Kaya_wire.voice_route_synthetic then Synthetic
+    else if n = Kaya_wire.voice_route_failed then Failed
+    else invalid_arg (Printf.sprintf "kaya: a voice route of %d, which this build does not know" n)
+
+  let name = function
+    | None -> "none"
+    | Voice -> "voice"
+    | Plain -> "plain"
+    | Synthetic -> "synthetic"
+    | Failed -> "failed"
+end
+
 module Capture_kind = struct
   type t = Camera | Microphone
 
@@ -1142,6 +1161,10 @@ type media = {
   node_visibility : (int64, Kaya_wire.value list -> float -> unit) Hashtbl.t;
   mutable session_handler : (Session_action.t -> unit) option;
   mutable next_capture : int64;
+  (* docs/capture-plan.md §5: the voice outputs' routes and handlers. *)
+  mutable next_voice : int64;
+  voice_routes : (int64, Voice_route.t) Hashtbl.t;
+  voice_handlers : (int64, Voice_route.t -> string -> unit) Hashtbl.t;
   capture_readings : (int64, Capture_reading.t) Hashtbl.t;
   permissions : (Capture_kind.t, Permission.t) Hashtbl.t;
   mutable capture_devices : Capture_device.t list;
@@ -1422,6 +1445,9 @@ let create () =
         node_visibility = Hashtbl.create 8;
         session_handler = Option.none;
         next_capture = 1L;
+        next_voice = 1L;
+        voice_routes = Hashtbl.create 2;
+        voice_handlers = Hashtbl.create 2;
         capture_readings = Hashtbl.create 4;
         permissions = Hashtbl.create 2;
         capture_devices = [];
@@ -3452,6 +3478,58 @@ let request_permission kind = emit (the_tx ()) (Kaya_wire.tx_request_permission 
    ([on_capture_devices]); false stops. *)
 let watch_capture_devices on =
   emit (the_tx ()) (Kaya_wire.tx_watch_capture_devices (if on then 1 else 0))
+
+(* --- THE FAR END (docs/capture-plan.md §5) *)
+
+type voice = Voice of int64
+
+(* A voice output: it plays what [voice_write] writes on the platform's
+   voice path, where its echo canceller hears it; [on_route] hears the route
+   the platform opened it on. *)
+let voice ?on_route () =
+  let tx = the_tx () in
+  let id = tx.app.media.next_voice in
+  tx.app.media.next_voice <- Int64.succ id;
+  emit tx (Kaya_wire.tx_create_voice id);
+  Option.iter (Hashtbl.replace tx.app.media.voice_handlers id) on_route;
+  Voice id
+
+(* Stop and forget a voice output; what it still holds is dropped. *)
+let release_voice (Voice id) = emit (the_tx ()) (Kaya_wire.tx_release_voice id)
+
+(* A voice output's route as last heard: [None] until the platform opens it. *)
+let voice_route app (Voice id) =
+  Option.value (Hashtbl.find_opt app.media.voice_routes id) ~default:Voice_route.None
+
+(* Queue 48 kHz mono s16 samples for the platform's voice path; past 200 ms
+   ahead of it the oldest are dropped. False once released. Any thread; no
+   transaction. *)
+let voice_write (Voice id) samples = Kaya_runtime.voice_write id samples
+
+(* A surface (docs/capture-plan.md §5): a rectangle showing the frames
+   [surface_submit] submits, the last one kept; half their size until laid
+   out otherwise, 320x240 before the first. Live zone only. *)
+let surface ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?(bleed = false)
+    ?a11y_hint ?fit ?aspect () =
+  let w = widget Kaya_wire.kind_surface in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  Option.iter (fun v -> set_a11y_hint w v) a11y_hint;
+  Option.iter (set_fit w) fit;
+  Option.iter (fun (width, height) -> set_aspect w width height) aspect;
+  declare_bleed w bleed;
+  w
+
+(* Show [frame] (NV12, as a capture hands one) on [surface] once its display
+   clock next ticks, replacing any frame not yet shown; the planes are
+   copied before it returns. False when the surface is gone. Any thread; no
+   transaction. *)
+let surface_submit (Widget id) (f : Capture_frame.t) =
+  if Bytes.length f.y < f.y_stride * f.height || Bytes.length f.uv < f.uv_stride * (f.height / 2) then
+    invalid_arg "kaya: a surface frame's planes are shorter than its strides and height say (docs/capture-plan.md §4)";
+  Kaya_runtime.surface_submit id ~width:f.width ~height:f.height ~y:f.y ~y_stride:f.y_stride ~uv:f.uv
+    ~uv_stride:f.uv_stride ~timestamp_ns:f.timestamp_ns ~rotation:f.rotation
 
 (* Preview another capture in a live video view, or none. *)
 let show_capture (Widget id) c =
@@ -7354,6 +7432,16 @@ let capture_occurrence app kind id payload tail =
     (* The pair class: behind_ms keys the record, the capture rides as the
        payload. *)
     (match payload with Some (Kaya_wire.I64 cid) -> fire cid (Capture_overrun (Int64.to_int id)) | _ -> ());
+    true
+  end
+  else if kind = Kaya_wire.occ_kind_voice_changed then begin
+    (match tail with
+    | Kaya_wire.I64 route :: detail :: _ ->
+        let route = Voice_route.of_wire (Int64.to_int route) in
+        Hashtbl.replace m.voice_routes id route;
+        let detail = match detail with Kaya_wire.Str s -> s | _ -> "" in
+        Option.iter (fun f -> dispatch app (fun () -> f route detail)) (Hashtbl.find_opt m.voice_handlers id)
+    | _ -> ());
     true
   end
   else if kind = Kaya_wire.occ_kind_capture_permission then begin

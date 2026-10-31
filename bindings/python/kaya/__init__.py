@@ -8162,6 +8162,146 @@ def capture(*, camera: str | None = None, microphone: str | None = None,
     return c
 
 
+class VoiceRoute(enum.IntEnum):
+    """Where a voice output plays (docs/capture-plan.md §5): VOICE on the
+    platform's voice path, PLAIN where no echo canceller hears it,
+    SYNTHETIC the harness's own engine, FAILED not at all, NONE until the
+    platform opens it. `str()` is the wire's own word."""
+
+    NONE = wire.VOICE_ROUTE_NONE
+    VOICE = wire.VOICE_ROUTE_VOICE
+    PLAIN = wire.VOICE_ROUTE_PLAIN
+    SYNTHETIC = wire.VOICE_ROUTE_SYNTHETIC
+    FAILED = wire.VOICE_ROUTE_FAILED
+
+    def __str__(self) -> str:
+        return self.name.lower()
+
+    @classmethod
+    def _missing_(cls, value: object) -> Any:
+        return _vocab_missing(cls, value, "a voice route",
+                              "kaya.VoiceRoute.VOICE")
+
+
+class VoiceWriter:
+    """Where a voice output's samples go, from any thread
+    (docs/capture-plan.md §5)."""
+
+    __slots__ = ("id",)
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+
+    def write(self, samples: array.array[int] | bytes | Sequence[int]) -> bool:
+        """Queue 48 kHz mono s16 samples for the platform's voice path; past
+        200 ms ahead of it the oldest are dropped. False once the voice
+        output is released. Any thread; no transaction."""
+        if isinstance(samples, bytes):
+            data = samples
+        else:
+            data = array.array("h", samples).tobytes()
+        return runtime.voice_write(self.id, data)
+
+
+class Voice:
+    """A voice output (docs/capture-plan.md §5): it plays what its writer
+    writes on the platform's voice path, where its echo canceller hears
+    it. Its route is the last occurrence the loop took."""
+
+    __slots__ = ("id", "_route", "_detail", "_on_route")
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+        self._route = VoiceRoute.NONE
+        self._detail = ""
+        self._on_route: Callable[[VoiceRoute, str], object] | None = None
+
+    @property
+    def route(self) -> VoiceRoute:
+        return self._route
+
+    @property
+    def detail(self) -> str:
+        """What the backend measured of the route."""
+        return self._detail
+
+    def writer(self) -> VoiceWriter:
+        """The sample handle, for the thread the samples arrive on."""
+        return VoiceWriter(self.id)
+
+    def release(self) -> None:
+        """Stop and forget the voice output; what it still holds is dropped."""
+        _records().append(wire.tx_release_voice(self.id))
+
+    def _absorb(self, payload: Any) -> None:
+        self._route = VoiceRoute(payload[0])
+        self._detail = str(payload[1])
+
+    def __repr__(self) -> str:
+        return f"<kaya.Voice {self.id} {self._route}>"
+
+
+def voice(*, on_route: Callable[[VoiceRoute, str], object] | None = None) -> Voice:
+    """A voice output (docs/capture-plan.md §5), created in the ambient
+    transaction. `on_route(route, detail)` hears the route the platform
+    opened it on."""
+    records = _records()
+    v = Voice(_app._next("voice"))
+    records.append(wire.tx_create_voice(v.id))
+    _app._voices[v.id] = v
+    v._on_route = on_route
+    return v
+
+
+class SurfaceFrames:
+    """Where a surface's frames go, from any thread (docs/capture-plan.md §5)."""
+
+    __slots__ = ("id",)
+
+    def __init__(self, ident: int) -> None:
+        self.id: int = ident
+
+    def submit(self, frame: CaptureFrame) -> bool:
+        """Show `frame` (NV12, as a capture hands one) once the surface's
+        display clock next ticks, replacing any frame not yet shown; the
+        planes are copied before it returns. False when the surface is
+        gone. Any thread; no transaction."""
+        if (len(frame.y) < frame.y_stride * frame.height
+                or len(frame.uv) < frame.uv_stride * (frame.height // 2)):
+            raise KayaValueError(
+                "kaya: a surface frame's planes are shorter than its strides "
+                "and height say (docs/capture-plan.md §4)")
+        return runtime.surface_submit(self.id, frame.width, frame.height, frame.y,
+                                      frame.y_stride, frame.uv, frame.uv_stride,
+                                      frame.timestamp_ns, frame.rotation)
+
+
+def surface(*, fit: Fit | str | int | None = None,
+            aspect: tuple[int, int] | None = None,
+            grow: float | None = None, bleed: bool = False) -> Widget:
+    """A surface (docs/capture-plan.md §5): a rectangle showing the frames
+    `kaya.surface_frames(it)` submits, the last one kept; half their size
+    until laid out otherwise, 320x240 before the first. Live zone only."""
+    if _tpl_depth > 0:
+        raise KayaStateError(
+            "kaya: a surface shows frames submitted to a live widget, never a "
+            "row's (docs/capture-plan.md §5)")
+    handle = _widget(wire.KIND_SURFACE)
+    if fit is not None:
+        _records().append(wire.tx_set_fit(handle.id, int(Fit(fit))))
+    if aspect is not None:
+        width, height = aspect
+        _records().append(wire.tx_set_aspect(handle.id, _pack_aspect(width, height)))
+    _set_grow(handle, grow)
+    _bleed(handle, bleed)
+    return handle
+
+
+def surface_frames(surface: Widget) -> SurfaceFrames:
+    """A surface's frame handle, for the thread the frames arrive on."""
+    return SurfaceFrames(surface.id)
+
+
 def request_permission(kind: CaptureKind | str | int) -> None:
     """Ask for a kind's permission before any capture starts; the answer
     arrives through `kaya.on_permission`."""
@@ -8253,7 +8393,7 @@ class App:
                           "alert": 0, "menu_item": 0, "file_dialog": 0,
                           "clipboard": 0, "link_route": 0, "player": 0,
                           "reader": 0, "read": 0, "image": 0,
-                          "capture": 0}
+                          "capture": 0, "voice": 0}
         # The wire routes by path_len, not by number, so two dicts.
         self._widget_handlers: dict[tuple[int, int], Handler] = {}
         self._alert_handlers: dict[int, Callable[[AlertChoice], object]] = {}
@@ -8339,6 +8479,7 @@ class App:
         # The captures' mirrors as the players' are; the two callback
         # tables are READ ON KAYA'S CAPTURE THREAD (runtime.frame_sink).
         self._captures: dict[int, Capture] = {}
+        self._voices: dict[int, Voice] = {}
         self._capture_frames: dict[int, FrameCallback] = {}
         self._capture_samples: dict[int, SamplesCallback] = {}
         self._capture_permissions: dict[CaptureKind, Permission] = {}
@@ -9188,6 +9329,14 @@ class App:
                 seat._absorb(kind, payload)
                 for fn, args in seat._handlers(kind, payload):
                     self._dispatch(fn, *args)
+                continue
+            if kind == wire.OCC_VOICE_CHANGED:
+                voice_seat = self._voices.get(int(ident))
+                if voice_seat is None:
+                    continue
+                voice_seat._absorb(payload)
+                if voice_seat._on_route is not None:
+                    self._dispatch(voice_seat._on_route, voice_seat.route, voice_seat.detail)
                 continue
             if kind == wire.OCC_CAPTURE_PERMISSION:
                 which, granted = CaptureKind(payload[0]), Permission(payload[1])

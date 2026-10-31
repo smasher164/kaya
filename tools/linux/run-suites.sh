@@ -67,7 +67,7 @@ eval "$(opam env 2>/dev/null)" || true
 
 # --lib builds the cdylib (libkaya.so) the foreign suites load;
 # --example alone would build only the rlib it depends on.
-SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick"
+SCENES="background stall milestone2 entry search gallery todos reorder feed grow layout align window panels confirm nav split panes table scroll progress select radio grid textarea sections menus rowmenu commands a11y a11yrows filedialog clipboard undo dirty ranges save styling typeface toolbar identity assets adaptive pickers sliders sheet doctabs submit scrollto fullscreen numberfield timecode colorpicker range media capture secure autofill reveal segmented expander toast safearea netimage netimage_http grounds shapes cards tracks dock codesurface fontpick farend"
 # Scenes this lane declares off rather than wires (tools/check-steps.py
 # reads this line): the phone keyboard scripts, since a desktop has no
 # software keyboard (docs/safe-area-plan.md A13); windowmem, since libadwaita's
@@ -2431,6 +2431,24 @@ for proto in x11 wayland; do
     run "$proto" capture_denied-haskell env KAYA_SELFTEST=capture_denied \
         python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin capture)"
     run "$proto" capture_denied-java env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
+    # THE FAR END (docs/capture-plan.md §5): the capture leg's PipeWire with a
+    # driving null sink and the echo-cancel module the voice output plays into.
+    run "$proto" farend-rust env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/farend"
+    run "$proto" farend-python env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" python3 guests/python/farend.py
+    run "$proto" farend-js env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" node guests/js/farend.ts
+    run "$proto" farend-go env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 \
+        python3 tools/linux/capture-leg.py "$capture_regime" /tmp/go-guests/kaya-go
+    run "$proto" farend-csharp env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" dotnet exec "$CS_GUEST"
+    run "$proto" farend-ocaml env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 KAYA_LIB="$LIB" \
+        python3 tools/linux/capture-leg.py "$capture_regime" _build-linux/default/guests/ocaml/farend.exe
+    run "$proto" farend-haskell env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 \
+        python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin farend)"
+    run "$proto" farend-java env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 KAYA_LIB="$LIB" \
         python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
     # A clip picked through GNOME's own picker and played (docs/media-plan.md
     # §2): rust-only, pooled like filedialog.

@@ -398,6 +398,13 @@ module KayaApp
     watchCaptureDevices,
     videoCapture,
     showCapture,
+    voice,
+    releaseVoice,
+    voiceRoute,
+    onVoiceRoute,
+    voiceWrite,
+    surface,
+    surfaceSubmit,
     captureReading,
     permission,
     captureDevices,
@@ -4582,6 +4589,51 @@ videoCapture (Capture c) = leafish $ do
   emitB (W.txSetCapture n (fromIntegral c))
   return w
 
+-- THE FAR END (docs/capture-plan.md §5).
+
+-- | A voice output: it plays what 'voiceWrite' writes on the platform's
+-- voice path, where its echo canceller hears it.
+voice :: Build Voice
+voice = do
+  n <- state $ \s -> let c = s.bCounters; next = c.cVoice + 1 in (next, s {bCounters = c {cVoice = next}})
+  emitB (W.txCreateVoice n)
+  return (Voice n)
+
+-- | Stop and forget a voice output; what it still holds is dropped.
+releaseVoice :: Voice -> Build ()
+releaseVoice (Voice v) = emitB (W.txReleaseVoice v)
+
+-- | A voice output's route as last heard: 'VoiceRouteNone' until the
+-- platform opens it.
+voiceRoute :: App -> Voice -> IO VoiceRoute
+voiceRoute app (Voice v) = Map.findWithDefault VoiceRouteNone v <$> readIORef app.appMedia.voiceRoutes
+
+-- | The route the platform opened the voice output on, and what the backend
+-- measured of it.
+onVoiceRoute :: App -> Voice -> (VoiceRoute -> Text -> IO ()) -> IO ()
+onVoiceRoute app (Voice v) f = modifyIORef' app.appMedia.voiceHandlers (Map.insert v f)
+
+-- | Queue 48 kHz mono s16 samples for the platform's voice path; past 200 ms
+-- ahead of it the oldest are dropped. False once released. Any thread; no
+-- transaction.
+voiceWrite :: Voice -> [Int16] -> IO Bool
+voiceWrite (Voice v) = R.voiceWrite v
+
+-- | A surface (docs\/capture-plan.md §5): a rectangle showing the frames
+-- 'surfaceSubmit' submits, the last one kept; half their size until laid
+-- out otherwise, 320x240 before the first. Live zone only.
+surface :: (LeafArgs r) => r
+surface = leafish (widget W.kindSurface)
+
+-- | Show an NV12 frame on a surface once its display clock next ticks,
+-- replacing any frame not yet shown; the planes are copied before it
+-- returns. False when the surface is gone. Any thread; no transaction.
+surfaceSubmit :: Widget -> CaptureFrame -> IO Bool
+surfaceSubmit (Widget w) f
+  | BS.length f.y < f.yStride * f.height || BS.length f.uv < f.uvStride * (f.height `div` 2) =
+      error "kaya: a surface frame's planes are shorter than its strides and height say (docs/capture-plan.md §4)"
+  | otherwise = R.surfaceSubmit w f.width f.height f.y f.yStride f.uv f.uvStride f.timestampNs f.rotation
+
 -- | Preview another capture in a live video view, or none.
 showCapture :: Widget -> Maybe Capture -> Build ()
 showCapture (Widget n) c = emitB (W.txSetCapture n (maybe 0 (\(Capture i) -> fromIntegral i) c))
@@ -6334,6 +6386,15 @@ mediaOccurrence app kind ident keys payload tail_
       return True
   | kind `elem` [W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun] =
       captureOccurrence app kind ident payload tail_
+  | kind == W.occKindVoiceChanged = do
+      case tail_ of
+        W.VI64 r : detail : _ -> do
+          let route = voiceRouteOfWire (fromIntegral r)
+          modifyIORef' m.voiceRoutes (Map.insert ident route)
+          hs <- readIORef m.voiceHandlers
+          dispatch (mapM_ (\f -> f route (case detail of W.VStr d -> T.pack d; _ -> "")) (Map.lookup ident hs))
+        _ -> return ()
+      return True
   | kind == W.occKindFontFamilies = do
       let names = [T.pack name | W.VStr name <- drop 1 tail_]
       h <- readIORef m.fontFamiliesHandler
@@ -6410,7 +6471,7 @@ newApp :: IO App
 newApp =
   App
     <$> newMVar [] -- appPosted
-    <*> newIORef (Counters 0 0 0 0 0 0 0 0 0 0 0 0) -- appCounters
+    <*> newIORef (Counters 0 0 0 0 0 0 0 0 0 0 0 0 0) -- appCounters
     <*> newIORef (Map.empty, Map.empty) -- appModel
     <*> newIORef Map.empty -- appFresh
     <*> newIORef Map.empty -- appDerived
@@ -6506,6 +6567,8 @@ newApp =
             <*> newIORef Nothing -- fontFamiliesHandler
             <*> newIORef Nothing -- fontFacesHandler
             <*> newIORef Map.empty -- fontDialogHandlers
+            <*> newIORef Map.empty -- voiceRoutes
+            <*> newIORef Map.empty -- voiceHandlers
         ) -- appMedia
 
 -- | Set up (build the scene, register handlers) and run: occurrences
@@ -6557,7 +6620,7 @@ drainPosted app = do
 
 isMediaKind :: Word16 -> Bool
 isMediaKind kind =
-  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun, W.occKindFontFamilies, W.occKindFontFaces, W.occKindFontDialogResult]
+  kind `elem` [W.occKindPlayerChanged, W.occKindPlayerPosition, W.occKindSeekCompleted, W.occKindPlayerTracks, W.occKindCaptionCue, W.occKindVideoVisibility, W.occKindSessionAction, W.occKindReaderFrame, W.occKindReaderProgress, W.occKindReaderPeaks, W.occKindReaderDone, W.occKindImageLoaded, W.occKindCaptureChanged, W.occKindCapturePermission, W.occKindCaptureDevices, W.occKindCaptureOverrun, W.occKindVoiceChanged, W.occKindFontFamilies, W.occKindFontFaces, W.occKindFontDialogResult]
 
 dispatchLoop :: App -> IO ()
 dispatchLoop app = do

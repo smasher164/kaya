@@ -183,6 +183,10 @@ windows = { version = "0.62", features = [
     # THE READER'S ARM (docs/media-plan.md §8 ruling 4, winui/reader.rs):
     # the source reader, and the PROPVARIANT its seek and duration take.
     "Win32_Media_MediaFoundation",
+    # The voice output's WASAPI render in the Communications category
+    # (docs/capture-plan.md §5), and its event-driven render thread.
+    "Win32_Media_Audio",
+    "Win32_System_Threading",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Variant",
 ] }
@@ -473,6 +477,10 @@ path = "../../guests/rust/media.rs"
 [[example]]
 name = "capture"
 path = "../../guests/rust/capture.rs"
+
+[[example]]
+name = "farend"
+path = "../../guests/rust/farend.rs"
 
 [[example]]
 name = "sliders"

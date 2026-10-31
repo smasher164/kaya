@@ -21,7 +21,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x721721bd5ae0c2aa
+let kayaSpecHash: UInt64 = 0xe3377635dd9a81cc
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -138,6 +138,9 @@ private let applySetDocumentProp: UInt16 = 80
 private let applyAddRegion: UInt16 = 81
 private let applyPresentFontDialog: UInt16 = 82
 private let applyListFontFaces: UInt16 = 83
+/// docs/capture-plan.md §5: a voice output on the platform.
+private let applyCreateVoice: UInt16 = 84
+private let applyReleaseVoice: UInt16 = 85
 /// The alert_choice cancel sentinel (deliberately not an index).
 private let kayaAlertChoiceCancel: UInt32 = 0xFFFF_FFFF
 
@@ -255,6 +258,7 @@ private let kindVideo: UInt32 = 23
 private let kindSecureField: UInt32 = 24
 private let kindSegmented: UInt32 = 25
 private let kindExpander: UInt32 = 26
+private let kindSurface: UInt32 = 27
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -1472,6 +1476,7 @@ final class KayaSceneModel {
     var secureFields: [KayaNode] = []
     var segmenteds: [KayaNode] = []
     var expanders: [KayaNode] = []
+    var surfaces: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
     static let registries: [ReferenceWritableKeyPath<KayaSceneModel, [KayaNode]>] = [
@@ -1479,6 +1484,7 @@ final class KayaSceneModel {
         \.timePickers, \.images, \.canvases, \.columns, \.rows, \.scrolls, \.progresses,
         \.selects, \.radios, \.grids, \.textareas, \.labeleds, \.searches, \.numberFields,
         \.colorPickers, \.ranges, \.videos, \.secureFields, \.segmenteds, \.expanders,
+        \.surfaces,
     ]
 
     func forget(_ id: UInt64) {
@@ -6384,6 +6390,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindColorPicker: kayaScene.colorPickers.append(node)
                 case kindRange: kayaScene.ranges.append(node)
                 case kindVideo: kayaScene.videos.append(node)
+                case kindSurface: kayaScene.surfaces.append(node)
                 case kindSecureField: kayaScene.secureFields.append(node)
                 case kindSegmented: kayaScene.segmenteds.append(node)
                 case kindExpander:
@@ -7871,6 +7878,11 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 }
             case applyWatchCaptureDevices:
                 kayaCaptureWatchDevices(raw.loadUnaligned(fromByteOffset: body, as: UInt32.self) != 0)
+            case applyCreateVoice:
+                let vid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
+                kayaVoices[vid] = KayaVoiceOutput(id: vid)
+            case applyReleaseVoice:
+                kayaVoices.removeValue(forKey: raw.loadUnaligned(fromByteOffset: body, as: UInt64.self))?.stop()
             case applySetVideoCapture:
                 let vid = raw.loadUnaligned(fromByteOffset: body, as: UInt64.self)
                 let node = kayaScene.nodes[vid]!
@@ -9850,6 +9862,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "secure_field": return kayaTarget(spec, "secure_field", kayaScene.secureFields)
     case "segmented": return kayaTarget(spec, "segmented", kayaScene.segmenteds)
     case "expander": return kayaTarget(spec, "expander", kayaScene.expanders)
+    case "surface": return kayaTarget(spec, "surface", kayaScene.surfaces)
     default: return nil
     }
 }
@@ -14514,7 +14527,7 @@ private func kayaRunScript(_ script: String) {
                 // process snapshot holds a player's frames (measured).
                 let want = kayaQuoted(Array(parts[2...]))
                 #if os(macOS)
-                    let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                    let node = DispatchQueue.main.sync { kayaPictureTarget(parts[1]) }
                     let got = node.map { kayaVideoInk($0) } ?? "<no such target>"
                     if want == "none" {
                         let ground = node.map { kayaVideoInk($0, beside: true) } ?? "<no such target>"
@@ -14528,12 +14541,14 @@ private func kayaRunScript(_ script: String) {
                     } else if kayaVideoInkMatches(got, want) {
                         observed.append("video ink \(want)")
                     } else {
-                        failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
+                        failures.append(
+                            "video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel"
+                                + (node.map(kayaSurfaceMiss) ?? ""))
                     }
                 #else
                     // The simulator's own screenshot, taken by the host, is
                     // sRGB and holds the layer's picture (docs/media-plan.md §6).
-                    let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                    let node = DispatchQueue.main.sync { kayaPictureTarget(parts[1]) }
                     let got = node.map { kayaVideoInk($0) } ?? "<no such target>"
                     if want == "none" {
                         let ground = node.map { kayaVideoInk($0, beside: true) } ?? "<no such target>"
@@ -14547,7 +14562,9 @@ private func kayaRunScript(_ script: String) {
                     } else if kayaVideoInkMatches(got, want) {
                         observed.append("video ink \(want)")
                     } else {
-                        failures.append("video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
+                        failures.append(
+                            "video ink \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel"
+                                + (node.map(kayaSurfaceMiss) ?? ""))
                     }
                 #endif
             case "expect_drop_at":
@@ -14574,7 +14591,7 @@ private func kayaRunScript(_ script: String) {
                 let want = kayaQuoted(Array(parts[2...]))
                 let ratio = want.split(separator: ":").compactMap { Int($0) }
                 let size = want.split(separator: "x").compactMap { Int($0) }
-                let node = DispatchQueue.main.sync { kayaTarget(parts[1], "video", kayaScene.videos) }
+                let node = DispatchQueue.main.sync { kayaPictureTarget(parts[1]) }
                 let got = node.map { kayaVideoBox($0) } ?? "<no such target>"
                 if ratio.count == 2, kayaVideoBoxShaped(got, ratio[0], ratio[1]) {
                     observed.append("video box \(want)")
@@ -14606,6 +14623,11 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("video corner \(got), wanted \(want) within \(kayaVideoInkTolerance) per channel")
                 }
+            case "expect_voice":
+                // docs/capture-plan.md §5: what the platform's voice path
+                // pulled, by the core's own statistics, and its route.
+                let (ok, sentence) = kayaVoiceHarness(UInt32(parts[1]) ?? UInt32.max, kayaQuoted(Array(parts[2...])))
+                if ok { observed.append(sentence) } else { failures.append(sentence) }
             case "expect_capture":
                 // docs/capture-plan.md §7: the core's own statistics of what
                 // passed through the capture, never the app's word.
@@ -30177,6 +30199,17 @@ struct KayaRender: View {
                     .accessibilityAction(named: actions[1].0, actions[1].1)
                     .modifier(KayaBleedIfAsked(node: node))
             }
+        case kindSurface:
+            // docs/capture-plan.md §5: the frames the app submits, composited
+            // on the display clock at the self-view's box, a picture to an
+            // assistive reader.
+            let box = kayaSurfaceNatural(node)
+            KayaSurfaceHost(node: node)
+                .aspectRatio(box, contentMode: .fit)
+                .frame(idealWidth: box.width, maxWidth: node.grow > 0 ? .infinity : box.width)
+                .accessibilityElement(children: .ignore)
+                .accessibilityAddTraits(.isImage)
+                .modifier(KayaBleedIfAsked(node: node))
         case kindDatePicker:
             // The platform's own control, hosted (docs/datetime-plan.md D6):
             // the compact field that opens the calendar. Its action is the
@@ -44157,4 +44190,311 @@ func kayaVideoInkMatches(_ got: String, _ want: String) -> Bool {
     }
     guard let g = rgb(got), let w = rgb(want) else { return false }
     return zip(g, w).allSatisfy { abs($0 - $1) <= kayaVideoInkTolerance }
+}
+
+// MARK: - The far end of a call (docs/capture-plan.md §5)
+
+/// expect_video_ink's and expect_video_box's target: a video view or a surface.
+func kayaPictureTarget(_ spec: Substring) -> KayaNode? {
+    spec.hasPrefix("surface#") ? kayaTarget(spec, "surface", kayaScene.surfaces) : kayaTarget(spec, "video", kayaScene.videos)
+}
+
+/// What a surface's missed read adds: the core's count of the app's submits
+/// and this backend's takes, so the sentence says which half failed.
+func kayaSurfaceMiss(_ node: KayaNode) -> String {
+    guard node.kind == kindSurface else { return "" }
+    var buffer = [UInt8](repeating: 0, count: 512)
+    let n = buffer.withUnsafeMutableBufferPointer { KayaHost.api.surface_detail(node.id, $0.baseAddress, UInt($0.count)) }
+    return "; " + String(decoding: buffer.prefix(min(Int(n), buffer.count)), as: UTF8.self)
+}
+
+/// Every surface's sink by node.
+nonisolated(unsafe) var kayaSurfaceSinks: [UInt64: KayaSurfaceSink] = [:]
+
+/// One surface's half: the frames the app submitted, uploaded into pixel
+/// buffers from a pool and enqueued on a sample-buffer layer as the display
+/// clock ticks; the layer keeps the last one.
+final class KayaSurfaceSink {
+    let node: UInt64
+    let display = AVSampleBufferDisplayLayer()
+    private var seen: UInt64 = 0
+    private var pool: CVPixelBufferPool?
+    private var description: CMVideoFormatDescription?
+    private(set) var frames: (UInt32, UInt32, UInt32) = (0, 0, 0)
+
+    init(node: UInt64) {
+        self.node = node
+        display.videoGravity = .resizeAspect
+    }
+
+    func fit(_ gravity: AVLayerVideoGravity) { display.videoGravity = gravity }
+
+    /// The display clock's tick: a newer frame is uploaded and shown.
+    func tick() {
+        var info: [UInt32] = [0, 0, 0]
+        var seq: UInt64 = 0
+        let newer = info.withUnsafeMutableBufferPointer { KayaHost.api.surface_newer(node, seen, $0.baseAddress, &seq) }
+        guard newer == 1 else { return }
+        let (w, h, rotation) = (info[0], info[1], info[2])
+        if frames.0 != w || frames.1 != h || pool == nil {
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+                kCVPixelBufferWidthKey as String: Int(w), kCVPixelBufferHeightKey as String: Int(h),
+                kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
+            ]
+            pool = nil
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attrs as CFDictionary, &pool)
+            description = nil
+        }
+        guard let pool else { return }
+        var made: CVPixelBuffer?
+        guard CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &made) == kCVReturnSuccess, let pixels = made
+        else { return }
+        CVPixelBufferLockBaseAddress(pixels, [])
+        let copied = KayaHost.api.surface_copy(
+            node, w, h,
+            CVPixelBufferGetBaseAddressOfPlane(pixels, 0)!.assumingMemoryBound(to: UInt8.self),
+            UInt32(CVPixelBufferGetBytesPerRowOfPlane(pixels, 0)),
+            CVPixelBufferGetBaseAddressOfPlane(pixels, 1)!.assumingMemoryBound(to: UInt8.self),
+            UInt32(CVPixelBufferGetBytesPerRowOfPlane(pixels, 1)))
+        CVPixelBufferUnlockBaseAddress(pixels, [])
+        guard copied != 0 else { return }
+        seen = copied
+        // The samples' own colour, as the synthetic camera's buffers carry it.
+        CVBufferSetAttachment(pixels, kCVImageBufferYCbCrMatrixKey, kCVImageBufferYCbCrMatrix_ITU_R_601_4, .shouldPropagate)
+        CVBufferSetAttachment(pixels, kCVImageBufferColorPrimariesKey, kCVImageBufferColorPrimaries_ITU_R_709_2, .shouldPropagate)
+        CVBufferSetAttachment(pixels, kCVImageBufferTransferFunctionKey, kCVImageBufferTransferFunction_sRGB, .shouldPropagate)
+        if description == nil {
+            CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescriptionOut: &description)
+        }
+        guard let description else { return }
+        var timing = CMSampleTimingInfo(
+            duration: .invalid, presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault, imageBuffer: pixels, formatDescription: description, sampleTiming: &timing,
+            sampleBufferOut: &sample)
+        guard let sample else { return }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true),
+            CFArrayGetCount(attachments) > 0
+        {
+            let first = unsafeBitCast(CFArrayGetValueAtIndex(attachments, 0), to: CFMutableDictionary.self)
+            CFDictionarySetValue(
+                first, Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+                Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
+        }
+        let renderer = display.sampleBufferRenderer
+        if renderer.status == .failed { renderer.flush() }
+        renderer.enqueue(sample)
+        if frames != (w, h, rotation) {
+            frames = (w, h, rotation)
+            display.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(rotation) * .pi / 180))
+            kayaScene.nodes[node]?.videoSeq += 1
+        }
+    }
+}
+
+/// The surface's box before layout: the self-view's rule over its frames
+/// (docs/capture-plan.md §3), 320x240 before the first.
+func kayaSurfaceNatural(_ node: KayaNode) -> CGSize {
+    _ = node.videoSeq
+    let frames = kayaSurfaceSinks[node.id]?.frames ?? (0, 0, 0)
+    var box: [UInt32] = [0, 0]
+    box.withUnsafeMutableBufferPointer { KayaHost.api.capture_self_view_box(frames.0, frames.1, frames.2, node.aspect, $0.baseAddress) }
+    return CGSize(width: Int(box[0]), height: Int(box[1]))
+}
+
+/// The surface on screen: the video view's layer host with the sink's layer
+/// in it, ticked by the display clock.
+struct KayaSurfaceHost: View {
+    let node: KayaNode
+
+    var body: some View {
+        KayaSurfaceLayer(node: node)
+            .background {
+                TimelineView(.animation) { context in
+                    Color.clear.onChange(of: context.date) { _, _ in kayaSurfaceSinks[node.id]?.tick() }
+                }
+            }
+    }
+}
+
+#if os(macOS)
+    struct KayaSurfaceLayer: NSViewRepresentable {
+        let node: KayaNode
+
+        func makeNSView(context: Context) -> KayaVideoView {
+            let view = KayaVideoView()
+            update(view)
+            return view
+        }
+
+        func updateNSView(_ view: KayaVideoView, context: Context) { update(view) }
+
+        private func update(_ view: KayaVideoView) {
+            _ = node.videoSeq
+            kayaVideoViews[node.id] = view
+            let sink = kayaSurfaceSinks[node.id] ?? KayaSurfaceSink(node: node.id)
+            kayaSurfaceSinks[node.id] = sink
+            view.preview(sink.display, node.fit)
+            sink.fit(kayaVideoGravity(node.fit))
+        }
+
+        static func dismantleNSView(_ view: KayaVideoView, coordinator: ()) {
+            for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
+            view.preview(nil, 0)
+        }
+    }
+#else
+    struct KayaSurfaceLayer: UIViewRepresentable {
+        let node: KayaNode
+
+        func makeUIView(context: Context) -> KayaVideoView {
+            let view = KayaVideoView()
+            view.clipsToBounds = true
+            update(view)
+            return view
+        }
+
+        func updateUIView(_ view: KayaVideoView, context: Context) { update(view) }
+
+        private func update(_ view: KayaVideoView) {
+            _ = node.videoSeq
+            kayaVideoViews[node.id] = view
+            let sink = kayaSurfaceSinks[node.id] ?? KayaSurfaceSink(node: node.id)
+            kayaSurfaceSinks[node.id] = sink
+            view.preview(sink.display, node.fit)
+            sink.fit(kayaVideoGravity(node.fit))
+        }
+
+        static func dismantleUIView(_ view: KayaVideoView, coordinator: ()) {
+            for (id, held) in kayaVideoViews where held === view { kayaVideoViews.removeValue(forKey: id) }
+            view.preview(nil, 0)
+        }
+    }
+#endif
+
+/// Every live voice output by id.
+nonisolated(unsafe) var kayaVoices: [UInt64: KayaVoiceOutput] = [:]
+
+/// expect_voice, answered by the core.
+func kayaVoiceHarness(_ index: UInt32, _ text: String) -> (Bool, String) {
+    var out = [UInt8](repeating: 0, count: 1024)
+    var ok: UInt8 = 0
+    let n = Array(text.utf8).withUnsafeBufferPointer { t in
+        out.withUnsafeMutableBufferPointer { o in
+            KayaHost.api.voice_harness(index, t.baseAddress, UInt(t.count), o.baseAddress, UInt(o.count), &ok)
+        }
+    }
+    return (ok == 1, String(decoding: out.prefix(min(Int(n), out.count)), as: UTF8.self))
+}
+
+func kayaReportVoiceRoute(_ id: UInt64, _ route: Int32, _ detail: String) {
+    let bytes = Array(detail.utf8)
+    bytes.withUnsafeBufferPointer { d in KayaHost.api.voice_route(id, UInt32(route), d.baseAddress, UInt(d.count)) }
+}
+
+/// A voice output: an AVAudioSourceNode pulling the core's queue. Under the
+/// harness the engine renders offline in manual rendering mode, paced by a
+/// timer, so no output device opens (docs/capture-plan.md §7, the
+/// in-process synthetic device); on a real run it is KayaRealVoice's engine
+/// with voice processing, the path Apple's echo canceller hears.
+final class KayaVoiceOutput {
+    static let rate = 44_100.0
+    let id: UInt64
+    private let engine = AVAudioEngine()
+    private var timer: DispatchSourceTimer?
+    private var started = DispatchTime.now()
+    private var rendered = 0
+    private let queue: DispatchQueue
+
+    init(id: UInt64) {
+        self.id = id
+        queue = DispatchQueue(label: "dev.kaya.voice.\(id)")
+        let format = AVAudioFormat(standardFormatWithSampleRate: KayaVoiceOutput.rate, channels: 2)!
+        let voice = id
+        let source = AVAudioSourceNode(format: format) { _, _, frames, list -> OSStatus in
+            let buffers = UnsafeMutableAudioBufferListPointer(list)
+            guard let first = buffers.first?.mData?.assumingMemoryBound(to: Float.self) else { return noErr }
+            _ = KayaHost.api.voice_pull(voice, UInt32(KayaVoiceOutput.rate), 1, first, UInt(frames))
+            for other in buffers.dropFirst() {
+                other.mData?.copyMemory(from: first, byteCount: Int(frames) * MemoryLayout<Float>.size)
+            }
+            return noErr
+        }
+        if kayaCaptureUnderHarness {
+            do {
+                try engine.enableManualRenderingMode(.offline, format: format, maximumFrameCount: 4096)
+                engine.attach(source)
+                engine.connect(source, to: engine.mainMixerNode, format: format)
+                try engine.start()
+            } catch {
+                kayaReportVoiceRoute(id, KAYA_VOICE_ROUTE_FAILED, "the harness's offline engine would not start: \(error)")
+                return
+            }
+            kayaReportVoiceRoute(
+                id, KAYA_VOICE_ROUTE_SYNTHETIC,
+                "the harness's AVAudioEngine renders offline (manual rendering, 44100 Hz x2) through an "
+                    + "AVAudioSourceNode; no output device opens")
+            let buffer = AVAudioPCMBuffer(pcmFormat: engine.manualRenderingFormat, frameCapacity: 4096)!
+            let t = DispatchSource.makeTimerSource(queue: queue)
+            t.schedule(deadline: .now(), repeating: .milliseconds(10), leeway: .milliseconds(1))
+            t.setEventHandler { [weak self] in self?.render(buffer) }
+            timer = t
+            started = DispatchTime.now()
+            t.resume()
+        } else {
+            let (route, detail) = KayaRealVoice.open(engine, source, format)
+            kayaReportVoiceRoute(id, route, detail)
+        }
+    }
+
+    /// The frames due since the start, rendered as the hardware would pull them.
+    private func render(_ buffer: AVAudioPCMBuffer) {
+        let due = Int(Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e9 * KayaVoiceOutput.rate)
+        while rendered + 441 <= due {
+            guard (try? engine.renderOffline(441, to: buffer)) == .success else { return }
+            rendered += 441
+        }
+    }
+
+    func stop() {
+        timer?.cancel()
+        timer = nil
+        engine.stop()
+    }
+}
+
+/// EVERY REAL VOICE PATH IS OPENED HERE (docs/capture-plan.md §5, §7): voice
+/// processing opens the microphone with the speaker, so each entry calls
+/// kayaCaptureWall first, as KayaRealCapture's do.
+enum KayaRealVoice {
+    static func open(_ engine: AVAudioEngine, _ source: AVAudioSourceNode, _ format: AVAudioFormat) -> (Int32, String) {
+        kayaCaptureWall("opening a voice output's voice path")
+        #if os(iOS)
+            do {
+                try AVAudioSession.sharedInstance().setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker])
+                try AVAudioSession.sharedInstance().setActive(true)
+            } catch {
+                return (KAYA_VOICE_ROUTE_FAILED, "the audio session refused voice chat: \(error.localizedDescription)")
+            }
+        #endif
+        var route = KAYA_VOICE_ROUTE_VOICE
+        var detail = "AVAudioEngine's voice-processing I/O"
+        do {
+            try engine.outputNode.setVoiceProcessingEnabled(true)
+        } catch {
+            route = KAYA_VOICE_ROUTE_PLAIN
+            detail = "voice processing refused (\(error.localizedDescription)); played on the engine's plain output"
+        }
+        engine.attach(source)
+        engine.connect(source, to: engine.mainMixerNode, format: format)
+        do {
+            try engine.start()
+        } catch {
+            return (KAYA_VOICE_ROUTE_FAILED, "the engine would not start: \(error.localizedDescription)")
+        }
+        return (route, detail)
+    }
 }

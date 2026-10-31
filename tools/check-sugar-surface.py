@@ -12088,6 +12088,80 @@ if _rust_capture:
                   f"{', '.join(_rust_capture)} — its patterns no longer match the binding they "
                   f"were calibrated against")
 
+
+# --- THE FAR END, in all nine (docs/capture-plan.md §5) -------------------
+# The voice output's two records and the surface kind reach every binding
+# through the generator whether or not an app can spell them, and the frame
+# and sample writes are C entry points no generator writes. So each row reads
+# the binding's hand-written surface: the generated writer called for each
+# record, the kind named where a surface is made, and the two C entries (or
+# the binding's own route to them). Rust is the reference row.
+_FAREND_RECORDS = ("create_voice", "release_voice")
+_FAREND_ENTRIES = ("kaya_surface_submit", "kaya_voice_write")
+
+
+def _farend_row(rel, record_template, record_name, kind_pattern, entries_rel, entry_template,
+                kind_rel=None):
+    return ([(rel, record_template, record_name(r)) for r in _FAREND_RECORDS]
+            + [(kind_rel or rel, r"{}", kind_pattern)]
+            + [(entries_rel, entry_template, e) for e in _FAREND_ENTRIES])
+
+
+FAREND_SURFACES = [
+    ("rust", [("crates/kaya/src/app/farend.rs", r"TxOp::{} \{{", _pascal(r))
+              for r in _FAREND_RECORDS]
+     + [("crates/kaya/src/app.rs", r"{}", r"WidgetKind::Surface")]
+     + [("crates/kaya/src/app/farend.rs", r"crate::farend::{}\(", e) for e in ("submit", "write")]),
+    ("python", _farend_row("bindings/python/kaya/__init__.py", r"wire\.{}\(",
+                           lambda r: "tx_" + r, r"wire\.KIND_SURFACE\b",
+                           "bindings/python/kaya/runtime.py", r"_lib\.{}\(")),
+    ("go", _farend_row("bindings/go/farend.go", r"\b{}\(", lambda r: "Tx" + _pascal(r),
+                       r"\bKindSurface\b", "bindings/go/farend.go", r"C\.{}\(",
+                       "bindings/go/app.go")),
+    ("csharp", _farend_row("bindings/csharp/KayaApp.cs", r"KayaWire\.{}\(",
+                           lambda r: "Tx" + _pascal(r), r"KayaWire\.KindSurface\b",
+                           "bindings/csharp/KayaApp.cs", r"\b{}\(")),
+    ("java", _farend_row("bindings/java/dev/kaya/KayaApp.java", r"KayaWire\.{}\(",
+                         lambda r: "tx" + _pascal(r), r"KayaWire\.KIND_SURFACE\b",
+                         "crates/kaya/src/jvm.rs", r"capi::{}\(")),
+    ("swift", _farend_row("bindings/swift/KayaFarEnd.swift", r"tx\.{}\(", _camel,
+                          r"KAYA_KIND_SURFACE\b", "bindings/swift/KayaFarEnd.swift", r"\b{}\(",
+                          "bindings/swift/KayaApp.swift")),
+    ("haskell", _farend_row("bindings/haskell/KayaApp.hs", r"W\.{}\b",
+                            lambda r: "tx" + _pascal(r), r"W\.kindSurface\b",
+                            "bindings/haskell/KayaRuntime.hs", r'"{}"')),
+    ("ocaml", _farend_row("bindings/ocaml/kaya_app.ml", r"Kaya_wire\.{}\b", lambda r: "tx_" + r,
+                          r"Kaya_wire\.kind_surface\b", "bindings/ocaml/kaya_runtime.ml",
+                          r'"{}"')),
+    ("js", _farend_row("bindings/js/kaya/index.ts", r"wire\.{}\(", lambda r: "tx_" + r,
+                       r"wire\.KIND_SURFACE\b", "crates/kaya/src/node.rs", r"capi::{}\(")),
+]
+
+
+def check_farend_surfaces(fake_name=None, findings=None):
+    global status
+    for lang, patterns in FAREND_SURFACES:
+        for rel, template, name in patterns:
+            pat = template.format(fake_name or name)
+            if not grep_file(pat, rel):
+                msg = (f"check-sugar-surface: {lang} lacks the far end's surface "
+                       f"(wanted /{pat}/ in {rel})")
+                if findings is None:
+                    print(msg)
+                    status = 1
+                else:
+                    findings.append(msg)
+
+
+check_farend_surfaces()
+_farend_fake = []
+check_farend_surfaces("KayaFakeFarEndSurface", findings=_farend_fake)
+_farend_want = sum(len(p) for _, p in FAREND_SURFACES)
+print(f"check-sugar-surface: fake far-end surfaces fired {len(_farend_fake)}/{_farend_want}")
+if len(_farend_fake) != _farend_want:
+    selftest_exit(f"check-sugar-surface: self-test failed ({len(_farend_fake)}/{_farend_want} "
+                  f"far-end patterns fired for names that exist nowhere)")
+
 from timecode_surface import run as check_timecode_surface
 
 if check_timecode_surface():

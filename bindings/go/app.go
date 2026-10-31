@@ -285,6 +285,7 @@ type App struct {
 	media mediaState
 	// The captures' mirrors and handlers (capture.go).
 	capture captureState
+	voice   voiceState
 	// docs/code-surface-plan.md M3.
 	onFontFamilies func(*Tx, []string)
 	onFontFaces    func(*Tx, string, []FontFace)
@@ -2596,6 +2597,11 @@ func (tx *Tx) DatePickerBound(date Signal[Date], onDate func(*Tx, Date)) Widget 
 // Video creates a video view showing p (docs/media-plan.md §3): the
 // platform's own view with its controls off. A player is shown by one
 // video view at a time (§7b).
+// Surface creates a surface (docs/capture-plan.md §5): a rectangle showing
+// the frames App.SurfaceFrames submits, the last one kept; half their size
+// until laid out otherwise, 320x240 before the first. Live zone only.
+func (tx *Tx) Surface() Widget { return tx.Widget(KindSurface) }
+
 func (tx *Tx) Video(p Player) Widget {
 	w := tx.Widget(KindVideo)
 	tx.emit(TxSetPlayer(w.id, int64(p.id)))
@@ -7673,6 +7679,8 @@ func (a *App) Serve() {
 			a.mediaOccurred(kind, id, keys, payload)
 		case captureOccurrence(kind):
 			a.captureOccurred(kind, id, payload)
+		case kind == occVoiceChanged:
+			a.voiceOccurred(id, tail)
 		case kind == occFontFamilies:
 			listed, _ := payload.([]any)
 			if len(listed) > 0 {

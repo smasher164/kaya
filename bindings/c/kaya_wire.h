@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0x721721bd5ae0c2aaULL
+#define KAYA_SPEC_HASH 0xe3377635dd9a81ccULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -1061,6 +1061,20 @@ static inline void kaya_tx_show_font_dialog(KayaTx *tx, uint64_t window, uint64_
 static inline void kaya_tx_list_font_faces(KayaTx *tx, KayaVal family) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_LIST_FONT_FACES);
     kaya_wire_value(tx, family);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed. */
+static inline void kaya_tx_create_voice(KayaTx *tx, uint64_t voice) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_CREATE_VOICE);
+    kaya_wire_u64(tx, voice);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows. */
+static inline void kaya_tx_release_voice(KayaTx *tx, uint64_t voice) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_VOICE);
+    kaya_wire_u64(tx, voice);
     kaya_wire_end(tx, kaya_at);
 }
 

@@ -1103,6 +1103,58 @@ static class MediaWords
 /// place in the layout. Tx.Capture makes one; a video view previews it.
 readonly record struct Capture(ulong Id);
 
+/// A voice output (docs/capture-plan.md §5): plays the 48 kHz mono s16
+/// samples its writer writes on the platform's voice path, an id in its own
+/// space, with no place in the layout. Tx.Voice makes one.
+readonly record struct Voice(ulong Id)
+{
+    /// The sample handle, for the thread the samples arrive on.
+    public VoiceWriter Writer() => new(Id);
+}
+
+/// Where a voice output plays: Voice on the platform's voice path, Plain
+/// where no echo canceller hears it, Synthetic the harness's own engine,
+/// Failed not at all, None until the platform opens it.
+enum VoiceRoute : uint
+{
+    None = KayaWire.VoiceRouteNone,
+    Voice = KayaWire.VoiceRouteVoice,
+    Plain = KayaWire.VoiceRoutePlain,
+    Synthetic = KayaWire.VoiceRouteSynthetic,
+    Failed = KayaWire.VoiceRouteFailed,
+}
+
+/// Where a voice output's samples go, from any thread.
+readonly record struct VoiceWriter(ulong Id)
+{
+    /// Queue 48 kHz mono s16 samples for the platform's voice path; past
+    /// 200 ms ahead of it the oldest are dropped. False once the voice
+    /// output is released. Any thread; no transaction.
+    public unsafe bool Write(ReadOnlySpan<short> samples)
+    {
+        fixed (short* p = samples) return Kaya.kaya_voice_write(Id, p, (nuint)samples.Length) == 1;
+    }
+}
+
+/// Where a surface's frames go, from any thread (docs/capture-plan.md §5).
+readonly record struct SurfaceFrames(ulong Id)
+{
+    /// Show `frame` (NV12, as a capture hands one) once the surface's display
+    /// clock next ticks, replacing any frame not yet shown; the planes are
+    /// copied before it returns. False when the surface is gone. Any thread.
+    public unsafe bool Submit(CaptureFrame frame)
+    {
+        if ((ulong)frame.Y.Length < (ulong)frame.YStride * frame.Height
+            || (ulong)frame.UV.Length < (ulong)frame.UVStride * (frame.Height / 2))
+            throw new ArgumentException(
+                "kaya: a surface frame's planes are shorter than its strides and height say (docs/capture-plan.md §4)");
+        fixed (byte* y = frame.Y)
+        fixed (byte* uv = frame.UV)
+            return Kaya.kaya_surface_submit(Id, frame.Width, frame.Height, y, frame.YStride, uv, frame.UVStride,
+                frame.TimestampNs, frame.Rotation) == 1;
+    }
+}
+
 enum CaptureState : uint
 {
     Idle = KayaWire.CaptureStateIdle,
@@ -1243,6 +1295,13 @@ static unsafe partial class Kaya
     [System.Runtime.InteropServices.DllImport("kaya")]
     static extern void kaya_capture_on_frame(ulong capture,
         delegate* unmanaged[Cdecl]<IntPtr, NativeCaptureFrame*, void> callback, IntPtr ctx);
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    internal static extern uint kaya_voice_write(ulong voice, short* samples, nuint count);
+
+    [System.Runtime.InteropServices.DllImport("kaya")]
+    internal static extern uint kaya_surface_submit(ulong widget, uint width, uint height, byte* y, uint yStride,
+        byte* uv, uint uvStride, ulong timestampNs, uint rotation);
 
     [System.Runtime.InteropServices.DllImport("kaya")]
     static extern void kaya_capture_on_samples(ulong capture,
@@ -1548,6 +1607,9 @@ sealed record CaptureMoved(ulong Id, List<object> Keys, CaptureReading Reading, 
     : Occurrence(Id, Keys);
 
 sealed record CaptureOverran(ulong Id, List<object> Keys, ulong BehindMs) : Occurrence(Id, Keys);
+
+// The voice output's route (docs/capture-plan.md §5): Id is the VOICE.
+sealed record VoiceRouted(ulong Id, List<object> Keys, VoiceRoute Route, string Detail) : Occurrence(Id, Keys);
 
 sealed record PermissionHeard(ulong Id, List<object> Keys, CaptureKind Kind, Permission Permission)
     : Occurrence(Id, Keys);
@@ -3160,6 +3222,19 @@ sealed class KayaApp
 
     internal Capture NextCapture() => new(++captures);
 
+    internal Voice NextVoice() => new(++voices);
+
+    ulong voices;
+    readonly Dictionary<ulong, VoiceRoute> voiceRoutes = new();
+    readonly Dictionary<ulong, Action<Tx, VoiceRoute, string>> voiceHandlers = new();
+
+    /// A voice output's route as last heard: None until the platform opens it.
+    public VoiceRoute VoiceRoute(Voice v) => voiceRoutes.TryGetValue(v.Id, out var r) ? r : global::VoiceRoute.None;
+
+    /// The route the platform opened the voice output on, and what the
+    /// backend measured of it.
+    public void OnVoiceRoute(Voice v, Action<Tx, VoiceRoute, string> handler) => voiceHandlers[v.Id] = handler;
+
     ulong captures;
     readonly Dictionary<ulong, CaptureReading> captureReadings = new();
     readonly Dictionary<ulong, Action<Tx, CaptureReading>> captureStates = new();
@@ -3804,6 +3879,11 @@ sealed class KayaApp
             // capture rides as the payload.
             case KayaWire.OccKindCaptureOverrun:
                 return new CaptureOverran(payload is ulong capture ? capture : 0, keys, id);
+            case KayaWire.OccKindVoiceChanged:
+            {
+                var tail = FlatTail("voice_changed", payload as List<object>, 2);
+                return new VoiceRouted(id, keys, (VoiceRoute)(uint)Int(tail[0]), tail[1] as string ?? "");
+            }
             case KayaWire.OccKindCapturePermission:
             {
                 var tail = FlatTail("capture_permission", payload as List<object>, 2);
@@ -4201,6 +4281,11 @@ sealed class KayaApp
                     break;
                 case CaptureMoved or CaptureOverran or PermissionHeard or DevicesListed:
                     DispatchCapture(occurrence);
+                    break;
+                case VoiceRouted routed:
+                    voiceRoutes[routed.Id] = routed.Route;
+                    if (voiceHandlers.TryGetValue(routed.Id, out var onRoute))
+                        Dispatch(tx => onRoute(tx, routed.Route, routed.Detail));
                     break;
                 case FamiliesListed listedFamilies:
                     if (familiesHandler is { } onFamilies)
@@ -5596,6 +5681,35 @@ sealed class Tx : IDisposable
         if (grow is double g) SetGrow(w, g);
         return w;
     }
+
+    /// A voice output (docs/capture-plan.md §5): plays what its Writer()
+    /// writes on the platform's voice path, where its echo canceller hears
+    /// it. `onRoute` hears the route the platform opened it on.
+    public Voice Voice(Action<Tx, VoiceRoute, string>? onRoute = null)
+    {
+        var v = App.NextVoice();
+        Records.Add(KayaWire.TxCreateVoice(v.Id));
+        if (onRoute != null) App.OnVoiceRoute(v, onRoute);
+        return v;
+    }
+
+    /// Stop and forget a voice output; what it still holds is dropped.
+    public void ReleaseVoice(Voice v) => Records.Add(KayaWire.TxReleaseVoice(v.Id));
+
+    /// A surface (docs/capture-plan.md §5): a rectangle showing the frames
+    /// Frames(surface) submits, the last one kept; half their size until laid
+    /// out otherwise, 320x240 before the first. Live zone only.
+    public Widget Surface(Fit? fit = null, double? grow = null, (int Width, int Height)? aspect = null)
+    {
+        var w = Widget(KayaWire.KindSurface);
+        if (fit is Fit f) SetFit(w, f);
+        if (aspect is var (aw, ah)) SetAspect(w, aw, ah);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
+    /// A surface's frame handle, for the thread the frames arrive on.
+    public SurfaceFrames Frames(Widget surface) => new(surface.Id);
 
     /// Preview another capture in a live video view, or none.
     public void ShowCapture(Widget video, Capture? capture) =>

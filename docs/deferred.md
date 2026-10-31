@@ -1498,7 +1498,7 @@ sighting read those lines in leg-log.txt first: a player that never paused
 is this arm, a player that paused with the label still "playing" is the
 core's report or the guest.
 
-## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day; the C floor's parsers, §5's far end and the rulings below remain
+## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day, §5's far end built 2026-10-31; the C floor's parsers, the `voice` prop and the rulings below remain
 KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_nearest_format, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied, pwsynth, capture-leg.py, winvcam, kaya-capture-lane, capture-install.ps1, emulator_capture.py, KayaCapture.kt, scene-negative.py
 
 The depth slice: the spec's six transaction, seven apply and four occurrence
@@ -1582,8 +1582,14 @@ and caught a panicking capture callback there (`survive`):
     own grant arranged by the lane. tools/check-verbs.py holds a wall per
     backend: every real-device open inside one walled function, fatal under
     KAYA_SELFTEST.
-  - Not built, each with its plan section: §5's surface frames and voice
-    output (and with them the `voice` prop), the opt-in real-device leg
+  - ~~§5's surface frames and voice output~~ — BUILT 2026-10-31: the
+    `surface` kind fed with the app's NV12 frames and the voice output on each
+    platform's voice path, the `farend` scene green on five lanes in all nine
+    bindings, the choices it settled in docs/capture-plan.md §11. Still not
+    built from §5: the `voice` prop, and on Apple's real path the microphone
+    on the voice output's processing engine (the capture still opens it
+    through AVCaptureSession).
+  - Not built, each with its plan section: the `voice` prop, the opt-in real-device leg
     (§7a), rule 6's background capture, `systemPreferredCamera` followed live
     (it is read when the list is reported), the self-view's mirroring asserted
     (it is applied for a front or desktop camera, but a flat synthetic colour

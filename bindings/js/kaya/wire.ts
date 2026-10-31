@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0x721721bd5ae0c2aan;
+export const SPEC_HASH = 0xe3377635dd9a81ccn;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -49,6 +49,7 @@ export const KIND_VIDEO = 23;
 export const KIND_SECURE_FIELD = 24;
 export const KIND_SEGMENTED = 25;
 export const KIND_EXPANDER = 26;
+export const KIND_SURFACE = 27;
 export const DRAW_OP_MOVE_TO = 1;
 export const DRAW_OP_LINE_TO = 2;
 export const DRAW_OP_CLOSE = 3;
@@ -371,6 +372,11 @@ export const CAPTURE_INTERRUPTION_NONE = 0;
 export const CAPTURE_INTERRUPTION_BACKGROUND = 1;
 export const CAPTURE_INTERRUPTION_ANOTHER_APP = 2;
 export const CAPTURE_INTERRUPTION_SYSTEM_PRESSURE = 3;
+export const VOICE_ROUTE_NONE = 0;
+export const VOICE_ROUTE_VOICE = 1;
+export const VOICE_ROUTE_PLAIN = 2;
+export const VOICE_ROUTE_SYNTHETIC = 3;
+export const VOICE_ROUTE_FAILED = 4;
 export const CAPTURE_KIND_CAMERA = 0;
 export const CAPTURE_KIND_MICROPHONE = 1;
 export const PERMISSION_PROMPT = 0;
@@ -520,6 +526,8 @@ export const TX_SET_DOCUMENT_PROP = 92;
 export const TX_ADD_REGION = 93;
 export const TX_SHOW_FONT_DIALOG = 94;
 export const TX_LIST_FONT_FACES = 95;
+export const TX_CREATE_VOICE = 96;
+export const TX_RELEASE_VOICE = 97;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -601,6 +609,8 @@ export const APPLY_SET_DOCUMENT_PROP = 80;
 export const APPLY_ADD_REGION = 81;
 export const APPLY_PRESENT_FONT_DIALOG = 82;
 export const APPLY_LIST_FONT_FACES = 83;
+export const APPLY_CREATE_VOICE = 84;
+export const APPLY_RELEASE_VOICE = 85;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -671,6 +681,7 @@ export const OCC_DOCUMENT_MOVED = 67;
 export const OCC_DOCUMENTS_DETACHED = 68;
 export const OCC_FONT_DIALOG_RESULT = 69;
 export const OCC_FONT_FACES = 70;
+export const OCC_VOICE_CHANGED = 71;
 
 const text_encoder = new TextEncoder();
 const text_decoder = new TextDecoder("utf-8", { fatal: true });
@@ -1658,6 +1669,20 @@ export function tx_list_font_faces(family: WireValue): Uint8Array {
   enc.begin();
   enc.value(family);
   return enc.end(TX_LIST_FONT_FACES);
+}
+
+/** Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed. */
+export function tx_create_voice(voice: number): Uint8Array {
+  enc.begin();
+  enc.u64(voice);
+  return enc.end(TX_CREATE_VOICE);
+}
+
+/** Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows. */
+export function tx_release_voice(voice: number): Uint8Array {
+  enc.begin();
+  enc.u64(voice);
+  return enc.end(TX_RELEASE_VOICE);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */
@@ -3570,7 +3595,7 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
   const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const size = view.getUint32(0, true);
   const kind = view.getUint16(4, true);
-  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED, OCC_FONT_DIALOG_RESULT, OCC_FONT_FACES].includes(kind)) return { kind, id: null, keys: [], payload: null };
+  if (![OCC_BUTTON_CLICKED, OCC_TEXT_CHANGED, OCC_TOGGLED, OCC_VALUE_CHANGED, OCC_CLOSE_REQUESTED, OCC_WINDOW_CLOSED, OCC_ALERT_RESULT, OCC_ENTRY_POPPED, OCC_BACK_REQUESTED, OCC_SECTION_SELECTED, OCC_MENU_ACTIVATED, OCC_MENU_TOGGLED, OCC_MENU_VALUE_CHANGED, OCC_FILE_DIALOG_RESULT, OCC_CLIPBOARD_RESULT, OCC_PASTED, OCC_UNDONE, OCC_REDONE, OCC_SORT_REQUESTED, OCC_DRAW_REQUESTED, OCC_TICK, OCC_DROPPED, OCC_DRAG_ENDED, OCC_DATE_CHANGED, OCC_TIME_CHANGED, OCC_VALUE_COMMITTED, OCC_NOTIFICATION_RESULT, OCC_LINK_OPENED, OCC_TEXT_EDITED, OCC_TEXT_FORMATTED, OCC_SHEET_DISMISSED, OCC_DISMISS_REQUESTED, OCC_SUBMITTED, OCC_NOTIFICATION_REPLIED, OCC_FULLSCREEN_CHANGED, OCC_COLOR_CHANGED, OCC_RANGE_CHANGED, OCC_RANGE_COMMITTED, OCC_PLAYER_CHANGED, OCC_PLAYER_POSITION, OCC_SEEK_COMPLETED, OCC_SESSION_ACTION, OCC_PLAYER_TRACKS, OCC_CAPTION_CUE, OCC_VIDEO_VISIBILITY, OCC_READER_FRAME, OCC_READER_PROGRESS, OCC_READER_PEAKS, OCC_READER_DONE, OCC_IMAGE_LOADED, OCC_CAPTURE_CHANGED, OCC_CAPTURE_PERMISSION, OCC_CAPTURE_DEVICES, OCC_CAPTURE_OVERRUN, OCC_TOAST_RESULT, OCC_IMAGE_NEEDED, OCC_IMAGE_RELEASED, OCC_ACTIVATED, OCC_SELECTION_CHANGED, OCC_FONT_FAMILIES, OCC_TEXT_SELECTED, OCC_DOCUMENT_SELECTED, OCC_DOCUMENT_CLOSE_REQUESTED, OCC_DOCUMENTS_CLOSE_REQUESTED, OCC_DOCUMENT_CLOSED, OCC_NEW_DOCUMENT_REQUESTED, OCC_DOCUMENT_MOVED, OCC_DOCUMENTS_DETACHED, OCC_FONT_DIALOG_RESULT, OCC_FONT_FACES, OCC_VOICE_CHANGED].includes(kind)) return { kind, id: null, keys: [], payload: null };
   if (kind === OCC_ALERT_RESULT) {
     // A request's one answer: id + the u32 code.
     return { kind, id: read_u64(buf, 8), keys: [], payload: read_u32(buf, 16) };
@@ -3909,6 +3934,21 @@ export function parse_occurrence(buf: Uint8Array): Occurrence {
       }
     }
     return { kind, id: 0, keys: [], payload: tail };
+  }
+  if (kind === OCC_VOICE_CHANGED) {
+    // A flat record: its fields in order, into the tail.
+    let at = 8;
+    const tail: Decoded[] = [];
+    at += 8;
+    tail.push(read_u32(buf, at));
+    at += 4;
+    at += 4;
+    {
+      let value: Decoded;
+      [value, at] = parse_value(buf, at);
+      tail.push(value);
+    }
+    return { kind, id: read_u64(buf, 8), keys: [], payload: tail };
   }
   if (kind === OCC_FILE_DIALOG_RESULT) {
     const dialog = read_u64(buf, 8);

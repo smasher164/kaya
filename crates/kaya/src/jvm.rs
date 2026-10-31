@@ -189,6 +189,17 @@ pub(crate) fn register_ring_natives(env: &mut JNIEnv) -> jni::errors::Result<()>
                 sig: "(JZ)V".into(),
                 fn_ptr: ring_capture_on_samples as *mut _,
             },
+            // The far end (docs/capture-plan.md §5).
+            NativeMethod {
+                name: "surfaceSubmit".into(),
+                sig: "(JII[BI[BIJI)Z".into(),
+                fn_ptr: ring_surface_submit as *mut _,
+            },
+            NativeMethod {
+                name: "voiceWrite".into(),
+                sig: "(J[SI)Z".into(),
+                fn_ptr: ring_voice_write as *mut _,
+            },
             NativeMethod {
                 name: "prefRemove".into(),
                 sig: "([B)V".into(),
@@ -812,6 +823,55 @@ fn capture_call(d: &CaptureDispatch, call: impl FnOnce(&mut JNIEnv) -> jni::erro
     } else if let Err(e) = done {
         eprintln!("kaya: handing a capture callback its data failed: {e}");
     }
+}
+
+/// One NV12 frame onto a surface, any thread: the planes copied out of the
+/// JVM's arrays, then by the core.
+#[allow(clippy::too_many_arguments)]
+extern "system" fn ring_surface_submit(
+    mut env: JNIEnv,
+    _class: JClass,
+    widget: jlong,
+    width: jint,
+    height: jint,
+    y: JByteArray,
+    y_stride: jint,
+    uv: JByteArray,
+    uv_stride: jint,
+    timestamp_ns: jlong,
+    rotation: jint,
+) -> jboolean {
+    let (Ok(y), Ok(uv)) = (env.convert_byte_array(&y), env.convert_byte_array(&uv)) else { return 0 };
+    if (y.len() as i64) < i64::from(y_stride) * i64::from(height) || (uv.len() as i64) < i64::from(uv_stride) * i64::from(height / 2) {
+        let _ = env.throw_new(
+            "java/lang/IllegalArgumentException",
+            "kaya: a surface frame's planes are shorter than its strides and height say (docs/capture-plan.md §4)",
+        );
+        return 0;
+    }
+    let ok = unsafe {
+        crate::capi::kaya_surface_submit(
+            widget as u64,
+            width.max(0) as u32,
+            height.max(0) as u32,
+            y.as_ptr(),
+            y_stride.max(0) as u32,
+            uv.as_ptr(),
+            uv_stride.max(0) as u32,
+            timestamp_ns as u64,
+            rotation.max(0) as u32,
+        )
+    };
+    jboolean::from(ok == 1)
+}
+
+/// `count` 48 kHz mono s16 samples onto a voice output, any thread.
+extern "system" fn ring_voice_write(env: JNIEnv, _class: JClass, voice: jlong, samples: jni::objects::JShortArray, count: jint) -> jboolean {
+    let mut buf = vec![0i16; count.max(0) as usize];
+    if !buf.is_empty() && env.get_short_array_region(&samples, 0, &mut buf).is_err() {
+        return 0;
+    }
+    jboolean::from(unsafe { crate::capi::kaya_voice_write(voice as u64, buf.as_ptr(), buf.len()) } == 1)
 }
 
 extern "system" fn ring_capture_on_frame(mut env: JNIEnv, _class: JClass, capture: jlong, on: jboolean) {

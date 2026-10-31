@@ -7037,6 +7037,120 @@ export function capture(opts: CaptureOptions = {}): Capture {
   return c;
 }
 
+/** Where a voice output plays (docs/capture-plan.md §5): "voice" on the
+ * platform's voice path, "plain" where no echo canceller hears it,
+ * "synthetic" the harness's own engine, "failed" not at all, "none" until
+ * the platform opens it. */
+export type VoiceRoute = "none" | "voice" | "plain" | "synthetic" | "failed";
+
+const VOICE_ROUTES: ReadonlyMap<number, VoiceRoute> = new Map([
+  [wire.VOICE_ROUTE_NONE, "none"],
+  [wire.VOICE_ROUTE_VOICE, "voice"],
+  [wire.VOICE_ROUTE_PLAIN, "plain"],
+  [wire.VOICE_ROUTE_SYNTHETIC, "synthetic"],
+  [wire.VOICE_ROUTE_FAILED, "failed"],
+]);
+
+/** Where a voice output's samples go, from any thread. */
+export class VoiceWriter {
+  readonly id: number;
+
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  /** Queue 48 kHz mono s16 samples for the platform's voice path; past
+   * 200 ms ahead of it the oldest are dropped. False once released. */
+  write(samples: Int16Array): boolean {
+    return runtime.voiceWrite(this.id, samples);
+  }
+}
+
+/** A voice output (docs/capture-plan.md §5): it plays what its writer
+ * writes on the platform's voice path, where its echo canceller hears it. */
+export class Voice {
+  _route: VoiceRoute = "none";
+  _detail = "";
+  _onRoute: ((route: VoiceRoute, detail: string) => void) | undefined;
+
+  readonly id: number;
+
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  /** The route as last heard: "none" until the platform opens it. */
+  get route(): VoiceRoute {
+    return this._route;
+  }
+
+  /** What the backend measured of the route. */
+  get detail(): string {
+    return this._detail;
+  }
+
+  /** The sample handle, for the thread the samples arrive on. */
+  writer(): VoiceWriter {
+    return new VoiceWriter(this.id);
+  }
+
+  /** Stop and forget the voice output; what it still holds is dropped. */
+  release(): void {
+    records().push(wire.tx_release_voice(this.id));
+  }
+}
+
+/** A voice output, created in the ambient transaction; `onRoute(route,
+ * detail)` hears the route the platform opened it on. */
+export function voice(opts: { onRoute?: (route: VoiceRoute, detail: string) => void } = {}): Voice {
+  const recs = records();
+  const v = new Voice(app()._next("voice"));
+  recs.push(wire.tx_create_voice(v.id));
+  app()._voices.set(v.id, v);
+  v._onRoute = opts.onRoute;
+  return v;
+}
+
+export type SurfaceOptions = GrowOption & BleedOption & {
+  fit?: Fit;
+  /** The box's width:height, as a video view's. */
+  aspect?: VideoOptions["aspect"];
+};
+
+/** A surface (docs/capture-plan.md §5): a rectangle showing the frames
+ * `kaya.surfaceFrames(it)` submits, the last one kept; half their size until
+ * laid out otherwise, 320x240 before the first. Live zone only. */
+export function surface(opts: SurfaceOptions = {}): Widget {
+  if (_tplDepth > 0) throw new Error("kaya: a surface shows frames submitted to a live widget, never a row's (docs/capture-plan.md §5)");
+  const handle = widget(wire.KIND_SURFACE);
+  if (opts.fit !== undefined) records().push(wire.tx_set_fit(handle.id, fitValue(opts.fit)));
+  if (opts.aspect !== undefined) records().push(aspectRecord(handle.id, opts.aspect[0], opts.aspect[1]));
+  setGrow(handle, opts);
+  setBleed(handle, opts);
+  return handle;
+}
+
+/** Where a surface's frames go, from any thread. */
+export class SurfaceFrames {
+  readonly id: number;
+
+  constructor(id: number) {
+    this.id = id;
+  }
+
+  /** Show `frame` (NV12, as a capture hands one) once the surface's display
+   * clock next ticks, replacing any frame not yet shown; the planes are
+   * copied before it returns. False when the surface is gone. */
+  submit(frame: CaptureFrame): boolean {
+    return runtime.surfaceSubmit(this.id, frame);
+  }
+}
+
+/** A surface's frame handle. */
+export function surfaceFrames(surface: Widget): SurfaceFrames {
+  return new SurfaceFrames(surface.id);
+}
+
 /** Ask for a kind's permission before any capture starts; the answer
  * arrives through `kaya.onPermission`. */
 export function requestPermission(kind: CaptureKind): void {
@@ -7134,7 +7248,7 @@ export function postToApp(message: unknown): void {
 }
 
 export class App {
-  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0, reader: 0, read: 0, image: 0, capture: 0 };
+  private readonly _counters: Record<string, number> = { signal: 0, widget: 0, collection: 0, alert: 0, menu_item: 0, file_dialog: 0, clipboard: 0, link_route: 0, player: 0, reader: 0, read: 0, image: 0, capture: 0, voice: 0 };
   /** @internal */ readonly _widgetHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeHandlers = new Map<string, Handler>();
   /** @internal */ readonly _nodeOwners = new Map<number, Collection<unknown, unknown>>();
@@ -7200,6 +7314,7 @@ export class App {
   /** @internal */ readonly _readerBook = new ReaderBook();
   /** @internal The captures' mirrors, as the players' are. */
   readonly _captures = new Map<number, Capture>();
+  readonly _voices = new Map<number, Voice>();
   /** @internal */ readonly _capturePermissions = new Map<CaptureKind, Permission>();
   /** @internal */ _captureDevices: readonly CaptureDevice[] = [];
   /** @internal */ _onPermission: ((kind: CaptureKind, permission: Permission) => void) | undefined;
@@ -7896,6 +8011,15 @@ export class App {
       if (seat === undefined) return;
       seat._absorb(kind, payload);
       for (const [fn, args] of seat._handlers(kind, pair ? ident : payload)) this._dispatch(fn, ...args);
+      return;
+    }
+    if (kind === wire.OCC_VOICE_CHANGED) {
+      const seat = this._voices.get(Number(ident));
+      if (seat === undefined) return;
+      const [route, detail] = payload as [number, string];
+      seat._route = known(VOICE_ROUTES, Number(route), "voice route");
+      seat._detail = String(detail);
+      if (seat._onRoute !== undefined) this._dispatch(seat._onRoute as Handler, seat._route, seat._detail);
       return;
     }
     if (kind === wire.OCC_CAPTURE_PERMISSION) {

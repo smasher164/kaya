@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x721721bd5ae0c2aa
+let kayaSpecHash: UInt64 = 0xe3377635dd9a81cc
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -993,6 +993,20 @@ struct KayaTx {
     mutating func listFontFaces(_ family: KayaValue) {
         let kayaAt = self.begin(UInt16(KAYA_TX_LIST_FONT_FACES))
         self.value(family)
+        self.end(kayaAt)
+    }
+
+    /// Create a VOICE OUTPUT (docs/capture-plan.md §5): an app-held object with no place in the layout that plays the 48 kHz mono s16 samples the app writes from any thread (kaya_voice_write) on the platform's voice path, the one its echo canceller takes as the far end. Its id is guest-chosen in its own space; a second create of a live id is a scene error. Its route reports in voice_changed.
+    mutating func createVoice(_ voice: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_CREATE_VOICE))
+        self.u64(voice)
+        self.end(kayaAt)
+    }
+
+    /// Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows.
+    mutating func releaseVoice(_ voice: UInt64) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_VOICE))
+        self.u64(voice)
         self.end(kayaAt)
     }
 
@@ -4301,6 +4315,7 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
             || kind == UInt16(KAYA_OCCURRENCE_DOCUMENTS_DETACHED)
             || kind == UInt16(KAYA_OCCURRENCE_FONT_DIALOG_RESULT)
             || kind == UInt16(KAYA_OCCURRENCE_FONT_FACES)
+            || kind == UInt16(KAYA_OCCURRENCE_VOICE_CHANGED)
         else { return nil }
         let id = raw.loadUnaligned(fromByteOffset: 8, as: UInt64.self)
         if kind == UInt16(KAYA_OCCURRENCE_ALERT_RESULT) {
@@ -4862,6 +4877,31 @@ func kayaParseOccurrence(_ rec: [UInt8]) -> KayaOccurrence? {
                 for _ in 0..<count { tail.append(value()) }
             }
             return (kind, 0, [], nil, [], nil, nil, tail)
+        }
+        if kind == UInt16(KAYA_OCCURRENCE_VOICE_CHANGED) {
+            // A flat record: its fields in order, into the tail.
+            var at = 8
+            var tail: [KayaValue] = []
+            func value() -> KayaValue {
+                let vtype = raw.loadUnaligned(fromByteOffset: at, as: UInt32.self)
+                let vlen = Int(raw.loadUnaligned(fromByteOffset: at + 4, as: UInt32.self))
+                defer { at += 8 + ((vlen + 7) & ~7) }
+                switch vtype {
+                case UInt32(KAYA_VALUE_BOOL): return .bool(raw[at + 8] != 0)
+                case UInt32(KAYA_VALUE_I64):
+                    return .i64(Int64(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                case UInt32(KAYA_VALUE_F64):
+                    return .f64(Double(bitPattern: raw.loadUnaligned(fromByteOffset: at + 8, as: UInt64.self)))
+                default:
+                    return .str(String(decoding: raw[(at + 8)..<(at + 8 + vlen)], as: UTF8.self))
+                }
+            }
+            at += 8
+            tail.append(.i64(Int64(raw.loadUnaligned(fromByteOffset: at, as: UInt32.self))))
+            at += 4
+            at += 4
+            tail.append(value())
+            return (kind, id, [], nil, [], nil, nil, tail)
         }
         if kind == UInt16(KAYA_OCCURRENCE_FILE_DIALOG_RESULT) {
             // id, a count, then three Values per file

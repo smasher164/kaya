@@ -62,6 +62,9 @@ mod reader;
 // The camera and the microphone (docs/capture-plan.md): the scene's state
 // machine, the synthetic devices, and the pipe frames and samples take.
 mod capture;
+// The far end of a call (docs/capture-plan.md §5): the surface's submitted
+// frames and the voice output's queue.
+mod farend;
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 mod edit_list;
 // docs/number-field-plan.md; the SwiftUI arm is its caller until the
@@ -157,6 +160,8 @@ pub use app::{
     Frame, ReadError,
     // docs/capture-plan.md: the capture's readings and handle.
     CaptureReading, CaptureRef,
+    // docs/capture-plan.md §5: the far end's two handles.
+    SurfaceFrames, VoiceWriter,
     // docs/network-images-plan.md N2, N12.
     ImagePhaseKind, RowImages,
 };
@@ -181,7 +186,7 @@ pub use protocol::{
     TrackKind,
     FrameAccuracy, ImageId, Peaks, ReadId, ReadOutcome, ReaderId,
     CameraFacing, CaptureCommand, CaptureDevice, CaptureFailure, CaptureId, CaptureInterruption, CaptureKind,
-    CaptureProp, CaptureState, Permission,
+    CaptureProp, CaptureState, Permission, VoiceId, VoiceRoute,
     ToastDuration, ToastId, ToastOutcome,
 };
 

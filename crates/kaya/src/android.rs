@@ -957,6 +957,32 @@ fn register_present_natives(env: &mut JNIEnv) -> jni::errors::Result<()> {
                 sig: "(IILjava/lang/String;)Ljava/lang/String;".into(),
                 fn_ptr: present_capture_harness as *mut _,
             },
+            // The far end (docs/capture-plan.md §5).
+            NativeMethod {
+                name: "surfaceTake".into(),
+                sig: "(JJ[J)[B".into(),
+                fn_ptr: present_surface_take as *mut _,
+            },
+            NativeMethod {
+                name: "surfaceDetail".into(),
+                sig: "(J)Ljava/lang/String;".into(),
+                fn_ptr: present_surface_detail as *mut _,
+            },
+            NativeMethod {
+                name: "voicePull".into(),
+                sig: "(JII[FI)I".into(),
+                fn_ptr: present_voice_pull as *mut _,
+            },
+            NativeMethod {
+                name: "voiceRoute".into(),
+                sig: "(JILjava/lang/String;)V".into(),
+                fn_ptr: present_voice_route as *mut _,
+            },
+            NativeMethod {
+                name: "voiceHarness".into(),
+                sig: "(ILjava/lang/String;)Ljava/lang/String;".into(),
+                fn_ptr: present_voice_harness as *mut _,
+            },
             NativeMethod {
                 name: "emitSortRequested".into(),
                 sig: "([BI)V".into(),
@@ -3074,6 +3100,72 @@ extern "system" fn present_capture_harness<'local>(
     let mut ok = 0u8;
     let n = unsafe {
         crate::capi::kaya_capture_harness(verb.max(0) as u32, index as u32, text.as_ptr(), text.len(), out.as_mut_ptr(), out.len(), &mut ok)
+    };
+    out.truncate(n.min(1024));
+    let sentence = String::from_utf8_lossy(&out);
+    env.new_string(format!("{ok}{sentence}")).unwrap_or_default()
+}
+
+/// A surface's frame newer than `seen`, stood upright as RGBA, with its
+/// width, height, rotation and number written into `shape`; null for none.
+extern "system" fn present_surface_take<'local>(
+    env: JNIEnv<'local>,
+    _class: JClass,
+    widget: jlong,
+    seen: jlong,
+    shape: jni::objects::JLongArray,
+) -> jni::objects::JByteArray<'local> {
+    let Some((w, h, rotation, seq, rgba)) = crate::farend::take_rgba(crate::protocol::WidgetId(widget as u64), seen as u64)
+    else {
+        return jni::objects::JByteArray::default();
+    };
+    if env.set_long_array_region(&shape, 0, &[i64::from(w), i64::from(h), i64::from(rotation), seq as i64]).is_err() {
+        return jni::objects::JByteArray::default();
+    }
+    env.byte_array_from_slice(&rgba).unwrap_or_default()
+}
+
+extern "system" fn present_surface_detail<'local>(env: JNIEnv<'local>, _class: JClass, widget: jlong) -> JString<'local> {
+    env.new_string(crate::farend::surface_detail(crate::protocol::WidgetId(widget as u64))).unwrap_or_default()
+}
+
+/// The platform's audio thread pulls `frames` frames of `channels` floats
+/// at `rate` into `out`; answers how many the app's samples filled.
+extern "system" fn present_voice_pull(
+    env: JNIEnv,
+    _class: JClass,
+    voice: jlong,
+    rate: jint,
+    channels: jint,
+    out: jni::objects::JFloatArray,
+    frames: jint,
+) -> jint {
+    let n = frames.max(0) as usize * channels.max(1) as usize;
+    let mut buf = vec![0f32; n];
+    let real = crate::farend::pull(crate::protocol::VoiceId(voice as u64), rate.max(1) as u32, channels.max(1) as u32, &mut buf);
+    if env.set_float_array_region(&out, 0, &buf).is_err() {
+        return 0;
+    }
+    real as jint
+}
+
+extern "system" fn present_voice_route(mut env: JNIEnv, _class: JClass, voice: jlong, route: jint, detail: JString) {
+    let detail = jstring_text(&mut env, &detail, "voice route detail");
+    unsafe { crate::capi::kaya_voice_route(voice as u64, route.max(0) as u32, detail.as_ptr(), detail.len()) }
+}
+
+/// expect_voice: "1" or "0" (recorded or failed), then the sentence.
+extern "system" fn present_voice_harness<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass,
+    index: jint,
+    text: JString,
+) -> JString<'local> {
+    let text = jstring_text(&mut env, &text, "voice verb text");
+    let mut out = vec![0u8; 1024];
+    let mut ok = 0u8;
+    let n = unsafe {
+        crate::capi::kaya_voice_harness(index as u32, text.as_ptr(), text.len(), out.as_mut_ptr(), out.len(), &mut ok)
     };
     out.truncate(n.min(1024));
     let sentence = String::from_utf8_lossy(&out);

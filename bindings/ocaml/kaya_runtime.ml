@@ -706,6 +706,30 @@ let capture_hook register fn capture on =
 let capture_on_frame = capture_hook kaya_capture_on_frame capture_frame_fn
 let capture_on_samples = capture_hook kaya_capture_on_samples capture_samples_fn
 
+(* The far end (docs/capture-plan.md §5): a surface's frames and a voice
+   output's samples, from any thread; the core copies both before it
+   returns. *)
+let kaya_surface_submit =
+  foreign ~from:lib "kaya_surface_submit"
+    (uint64_t @-> uint32_t @-> uint32_t @-> ocaml_bytes @-> uint32_t @-> ocaml_bytes @-> uint32_t @-> uint64_t
+   @-> uint32_t @-> returning uint32_t)
+
+let kaya_voice_write =
+  foreign ~from:lib "kaya_voice_write" (uint64_t @-> ptr int16_t @-> size_t @-> returning uint32_t)
+
+let surface_submit widget ~width ~height ~y ~y_stride ~uv ~uv_stride ~timestamp_ns ~rotation =
+  let u32 = Unsigned.UInt32.of_int in
+  Unsigned.UInt32.to_int
+    (kaya_surface_submit (Unsigned.UInt64.of_int64 widget) (u32 width) (u32 height) (ocaml_bytes_start y)
+       (u32 y_stride) (ocaml_bytes_start uv) (u32 uv_stride) (Unsigned.UInt64.of_int64 timestamp_ns) (u32 rotation))
+  = 1
+
+let voice_write voice (samples : (int, Bigarray.int16_signed_elt, Bigarray.c_layout) Bigarray.Array1.t) =
+  Unsigned.UInt32.to_int
+    (kaya_voice_write (Unsigned.UInt64.of_int64 voice) (bigarray_start array1 samples)
+       (Unsigned.Size_t.of_int (Bigarray.Array1.dim samples)))
+  = 1
+
 external capture_drive_frame : int64 -> int -> int -> bool = "kaya_ml_capture_drive_frame"
 external capture_drive_samples : int64 -> bool = "kaya_ml_capture_drive_samples"
 external capture_thread_counts : unit -> int * int = "kaya_ml_capture_thread_counts"

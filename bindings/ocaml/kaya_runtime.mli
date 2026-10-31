@@ -136,6 +136,23 @@ val wake : unit -> unit
    [capture] (true), or take it back (false); the trampolines call the
    values registered as "kaya_capture_frame" / "kaya_capture_samples". *)
 val capture_on_frame : int64 -> bool -> unit
+
+(* The far end (docs/capture-plan.md §5): show an NV12 frame on a surface,
+   queue 48 kHz mono s16 samples on a voice output; any thread, the core
+   copies both. False when the target is gone. *)
+val surface_submit :
+  int64 ->
+  width:int ->
+  height:int ->
+  y:bytes ->
+  y_stride:int ->
+  uv:bytes ->
+  uv_stride:int ->
+  timestamp_ns:int64 ->
+  rotation:int ->
+  bool
+
+val voice_write : int64 -> (int, Bigarray.int16_signed_elt, Bigarray.c_layout) Bigarray.Array1.t -> bool
 val capture_on_samples : int64 -> bool -> unit
 
 (* bindings/ocaml/checks alone: call a trampoline from a fresh foreign
