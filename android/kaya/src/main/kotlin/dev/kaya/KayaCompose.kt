@@ -9596,6 +9596,19 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         return out.sortedWith(compareBy({ it.boundsInRoot.top }, { it.boundsInRoot.left }))
     }
 
+    /** docs/deferred.md, editor-go's Font… that opened no sheet. */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    private fun kayaFontSheetWhyNot(): String {
+        val state = KayaSceneModel.fontSheetState
+        val window = KayaSceneModel.fontSheetWindow
+        val drawn = if (state == null) "the sheet is not composed" else
+            "the sheet is ${state.currentValue} going to ${state.targetValue}"
+        val root = if (window == null) "no dialog window" else
+            "a dialog window whose compose root is ${kayaComposeRoot(window.decorView)?.javaClass?.simpleName}"
+        val picker = KayaSceneModel.fontPicker ?: return "no request is held; $drawn; $root"
+        return "dialog ${picker.dialog} is held; $drawn; $root"
+    }
+
     private fun kayaNodeText(n: SemanticsNode): String =
         n.config.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text } ?: ""
 
@@ -9606,7 +9619,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             if (KayaSceneModel.fontPicker == null && KayaSceneModel.fontSheetWindow == null) {
                 return@onUi if (want == "closed") "closed" to "" else null to ": no font picker is open"
             }
-            val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled"
+            val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled (${kayaFontSheetWhyNot()})"
             val listed = rows.map { kayaNodeText(it) }.filter { it.isNotEmpty() }.distinct()
             when {
                 want == "closed" -> null to ": a font picker is open, listing ${listed.size} families"
@@ -9630,7 +9643,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      *  shows it whole. */
     private fun kayaFontDialogSelected(activity: ComponentActivity): Pair<String?, String> = onUi(activity) {
         val picker = KayaSceneModel.fontPicker ?: return@onUi null to ": no font picker is open"
-        val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled"
+        val rows = kayaFontSheetNodes(KayaCompose.FONT_FAMILY_TAG) ?: return@onUi null to ": the font picker is not up and settled (${kayaFontSheetWhyNot()})"
         val list = kayaFontSheetNodes(KayaCompose.FONT_LIST_TAG)?.firstOrNull()
             ?: return@onUi null to ": the font picker shows no list"
         val row = rows.firstOrNull { it.config.getOrNull(SemanticsProperties.Selected) == true }
@@ -9650,7 +9663,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      *  its own click action; or Cancel. Null once the presses went out. */
     private fun kayaPickFont(activity: ComponentActivity, choice: Pair<String, KayaFontFace>?): String? {
         fun click(tag: String, match: (SemanticsNode) -> Boolean): String? = onUi(activity) {
-            val nodes = kayaFontSheetNodes(tag) ?: return@onUi "the font picker is not up and settled"
+            val nodes = kayaFontSheetNodes(tag) ?: return@onUi "the font picker is not up and settled (${kayaFontSheetWhyNot()})"
             val node = nodes.firstOrNull(match) ?: return@onUi "no $tag matches among ${nodes.map { kayaNodeText(it) }}"
             val press = node.config.getOrNull(SemanticsActions.OnClick)?.action ?: return@onUi "$tag carries no click"
             press.invoke()
