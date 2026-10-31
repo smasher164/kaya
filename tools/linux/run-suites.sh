@@ -2416,6 +2416,8 @@ for proto in x11 wayland; do
         python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin capture)"
     run "$proto" capture-java env KAYA_SELFTEST=capture KAYA_LIB="$LIB" \
         python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" capture-c env KAYA_SELFTEST=capture \
+        python3 tools/linux/capture-leg.py "$capture_regime" /tmp/c-guests/capture
     run "$proto" capture_denied-rust env KAYA_SELFTEST=capture_denied \
         python3 tools/linux/capture-leg.py "$capture_regime" "$CARGO_TARGET_DIR/debug/examples/capture"
     run "$proto" capture_denied-python env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
@@ -2432,6 +2434,8 @@ for proto in x11 wayland; do
         python3 tools/linux/capture-leg.py "$capture_regime" "$(hs_bin capture)"
     run "$proto" capture_denied-java env KAYA_SELFTEST=capture_denied KAYA_LIB="$LIB" \
         python3 tools/linux/capture-leg.py "$capture_regime" java -cp /tmp/java-guests dev.kaya.guests.Main
+    run "$proto" capture_denied-c env KAYA_SELFTEST=capture_denied \
+        python3 tools/linux/capture-leg.py "$capture_regime" /tmp/c-guests/capture
     # THE FAR END (docs/capture-plan.md §5): the capture leg's PipeWire with a
     # driving null sink and the echo-cancel module the voice output plays into.
     run "$proto" farend-rust env KAYA_SELFTEST=farend KAYA_CAPTURE_FAR_END=1 \

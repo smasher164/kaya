@@ -134,6 +134,8 @@ validate-mac's SCENES/leg lines, both granted.
   probe's recipe (UIFontMetrics + the Bold Text weight step), but the
   read has never run on a device; the expect arm calls
   kayaDepthStub("typeface", on: "ios") so no iOS leg can pass vacuously.
+  (Closed 2026-10-31: the read runs on iOS and the lane wires typeface legs;
+  docs/deferred.md, the typeface tracker.)
 
 ## 10. THE MAC LANE (rung 3), FULL RUN
 `tools/validate-mac.py` — 287 legs, 0 FAIL, `validate-mac: ALL PASS`,

@@ -92,7 +92,9 @@ C_SCENES = ["undo", "dirty", "ranges", "save", "a11yrows", "styling",
             # Network images at the floor (docs/network-images-plan.md N16).
             "netimage",
             # The skin at the floor (docs/styling-pass-plan.md Y10).
-            "grounds", "shapes", "cards", "tracks", "dock"]
+            "grounds", "shapes", "cards", "tracks", "dock",
+            # The capture at the floor (docs/capture-plan.md, the C floor's parsers).
+            "capture"]
 
 # The nine hosted languages in their DEFAULT group order; a group
 # that deviates spells its own order in ORDER below. js is the ninth
@@ -373,8 +375,8 @@ ORDER = [
     ("media_feed", LANGS),
     ("media_timeout", ("rust",)),
     ("media_reader", LANGS),
-    ("capture", LANGS),
-    ("capture_denied", LANGS),
+    ("capture", LANGS + ("c",)),
+    ("capture_denied", LANGS + ("c",)),
     ("farend", LANGS),
     ("toast", LANGS + ("c",)),
     ("expander", LANGS + ("c",)),

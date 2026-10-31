@@ -15462,23 +15462,16 @@ private func kayaRunScript(_ script: String) {
                 // THE RESOLVED FAMILY, off the real views, never the request:
                 // every font API here renders SOMETHING for a family it does
                 // not have (docs/styling-plan.md Slice 2b).
-                #if os(macOS)
-                    // The family is a QUOTED string in the grammar, and the
-                    // observation is byte-compared against harness.rs, so the
-                    // quotes come off here and stay off below.
-                    let wantFamily = kayaQuoted(Array(parts[1...]))
-                    let gotFamily = DispatchQueue.main.sync { kayaResolvedTypeface() }
-                    if gotFamily == wantFamily {
-                        observed.append("typeface \(wantFamily)")
-                    } else {
-                        failures.append("typeface \(gotFamily), wanted \(wantFamily)")
-                    }
-                #else
-                    // THE APPLY SIDE IS LIVE ON iOS, through UIFontMetrics, but
-                    // the OBSERVATION has not been proven on a device, so the
-                    // iOS runner wires no typeface legs.
-                    kayaDepthStub("typeface", on: "ios")
-                #endif
+                // The family is a QUOTED string in the grammar, and the
+                // observation is byte-compared against harness.rs, so the
+                // quotes come off here and stay off below.
+                let wantFamily = kayaQuoted(Array(parts[1...]))
+                let gotFamily = DispatchQueue.main.sync { kayaResolvedTypeface() }
+                if gotFamily == wantFamily {
+                    observed.append("typeface \(wantFamily)")
+                } else {
+                    failures.append("typeface \(gotFamily), wanted \(wantFamily)")
+                }
             case "expect_app_icon":
                 // TWO PLATFORMS, TWO ARTIFACTS, ONE STRING: macOS reads AppKit's
                 // copy of the Dock picture, iOS the icon in the bundle it runs

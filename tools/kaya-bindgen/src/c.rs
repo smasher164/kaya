@@ -711,6 +711,88 @@ pub fn emit(spec: &ProtocolSpec) -> String {
         c.line("}");
         c.line("");
     }
+    // main.rs's flat_occurrence_names, the other bindings' generic tail:
+    // the fields in order into `vals`, u32 and u64 as I64, `reserved`
+    // skipped, a Value as itself, a Values block as I64(count) then its
+    // values; the first field is the id when it is a u64.
+    // The surface-id families (one u64, or two) take the same parser, the
+    // second id into `vals`, and are not counted with the flat arms.
+    let flat = crate::flat_occurrence_names(spec);
+    let id_families: Vec<&str> = crate::id_only_occurrence_names(spec)
+        .into_iter()
+        .chain(crate::id_pair_occurrence_names(spec))
+        .collect();
+    for name in flat.iter().chain(id_families.iter()).copied() {
+        let rec = spec.occurrence.iter().find(|r| r.name == name).unwrap();
+        let up = name.to_uppercase();
+        let pad = " ".repeat(31 + name.len());
+        let mark = if flat.contains(&name) { crate::FLAT_MARK } else { "A surface-id record." };
+        c.line(&format!("/* {mark} Decode a {name} occurrence:"));
+        c.line(" * the id when its first field is a u64 (else 0), then every other");
+        c.line(" * field as one value in order (u32 and u64 as I64, a Values block");
+        c.line(" * as I64(count) then its values); n_vals counts them all, filled up");
+        c.line(" * to max_vals. Returns 1, or 0 for other kinds. */");
+        c.line(&format!("static inline int kaya_parse_{name}(const uint8_t *rec, uint64_t *id,"));
+        c.line(&format!("{pad}KayaVal *vals, uint32_t max_vals,"));
+        c.line(&format!("{pad}uint32_t *n_vals) {{"));
+        c.line("    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;");
+        c.line(&format!("    if (h->kind != KAYA_OCCURRENCE_{up})"));
+        c.line("        return 0;");
+        c.line("    size_t at = 8;");
+        c.line("    *n_vals = 0;");
+        c.line("    KayaVal scratch;");
+        let mut fields = rec.fields.iter();
+        if matches!(rec.fields[0].ty, FieldTy::U64) {
+            fields.next();
+            c.line("    memcpy(id, rec + at, 8);");
+            c.line("    at += 8;");
+        } else {
+            c.line("    *id = 0;");
+        }
+        let push = "*n_vals < max_vals ? &vals[*n_vals] : &scratch";
+        for f in fields {
+            match f.ty {
+                FieldTy::U32 if f.name == "reserved" => c.line("    at += 4;"),
+                FieldTy::U32 | FieldTy::U64 => {
+                    let (ty, n) = if matches!(f.ty, FieldTy::U32) { ("uint32_t", 4) } else { ("uint64_t", 8) };
+                    c.line("    {");
+                    c.line(&format!("        {ty} raw; /* {0} */", f.name));
+                    c.line(&format!("        memcpy(&raw, rec + at, {n});"));
+                    c.line(&format!("        KayaVal *v = {push};"));
+                    c.line("        *v = kaya_i64((int64_t)raw);");
+                    c.line("        (*n_vals)++;");
+                    c.line(&format!("        at += {n};"));
+                    c.line("    }");
+                }
+                FieldTy::Value => {
+                    c.line(&format!("    at = kaya_parse_value(rec, at, {push});"));
+                    c.line("    (*n_vals)++;");
+                }
+                FieldTy::Values => {
+                    c.line("    {");
+                    c.line("        uint32_t count;");
+                    c.line("        memcpy(&count, rec + at, 4);");
+                    c.line("        at += 8;");
+                    c.line(&format!("        KayaVal *v = {push};"));
+                    c.line("        *v = kaya_i64((int64_t)count);");
+                    c.line("        (*n_vals)++;");
+                    c.line("        for (uint32_t i = 0; i < count; i++) {");
+                    c.line(&format!("            at = kaya_parse_value(rec, at, {push});"));
+                    c.line("            (*n_vals)++;");
+                    c.line("        }");
+                    c.line("    }");
+                }
+                FieldTy::VariantSchemas => panic!("kaya-bindgen: flat record {name} carries variant schemas"),
+            }
+        }
+        c.line("    (void)at;");
+        c.line("    (void)vals;");
+        c.line("    (void)max_vals;");
+        c.line("    (void)scratch;");
+        c.line("    return 1;");
+        c.line("}");
+        c.line("");
+    }
     c.line("#endif /* KAYA_WIRE_H */");
     c.out
 }

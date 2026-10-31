@@ -165,9 +165,6 @@ fn occurrence_decode_refusals(spec: &ProtocolSpec, outputs: &[(&str, String)]) -
     }
     let family = flat_occurrence_names(spec);
     for (rel, content) in outputs {
-        if rel.ends_with(".h") {
-            continue;
-        }
         let arms = content.matches(FLAT_MARK).count();
         println!("kaya-bindgen: {rel}: {arms} flat decode arms");
         if arms != family.len() {

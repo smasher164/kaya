@@ -1519,7 +1519,7 @@ sighting read those lines in leg-log.txt first: a player that never paused
 is this arm, a player that paused with the label still "playing" is the
 core's report or the guest.
 
-## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day, §5's far end built 2026-10-31; the C floor's parsers, the `voice` prop and the rulings below remain
+## BUILD — camera and microphone capture (docs/capture-plan.md), depth on the mac (2026-10-02), breadth built 2026-10-03 and the Windows legs green the same day, §5's far end built 2026-10-31, the C floor's parsers and its capture guest 2026-10-31; the `voice` prop and the rulings below remain
 KEY: capture, CaptureId, CaptureRef, CaptureReading, CaptureFrame, create_capture, set_capture_prop, capture_command, release_capture, request_permission, watch_capture_devices, set_video_capture, capture_changed, capture_permission, capture_devices, capture_overrun, cprop, capture_state, capture_failure, capture_interruption, capture_kind, camera_facing, PropKind::Capture, PROP_CAPTURE, kaya_capture_state, kaya_capture_frame, kaya_capture_samples, kaya_capture_on_frame, kaya_capture_on_samples, kaya_capture_synthetic, kaya_capture_nearest_format, kaya_capture_harness, crates/kaya/src/capture.rs, KayaRealCapture, kayaCaptureWall, expect_capture, answer_permission, DEPTH STUB capture, CAPTURE_SURFACES, capture_denied, pwsynth, capture-leg.py, winvcam, kaya-capture-lane, capture-install.ps1, emulator_capture.py, KayaCapture.kt, scene-negative.py
 
 The depth slice: the spec's six transaction, seven apply and four occurrence
@@ -1591,9 +1591,19 @@ and caught a panicking capture callback there (`survive`):
     And JS's one difference: its worker carries a capture's frame and sample
     callbacks both, so a slow frame handler delays a chunk (reported as
     overrun, never lost).
-  - **The C floor**: kaya.h carries every capture entry point, but
+  - ~~**The C floor**: kaya.h carries every capture entry point, but
     bindings/c/kaya_wire.h has no parsers for the four capture occurrences
-    and no C guest exists; the generator's C arm is the next step.
+    and no C guest exists; the generator's C arm is the next step.~~ BUILT
+    2026-10-31 (the residue pass): the C emitter writes the flat records'
+    generic parser the other eight bindings already had (the fields in
+    order into `vals`), and the surface-id records' beside it, so
+    kaya_wire.h has `kaya_parse_capture_changed`, `_permission`, `_devices`
+    and `_overrun` among 18 flat and the id-record parsers; guests/c/capture.c
+    runs capture and capture_denied on the mac and linux lanes. GUARD:
+    kaya-bindgen's occurrence_decode_refusals now counts the C header's flat
+    arms too (it skipped `.h`; with the C arm cut, gen-bindings refused "decodes
+    0 of the 18 flat occurrences"), and with the Values block's count read
+    four bytes short capture-c went red reading every device's id empty.
   - Each lane's synthetic device sits in its platform's own path (§9 ruling 3)
     under the harness, every backend lists the core's synthetic table, each
     entry carried by the lane device found for it (a PipeWire node named by
@@ -4399,9 +4409,8 @@ unpicked.
       `set_brand_typeface` (crates/kaya/src/spec.rs:1015) carries a
       family and no scale, and `expect_typeface` reads back the family
       the text system actually resolved (tools/scenes/typeface.steps
-      freezes `expect_typeface "Sora"`). The one remainder is the iOS
-      observation depth stub, held by the typeface tracker section
-      further down this file, not here.
+      freezes `expect_typeface "Sora"`). The iOS observation, its one
+      remainder, closed 2026-10-31 (the typeface tracker section below).
   - ~~**Accessibility surfacing**~~ — LANDED 2026-07-25. Two universal
     props (`a11y_id`, `a11y_label`) in all 8 bindings plus the C
     floor, and `expect_ax`, which reads each platform's REAL tree
@@ -7975,8 +7984,8 @@ REFUSES a verdict rather than reporting an empty zone as a clean one.
 CLOSED 2026-08-19 as a tracker, and it closed the way it said it would —
 with the fan-out. All three depth stubs below are struck and LANDED
 2026-08-12; no `depth_stub("styling")` survives anywhere in the tree
-(check-stubs green, and the ONE remaining depth-stub call in the whole
-repo is typeface-on-iOS), and `styling` is a live scene on all five
+(check-stubs green; typeface-on-iOS, the last depth-stub call this
+sentence once named, closed 2026-10-31), and `styling` is a live scene on all five
 lanes: validate-mac's SCENES, deploy-win's SCENES, run-suites' SCENES
 with nine legs including the C floor, run-sim's IOS_SWIFT_SCENES and
 IOS_GO_SCENES, and `run_apk styling-compose`. The one thing it carried
@@ -8942,7 +8951,7 @@ composable names is a write (the harness stamps) or an exempt registry.
 Four watched negatives, the first of them `windowTitle` made plain, the
 shipped defect itself. Keyed on android/ and docs/.
 
-## The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)
+## ~~The typeface scene's depth stubs (Slice 2b mid-flight, expected to close with the fan-out)~~ CLOSED 2026-10-31: the last one, typeface on iOS, closed in the residue pass; no depth stub for typeface remains on any backend
 KEY: typeface depth stub, depth_stub("typeface"), typeface scene, SetTypeface arm
 
 The depth landed 2026-08-16: spec (`set_brand_typeface` / `set_typeface`,
@@ -8955,7 +8964,13 @@ linux/windows/android lanes run typeface legs; the stub is what holds
 the iOS legs off in check-steps and check-stubs (docs/styling-plan.md
 Slice 2b — depth then breadth, the standing pattern):
 
-- **DEPTH STUB: typeface on swiftui/ios** — the APPLY side is already
+- ~~**DEPTH STUB: typeface on swiftui/ios**~~ — CLOSED 2026-10-31: the
+  stub is gone and `expect_typeface` runs the same walk on iOS (the entry's
+  UITextField and the textarea's UITextView); the iOS lane wires
+  typeface-swift, typeface-go and typeface-swiftui, all green, and with the
+  iOS apply returning the system font instead of the substituted one
+  typeface-swift went red "typeface .AppleSystemUIFont, wanted Sora"
+  (restored by sha256). Was: the APPLY side is already
   live on iOS (the same fresh-descriptor route, plus UIFontMetrics for
   Dynamic Type and the Bold Text weight step the probe measured a
   substituted family dropping). What is not proven is the OBSERVATION:

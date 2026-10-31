@@ -4272,4 +4272,1241 @@ static inline int kaya_parse_text_formatted(const uint8_t *rec, uint64_t *id,
     return 1;
 }
 
+/* A flat record: its fields in order, into the tail. Decode a player_changed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_player_changed(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *vals, uint32_t max_vals,
+                                             uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_PLAYER_CHANGED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* state */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* failure */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint64_t raw; /* duration_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t raw; /* width */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* height */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a session_action occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_session_action(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *vals, uint32_t max_vals,
+                                             uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_SESSION_ACTION)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    *id = 0;
+    {
+        uint32_t raw; /* action */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    {
+        uint64_t raw; /* at_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a player_tracks occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_player_tracks(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *vals, uint32_t max_vals,
+                                            uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_PLAYER_TRACKS)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* audio_selected */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* caption_selected */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a reader_frame occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_reader_frame(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *vals, uint32_t max_vals,
+                                           uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_READER_FRAME)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* read */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint64_t raw; /* image */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t raw; /* index */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* width */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* height */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    {
+        uint64_t raw; /* requested_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint64_t raw; /* actual_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a reader_progress occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_reader_progress(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_READER_PROGRESS)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* read */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint64_t raw; /* done_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint64_t raw; /* total_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a reader_peaks occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_reader_peaks(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *vals, uint32_t max_vals,
+                                           uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_READER_PEAKS)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* read */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t raw; /* sample_rate */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* samples_per_pair */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* channels */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* length */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a reader_done occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_reader_done(const uint8_t *rec, uint64_t *id,
+                                          KayaVal *vals, uint32_t max_vals,
+                                          uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_READER_DONE)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* read */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t raw; /* outcome */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* failure */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a image_loaded occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_image_loaded(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *vals, uint32_t max_vals,
+                                           uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_IMAGE_LOADED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* width */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* height */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* failure */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a capture_changed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_capture_changed(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_CAPTURE_CHANGED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* state */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* failure */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* interruption */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* width */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* height */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* frame_rate */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a capture_permission occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_capture_permission(const uint8_t *rec, uint64_t *id,
+                                                 KayaVal *vals, uint32_t max_vals,
+                                                 uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_CAPTURE_PERMISSION)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    *id = 0;
+    {
+        uint32_t raw; /* kind */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* permission */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a capture_devices occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_capture_devices(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_CAPTURE_DEVICES)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    *id = 0;
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a font_families occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_font_families(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *vals, uint32_t max_vals,
+                                            uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_FONT_FAMILIES)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    *id = 0;
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a documents_close_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_documents_close_requested(const uint8_t *rec, uint64_t *id,
+                                                        KayaVal *vals, uint32_t max_vals,
+                                                        uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENTS_CLOSE_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a document_moved occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_document_moved(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *vals, uint32_t max_vals,
+                                             uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENT_MOVED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* window */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t raw; /* index */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a documents_detached occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_documents_detached(const uint8_t *rec, uint64_t *id,
+                                                 KayaVal *vals, uint32_t max_vals,
+                                                 uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENTS_DETACHED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* window */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a font_dialog_result occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_font_dialog_result(const uint8_t *rec, uint64_t *id,
+                                                 KayaVal *vals, uint32_t max_vals,
+                                                 uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_FONT_DIALOG_RESULT)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* weight */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* italic */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    {
+        uint32_t raw; /* width */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a font_faces occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_font_faces(const uint8_t *rec, uint64_t *id,
+                                         KayaVal *vals, uint32_t max_vals,
+                                         uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_FONT_FACES)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    *id = 0;
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    {
+        uint32_t count;
+        memcpy(&count, rec + at, 4);
+        at += 8;
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)count);
+        (*n_vals)++;
+        for (uint32_t i = 0; i < count; i++) {
+            at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+            (*n_vals)++;
+        }
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A flat record: its fields in order, into the tail. Decode a voice_changed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_voice_changed(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *vals, uint32_t max_vals,
+                                            uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_VOICE_CHANGED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint32_t raw; /* route */
+        memcpy(&raw, rec + at, 4);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 4;
+    }
+    at += 4;
+    at = kaya_parse_value(rec, at, *n_vals < max_vals ? &vals[*n_vals] : &scratch);
+    (*n_vals)++;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a close_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_close_requested(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_CLOSE_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a window_closed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_window_closed(const uint8_t *rec, uint64_t *id,
+                                            KayaVal *vals, uint32_t max_vals,
+                                            uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_WINDOW_CLOSED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a entry_popped occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_entry_popped(const uint8_t *rec, uint64_t *id,
+                                           KayaVal *vals, uint32_t max_vals,
+                                           uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_ENTRY_POPPED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a back_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_back_requested(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *vals, uint32_t max_vals,
+                                             uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_BACK_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a sheet_dismissed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_sheet_dismissed(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_SHEET_DISMISSED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a dismiss_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_dismiss_requested(const uint8_t *rec, uint64_t *id,
+                                                KayaVal *vals, uint32_t max_vals,
+                                                uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DISMISS_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a document_close_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_document_close_requested(const uint8_t *rec, uint64_t *id,
+                                                       KayaVal *vals, uint32_t max_vals,
+                                                       uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENT_CLOSE_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a document_closed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_document_closed(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENT_CLOSED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a new_document_requested occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_new_document_requested(const uint8_t *rec, uint64_t *id,
+                                                     KayaVal *vals, uint32_t max_vals,
+                                                     uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_NEW_DOCUMENT_REQUESTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a section_selected occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_section_selected(const uint8_t *rec, uint64_t *id,
+                                               KayaVal *vals, uint32_t max_vals,
+                                               uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_SECTION_SELECTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* section */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a player_position occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_player_position(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_PLAYER_POSITION)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* position_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a seek_completed occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_seek_completed(const uint8_t *rec, uint64_t *id,
+                                             KayaVal *vals, uint32_t max_vals,
+                                             uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_SEEK_COMPLETED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* position_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a capture_overrun occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_capture_overrun(const uint8_t *rec, uint64_t *id,
+                                              KayaVal *vals, uint32_t max_vals,
+                                              uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_CAPTURE_OVERRUN)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* behind_ms */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
+/* A surface-id record. Decode a document_selected occurrence:
+ * the id when its first field is a u64 (else 0), then every other
+ * field as one value in order (u32 and u64 as I64, a Values block
+ * as I64(count) then its values); n_vals counts them all, filled up
+ * to max_vals. Returns 1, or 0 for other kinds. */
+static inline int kaya_parse_document_selected(const uint8_t *rec, uint64_t *id,
+                                                KayaVal *vals, uint32_t max_vals,
+                                                uint32_t *n_vals) {
+    const KayaRecordHeader *h = (const KayaRecordHeader *)rec;
+    if (h->kind != KAYA_OCCURRENCE_DOCUMENT_SELECTED)
+        return 0;
+    size_t at = 8;
+    *n_vals = 0;
+    KayaVal scratch;
+    memcpy(id, rec + at, 8);
+    at += 8;
+    {
+        uint64_t raw; /* document */
+        memcpy(&raw, rec + at, 8);
+        KayaVal *v = *n_vals < max_vals ? &vals[*n_vals] : &scratch;
+        *v = kaya_i64((int64_t)raw);
+        (*n_vals)++;
+        at += 8;
+    }
+    (void)at;
+    (void)vals;
+    (void)max_vals;
+    (void)scratch;
+    return 1;
+}
+
 #endif /* KAYA_WIRE_H */
