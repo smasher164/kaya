@@ -16518,6 +16518,25 @@ inputs", the pan block's `above` clause, "the pan's room", "the pan's queue",
 the three readers re-reading the pan and "SwiftUI's expect_safe failure names
 the pan's inputs"; tools/check-flightrec.py NA5, NA6.
 
+## The 16 sp notes field in a 48 px room (measured 2026-10-31)
+
+taskskeyboardland-compose went red after cd1a46e6 gave Compose's text fields
+Material's 16 sp: `textarea@notes is covered by the keyboard: frame
+(16,93,768,51) ... room 88..136`. A20's floor is one line with its chrome, and
+one line with the decoration's 16 dp padding grew from 48 px (14 sp, line 16)
+to 51 px (line 19) in the landscape lane's 48 px room, so the cap took the
+floor, the pan could aim only the caret line and the whole field never showed.
+When one line with its full padding is taller than the room, the floor is now
+one line with 8 dp of padding (KAYA_CAPPED_PAD) and the field gives up its
+vertical padding to fit the cap (kayaCappedPadding); a line that fits keeps
+the full padding, so chat's composer (43 px) is unchanged. Read 40 px in the
+same room with the leg green; with the old floor restored it went red with the
+sentence above. The pan's sentence now ends with the A20 cap, the one-line
+floor and the first line (`A20 cap 51, one line 51 (first line 19)`), which
+the first bundle lacked. GUARD: tools/lib/safearea_routes.py, "Compose's
+capped textarea gives up its padding to fit one line" and its two neighbours,
+cuts watched.
+
 ## A Compose effect keyed on a node's fields, not the node, misses a restamped row (measured 2026-10-13)
 
 KayaRender composes a container's children BY POSITION, with no `key()`, so

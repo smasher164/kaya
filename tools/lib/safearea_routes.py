@@ -141,7 +141,15 @@ NATIVE = [
     # one line; no scene can tell a cap without its floor from one with it
     # while the room is a line or more.
     (COMPOSE, "Compose's focused textarea is capped at the room above the keyboard, a line at least",
-     "return maxOf(kayaOneLineHeight(field, frame), keyboardTop - kayaKeyboardRoomTop(field, insets) - gap)"),
+     "val floor = if (line <= room + 0.5f) line else kayaTightLineHeight(field, frame, density)\n"
+     " return maxOf(floor, room - gap)"),
+    # A line with its full padding taller than the room gives up padding
+    # (docs/traps.md, the 16 sp notes field in a 48 px room).
+    (COMPOSE, "Compose's capped textarea gives up its padding to fit one line",
+     "contentPadding = kayaCappedPadding("),
+    (COMPOSE, "Compose's capped padding stops at its floor", "val pad = maxOf(KAYA_CAPPED_PAD, fits)"),
+    (COMPOSE, "Compose's cap carries the field's first line",
+     "KayaSceneModel.keyboardFieldLine = kayaFirstLineHeight(field) ?: 0f\n KayaSceneModel.keyboardFieldCap = field.id to want"),
     (COMPOSE, "Compose's pan caps by A20's room", "val want = kayaFieldRoom(field, frame, decor, insets)"),
     # The verb owes A20's room read from the window, so a cap the pan left
     # behind is red (docs/traps.md, the grown textarea's one-line floor).
@@ -887,8 +895,10 @@ def run(g):
          r"\n\s+\.then\(if \(cap != null\) Modifier\.sizeIn\(maxHeight = [^\n]*", "",
          "Compose's cap bounds the field"),
         ("Compose's cap below one line", COMPOSE,
-         r"maxOf\(kayaOneLineHeight\(field, frame\), keyboardTop - kayaKeyboardRoomTop\(field, insets\) - gap\)",
-         "keyboardTop - kayaKeyboardRoomTop(field, insets) - gap", "Compose's focused textarea is capped"),
+         r"return maxOf\(floor, room - gap\)", "return room - gap", "Compose's focused textarea is capped"),
+        ("Compose's capped textarea keeping its full padding", COMPOSE,
+         r"contentPadding = kayaCappedPadding\(", "contentPadding = kayaFullPadding(",
+         "Compose's capped textarea gives up its padding"),
         ("Compose's one line as the frame less its own lines, as shipped", COMPOSE,
          r"return 2f \* \(top - frame\.top\) \+", "return frame.height - (top - frame.top) +",
          "the decoration's padding around its first line"),

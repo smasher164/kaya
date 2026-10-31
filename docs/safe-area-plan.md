@@ -529,7 +529,9 @@ into view, and `expect_safe` still holds the whole field and its caret line.
 On both phones: Compose (KayaTextField's one-line floor and `sizeIn` cap, from
 kayaPanEvaluate) and SwiftUI on iOS (kayaTextareaFrame's cap, the growing
 textarea's sizeThatFits, from kayaPanEvaluate), the same rule in both, held by
-tools/lib/safearea_routes.py. The desktops (A13): macOS answers no keyboard, GTK
+tools/lib/safearea_routes.py. On Compose, when one line with the field's full padding is
+taller than the room, the padding gives way down to 8 dp so one line fits
+(docs/traps.md, the 16 sp notes field in a 48 px room). The desktops (A13): macOS answers no keyboard, GTK
 has no on-screen keyboard API, and WinUI's touch keyboard leaves layout to
 ScrollViewer's bring-into-view, so none shrinks a field and none needs to; no
 desktop lane raises a keyboard.

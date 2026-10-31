@@ -7,6 +7,8 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1954,6 +1956,8 @@ object KayaSceneModel {
     /** The focused textarea's height cap while the keyboard is up, as (node,
      * px): A20, docs/safe-area-plan.md (kayaPanEvaluate). */
     var keyboardFieldCap by mutableStateOf<Pair<Long, Float>?>(null)
+    /** The capped textarea's first line, px, for the padding it gives up. */
+    var keyboardFieldLine by mutableStateOf(0f)
 
     /**
      * THE APP'S OWN APPEARANCE CHOICE (wprop 9, docs/tasks-s2b-plan.md
@@ -21576,11 +21580,10 @@ fun KayaTextField(
                 placeholder = prompt,
                 leadingIcon = glyph,
                 trailingIcon = clear,
-                contentPadding = if (inComposer) {
-                    PaddingValues(horizontal = 12.dp, vertical = 12.dp)
-                } else {
-                    TextFieldDefaults.contentPaddingWithoutLabel()
-                },
+                contentPadding = kayaCappedPadding(
+                    if (inComposer) PaddingValues(horizontal = 12.dp, vertical = 12.dp)
+                    else TextFieldDefaults.contentPaddingWithoutLabel(),
+                    if (inComposer) 12.dp else 16.dp, cap),
                 colors = if (inComposer) {
                     TextFieldDefaults.colors(
                         focusedContainerColor = Color.Transparent,
@@ -21704,6 +21707,22 @@ private fun KayaHighlightLayer(
     ) {
         inner()
     }
+}
+
+/** [base] with its vertical padding given up, down to KAYA_CAPPED_PAD, while
+ * A20's cap is shorter than one line inside it. */
+@Composable
+private fun kayaCappedPadding(base: PaddingValues, vertical: Dp, cap: Float?): PaddingValues {
+    if (cap == null) return base
+    val density = LocalDensity.current
+    val line = KayaSceneModel.keyboardFieldLine
+    val fits = with(density) { ((cap - line) / 2f).toDp() }
+    if (line <= 0f || fits >= vertical) return base
+    val pad = maxOf(KAYA_CAPPED_PAD, fits)
+    val dir = LocalLayoutDirection.current
+    return PaddingValues(
+        start = base.calculateStartPadding(dir), top = pad,
+        end = base.calculateEndPadding(dir), bottom = pad)
 }
 
 /** How many lines of the textarea are on screen at once — this host's
@@ -22955,6 +22974,19 @@ internal fun kayaOneLineHeight(node: KayaNode, frame: androidx.compose.ui.geomet
     return 2f * (top - frame.top) + (layout.getLineBottom(0) - layout.getLineTop(0))
 }
 
+internal fun kayaFirstLineHeight(node: KayaNode): Float? =
+    kayaTextLayouts[node.id]?.invoke()?.let { it.getLineBottom(0) - it.getLineTop(0) }
+
+/** A20's floor when one line with its full padding is taller than the room:
+ * the padding gives way down to KAYA_CAPPED_PAD (docs/traps.md, the 16 sp
+ * notes field in a 48 px room). */
+internal fun kayaTightLineHeight(node: KayaNode, frame: androidx.compose.ui.geometry.Rect, density: Float): Float {
+    val line = kayaFirstLineHeight(node) ?: return frame.height
+    return line + 2f * KAYA_CAPPED_PAD.value * density
+}
+
+internal val KAYA_CAPPED_PAD = 8.dp
+
 /** The content box's top in the window, below the top bar, as last laid out. */
 internal var kayaContentTop = 0f
 
@@ -23186,6 +23218,7 @@ internal fun kayaPanEvaluate() {
     if (want != null) {
         val held = KayaSceneModel.keyboardFieldCap?.takeIf { it.first == field.id }?.second
         if ((held != null || frame.height > want + 0.5f) && (held == null || kotlin.math.abs(held - want) > 0.5f)) {
+            KayaSceneModel.keyboardFieldLine = kayaFirstLineHeight(field) ?: 0f
             KayaSceneModel.keyboardFieldCap = field.id to want
             return
         }
@@ -23239,8 +23272,12 @@ internal fun kayaPanInputs(
         "sheet ${s.id} content top ${kayaSheetTops[rootId]?.toInt()}, handle ${if (s.handleDropped) "dropped" else "shown"}, " +
             "offset $offset, ${st?.currentValue} -> ${st?.targetValue}"
     } ?: "no sheet, content top ${kayaContentTop.toInt()}"
+    val cap = KayaSceneModel.keyboardFieldCap?.takeIf { it.first == field.id }?.second
+    val a20 = if (field.kind != KayaCompose.KIND_TEXTAREA) "" else
+        ", A20 ${cap?.let { "cap ${it.toInt()}" } ?: "no cap"}, one line ${kayaOneLineHeight(field, frame).toInt()} " +
+            "(first line ${kayaFirstLineHeight(field)?.toInt()})"
     return "field ${field.id} frame ${kayaRectText(frame)}, room ${roomTop.toInt()}..${keyboardTop.toInt()}, " +
-        "pan ${KayaSceneModel.keyboardPan.toInt()} on root ${KayaSceneModel.keyboardPanRoot}, $sheetText"
+        "pan ${KayaSceneModel.keyboardPan.toInt()} on root ${KayaSceneModel.keyboardPanRoot}, $sheetText$a20"
 }
 
 /** The top of the room a focused field has above the keyboard: below the
@@ -23264,8 +23301,12 @@ internal fun kayaFieldRoom(
 ): Float? {
     if (field.kind != KayaCompose.KIND_TEXTAREA || !insets.isVisible(WindowInsetsCompat.Type.ime())) return null
     val keyboardTop = decor.height - insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-    val gap = 8f * decor.resources.displayMetrics.density
-    return maxOf(kayaOneLineHeight(field, frame), keyboardTop - kayaKeyboardRoomTop(field, insets) - gap)
+    val density = decor.resources.displayMetrics.density
+    val gap = 8f * density
+    val room = keyboardTop - kayaKeyboardRoomTop(field, insets)
+    val line = kayaOneLineHeight(field, frame)
+    val floor = if (line <= room + 0.5f) line else kayaTightLineHeight(field, frame, density)
+    return maxOf(floor, room - gap)
 }
 
 /** The topmost node above [id]: a surface's mounted root or a sheet's. */

@@ -3,6 +3,7 @@
 
 import AVFoundation
 import CoreText
+import GameController
 import MediaAccessibility
 import MediaPlayer
 import OSLog
@@ -31499,7 +31500,10 @@ func kayaUndoEnablementChanged() {
     #if os(macOS)
         kayaRefreshRoleEnablement()
     #else
-        DispatchQueue.main.async { UIMenuSystem.main.setNeedsRebuild() }
+        DispatchQueue.main.async {
+            kayaMenuRebuildAsks += 1
+            UIMenuSystem.main.setNeedsRebuild()
+        }
     #endif
 }
 
@@ -31938,8 +31942,7 @@ func kayaMenuBarRead() -> Result<([KayaBarMenu], Bool), KayaBarFailure> {
         return .success((bar, true))
     #else
         guard let bar = kayaBuiltMenuBar() else {
-            return .failure(KayaBarFailure(
-                "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system)"))
+            return .failure(KayaBarFailure(kayaNoMenuBuild()))
         }
         return .success((bar, false))
     #endif
@@ -34989,6 +34992,15 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
 
     /// The system's own main menu as UIKit handed it to the last build.
     var kayaSystemMenuRoot: UIMenu?
+    var kayaOtherMenuBuilds = 0
+    var kayaMenuRebuildAsks = 0
+
+    /// Why no main build is on hand, as far as this process saw.
+    func kayaNoMenuBuild() -> String {
+        "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system; "
+            + "\(kayaOtherMenuBuilds) build(s) for other menu systems, \(kayaMenuRebuildAsks) rebuild request(s) since launch, "
+            + "the hardware keyboard GCKeyboard.coalesced names: \(String(describing: GCKeyboard.coalesced?.vendorName)))"
+    }
 
     /// THE iOS BAR READ: UIKit builds the main menu lazily (once at launch,
     /// before the catalog exists, and then only when a keyboard or the iPad
@@ -35002,7 +35014,7 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
             return "a radio group with no options draws no heading"
         }
         guard let root = kayaSystemMenuRoot else {
-            return "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system)"
+            return kayaNoMenuBuild()
         }
         let builder = KayaMenuTreeBuilder(root: root)
         kayaLowerCatalogMenus(builder)
@@ -35333,7 +35345,10 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
         if ProcessInfo.processInfo.environment["KAYA_MENU_TRACE"] != nil {
             FileHandle.standardError.write(Data("KAYA_MENU_TRACE: rebuild requested\n".utf8))
         }
-        DispatchQueue.main.async { UIMenuSystem.main.setNeedsRebuild() }
+        DispatchQueue.main.async {
+            kayaMenuRebuildAsks += 1
+            UIMenuSystem.main.setNeedsRebuild()
+        }
     }
 
     var kayaClipboardObserverInstalled = false

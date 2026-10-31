@@ -1439,6 +1439,27 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
+## DEFECT — iOS kaya-sim-0 never builds the main menu: every expect_menu_bar leg placed on it is red (seen 2026-10-31, residue pass)
+KEY: buildMenu, expect_menu_bar, kayaNoMenuBuild, kayaOtherMenuBuilds, kayaMenuRebuildAsks, kaya-sim-0, 8F0680C5
+
+editor-go went red on iOS in two filtered runs at `expect_menu_bar "File"
+"Edit" "Format" "View"`: "UIKit has not built the menu bar". The sentence now
+carries what the process saw (kayaNoMenuBuild): on kaya-sim-0
+(8F0680C5-7FD8-4C3B-977E-79CE84F150FA) `0 build(s) for other menu systems,
+3 rebuild request(s) since launch`, and GCKeyboard.coalesced names a
+"Generic Keyboard"; the fail shot's scene is foreground active. So UIKit
+called buildMenu(with:) for no menu system at all on that device, with a
+hardware keyboard attached and the app frontmost. It is the DEVICE, not the
+leg: with the pool's slot order reversed (a temporary edit, restored by
+sha256) editor-go and menus-swift passed on kaya-sim-2 and kaya-sim-1 while
+menus-swiftui, put on sim-0, went red with the same sentence; menus-swift on
+sim-0 is red too. editor-go passed on iOS on 2026-10-30 (f13063e0). The pool
+is not rebooted or erased (memory: never erase the iOS pool), so the device's
+state is left for the maintainer; the next read is whether a SpringBoard
+restart on sim-0 alone (`simctl spawn <udid> launchctl kickstart` of
+SpringBoard) brings buildMenu back, or whether the lane should check one
+menu build per device at preflight and name the device that refuses.
+
 ## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 

@@ -137,7 +137,10 @@ final class KayaUIAppDelegate: UIResponder, UIApplicationDelegate {
         super.buildMenu(with: builder)
         // Only the main system carries a bar; context menu systems reach this
         // same responder and must be left alone.
-        guard builder.system == .main else { return }
+        guard builder.system == .main else {
+            kayaOtherMenuBuilds += 1
+            return
+        }
         kayaBuildCatalogMenus(builder)
     }
 }
