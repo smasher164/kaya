@@ -355,7 +355,8 @@ were made.
 REVIEWED 2026-09-24 morning, every capture retaken on 24ae2bdc with its
 time stamped (the review page, version 5). The maintainer: "it looks a
 lot better now"; a residual where Android, iOS and Windows place the
-checkbox a touch high beside the title's first line is DEFERRED on the
-ledger (docs/deferred.md, the checkbox-too-high entry), with the
-cap-height centring as the candidate refinement.
+checkbox a touch high beside the title's first line was measured on
+2026-10-27 at 0-1 px on those three and closed as measured on 2026-11-01
+(docs/deferred.md, the checkbox-too-high entry); cap-height centring was
+not built.
 

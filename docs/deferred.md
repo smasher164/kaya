@@ -2436,7 +2436,7 @@ KEY: selection menu, edit menu, extra-menu, SelectionFlyout,
 appendTextContextMenuComponents, editMenuForTextIn, keyboard_bar,
 merging authored items into native text-control menus.
 
-## RULING WANTED — the checkbox beside a title's first line: reported a touch high on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page), measured 2026-10-27 at 0, 1 and 0 px there and LOW on the mac (1.25 pt) and GTK (2.5 px); whether to chase the low residue is the open question (2026-10-31)
+## ~~RULING WANTED — the checkbox beside a title's first line: reported a touch high on Android, iOS and Windows (the maintainer, 2026-09-24 morning, off the recaptured review page), measured 2026-10-27 at 0, 1 and 0 px there and LOW on the mac (1.25 pt) and GTK (2.5 px); whether to chase the low residue is the open question (2026-10-31)~~ CLOSED AS MEASURED 2026-11-01: the maintainer took option (a) ("go with your recommendations"); the three platforms he named are centred to a pixel and the mac's 1.25 pt and GTK's 2.5 px low are the residue he said he would live with; cap-height centring is not built
 
 The first-line-box rule (docs/flex-shrink-plan.md §10, landed 24ae2bdc)
 centres a textless cell on the geometric middle of the provider's first

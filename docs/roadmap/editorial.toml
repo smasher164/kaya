@@ -165,7 +165,7 @@ plan = 'docs/capture-plan.md'
 key = 'far end'
 review = 'calls'
 plan_built_part = "the plan's Status names capture and §5's far end as built"
-text = "SHIPPED 2026-10-31 (ef377436; review {review:calls}): a `surface` widget kind showing the NV12 frames an app submits from any thread, and a voice output playing the 48 kHz mono samples the app writes on the same voice path as the capture, so the platform's echo canceller has its reference (Apple's voice-processing I/O, Android's voice-communication path, Windows' Communications category; on Linux the echo-cancel sink where PipeWire lists one, a carve-out stated once). Five platforms, nine bindings and the C floor; the farend scene reads the peer's picture by pixel and its tone by what the platform pulled. Its settled choices are capture-plan §11, for the maintainer to ratify. The surface in frames mode (media-plan §7) is still to build on it."
+text = "SHIPPED 2026-10-31 (ef377436; review {review:calls}): a `surface` widget kind showing the NV12 frames an app submits from any thread, and a voice output playing the 48 kHz mono samples the app writes on the same voice path as the capture, so the platform's echo canceller has its reference (Apple's voice-processing I/O, Android's voice-communication path, Windows' Communications category; on Linux the echo-cancel sink where PipeWire lists one, a carve-out stated once). Five platforms, nine bindings and the C floor; the farend scene reads the peer's picture by pixel and its tone by what the platform pulled. Its settled choices are capture-plan §11, ratified as built 2026-11-01. The surface in frames mode (media-plan §7) is still to build on it."
 
 [[menu]]
 title = "<b>The chat app's calls stage</b>"

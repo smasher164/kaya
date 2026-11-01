@@ -126,7 +126,7 @@ in a pane hidden by a signal; the strip is scrolled to its end and the
 caret moved with `press up` after the app's select_range, and both are read
 back after a hide and show on every lane.
 
-## Choices the build settled (for ratification)
+## Choices the build settled — RULED 2026-11-01 as built (the maintainer: "go with your recommendations")
 
 1. No prop number moves: prop 68 is the prop; no new verb, no wire record.
 2. A hidden row's place is the count of shown rows before it; a kept

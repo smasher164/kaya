@@ -383,7 +383,7 @@ settle, built a recommendation for each, and the maintainer took all eight
    path; and JS runs capture callbacks in a worker the capture thread calls
    and waits on.
 
-## §11. The choices the far end's build settled (2026-10-31, for the maintainer to ratify)
+## §11. The choices the far end's build settled — RULED 2026-11-01 as built (the maintainer: "go with your recommendations")
 
 The far end (§5) met these questions the plan did not settle; each is built
 as written here and can change on a word:
@@ -447,7 +447,7 @@ canceller is heard); the surface's frames mode (a player as the producer,
 docs/media-plan.md §4); a C guest scene (the floor reaches the far end
 through kaya.h and kaya_wire.h, as the capture's floor does).
 
-## §12. The chat app's calls, as built (C10, 2026-10-31, for the maintainer to ratify)
+## §12. The chat app's calls — RULED 2026-11-01 as built (the maintainer: "go with your recommendations"), item 1 ratified with the rest and item 2 changed: every call button carries a symbol and its text ("We should have both symbols and text")
 
 The calls stage is built in the Go chat app (guests/go/chat/call.go) and read
 by tools/scenes/chatcall.steps on five lanes. What it settled:
