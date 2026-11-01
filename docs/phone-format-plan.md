@@ -50,7 +50,8 @@ the editor's tools: `bold`, `italic`, `underline`, `strikethrough`.
 The app does not branch on platform: it marks the menu it already has.
 
 The bar is one row that scrolls sideways. While the row runs past the right
-edge, its last 24 pt fade out, and the fade goes once the row is scrolled to
+edge, its last 48 pt fade out (24 until 2026-11-01, when the maintainer
+asked it wider; Android's 24 dp went to 48 with it so the phones match), and the fade goes once the row is scrolled to
 its end, so a cut item reads as more to come (ruled 2026-10-30 over fitting
 the row and moving the rest into a More menu, and over a symbol for a nested
 menu). `expect_keyboard_bar_fade on|off` reads the fade and refuses one that

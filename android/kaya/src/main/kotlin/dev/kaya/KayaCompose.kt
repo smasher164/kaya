@@ -1941,6 +1941,8 @@ object KayaSceneModel {
     val keyboardBarScroll = androidx.compose.foundation.ScrollState(0)
     /** Whether the bar's last draw drew its trailing fade. */
     var keyboardBarFadeDrawn = false
+    /** The width the bar's last fade was drawn over, in dp. */
+    var keyboardBarFadeWidth = 0.0
     /** The window content inset (wprop 8, docs/styling-plan.md D3), in
      * DP — layout, not appearance; 0 is full bleed. */
     var windowInset by mutableStateOf(16.0)
@@ -9816,10 +9818,11 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
     /** expect_keyboard_bar_fade: what the bar's last draw drew, and how far
      * its row runs past the right edge, in dp. */
     private fun kayaBarFadeReading(activity: ComponentActivity, want: Boolean): Pair<String?, String> {
-        val (fade, past) = onUi(activity) {
+        val (fade, past, fadeWidth) = onUi(activity) {
             val bar = KayaSceneModel.keyboardBarScroll
             val density = activity.resources.displayMetrics.density
-            KayaSceneModel.keyboardBarFadeDrawn to (bar.maxValue - bar.value) / density.toDouble()
+            Triple(KayaSceneModel.keyboardBarFadeDrawn, (bar.maxValue - bar.value) / density.toDouble(),
+                KayaSceneModel.keyboardBarFadeWidth)
         }
         val runs = past > 0.5
         val said = "fade ${if (fade) "drawn" else "not drawn"}, the row " +
@@ -9827,6 +9830,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         return when {
             fade != runs -> null to "keyboard bar disagrees with itself: $said"
             fade != want -> null to "keyboard bar $said, wanted the fade ${if (want) "on" else "off"}"
+            fade && kotlin.math.abs(fadeWidth - 48.0) > 0.5 ->
+                null to "keyboard bar fade drawn %.1f wide, wanted 48.0".format(java.util.Locale.ROOT, fadeWidth)
             else -> "keyboard bar $said" to ""
         }
     }
@@ -23879,6 +23884,7 @@ private fun KayaKeyboardBar(modifier: Modifier) {
                     KayaSceneModel.keyboardBarFadeDrawn = fade
                     if (fade) {
                         val width = KAYA_KEYBOARD_BAR_FADE.toPx()
+                        KayaSceneModel.keyboardBarFadeWidth = (width / density.density).toDouble()
                         drawRect(
                             Brush.horizontalGradient(
                                 listOf(Color.Transparent, Color.Black),
@@ -23899,7 +23905,7 @@ private fun KayaKeyboardBar(modifier: Modifier) {
     }
 }
 
-private val KAYA_KEYBOARD_BAR_FADE = 24.dp
+private val KAYA_KEYBOARD_BAR_FADE = 48.dp
 
 @Composable
 private fun KayaKeyboardBarGap() {

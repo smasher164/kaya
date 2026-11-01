@@ -11810,7 +11810,7 @@ private func kayaRunScript(_ script: String) {
                 }
                 let wantFade = parts[1] == "on"
                 let fadeVerdict = { () -> (String?, String) in
-                    guard let (fade, past) = DispatchQueue.main.sync(execute: { kayaKeyboardBarFadeRead() }) else {
+                    guard let (fade, past, fadeWidth) = DispatchQueue.main.sync(execute: { kayaKeyboardBarFadeRead() }) else {
                         return (nil, "keyboard bar fade: no keyboard bar is up")
                     }
                     let runs = past > 0.5
@@ -11818,6 +11818,9 @@ private func kayaRunScript(_ script: String) {
                         + (runs ? String(format: "runs %.1f past its right edge", past) : "ends inside its right edge")
                     if fade != runs { return (nil, "keyboard bar disagrees with itself: \(said)") }
                     if fade != wantFade { return (nil, "keyboard bar \(said), wanted the fade \(parts[1])") }
+                    if fade && abs(fadeWidth - 48) > 0.5 {
+                        return (nil, String(format: "keyboard bar fade drawn %.1f wide, wanted 48.0", fadeWidth))
+                    }
                     return ("keyboard bar \(said)", "")
                 }
                 var fadeRead = fadeVerdict()
@@ -29568,7 +29571,7 @@ struct KayaRootFrameReader: View {
     /// docs/phone-format-plan.md §2: no software keyboard, so no bar.
     @MainActor func kayaKeyboardBarRead() -> String { "none" }
     @MainActor func kayaKeyboardBarPress(_ label: String) -> Bool { false }
-    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double)? { nil }
+    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double, Double)? { nil }
     @MainActor func kayaKeyboardBarScroll(_ end: Bool) -> Bool { false }
     @MainActor func kayaOwedRoom(_ id: UInt64) -> CGFloat? { nil }
     @MainActor func kayaFrameMoved() {}
@@ -39640,6 +39643,9 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         }
     }
 
+    /// docs/phone-format-plan.md §2 (widened 2026-11-01).
+    let kayaKeyboardBarFade: CGFloat = 48
+
     /// The bar UIKit carries above the keyboard: one button per item of the
     /// marked menus, a gap between groups.
     final class KayaKeyboardBar: UIInputView, UIScrollViewDelegate {
@@ -39699,7 +39705,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             let width = clip.bounds.width
             guard width > 0 else { return }
             fade.frame = clip.bounds
-            let start = NSNumber(value: Double(max(0, (width - 24) / width)))
+            let start = NSNumber(value: Double(max(0, (width - kayaKeyboardBarFade) / width)))
             fade.locations = [0, start, 1]
             clip.layer.mask = past > 0.5 ? fade : nil
         }
@@ -39820,13 +39826,14 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 
     /// expect_keyboard_bar_fade: whether the bar's container wears the fade
     /// mask, and how far its row runs past the right edge.
-    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double)? {
+    @MainActor func kayaKeyboardBarFadeRead() -> (Bool, Double, Double)? {
         guard kayaKeyboardInWindow() != nil, let window = kayaHarnessWindow(),
             let text = kayaFirstResponderText(window),
             let bar = text.inputAccessoryView as? KayaKeyboardBar, bar.window != nil
         else { return nil }
         bar.layoutIfNeeded()
-        return (bar.clip.layer.mask != nil, Double(bar.past))
+        let start = bar.fade.locations?[1].doubleValue ?? 1
+        return (bar.clip.layer.mask != nil, Double(bar.past), Double(bar.clip.bounds.width) * (1 - start))
     }
 
     @MainActor func kayaKeyboardBarScroll(_ end: Bool) -> Bool {

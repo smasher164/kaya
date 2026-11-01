@@ -2211,13 +2211,18 @@ pub(crate) fn overscroll_verdict(read: &TextFoot) -> Result<String, String> {
     Ok(format!("ends flush: {said}"))
 }
 
-/// The keyboard bar's row: whether its trailing fade is drawn, and how far
-/// its content runs past the right edge, in points.
+/// The keyboard bar's row: whether its trailing fade is drawn, how far
+/// its content runs past the right edge, and how wide the drawn fade is,
+/// in points.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BarFade {
     pub fade: bool,
     pub past: f64,
+    pub width: f64,
 }
+
+/// docs/phone-format-plan.md §2 (widened 2026-11-01).
+pub(crate) const KEYBOARD_BAR_FADE: f64 = 48.0;
 
 pub(crate) fn fade_verdict(read: &BarFade, want: bool) -> Result<String, String> {
     let runs = read.past > 0.5;
@@ -2231,6 +2236,9 @@ pub(crate) fn fade_verdict(read: &BarFade, want: bool) -> Result<String, String>
     }
     if read.fade != want {
         return Err(format!("keyboard bar {said}, wanted the fade {}", if want { "on" } else { "off" }));
+    }
+    if read.fade && (read.width - KEYBOARD_BAR_FADE).abs() > 0.5 {
+        return Err(format!("keyboard bar fade drawn {:.1} wide, wanted {KEYBOARD_BAR_FADE:.1}", read.width));
     }
     Ok(format!("keyboard bar {said}"))
 }
@@ -13106,13 +13114,15 @@ mod tests {
         assert!(caret_verdict(&caret(0x4FDBC8, 0x323534)).is_ok());
         assert!((contrast_ratio(0xFFFFFF, 0x000000) - 21.0).abs() < 1e-9);
         assert!(parse("expect_caret_contrast textarea#0").is_ok());
-        let bar = |fade, past| BarFade { fade, past };
+        let bar = |fade, past| BarFade { fade, past, width: KEYBOARD_BAR_FADE };
         assert!(fade_verdict(&bar(true, 80.0), true).is_ok());
         assert!(fade_verdict(&bar(false, 0.0), false).is_ok());
         assert_eq!(fade_verdict(&bar(false, 80.0), true).unwrap_err(),
             "keyboard bar disagrees with itself: fade not drawn, the row runs 80.0 past its right edge");
         assert!(fade_verdict(&bar(true, 0.0), true).unwrap_err().starts_with("keyboard bar disagrees"));
         assert!(fade_verdict(&bar(true, 80.0), false).unwrap_err().ends_with("wanted the fade off"));
+        assert_eq!(fade_verdict(&BarFade { fade: true, past: 80.0, width: 24.0 }, true).unwrap_err(),
+            "keyboard bar fade drawn 24.0 wide, wanted 48.0");
         assert!(parse("expect_keyboard_bar_fade maybe").is_err());
         assert!(parse("scroll_keyboard_bar end").is_ok());
     }
