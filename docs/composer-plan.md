@@ -67,7 +67,8 @@ bindings (Rust `.titled()`, Go `.Titled()`, Python and JavaScript
 `titled=`/`titled:` on `button`, C# and Swift `titled:`, Java `.titled()`,
 OCaml `?titled`, Haskell `Titled`); the chat app's call buttons are its
 first use. Held by check-universal-props' titled clause (five watched
-negatives) and chatcall's `expect_symbol` reads.
+negatives) and chatcall's `expect_symbol` reads. The name `titled` was
+ratified 2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them").
 
 ## §3 — The prominent circle
 

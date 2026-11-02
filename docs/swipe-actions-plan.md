@@ -73,7 +73,9 @@ verb reads what each backend lowered (edge, labels, the full item).
   2026-10-31, `symbol_icon_source`; tools/check-symbol-parity.py N11). The
   chat app's Mark unread and Archive carry `mark_unread` (an envelope with a
   badge) and `archive` (an archive box), added to the vocabulary on
-  2026-11-01 by the maintainer's ruling.
+  2026-11-01 by the maintainer's ruling. GNOME draws `archive` as
+  package-x-generic, its archive file icon, since Adwaita has no archive box:
+  a stand-in ratified 2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them").
 - Apple and GTK keep every swipe item in the context menu (R1, R2).
 - `swipe_action <row> "<item>"` runs the item through its swipe: a real touch
   swipe across the row on Android, and on Windows an injected finger

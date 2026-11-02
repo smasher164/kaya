@@ -462,7 +462,9 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    stuff like mute, camera off, and hanging up."): Call and Answer `phone`,
    Video `video`, Mute `mic_off` (Unmute `mic`), Camera off `video_off`
    (Camera on `video`), Hang up and Decline `hang_up`, through the button's
-   `titled` prop (docs/composer-plan.md §2).
+   `titled` prop (docs/composer-plan.md §2). Windows draws `video_off` as
+   Fluent UI System Icons' video_off outline (a path, since Segoe Fluent
+   Icons has no camera-off glyph), a stand-in ratified 2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them").
 3. **The call's media rides its own loopback connection** to the scripted
    peer, beside the message connection: tagged records of NV12 frames and
    480-sample chunks each way; the peer reads and drops the app's audio.
@@ -480,7 +482,7 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
 7. **The self-view is smaller, under the peer's picture** (the maintainer,
    2026-11-01, accepted for now): at most a third of the peer picture's
    natural 320 pt, about 107 pt wide, by a column's `max_width` around it;
-   the self-view shrinks to that room keeping its aspect (§3). For
-   ratification. The maintainer wants the self-view floated over a corner of
+   the self-view shrinks to that room keeping its aspect (§3). Ratified
+   2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them"). The maintainer wants the self-view floated over a corner of
    the peer's picture in the end, which needs a layering kind kaya lacks
    (docs/deferred.md, the GAP on layering one view over another).
