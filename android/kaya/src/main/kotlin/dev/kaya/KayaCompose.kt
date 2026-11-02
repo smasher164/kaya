@@ -15133,6 +15133,10 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                     return@onUi Pair(true, androidx.compose.ui.geometry.Rect(
                                         r.left.toFloat(), r.top.toFloat(), r.right.toFloat(), r.bottom.toFloat()))
                                 }
+                                if (spec.startsWith("video") || spec.startsWith("surface")) {
+                                    val v = kayaWidgetTarget(spec) ?: return@onUi Pair(false, null)
+                                    return@onUi Pair(true, kayaVideoFrames[v.id])
+                                }
                                 val node = target(spec, "label", KayaSceneModel.labels) ?: return@onUi Pair(false, null)
                                 Pair(true, kayaOverlapRects[node.id] ?: kayaTextRects[node.id])
                             }

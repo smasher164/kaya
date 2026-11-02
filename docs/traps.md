@@ -19968,3 +19968,21 @@ textarea registry beside it records the same twin-making on iOS). The
 registry now keeps one proxy per mounted copy and a copy that disappears
 takes its own out (KayaScrollMount); tools/scenes/hiderows.steps' strip is
 what reads it.
+
+## The quiet tail installed an apk of older guest sources (measured 2026-11-01)
+
+A watched negative on chatcall (the Go guest's call screen put back to its
+old geometry) went red on four lanes and GREEN on Android. chatcall is one of
+the Android QUIET legs, so `--only chatcall` launches only the android-quiet
+row, which printed "quiet: go installs the apk this matrix built": the main
+Android lane never ran, and the apk was the previous run's, built from the
+fixed guest (the leg's screencap showed the 107x80 self-view the old guest
+cannot draw). run-emulator.py's reuse_built proved the copied libkaya carried
+this tree's core id and the apk this tree's compose id, and neither id reads
+the guest sources the apk compiles: guests/rust for the Rust host,
+guests/java and android/javahost/src for the JVM host, guests/go, bindings/go
+and go.mod for the Go host. Each build now stamps a digest of those beside
+its apk (`QUIET_GUESTS`, written after the apk's proofs, removed before any
+build) and a reuse requires it equal; the rerun printed "go builds its apk"
+and went red on Android as on the other four.
+

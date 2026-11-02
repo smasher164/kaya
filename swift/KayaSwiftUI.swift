@@ -13680,6 +13680,15 @@ private func kayaRunScript(_ script: String) {
                             else { return nil }
                             return .some(kayaAnchoredFrame(node.id))
                         }
+                        if spec.hasPrefix("video") || spec.hasPrefix("surface") {
+                            guard let node = kayaPictureTarget(spec) else { return nil }
+                            guard let view = kayaVideoViews[node.id], view.window != nil else { return .some(nil) }
+                            #if os(macOS)
+                                return .some(kayaHarnessRect(view.bounds, in: view))
+                            #else
+                                return .some(view.convert(view.bounds, to: nil))
+                            #endif
+                        }
                         guard let node = kayaTarget(spec, "label", kayaScene.labels) else { return nil }
                         return .some(kayaLabelWindowFrames[node.id]?.values.first(where: { $0.width > 1 && $0.height > 1 }))
                     }

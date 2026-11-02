@@ -4403,6 +4403,32 @@ QUIET_LIBS = {
 }
 
 
+# What QUIET_LIBS' ids do not cover: the guest sources each apk compiles
+# (docs/traps.md, the quiet tail installed an apk of older guest sources).
+QUIET_GUESTS = {
+    "compose": ["guests/rust"],
+    "jvm": ["guests/java", "android/javahost/src"],
+    "go": ["guests/go", "bindings/go", "go.mod", "go.sum"],
+}
+
+
+def guest_digest(suite):
+    h = hashlib.sha256()
+    for name in QUIET_GUESTS[suite]:
+        p = ROOT / name
+        for f in sorted([p] if p.is_file() else
+                        (x for x in p.rglob("*") if x.is_file()
+                         and "__pycache__" not in x.parts)):
+            body = f.read_bytes()
+            h.update(f"{f.relative_to(ROOT)}\0{len(body)}\0".encode())
+            h.update(body)
+    return h.hexdigest()[:16]
+
+
+def guest_stamp(apk):
+    return apk.with_name(apk.name + ".guests")
+
+
 def packaged(apk, lib):
     """The bytes the apk carries for `lib`, or None."""
     try:
@@ -4418,6 +4444,8 @@ def reuse_built(suite, apk):
     lib = ROOT / QUIET_LIBS[suite]
     fresh = (apk.is_file() and lib.is_file()
              and packaged(apk, lib) == lib.read_bytes()
+             and guest_stamp(apk).is_file()
+             and guest_stamp(apk).read_text(encoding="utf-8") == guest_digest(suite)
              and run([str(ROOT / "tools/build-id.py"), "--verify", str(lib)]).returncode == 0
              and run([str(ROOT / "tools/build-id.py"), "--verify", "--component", "compose",
                       str(apk)]).returncode == 0)
@@ -4438,7 +4466,11 @@ def build_suite(suite):
     a Kotlin compile error produced a zero-verdict run)."""
     apk_rel, package, _activity = lane.SUITE_APPS[suite]
     apk = ROOT / apk_rel
-    if not reuse_built(suite, apk):
+    guests = guest_digest(suite) if suite in QUIET_GUESTS else None
+    reused = reuse_built(suite, apk)
+    if guests is not None:
+        guest_stamp(apk).unlink(missing_ok=True)
+    if not reused:
         if suite == "compose":
             jnilibs = ROOT / "android/rusthost/src/main/jniLibs/arm64-v8a"
             fresh_jnilibs(jnilibs)
@@ -4534,6 +4566,8 @@ def build_suite(suite):
         return False
     if not apk_assets_verify(apk):
         return False
+    if guests is not None:
+        guest_stamp(apk).write_text(guests, encoding="utf-8")
     timing(f"build-{suite}", clock="build")
     targets = ([*SERIALS, TABLET_SERIAL] if suite == "compose"
                else list(SERIALS))

@@ -482,7 +482,12 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
 7. **The self-view is smaller, under the peer's picture** (the maintainer,
    2026-11-01, accepted for now): at most a third of the peer picture's
    natural 320 pt, about 107 pt wide, by a column's `max_width` around it;
-   the self-view shrinks to that room keeping its aspect (§3). Ratified
+   the self-view shrinks to that room keeping its aspect (§3), a 4:3 tile by
+   `aspect(4, 3)` with `cover` so Android's upright 3:4 front camera shows the
+   wide tile the other lanes show (107x80); the peer's picture takes no
+   `grow` and keeps its natural 320x240 (docs/deferred.md, a growing video
+   view laid out five ways). tools/scenes/chatcall.steps reads both boxes and
+   the column's 8 point spacing above and below the peer. Ratified
    2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them"). The maintainer wants the self-view floated over a corner of
    the peer's picture in the end, which needs a layering kind kaya lacks
    (docs/deferred.md, the GAP on layering one view over another).

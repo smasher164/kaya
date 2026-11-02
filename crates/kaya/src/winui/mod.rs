@@ -30268,8 +30268,18 @@ impl crate::harness::Stage for WinUiStage {
 
     fn window_frame(&self, t: crate::harness::Target) -> Result<(f64, f64, f64, f64), String> {
         Self::on_ui_read(move |core| {
-            let Some(element) = target_element(core, t)? else {
-                return Ok(Err("<no such target>".to_string()));
+            use crate::harness::TargetKind;
+            let host = if matches!(t.kind, TargetKind::Video | TargetKind::Surface) {
+                media::stage::picture_at(core, t).and_then(|w| media::stage::host_of(core, w)).map(|g| g.cast::<UIElement>())
+            } else {
+                None
+            };
+            let element = match host {
+                Some(e) => e?,
+                None => match target_element(core, t)? {
+                    Some(e) => e,
+                    None => return Ok(Err("<no such target>".to_string())),
+                },
             };
             let fe: FrameworkElement = element.cast()?;
             let at = element

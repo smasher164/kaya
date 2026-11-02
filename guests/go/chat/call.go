@@ -256,11 +256,11 @@ func (k *calls) start(tx *kaya.Tx, c *conversation, video bool) {
 	pane := tx.Column(func() {
 		tx.Label(state).A11yID("callstate")
 		if video {
-			peerView := tx.Surface().A11yLabel(c.name).A11yID("peer").Grow(1)
+			peerView := tx.Surface().A11yLabel(c.name).A11yID("peer")
 			cl.frames = k.app.SurfaceFrames(peerView)
 			// docs/capture-plan.md §12 item 7.
 			tx.Column(func() {
-				tx.VideoCapture(cl.capture).A11yLabel("You").A11yID("selfview")
+				tx.VideoCapture(cl.capture).Aspect(4, 3).Fit(kaya.FitCover).A11yLabel("You").A11yID("selfview")
 			}).MaxWidth(selfViewWidth)
 		}
 		tx.Row(func() {
