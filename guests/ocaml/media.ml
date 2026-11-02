@@ -433,4 +433,5 @@ let () =
   | "media_tracks" -> tracks_app app
   | "media_feed" -> feed_app app
   | "media_reader" -> reader_app app
-  | _ -> formats_app app scene
+  | "" | "media" | "media_formats" | "media_session" | "media_delivery" -> formats_app app scene
+  | _ -> failwith ("kaya: no scene named \"" ^ scene ^ "\" in this guest; the runner asked for a leg it does not carry")

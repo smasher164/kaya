@@ -346,11 +346,8 @@ fn app(ctx: kaya::AppCtx) {
         // KAYA_ASSET_DIR, so the core reads through the AssetManager.
         Ok("assets") => assets::app(ctx),
         // "1" is the selftest flag's original spelling.
-        Ok("1") | Err(_) => milestone2::app(ctx),
-        Ok(other) => panic!(
-            "kaya: no scene named {other:?} in this APK — the runner asked for a leg \
-             the guest does not carry"
-        ),
+        Ok("") | Ok("1") | Err(_) => milestone2::app(ctx),
+        Ok(other) => panic!("kaya: no scene named \"{other}\" in this guest; the runner asked for a leg it does not carry"),
     }
 }
 

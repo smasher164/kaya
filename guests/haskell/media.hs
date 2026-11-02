@@ -433,4 +433,5 @@ main = kayaMain $ \app -> do
     "media_tracks" -> tracksApp app
     "media_feed" -> feedApp app
     "media_reader" -> readerApp app
-    _ -> formatsApp app scene
+    _ | scene `elem` ["", "media", "media_formats", "media_session", "media_delivery"] -> formatsApp app scene
+    _ -> error ("kaya: no scene named \"" ++ scene ++ "\" in this guest; the runner asked for a leg it does not carry")

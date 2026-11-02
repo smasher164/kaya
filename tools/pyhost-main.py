@@ -8,10 +8,9 @@ import runpy
 
 scene = os.environ.get("KAYA_SELFTEST", "")
 here = pathlib.Path(__file__).resolve().parent
-guest = here / f"{scene}.py"
+guest = here / f"{scene or 'portfolio'}.py"
 if not guest.is_file():
     raise SystemExit(
-        f"pyhost: no guest for scene {scene!r} at {guest} — stage the "
-        "guest in run-sim.py's IOS_PYTHON_SCENES or fix KAYA_SELFTEST"
+        f'kaya: no scene named "{scene}" in this guest; the runner asked for a leg it does not carry'
     )
 runpy.run_path(str(guest), run_name="__main__")

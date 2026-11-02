@@ -450,6 +450,7 @@ KayaApp.run { app in
     case "media_tracks": tracksApp(app)
     case "media_feed": feedApp(app)
     case "media_reader": readerApp(app)
-    default: suiteApp(app, scene)
+    case "", "media", "media_formats", "media_session", "media_delivery": suiteApp(app, scene)
+    default: fatalError("kaya: no scene named \"\(scene)\" in this guest; the runner asked for a leg it does not carry")
     }
 }

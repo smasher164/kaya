@@ -206,8 +206,8 @@ var scenes = map[string]func() *kaya.App{
 func pick(scene string) func() *kaya.App {
 	build, carried := scenes[scene]
 	if !carried {
-		panic("kaya: no scene named " + scene + " in this artifact — the runner " +
-			"asked for a leg the guest does not carry")
+		panic("kaya: no scene named \"" + scene +
+			"\" in this guest; the runner asked for a leg it does not carry")
 	}
 	return build
 }

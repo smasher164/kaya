@@ -26,7 +26,7 @@ object GuestStart : KayaGuestStart {
         // this selector). An unregistered name is refused below.
         val selftest = System.getenv("KAYA_SELFTEST")
         val scene = when (selftest) {
-            null, "1", "milestone2" -> Milestone2::app
+            null, "", "1", "milestone2" -> Milestone2::app
             "a11y" -> A11y::app
             "a11yrows" -> A11yRows::app
             "entry" -> Entry::app
@@ -122,7 +122,7 @@ object GuestStart : KayaGuestStart {
             // create_window, never by silently running milestone2.
             "window" -> Window::app
             "panels" -> Panels::app
-            else -> error("kaya: the JVM host has no scene \"$selftest\"; register its guest in android/javahost's MainActivity.kt")
+            else -> error("kaya: no scene named \"$selftest\" in this guest; the runner asked for a leg it does not carry")
         }
         // KAYA STARTS THE APP THREAD, not this shell — a configuration
         // change re-runs onCreate in the same process (KayaRing.startGuest).

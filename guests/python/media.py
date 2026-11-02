@@ -440,7 +440,9 @@ elif scene == "media_reader":
     reader_app()
 elif scene == "media_feed":
     feed_app()
-else:
+elif scene in ("", "media", "media_formats", "media_session", "media_delivery"):
     suite_app(scene)
+else:
+    raise SystemExit(f'kaya: no scene named "{scene}" in this guest; the runner asked for a leg it does not carry')
 
 sys.exit(app.run())

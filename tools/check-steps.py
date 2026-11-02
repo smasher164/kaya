@@ -1481,6 +1481,47 @@ print("check-steps: the winui story has one read door "
       f"({winui_text.count('.GetText(')} GetText call) and no "
       f"ITextRange::Link")
 
+# A GUEST ASKED FOR A SCENE IT DOES NOT CARRY STOPS AT LAUNCH, naming it in
+# one sentence on every host (the maintainer, 2026-11-01; docs/deferred.md,
+# the unknown scene entry); an empty name runs the default demo.
+SCENE_HOSTS = ("guests/go/cmd/scenes.go", "guests/csharp/Program.cs",
+               "guests/java/dev/kaya/guests/Main.java",
+               "android/javahost/src/main/kotlin/dev/kaya/javahost/MainActivity.kt",
+               "guests/rust/rusthost.rs", "tools/pyhost-main.py",
+               "guests/python/media.py", "guests/swift/media.swift",
+               "guests/ocaml/media.ml", "guests/haskell/media.hs",
+               "guests/js/media.ts", "guests/rust/media.rs")
+SCENE_REFUSAL = "in this guest; the runner asked for a leg it does not carry"
+
+
+def scene_refusal_lint(texts):
+    bad = []
+    for path, text in texts.items():
+        if "no scene named" not in text or SCENE_REFUSAL not in text:
+            bad.append(f"{path}: no longer refuses a scene it does not carry with "
+                       f"'no scene named \"<name>\" {SCENE_REFUSAL}'")
+        for old in ("have no scene", "has no scene", "no guest for scene",
+                    "in this APK", "in this artifact"):
+            if old in text:
+                bad.append(f"{path}: refuses an unknown scene in its own words ({old!r}); "
+                           "the sentence is one on every host")
+    return bad
+
+
+scene_texts = {p: read_rel(p) for p in SCENE_HOSTS}
+scene_out = scene_refusal_lint(scene_texts)
+if scene_out:
+    print("\n".join(scene_out), file=sys.stderr)
+    status = 1
+_s1, _n = sub_count(re.escape(SCENE_REFUSAL), "in this artifact",
+                    scene_texts["guests/csharp/Program.cs"])
+print(f"check-steps: scene refusal self-test the C# sentence reworded, "
+      f"{_n} substitution(s)")
+if _n != 1 or not scene_refusal_lint({"guests/csharp/Program.cs": _s1}):
+    selftest_fail("a host refusing an unknown scene in its own words passed")
+print(f"check-steps: {len(SCENE_HOSTS)} hosts refuse a scene they do not carry "
+      "in one sentence")
+
 stage_out = linux_stage_lint([(steps_rel(p), STEPS_TEXT[p])
                               for p in STEPS])
 if stage_out:

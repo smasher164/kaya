@@ -114,7 +114,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         "media_feed" => return feed_app(ctx),
         "media_picked" => return picked_app(ctx),
         "media_reader" => return reader_app(ctx),
-        _ => {}
+        "" | "media" | "media_formats" | "media_session" | "media_delivery" | "media_timeout" => {}
+        other => panic!("kaya: no scene named \"{other}\" in this guest; the runner asked for a leg it does not carry"),
     }
     let session = scene == "media_session";
     let items = match scene.as_str() {

@@ -2171,7 +2171,7 @@ as 1.234 through ICU's comma class, is refused, and `3.5` under ar-EG now
 reads on all five. Under glibc's ar-EG marks "," is the group, so Linux
 reads ar-EG `1,234` as 1234; the scene uses `12,34`, refused on all five.
 
-## RULING — a C# or Java guest host asked for a scene it does not carry runs milestone2 (found 2026-09-28, the number field's breadth)
+## ~~RULING — a C# or Java guest host asked for a scene it does not carry runs milestone2 (found 2026-09-28, the number field's breadth)~~ COMPLETE 2026-11-01, ruled and built: every host that picks a scene by KAYA_SELFTEST stops at launch on a name it does not carry with one sentence, `kaya: no scene named "<name>" in this guest; the runner asked for a leg it does not carry`, and an unset or empty name runs the default demo: Go (desktop and Android, whose empty-name panic gave way to the default, check-go-env holding the kaya.Env rule), C#, Java, the JVM and Rust Android hosts, the Python phone host (portfolio is its default) and the six media guests a runner picks by file (Python, Swift, OCaml, Haskell, JavaScript, Rust); the other scenes are one program each, which no runner can ask for another scene. check-steps holds the sentence on all twelve, watched red with C#'s reworded
 KEY: default arm, unknown scene, KAYA_SELFTEST, Program.cs, Main.java, milestone2 fallback
 
 When KAYA_SELFTEST names a scene the C# or Java host has no row for, the

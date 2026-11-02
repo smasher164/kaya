@@ -281,8 +281,8 @@ public final class Main {
                 app = Milestone2::app;
                 break;
             default:
-                throw new IllegalStateException("kaya: the Java guests have no scene \"" + scene
-                        + "\"; register it in guests/java/dev/kaya/guests/Main.java");
+                throw new IllegalStateException("kaya: no scene named \"" + scene
+                        + "\" in this guest; the runner asked for a leg it does not carry");
         }
         new Thread(app, "kaya-app").start();
         System.exit(KayaRing.run());

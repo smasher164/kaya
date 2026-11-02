@@ -116,10 +116,10 @@ static class Program
             case "netimage": NetimageScene.Run(); break;
             case "netimage_http": NetimageHttpScene.Run(); break;
             case "encodebench": EncodeBench.Run(); break;
-            case null: case "1": case "milestone2": Milestone2Scene.Run(); break;
+            case null: case "": case "1": case "milestone2": Milestone2Scene.Run(); break;
             default:
                 throw new InvalidOperationException(
-                    $"kaya: the C# guests have no scene \"{System.Environment.GetEnvironmentVariable("KAYA_SELFTEST")}\"; register it in guests/csharp/Program.cs");
+                    $"kaya: no scene named \"{System.Environment.GetEnvironmentVariable("KAYA_SELFTEST")}\" in this guest; the runner asked for a leg it does not carry");
         }
     }
 }

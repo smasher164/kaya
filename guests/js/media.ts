@@ -419,6 +419,7 @@ const scene = process.env["KAYA_SELFTEST"] ?? "";
 if (scene === "media_tracks") tracksApp();
 else if (scene === "media_feed") feedApp();
 else if (scene === "media_reader") readerApp();
-else suiteApp(scene);
+else if (["", "media", "media_formats", "media_session", "media_delivery"].includes(scene)) suiteApp(scene);
+else throw new Error(`kaya: no scene named "${scene}" in this guest; the runner asked for a leg it does not carry`);
 
 app.run();
