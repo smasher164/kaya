@@ -1217,6 +1217,7 @@ pub const KAYA_PROP_INSET: u32 = 17;
 /// A container's leading and trailing padding apart from its inset
 /// (docs/styling-plan.md D3, the inset pair).
 pub const KAYA_PROP_INSET_X: u32 = 76;
+pub const KAYA_PROP_TITLED: u32 = 77;
 /// The arrangement axis (docs/adaptive-layout-plan.md D1): row and
 /// column are one node this prop parameterizes.
 pub const KAYA_PROP_AXIS: u32 = 18;
@@ -1559,6 +1560,7 @@ const _: () = assert!(
         && KAYA_PROP_ROLE == wire::PROP_ROLE
         && KAYA_PROP_INSET == wire::PROP_INSET
         && KAYA_PROP_INSET_X == wire::PROP_INSET_X
+        && KAYA_PROP_TITLED == wire::PROP_TITLED
         && KAYA_PROP_AXIS == wire::PROP_AXIS
         && KAYA_PROP_DATE == wire::PROP_DATE
         && KAYA_PROP_TIME == wire::PROP_TIME
@@ -1804,6 +1806,13 @@ pub const KAYA_SYMBOL_ITALIC: u32 = 38;
 pub const KAYA_SYMBOL_UNDERLINE: u32 = 39;
 pub const KAYA_SYMBOL_STRIKETHROUGH: u32 = 40;
 pub const KAYA_SYMBOL_SAVE: u32 = 41;
+pub const KAYA_SYMBOL_PHONE: u32 = 42;
+pub const KAYA_SYMBOL_VIDEO: u32 = 43;
+pub const KAYA_SYMBOL_MIC_OFF: u32 = 44;
+pub const KAYA_SYMBOL_VIDEO_OFF: u32 = 45;
+pub const KAYA_SYMBOL_HANG_UP: u32 = 46;
+pub const KAYA_SYMBOL_MARK_UNREAD: u32 = 47;
+pub const KAYA_SYMBOL_ARCHIVE: u32 = 48;
 const _: () = assert!(
     KAYA_SYMBOL_ADD == wire::SYMBOL_ADD
         && KAYA_SYMBOL_REMOVE == wire::SYMBOL_REMOVE
@@ -1846,6 +1855,13 @@ const _: () = assert!(
         && KAYA_SYMBOL_UNDERLINE == wire::SYMBOL_UNDERLINE
         && KAYA_SYMBOL_STRIKETHROUGH == wire::SYMBOL_STRIKETHROUGH
         && KAYA_SYMBOL_SAVE == wire::SYMBOL_SAVE
+        && KAYA_SYMBOL_PHONE == wire::SYMBOL_PHONE
+        && KAYA_SYMBOL_VIDEO == wire::SYMBOL_VIDEO
+        && KAYA_SYMBOL_MIC_OFF == wire::SYMBOL_MIC_OFF
+        && KAYA_SYMBOL_VIDEO_OFF == wire::SYMBOL_VIDEO_OFF
+        && KAYA_SYMBOL_HANG_UP == wire::SYMBOL_HANG_UP
+        && KAYA_SYMBOL_MARK_UNREAD == wire::SYMBOL_MARK_UNREAD
+        && KAYA_SYMBOL_ARCHIVE == wire::SYMBOL_ARCHIVE
 );
 // Completeness, not just agreement (docs/traps.md): a symbol nobody
 // exported is a concept the C floor and every generated header silently
@@ -1863,7 +1879,7 @@ const _: () = {
         n
     };
     assert!(
-        variants == 41,
+        variants == 48,
         "the spec symbol enum grew: export the new KAYA_SYMBOL_* above, extend the pin, and \
          bump this count"
     );
@@ -2231,7 +2247,7 @@ const _: () = {
 // Completeness, not just agreement (docs/traps.md): a new spec prop
 // trips this count and walks you here.
 const _: () = assert!(
-    crate::spec::PROPS.len() == 76,
+    crate::spec::PROPS.len() == 77,
     "spec::PROPS grew: export the new KAYA_PROP_* above, extend the pin, and bump this count"
 );
 const _: () = assert!(

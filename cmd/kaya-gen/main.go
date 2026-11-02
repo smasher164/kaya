@@ -519,6 +519,7 @@ func generateRecord(w func(string, ...any), strct *ast.StructType, name, key str
 	w("")
 	w("func (r %sRow) SetSymbol(n kaya.Node, symbol kaya.Symbol) { r.t.SetSymbol(n, symbol) }", lowerFirst(name))
 	w("func (r %sRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }", lowerFirst(name))
+	w("func (r %sRow) SetTitled(n kaya.Node, on bool) { r.t.SetTitled(n, on) }", lowerFirst(name))
 	w("func (r %sRow) SetMaxLines(n kaya.Node, lines int) { r.t.SetMaxLines(n, lines) }", lowerFirst(name))
 	w("func (r %sRow) SetMonospaced(n kaya.Node, on bool) { r.t.SetMonospaced(n, on) }", lowerFirst(name))
 	w("func (r %sRow) SetFamily(n kaya.Node, name string) { r.t.SetFamily(n, name) }", lowerFirst(name))

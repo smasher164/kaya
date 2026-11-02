@@ -1596,6 +1596,13 @@ data Symbol
   | SymbolUnderline
   | SymbolStrikethrough
   | SymbolSave
+  | SymbolPhone
+  | SymbolVideo
+  | SymbolMicOff
+  | SymbolVideoOff
+  | SymbolHangUp
+  | SymbolMarkUnread
+  | SymbolArchive
   deriving (Eq, Show, Enum, Bounded)
 
 -- From the generated table, never literals: the discriminants are spec
@@ -1643,6 +1650,13 @@ symbolWire s = fromIntegral $ case s of
   SymbolUnderline -> W.symbolUnderline
   SymbolStrikethrough -> W.symbolStrikethrough
   SymbolSave -> W.symbolSave
+  SymbolPhone -> W.symbolPhone
+  SymbolVideo -> W.symbolVideo
+  SymbolMicOff -> W.symbolMicOff
+  SymbolVideoOff -> W.symbolVideoOff
+  SymbolHangUp -> W.symbolHangUp
+  SymbolMarkUnread -> W.symbolMarkUnread
+  SymbolArchive -> W.symbolArchive
 
 -- --- Menus: the command vocabulary (DESIGN.md, Menus) ---------------
 
@@ -3593,6 +3607,8 @@ data Attr (c :: WClass) where
   -- stays its accessible name (docs\/composer-plan.md §2); an expander
   -- draws it before its header (docs\/expander-plan.md K2).
   Symbol :: Symbol -> Attr c
+  -- | A symbol button draws its title beside the glyph (docs/composer-plan.md §2).
+  Titled :: Attr c
   -- | What this widget takes from a paste — the closed kinds by name
   -- ('acceptText' and friends) plus any custom format ids.
   Accepts :: [Text] -> Attr c
@@ -3696,6 +3712,7 @@ applyAttr (Min v) (Widget n) = emitB (W.txSetMin n v)
 applyAttr (Max v) (Widget n) = emitB (W.txSetMax n v)
 applyAttr (Role r) w = setRole w r
 applyAttr (Symbol s) w = setSymbol w s
+applyAttr Titled (Widget w) = emitB (W.txSetTitled w True)
 applyAttr (MaxWidth points) (Widget w) = emitB (W.txSetMaxWidth w points)
 applyAttr (MaxHeight points) (Widget w) = emitB (W.txSetMaxHeight w points)
 applyAttr (Accepts kinds) w = setAccepts w kinds
@@ -5052,6 +5069,7 @@ data TplAttr where
   TplSummaryField :: KField Text -> TplAttr
   -- | Each stamped button's or expander's glyph (the live 'Symbol').
   TplSymbol :: Symbol -> TplAttr
+  TplTitled :: TplAttr
   -- | Each copy's glyph from its row's 'Symbol' field (M16 (21)).
   TplSymbolField :: KField Symbol -> TplAttr
   TplNumberFormat :: NumberFormat -> TplAttr
@@ -5211,6 +5229,7 @@ applyTplAttr (TplSummary t) (Node n) = emitT (W.txSetSummary n (T.unpack t))
 applyTplAttr (TplSummaryBound (Signal s)) (Node n) = emitT (W.txBindSummary n s)
 applyTplAttr (TplSummaryField (KField i)) (Node n) = emitT (W.txBindSummaryElement n 0 i)
 applyTplAttr (TplSymbol sym) (Node n) = emitT (W.txSetSymbol n (symbolWire sym))
+applyTplAttr TplTitled (Node n) = emitT (W.txSetTitled n True)
 applyTplAttr (TplSymbolField (KField i)) (Node n) = emitT (W.txBindSymbolElement n 0 i)
 applyTplAttr (TplNumberFormat format) n = setNodeNumberFormat n format
 applyTplAttr (TplStep step) (Node n) = emitT (W.txSetStep n step)

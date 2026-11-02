@@ -647,6 +647,13 @@ public enum KayaSymbol: Int64, Sendable {
     case underline = 39
     case strikethrough = 40
     case save = 41
+    case phone = 42
+    case video = 43
+    case mic_off = 44
+    case video_off = 45
+    case hang_up = 46
+    case mark_unread = 47
+    case archive = 48
 }
 
 public struct KayaWidget {
@@ -4852,6 +4859,12 @@ public final class KayaAppTx {
         tx.setSymbol(w.id, symbol.rawValue)
     }
 
+    /// A symbol button draws its title beside the glyph rather than in its
+    /// place (docs/composer-plan.md §2).
+    public func setTitled(_ w: KayaWidget, _ on: Bool) {
+        tx.setTitled(w.id, on)
+    }
+
     public func setGrow(_ w: KayaWidget, _ weight: Double) {
         tx.setGrow(w.id, weight)
     }
@@ -5220,6 +5233,7 @@ public final class KayaAppTx {
     @discardableResult
     public func button(
         _ text: String? = nil, role: KayaRole? = nil, symbol: KayaSymbol? = nil,
+        titled: Bool = false,
         onClick: ((KayaAppTx) throws -> Void)? = nil,
         grow: Double? = nil
     ) -> KayaWidget {
@@ -5227,6 +5241,7 @@ public final class KayaAppTx {
         if let text { setText(w, text) }
         if let role { setRole(w, role) }
         if let symbol { setSymbol(w, symbol) }
+        if titled { setTitled(w, true) }
         if let onClick { app.onClick(w, onClick) }
         if let grow { setGrow(w, grow) }
         return w
@@ -7424,6 +7439,10 @@ public final class KayaTpl {
     /// Every stamped button's or expander's glyph (KayaAppTx.setSymbol).
     public func setSymbol(_ n: KayaNodeHandle, _ symbol: KayaSymbol) {
         tx.tx.setSymbol(n.id, symbol.rawValue)
+    }
+
+    public func setTitled(_ n: KayaNodeHandle, _ on: Bool) {
+        tx.tx.setTitled(n.id, on)
     }
 
     /// Every stamped copy's glyph from its row's symbol field

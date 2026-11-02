@@ -2331,6 +2331,13 @@ type symbol =
   | Underline
   | Strikethrough
   | Save
+  | Phone
+  | Video
+  | MicOff
+  | VideoOff
+  | HangUp
+  | MarkUnread
+  | Archive
 
 let symbol_wire = function
   | Add -> Int64.of_int Kaya_wire.symbol_add
@@ -2374,6 +2381,13 @@ let symbol_wire = function
   | Underline -> Int64.of_int Kaya_wire.symbol_underline
   | Strikethrough -> Int64.of_int Kaya_wire.symbol_strikethrough
   | Save -> Int64.of_int Kaya_wire.symbol_save
+  | Phone -> Int64.of_int Kaya_wire.symbol_phone
+  | Video -> Int64.of_int Kaya_wire.symbol_video
+  | MicOff -> Int64.of_int Kaya_wire.symbol_mic_off
+  | VideoOff -> Int64.of_int Kaya_wire.symbol_video_off
+  | HangUp -> Int64.of_int Kaya_wire.symbol_hang_up
+  | MarkUnread -> Int64.of_int Kaya_wire.symbol_mark_unread
+  | Archive -> Int64.of_int Kaya_wire.symbol_archive
 
 (* A [symbol] row field's wire form, for the ppx's generated code
    (docs/media-player-plan.md M16 (21)). Every constructor, in wire order;
@@ -2382,7 +2396,8 @@ let all_symbols =
   [ Add; Remove; Delete; Edit; Done; Close; Search; Settings; Refresh; Info; Warning; Back;
     Forward; More; Copy; Paste; Star; Lock; Person; Home; Emoji; Send; Attach; Mic;
     ImageMissing; Play; Pause; Next; Previous; Shuffle; Repeat; RepeatOne; Volume; Queue;
-    Favorite; Muted; Bold; Italic; Underline; Strikethrough; Save ]
+    Favorite; Muted; Bold; Italic; Underline; Strikethrough; Save;
+    Phone; Video; MicOff; VideoOff; HangUp; MarkUnread; Archive ]
 
 let pack_symbol = symbol_wire
 
@@ -2838,7 +2853,8 @@ let add_child (Widget parent) (Widget child) =
 let within container children = List.iter (fun child -> add_child container (child ())) children
 
 
-let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?symbol ?text ?on_click () =
+let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?a11y_hint ?role ?symbol
+    ?(titled = false) ?text ?on_click () =
   let tx = the_tx () in
   let w = widget Kaya_wire.kind_button in
   Option.iter (fun g -> set_grow w g) grow;
@@ -2849,6 +2865,7 @@ let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
      at the root. *)
   Option.iter (fun r -> set_role w r) role;
   Option.iter (fun s -> set_symbol w s) symbol;
+  if titled then emit tx (Kaya_wire.tx_set_titled (let (Widget id) = w in id) true);
   Option.iter (fun t -> set_text w t) text;
   (match on_click with
   | Some handler ->
@@ -6119,10 +6136,11 @@ module Tpl = struct
 
   let button ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_hint ?a11y_hint_bind
-      ?a11y_hint_field ?role ?symbol ?symbol_field ?text ?bind ?bind_field ?(level = 0)
+      ?a11y_hint_field ?role ?symbol ?symbol_field ?(titled = false) ?text ?bind ?bind_field ?(level = 0)
       ?(a11y_level = level) ?on_click () =
     let n = Floor.widget Kaya_wire.kind_button in
     Option.iter (fun s -> Floor.set_symbol n s) symbol;
+    if titled then emit (the_tx ()) (Kaya_wire.tx_set_titled (let (Node id) = n in id) true);
     Option.iter
       (fun (fd : (_, symbol) field) ->
         let (Node id) = n in

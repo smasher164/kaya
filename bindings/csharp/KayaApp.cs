@@ -875,6 +875,13 @@ enum Symbol : long
     Underline = KayaWire.SymbolUnderline,
     Strikethrough = KayaWire.SymbolStrikethrough,
     Save = KayaWire.SymbolSave,
+    Phone = KayaWire.SymbolPhone,
+    Video = KayaWire.SymbolVideo,
+    MicOff = KayaWire.SymbolMicOff,
+    VideoOff = KayaWire.SymbolVideoOff,
+    HangUp = KayaWire.SymbolHangUp,
+    MarkUnread = KayaWire.SymbolMarkUnread,
+    Archive = KayaWire.SymbolArchive,
 }
 
 /// WHICH PLATFORM A PER-PLATFORM BRAND VALUE IS FOR (the spec's
@@ -4986,6 +4993,11 @@ sealed class Tx : IDisposable
     public void SetSymbol(Widget w, Symbol symbol) =>
         Records.Add(KayaWire.TxSetSymbol(w.Id, (long)symbol));
 
+    /// A symbol button draws its title beside the glyph rather than in its
+    /// place (docs/composer-plan.md §2).
+    public void SetTitled(Widget w, bool on) =>
+        Records.Add(KayaWire.TxSetTitled(w.Id, on));
+
     public void BindChecked(Widget w, Signal s) =>
         Records.Add(KayaWire.TxBindChecked(w.Id, s.Id));
 
@@ -5195,7 +5207,7 @@ sealed class Tx : IDisposable
     /// Role.Prominent). It changes nothing about what pressing the
     /// button does.
     public Widget Button(string? text = null, Action<Tx>? onClick = null, double? grow = null,
-        Role? role = null, Symbol? symbol = null)
+        Role? role = null, Symbol? symbol = null, bool titled = false)
     {
         var w = Widget(KayaWire.KindButton);
         if (text != null) SetText(w, text);
@@ -5203,6 +5215,7 @@ sealed class Tx : IDisposable
         if (grow is double g) SetGrow(w, g);
         if (role is Role r) SetRole(w, r);
         if (symbol is Symbol sym) SetSymbol(w, sym);
+        if (titled) SetTitled(w, true);
         return w;
     }
 
@@ -7670,6 +7683,10 @@ sealed class Tpl
     /// Every stamped button's or expander's glyph (Tx.SetSymbol).
     public void SetSymbol(Node n, Symbol symbol) =>
         tx.Records.Add(KayaWire.TxSetSymbol(n.Id, (long)symbol));
+
+    /// Every stamped symbol button draws its title beside the glyph (Tx.SetTitled).
+    public void SetTitled(Node n, bool on) =>
+        tx.Records.Add(KayaWire.TxSetTitled(n.Id, on));
 
     /// Every stamped copy's glyph from its row's Symbol field
     /// (docs/media-player-plan.md M16 (21)).

@@ -4,6 +4,19 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## A WinUI button target read one button over (measured 2026-11-01)
+
+On the windows lane's chatcall leg every read of a call-screen button by its
+a11y id answered for the next button (`button@mute` read Camera off's glyph,
+`button@hangup` read a button with no icon). `resolve_id` answers a position
+in the append-only `button_controls` registry, while `target_element` mapped
+that position onto the LIVE buttons sorted by widget id, which skips every
+button already destroyed (the chat thread's earlier copies), so each read
+after a destruction looked one or more buttons later. Clicks were right,
+since they emit the registry's tag. `target_element` now reads
+`button_controls` at the registry's position; chatcall's `expect_symbol`
+reads on the call screen are the guard.
+
 ## A RichEditBox's own FontWeight over a Bold run (measured 2026-10-29)
 
 On the WinUI lane's fontpick legs a textarea in a Light face (Cascadia Mono

@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xe3377635dd9a81cc
+let kayaSpecHash: UInt64 = 0xf2f2a3b7c858b4ac
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -276,6 +276,7 @@ private let propAccepts: UInt32 = 15
 private let propRole: UInt32 = 16
 private let propInset: UInt32 = 17
 private let propInsetX: UInt32 = 76
+private let propTitled: UInt32 = 77
 /// The pickers' slots (docs/datetime-plan.md D2): packed-decimal I64s —
 /// YYYYMMDD for the three dates, HHMM for the time — and a minute count.
 private let propDate: UInt32 = 19
@@ -338,6 +339,13 @@ private let symbolItalic: Int64 = 38
 private let symbolUnderline: Int64 = 39
 private let symbolStrikethrough: Int64 = 40
 private let symbolSave: Int64 = 41
+private let symbolPhone: Int64 = 42
+private let symbolVideo: Int64 = 43
+private let symbolMicOff: Int64 = 44
+private let symbolVideoOff: Int64 = 45
+private let symbolHangUp: Int64 = 46
+private let symbolMarkUnread: Int64 = 47
+private let symbolArchive: Int64 = 48
 private let propValue: UInt32 = 3
 private let propMin: UInt32 = 4
 private let propMax: UInt32 = 5
@@ -539,6 +547,13 @@ let kayaSymbolTable: [(value: Int64, name: String, sf: String, rendered: String?
     (symbolUnderline, "underline", "underline", nil),
     (symbolStrikethrough, "strikethrough", "strikethrough", nil),
     (symbolSave, "save", "square.and.arrow.down", nil),
+    (symbolPhone, "phone", "phone", nil),
+    (symbolVideo, "video", "video", nil),
+    (symbolMicOff, "mic_off", "mic.slash", nil),
+    (symbolVideoOff, "video_off", "video.slash", nil),
+    (symbolHangUp, "hang_up", "phone.down", nil),
+    (symbolMarkUnread, "mark_unread", "envelope.badge", nil),
+    (symbolArchive, "archive", "archivebox", nil),
 ]
 
 /// The SEMANTIC NAME of a wire symbol value; nil means this interpreter and
@@ -861,6 +876,8 @@ final class KayaNode: Identifiable {
     var role: Int64 = 0
     /// An icon-only button's symbol (docs/composer-plan.md §2), 0 = none.
     var symbol: Int64 = 0
+    /// The symbol drawn beside the title rather than in its place (prop 77).
+    var titled = false
     /// An image's bound in points (docs/photo-attach-plan.md §2), 0 = none.
     var maxWidth: Double = 0
     var maxHeight: Double = 0
@@ -7083,6 +7100,8 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaScene.nodes[id]!.rich = raw[body + 24] != 0
                 case (propSubmits, valueBool):
                     kayaScene.nodes[id]!.submits = raw[body + 24] != 0
+                case (propTitled, valueBool):
+                    kayaScene.nodes[id]!.titled = raw[body + 24] != 0
                 case (propRevealed, valueBool):
                     kayaRevealSwap(kayaScene.nodes[id]!, raw[body + 24] != 0)
                 case (propRevealable, valueBool):
@@ -23416,6 +23435,18 @@ struct KayaSymbolButton: View {
     }
 }
 
+/// The glyph a titled symbol button draws, for expect_symbol (prop 77).
+struct KayaTitledGlyph: ViewModifier {
+    let node: KayaNode
+
+    func body(content: Content) -> some View {
+        let drawn = node.titled ? kayaSFSymbol(node.symbol) : nil
+        content
+            .onAppear { kayaButtonGlyphs[node.id] = drawn }
+            .onChange(of: drawn) { _, now in kayaButtonGlyphs[node.id] = now }
+    }
+}
+
 /// The toggle button (docs/media-player-plan.md M8): a checkbox drawn as the
 /// platform's toggle button around its symbol's glyph, filled while on where
 /// the symbol has a filled form; the title stays its accessible name.
@@ -30160,7 +30191,7 @@ struct KayaRender: View {
             } else {
                 EmptyView()
             }
-        case kindButton where node.symbol != 0:
+        case kindButton where node.symbol != 0 && !node.titled:
             #if os(macOS)
                 if kayaIsComposerSend(node) {
                     Color.clear.frame(width: 0, height: 0)
@@ -30180,7 +30211,8 @@ struct KayaRender: View {
             #if os(macOS)
                 KayaMacButton(
                     id: node.id, title: node.text, tag: node.tag, role: node.role,
-                    fillsWidth: node.grow > 0 && flexVertical == false
+                    fillsWidth: node.grow > 0 && flexVertical == false,
+                    symbol: node.titled ? kayaSFSymbol(node.symbol) : nil
                 )
                     .alignmentGuide(.top) { d in
                         kayaBaselineOffsets[node.id] = d[.firstTextBaseline] - d[.top]
@@ -30192,12 +30224,16 @@ struct KayaRender: View {
                 // destructive rides Button(role:), prominence is the
                 // borderedProminent style — both platform affordances, never
                 // raw color.
-                Button(
-                    node.text,
-                    role: node.role == roleDestructive ? .destructive : nil
-                ) {
+                Button(role: node.role == roleDestructive ? .destructive : nil) {
                     KayaHost.emit(node.tag)
+                } label: {
+                    if node.titled, let sf = kayaSFSymbol(node.symbol) {
+                        Label(node.text, systemImage: sf).labelStyle(.titleAndIcon)
+                    } else {
+                        Text(node.text)
+                    }
                 }
+                .modifier(KayaTitledGlyph(node: node))
                 .buttonStyle(KayaButtonStyle(
                     prominent: node.role == roleProminent, plain: node.role == rolePlain,
                     groupedRow: kayaGroupedButtonRow))
@@ -30769,6 +30805,8 @@ struct KayaRender: View {
         /// NSButton draws its bezel across whatever frame it is given,
         /// and GTK/WinUI/Compose already render exactly that.
         var fillsWidth = false
+        /// A titled symbol button's glyph, leading the title (prop 77).
+        var symbol: String? = nil
 
         final class Coordinator: NSObject {
             var tag: [UInt8] = []
@@ -30792,6 +30830,11 @@ struct KayaRender: View {
 
         func updateNSView(_ button: NSButton, context: Context) {
             button.title = title
+            button.image = symbol.flatMap { NSImage(systemSymbolName: $0, accessibilityDescription: nil) }
+            button.imagePosition = symbol == nil ? .noImage : .imageLeading
+            // The symbol's own description would name the button (measured: "video").
+            button.setAccessibilityLabel(symbol == nil ? nil : title)
+            kayaButtonGlyphs[id] = symbol
             context.coordinator.tag = tag
             // SEMANTIC EMPHASIS, in AppKit's own words (docs/styling-plan.md
             // D4): destructive is NSButton's hasDestructiveAction (macOS 11+ —

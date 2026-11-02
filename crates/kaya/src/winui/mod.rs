@@ -491,6 +491,8 @@ struct CoreState {
     symbol_buttons: HashMap<WidgetId, bool>,
     symbol_values: HashMap<WidgetId, i64>,
     prominent_buttons: HashMap<WidgetId, ()>,
+    /// Symbol buttons that draw their title beside the glyph (prop 77).
+    titled_buttons: HashMap<WidgetId, ()>,
     /// The minted padding host around a SCROLL mounted as a window's root: a
     /// ScrollViewer's default template ignores Control.Padding (the
     /// retemplated entry ScrollViewer in this file exists for that reason), so
@@ -1081,6 +1083,62 @@ enum FluentIcon {
     /// Route 2: a Segoe Fluent Icons codepoint, for the three concepts
     /// the enum never got.
     Glyph(&'static str),
+    /// Route 3: a 20x20 outline from Fluent UI System Icons (MIT,
+    /// github.com/microsoft/fluentui-system-icons), for a concept the
+    /// Segoe font has no glyph for; drawn as a PathIcon.
+    Path(&'static str),
+}
+
+/// ic_fluent_video_off_20_regular.svg.
+const VIDEO_OFF_PATH: &str = "M2.85355 2.14645C2.65829 1.95118 2.34171 1.95118 2.14645 2.14645C1.95118 2.34171 1.95118 2.65829 2.14645 2.85355L3.62556 4.33267C2.66007 4.83118 2 5.8385 2 7V13C2 14.6569 3.34315 16 5 16H10C11.4376 16 12.639 14.9888 12.9318 13.6389L17.1464 17.8536C17.3417 18.0488 17.6583 18.0488 17.8536 17.8536C18.0488 17.6583 18.0488 17.3417 17.8536 17.1464L2.85355 2.14645ZM12 12.7071V13C12 14.1046 11.1046 15 10 15H5C3.89543 15 3 14.1046 3 13V7C3 6.10882 3.58288 5.35378 4.3882 5.09531L12 12.7071ZM12 7V9.87866L13 10.8787V8.53588L16.6054 6.04643C16.7713 5.93193 16.9975 6.05063 16.9975 6.25215V13.7473C16.9975 13.9488 16.7713 14.0675 16.6054 13.953L14.8895 12.7682L17.0755 14.9541C17.5849 14.8133 17.9975 14.3558 17.9975 13.7473V6.25215C17.9975 5.24453 16.8664 4.65101 16.0372 5.22353L13 7.32067V7C13 5.34315 11.6569 4 10 4H6.12134L7.12134 5H10C11.1046 5 12 5.89543 12 7Z";
+
+/// The font glyph a concept draws, or None for a Path concept.
+fn fluent_glyph(symbol: crate::app::Symbol) -> Option<String> {
+    match fluent_icon(symbol) {
+        FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from),
+        FluentIcon::Glyph(glyph) => Some(glyph.to_owned()),
+        FluentIcon::Path(_) => None,
+    }
+}
+
+/// A Path concept's outline at `side` px, its absolute coordinates scaled
+/// from the 20px grid; the semantic name rides as its UIA name, which is
+/// what the symbol reads find it by.
+fn path_markup(data: &str, side: f64, source: bool, name: &str) -> String {
+    let scale = side / 20.0;
+    let mut out = String::new();
+    let mut number = String::new();
+    let flush = |number: &mut String, out: &mut String| {
+        if !number.is_empty() {
+            let v: f64 = number.parse().unwrap_or(0.0);
+            out.push_str(&format!("{}", v * scale));
+            number.clear();
+        }
+    };
+    for c in data.chars() {
+        if c.is_ascii_digit() || c == '.' || (c == '-' && number.is_empty()) {
+            number.push(c);
+        } else {
+            flush(&mut number, &mut out);
+            out.push(if c.is_ascii_alphabetic() { c } else { ' ' });
+            if c.is_ascii_alphabetic() {
+                out.push(' ');
+            }
+        }
+    }
+    flush(&mut number, &mut out);
+    let tag = if source { "PathIconSource" } else { "PathIcon" };
+    let name_attr = if source { String::new() } else { format!(" AutomationProperties.Name=\"{name}\"") };
+    format!(
+        "<{tag} xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"{name_attr} Data=\"{out}\"/>"
+    )
+}
+
+fn path_icon(data: &str, side: f64, name: &str) -> windows_core::Result<IconElement> {
+    let icon: FrameworkElement = XamlReader::Load(&HSTRING::from(path_markup(data, side, false, name)))?.cast()?;
+    icon.SetWidth(side)?;
+    icon.SetHeight(side)?;
+    icon.cast()
 }
 
 /// The Fluent spelling of a concept. EXHAUSTIVE ON PURPOSE: a 21st
@@ -1131,6 +1189,13 @@ const fn fluent_icon(symbol: crate::app::Symbol) -> FluentIcon {
         S::Underline => FluentIcon::Member(Fluent::Underline),
         S::Strikethrough => FluentIcon::Glyph("\u{EDE0}"),
         S::Save => FluentIcon::Member(Fluent::Save),
+        S::Phone => FluentIcon::Member(Fluent::Phone),
+        S::Video => FluentIcon::Member(Fluent::Video),
+        S::MicOff => FluentIcon::Glyph("\u{EC54}"),
+        S::VideoOff => FluentIcon::Path(VIDEO_OFF_PATH),
+        S::HangUp => FluentIcon::Member(Fluent::HangUp),
+        S::MarkUnread => FluentIcon::Glyph("\u{EDB3}"),
+        S::Archive => FluentIcon::Glyph("\u{E7B8}"),
     }
 }
 
@@ -1180,11 +1245,18 @@ const fn symbol_wire(symbol: crate::app::Symbol) -> u32 {
         S::Underline => crate::wire::SYMBOL_UNDERLINE,
         S::Strikethrough => crate::wire::SYMBOL_STRIKETHROUGH,
         S::Save => crate::wire::SYMBOL_SAVE,
+        S::Phone => crate::wire::SYMBOL_PHONE,
+        S::Video => crate::wire::SYMBOL_VIDEO,
+        S::MicOff => crate::wire::SYMBOL_MIC_OFF,
+        S::VideoOff => crate::wire::SYMBOL_VIDEO_OFF,
+        S::HangUp => crate::wire::SYMBOL_HANG_UP,
+        S::MarkUnread => crate::wire::SYMBOL_MARK_UNREAD,
+        S::Archive => crate::wire::SYMBOL_ARCHIVE,
     }
 }
 
 /// The vocabulary in wire order — the decode side's only list.
-const SYMBOL_ORDER: [crate::app::Symbol; 41] = {
+const SYMBOL_ORDER: [crate::app::Symbol; 48] = {
     use crate::app::Symbol as S;
     [
         S::Add, S::Remove, S::Delete, S::Edit, S::Done, S::Close, S::Search, S::Settings,
@@ -1192,7 +1264,7 @@ const SYMBOL_ORDER: [crate::app::Symbol; 41] = {
         S::Lock, S::Person, S::Home, S::Emoji, S::Send, S::Attach, S::Mic,
         S::ImageMissing, S::Play, S::Pause, S::Next, S::Previous, S::Shuffle, S::Repeat,
         S::RepeatOne, S::Volume, S::Queue, S::Favorite, S::Muted, S::Bold, S::Italic,
-        S::Underline, S::Strikethrough, S::Save,
+        S::Underline, S::Strikethrough, S::Save, S::Phone, S::Video, S::MicOff, S::VideoOff, S::HangUp, S::MarkUnread, S::Archive,
     ]
 };
 
@@ -1251,6 +1323,7 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
             icon.SetGlyph(&HSTRING::from(glyph))?;
             icon.cast()?
         }
+        FluentIcon::Path(data) => path_icon(data, 20.0, name)?,
     };
     bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
         &element,
@@ -1295,15 +1368,16 @@ fn button_icon(value: i64, prominent: bool) -> windows_core::Result<Option<IconE
     let Some(symbol) = symbol_from_wire(value) else {
         return Ok(None);
     };
-    let glyph = match fluent_icon(symbol) {
-        FluentIcon::Member(member) => char::from_u32(member.0 as u32)
-            .map(String::from)
-            .unwrap_or_default(),
-        FluentIcon::Glyph(glyph) => glyph.to_owned(),
+    let side = if prominent { SYMBOL_BUTTON_GLYPH_PROMINENT } else { SYMBOL_BUTTON_GLYPH };
+    let Some(glyph) = fluent_glyph(symbol) else {
+        let (FluentIcon::Path(data), Some(name)) = (fluent_icon(symbol), crate::wire::symbol_name(value)) else {
+            return Ok(None);
+        };
+        return Ok(Some(path_icon(data, side, name)?));
     };
     let icon = FontIcon::new()?;
     icon.SetGlyph(&HSTRING::from(glyph))?;
-    icon.SetFontSize(if prominent { SYMBOL_BUTTON_GLYPH_PROMINENT } else { SYMBOL_BUTTON_GLYPH })?;
+    icon.SetFontSize(side)?;
     Ok(Some(icon.cast()?))
 }
 
@@ -1315,9 +1389,11 @@ fn symbol_icon_source(
     let Some(symbol) = symbol_from_wire(value) else {
         return Ok(None);
     };
-    let glyph = match fluent_icon(symbol) {
-        FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
-        FluentIcon::Glyph(glyph) => glyph.to_owned(),
+    let Some(glyph) = fluent_glyph(symbol) else {
+        let (FluentIcon::Path(data), Some(name)) = (fluent_icon(symbol), crate::wire::symbol_name(value)) else {
+            return Ok(None);
+        };
+        return Ok(Some(XamlReader::Load(&HSTRING::from(path_markup(data, 20.0, true, name)))?.cast()?));
     };
     let icon = bindings::Microsoft::UI::Xaml::Controls::FontIconSource::new()?;
     icon.SetGlyph(&HSTRING::from(glyph))?;
@@ -2640,6 +2716,37 @@ const COMPOSER_FIELD_KEYS: [&str; 9] = [
     "TextControlButtonBackgroundPointerOver",
     "TextControlButtonBackgroundPressed",
 ];
+
+/// A titled symbol button's content (docs/composer-plan.md §2): the glyph
+/// and the caption side by side in a two-column grid, the caption still the
+/// one TextBlock the text and role arms write.
+fn titled_content(button: &Button, caption: &TextBlock, symbol: i64) -> windows_core::Result<()> {
+    let icon = button_icon(symbol, false)?
+        .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Fluent spelling in fluent_icon"));
+    if let Ok(pair) = button.Content().and_then(|c| c.cast::<Grid>()) {
+        let children = pair.Children()?;
+        children.SetAt(0, &icon)?;
+        return Ok(());
+    }
+    let pair = Grid::new()?;
+    pair.SetColumnSpacing(8.0)?;
+    let cols = pair.ColumnDefinitions()?;
+    for _ in 0..2 {
+        let def = ColumnDefinition::new()?;
+        def.SetWidth(GridLength { Value: 0.0, GridUnitType: GridUnitType::Auto })?;
+        cols.Append(&def)?;
+    }
+    button.SetContent(None::<&windows_core::IInspectable>)?;
+    let glyph: FrameworkElement = icon.cast()?;
+    glyph.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+    caption.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+    Grid::SetColumn(&glyph, 0)?;
+    Grid::SetColumn(caption, 1)?;
+    pair.Children()?.Append(&glyph)?;
+    pair.Children()?.Append(caption)?;
+    button.SetContent(&pair)?;
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(button, &caption.Text()?)
+}
 
 /// An icon-only button's style (docs/composer-plan.md §2, §3): subtle, or the
 /// accent button drawn as a circle when prominent.
@@ -18575,7 +18682,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Button { button, caption }, Prop::Text, Value::Str(s)) => {
                     caption.SetText(&HSTRING::from(&s))?;
-                    if core.symbol_buttons.contains_key(&id) {
+                    if core.symbol_buttons.contains_key(&id) || core.titled_buttons.contains_key(&id) {
                         bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(
                             button,
                             &HSTRING::from(&s),
@@ -19360,7 +19467,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // stops the brand lowering wrote. A brandless app gets
                     // the user's Windows accent.
                     core.prominent_buttons.insert(id, ());
-                    if let Some(&symbol) = core.symbol_values.get(&id) {
+                    if let Some(&symbol) = core.symbol_values.get(&id).filter(|_| !core.titled_buttons.contains_key(&id)) {
                         core.symbol_buttons.insert(id, true);
                         button.SetStyle(&symbol_button_style(true)?)?;
                         if let Some(icon) = button_icon(symbol, true)? {
@@ -19372,6 +19479,28 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 // An icon-only button (docs/composer-plan.md §2): the glyph as
                 // its content, the title kept as its accessible name.
+                (NativeWidget::Button { button, caption }, Prop::Symbol, Value::I64(symbol))
+                    if core.titled_buttons.contains_key(&id) =>
+                {
+                    core.symbol_values.insert(id, symbol);
+                    titled_content(button, caption, symbol)?;
+                }
+                (NativeWidget::Button { button, caption }, Prop::Titled, Value::Bool(on)) => {
+                    if on {
+                        core.titled_buttons.insert(id, ());
+                        if let Some(&symbol) = core.symbol_values.get(&id) {
+                            core.symbol_buttons.remove(&id);
+                            button.SetStyle(&theme_resource::<Style>(if core.prominent_buttons.contains_key(&id) {
+                                "AccentButtonStyle"
+                            } else {
+                                "DefaultButtonStyle"
+                            })?)?;
+                            titled_content(button, caption, symbol)?;
+                        }
+                    } else {
+                        core.titled_buttons.remove(&id);
+                    }
+                }
                 (NativeWidget::Button { button, caption }, Prop::Symbol, Value::I64(symbol)) => {
                     let prominent = core.prominent_buttons.contains_key(&id);
                     let icon = button_icon(symbol, prominent)?.unwrap_or_else(|| {
@@ -19429,7 +19558,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     // over the primary text fill, hovering to
                     // `SubtleFillColorSecondaryBrush`.
                     core.prominent_buttons.remove(&id);
-                    if let Some(&symbol) = core.symbol_values.get(&id) {
+                    if let Some(&symbol) = core.symbol_values.get(&id).filter(|_| !core.titled_buttons.contains_key(&id)) {
                         core.symbol_buttons.insert(id, false);
                         button.SetStyle(&symbol_button_style(false)?)?;
                         if let Some(icon) = button_icon(symbol, false)? {
@@ -22072,6 +22201,7 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             tips: HashMap::new(),
             symbol_buttons: HashMap::new(),
             symbol_values: HashMap::new(),
+            titled_buttons: HashMap::new(),
             prominent_buttons: HashMap::new(),
             scroll_root_hosts: HashMap::new(),
             transactions: tx_rx,
@@ -23817,29 +23947,10 @@ fn target_element(
         K::Grid => nth!(core.grids),
         K::Scroll => nth!(core.scrolls),
         K::Canvas => nth!(core.canvases),
-        // Buttons live in the registry as CLICK TAGS, not widgets, and the tag
-        // is captured in the click closure rather than stored on the Button,
-        // so there is no tag->widget link to follow. Both orderings are
-        // CREATION order, so the Nth button widget by ascending id is the Nth
-        // entry — and the ids must be sorted explicitly, because core.widgets
-        // is a HashMap.
-        K::Button => {
-            if try_resolve(target.index, core.buttons.len()).is_none() {
-                return Ok(None);
-            }
-            let i = crate::harness::resolve(target.index, core.buttons.len());
-            let mut ids: Vec<_> = core
-                .widgets
-                .iter()
-                .filter(|(_, w)| matches!(w, NativeWidget::Button { .. }))
-                .map(|(id, _)| *id)
-                .collect();
-            ids.sort_by_key(|id| id.0);
-            match ids.get(i).and_then(|id| core.widgets.get(id)) {
-                Some(NativeWidget::Button { button, .. }) => button.cast()?,
-                _ => return Ok(None),
-            }
-        }
+        // The append-only registry resolve_id answers positions in; live
+        // widgets by id skip a destroyed button (docs/traps.md, a WinUI
+        // button target read one button over).
+        K::Button => nth!(core.button_controls),
     }))
 }
 
@@ -30435,19 +30546,29 @@ impl crate::harness::Stage for WinUiStage {
             let Ok(button) = element.cast::<bindings::Microsoft::UI::Xaml::Controls::ContentControl>() else {
                 return Ok("<the target is not a Button or ToggleButton>".to_owned());
             };
-            let Ok(icon) = button.Content().and_then(|c| c.cast::<FontIcon>()) else {
-                return Ok("<the button's content is no FontIcon>".to_owned());
+            // A titled button's content is its glyph and its caption side by side.
+            let content = button.Content()?;
+            let drawn = match content.cast::<Grid>() {
+                Ok(pair) => pair.Children()?.GetAt(0)?.cast::<IconElement>()?,
+                Err(_) => match content.cast::<IconElement>() {
+                    Ok(icon) => icon,
+                    Err(_) => return Ok("<the button's content is no icon>".to_owned()),
+                },
+            };
+            let Ok(icon) = drawn.cast::<FontIcon>() else {
+                let name = bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::GetName(&drawn)?.to_string();
+                return Ok(SYMBOL_ORDER
+                    .into_iter()
+                    .filter(|s| matches!(fluent_icon(*s), FluentIcon::Path(_)))
+                    .filter_map(|s| crate::wire::symbol_name(i64::from(symbol_wire(s))))
+                    .find(|n| *n == name)
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("<the button draws a path named {name:?}, which is no Path concept in fluent_icon>")));
             };
             let glyph = icon.Glyph()?.to_string();
             Ok(SYMBOL_ORDER
                 .into_iter()
-                .find(|s| {
-                    let drawn = match fluent_icon(*s) {
-                        FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
-                        FluentIcon::Glyph(g) => g.to_owned(),
-                    };
-                    drawn == glyph
-                })
+                .find(|s| fluent_glyph(*s).as_deref() == Some(glyph.as_str()))
                 .and_then(|s| crate::wire::symbol_name(i64::from(symbol_wire(s))))
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("<the button draws glyph {:?}, which is not in fluent_icon>", glyph)))
@@ -34895,7 +35016,7 @@ mod images {
             glyph.SetFontSize(GLYPH)?;
             glyph.SetStyle(&super::themed_foreground_style("FontIcon", None, "TextFillColorSecondaryBrush")?)?;
             glyph.SetHorizontalAlignment(HorizontalAlignment::Center)?;
-            glyph.SetVerticalAlignment(VerticalAlignment::Center)?;
+            glyph.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
             AutomationProperties::SetAccessibilityView(&glyph, AccessibilityView::Raw)?;
             look.SetChild(&glyph)?;
             host.Children()?.Append(&look)?;
@@ -34993,10 +35114,7 @@ mod images {
     }
 
     fn missing_glyph() -> String {
-        match super::fluent_icon(crate::app::Symbol::ImageMissing) {
-            super::FluentIcon::Member(member) => char::from_u32(member.0 as u32).map(String::from).unwrap_or_default(),
-            super::FluentIcon::Glyph(glyph) => glyph.to_owned(),
-        }
+        super::fluent_glyph(crate::app::Symbol::ImageMissing).unwrap_or_default()
     }
 
     /// The fill as a {ThemeResource} setter, so it follows the element's own

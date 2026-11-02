@@ -249,6 +249,7 @@ func (r trackRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n
 
 func (r trackRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r trackRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r trackRow) SetTitled(n kaya.Node, on bool)                    { r.t.SetTitled(n, on) }
 func (r trackRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 func (r trackRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r trackRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }

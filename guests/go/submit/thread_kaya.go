@@ -177,6 +177,7 @@ func (r threadRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(
 
 func (r threadRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r threadRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r threadRow) SetTitled(n kaya.Node, on bool)                    { r.t.SetTitled(n, on) }
 func (r threadRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 func (r threadRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r threadRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }

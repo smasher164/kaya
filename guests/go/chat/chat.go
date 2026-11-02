@@ -263,8 +263,8 @@ func App() *kaya.App {
 					tx.Spacer()
 					tx.Label(connection).A11yID("connection")
 					// C10 (docs/capture-plan.md §8): a call and a video call.
-					tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).A11yID("call")
-					tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).A11yID("videocall")
+					tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).Symbol(kaya.SymbolPhone).Titled().A11yID("call")
+					tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).Symbol(kaya.SymbolVideo).Titled().A11yID("videocall")
 				})
 				tx.Scroll(func() {
 					thread = MessageCollection(tx)
@@ -412,7 +412,7 @@ func App() *kaya.App {
 		// row's context menu everywhere, and swipe the row where the platform
 		// swipes rows.
 		rowActions := tx.ContextCatalog()
-		rowActions.Item("Mark unread").Swipe(kaya.SwipeLeading).
+		rowActions.Item("Mark unread").Symbol(kaya.SymbolMarkUnread).Swipe(kaya.SwipeLeading).
 			OnActivateNode(func(tx *kaya.Tx, keys []any) {
 				c := convs[keys[0].(string)]
 				if c.unread == 0 {
@@ -421,7 +421,7 @@ func App() *kaya.App {
 					refresh(tx, c)
 				}
 			})
-		rowActions.Item("Archive").Swipe(kaya.SwipeTrailingFull).
+		rowActions.Item("Archive").Symbol(kaya.SymbolArchive).Swipe(kaya.SwipeTrailingFull).
 			OnActivateNode(func(tx *kaya.Tx, keys []any) {
 				id := keys[0].(string)
 				if id == open {

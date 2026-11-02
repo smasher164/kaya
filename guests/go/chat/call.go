@@ -19,6 +19,10 @@ import (
 	kaya "dev.kaya/bindings/go"
 )
 
+// selfViewWidth is a third of the peer picture's natural 320 pt
+// (docs/capture-plan.md §12 item 7).
+const selfViewWidth = 320.0 / 3
+
 // The call screen and the incoming call's are entries above the thread.
 const (
 	callEntry     = 2
@@ -254,7 +258,10 @@ func (k *calls) start(tx *kaya.Tx, c *conversation, video bool) {
 		if video {
 			peerView := tx.Surface().A11yLabel(c.name).A11yID("peer").Grow(1)
 			cl.frames = k.app.SurfaceFrames(peerView)
-			tx.VideoCapture(cl.capture).A11yLabel("You").A11yID("selfview")
+			// docs/capture-plan.md §12 item 7.
+			tx.Column(func() {
+				tx.VideoCapture(cl.capture).A11yLabel("You").A11yID("selfview")
+			}).MaxWidth(selfViewWidth)
 		}
 		tx.Row(func() {
 			if video {
@@ -282,23 +289,26 @@ func (k *calls) start(tx *kaya.Tx, c *conversation, video bool) {
 				muted = !muted
 				tx.CaptureMuted(cl.capture, muted)
 				tx.SetText(mute, map[bool]string{true: "Unmute", false: "Mute"}[muted])
-			}).A11yID("mute")
+				tx.SetSymbol(mute, map[bool]kaya.Symbol{true: kaya.SymbolMic, false: kaya.SymbolMicOff}[muted])
+			}).Symbol(kaya.SymbolMicOff).Titled().A11yID("mute")
 			if video {
 				cameraButton = tx.Button("Camera off", func(tx *kaya.Tx) {
 					cameraOn = !cameraOn
 					if cameraOn {
 						tx.CaptureCamera(cl.capture, camera)
 						tx.SetText(cameraButton, "Camera off")
+						tx.SetSymbol(cameraButton, kaya.SymbolVideoOff)
 					} else {
 						tx.CameraOff(cl.capture)
 						tx.SetText(cameraButton, "Camera on")
+						tx.SetSymbol(cameraButton, kaya.SymbolVideo)
 					}
-				}).A11yID("cameraoff")
+				}).Symbol(kaya.SymbolVideoOff).Titled().A11yID("cameraoff")
 			}
 			tx.Button("Hang up", func(tx *kaya.Tx) {
 				k.end(tx)
 				tx.PopEntry()
-			}).Role(kaya.RoleDestructive).A11yID("hangup")
+			}).Symbol(kaya.SymbolHangUp).Titled().Role(kaya.RoleDestructive).A11yID("hangup")
 		}).Wrap(true)
 	})
 	tx.MountIn(entry, pane)
@@ -354,8 +364,9 @@ func (k *calls) incoming(tx *kaya.Tx, c *conversation) {
 			tx.Button("Answer", func(tx *kaya.Tx) {
 				tx.PopEntry()
 				k.start(tx, c, false)
-			}).Role(kaya.RoleProminent).A11yID("answer")
-			tx.Button("Decline", func(tx *kaya.Tx) { tx.PopEntry() }).Role(kaya.RoleDestructive).A11yID("decline")
+			}).Symbol(kaya.SymbolPhone).Titled().Role(kaya.RoleProminent).A11yID("answer")
+			tx.Button("Decline", func(tx *kaya.Tx) { tx.PopEntry() }).Symbol(kaya.SymbolHangUp).Titled().
+				Role(kaya.RoleDestructive).A11yID("decline")
 		})
 	})
 	tx.MountIn(entry, pane)

@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xe3377635dd9a81ccL
+let spec_hash = 0xf2f2a3b7c858b4acL
 let version = "0.0.0"
 
 let value_bool = 1
@@ -175,6 +175,7 @@ let prop_font_weight = 73
 let prop_font_italic = 74
 let prop_font_width = 75
 let prop_inset_x = 76
+let prop_titled = 77
 let wprop_title = 1
 let wprop_width = 2
 let wprop_height = 3
@@ -328,6 +329,13 @@ let symbol_italic = 38
 let symbol_underline = 39
 let symbol_strikethrough = 40
 let symbol_save = 41
+let symbol_phone = 42
+let symbol_video = 43
+let symbol_mic_off = 44
+let symbol_video_off = 45
+let symbol_hang_up = 46
+let symbol_mark_unread = 47
+let symbol_archive = 48
 let source_const = 0
 let source_signal = 1
 let source_element = 2
@@ -3441,6 +3449,32 @@ let tx_bind_inset_x_element ?(level = 0) ?(field = 0) widget_id =
   finish tx_kind_set_property (fun b ->
       Buffer.add_int64_le b widget_id;
       Buffer.add_int32_le b (Int32.of_int prop_inset_x);
+      Buffer.add_int32_le b (Int32.of_int source_element);
+      Buffer.add_int32_le b (Int32.of_int level);
+      Buffer.add_int32_le b (Int32.of_int field))
+
+(* set_property with a constant titled value. *)
+let tx_set_titled widget_id titled =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_titled);
+      Buffer.add_int32_le b (Int32.of_int source_const);
+      encode_value b (Bool titled))
+
+(* set_property with a signal-bound titled value. *)
+let tx_bind_titled widget_id signal_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_titled);
+      Buffer.add_int32_le b (Int32.of_int source_signal);
+      Buffer.add_int64_le b signal_id)
+
+(* set_property bound to one field of the element of the enclosing
+   For, `level` Fors up (0 = nearest; field 0 for a scalar). *)
+let tx_bind_titled_element ?(level = 0) ?(field = 0) widget_id =
+  finish tx_kind_set_property (fun b ->
+      Buffer.add_int64_le b widget_id;
+      Buffer.add_int32_le b (Int32.of_int prop_titled);
       Buffer.add_int32_le b (Int32.of_int source_element);
       Buffer.add_int32_le b (Int32.of_int level);
       Buffer.add_int32_le b (Int32.of_int field))

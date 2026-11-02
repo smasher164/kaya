@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xe3377635dd9a81cc
+specHash = 0xf2f2a3b7c858b4ac
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -312,6 +312,8 @@ propFontWidth :: Word32
 propFontWidth = 75
 propInsetX :: Word32
 propInsetX = 76
+propTitled :: Word32
+propTitled = 77
 wpropTitle :: Word32
 wpropTitle = 1
 wpropWidth :: Word32
@@ -618,6 +620,20 @@ symbolStrikethrough :: Word32
 symbolStrikethrough = 40
 symbolSave :: Word32
 symbolSave = 41
+symbolPhone :: Word32
+symbolPhone = 42
+symbolVideo :: Word32
+symbolVideo = 43
+symbolMicOff :: Word32
+symbolMicOff = 44
+symbolVideoOff :: Word32
+symbolVideoOff = 45
+symbolHangUp :: Word32
+symbolHangUp = 46
+symbolMarkUnread :: Word32
+symbolMarkUnread = 47
+symbolArchive :: Word32
+symbolArchive = 48
 sourceConst :: Word32
 sourceConst = 0
 sourceSignal :: Word32
@@ -3262,6 +3278,25 @@ txBindInsetX widgetId signalId = wireRecord txKindSetProperty
 txBindInsetXElement :: Word64 -> Word32 -> Word32 -> Builder
 txBindInsetXElement widgetId level field = wireRecord txKindSetProperty
   (word64LE widgetId <> word32LE propInsetX <> word32LE sourceElement
+    <> word32LE level <> word32LE field)
+
+-- set_property with a constant titled value.
+txSetTitled :: Word64 -> Bool -> Builder
+txSetTitled widgetId titled = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTitled <> word32LE sourceConst
+    <> encodeValue (VBool titled))
+
+-- set_property with a signal-bound titled value.
+txBindTitled :: Word64 -> Word64 -> Builder
+txBindTitled widgetId signalId = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTitled <> word32LE sourceSignal
+    <> word64LE signalId)
+
+-- set_property bound to one field of the element of the enclosing
+-- For, `level` Fors up (0 = nearest; field 0 for a scalar).
+txBindTitledElement :: Word64 -> Word32 -> Word32 -> Builder
+txBindTitledElement widgetId level field = wireRecord txKindSetProperty
+  (word64LE widgetId <> word32LE propTitled <> word32LE sourceElement
     <> word32LE level <> word32LE field)
 
 -- set_window_prop with a constant title value (window 0, the primary surface).

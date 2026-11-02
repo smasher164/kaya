@@ -54,6 +54,21 @@ A symbol-only button is drawn borderless (the `plain` role's look) unless
 its role says otherwise. Art a symbol cannot name (a brand mark) takes the
 button's image bytes, as a section's `icon` already does.
 
+A TITLED symbol button (`titled`, prop 77; the maintainer, 2026-11-01: "We
+should have both symbols and text") draws its glyph beside its title rather
+than in its place, in the platform's own icon-and-label form: SwiftUI's
+`Label` with `.titleAndIcon` on iOS and an NSButton image leading its title on
+the mac, a Material button with `ButtonDefaults.IconSize` and `IconSpacing`,
+libadwaita's `AdwButtonContent`, and on WinUI the glyph and the caption side
+by side in the button's content. The button keeps its role's chrome (a
+bezel, the accent fill, the destructive tint); only an untitled symbol
+button takes the borderless look. Spelled in both zones in all nine
+bindings (Rust `.titled()`, Go `.Titled()`, Python and JavaScript
+`titled=`/`titled:` on `button`, C# and Swift `titled:`, Java `.titled()`,
+OCaml `?titled`, Haskell `Titled`); the chat app's call buttons are its
+first use. Held by check-universal-props' titled clause (five watched
+negatives) and chatcall's `expect_symbol` reads.
+
 ## §3 — The prominent circle
 
 A `prominent` button carrying only a symbol draws as an accent-filled

@@ -107,6 +107,13 @@ const SYMBOL_ICONS: &[(u32, &str)] = &[
     (crate::wire::SYMBOL_UNDERLINE, "format-text-underline-symbolic"),
     (crate::wire::SYMBOL_STRIKETHROUGH, "format-text-strikethrough-symbolic"),
     (crate::wire::SYMBOL_SAVE, "document-save-symbolic"),
+    (crate::wire::SYMBOL_PHONE, "call-start-symbolic"),
+    (crate::wire::SYMBOL_VIDEO, "camera-video-symbolic"),
+    (crate::wire::SYMBOL_MIC_OFF, "microphone-disabled-symbolic"),
+    (crate::wire::SYMBOL_VIDEO_OFF, "camera-disabled-symbolic"),
+    (crate::wire::SYMBOL_HANG_UP, "call-stop-symbolic"),
+    (crate::wire::SYMBOL_MARK_UNREAD, "mail-unread-symbolic"),
+    (crate::wire::SYMBOL_ARCHIVE, "package-x-generic-symbolic"),
 ];
 
 const _: () = assert!(
@@ -6153,6 +6160,11 @@ struct CoreState {
     // Per-kind registries in creation order (stamped copies included): the
     // harness names targets as kind#index.
     buttons: Vec<gtk4::Button>,
+    /// A symbol button's title and whether it draws it (prop 77, docs/composer-plan.md
+    /// §2): the title, the symbol and `titled` arrive in any order, and set_icon_name
+    /// drops the label the title was.
+    button_titles: HashMap<WidgetId, String>,
+    titled_buttons: std::collections::HashSet<WidgetId>,
     /// The two registries a ROLE can re-type (docs/tasks-s2-plan.md T1, T3):
     /// a checkbox is a `GtkCheckButton` or a `GtkSwitch`, a label a `GtkLabel`
     /// or a `GtkLinkButton`, and neither pair shares a subclass — so the slot
@@ -9795,6 +9807,32 @@ fn image_drawn_phase(picture: &gtk4::Picture) -> String {
 /// An icon-only button's classes (docs/composer-plan.md §2, §3): flat unless
 /// its role says otherwise, and a prominent one is the accent circle. Called
 /// from both the symbol's arm and the role's, which arrive in either order.
+/// A titled symbol button's child: libadwaita's own icon-and-label content.
+fn titled_content(button: &gtk4::Button) -> Option<adw::ButtonContent> {
+    use gtk4::prelude::{ButtonExt, Cast};
+    button.child().and_then(|c| c.downcast::<adw::ButtonContent>().ok())
+}
+
+fn set_titled_content(button: &gtk4::Button, icon: &str, title: &str) {
+    use gtk4::prelude::{AccessibleExt, ButtonExt};
+    let content = titled_content(button).unwrap_or_else(|| {
+        let content = adw::ButtonContent::new();
+        content.set_use_underline(false);
+        button.set_child(Some(&content));
+        content
+    });
+    content.set_icon_name(icon);
+    content.set_label(title);
+    button.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+    button.update_property(&[gtk4::accessible::Property::Label(title)]);
+}
+
+/// The title a button draws, plain or beside its symbol.
+fn button_drawn_title(button: &gtk4::Button) -> Option<String> {
+    use gtk4::prelude::ButtonExt;
+    button.label().map(String::from).or_else(|| titled_content(button).map(|c| c.label().to_string()))
+}
+
 fn symbol_button_classes(button: &gtk4::Button) {
     use gtk4::prelude::{ButtonExt, WidgetExt};
     if button.icon_name().is_none() {
@@ -17602,7 +17640,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Button(button), Prop::Text, Value::Str(s)) => {
                     use gtk4::prelude::AccessibleExt;
-                    if button.icon_name().is_some() {
+                    core.button_titles.insert(id, s.clone());
+                    if let Some(content) = titled_content(button) {
+                        content.set_label(&s);
+                    } else if button.icon_name().is_some() {
                         button.update_property(&[gtk4::accessible::Property::Label(&s)]);
                     } else {
                         button.set_label(&s);
@@ -18216,15 +18257,39 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 (NativeWidget::Button(button), Prop::Symbol, Value::I64(symbol)) => {
                     use gtk4::prelude::{AccessibleExt, ButtonExt};
                     assert_symbol_icons_resolve(&gtk4::prelude::WidgetExt::display(button));
-                    let title = button.label().map(|l| l.to_string()).unwrap_or_default();
+                    let title = core.button_titles.get(&id).cloned()
+                        .unwrap_or_else(|| button.label().map(|l| l.to_string()).unwrap_or_default());
                     let icon = symbol_icon_name(symbol)
                         .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
-                    button.set_icon_name(icon);
-                    // The icon child the LABELLED_BY relation points at has no
-                    // name (toggle_name's measurement, one kind over).
-                    button.reset_relation(gtk4::AccessibleRelation::LabelledBy);
-                    button.update_property(&[gtk4::accessible::Property::Label(&title)]);
-                    symbol_button_classes(button);
+                    core.button_titles.insert(id, title.clone());
+                    if core.titled_buttons.contains(&id) {
+                        set_titled_content(button, icon, &title);
+                    } else {
+                        button.set_icon_name(icon);
+                        // The icon child the LABELLED_BY relation points at has no
+                        // name (toggle_name's measurement, one kind over).
+                        button.reset_relation(gtk4::AccessibleRelation::LabelledBy);
+                        button.update_property(&[gtk4::accessible::Property::Label(&title)]);
+                        symbol_button_classes(button);
+                    }
+                }
+                // docs/composer-plan.md §2: the glyph beside the title, the
+                // button's own chrome kept.
+                (NativeWidget::Button(button), Prop::Titled, Value::Bool(on)) => {
+                    use gtk4::prelude::{ButtonExt, WidgetExt};
+                    if on {
+                        core.titled_buttons.insert(id);
+                        if let Some(icon) = button.icon_name() {
+                            let title = core.button_titles.get(&id).cloned().unwrap_or_default();
+                            button.remove_css_class("circular");
+                            if !button.has_css_class(PLAIN_CLASS) {
+                                button.remove_css_class("flat");
+                            }
+                            set_titled_content(button, &icon, &title);
+                        }
+                    } else {
+                        core.titled_buttons.remove(&id);
+                    }
                 }
                 // A composer (docs/composer-plan.md §4): its children sit on the
                 // bottom line as the field grows.
@@ -21262,6 +21327,8 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 widgets: HashMap::new(),
                 widget_tags: HashMap::new(),
                 buttons: Vec::new(),
+                button_titles: HashMap::new(),
+                titled_buttons: std::collections::HashSet::new(),
                 checkboxes: Vec::new(),
                 labels: Vec::new(),
                 entries: Vec::new(),
@@ -27683,7 +27750,7 @@ impl crate::harness::Stage for GtkStage {
                 if !button.is_mapped() {
                     continue;
                 }
-                let text: String = button.label().map(|l| l.to_string()).unwrap_or_default().chars().take(40).collect();
+                let text: String = button_drawn_title(button).unwrap_or_default().chars().take(40).collect();
                 if let Some(past) = off_screen(core, "button", &text, &button.clone().upcast()) {
                     return past;
                 }
@@ -27994,7 +28061,7 @@ impl crate::harness::Stage for GtkStage {
                 let text = widget
                     .downcast_ref::<gtk4::Label>()
                     .map(|l| l.text().to_string())
-                    .or_else(|| widget.downcast_ref::<gtk4::Button>().and_then(|b| b.label().map(String::from)))
+                    .or_else(|| widget.downcast_ref::<gtk4::Button>().and_then(button_drawn_title))
                     .unwrap_or_default();
                 let short: String = text.chars().take(40).collect();
                 out.push((
@@ -28278,7 +28345,10 @@ impl crate::harness::Stage for GtkStage {
             let Ok(button) = widget.downcast::<gtk4::Button>() else {
                 return "<the target is not a GtkButton>".to_string();
             };
-            let Some(icon) = button.icon_name() else { return "<the button draws no icon>".to_string() };
+            let Some(icon) = button.icon_name().or_else(|| titled_content(&button).map(|c| c.icon_name()).filter(|n| !n.is_empty()))
+            else {
+                return "<the button draws no icon>".to_string();
+            };
             symbol_name_of_icon(&icon)
                 .map(str::to_string)
                 .unwrap_or_else(|| format!("<the button draws {icon}, which is not in SYMBOL_ICONS>"))

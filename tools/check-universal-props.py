@@ -514,6 +514,7 @@ def census(files):
     bad += filled_edges(read(compose), read(gtk))
     bad += composers(read(swiftui), read(compose), read(gtk), read(winui))
     bad += swipes(read(compose), read(winui))
+    bad += titled_buttons(read(swiftui), read(compose), read(gtk), read(winui))
     bad += compose_slider_names(read(compose))
     bad += secure_identity(read(gtk), read(winui))
     bad += gtk_secure_text(read(gtk), read(GTK_SECURE))
@@ -954,6 +955,40 @@ def composers(swiftui_text, compose_text, gtk_text, winui_text):
     return bad
 
 
+# A TITLED SYMBOL BUTTON (prop 77, docs/composer-plan.md §2) draws its title
+# beside the glyph on every arm. expect_symbol reads the glyph and expect_ax
+# the name, and both pass on an icon-only button, so the title's drawing is
+# held here.
+def titled_buttons(swiftui_text, compose_text, gtk_text, winui_text):
+    bad = []
+    for path, text, needles in (
+        (SWIFTUI, swiftui_text, (
+            "case kindButton where node.symbol != 0 && !node.titled:",
+            "Label(node.text, systemImage: sf).labelStyle(.titleAndIcon)",
+            "symbol: node.titled ? kayaSFSymbol(node.symbol) : nil",
+            "button.imagePosition = symbol == nil ? .noImage : .imageLeading")),
+        (COMPOSE, compose_text, (
+            "if (glyph != null && !node.titled) {",
+            "val titledGlyph = if (node.titled) glyph else null")),
+        (GTK, gtk_text, (
+            "if core.titled_buttons.contains(&id) {\n"
+            "                        set_titled_content(button, icon, &title);",
+            "content.set_label(title);")),
+        (WINUI, winui_text, (
+            "if core.titled_buttons.contains_key(&id) =>\n                {\n"
+            "                    core.symbol_values.insert(id, symbol);\n"
+            "                    titled_content(button, caption, symbol)?;",
+            "pair.Children()?.Append(caption)?;")),
+    ):
+        for needle in needles:
+            if needle not in text:
+                bad.append(f"{path}: the titled symbol button lost {needle!r}")
+    buttons = compose_text.count("KayaButtonLead(titledGlyph)")
+    if buttons != 4:
+        bad.append(f"{COMPOSE}: {buttons} of the four role arms lead with a titled button's glyph")
+    return bad
+
+
 # A ROW'S FULL SWIPE ON ANDROID (docs/swipe-actions-plan.md R3) runs its item
 # through the context menu's one activation route, and the harness's
 # swipe_action drives a real touch swipe: a verb that activated the item
@@ -1123,7 +1158,7 @@ def drag_waits(winui_text):
 real = load()
 g = Gate("check-universal-props")
 RAN = 0
-DECLARED = 149
+DECLARED = 154
 for path, pattern, repl in (
     (COMPOSE, r"\ba11y\b", "kayaUnappliedProps"),
     (SWIFTUI, r"\bkayaA11y\b", "kayaUnappliedProps"),
@@ -1561,6 +1596,18 @@ for label, path, pattern, repl in (
     ("WinUI's field inside a composer keeping its chrome", WINUI,
      r"resources\.Insert\(&PropertyValue::CreateString\(&HSTRING::from\(key\)\)\?, &clear\)\?;",
      "let _ = (&resources, key, &clear);"),
+    ("SwiftUI's titled button drawn icon-only", SWIFTUI,
+     r"case kindButton where node\.symbol != 0 && !node\.titled:",
+     "case kindButton where node.symbol != 0:"),
+    ("Compose's titled button drawn icon-only", COMPOSE,
+     r"if \(glyph != null && !node\.titled\) \{", "if (glyph != null) {"),
+    ("Compose's outlined button dropping a titled glyph", COMPOSE,
+     r"(OutlinedButton\([\s\S]*?)KayaButtonLead\(titledGlyph\)\n *", r"\1"),
+    ("GTK's titled button drawn icon-only", GTK,
+     r"if core\.titled_buttons\.contains\(&id\) \{\n                        set_titled_content",
+     "if false {\n                        set_titled_content"),
+    ("WinUI's titled button drawn icon-only", WINUI,
+     r"if core\.titled_buttons\.contains_key\(&id\) =>", "if false =>"),
     ("WinUI's column answering its bottom", WINUI,
      r"first_text_baseline\(core, \*child, &element\)\?", "Some(element.ActualHeight()?)"),
 ):

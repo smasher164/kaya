@@ -569,6 +569,7 @@ static class Program
         Set("SetSummary", ["Node n", "Field<string> f", "uint level = 0"], "n, f, level");
         Set("SetSymbol", ["Node n", "Symbol symbol"], "n, symbol");
         Set("SetSymbol", ["Node n", "Field<Symbol> f", "uint level = 0"], "n, f, level");
+        Set("SetTitled", ["Node n", "bool on"], "n, on");
         Set("SetAlign", ["Node n", "Align align"], "n, align");
         Set("SetFilled", ["Node n", "Tint tint"], "n, tint");
         Set("SetMaxWidth", ["Node n", "double points"], "n, points");

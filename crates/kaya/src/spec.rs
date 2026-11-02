@@ -353,6 +353,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // bottom, in DIP; unset, the sides take `inset`. The bindings spell the
     // two as one inset with a vertical and a horizontal value.
     ("inset_x", 76, PropKind::F64),
+    // A symbol button that draws its title beside the glyph rather than in
+    // place of it (docs/composer-plan.md §2, the maintainer 2026-11-01).
+    ("titled", 77, PropKind::Bool),
 ];
 
 /// Window properties: the presentation-context twin of PROPS, in its
@@ -4880,6 +4883,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("font_italic", 74),
                 ("font_width", 75),
                 ("inset_x", 76),
+                ("titled", 77),
             ],
         },
         EnumSpec {
@@ -5115,7 +5119,7 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             // THE IDS ARE APPEND-ONLY, FOREVER: wire values in eight
             // generated bindings and four backends' lowering tables, so
             // a renumber would silently redraw every shipped app's menus.
-            // A new concept takes 42.
+            // A new concept takes 49.
             name: "symbol",
             variants: &[
                 ("add", 1),
@@ -5159,6 +5163,13 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("underline", 39),
                 ("strikethrough", 40),
                 ("save", 41),
+                ("phone", 42),
+                ("video", 43),
+                ("mic_off", 44),
+                ("video_off", 45),
+                ("hang_up", 46),
+                ("mark_unread", 47),
+                ("archive", 48),
             ],
         },
         EnumSpec {
@@ -6126,6 +6137,7 @@ mod tests {
                     ("prop", "font_italic") => wire::PROP_FONT_ITALIC,
                     ("prop", "font_width") => wire::PROP_FONT_WIDTH,
                     ("prop", "inset_x") => wire::PROP_INSET_X,
+                    ("prop", "titled") => wire::PROP_TITLED,
                     ("wprop", "title") => wire::WPROP_TITLE,
                     ("wprop", "width") => wire::WPROP_WIDTH,
                     ("wprop", "height") => wire::WPROP_HEIGHT,
@@ -6284,6 +6296,13 @@ mod tests {
                     ("symbol", "underline") => wire::SYMBOL_UNDERLINE,
                     ("symbol", "strikethrough") => wire::SYMBOL_STRIKETHROUGH,
                     ("symbol", "save") => wire::SYMBOL_SAVE,
+                    ("symbol", "phone") => wire::SYMBOL_PHONE,
+                    ("symbol", "video") => wire::SYMBOL_VIDEO,
+                    ("symbol", "mic_off") => wire::SYMBOL_MIC_OFF,
+                    ("symbol", "video_off") => wire::SYMBOL_VIDEO_OFF,
+                    ("symbol", "hang_up") => wire::SYMBOL_HANG_UP,
+                    ("symbol", "mark_unread") => wire::SYMBOL_MARK_UNREAD,
+                    ("symbol", "archive") => wire::SYMBOL_ARCHIVE,
                     ("file_mode", "read") => wire::FILE_MODE_READ,
                     ("file_mode", "write") => wire::FILE_MODE_WRITE,
                     ("file_mode", "read_write") => wire::FILE_MODE_READ_WRITE,
@@ -6629,7 +6648,7 @@ mod tests {
         // Nothing outside the table resolves, including the off-by-one
         // neighbours and the negative a signed wire slot can carry.
         assert_eq!(wire::symbol_name(0), None);
-        assert_eq!(wire::symbol_name(42), None);
+        assert_eq!(wire::symbol_name(49), None);
         assert_eq!(wire::symbol_name(-1), None);
     }
 

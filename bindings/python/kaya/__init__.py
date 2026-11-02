@@ -5222,6 +5222,13 @@ class Symbol(enum.IntEnum):
     UNDERLINE = wire.SYMBOL_UNDERLINE
     STRIKETHROUGH = wire.SYMBOL_STRIKETHROUGH
     SAVE = wire.SYMBOL_SAVE
+    PHONE = wire.SYMBOL_PHONE
+    VIDEO = wire.SYMBOL_VIDEO
+    MIC_OFF = wire.SYMBOL_MIC_OFF
+    VIDEO_OFF = wire.SYMBOL_VIDEO_OFF
+    HANG_UP = wire.SYMBOL_HANG_UP
+    MARK_UNREAD = wire.SYMBOL_MARK_UNREAD
+    ARCHIVE = wire.SYMBOL_ARCHIVE
 
     @classmethod
     def _missing_(cls, value: object) -> Any:
@@ -5503,7 +5510,8 @@ def column(*, grow: float | None = None, spacing: float | None = None,
 def button(text: str | None = None, bind: TextSource | None = None, *,
            on_click: Handler | None = None,
            grow: float | None = None,
-           symbol: Symbol | str | Source | None = None) -> Widget:
+           symbol: Symbol | str | Source | None = None,
+           titled: bool = False) -> Widget:
     """A button; `text` for a constant caption, `bind` for one the row
     supplies — a Signal, the enclosing For's element, or one of its
     fields (`row.title`).
@@ -5544,6 +5552,8 @@ def button(text: str | None = None, bind: TextSource | None = None, *,
     if on_click is not None:
         _app._register(handle, wire.OCC_BUTTON_CLICKED, on_click)
     _set_grow(handle, grow)
+    if titled:
+        _records().append(wire.tx_set_titled(handle.id, True))
     return handle
 
 

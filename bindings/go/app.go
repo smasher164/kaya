@@ -1764,6 +1764,22 @@ func (w Widget) Symbol(symbol Symbol) Widget {
 	return w
 }
 
+// SetTitled makes a symbol button draw its title beside the glyph rather
+// than in its place (docs/composer-plan.md §2).
+func (tx *Tx) SetTitled(w Widget, on bool) {
+	tx.emit(TxSetTitled(w.id, on))
+}
+
+// Titled makes this symbol button draw its title at construction. Same
+// transaction discipline as Symbol.
+func (w Widget) Titled() Widget {
+	if w.tx == nil || w.tx.closed {
+		panic("kaya: Titled on a widget outside its build transaction — use Tx.SetTitled inside a live transaction")
+	}
+	w.tx.SetTitled(w, true)
+	return w
+}
+
 func (tx *Tx) BindChecked(w Widget, s Signal[bool]) {
 	tx.emit(TxBindChecked(w.id, s.id))
 }
@@ -6730,6 +6746,12 @@ func (t *Tpl) BindSummary[S interface {
 // for symbol (Tx.SetSymbol).
 func (t *Tpl) SetSymbol(n Node, symbol Symbol) {
 	t.tx.emit(TxSetSymbol(n.id, int64(symbol)))
+}
+
+// SetTitled makes every stamped symbol button draw its title beside the
+// glyph (Widget.Titled).
+func (t *Tpl) SetTitled(n Node, on bool) {
+	t.tx.emit(TxSetTitled(n.id, on))
 }
 
 // BindSymbol reads each copy's symbol from the row's field: the playing

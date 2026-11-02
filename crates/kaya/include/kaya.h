@@ -1315,6 +1315,8 @@
  */
 #define KAYA_PROP_INSET_X 76
 
+#define KAYA_PROP_TITLED 77
+
 /**
  * The arrangement axis (docs/adaptive-layout-plan.md D1): row and
  * column are one node this prop parameterizes.
@@ -1976,6 +1978,20 @@
 #define KAYA_SYMBOL_STRIKETHROUGH 40
 
 #define KAYA_SYMBOL_SAVE 41
+
+#define KAYA_SYMBOL_PHONE 42
+
+#define KAYA_SYMBOL_VIDEO 43
+
+#define KAYA_SYMBOL_MIC_OFF 44
+
+#define KAYA_SYMBOL_VIDEO_OFF 45
+
+#define KAYA_SYMBOL_HANG_UP 46
+
+#define KAYA_SYMBOL_MARK_UNREAD 47
+
+#define KAYA_SYMBOL_ARCHIVE 48
 
 /**
  * The rich text vocabularies (spec enums "rich_attr", "block_kind",

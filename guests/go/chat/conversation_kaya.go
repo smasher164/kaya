@@ -229,6 +229,7 @@ func (r conversationRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSu
 
 func (r conversationRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r conversationRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r conversationRow) SetTitled(n kaya.Node, on bool)                    { r.t.SetTitled(n, on) }
 func (r conversationRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 func (r conversationRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r conversationRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }

@@ -217,6 +217,15 @@ key = 'first line box'
 text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the Windows launchers are derived from the roster, the iOS typeface is read, the Windows dnd_java face folded into its successor watch, WinUI swipe items draw their symbols, the colour picker's panel scene (<code>pick_color</code>) runs on five lanes, and capture's C floor parsers and a C capture guest exist. Left: the iOS codesurface gutter defect (the read that tells a stale layout from a stale draw is in place, awaiting a sighting), the iOS media session's remote pause seen once leaving the player playing, and an iOS simulator that never builds the main menu. Three need a ruling: whether to chase the checkbox's low residue on the mac and GTK (the reported HIGH no longer reproduces), how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
 
 [[menu]]
+title = '<b>Layering: one view over another</b>'
+star = false
+status = 'open'
+size = 'M'
+unblocks = 'the chat app (its call screen); the media player; the video editor'
+key = 'layering kind'
+text = "Opened 2026-11-01 by the maintainer's call-screen ruling: a container whose children share one box, a small view floated over an edge or corner of a larger one, so a call's self-view sits over the peer's picture rather than under it. Each toolkit has it (SwiftUI's ZStack and overlay, Compose's Box, GTK's GtkOverlay, WinUI's one-cell Grid); kaya's containers only lay children side by side. The call screen's smaller self-view under the peer is the interim (capture-plan §12 item 7)."
+
+[[menu]]
 title = 'Segmented control'
 star = false
 status = 'shipped'

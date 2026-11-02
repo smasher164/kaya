@@ -1265,6 +1265,7 @@ pub(crate) const PROP_ROLE: u32 = 16;
 /// carried by the spacing kinds.
 pub(crate) const PROP_INSET: u32 = 17;
 pub(crate) const PROP_INSET_X: u32 = 76;
+pub(crate) const PROP_TITLED: u32 = 77;
 pub(crate) const PROP_AXIS: u32 = 18;
 /// The pickers' value and range slots, packed-decimal I64s the spec
 /// labels Date/Time (docs/datetime-plan.md D2); the step is a count.
@@ -1710,6 +1711,13 @@ pub(crate) const SYMBOL_ITALIC: u32 = 38;
 pub(crate) const SYMBOL_UNDERLINE: u32 = 39;
 pub(crate) const SYMBOL_STRIKETHROUGH: u32 = 40;
 pub(crate) const SYMBOL_SAVE: u32 = 41;
+pub(crate) const SYMBOL_PHONE: u32 = 42;
+pub(crate) const SYMBOL_VIDEO: u32 = 43;
+pub(crate) const SYMBOL_MIC_OFF: u32 = 44;
+pub(crate) const SYMBOL_VIDEO_OFF: u32 = 45;
+pub(crate) const SYMBOL_HANG_UP: u32 = 46;
+pub(crate) const SYMBOL_MARK_UNREAD: u32 = 47;
+pub(crate) const SYMBOL_ARCHIVE: u32 = 48;
 
 /// The vocabulary as one table, in wire order: `(id, semantic name)`.
 /// The NAME is what a diagnostic prints and what the harness compares —
@@ -1756,6 +1764,13 @@ pub(crate) const SYMBOLS: &[(u32, &str)] = &[
     (SYMBOL_UNDERLINE, "underline"),
     (SYMBOL_STRIKETHROUGH, "strikethrough"),
     (SYMBOL_SAVE, "save"),
+    (SYMBOL_PHONE, "phone"),
+    (SYMBOL_VIDEO, "video"),
+    (SYMBOL_MIC_OFF, "mic_off"),
+    (SYMBOL_VIDEO_OFF, "video_off"),
+    (SYMBOL_HANG_UP, "hang_up"),
+    (SYMBOL_MARK_UNREAD, "mark_unread"),
+    (SYMBOL_ARCHIVE, "archive"),
 ];
 
 /// The semantic name of a wire symbol value, or None if it is outside
@@ -1978,6 +1993,7 @@ fn prop(raw: u32) -> Prop {
         PROP_ROLE => Prop::Role,
         PROP_INSET => Prop::Inset,
         PROP_INSET_X => Prop::InsetX,
+        PROP_TITLED => Prop::Titled,
         PROP_AXIS => Prop::Axis,
         PROP_DATE => Prop::Date,
         PROP_TIME => Prop::Time,
@@ -6226,6 +6242,7 @@ fn prop_raw(prop: Prop) -> u32 {
         Prop::Role => PROP_ROLE,
         Prop::Inset => PROP_INSET,
         Prop::InsetX => PROP_INSET_X,
+        Prop::Titled => PROP_TITLED,
         Prop::Axis => PROP_AXIS,
         Prop::A11yHint => PROP_A11Y_HINT,
         Prop::Date => PROP_DATE,

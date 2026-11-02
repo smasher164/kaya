@@ -895,6 +895,13 @@ type symbol =
   | Underline
   | Strikethrough
   | Save
+  | Phone
+  | Video
+  | MicOff
+  | VideoOff
+  | HangUp
+  | MarkUnread
+  | Archive
 
 (* An icon-only button (docs/composer-plan.md §2). *)
 val set_symbol : widget -> symbol -> unit
@@ -999,7 +1006,7 @@ val button :
   ?help:string ->
   ?help_bind:string signal ->
   ?a11y_hint:string ->
-  ?role:role -> ?symbol:symbol -> ?text:string -> ?on_click:(unit -> unit) -> unit -> widget
+  ?role:role -> ?symbol:symbol -> ?titled:bool -> ?text:string -> ?on_click:(unit -> unit) -> unit -> widget
 
 val textarea :
   ?grow:float ->
@@ -2433,6 +2440,7 @@ module Tpl : sig
     ?role:role ->
     ?symbol:symbol ->
     ?symbol_field:('f, symbol) field ->
+    ?titled:bool ->
     ?text:string ->
     ?bind:string signal ->
     ?bind_field:('e, string) field ->

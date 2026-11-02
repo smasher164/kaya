@@ -4568,6 +4568,13 @@ export const Symbol_ = Object.freeze({
   UNDERLINE: wire.SYMBOL_UNDERLINE,
   STRIKETHROUGH: wire.SYMBOL_STRIKETHROUGH,
   SAVE: wire.SYMBOL_SAVE,
+  PHONE: wire.SYMBOL_PHONE,
+  VIDEO: wire.SYMBOL_VIDEO,
+  MIC_OFF: wire.SYMBOL_MIC_OFF,
+  VIDEO_OFF: wire.SYMBOL_VIDEO_OFF,
+  HANG_UP: wire.SYMBOL_HANG_UP,
+  MARK_UNREAD: wire.SYMBOL_MARK_UNREAD,
+  ARCHIVE: wire.SYMBOL_ARCHIVE,
 });
 // `Symbol` is JS's own; the vocabulary exports under kaya's usual name
 // through this alias, so `kaya.Symbol.COPY` reads like every other binding.
@@ -4946,7 +4953,7 @@ function bindText(what: string, handle: Handle, bind: unknown): void {
   }
 }
 
-export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler; symbol?: SymbolValue | SymbolName | FieldRef };
+export type ButtonOptions = GrowOption & { bind?: Bindable; onClick?: Handler; symbol?: SymbolValue | SymbolName | FieldRef; titled?: boolean };
 
 /** A button: a constant caption, or `{bind}` for one the row supplies —
  * template-only, as in all eight other bindings (docs/tpl-props-plan.md F5). */
@@ -4965,6 +4972,7 @@ export function button(a: string | ButtonOptions, b?: ButtonOptions): Widget {
     bindText("button", handle, opts.bind);
   }
   if (opts.symbol !== undefined) setSymbol(handle, opts.symbol);
+  if (opts.titled) records().push(wire.tx_set_titled(handle.id, true));
   if (opts.onClick !== undefined) app()._register(handle, wire.OCC_BUTTON_CLICKED, opts.onClick);
   setGrow(handle, opts);
   return handle;

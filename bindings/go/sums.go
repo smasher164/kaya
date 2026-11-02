@@ -481,6 +481,9 @@ func (sc SumCase[K, V]) SetSymbol(n Node, symbol Symbol) { sc.t.SetSymbol(n, sym
 // BindSymbol is Tpl.BindSymbol for the nodes this arm stamps.
 func (sc SumCase[K, V]) BindSymbol(n Node, f Field[Symbol]) { sc.t.BindSymbol(n, f) }
 
+// SetTitled draws a symbol button this arm stamps with its title (Tpl.SetTitled).
+func (sc SumCase[K, V]) SetTitled(n Node, on bool) { sc.t.SetTitled(n, on) }
+
 // SetMaxLines is Tpl.SetMaxLines for the labels this arm stamps.
 func (sc SumCase[K, V]) SetMaxLines(n Node, lines int) { sc.t.SetMaxLines(n, lines) }
 

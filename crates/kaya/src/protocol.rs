@@ -2618,6 +2618,8 @@ pub enum Prop {
     /// top and bottom (docs/styling-plan.md D3, the inset pair, ruled
     /// 2026-10-30): unset, the sides take `inset`.
     InsetX,
+    /// A symbol button draws its title beside the glyph (docs/composer-plan.md §2).
+    Titled,
     /// The container's arrangement axis (docs/adaptive-layout-plan.md
     /// D1/D2): row and column are one node this parameterizes, and the
     /// prop is mutable so a breakpoint diff or a handler toggle is an

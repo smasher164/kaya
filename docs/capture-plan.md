@@ -456,9 +456,13 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    phones' back gesture and the desktops' back button hang up as Hang up
    does; the incoming call's Answer and Decline are a page of their own
    (entry 3). A sheet or a window of its own were the alternatives.
-2. **The thread's header carries text buttons, Call and Video**, beside the
-   connection label. Symbols for them (a phone, a camera) are not in kaya's
-   symbol vocabulary; adding two is a visible choice left to the maintainer.
+2. **The thread's header carries Call and Video**, beside the connection
+   label, and every call button draws its symbol beside its title (changed
+   2026-11-01, the maintainer: "We should have both symbols and text. Even
+   stuff like mute, camera off, and hanging up."): Call and Answer `phone`,
+   Video `video`, Mute `mic_off` (Unmute `mic`), Camera off `video_off`
+   (Camera on `video`), Hang up and Decline `hang_up`, through the button's
+   `titled` prop (docs/composer-plan.md §2).
 3. **The call's media rides its own loopback connection** to the scripted
    peer, beside the message connection: tagged records of NV12 frames and
    480-sample chunks each way; the peer reads and drops the app's audio.
@@ -473,3 +477,10 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    camera portal the lane grants for the app id the leg registers
    (tools/linux/notify-leg.sh KAYA_NOTIFY_GRANT_CAMERA) under the capture
    leg's PipeWire and far end.
+7. **The self-view is smaller, under the peer's picture** (the maintainer,
+   2026-11-01, accepted for now): at most a third of the peer picture's
+   natural 320 pt, about 107 pt wide, by a column's `max_width` around it;
+   the self-view shrinks to that room keeping its aspect (§3). For
+   ratification. The maintainer wants the self-view floated over a corner of
+   the peer's picture in the end, which needs a layering kind kaya lacks
+   (docs/deferred.md, the GAP on layering one view over another).

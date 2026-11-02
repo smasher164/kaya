@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xe3377635dd9a81cc
+SPEC_HASH = 0xf2f2a3b7c858b4ac
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -159,6 +159,7 @@ PROP_FONT_WEIGHT = 73
 PROP_FONT_ITALIC = 74
 PROP_FONT_WIDTH = 75
 PROP_INSET_X = 76
+PROP_TITLED = 77
 WPROP_TITLE = 1
 WPROP_WIDTH = 2
 WPROP_HEIGHT = 3
@@ -312,6 +313,13 @@ SYMBOL_ITALIC = 38
 SYMBOL_UNDERLINE = 39
 SYMBOL_STRIKETHROUGH = 40
 SYMBOL_SAVE = 41
+SYMBOL_PHONE = 42
+SYMBOL_VIDEO = 43
+SYMBOL_MIC_OFF = 44
+SYMBOL_VIDEO_OFF = 45
+SYMBOL_HANG_UP = 46
+SYMBOL_MARK_UNREAD = 47
+SYMBOL_ARCHIVE = 48
 SOURCE_CONST = 0
 SOURCE_SIGNAL = 1
 SOURCE_ELEMENT = 2
@@ -2299,6 +2307,21 @@ def tx_bind_inset_x(widget_id: int, signal_id: int) -> bytes:
 def tx_bind_inset_x_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
     """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
     return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_INSET_X, SOURCE_ELEMENT, level, field))
+
+
+def tx_set_titled(widget_id: int, titled: bool) -> bytes:
+    """set_property with a constant titled value (bool)."""
+    return record(TX_SET_PROPERTY, struct.pack("<QII", widget_id, PROP_TITLED, SOURCE_CONST) + _enc.value(titled))
+
+
+def tx_bind_titled(widget_id: int, signal_id: int) -> bytes:
+    """set_property with a signal-bound titled value."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIQ", widget_id, PROP_TITLED, SOURCE_SIGNAL, signal_id))
+
+
+def tx_bind_titled_element(widget_id: int, level: int = 0, field: int = 0) -> bytes:
+    """set_property bound to one field of the element of the enclosing For, `level` Fors up."""
+    return record(TX_SET_PROPERTY, struct.pack("<QIIII", widget_id, PROP_TITLED, SOURCE_ELEMENT, level, field))
 
 
 def tx_set_window_title(window: int, title: str) -> bytes:

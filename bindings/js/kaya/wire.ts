@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xe3377635dd9a81ccn;
+export const SPEC_HASH = 0xf2f2a3b7c858b4acn;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -152,6 +152,7 @@ export const PROP_FONT_WEIGHT = 73;
 export const PROP_FONT_ITALIC = 74;
 export const PROP_FONT_WIDTH = 75;
 export const PROP_INSET_X = 76;
+export const PROP_TITLED = 77;
 export const WPROP_TITLE = 1;
 export const WPROP_WIDTH = 2;
 export const WPROP_HEIGHT = 3;
@@ -305,6 +306,13 @@ export const SYMBOL_ITALIC = 38;
 export const SYMBOL_UNDERLINE = 39;
 export const SYMBOL_STRIKETHROUGH = 40;
 export const SYMBOL_SAVE = 41;
+export const SYMBOL_PHONE = 42;
+export const SYMBOL_VIDEO = 43;
+export const SYMBOL_MIC_OFF = 44;
+export const SYMBOL_VIDEO_OFF = 45;
+export const SYMBOL_HANG_UP = 46;
+export const SYMBOL_MARK_UNREAD = 47;
+export const SYMBOL_ARCHIVE = 48;
 export const SOURCE_CONST = 0;
 export const SOURCE_SIGNAL = 1;
 export const SOURCE_ELEMENT = 2;
@@ -3080,6 +3088,24 @@ export function tx_bind_inset_x(widget_id: number, signal_id: number): Uint8Arra
 /** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
 export function tx_bind_inset_x_element(widget_id: number, level = 0, field = 0): Uint8Array {
   enc.begin(); enc.u64(widget_id); enc.u32(PROP_INSET_X); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a constant titled value. */
+export function tx_set_titled(widget_id: number, titled: boolean): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TITLED); enc.u32(SOURCE_CONST); enc.value(titled);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property with a signal-bound titled value. */
+export function tx_bind_titled(widget_id: number, signal_id: number): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TITLED); enc.u32(SOURCE_SIGNAL); enc.u64(signal_id);
+  return enc.end(TX_SET_PROPERTY);
+}
+
+/** set_property bound to one field of the element of the enclosing For, `level` Fors up. */
+export function tx_bind_titled_element(widget_id: number, level = 0, field = 0): Uint8Array {
+  enc.begin(); enc.u64(widget_id); enc.u32(PROP_TITLED); enc.u32(SOURCE_ELEMENT); enc.u32(level); enc.u32(field);
   return enc.end(TX_SET_PROPERTY);
 }
 

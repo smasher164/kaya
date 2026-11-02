@@ -188,6 +188,13 @@ import androidx.compose.material.icons.filled.FormatItalic
 import androidx.compose.material.icons.filled.FormatStrikethrough
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.FormatUnderlined
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.VideocamOff
+import androidx.compose.material.icons.filled.CallEnd
+import androidx.compose.material.icons.filled.MarkEmailUnread
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -820,6 +827,8 @@ class KayaNode(val id: Long, val kind: Int, val tag: ByteArray) {
     var fontWidth by mutableStateOf(0)
     /** A button's glyph in place of its title (docs/composer-plan.md §2); 0 = none. */
     var symbol by mutableStateOf(0L)
+    /** The glyph drawn beside the title rather than in its place (prop 77). */
+    var titled by mutableStateOf(false)
     /** An image's bound in dp (docs/photo-attach-plan.md §2); 0 = none. */
     var maxWidth by mutableStateOf(0.0)
     var maxHeight by mutableStateOf(0.0)
@@ -3542,7 +3551,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xe3377635dd9a81ccuL
+    private const val SPEC_HASH: ULong = 0xf2f2a3b7c858b4acuL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3946,6 +3955,7 @@ object KayaCompose {
     private const val PROP_ROLE = 16
     private const val PROP_INSET = 17
     private const val PROP_INSET_X = 76
+    private const val PROP_TITLED = 77
 
     // The pickers' slots (docs/datetime-plan.md D2/D3/D4): three packed
     // decimal I64s — YYYYMMDD for a date, HHMM for a time — and a count.
@@ -4016,6 +4026,13 @@ object KayaCompose {
     const val SYMBOL_UNDERLINE = 39L
     const val SYMBOL_STRIKETHROUGH = 40L
     const val SYMBOL_SAVE = 41L
+    const val SYMBOL_PHONE = 42L
+    const val SYMBOL_VIDEO = 43L
+    const val SYMBOL_MIC_OFF = 44L
+    const val SYMBOL_VIDEO_OFF = 45L
+    const val SYMBOL_HANG_UP = 46L
+    const val SYMBOL_MARK_UNREAD = 47L
+    const val SYMBOL_ARCHIVE = 48L
 
     /**
      * THE MATERIAL COLUMN: (wire value, semantic name, glyph);
@@ -4066,6 +4083,13 @@ object KayaCompose {
         Triple(SYMBOL_UNDERLINE, "underline", Icons.Default.FormatUnderlined),
         Triple(SYMBOL_STRIKETHROUGH, "strikethrough", Icons.Default.FormatStrikethrough),
         Triple(SYMBOL_SAVE, "save", Icons.Default.Save),
+        Triple(SYMBOL_PHONE, "phone", Icons.Default.Phone),
+        Triple(SYMBOL_VIDEO, "video", Icons.Default.Videocam),
+        Triple(SYMBOL_MIC_OFF, "mic_off", Icons.Default.MicOff),
+        Triple(SYMBOL_VIDEO_OFF, "video_off", Icons.Default.VideocamOff),
+        Triple(SYMBOL_HANG_UP, "hang_up", Icons.Default.CallEnd),
+        Triple(SYMBOL_MARK_UNREAD, "mark_unread", Icons.Default.MarkEmailUnread),
+        Triple(SYMBOL_ARCHIVE, "archive", Icons.Default.Archive),
     )
 
     /** The SEMANTIC NAME of a wire symbol value, or null for a value
@@ -5015,6 +5039,8 @@ object KayaCompose {
                             KayaSceneModel.nodes[id]!!.maxLines = readF64(b).toInt()
                         PROP_SYMBOL ->
                             KayaSceneModel.nodes[id]!!.symbol = readI64(b)
+                        PROP_TITLED ->
+                            KayaSceneModel.nodes[id]!!.titled = readBool(b)
                         PROP_MAX_WIDTH -> KayaSceneModel.nodes[id]!!.let { node ->
                             node.maxWidth = readF64(b)
                             if (node.kind == KIND_IMAGE) node.imageGen += 1
@@ -20868,10 +20894,12 @@ private fun KayaRenderCore(
             // CONTAINER, fixed by Material rather than derived from the
             // brand, so red keeps meaning destructive in a red-branded app.
             val glyph = if (node.symbol != 0L) KayaCompose.symbolIcon(node.symbol) else null
+            // A titled symbol button (prop 77): Material's icon-and-label button.
+            val titledGlyph = if (node.titled) glyph else null
             // An icon-only button (docs/composer-plan.md §2, §3): the glyph,
             // the title as its accessible name; a prominent one is Material's
             // filled circle.
-            if (glyph != null) {
+            if (glyph != null && !node.titled) {
                 // Beside a composer the button centres on the field's bottom
                 // line (docs/composer-plan.md §4): the composer's rest height is
                 // its field's one line (the body line and the field's 12dp
@@ -20921,6 +20949,7 @@ private fun KayaRenderCore(
                         // (`Button` provides labelLarge internally), so
                         // this samples the ramp route through a
                         // component kaya never styles.
+                        KayaButtonLead(titledGlyph)
                         Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 KayaCompose.ROLE_DESTRUCTIVE ->
@@ -20932,6 +20961,7 @@ private fun KayaRenderCore(
                             contentColor = MaterialTheme.colorScheme.onErrorContainer,
                         ),
                     ) {
+                        KayaButtonLead(titledGlyph)
                         Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 // The row accessory's low-emphasis rung (docs/tasks-plan.md §4, R6).
@@ -20940,6 +20970,7 @@ private fun KayaRenderCore(
                         onClick = { KayaPresent.emitClicked(node.tag) },
                         modifier = kayaPlainTrim().then(boxFill).then(a11y).then(buttonRect),
                     ) {
+                        KayaButtonLead(titledGlyph)
                         Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
                 else ->
@@ -20952,6 +20983,7 @@ private fun KayaRenderCore(
                         // already do (grow.steps' button#0).
                         modifier = boxFill.then(a11y).then(buttonRect),
                     ) {
+                        KayaButtonLead(titledGlyph)
                         Text(node.text, modifier = captionRect, onTextLayout = { kayaTypefaceSites["button"] = it })
                     }
             }
@@ -23906,6 +23938,15 @@ private fun KayaKeyboardBar(modifier: Modifier) {
 }
 
 private val KAYA_KEYBOARD_BAR_FADE = 48.dp
+
+/** A titled symbol button's leading glyph, Material's icon-and-label spacing. */
+@Composable
+private fun KayaButtonLead(glyph: ImageVector?) {
+    if (glyph == null) return
+    Icon(glyph, contentDescription = null,
+        modifier = Modifier.size(ButtonDefaults.IconSize).semantics { this[KayaGlyph] = glyph })
+    Spacer(Modifier.size(ButtonDefaults.IconSpacing))
+}
 
 @Composable
 private fun KayaKeyboardBarGap() {

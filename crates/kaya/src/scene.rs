@@ -1767,6 +1767,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
             WidgetKind::Image | WidgetKind::Slider | WidgetKind::Label | WidgetKind::Row | WidgetKind::Column
         ),
         Prop::MaxHeight => kind == WidgetKind::Image,
+        Prop::Titled => kind == WidgetKind::Button,
     };
     assert!(ok, "kaya: {kind:?} has no property {prop:?}");
 }
@@ -2393,6 +2394,7 @@ fn prop_value_type(prop: Prop) -> ValueType {
         Prop::Align => ValueType::I64,
         Prop::Filled => ValueType::I64,
         Prop::FollowsEnd => ValueType::Bool,
+        Prop::Titled => ValueType::Bool,
         Prop::MaxLines => ValueType::F64,
         Prop::MaxWidth | Prop::MaxHeight => ValueType::F64,
         Prop::Axis => ValueType::I64,
@@ -13941,7 +13943,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "42 is not a symbol")]
+    #[should_panic(expected = "49 is not a symbol")]
     fn a_button_symbol_outside_the_vocabulary_dies_at_declare() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -13949,7 +13951,7 @@ mod tests {
             TxOp::SetProperty {
                 widget: WidgetId(1),
                 prop: Prop::Symbol,
-                value: PropValue::Const(Value::I64(42)),
+                value: PropValue::Const(Value::I64(49)),
             },
         ]);
     }
@@ -15715,7 +15717,7 @@ mod tests {
     /// each, and the tab draws with no icon. 21 is the first free id — what a
     /// guest generated against a NEWER spec sends.
     #[test]
-    #[should_panic(expected = "42 is not a symbol")]
+    #[should_panic(expected = "49 is not a symbol")]
     fn section_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -15723,7 +15725,7 @@ mod tests {
             TxOp::SetSectionProp {
                 section: WindowId(7),
                 prop: SectionProp::Symbol,
-                value: PropValue::Const(Value::I64(42)),
+                value: PropValue::Const(Value::I64(49)),
             },
         ]);
     }
@@ -18414,7 +18416,7 @@ mod tests {
     /// section side, which is the point: one vocabulary, one sentence,
     /// two surfaces that cannot answer differently.
     #[test]
-    #[should_panic(expected = "42 is not a symbol")]
+    #[should_panic(expected = "49 is not a symbol")]
     fn menu_symbol_rejects_a_value_outside_the_vocabulary() {
         let mut scene = Scene::new();
         scene.apply(vec![
@@ -18422,7 +18424,7 @@ mod tests {
             TxOp::SetMenuProp {
                 item: MenuItemId(1),
                 prop: MenuProp::Symbol,
-                value: PropValue::Const(Value::I64(42)),
+                value: PropValue::Const(Value::I64(49)),
             },
         ]);
     }

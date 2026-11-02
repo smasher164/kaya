@@ -287,7 +287,14 @@ public final class KayaApp {
         ITALIC(KayaWire.SYMBOL_ITALIC),
         UNDERLINE(KayaWire.SYMBOL_UNDERLINE),
         STRIKETHROUGH(KayaWire.SYMBOL_STRIKETHROUGH),
-        SAVE(KayaWire.SYMBOL_SAVE);
+        SAVE(KayaWire.SYMBOL_SAVE),
+        PHONE(KayaWire.SYMBOL_PHONE),
+        VIDEO(KayaWire.SYMBOL_VIDEO),
+        MIC_OFF(KayaWire.SYMBOL_MIC_OFF),
+        VIDEO_OFF(KayaWire.SYMBOL_VIDEO_OFF),
+        HANG_UP(KayaWire.SYMBOL_HANG_UP),
+        MARK_UNREAD(KayaWire.SYMBOL_MARK_UNREAD),
+        ARCHIVE(KayaWire.SYMBOL_ARCHIVE);
 
         final long wire;
 
@@ -5212,6 +5219,18 @@ public final class KayaApp {
         /** This button draws the platform's glyph for {@code symbol} in
          * place of its title, which stays its accessible name
          * (docs/composer-plan.md §2). */
+        public Widget titled() {
+            if (tx == null || tx.closed) {
+                throw new IllegalStateException(
+                    "kaya: titled on a widget outside its build transaction"
+                    + " — use Tx.setTitled inside a live transaction");
+            }
+            tx.setTitled(this, true);
+            return this;
+        }
+
+        /** This button draws the platform's glyph for {@code symbol}; with
+         * {@link #titled} beside its title (docs/composer-plan.md §2). */
         public Widget symbol(Symbol symbol) {
             if (tx == null || tx.closed) {
                 throw new IllegalStateException(
@@ -6925,6 +6944,10 @@ public final class KayaApp {
 
         /** This row's copy of that button's or expander's glyph
          * (Tpl.setSymbol). */
+        public void setTitled(Node n, boolean on) {
+            t.setTitled(n, on);
+        }
+
         public void setSymbol(Node n, Symbol symbol) {
             t.setSymbol(n, symbol);
         }
@@ -7992,6 +8015,12 @@ public final class KayaApp {
         /** An icon-only button (docs/composer-plan.md §2). */
         public void setSymbol(Widget w, Symbol symbol) {
             emit(KayaWire.txSetSymbol(w.id, symbol.wire));
+        }
+
+        /** A symbol button draws its title beside the glyph rather than in
+         * its place (docs/composer-plan.md §2). */
+        public void setTitled(Widget w, boolean on) {
+            emit(KayaWire.txSetTitled(w.id, on));
         }
 
         /**
@@ -10594,6 +10623,11 @@ public final class KayaApp {
          * of {@link Tx#setSymbol}. */
         public void setSymbol(Node n, Symbol symbol) {
             tx.emit(KayaWire.txSetSymbol(n.id, symbol.wire));
+        }
+
+        /** Every stamped symbol button draws its title beside the glyph. */
+        public void setTitled(Node n, boolean on) {
+            tx.emit(KayaWire.txSetTitled(n.id, on));
         }
 
         /** Every stamped copy's glyph from its row's Symbol field

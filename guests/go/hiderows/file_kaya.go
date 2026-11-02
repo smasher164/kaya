@@ -201,6 +201,7 @@ func (r fileRow) Summary(n kaya.Node, f kaya.Field[string]) { r.t.BindSummary(n,
 
 func (r fileRow) SetSymbol(n kaya.Node, symbol kaya.Symbol)         { r.t.SetSymbol(n, symbol) }
 func (r fileRow) BindSymbol(n kaya.Node, f kaya.Field[kaya.Symbol]) { r.t.BindSymbol(n, f) }
+func (r fileRow) SetTitled(n kaya.Node, on bool)                    { r.t.SetTitled(n, on) }
 func (r fileRow) SetMaxLines(n kaya.Node, lines int)                { r.t.SetMaxLines(n, lines) }
 func (r fileRow) SetMonospaced(n kaya.Node, on bool)                { r.t.SetMonospaced(n, on) }
 func (r fileRow) SetFamily(n kaya.Node, name string)                { r.t.SetFamily(n, name) }
