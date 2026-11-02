@@ -15610,6 +15610,8 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let adjustment =
                         gtk4::Adjustment::new(0.0, -unbounded, unbounded, 1.0, 10.0, 0.0);
                     let spin = gtk4::SpinButton::new(Some(&adjustment), 0.0, 0);
+                    // docs/number-field-plan.md §11: it fills a column as an entry does.
+                    set_text_field(spin.upcast_ref());
                     spin.set_update_policy(gtk4::SpinButtonUpdatePolicy::Always);
                     spin.set_numeric(false);
                     // FOCUS LOSS IS A FOCUS MOVE INSIDE THE WINDOW (§4.5,
@@ -19134,9 +19136,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.widgets.get(&parent).expect("scene validated the id"),
                     NativeWidget::Column(_)
                 )
+                // A stamped number field fills the column as a live one does
+                // (docs/number-field-plan.md §11).
                 && matches!(
                     core.widgets.get(&child).expect("scene validated the id"),
-                    NativeWidget::Row(_)
+                    NativeWidget::Row(_) | NativeWidget::NumberField(_)
                 )
                 && core
                     .widget_tags

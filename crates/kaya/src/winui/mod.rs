@@ -19779,9 +19779,11 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // A stamped ROW copy marks its host, whose own cross placement in
             // ITS parent is re-read for it (docs/tasks-plan.md §4, R7); a
             // declared table's rows already live in a viewport that spans.
+            // A stamped number field fills the column as a live one does
+            // (docs/number-field-plan.md §11).
             let stamped_row = matches!(
                 core.widgets.get(&child).expect("scene validated the id"),
-                NativeWidget::Row(_)
+                NativeWidget::Row(_) | NativeWidget::NumberField(_)
             ) && core
                 .widget_tags
                 .get(&child.0)

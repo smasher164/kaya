@@ -17901,7 +17901,10 @@ var kayaMacButtons: [UInt64: NSButton] = [:]
 /// expect_same_width's read: a column's, row's or label's laid-out width;
 /// nil for no such target, .some(nil) while nothing is laid out (M20 (2)).
 @MainActor func kayaFrameWidthRead(_ spec: Substring) -> Double?? {
-    if let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows) {
+    if let node = kayaTarget(spec, "column", kayaScene.columns) ?? kayaTarget(spec, "row", kayaScene.rows)
+        ?? kayaTarget(spec, "entry", kayaScene.entryWidgets)
+        ?? kayaTarget(spec, "number_field", kayaScene.numberFields)
+    {
         guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id) else { return .some(nil) }
         return .some(Double(frame.width))
     }

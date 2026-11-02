@@ -2983,6 +2983,13 @@ internal fun kayaPlainTrim(): Modifier = Modifier.layout { measurable, constrain
 
 internal val kayaOverlapRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
 
+/** An entry's or number field's bounds in the root's space, for expect_same_width. */
+internal val kayaFieldRects = HashMap<Long, androidx.compose.ui.geometry.Rect>()
+
+internal fun kayaFieldRectRead(node: KayaNode): Modifier = Modifier.onGloballyPositioned {
+    kayaFieldRects[node.id] = it.boundsInRoot()
+}
+
 /** The window each overlap rect was read in, by node id. */
 internal val kayaTextWindows = HashMap<Long, Int>()
 
@@ -9382,6 +9389,9 @@ private fun kayaFrameWidthRead(activity: ComponentActivity, spec: String): Doubl
         val outer = kayaInsetOuter[container.id] ?: return Double.NaN
         return outer.first / density
     }
+    val field = target(spec, "entry", KayaSceneModel.entryWidgets)
+        ?: target(spec, "number_field", KayaSceneModel.numberFields)
+    if (field != null) return (kayaFieldRects[field.id] ?: return Double.NaN).width / density
     val node = target(spec, "label", KayaSceneModel.labels) ?: return null
     val rect = kayaOverlapRects[node.id] ?: kayaTextRects[node.id] ?: return Double.NaN
     return rect.width / density
@@ -20812,7 +20822,7 @@ private fun KayaRenderCore(
         }
         KayaCompose.KIND_SEARCH ->
             KayaTextField(node, a11y, boxFill, singleLine = true, search = true)
-        KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y, boxFill)
+        KayaCompose.KIND_NUMBER_FIELD -> KayaNumberField(node, a11y.then(kayaFieldRectRead(node)), boxFill)
         KayaCompose.KIND_COLOR_PICKER -> KayaColorButton(node, a11y, boxFill)
         KayaCompose.KIND_RANGE -> KayaRangeSurface(node, boxFill, a11y)
         KayaCompose.KIND_VIDEO -> KayaVideoView(node, a11y, boxFill)
@@ -21252,7 +21262,7 @@ private fun KayaRenderCore(
         // second place for the echo guard to be got wrong.
         KayaCompose.KIND_TEXTAREA -> KayaTextField(
             node, a11y, boxFill, singleLine = false, tall = flexVertical == true && node.grow > 0)
-        KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y, boxFill, singleLine = true)
+        KayaCompose.KIND_ENTRY -> KayaTextField(node, a11y.then(kayaFieldRectRead(node)), boxFill, singleLine = true)
         KayaCompose.KIND_DATE_PICKER, KayaCompose.KIND_TIME_PICKER ->
             KayaPickerField(node, a11y, boxFill, fieldFills)
         KayaCompose.KIND_CANVAS -> {

@@ -49,13 +49,10 @@ main = kayaMain $ \app -> do
           submitTx app $ writeSignal amountValue (40.0 :: Double)
 
     (lineList, qtyNode) <- forEach (recordHandle lines') $ do
-      -- Realized ahead of its row so the central registration has a handle.
-      n <-
-        withTplAttrs
-          [TplMin 0.0, TplA11yId "qty"]
-          (numberField (field @"qty" @Line))
-      _ <- rowOf [label (field @"name" @Line), pure n]
-      return n
+      _ <- label (field @"name" @Line)
+      withTplAttrs
+        [TplMin 0.0, TplA11yId "qty"]
+        (numberField (field @"qty" @Line))
 
     root <-
       column

@@ -473,3 +473,22 @@ reports invalid rates or frame arguments as a named app fault, and returns
 -1 for unreadable text. Each binding maps unreadable text to its usual
 optional/result idiom. A NUL within a guest string is unreadable, with
 invalid rate arguments still refused first.
+
+## §11. Width: a number field fills its column (RULED 2026-11-01)
+
+The maintainer ruled the recommendation ("go with your recommendations",
+2026-11-01; docs/deferred.md, the number field width entry): a number field
+fills its column's cross axis, as a text entry does, on all five backends,
+live and stamped; an app that wants it narrow gives it a fixed width.
+SwiftUI and Compose already filled. GTK's GtkSpinButton takes the text
+field mark that fills a column (`set_text_field`), and on GTK and WinUI a
+For's column spans its host when it stamps number fields, as it does for
+stamped rows, so the stamped field fills it. The OCaml and Haskell guests wrapped
+each stamped field in a row the other seven do not; they stamp the label
+and the field directly now, so every language lays the scene out alike.
+`expect_same_width` reads entries and number fields, and numberfield.steps
+holds the live field to the entry beside it and the stamped field to the
+live one; both reads were watched red on the old GTK and WinUI behaviour
+(GTK 106 or 123 against 498 or 508, WinUI's stamped field 132 against 508,
+the mac's row-wrapped OCaml and Haskell copies 120).
+

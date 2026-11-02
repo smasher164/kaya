@@ -6,6 +6,10 @@ expect_title "numberfield"
 expect number_field@amount "{fmt:field 0 0.5}"
 expect_value number_field@amount "0"
 expect label@commits "commits: 0"
+# A number field fills its column's cross axis like the text entry beside it,
+# live and stamped (the maintainer, 2026-11-01; docs/number-field-plan.md §11).
+expect_same_width number_field@amount entry@note
+expect_same_width number_field@qty[b] number_field@amount
 click number_field@amount
 expect_focused number_field@amount
 set_text number_field@amount ""

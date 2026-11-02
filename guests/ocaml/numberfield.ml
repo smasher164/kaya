@@ -44,16 +44,11 @@ let () =
                 write amount_value (40.0));
             each (record_handle lines) (fun () ->
                 Tpl.(
-                  row
-                    [
-                      label ~bind_field:line_name;
-                      number_field ~a11y_id:"qty" ~bind_field:line_qty
-                        ~min:0.0
-                        ~on_commit:(fun keys v ->
-                          let key = key_text (List.hd keys) in
-                          write row_text
-                            (Printf.sprintf "row %s: %s" key (spelled v)));
-                    ]
+                  ignore (label ~bind_field:line_name ());
+                  number_field ~a11y_id:"qty" ~bind_field:line_qty ~min:0.0
+                    ~on_commit:(fun keys v ->
+                      let key = key_text (List.hd keys) in
+                      write row_text (Printf.sprintf "row %s: %s" key (spelled v)))
                     ()));
           ]
           ()

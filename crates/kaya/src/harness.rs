@@ -4180,8 +4180,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                 };
                 let (a, b) = (parse_target(a)?, parse_target(b)?);
                 for t in [&a, &b] {
-                    if !matches!(t.kind, TargetKind::Column | TargetKind::Row | TargetKind::Label) {
-                        return Err(format!("expect_same_width wants column, row or label targets: {line:?}"));
+                    if !matches!(
+                        t.kind,
+                        TargetKind::Column | TargetKind::Row | TargetKind::Label | TargetKind::Entry | TargetKind::NumberField
+                    ) {
+                        return Err(format!(
+                            "expect_same_width wants column, row, label, entry or number_field targets: {line:?}"
+                        ));
                     }
                 }
                 Step::ExpectSameWidth(a, b)
