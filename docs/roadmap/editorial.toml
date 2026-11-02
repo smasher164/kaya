@@ -40,6 +40,7 @@ hiderows = 'https://claude.ai/artifact/V5BWnaBPnCpQNTtyX6qhGN'
 editorfmt = 'https://claude.ai/artifact/7PtETtTpi3bPZscDSSQwJ7'
 doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
 fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
+rulings1101 = 'https://claude.ai/artifact/64X8oeghtQchdNVYmdQMJn'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -71,7 +72,7 @@ unblocks = 'the video editor'
 plan = 'docs/number-field-plan.md'
 review = 'number'
 key = 'number field width'
-text = "SHIPPED 2026-09-28 (60b0819a, 9cd33cf9; review {review:number}): a number kind with range and step, committing on Return, focus loss or a step, kaya reading and writing the text in the user's locale; since 2026-10-02 the typed text is read by one rule in the core on all five platforms (1b48083d). The timecode formatter its <code>format</code> names was ruled for the editor and shipped 2026-10-05 (below); no empty state (a \"may be blank\" state for form fields is on the ledger). Open: the field's width, a ruling on the ledger."
+text = "SHIPPED 2026-09-28 (60b0819a, 9cd33cf9; review {review:number}): a number kind with range and step, committing on Return, focus loss or a step, kaya reading and writing the text in the user's locale; since 2026-10-02 the typed text is read by one rule in the core on all five platforms (1b48083d). The timecode formatter its <code>format</code> names was ruled for the editor and shipped 2026-10-05 (below); no empty state (a \"may be blank\" state for form fields is on the ledger). The width was ruled 2026-11-01 and built (6401f838; review {review:rulings1101}): the field fills its column like a text entry on all five backends."
 
 [[menu]]
 title = '<a href="#item-color_picker">Colour picker</a>'
@@ -176,7 +177,7 @@ unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
 review = 'calls'
 plan_built_part = "stage C10 is capture-plan §8; the plan's BUILT is capture itself"
-text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Open: the self-view's size and the buttons as text or symbols, rulings on the review page; the settled choices are capture-plan §12."
+text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Ruled 2026-11-01 and built (9b59dfd0; review {review:rulings1101}): every call button shows its symbol beside its title, and the self-view sits smaller under the peer's picture until the layering entry lets it float over a corner; the settled choices are capture-plan §12, ratified."
 
 [[menu]]
 title = '<b>Six more languages on a phone</b>'
@@ -213,8 +214,8 @@ star = false
 status = 'open'
 size = 'S each'
 unblocks = 'no app'
-key = 'first line box'
-text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the Windows launchers are derived from the roster, the iOS typeface is read, the Windows dnd_java face folded into its successor watch, WinUI swipe items draw their symbols, the colour picker's panel scene (<code>pick_color</code>) runs on five lanes, and capture's C floor parsers and a C capture guest exist. Left: the iOS codesurface gutter defect (the read that tells a stale layout from a stale draw is in place, awaiting a sighting), the iOS media session's remote pause seen once leaving the player playing, and an iOS simulator that never builds the main menu. Three need a ruling: whether to chase the checkbox's low residue on the mac and GTK (the reported HIGH no longer reproduces), how wide a number field is, and what a C# or Java host does when asked for a scene it does not carry."
+key = 'ios codesurface'
+text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the Windows launchers are derived from the roster, the iOS typeface is read, the Windows dnd_java face folded into its successor watch, WinUI swipe items draw their symbols, the colour picker's panel scene (<code>pick_color</code>) runs on five lanes, and capture's C floor parsers and a C capture guest exist. Left: the iOS codesurface gutter defect (the read that tells a stale layout from a stale draw is in place, awaiting a sighting), the iOS media session's remote pause seen once leaving the player playing, and an iOS simulator that never builds the main menu. The three rulings came 2026-11-01 and are built: the checkbox closed as measured (406562bf), the number field fills its column (6401f838), and every host refuses a scene it does not carry at launch (50c0a246); review {review:rulings1101}."
 
 [[menu]]
 title = '<b>Layering: one view over another</b>'
