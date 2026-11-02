@@ -112,6 +112,17 @@ KayaApp.run { app in
             _ = buttons
             view = tx.surface()  // surface#0
             tx.setA11yLabel(view, "Peer")
+            let narrowCol = tx.column(grow: 1) { narrowCol in
+                let narrow = tx.surface(grow: 1)  // surface#1
+                tx.setA11yId(narrow, "narrow")
+                tx.setA11yLabel(narrow, "Narrow")
+                tx.setA11yId(tx.label("end"), "narrowend")  // label#1
+                return narrowCol
+            }
+            tx.setMaxWidth(narrowCol, 80)
+            let tall = tx.surface(grow: 1)  // surface#2
+            tx.setA11yId(tall, "tall")
+            tx.setA11yLabel(tall, "Tall")
             return root
         }
         tx.mount(root)

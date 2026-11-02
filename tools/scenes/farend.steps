@@ -8,6 +8,12 @@ expect_title "far end"
 expect label#0 "voice none"
 expect_video_ink surface#0 "none"
 expect_video_box surface#0 "320x240"
+# A growing picture fills until either axis of its room is used up, keeping
+# its shape, and the rest of its share stays with the container
+# (docs/media-plan.md §3): 80 wide in its column, and as tall as its share.
+expect_video_box surface@narrow "80x60"
+expect_gap surface@narrow label@narrowend 8
+expect_video_box surface@tall "4:3"
 click button#0
 expect label#0 "voice playing"
 expect_video_ink surface#0 "1E5AC8"

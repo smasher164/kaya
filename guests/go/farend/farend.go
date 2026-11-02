@@ -102,6 +102,7 @@ func App() *kaya.App {
 	app.Build(func(tx *kaya.Tx) {
 		tx.Window(0).Title("far end").Size(520, 640)
 		route = tx.Signal("voice none")
+		end := tx.Signal("end")
 		tx.Mount(tx.Column(func() {
 			tx.Label(route) // label#0
 			tx.Row(func() {
@@ -146,6 +147,11 @@ func App() *kaya.App {
 				})
 			})
 			surface = tx.Surface().A11yLabel("Peer") // surface#0
+			tx.Column(func() {
+				tx.Surface().Grow(1).A11yID("narrow").A11yLabel("Narrow") // surface#1
+				tx.Label(end).A11yID("narrowend")                        // label#1
+			}).Grow(1).MaxWidth(80)
+			tx.Surface().Grow(1).A11yID("tall").A11yLabel("Tall") // surface#2
 		}))
 	})
 	return app

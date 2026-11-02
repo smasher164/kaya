@@ -149,6 +149,27 @@ height-for-width layout calls; SwiftUI spells it `.aspectRatio(.fit)`,
 Compose `Modifier.aspectRatio` and WinUI a `Viewbox` around the natural
 extent. tools/check-verbs.py's video view clause holds all five.
 
+**A growing box, RULED 2026-11-01 (the maintainer: "i agree with your
+recommendation of a").** A video view or a surface that takes `grow`
+enlarges, keeping its aspect, until either axis of the room it is given is
+used up. In a column its room is the column's width and the share of the
+column's height that `grow` gives it, and its box is the largest box at its
+aspect inside that room: the box is the picture, with no bands, centred
+across the column where the width is not the limit. The part of the share
+the box does not use belongs to the container, not to a sibling: the child
+after it follows at the column's spacing, and with every child placed the
+rest of the column is empty, as it is under children that do not grow. In a
+row the box widens to its share and its height follows, a row being as tall
+as its cells. Without `grow` nothing changes. One rule in the core,
+`crate::media::grown_box`, which GTK's flex layout and WinUI's row caps
+call; SwiftUI's `KayaFlex` keeps a copy, and Compose spells it
+`Modifier.weight(fill = false)` with the box's `aspectRatio`. Measured before
+the ruling, the five read one prop five ways (docs/deferred.md, the struck
+"laid out five ways" entry). tools/scenes/farend.steps reads it on all five
+lanes: `surface@narrow` grows in a column 80 wide and is `80x60` with
+`label@narrowend` 8 under it, and `surface@tall`, whose share of the window's
+height is the limit, keeps `4:3`.
+
 | backend | lowering | `fit` | first-frame signal |
 |---|---|---|---|
 | macOS, iOS | a representable backed by a bare `AVPlayerLayer`; never `AVPlayerView` (it keeps Space, arrows and J/K/L at every controls style), `AVPlayerViewController` (child view controller parenting, its own Now Playing session) or SwiftUI `VideoPlayer` (no way to hide its controls; dims a paused picture) | `videoGravity` | `isReadyForDisplay` |

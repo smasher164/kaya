@@ -1140,6 +1140,15 @@ pub(crate) fn video_view_height(natural: (u32, u32), width: i32, grows: bool) ->
     ((width * h + w / 2) / w) as i32
 }
 
+/// A growing video view's or surface's box (docs/media-plan.md §3, a growing
+/// box): the largest box at its natural box's aspect inside the room given.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(dead_code))]
+pub(crate) fn grown_box(natural: (u32, u32), room: (f64, f64)) -> (f64, f64) {
+    let (w, h) = (f64::from(natural.0.max(1)), f64::from(natural.1.max(1)));
+    let scale = (room.0.max(0.0) / w).min(room.1.max(0.0) / h);
+    (w * scale, h * scale)
+}
+
 /// What a video view shows, as its box rule reads it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum VideoPicture {
@@ -1173,6 +1182,14 @@ pub(crate) fn video_view_box(picture: VideoPicture, aspect: i64) -> (u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_growing_box_fills_until_either_axis_is_used_up() {
+        assert_eq!(grown_box((320, 240), (80.0, 1000.0)), (80.0, 60.0));
+        assert_eq!(grown_box((320, 240), (480.0, 120.0)), (160.0, 120.0));
+        assert_eq!(grown_box((320, 180), (640.0, 360.0)), (640.0, 360.0));
+        assert_eq!(grown_box((320, 240), (-5.0, 100.0)), (0.0, 0.0));
+    }
 
     #[test]
     fn an_aspect_sets_the_box_and_nothing_else_does() {

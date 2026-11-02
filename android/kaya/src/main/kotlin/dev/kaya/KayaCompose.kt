@@ -20176,6 +20176,10 @@ private fun kayaIsForm(node: KayaNode): Boolean {
     }
 }
 
+/** A video view or a surface: docs/media-plan.md §3's growing box. */
+internal fun kayaIsAspectBox(node: KayaNode): Boolean =
+    node.kind == KayaCompose.KIND_VIDEO || node.kind == KayaCompose.KIND_SURFACE
+
 /**
  * A HUGGING CONTAINER PINS ITSELF TO ITS CONTENT before the breadth
  * ruling's fill resolves against it: `fillMaxWidth()` takes the
@@ -20259,7 +20263,7 @@ private fun KayaRenderCore(
             } else {
                 node.kind == KayaCompose.KIND_COLUMN
             }
-        if (node.grow > 0) {
+        if (node.grow > 0 && !(flexVertical && kayaIsAspectBox(node))) {
             boxFill =
                 if (flexVertical) boxFill.fillMaxHeight() else boxFill.fillMaxWidth()
         }
@@ -20690,13 +20694,18 @@ private fun KayaRenderCore(
                                 it.size.width.toDouble(),
                             )
                         }
-                        if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
+                        // docs/media-plan.md §3, a growing box: the rest of
+                        // its share stays with the column.
+                        val grownBox = child.grow > 0 && kayaIsAspectBox(child)
+                        if (grownBox) {
+                            cell = cell.weight(child.grow.toFloat(), fill = false).align(Alignment.CenterHorizontally)
+                        } else if (child.grow > 0) cell = cell.weight(child.grow.toFloat())
                         // The track a crossing ROW spans is the whole breadth,
                         // under every align mode (the 2026-08-22 breadth
                         // ruling) — beside stretch, which spans every child's.
-                        if (node.align == KayaCompose.ALIGN_STRETCH ||
+                        if (!grownBox && (node.align == KayaCompose.ALIGN_STRETCH ||
                             (child.kind == KayaCompose.KIND_ROW && child.fill != false) ||
-                            child.kind == KayaCompose.KIND_LABELED
+                            child.kind == KayaCompose.KIND_LABELED)
                         ) {
                             cell = cell.fillMaxWidth()
                         }

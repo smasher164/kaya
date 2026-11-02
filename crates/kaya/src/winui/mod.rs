@@ -3385,6 +3385,8 @@ fn wrap_retry(rid: u64, probe: Grid) {
 }
 
 thread_local! {
+    /// The columns whose LayoutUpdated fits a growing box's row.
+    static GROWN_WIRED: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
     /// The children reindex collapsed because they are vacant (M16 (3)).
     static VACATED: RefCell<std::collections::HashSet<u64>> = RefCell::new(std::collections::HashSet::new());
     /// The widgets the app hid (DESIGN.md, Structural operators): vacant, whatever their kind.
@@ -3415,6 +3417,81 @@ fn vacant(core: &CoreState, id: WidgetId) -> bool {
     core.child_order.children(id).iter().all(|c| vacant(core, *c))
 }
 
+/// The children a container lays out: a folded child renders inside its
+/// table's viewport, and a vacant one takes no track (M16 (3)).
+fn laid_out(core: &CoreState, parent: WidgetId) -> Vec<WidgetId> {
+    core.child_order
+        .children(parent)
+        .iter()
+        .copied()
+        .filter(|c| !core.folded_into.contains_key(&c.0) && !VACATED.with_borrow(|v| v.contains(&c.0)))
+        .collect()
+}
+
+/// A growing video view or surface in a column (docs/media-plan.md §3, a
+/// growing box): its row stops at its box, and while one does, every
+/// grower's row is capped at its own share so the rest stays with the
+/// column (the Grid would hand it to the other star rows). Read from the
+/// column's settled size, so it runs on its LayoutUpdated.
+fn fit_grown_rows(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
+    let Some(NativeWidget::Column(grid) | NativeWidget::Row(grid)) = core.widgets.get(&parent) else {
+        return Ok(());
+    };
+    if !effective_vertical(core, parent) || TABLES.with_borrow(|t| t.contains_key(&parent.0)) {
+        return Ok(());
+    }
+    let order = laid_out(core, parent);
+    let defs = grid.RowDefinitions()?;
+    if defs.Size()? as usize != order.len() {
+        return Ok(());
+    }
+    let pad = grid.Padding()?;
+    let width = grid.ActualWidth()? - pad.Left - pad.Right;
+    let height = grid.ActualHeight()? - pad.Top - pad.Bottom;
+    let weight = |c: &WidgetId| core.grow.get(c).copied().unwrap_or(0.0);
+    let (mut fixed, mut pool) = (0.0, 0.0);
+    for (i, child) in order.iter().enumerate() {
+        if weight(child) > 0.0 {
+            pool += weight(child);
+        } else {
+            fixed += defs.GetAt(i as u32)?.ActualHeight()?;
+        }
+    }
+    if pool <= 0.0 || width <= 0.0 {
+        return Ok(());
+    }
+    let gaps = grid.RowSpacing()? * order.len().saturating_sub(1) as f64;
+    let leftover = (height - fixed - gaps).max(0.0);
+    let mut caps = vec![f64::INFINITY; order.len()];
+    let mut capped = false;
+    for (i, child) in order.iter().enumerate() {
+        if weight(child) <= 0.0 {
+            continue;
+        }
+        let share = leftover * weight(child) / pool;
+        caps[i] = share;
+        if let Some(natural) = media::grown_natural(core, child.0) {
+            let (_, h) = crate::media::grown_box(natural, (width, share));
+            if h < share - 0.5 {
+                caps[i] = h;
+                capped = true;
+            }
+        }
+    }
+    for (i, child) in order.iter().enumerate() {
+        if weight(child) <= 0.0 {
+            continue;
+        }
+        let def = defs.GetAt(i as u32)?;
+        let want = if capped { caps[i] } else { f64::INFINITY };
+        let have = def.MaxHeight()?;
+        if want.is_finite() != have.is_finite() || (want.is_finite() && (want - have).abs() > 0.5) {
+            def.SetMaxHeight(want)?;
+        }
+    }
+    Ok(())
+}
+
 fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     let grid = match core.widgets.get(&parent) {
         Some(NativeWidget::Column(g)) | Some(NativeWidget::Row(g)) => g.clone(),
@@ -3440,13 +3517,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     // The children this container LAYS OUT (D7): a folded child renders
     // inside its table's viewport instead; its order entry stays, so the
     // unfold re-stamps it exactly where it was declared.
-    let order: Vec<WidgetId> = core
-        .child_order
-        .children(parent)
-        .iter()
-        .copied()
-        .filter(|c| !core.folded_into.contains_key(&c.0) && !VACATED.with_borrow(|v| v.contains(&c.0)))
-        .collect();
+    let order = laid_out(core, parent);
     let order = &order[..];
     // This container's own vacancy may have moved with its children.
     if let Some(&above) = core.tree_parent.get(&parent.0) {
@@ -3728,6 +3799,37 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
     }
     if mode == 4 && !vertical {
         baseline_compensate(core, &grid, order)?;
+    }
+    // A growing box is centred across its slot (docs/media-plan.md §3).
+    let mut grown = false;
+    for child in order {
+        let Some(widget @ NativeWidget::Video { .. }) = core.widgets.get(child) else { continue };
+        let grows = core.grow.get(child).copied().unwrap_or(0.0) > 0.0;
+        media::set_grows(core, child.0, grows)?;
+        if !grows {
+            continue;
+        }
+        grown = true;
+        let element: FrameworkElement = widget.element()?.cast()?;
+        if vertical {
+            element.SetHorizontalAlignment(bindings::Microsoft::UI::Xaml::HorizontalAlignment::Center)?;
+        } else {
+            element.SetVerticalAlignment(bindings::Microsoft::UI::Xaml::VerticalAlignment::Center)?;
+        }
+    }
+    if grown && vertical && table.is_none() && GROWN_WIRED.with_borrow_mut(|w| w.insert(parent.0)) {
+        let pid = parent;
+        let laid = EventHandler::<windows_core::IInspectable>::new(move |_, _| {
+            CORE.with(|slot| {
+                let Ok(core) = slot.try_borrow() else { return };
+                let Some(core) = core.as_ref() else { return };
+                if let Err(e) = fit_grown_rows(core, pid) {
+                    eprintln!("KAYA_DIAG winui grown rows of {}: {}", pid.0, e.message());
+                }
+            });
+            Ok(())
+        });
+        grid.LayoutUpdated(&laid)?;
     }
     Ok(())
 }

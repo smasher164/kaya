@@ -86,6 +86,7 @@ pub fn app(ctx: kaya::AppCtx) {
     let (route, surface) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("far end").size(520.0, 640.0);
         let route = tx.signal("voice none");
+        let end = tx.signal("end");
         let (root, surface) = tx
             .column(|tx| {
                 tx.label(route); // label#0
@@ -97,7 +98,15 @@ pub fn app(ctx: kaya::AppCtx) {
                         msgs.on_click(b, msg);
                     }
                 });
-                tx.surface().a11y_label("Peer").id() // surface#0
+                let peer = tx.surface().a11y_label("Peer").id(); // surface#0
+                tx.column(|tx| {
+                    tx.surface().grow(1.0).a11y_id("narrow").a11y_label("Narrow"); // surface#1
+                    tx.label(end).a11y_id("narrowend"); // label#1
+                })
+                .grow(1.0)
+                .max_width(80.0);
+                tx.surface().grow(1.0).a11y_id("tall").a11y_label("Tall"); // surface#2
+                peer
             })
             .into_parts();
         tx.mount(root);

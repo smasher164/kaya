@@ -361,6 +361,9 @@ pub(super) struct WinVideo {
     /// is the core's rule over both (docs/media-plan.md §3).
     shows: std::cell::Cell<crate::media::VideoPicture>,
     aspect: std::cell::Cell<i64>,
+    /// Under `grow` the host widens past its natural width (docs/media-plan.md
+    /// §3, a growing box).
+    grows: std::cell::Cell<bool>,
 }
 
 #[derive(Default)]
@@ -1951,6 +1954,7 @@ pub(super) fn create_video(core: &mut CoreState, id: u64) -> windows_core::Resul
         capture: None,
         shows: std::cell::Cell::new(crate::media::VideoPicture::Player((0, 0))),
         aspect: std::cell::Cell::new(0),
+        grows: std::cell::Cell::new(false),
     };
     natural_size(&video, crate::media::VideoPicture::Player((0, 0)))?;
     core.media.video_ids.push(id);
@@ -1979,19 +1983,39 @@ pub(super) fn surface_elements(core: &CoreState) -> Vec<super::bindings::Microso
 /// wider than the room it is given, its height following its width
 /// (docs/media-plan.md §3).
 fn natural_size(video: &WinVideo, shows: crate::media::VideoPicture) -> windows_core::Result<()> {
-    use crate::media::VideoPicture;
     video.shows.set(shows);
-    let picture = match shows {
-        VideoPicture::Player(size) if size.0 == 0 || size.1 == 0 => VideoPicture::Player((320, 180)),
-        other => other,
-    };
-    let (w, h) = crate::media::video_view_box(picture, video.aspect.get());
+    let (w, h) = natural_box(video);
     let (w, h) = (f64::from(w), f64::from(h));
     video.frame.SetWidth(w)?;
     video.frame.SetHeight(h)?;
     video.host.SetWidth(f64::NAN)?;
-    video.host.SetMaxWidth(w)?;
+    video.host.SetMaxWidth(if video.grows.get() { f64::INFINITY } else { w })?;
     video.host.SetHeight(f64::NAN)
+}
+
+fn natural_box(video: &WinVideo) -> (u32, u32) {
+    use crate::media::VideoPicture;
+    let picture = match video.shows.get() {
+        VideoPicture::Player(size) if size.0 == 0 || size.1 == 0 => VideoPicture::Player((320, 180)),
+        other => other,
+    };
+    crate::media::video_view_box(picture, video.aspect.get())
+}
+
+/// A video view's or a surface's natural box, for the column's growing-box
+/// caps (docs/media-plan.md §3).
+pub(super) fn grown_natural(core: &CoreState, id: u64) -> Option<(u32, u32)> {
+    core.media.videos.get(&id).map(natural_box)
+}
+
+/// Whether the view grows, from the parent's re-stamp.
+pub(super) fn set_grows(core: &CoreState, id: u64, grows: bool) -> windows_core::Result<()> {
+    let Some(video) = core.media.videos.get(&id) else { return Ok(()) };
+    if video.grows.get() == grows {
+        return Ok(());
+    }
+    video.grows.set(grows);
+    natural_size(video, video.shows.get())
 }
 
 // ---- the surface (docs/capture-plan.md §5) -----------------------------------

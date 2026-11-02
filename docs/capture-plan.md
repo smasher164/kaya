@@ -141,7 +141,8 @@ inside that half-size box (180x240 for 640x480, 203x360 for 1280x720) and a
 layout that fits one platform fits the others. It takes no minimum: in a window narrower than that it shrinks to the room
 it is given, keeping its aspect, so its height follows its width and the
 picture fills it with no bands (docs/media-plan.md §3, the one rule every
-video view keeps). The natural size is computed in one place,
+video view keeps). Under `grow` it fills as any video view does
+(docs/media-plan.md §3, a growing box). The natural size is computed in one place,
 `crate::capture::self_view_natural`, reached only through the video view's
 box rule (`crate::media::video_view_box`, docs/media-plan.md §3), which GTK
 and WinUI call directly and the two interpreters reach through
@@ -409,7 +410,8 @@ as written here and can change on a word:
    work the producer research holds.
 3. **A surface's box is the self-view's rule** (§3): half its frames, a
    rotated frame fitted upright, 320x240 before the first frame; `fit`,
-   `aspect` and `bleed` as a video view's.
+   `aspect` and `bleed` as a video view's, and under `grow` it fills as a
+   video view does (docs/media-plan.md §3, a growing box, RULED 2026-11-01).
 4. **A surface is live-only**: a row template holding one is a scene error,
    as a row's capture preview is (§10 ruling 2).
 5. **A voice output holds 200 ms ahead of the platform** (KAYA_VOICE_QUEUE_MS):
@@ -485,8 +487,8 @@ by tools/scenes/chatcall.steps on five lanes. What it settled:
    the self-view shrinks to that room keeping its aspect (§3), a 4:3 tile by
    `aspect(4, 3)` with `cover` so Android's upright 3:4 front camera shows the
    wide tile the other lanes show (107x80); the peer's picture takes no
-   `grow` and keeps its natural 320x240 (docs/deferred.md, a growing video
-   view laid out five ways). tools/scenes/chatcall.steps reads both boxes and
+   `grow` and keeps its natural 320x240 (under `grow` it would fill the
+   call's room, docs/media-plan.md §3, a growing box). tools/scenes/chatcall.steps reads both boxes and
    the column's 8 point spacing above and below the peer. Ratified
    2026-11-01 (the maintainer, 2026-11-01: "the four small ones are fine, go with them"). The maintainer wants the self-view floated over a corner of
    the peer's picture in the end, which needs a layering kind kaya lacks

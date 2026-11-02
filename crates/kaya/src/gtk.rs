@@ -1646,6 +1646,29 @@ fn set_max_across(widget: &gtk4::Widget, points: f64) {
     unsafe { widget.set_data(MAX_ACROSS_KEY, points) }
 }
 
+/// A video view or a surface: under `grow` the flex layout gives it the
+/// largest box at its aspect in its room (docs/media-plan.md §3, a growing box).
+const ASPECT_BOX_KEY: &str = "kaya-aspect-box";
+
+fn mark_aspect_box(widget: &gtk4::Widget) {
+    // SAFETY: the only writer of the key.
+    unsafe { widget.set_data(ASPECT_BOX_KEY, true) }
+}
+
+/// A growing aspect box's natural box, read off its picture's measure.
+fn grown_aspect(widget: &gtk4::Widget) -> Option<(u32, u32)> {
+    use gtk4::prelude::WidgetExt;
+    // SAFETY: the key is private to this module and only ever holds a bool.
+    unsafe { widget.data::<bool>(ASPECT_BOX_KEY) }?;
+    if grow_weight(widget) <= 0.0 {
+        return None;
+    }
+    let picture = widget.downcast_ref::<gtk4::Overlay>()?.child()?;
+    let (_, w, _, _) = picture.measure(gtk4::Orientation::Horizontal, -1);
+    let (_, h, _, _) = picture.measure(gtk4::Orientation::Vertical, -1);
+    (w > 0 && h > 0).then_some((w as u32, h as u32))
+}
+
 /// A child's measure under its widest width (M20 (2)): the natural width
 /// is capped, and a height is asked for a width inside the cap, since the
 /// allocate caps the width the child gets.
@@ -2090,6 +2113,12 @@ fn reconcile_grow_align(child: &gtk4::Widget) {
         child.set_halign(gtk4::Align::Fill);
         child.set_valign(gtk4::Align::Fill);
     }
+    // A growing box: the flex layout allocates the box itself, which an
+    // align other than Fill would clamp to its natural size (docs/media-plan.md §3).
+    if grown_aspect(child).is_some() {
+        child.set_halign(gtk4::Align::Fill);
+        child.set_valign(gtk4::Align::Fill);
+    }
 }
 
 /// The flex layout manager: GTK's half of the `grow` contract. GtkBox cannot
@@ -2513,11 +2542,22 @@ mod flex {
                 .iter()
                 .enumerate()
                 .map(|(i, (c, weight, _, _))| {
-                    let extent = if *weight > 0.0 {
+                    let mut extent = if *weight > 0.0 {
                         shares.next().expect("a grower has a computed share")
                     } else {
                         extents_fixed[i]
                     };
+                    // docs/media-plan.md §3, a growing box: the rest of the
+                    // share stays with the container.
+                    if let (Some(natural), true) = (super::grown_aspect(c), cross_total > 0) {
+                        let room = if vertical {
+                            (f64::from(cross_total), f64::from(extent))
+                        } else {
+                            (f64::from(extent), f64::from(cross_total))
+                        };
+                        let (w, h) = crate::media::grown_box(natural, room);
+                        extent = extent.min((if vertical { h } else { w }).round() as i32);
+                    }
                     (c.clone(), extent)
                 })
                 .collect()
@@ -2652,6 +2692,19 @@ mod flex {
                 let (w, x) = match super::max_across(&c) {
                     Some(cap) if w > cap => (cap, if rtl && !vertical { x + w - cap } else { x }),
                     _ => (w, x),
+                };
+                // A growing box is centred across its slot (docs/media-plan.md §3).
+                let (w, h, x, y) = match super::grown_aspect(&c) {
+                    Some(natural) => {
+                        let (bw, bh) = crate::media::grown_box(natural, (f64::from(w), f64::from(h)));
+                        let (bw, bh) = (bw.round() as i32, bh.round() as i32);
+                        if vertical {
+                            (bw, bh, x + (w - bw) / 2, y)
+                        } else {
+                            (bw, bh, x, y + (h - bh) / 2)
+                        }
+                    }
+                    None => (w, h, x, y),
                 };
 // The track, recorded BEFORE the allocate: what GTK stores on the
 // child afterwards is the box its own align and margins shrank it to.
@@ -31211,7 +31264,9 @@ mod gtk_media {
                 }
                 let grows = widget.parent().is_some_and(|p| super::super::grow_weight(&p) > 0.0);
                 let at = crate::media::video_view_height((w.max(0) as u32, h.max(0) as u32), for_size, grows);
-                (at, at, -1, -1)
+                // A growing box takes its room, never a floor of its own
+                // (docs/media-plan.md §3, a growing box).
+                (if grows { 0 } else { at }, at, -1, -1)
             }
 
             fn allocate(&self, _widget: &gtk4::Widget, _width: i32, _height: i32, _baseline: i32) {}
@@ -31259,6 +31314,7 @@ mod gtk_media {
         frame.set_layout_manager(Some(layout.clone()));
         frame.set_content_fit(gtk4::ContentFit::Contain);
         overlay.set_child(Some(&frame));
+        super::mark_aspect_box(overlay.upcast_ref());
         let caption = gtk4::Label::new(None);
         caption.set_visible(false);
         let seen = std::cell::Cell::new(0u64);
@@ -31303,6 +31359,7 @@ mod gtk_media {
         picture.set_layout_manager(Some(video_layout_manager::VideoLayout::default()));
         picture.set_content_fit(gtk4::ContentFit::Contain);
         overlay.set_child(Some(&picture));
+        super::mark_aspect_box(overlay.upcast_ref());
         let caption = gtk4::Label::new(None);
         caption.set_accessible_role(gtk4::AccessibleRole::None);
         // SAFETY: the only writer of the key.

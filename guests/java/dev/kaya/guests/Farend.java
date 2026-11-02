@@ -149,6 +149,11 @@ public final class Farend {
                     });
                 });
                 view[0] = tx.surface().a11yLabel("Peer"); // surface#0
+                tx.column(narrow -> {
+                    tx.surface().grow(1.0).a11yId("narrow").a11yLabel("Narrow"); // surface#1
+                    tx.label("end").a11yId("narrowend"); // label#1
+                }).grow(1.0).maxWidth(80.0);
+                tx.surface().grow(1.0).a11yId("tall").a11yLabel("Tall"); // surface#2
             }));
             return null;
         });

@@ -85,6 +85,12 @@ const { line, view } = app.window({ title: "far end", width: 520, height: 640 },
       }); // button#3
     });
     view = kaya.surface().a11yLabel("Peer"); // surface#0
+    kaya.column({ grow: 1 }, (narrow) => {
+      narrow.maxWidth(80);
+      kaya.surface({ grow: 1 }).a11yId("narrow").a11yLabel("Narrow"); // surface#1
+      kaya.label("end").a11yId("narrowend"); // label#1
+    });
+    kaya.surface({ grow: 1 }).a11yId("tall").a11yLabel("Tall"); // surface#2
   });
   return { line, view };
 });

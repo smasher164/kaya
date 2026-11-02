@@ -123,6 +123,19 @@ static class FarendScene
                 });
                 surface = tx.Surface(); // surface#0
                 tx.SetA11yLabel(surface, "Peer");
+                var narrowCol = tx.Column(narrowCol =>
+                {
+                    var narrow = tx.Surface(grow: 1); // surface#1
+                    tx.SetA11yId(narrow, "narrow");
+                    tx.SetA11yLabel(narrow, "Narrow");
+                    tx.SetA11yId(tx.Label("end"), "narrowend"); // label#1
+                    return narrowCol;
+                });
+                tx.SetGrow(narrowCol, 1);
+                tx.SetMaxWidth(narrowCol, 80);
+                var tall = tx.Surface(grow: 1); // surface#2
+                tx.SetA11yId(tall, "tall");
+                tx.SetA11yLabel(tall, "Tall");
                 return root;
             }));
             return route;

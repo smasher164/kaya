@@ -5519,7 +5519,9 @@ def self_view_natural(texts=None):
                                        for c in capture_calls):
         bad.append(f"{WINUI_MEDIA}: {len(capture_calls)} self-view sizing call(s) through "
                    f"crate::media::VideoPicture::SelfView, wanted the attach and the detach")
-    winui = need("winui", "fn natural_size(", "SetMaxWidth(w)", "video.host.SetWidth(f64::NAN)",
+    winui = need("winui", "fn natural_size(",
+                 "SetMaxWidth(if video.grows.get() { f64::INFINITY } else { w })",
+                 "video.host.SetWidth(f64::NAN)",
                  "video.host.SetHeight(f64::NAN)", "video.frame.SetHeight(h)",
                  why="the WinUI view fixes its host's size, so it no longer shrinks at "
                      "its aspect")
@@ -5547,7 +5549,7 @@ def self_view_natural(texts=None):
         need("video_layout", "fn measure(", "return (0, w, -1, -1);",
              "Some(frames) => crate::media::VideoPicture::SelfView "
              "{ frames, rotation: self.rotation.get() },",
-             "crate::media::video_view_height(", "(at, at, -1, -1)",
+             "crate::media::video_view_height(", "(if grows { 0 } else { at }, at, -1, -1)",
              why="the GTK video view reports a minimum or a height of its own")
     flow = brace_body(t["gtk_media"], "impl LayoutManagerImpl for FlowLayoutInner {")
     if flow is None or "gtk4::SizeRequestMode::HeightForWidth" not in flow:
@@ -5822,8 +5824,9 @@ def video_aspect(texts=None, names=None):
              "picture's bars are outside the texture and the corner reads the picture")
     need("gtk", "pub(super) fn video_box(view: &GtkVideoView)", "view.picture.width()",
          why="expect_video_box reads something other than the laid-out picture")
-    need("winui", "fn natural_size(", f"crate::media::{n['box']}(picture, video.aspect.get())",
-         "video.shows.set(shows)",
+    need("winui", "fn natural_box(", f"crate::media::{n['box']}(picture, video.aspect.get())",
+         why="the WinUI box is sized from the picture when the app set an aspect")
+    need("winui", "fn natural_size(", "video.shows.set(shows)", "natural_box(video)",
          why="the WinUI box is sized from the picture when the app set an aspect")
     need("winui", "pub(super) fn create_video(", "frame.Children()?.Append(&element)",
          "frame.Children()?.Append(&picture)",

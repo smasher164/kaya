@@ -119,7 +119,13 @@ main = kayaMain $ \app -> do
               buttonOn "Quiet" (modifyMVar_ peer (\s -> return s {sHz = 0})),
               buttonOn "Hang up" hangUp -- button#3
             ],
-          pure view
+          pure view,
+          column
+            [Grow 1, MaxWidth 80]
+            [ surface [Grow 1, A11yId "narrow", A11yLabel "Narrow"], -- surface#1
+              labelText "end" [A11yId "narrowend"] -- label#1
+            ],
+          surface [Grow 1, A11yId "tall", A11yLabel "Tall"] -- surface#2
         ]
     mount root
     return (route, view)

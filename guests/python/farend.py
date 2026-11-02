@@ -119,5 +119,10 @@ with app.window("far end", width=520.0, height=640.0):
             kaya.button("Quiet", on_click=quiet)           # button#2
             kaya.button("Hang up", on_click=hang_up)       # button#3
         view = kaya.surface().a11y_label("Peer")           # surface#0
+        with kaya.column(grow=1) as narrow:
+            narrow.max_width(80)
+            kaya.surface(grow=1).a11y_id("narrow").a11y_label("Narrow")  # surface#1
+            kaya.label("end").a11y_id("narrowend")         # label#1
+        kaya.surface(grow=1).a11y_id("tall").a11y_label("Tall")  # surface#2
 
 sys.exit(app.run())

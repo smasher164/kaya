@@ -23752,9 +23752,9 @@ struct KayaFlex: Layout {
     /// not fit, each fixed cell shrunk in proportion to its slack above
     /// its longest word (what a Text answers a zero-width proposal with),
     /// never below it; the growers divide what is left after that.
-    func extents(mainExtent: CGFloat, subviews: Subviews, childProposal: ProposedViewSize)
-        -> [CGFloat]
-    {
+    func extents(
+        mainExtent: CGFloat, subviews: Subviews, childProposal: ProposedViewSize, cross: CGFloat? = nil
+    ) -> [CGFloat] {
         // A grower's natural size is deliberately not consulted: the contract is
         // flex-basis 0.
         var extents = subviews.indices.map { i -> CGFloat in
@@ -23794,7 +23794,36 @@ struct KayaFlex: Layout {
                 }
             }
         }
+        // docs/media-plan.md §3, a growing box: the rest of the share stays
+        // with the container.
+        if let cross, cross > 0 {
+            for i in subviews.indices {
+                guard let natural = grownAspect(i) else { continue }
+                let fitted = Self.grownBox(natural, room: vertical
+                    ? CGSize(width: cross, height: extents[i]) : CGSize(width: extents[i], height: cross))
+                extents[i] = min(extents[i], main(fitted))
+            }
+        }
         return extents
+    }
+
+    /// crates/kaya/src/media.rs's grown_box, the interpreter's copy.
+    static func grownBox(_ natural: CGSize, room: CGSize) -> CGSize {
+        let w = max(natural.width, 1), h = max(natural.height, 1)
+        let scale = min(max(room.width, 0) / w, max(room.height, 0) / h)
+        return CGSize(width: w * scale, height: h * scale)
+    }
+
+    /// A growing video view's or surface's natural box.
+    private func grownAspect(_ i: Int) -> CGSize? {
+        guard i < nodes.count, nodes[i].grow > 0,
+            nodes[i].kind == kindVideo || nodes[i].kind == kindSurface
+        else { return nil }
+        let node = nodes[i]
+        let natural = MainActor.assumeIsolated {
+            node.kind == kindVideo ? kayaVideoNatural(node) : kayaSurfaceNatural(node)
+        }
+        return natural.width > 0 && natural.height > 0 ? natural : nil
     }
 
     func sizeThatFits(
@@ -23872,7 +23901,8 @@ struct KayaFlex: Layout {
         let childProposal = Self.bounded(
             ProposedViewSize(bounds.size), vertical: vertical)
         let extents = extents(
-            mainExtent: main(bounds.size), subviews: subviews, childProposal: childProposal)
+            mainExtent: main(bounds.size), subviews: subviews, childProposal: childProposal,
+            cross: cross(bounds.size))
 
         kayaTrace("flex v=\(vertical) bounds=\(Int(bounds.width))x\(Int(bounds.height)) "
             + "ids=\(nodes.map { $0.id }) grow=\(nodes.map { $0.grow }) "
@@ -23892,11 +23922,22 @@ struct KayaFlex: Layout {
             // child decides: a nested container fills it, a label keeps its
             // intrinsic width. That reproduces the stack behaviour the other
             // backends have natively.
-            let sized =
+            var sized =
                 vertical
                 ? ProposedViewSize(width: bounds.width, height: extent)
                 : ProposedViewSize(width: extent, height: bounds.height - drop)
-            subviews[i].place(at: origin, anchor: .topLeading, proposal: sized)
+            var at = origin
+            if let natural = grownAspect(i) {
+                let slot = CGSize(width: sized.width ?? 0, height: sized.height ?? 0)
+                let fitted = Self.grownBox(natural, room: slot)
+                sized = ProposedViewSize(fitted)
+                if vertical {
+                    at.x += (slot.width - fitted.width) / 2
+                } else {
+                    at.y += (slot.height - fitted.height) / 2
+                }
+            }
+            subviews[i].place(at: at, anchor: .topLeading, proposal: sized)
             offset += extent + spacing
         }
     }

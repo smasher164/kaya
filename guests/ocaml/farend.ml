@@ -122,6 +122,18 @@ let () =
                 let w = surface ~a11y_label:"Peer" () in (* surface#0 *)
                 peer_view := Some w;
                 w);
+              (fun () ->
+                let c =
+                  column ~grow:1.0
+                    [
+                      surface ~grow:1.0 ~a11y_id:"narrow" ~a11y_label:"Narrow" (* surface#1 *);
+                      label ~a11y_id:"narrowend" ~text:"end" (* label#1 *);
+                    ]
+                    ()
+                in
+                set_max_width c 80.0;
+                c);
+              surface ~grow:1.0 ~a11y_id:"tall" ~a11y_label:"Tall" (* surface#2 *);
             ]
             ()
         in
