@@ -24974,7 +24974,9 @@ internal fun kayaHideDocumentsList() {
         KayaSceneModel.documentsListShown = false
         return
     }
-    kayaDocumentsScope?.launch { state.hide() }?.invokeOnCompletion {
+    KayaVTrace.note("documents_sheet", "hide asked at ${state.currentValue} going to ${state.targetValue}")
+    kayaDocumentsScope?.launch { state.hide() }?.invokeOnCompletion { why ->
+        KayaVTrace.note("documents_sheet", "hide ended${why?.let { ": $it" } ?: ""}")
         KayaSceneModel.documentsListShown = false
     } ?: run { KayaSceneModel.documentsListShown = false }
 }
@@ -25044,8 +25046,17 @@ fun KayaDocumentsSheet() {
     val scope = rememberCoroutineScope()
     KayaSceneModel.documentsSheetState = state
     kayaDocumentsScope = scope
+    // docs/deferred.md, the android documents list that did not come up: the
+    // sheet's moves in the verb trace.
+    androidx.compose.runtime.LaunchedEffect(state) {
+        KayaVTrace.note("documents_sheet", "composed: ${state.currentValue} going to ${state.targetValue}")
+        androidx.compose.runtime.snapshotFlow { state.currentValue to state.targetValue }.collect { (now, to) ->
+            KayaVTrace.note("documents_sheet", "$now going to $to")
+        }
+    }
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose {
+            KayaVTrace.note("documents_sheet", "disposed")
             KayaSceneModel.documentsSheetState = null
             KayaSceneModel.documentsSheetWindow = null
             kayaDocumentsScope = null

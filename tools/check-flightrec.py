@@ -228,6 +228,8 @@ def census_documents_why(src):
     if why < 0 or not 0 <= why < hide:
         found.append("android: kayaDocumentsRead does not read why the list is not up before it "
                      "puts the list away")
+    if 'KayaVTrace.note("documents_sheet", "$now going to $to")' not in kt:
+        found.append("android: the documents sheet's moves are not in the verb trace")
     if kt.count("($kayaDocumentsWhy)") != 2:
         found.append("android: a documents refusal does not say why the list is not up "
                      "($kayaDocumentsWhy)")
@@ -2988,6 +2990,10 @@ nv1 = doctored(CAPTURE_LEG, r'"step-failed voice" in line', '"step-failed voice"
                "NV1 the voice graph never read")
 gate.negative("NV1 a voice red without the graph it ran in",
               lambda: census_voice_graph(nv1), want="PipeWire links")
+nd3 = doctored(COMPOSE, r'KayaVTrace\.note\("documents_sheet", "\$now going to \$to"\)', "Unit",
+               "NDS1 the sheet's moves untraced")
+gate.negative("NDS1 a documents sheet whose moves the trace does not show",
+              lambda: census_documents_why(nd3), want="sheet's moves are not in the verb trace")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -3987,6 +3993,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(282 + (5 if DRIVES else 0))
+gate.negatives_ran(283 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

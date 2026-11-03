@@ -1490,8 +1490,10 @@ the sheet is Hidden going to Hidden; a dialog window showing 1 document
 row(s)". The ModalBottomSheet was composed in its dialog window and never
 animated toward Expanded. Not yet explained: whether its own show was never
 started (anchors unmeasured under load) or was cancelled by the previous
-read's hide; the next step is to trace the sheet state's transitions in the
-verb trace.
+read's hide. The verb trace now carries every move of the sheet and every
+hide the reader asks (forced red read back: "composed: Hidden going to Hidden",
+"Hidden going to Expanded", "hide asked at Expanded going to Expanded", "hide
+ended"); read those first on the next sighting.
 
 ## ~~DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)~~ FIXED 2026-11-03: a surface draws its frames with a linear filter, measured 9 of 147 main-thread samples in glGenerateMipmap before and 0 of 145 after (docs/traps.md, the GTK surface mipmap stall)
 KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter
