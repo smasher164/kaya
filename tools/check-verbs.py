@@ -834,6 +834,13 @@ def verb_trace(harness_src=None, swift_src=None, kotlin_src=None,
                  if runner_text.rfind("NSSetUncaughtExceptionHandler", 0, c) >= 0
                  and c - runner_text.rfind("NSSetUncaughtExceptionHandler", 0, c) < 300]
         calls = [c for c in calls if c not in crash]
+        # THE FIRST FAILED STEP dumps too (docs/traps.md, the android leg with
+        # no verb trace): a leg its runner ends without a verdict keeps it.
+        first = [c for c in calls if "the first failed step" in runner_text[c:c + 120]]
+        calls = [c for c in calls if c not in first]
+        if len(first) != 1:
+            bad.append(f"{runner_rel} has {len(first)} first-failed-step dump site(s), want "
+                       f"exactly 1: a leg its runner ends without a verdict leaves no trace")
         if len(crash) > 1 or (crash and lang != "swift"):
             bad.append(f"{runner_rel} dumps the verb trace from "
                        f"{len(crash)} uncaught-exception handler(s) — one, "
@@ -2070,6 +2077,12 @@ VTRACE_NEGATIVES = [
     ("the Rust watchdog dump moved off the fire path", HARNESS,
      r'crate::vtrace::dump\("the step ceiling fired: no verdict"\);\n',
      "", "verb-trace dump site(s), want exactly 2"),
+    ("the Swift first-failed-step dump cut", SWIFT,
+     r'if failuresBefore == 0 \{ KayaVTrace\.dump\("the first failed step: ', "if false { print(\"",
+     "first-failed-step dump site(s), want exactly 1"),
+    ("the Rust first-failed-step dump cut", HARNESS,
+     r'crate::vtrace::dump\(&format!\("the first failed step: \{e\}"\)\);', "",
+     "first-failed-step dump site(s), want exactly 1"),
     ("the Rust ring's pointer line drifted", VTRACE,
      r'appended to \{\}', "written to {}",
      "does not carry the verb-trace line shape"),

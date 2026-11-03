@@ -9372,6 +9372,11 @@ fn run_with_log(
                 // on the alert guard, and diagnosing it meant noticing that
                 // six steps took EXACTLY 15.0s (POLL_DEADLINE).
                 let picture = if failures.is_empty() { stage.failure_picture() } else { String::new() };
+                // A leg its runner ends without a verdict keeps the trace
+                // (docs/traps.md, the android leg with no verb trace).
+                if failures.is_empty() {
+                    crate::vtrace::dump(&format!("the first failed step: {e}"));
+                }
                 if let Some((log, _)) = log {
                     log(&format!("KAYA_HARNESS: step-failed {e}"));
                     #[cfg(target_os = "linux")]

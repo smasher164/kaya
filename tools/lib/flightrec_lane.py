@@ -624,15 +624,17 @@ def mac_no_trace_sentence(scratch, log):
         return (mac_timeout_sentence(log) if log else
                 "flightrec: `timeout 120` killed the leg (exit 124) with no "
                 "verdict; it streamed to the terminal, so no step is named") + (
-                    "; the harness dumps the ring only on a verdict or its step "
-                    "watchdog, so it wrote no verb trace")
+                    "; the harness dumps the ring at its first failed step, a "
+                    "failed verdict and its step watchdog, so it reached none of "
+                    "them and wrote no verb trace")
     if rc == "0":
         return ("flightrec: the guest wrote no verb trace because it exited 0, "
                 "its own verdict passing; the red is the runner's refusal, "
                 "written at the end of the leg log")
     return (f"flightrec: the guest wrote no verb trace and exited {rc}: the "
-            "ring is dumped on a FAILED verdict and by the step watchdog, so "
-            "the leg ended before either (a crash or act one's own refusal; "
+            "ring is dumped at the first failed step, on a FAILED verdict and "
+            "by the step watchdog, so the leg ended before any of them (a crash "
+            "or act one's own refusal; "
             "the leg log carries its last lines)")
 
 

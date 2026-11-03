@@ -17602,6 +17602,8 @@ private func kayaRunScript(_ script: String) {
                     for text in failures[failuresBefore...] {
                         print("KAYA_HARNESS: step-failed \(text)")
                     }
+                    // docs/traps.md, the android leg with no verb trace.
+                    if failuresBefore == 0 { KayaVTrace.dump("the first failed step: \(line)") }
                     watchdog.enter("<the fail shot>")
                     KayaFailShot.take("the first failed step, \(line)")
                 }

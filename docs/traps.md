@@ -20108,4 +20108,8 @@ runner's leg ceiling and was ended before either, so two matrices' bundles
 carried a 63-byte trace while the cause sat in the ring. The ring is now
 also dumped at the first failed step (append mode, so a verdict's dump
 follows it); forced red: a leg ended without a verdict left 3774 bytes
-starting "dump reason=\"the first failed step: ...\"". check-flightrec NDS2.
+starting "dump reason=\"the first failed step: ...\"". The mac lane had the
+same gap under `timeout 120`, so all three harnesses dump there (harness.rs,
+KayaSwiftUI.swift, KayaCompose.kt): a forced red on every lane left the
+first-failed-step dump in 40 of 40 bundles. check-verbs holds one such site
+per harness (two cuts watched), check-flightrec NDS2.
