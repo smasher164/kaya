@@ -10769,6 +10769,36 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
 
     private class KayaDocRow(val title: String, val dirty: Boolean, val node: SemanticsNode)
 
+    /** Why [kayaDocumentRows] answered null, each clause a reading made now
+     * (docs/traps.md, the android documents list that never came up). */
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class,
+        androidx.compose.material3.ExperimentalMaterial3Api::class)
+    private fun kayaDocumentsWhyNot(activity: ComponentActivity): String {
+        val main = kayaComposeRoot(activity.window.decorView) as? RootForTest
+            ?: return "the activity has no compose root"
+        main.measureAndLayoutForTest()
+        val button = if (kayaAxFind(main.semanticsOwner.rootSemanticsNode, DOCUMENTS_TAG) == null)
+            "no documents button in the activity's tree" else "the documents button is in the tree"
+        val asked = if (KayaSceneModel.documentsListShown) "the list is asked to show" else "the list is not asked to show"
+        val state = KayaSceneModel.documentsSheetState
+        val drawn = if (state == null) "the sheet is not composed" else
+            "the sheet is ${state.currentValue} going to ${state.targetValue}"
+        val window = KayaSceneModel.documentsSheetWindow
+        val root = if (window == null) "no dialog window" else
+            (kayaComposeRoot(window.decorView) as? RootForTest)?.let { r ->
+                r.measureAndLayoutForTest()
+                var rows = 0
+                fun walk(n: SemanticsNode, depth: Int) {
+                    if (depth > 64) return
+                    if (n.config.getOrNull(SemanticsProperties.TestTag) == DOCUMENT_ROW_TAG) rows++
+                    else n.children.forEach { walk(it, depth + 1) }
+                }
+                walk(r.semanticsOwner.rootSemanticsNode, 0)
+                "a dialog window showing $rows document row(s)"
+            } ?: "a dialog window with no compose root"
+        return "$button; $asked; $drawn; $root"
+    }
+
     /** The documents list's rows off its sheet's semantics tree, top to
      * bottom; empty when the bar shows no documents button, null while the
      * sheet is not up and settled, which this read opens through the bar's
@@ -10841,6 +10871,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
     /** The rows once [done] holds of them, or the last read at the bound; a
      * list the read opened it closes again, waiting for the sheet to go, so
      * the next step meets the document (docs/doctabs-plan.md §4). */
+    private var kayaDocumentsWhy = ""
+
     private fun kayaDocumentsRead(activity: ComponentActivity, done: (List<KayaDocRow>) -> Boolean): List<KayaDocRow>? {
         kayaAwaitListSettled(activity)
         val opened = onUi(activity) { !KayaSceneModel.documentsListShown }
@@ -10851,6 +10883,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             if (rows != null && done(rows)) break
             Thread.sleep(100)
         } while (System.nanoTime() < readBy)
+        // Read before the list is put away, which would erase the state it names.
+        kayaDocumentsWhy = if (rows == null) onUi(activity) { kayaDocumentsWhyNot(activity) } else ""
         if (opened) {
             onUi(activity) { kayaHideDocumentsList() }
             val goneBy = System.nanoTime() + 5_000_000_000L
@@ -14874,7 +14908,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         val got = rows?.joinToString("|") { it.title }
                         when {
                             got == want -> observed.add("documents \"$want\"")
-                            rows == null -> failures.add("the documents list is not up yet, wanted \"$want\"")
+                            rows == null -> failures.add("the documents list is not up yet " +
+                                "($kayaDocumentsWhy), wanted \"$want\"")
                             else -> failures.add("documents \"$got\", wanted \"$want\"")
                         }
                     }
@@ -14897,7 +14932,8 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             r.firstOrNull { it.title == title }?.let { if (it.dirty) "true" else "false" }
                                 ?: "<no row titled $title (rows: ${r.map { it.title }})>"
                         val rows = kayaDocumentsRead(activity) { dirtyOf(it) == wantDirty }
-                        val got = rows?.let(::dirtyOf) ?: "<the documents list is not up yet>"
+                        val got = rows?.let(::dirtyOf)
+                            ?: "<the documents list is not up yet ($kayaDocumentsWhy)>"
                         if (got == wantDirty) observed.add("document \"$title\" dirty $wantDirty")
                         else failures.add("document \"$title\" dirty $got, wanted $wantDirty")
                     }

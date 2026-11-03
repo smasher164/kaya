@@ -179,6 +179,26 @@ def census_android_app_shot(src):
     return found
 
 
+def census_documents_why(src):
+    """docs/traps.md, the android documents list that never came up: the
+    read's refusal names the button, the request, the sheet's state and its
+    window, read BEFORE the list is put away (which erases them)."""
+    found = []
+    kt = src[COMPOSE]
+    read = kt[kt.find("private fun kayaDocumentsRead("):]
+    read = read[:read.find("\n    }\n")]
+    why = read.find("kayaDocumentsWhy = if (rows == null) onUi(activity) "
+                    "{ kayaDocumentsWhyNot(activity) }")
+    hide = read.find("kayaHideDocumentsList()")
+    if why < 0 or not 0 <= why < hide:
+        found.append("android: kayaDocumentsRead does not read why the list is not up before it "
+                     "puts the list away")
+    if kt.count("($kayaDocumentsWhy)") != 2:
+        found.append("android: a documents refusal does not say why the list is not up "
+                     "($kayaDocumentsWhy)")
+    return found
+
+
 def census_mac_app_shot(src):
     """docs/traps.md, the mac red leg whose window was gone: the guest
     leaves within the grace of its verdict, so the collect lists the other
@@ -2739,6 +2759,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
             ("no frontmost shot", census_frontmost),
             ("no foreign window title", census_foreign_titles),
+            ("android documents why-not", census_documents_why),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -2921,6 +2942,14 @@ na10 = doctored(COMPOSE, r"android\.view\.PixelCopy\.request\(view, layer,",
                 "NA10 the surface copy aimed at the window")
 gate.negative("NA10 a surface layer copied from the window, which holds only its hole",
               lambda: census_android_app_shot(na10), want="does not copy each SurfaceView")
+nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
+               "ND1 the documents why-not unread")
+gate.negative("ND1 a documents refusal read after the list is put away",
+              lambda: census_documents_why(nd1), want="before it puts the list away")
+nd2 = doctored(COMPOSE, r'"<the documents list is not up yet \(\$kayaDocumentsWhy\)>"',
+               '"<the documents list is not up yet>"', "ND2 the dirty refusal without its why")
+gate.negative("ND2 a dirty read refusing without the why",
+              lambda: census_documents_why(nd2), want="does not say why the list is not up")
 na8 = doctored(COMPOSE, r"covered its bottom \$\{bottom\}px", "covered its bottom",
                "NA8 the keyboard sentence interpolating nothing")
 gate.negative("NA8 a keyboard sentence that measured nothing",
@@ -3912,6 +3941,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(278 + (5 if DRIVES else 0))
+gate.negatives_ran(280 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

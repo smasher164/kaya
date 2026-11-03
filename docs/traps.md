@@ -20037,3 +20037,16 @@ carries; the hole is the only record of it (forced red: "8560 transparent of
 15301 px there", the picture equal to `adb screencap` of the same frame).
 With no hole the layer is drawn over, and the sentence says so.
 check-flightrec NA9/NA10.
+
+## The android documents list that never came up (seen 2026-11-03)
+
+In a matrix stopped on battery (load 93-176), editor-go on Android read
+`document "untitled" dirty <the documents list is not up yet>` for three
+attempts. That sentence could not tell an unpressed button from a sheet that
+never composed or one that composed with no rows. The read now names each,
+measured before the list is put away (putting it away erases exactly that
+state; the first version read it after and printed "not asked to show" for a
+sheet that was up): "the documents button is in the tree; the list is asked
+to show; the sheet is Expanded going to Expanded; a dialog window showing 1
+document row(s)". Both forced branches printed (the press cut; the rows
+refused). check-flightrec ND1/ND2 (android documents why-not).

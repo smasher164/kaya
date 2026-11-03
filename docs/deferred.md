@@ -1449,6 +1449,34 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
+## WATCH — Android editor-go: the documents list did not come up under load (seen once 2026-11-03, a matrix stopped on battery); the read now says which part failed
+KEY: editor-go android, the documents list is not up yet, kayaDocumentsWhyNot, kayaDocumentsWhy, documentsSheetState
+
+Flight recorder run 20261103T092933Z-089600: `expect_document_dirty "untitled" true`
+read "<the documents list is not up yet>" for three attempts at host load
+93-176 on battery; the app's picture shows the editor with the keyboard up and
+no sheet. The read now names the button, the request, the sheet's state and
+its window before the list is put away (docs/traps.md, the android documents
+list that never came up). Read that clause first on the next sighting.
+
+## DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)
+KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter
+
+Run 20261103T093015Z-008418: farend rust, python, go, ocaml and haskell on x11
+each ended at the harness ceiling inside Click(button#3) or
+ExpectVideoInk(surface#0, "C83C1E"), seven farend processes at about 120% CPU
+each in the VM, the host at load 100-176 on battery. The main thread's stack
+(stack-names.txt) sits in `_mesa_GenerateMipmap` > `util_gen_mipmap` >
+`llvmpipe_flush_resource` > `lp_fence_wait`: GTK's GL renderer was building a
+mipmap chain on the UI thread, which on llvmpipe is CPU work. Which texture is
+not in the bundle; the guess is a frame a GtkPicture draws well below its size
+(the self-view's 640x480 frames in a 107x80 box since 211bc322), one chain per
+new frame. Not reproduced off battery yet. The
+likely cure, unbuilt: draw the frame through a paintable whose snapshot uses
+`append_scaled_texture(.., gsk::ScalingFilter::Linear, ..)`, or hand the
+picture frames already at the box's size. Needs check-gtk and the linux lane,
+which the battery would not carry tonight.
+
 ## ~~DEFECT — iOS kaya-sim-0 never builds the main menu: every expect_menu_bar leg placed on it is red (seen 2026-10-31, residue pass)~~ FIXED 2026-11-03: UIKit builds the main menu on a hardware key, so both iOS bar reads send the driver a shift first (docs/traps.md, the iOS main menu built only on a hardware key)
 KEY: buildMenu, expect_menu_bar, kayaNoMenuBuild, kayaOtherMenuBuilds, kayaMenuRebuildAsks, kaya-sim-0, 8F0680C5
 

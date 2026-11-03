@@ -991,8 +991,10 @@ both ways; four cuts watched.
 AND THE ANDROID PICTURE CARRIES ITS SURFACES since 2026-11-03 (docs/traps.md,
 the android red leg's white self-view): KayaFailShot copies each shown
 SurfaceView on its own and composites it under the window's hole; two cuts
-watched.
-Two hundred and seventy-eight watched negatives, counts printed)
+watched. AND AN ANDROID DOCUMENTS READ SAYS WHY THE LIST IS NOT UP since
+2026-11-03 (docs/traps.md, the android documents list that never came up),
+read before the list is put away; two cuts watched.
+Two hundred and eighty watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 
