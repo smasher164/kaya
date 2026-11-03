@@ -39540,6 +39540,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                         content.documentRange.location, offsetBy: NSMaxRange(range)),
                     let laid = NSTextRange(location: content.documentRange.location, end: end)
                 {
+                    // Fragments laid at an older, narrower width keep their
+                    // heights until invalidated, and lay the range too low
+                    // (docs/deferred.md, the iOS codesurface gutter: 16 fragments
+                    // over 832 pt where a healthy layout has 35).
+                    layout.invalidateLayout(for: laid)
                     layout.ensureLayout(for: laid)
                 }
                 // WITHOUT ANIMATION, the difference between a deterministic verb
@@ -39547,6 +39552,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 // a no-op at the call site), so a leg asserting immediately
                 // fails. Wrapped, it lands synchronously (3.95ms).
                 UIView.performWithoutAnimation { view.scrollRangeToVisible(range) }
+                view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             }
             kayaUITextViews[node.id] = KayaWeakTextView(view)
         }

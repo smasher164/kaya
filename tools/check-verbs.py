@@ -4075,6 +4075,26 @@ cut = g.doctor("flyout reshow cut", real(WINUI_MOD), r'"the flyout would not sho
 if not winui_flyout_reshow(cut):
     fail("check-verbs SELF-TEST: the flyout reshow clause passed with the reshow cut")
 
+# THE iOS REVEAL LAYS ITS RANGE OUT AFRESH (docs/deferred.md, the iOS
+# codesurface gutter): fragments laid at an older width keep their heights.
+def ios_reveal_fresh(src=None):
+    text = src or real(SWIFT)
+    if not re.search(r"layout\.invalidateLayout\(for: laid\)\n +layout\.ensureLayout\(for: laid\)",
+                     text):
+        return ["KayaSwiftUI.swift: the iOS reveal lays its range out over stale fragments "
+                "(no invalidateLayout before ensureLayout)"]
+    return []
+
+
+if ios_reveal_fresh():
+    media_status = 1
+    print("\n".join(ios_reveal_fresh()), file=sys.stderr)
+print("check-verbs: the iOS reveal lays its range out afresh")
+cut = g.doctor("iOS reveal invalidate cut", real(SWIFT),
+               r"\n +layout\.invalidateLayout\(for: laid\)", "")
+if not ios_reveal_fresh(cut):
+    fail("check-verbs SELF-TEST: the iOS reveal clause passed with the invalidate cut")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its

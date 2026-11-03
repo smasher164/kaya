@@ -1606,6 +1606,17 @@ and the container's width against the view's (forced red, healthy layout:
 container width 309, view width 343"). On the next sighting compare those
 with that healthy reading.
 
+Sixth sighting, the 77eac884 matrix (run 20261103T175930Z-051771), read with
+the grown clause: "above it 16 fragment(s), the first at y 0 h 20, the
+tallest 142 high; container width 309, view width 343". Sixteen fragments
+fill the 832 pt that thirty-five fill in the healthy layout: the lines above
+were laid at an older, narrower width and kept those heights. BUILT
+2026-11-03: the reveal invalidates the layout of the range it ensures before
+laying it out, and runs a viewport pass after its scroll (check-verbs holds
+the invalidate, one cut watched). Green alone (iOS codesurface, reveal and
+editor, 18 of 18 legs); whether the matrix sighting stops is for the next
+matrices.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 
