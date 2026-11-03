@@ -104,7 +104,7 @@ GATES = {
                         "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
                         "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt",
                         "tools/linux/capture-leg.py",
-                        "crates/kaya/src/gtk.rs"],
+                        "crates/kaya/src/gtk.rs", "crates/kaya/src/scene.rs"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.
     "check-table-card": ["crates", "swift", "android"],

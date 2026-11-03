@@ -1449,6 +1449,47 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
+## ~~DEFECT — android: the emulator's virtual WiFi dropped under host load and failed the fetch in flight (media_tracks-compose in the 77eac884 matrix; media_feed-compose and netimage_http-go on 2026-10-24)~~ FIXED 2026-11-03: the pool runs on the modem's network, read back on every run (docs/traps.md, the virtual WiFi the host's load disconnected)
+KEY: CTRL-EVENT-DISCONNECTED, CTRL-EVENT-BEACON-LOSS, modem_network, svc wifi disable, Transports: CELLULAR, failed network, captions fetch, wlan0
+
+Run 20261103T175803Z-046610: the sidecar nope.vtt fetch answered
+`java.net.ConnectException` 150 ms after wpa_supplicant dropped wlan0 (reason 4,
+locally generated: beacon loss), at host load 152; the full logcat kept for
+the leg carried it, the bundle's 400-line logcat section started after the WiFi
+came back. Measured with spinners alone: beacon loss every 8 s on every pool
+emulator from load 50 up, none with the WiFi off. The fix is the lane's:
+run-emulator turns the virtual WiFi off on every pool device and the tablet
+each run and dies unless the default network reads back cellular;
+android_system_events selects the link's events. check-flightrec "android modem
+network", NWF1 to NWF3 watched red.
+
+## DEFECT — iOS editor-go: the export sheet's Save wrote the file and the picker reported cancel (seen once 2026-11-03, the 77eac884 matrix)
+KEY: documentPickerWasCancelled, forExporting, save cancelled, file_save, DOCCopyOperation, Failed opening URL: 2, LocalStorage purge, kaya-save-export
+
+Run 20261103T175930Z-051771: `file_save` pressed the sheet's Save ("Save
+offered enabled=true hittable=true at 323,92 keyboards 1->0 sheet gone") and
+the app heard `documentPickerWasCancelled` ("cancelled dialog=1 save=true"), so
+label#0 read "save cancelled" and no document "draft" existed; the later
+`expect_file_dialog kaya-editor-$PID decoy draft notes` PASSED, so the
+provider HAD written draft. The device's log around the tap:
+DocumentManager.Service "finishing DOCCopyOperation" among bursts of
+`[FileProvider] Failed opening URL: 2`, and the LocalStorage provider purging
+its Spotlight index (10:10:51.8 to 53.9) while the sheet was up; admission had
+read the indexer idle only after 17.3 s with 239 errors. The export completed
+and its result callback failed inside the picker, which fell back to cancel.
+Not reproduced in the stability pass (editor-go green in its loop under load,
+1 of 1 before the loop was stopped for codesurface). The app may not branch on
+this; the read is the lane's, BUILT 2026-11-03: a save sheet's cancel note
+lists the directory file_dialog_goto armed under the name the harness typed
+(kayaSaveCancelLeftovers), three sentences each forced to print: "no directory
+and name armed by the harness" (save-go's untyped cancel), "<dir> holds no
+probe (it holds decoy, draft): nothing was written" (a name typed before the
+cancel, save.steps doctored and restored by copy), and "<dir> holds draft (0
+bytes, modified 5.4 s ago): the platform cancelled a save it had written"
+(didPick routed through the cancel delegate, the interpreter doctored and
+restored by copy). check-flightrec "iOS save cancel leftovers", NSC1. On the
+next sighting that sentence is the whole reading.
+
 ## WATCH — three reds of the 72b602fb matrix, each green alone (2026-11-03)
 KEY: music_header-python-wayland, checkbox@like checked reads on, colorpanel_rust, HexTextBox, music_dock-python, full_play_pause, player_command
 
@@ -1477,13 +1518,30 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   app's; the app wrote 610080 sample(s), 502560 dropped past the 200 ms queue,
   1072320 pulled past its end", the starvation shape of docs/traps.md (a debug
   build's conversion on GTK's frame clock), under host load near 100.
-- From the 77eac884 matrix, not yet read past their sentences: windows
-  netimage_http_java (run 20261103T180100Z-056102) `image@art[a01] reads "0x0",
-  wanted "320x320"`; iOS editor-go (run 20261103T175930Z-051771) `documents
-  "untitled|notes", wanted "draft|notes"` and "no row titled draft"; android
-  media_tracks-compose (run 20261103T175803Z-046610) `label#0 reads "failed
-  network, can_play yes", wanted "failed not_found, can_play yes"`. Each was a
-  single leg of its scene in that run.
+- From the 77eac884 matrix, read 2026-11-03 (the stability pass):
+  - windows netimage_http_java (run 20261103T180100Z-056102) `image@art[a01]
+    reads "0x0"`: the media-server log shows the leg's client asked for every
+    cover but cover-320.jpg, the URL the four rows a01/a04/a07/a10 share, so the
+    Java RowImages helper never fetched it; the bundle could not say whether the
+    core sent image_needed for those rows. The core's image_needed and
+    image_released are in the verb trace now (docs/traps.md, the WinUI row
+    image the app never fetched); on the next sighting a `needed` line with no
+    fetch is the binding, none is the core. Not reproduced: the six
+    netimage_http legs 8 times over (48 legs) under a host load of 100-160,
+    all green.
+  - iOS editor-go (run 20261103T175930Z-051771): the first failed step is
+    `file_save`: the driver tapped the export sheet's Save (enabled, hittable,
+    the sheet went away) and the app heard documentPickerWasCancelled, so
+    "draft" was never a document; yet the later `expect_file_dialog ... decoy
+    draft notes` PASSED, so the provider had written draft. The device log
+    around the tap: DocumentManager.Service finishing a DOCCopyOperation among
+    bursts of `[FileProvider] Failed opening URL: 2`, and the LocalStorage
+    provider purging its Spotlight index while the sheet was up. A platform
+    false cancel under load; see the DEFECT entry below.
+  - android media_tracks-compose (run 20261103T175803Z-046610) `label#0 reads
+    "failed network"`: the emulator's virtual WiFi dropped (docs/traps.md, the
+    virtual WiFi the host's load disconnected); the pool runs on the modem's
+    network now.
 - android music_dock-python (run 20261103T131352Z-079427): the full player's
   pause click left the button "Pause"; the verb trace now carries every player
   command and change (docs/traps.md, the android play/pause the player did not
@@ -1555,7 +1613,7 @@ then on sim-0 twice, once with swift/KayaSwiftUI.swift swapped back to
 86f0e15e's, so the change in hand did not cause it and the device-only
 reading no longer holds: sim-1 has refused too.
 
-## DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)
+## ~~DEFECT — iOS codesurface-go: after `click button@end` the gutter stayed at lines 18-21 (seen three times 2026-10-29: the 8aa99928 matrix, then codesurface-swift twice, the second in the e2d4a307 matrix)~~ FIXED 2026-11-03: the update pass's full-storage attribute edits re-estimated TextKit 2's whole document between the reveal and the read; both edits are scoped to the runs that carry the attribute, reproduced 3 of 3 then 2 of 3 under load and green under the same load after (docs/traps.md, the attribute edits that re-estimated the document)
 KEY: codesurface-go, expect_gutter shows 39, button@end, kayaGutterContext, ios codesurface
 
 The matrix read `textarea@code gutter reads 18 19 20 21, wanted shows 39`

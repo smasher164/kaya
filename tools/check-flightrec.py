@@ -112,7 +112,7 @@ def sources():
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
              LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE,
-             ANDROID_MEDIA, CAPTURE_LEG)}
+             ANDROID_MEDIA, CAPTURE_LEG, SCENE_RS)}
 
 
 def census_android_app_shot(src):
@@ -221,6 +221,62 @@ def census_gtk_toggle_writes(src):
     if '"prop_checked",' not in gtk or '"toggle {} {was} -> {b}, now {}"' not in gtk:
         return ["GTK: a toggle's checked write is no longer in the verb trace"]
     return []
+
+
+def census_save_cancel_leftovers(src):
+    """docs/deferred.md, the iOS export sheet's Save that reported cancel: a
+    save sheet's cancel note says what the armed directory holds under the
+    typed name, three sentences, each forced to print on 2026-11-03."""
+    swift = src[SWIFTUI]
+    found = []
+    if '+ (save ? "; " + kayaSaveCancelLeftovers() : ""))' not in swift:
+        found.append("iOS: a save sheet's cancel no longer says what the armed directory holds")
+    body = swift[swift.find("func kayaSaveCancelLeftovers() -> String {"):]
+    body = body[:body.find("\n    }\n")]
+    for sentence in ("no directory and name armed by the harness",
+                     "the platform cancelled a save it had written",
+                     "nothing was written"):
+        if sentence not in body:
+            found.append(f"iOS: the cancel read lost its sentence `{sentence}`")
+    return found
+
+
+SCENE_RS = "crates/kaya/src/scene.rs"
+
+
+def census_core_image_needs(src):
+    """docs/traps.md, the WinUI row image the app never fetched: the core's
+    image_needed and image_released (N8) go into the verb trace, so a row
+    stuck at 0x0 says whether the core asked or the app never fetched."""
+    scene = src[SCENE_RS]
+    found = []
+    for verb in ("image_needed", "image_released"):
+        if f'crate::vtrace::note("{verb}", format_args!(' not in scene:
+            found.append(f"core: {verb} is no longer in the verb trace")
+    return found
+
+
+def census_android_modem_network(src):
+    """docs/traps.md, the virtual WiFi the host's load disconnected: every
+    pool device and the tablet run on the modem's network, read back, and
+    the system timeline carries the link's events."""
+    runner = src[ANDROID]
+    found = []
+    if '"svc", "wifi", "disable"' not in runner:
+        found.append("android: the runner no longer turns the virtual WiFi off")
+    if '"Transports: CELLULAR" in agent' not in runner:
+        found.append("android: the runner no longer reads back that the default network "
+                     "is the modem's")
+    for call in ('    modem_network(_serial, "phone pool")',
+                 'modem_network(TABLET_SERIAL, "tablet")'):
+        if call not in runner:
+            found.append(f"android: `{call.strip()}` is no longer made")
+    lane = src[LANE_PY]
+    for needle in ("CTRL-EVENT-(?:DISCONNECTED|CONNECTED|BEACON-LOSS)",
+                   r"media: player \d+ captions .* failed"):
+        if needle not in lane:
+            found.append(f"android: the system timeline no longer selects `{needle}`")
+    return found
 
 
 def census_documents_why(src):
@@ -1563,11 +1619,21 @@ def android_report_checks(src, echo=False):
               "Unexpected runtime error: Detaching surface timed out.",
               "init    : Service 'android-hardware-media-c2-goldfish-hal-1-0' (pid 394) "
               "received signal 31",
-              "InetDiagMessage: Destroyed live tcp sockets for uids={10091, 10208} in 1ms"]
+              "InetDiagMessage: Destroyed live tcp sockets for uids={10091, 10208} in 1ms",
+              "wpa_supplicant: wlan0: CTRL-EVENT-DISCONNECTED bssid=00:13:10:85:fe:01 reason=4 "
+              "locally_generated=1",
+              "wpa_supplicant: wlan0: CTRL-EVENT-BEACON-LOSS ",
+              "ConnectivityService: [103 WIFI] EVENT_NETWORK_INFO_CHANGED, going from CONNECTED "
+              "to DISCONNECTED",
+              "ConnectivityService: [103 WIFI] disconnected, was satisfying 65",
+              "ConnectivityService: Sending CONNECTED broadcast for type 1 [104 WIFI]",
+              "kaya    : media: player 1 captions http://10.0.2.2:8767/nope.vtt failed media3 "
+              "2001: java.net.ConnectException: Failed to connect to /10.0.2.2:8767"]
     timeline = scope["android_system_events"]("\n".join([*events, "unrelated noise"]))
     if any(event not in timeline for event in events) or "unrelated noise" in timeline:
         found.append("android: system timeline dropped a focus/ANR event, drag event, "
-                     "media codec event or socket destruction, or kept unrelated noise")
+                     "media codec event, socket destruction or network event, or kept "
+                     "unrelated noise")
     if "Selected 0 line(s)" not in scope["android_system_events"]("unrelated noise"):
         found.append("android: empty system timeline did not report its zero count")
     shade = scope["android_shade_history"]
@@ -2816,6 +2882,9 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("android player trace", census_android_player_trace),
             ("linux voice graph", census_voice_graph),
             ("GTK toggle writes", census_gtk_toggle_writes),
+            ("core image needs", census_core_image_needs),
+            ("android modem network", census_android_modem_network),
+            ("iOS save cancel leftovers", census_save_cancel_leftovers),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -3023,6 +3092,27 @@ nt5 = doctored(GTK_RS, r'"toggle \{\} \{was\} -> \{b\}, now \{\}"',
                '"toggle {} -> {b}"', "NTW the toggle write's before and after unread")
 gate.negative("NTW a toggle write the trace does not show",
               lambda: census_gtk_toggle_writes(nt5), want="checked write is no longer")
+for verb in ("image_needed", "image_released"):
+    cut = doctored(SCENE_RS, re.escape(f'crate::vtrace::note("{verb}", format_args!('),
+                   f'crate::vtrace::note("{verb}_cut", format_args!(', f"NIN the core's {verb} cut")
+    gate.negative(f"NIN a row image's {verb} the trace does not show",
+                  lambda: census_core_image_needs(cut), want=f"{verb} is no longer")
+nwf1 = doctored(ANDROID, r'"svc", "wifi", "disable"', '"svc", "wifi", "enable"',
+                "NWF1 the WiFi left on")
+gate.negative("NWF1 a pool device on the virtual WiFi",
+              lambda: census_android_modem_network(nwf1),
+              want="no longer turns the virtual WiFi off")
+nwf2 = doctored(ANDROID, r'"Transports: CELLULAR" in agent', "True", "NWF2 the modem read-back cut")
+gate.negative("NWF2 a default network nobody read back",
+              lambda: census_android_modem_network(nwf2), want="no longer reads back")
+nwf3 = doctored(LANE_PY, r"CTRL-EVENT-\(\?:DISCONNECTED\|CONNECTED\|BEACON-LOSS\)",
+                "CTRL-EVENT-NOTHING", "NWF3 the link's events unselected")
+gate.negative("NWF3 a system timeline without the link's events",
+              lambda: census_android_modem_network(nwf3), want="no longer selects")
+nsc1 = doctored(SWIFTUI, r'\+ \(save \? "; " \+ kayaSaveCancelLeftovers\(\) : ""\)\)', ")",
+                "NSC1 the save cancel's leftovers unread")
+gate.negative("NSC1 a save sheet's cancel that says nothing of the directory",
+              lambda: census_save_cancel_leftovers(nsc1), want="no longer says what the armed")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -4022,6 +4112,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(286 + (5 if DRIVES else 0))
+gate.negatives_ran(292 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

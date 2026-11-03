@@ -4749,7 +4749,34 @@ func kayaPresentSaveDialog(
     /// with the eyes.
     func kayaSimdriveSaveName(_ name: String) -> String? {
         let (ok, lines) = KayaSimdrive.ask("savename \(name)")
+        if ok {
+            kayaSimdriveTypedSaveName = name
+        }
         return ok ? nil : (lines.first ?? "simdrive refused savename \(name) without saying why")
+    }
+
+    /// The name the harness last typed into a save sheet, for the cancel read
+    /// below (docs/deferred.md, the export sheet's Save that reported cancel).
+    var kayaSimdriveTypedSaveName: String?
+
+    /// WHAT A SAVE SHEET'S CANCEL LEFT BEHIND: iOS reported cancel once for a
+    /// Save it had completed, so the read lists the directory the harness armed
+    /// for the typed name. Three sentences, each watched printing.
+    func kayaSaveCancelLeftovers() -> String {
+        guard let dir = kayaPendingPanelDirectory, let name = kayaSimdriveTypedSaveName else {
+            return "no directory and name armed by the harness, so nothing says whether a file was written"
+        }
+        let path = (dir as NSString).appendingPathComponent(name)
+        let manager = FileManager.default
+        if let attrs = try? manager.attributesOfItem(atPath: path) {
+            let bytes = (attrs[.size] as? NSNumber)?.intValue ?? -1
+            let age = (attrs[.modificationDate] as? Date).map { Date().timeIntervalSince($0) } ?? -1
+            return "\(dir) holds \(name) (\(bytes) bytes, modified \(String(format: "%.1f", age)) s ago): "
+                + "the platform cancelled a save it had written"
+        }
+        let held = (try? manager.contentsOfDirectory(atPath: dir))
+            .map { $0.isEmpty ? "nothing" : $0.sorted().joined(separator: ", ") } ?? "no such directory"
+        return "\(dir) holds no \(name) (it holds \(held)): nothing was written"
     }
 
     /// Press the live save dialog's own Save or Cancel. The host requires the
@@ -4911,7 +4938,8 @@ func kayaPresentSaveDialog(
         /// Cancel is the EMPTY LIST, faithfully — no platform can
         /// confirm an empty selection, so there is no sentinel.
         func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-            kayaPickerNote("cancelled dialog=\(dialog) save=\(save)")
+            kayaPickerNote("cancelled dialog=\(dialog) save=\(save)"
+                + (save ? "; " + kayaSaveCancelLeftovers() : ""))
             answer([])
         }
 
@@ -5064,6 +5092,43 @@ var kayaLiveAlert: KayaLiveAlert?
 /// ignored, and NSOpenPanel then restores its last location (measured — a run
 /// inherited a directory an unrelated probe binary left).
 var kayaPendingPanelDirectory: String?
+
+/// Clears the highlight attribute ONLY WHERE IT IS: a removeAttribute over the
+/// whole document marks the whole document edited whether or not the attribute
+/// was there, and TextKit 2 then drops every laid fragment back to an estimate
+/// (docs/traps.md, the attribute edits that re-estimated the document).
+/// check-verbs holds this clause.
+func kayaClearHighlights(_ storage: NSTextStorage) {
+    kayaRemoveAttributeWhereSet(storage, .backgroundColor)
+}
+
+/// The same rule for any attribute an update pass clears: an edit only over
+/// the runs that carry it, and no edit at all when none does.
+func kayaRemoveAttributeWhereSet(_ storage: NSTextStorage, _ key: NSAttributedString.Key) {
+    var runs: [NSRange] = []
+    storage.enumerateAttribute(key, in: NSRange(location: 0, length: storage.length)) {
+        value, range, _ in
+        if value != nil { runs.append(range) }
+    }
+    if runs.isEmpty { return }
+    storage.beginEditing()
+    for range in runs { storage.removeAttribute(key, range: range) }
+    storage.endEditing()
+}
+
+/// And for one an update pass sets: an edit only over the runs that do not
+/// already carry `value`.
+func kayaAddAttributeWhereUnset(_ storage: NSTextStorage, _ key: NSAttributedString.Key, _ value: NSNumber) {
+    var runs: [NSRange] = []
+    storage.enumerateAttribute(key, in: NSRange(location: 0, length: storage.length)) {
+        held, range, _ in
+        if (held as? NSNumber) != value { runs.append(range) }
+    }
+    if runs.isEmpty { return }
+    storage.beginEditing()
+    for range in runs { storage.addAttribute(key, value: value, range: range) }
+    storage.endEditing()
+}
 
 #if !os(macOS)
     var kayaLiveAlertController: UIAlertController?
@@ -10309,18 +10374,35 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
             var above = 0
             var tallest: CGFloat = 0
             var first = CGRect.null
+            var states: [String] = []
             tlm.enumerateTextLayoutFragments(from: tlm.documentRange.location, options: []) { fragment in
                 if fragment.rangeInElement.location.compare(range.location) != .orderedAscending { return false }
                 if first.isNull { first = fragment.layoutFragmentFrame }
                 tallest = max(tallest, fragment.layoutFragmentFrame.height)
                 above += 1
+                // Each fragment's layout state beside its height: an estimate
+                // (E) laid too tall is TextKit 2's guess, a laid one (L) is a
+                // width it was laid at.
+                let state: String
+                switch fragment.state {
+                case .layoutAvailable: state = "L"
+                case .calculatedUsageBounds: state = "C"
+                case .estimatedUsageBounds: state = "E"
+                default: state = "N"
+                }
+                if states.count < 48 {
+                    states.append(String(format: "%@%.0f", state, fragment.layoutFragmentFrame.height))
+                }
                 return true
             }
             laid += String(
                 format: "; above it %d fragment(s), the first at y %.0f h %.0f, the tallest %.0f high; "
-                    + "container width %.0f, view width %.0f",
+                    + "container width %.0f, view width %.0f; above states %@",
                 above, first.isNull ? -1 : first.minY, first.isNull ? -1 : first.height, tallest,
-                view.textContainer.size.width, view.bounds.width)
+                view.textContainer.size.width, view.bounds.width, states.joined(separator: " "))
+            if let own = view as? KayaTextView {
+                laid += "; geometries " + own.geometries.joined(separator: " | ")
+            }
         }
         return String(
             format: " (caret %d+%d on line %d of %d; viewport y %.0f-%.0f of content %.0f, inset bottom %.0f; first responder %@; %@)",
@@ -26125,12 +26207,13 @@ func kayaFamilyPresent(_ family: String) -> Bool {
 /// A plain textarea's synthesized bold, on its text and its typing
 /// (docs/font-picker-plan.md §2.4); a rich one carries it per run.
 @MainActor func kayaPlainSyntheticBold(_ storage: NSTextStorage, typing: inout [NSAttributedString.Key: Any], on: Bool) {
-    let full = NSRange(location: 0, length: storage.length)
+    // Over the runs that need it, never the whole document on every update
+    // pass (docs/traps.md, the attribute edits that re-estimated the document).
     if on {
-        storage.addAttribute(.strokeWidth, value: kayaSyntheticBoldStroke, range: full)
+        kayaAddAttributeWhereUnset(storage, .strokeWidth, NSNumber(value: Double(kayaSyntheticBoldStroke)))
         typing[.strokeWidth] = kayaSyntheticBoldStroke
     } else if storage.length > 0 || typing[.strokeWidth] != nil {
-        storage.removeAttribute(.strokeWidth, range: full)
+        kayaRemoveAttributeWhereSet(storage, .strokeWidth)
         typing.removeValue(forKey: .strokeWidth)
     }
 }
@@ -38642,8 +38725,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
     /// CLEAR-ON-EDIT IS THE `highlightsFor` COMPARE, at paint time.
     private func applyRanges(_ view: KayaTextView, _ coordinator: Coordinator) {
         guard let storage = view.textStorage else { return }
-        let full = NSRange(location: 0, length: storage.length)
-        storage.removeAttribute(.backgroundColor, range: full)
+        kayaClearHighlights(storage)
         if highlightsFor == text {
             // BOUNDS ARE RE-CHECKED AGAINST THE LIVE STORAGE: an out-of-range
             // `addAttribute` raises NSRangeException and the app exits 134
@@ -39486,23 +39568,22 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         /// `setNeedsDisplay()` (docs/probes/range-probe-ios.md N1/S1).
         private func applyRanges(_ view: UITextView, _ coordinator: Coordinator) {
             let storage = view.textStorage
-            let full = NSRange(location: 0, length: storage.length)
-            // UNCONDITIONALLY, on every update pass, and that is measured: 200
-            // clear passes over a 200 KB document cost 2.47ms. CLEARED BEFORE
-            // ANYTHING IS APPLIED: a re-declare that does not clear first UNIONS
-            // with the stale shifted run, leaving {51,6} for a declared {51,5}.
-            storage.beginEditing()
-            storage.removeAttribute(.backgroundColor, range: full)
+            // On every update pass, CLEARED BEFORE ANYTHING IS APPLIED: a
+            // re-declare that does not clear first UNIONS with the stale shifted
+            // run, leaving {51,6} for a declared {51,5}. Only the runs that are
+            // there (kayaClearHighlights), never the whole document.
+            kayaClearHighlights(storage)
             if highlightsFor == text {
                 // Bounds re-checked against the LIVE storage: its length is a
                 // fact only this side holds at this instant.
+                storage.beginEditing()
                 for range in highlights where NSMaxRange(range) <= storage.length {
                     storage.addAttribute(
                         .backgroundColor, value: UIColor.systemYellow.withAlphaComponent(0.55),
                         range: range)
                 }
+                storage.endEditing()
             }
-            storage.endEditing()
 
             // THE TWO ONE-SHOTS, each performed once per request, both clamped to
             // the live text: an out-of-range selection is CLAMPED TO A CARET AT
@@ -39540,11 +39621,6 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                         content.documentRange.location, offsetBy: NSMaxRange(range)),
                     let laid = NSTextRange(location: content.documentRange.location, end: end)
                 {
-                    // Fragments laid at an older, narrower width keep their
-                    // heights until invalidated, and lay the range too low
-                    // (docs/deferred.md, the iOS codesurface gutter: 16 fragments
-                    // over 832 pt where a healthy layout has 35).
-                    layout.invalidateLayout(for: laid)
                     layout.ensureLayout(for: laid)
                 }
                 // WITHOUT ANIMATION, the difference between a deterministic verb
@@ -39599,8 +39675,22 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             }
         }
 
+        /// The last twelve geometries this view was laid out at, for a refused
+        /// gutter read (docs/deferred.md, the iOS codesurface gutter): when
+        /// the width or height moved, the container's width and the content's
+        /// height at that moment.
+        var geometries: [String] = []
+
         override func layoutSubviews() {
             super.layoutSubviews()
+            let now = String(
+                format: "%.3f %.0fx%.0f c%.0f h%.0f o%.0f", Date().timeIntervalSince1970,
+                bounds.width, bounds.height, textContainer.size.width, contentSize.height,
+                contentOffset.y)
+            if geometries.last.map({ String($0.dropFirst(15)) }) != String(now.dropFirst(15)) {
+                geometries.append(now)
+                if geometries.count > 12 { geometries.removeFirst() }
+            }
             // A view that got shorter while editing (the keyboard bar arriving
             // above the keyboard, docs/phone-format-plan.md §2) keeps its caret
             // in view, as a keyboard's own arrival does.

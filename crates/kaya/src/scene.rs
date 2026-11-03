@@ -8705,6 +8705,10 @@ impl Scene {
                 ApplyOp::Destroy { id } => {
                     if let Some(row) = self.image_rows.remove(id) {
                         if self.images_needed.remove(&row.addr) && row.phase == crate::wire::IMAGE_PHASE_LOADING {
+                            #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+                            crate::vtrace::note("image_released", format_args!(
+                                "-> widget {} node {} path {:?} destroyed while loading",
+                                id.0, row.addr.0, path_values(&row.addr.1)));
                             self.asks.push(Occurrence::ImageReleased {
                                 node: crate::protocol::TemplateNodeId(row.addr.0),
                                 path: path_values(&row.addr.1),
@@ -8736,6 +8740,13 @@ impl Scene {
             if row.phase != crate::wire::IMAGE_PHASE_LOADING {
                 self.images_needed.remove(&row.addr);
             } else if !row.has_source && !seeded && self.images_needed.insert(row.addr.clone()) {
+                // docs/traps.md, the WinUI row image the app never fetched: the
+                // core's side of N8 in the verb trace, so a 0x0 names which half
+                // went silent (check-flightrec, "core image needs").
+                #[cfg(all(feature = "harness", any(target_os = "windows", target_os = "linux", test)))]
+                crate::vtrace::note("image_needed", format_args!(
+                    "-> widget {} node {} path {:?} realized loading with no source",
+                    id.0, row.addr.0, path_values(&row.addr.1)));
                 self.asks.push(Occurrence::ImageNeeded {
                     node: crate::protocol::TemplateNodeId(row.addr.0),
                     path: path_values(&row.addr.1),

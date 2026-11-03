@@ -20126,3 +20126,66 @@ window takes the foreground is the suspected cause, not yet seen). Forced: the
 template's name perturbed printed "the flyout open true, shown again 0
 time(s)"; a Hide right after ShowAt passed with "shown again 1 time(s)".
 check-verbs holds the reshow (one cut watched).
+
+## The virtual WiFi the host's load disconnected (measured 2026-11-03)
+
+media_tracks-compose in the 77eac884 matrix read "failed network" where a
+404 was expected: the sidecar fetch never reached the media server. The full
+logcat kept for the leg said why: `wpa_supplicant: wlan0: CTRL-EVENT-DISCONNECTED
+reason=4 locally_generated=1` (mac80211's beacon loss), ConnectivityService
+`[103 WIFI] going from CONNECTED to DISCONNECTED`, netd destroying the sockets
+on 10.0.2.16, and 150 ms later `media: player 1 captions ... failed media3 2001:
+java.net.ConnectException: Failed to connect to /10.0.2.2:8767`; the WiFi came
+back as a new network 7 s later. The same drop sits in the kept logcats of two
+older red network legs (media_feed-compose and netimage_http-go, 2026-10-24).
+Measured with CPU spinners alone (no lane running): at a one-minute load of 50
+to 140 every pool emulator logs `CTRL-EVENT-BEACON-LOSS` about every 8 s (41
+and 39 in 5 min at load 140); an emulator with `svc wifi disable` logs none,
+and its default network is the modem's (eth0, Transports: CELLULAR), which has
+no beacons to miss. So tools/android/run-emulator.py turns the virtual WiFi off
+on every pool device and the tablet on every run and reads back that the
+default network is cellular (modem_network), and android_system_events selects
+the link's events and the captions-fetch failure, so a network red names the
+flap. check-flightrec "android modem network", NWF1 to NWF3.
+
+## The attribute edits that re-estimated the document (measured 2026-11-03)
+
+The iOS code surface, after `click button@end`, read its gutter at lines
+18-21 where it wanted 39: six matrix sightings, green alone every time, and
+3 of 3 legs red under a host load of 100-160 (the stability pass's loop; the
+same with `KAYA_ONLY=codesurface` and CPU spinners, 2 of 3). The grown read
+settled it: the 16 fragments above the viewport range were all LAID at their
+true heights (15 x 20 pt and one of 142, 442 pt in all) while the range's
+fragments sat at y 832, and the text view's geometry ring showed the content
+height flip 1456 -> 1478 -> 950 (the reveal's full layout, offset 845) ->
+1376 (offset 1231) -> 1335 -> 950 (offset 854) within 200 ms. TextKit 2 had
+re-estimated the WHOLE document right after the reveal laid it out, UIKit
+scrolled the caret into view against the estimate, the viewport's fragments
+were laid at the estimate's positions, and a later partial layout of the lines
+above did not move them. What re-estimated it: the update pass's attribute
+edits over the full storage, `removeAttribute(.backgroundColor, range: full)`
+in applyRanges and `removeAttribute(.strokeWidth, range: full)` in
+kayaPlainSyntheticBold; an attribute edit marks its whole range edited whether
+or not the attribute is there, and TextKit 2 drops every laid fragment in an
+edited range back to an estimate. Alone, the keyboard-driven update pass lands
+before the reveal; under load it lands between the reveal and the read. Both
+edits now touch only the runs that carry (or lack) the attribute and make no
+edit when none does (kayaRemoveAttributeWhereSet, kayaAddAttributeWhereUnset;
+the mac arm shares them). With the highlight clear scoped alone the leg was
+still red 2 of 3 (the bold clear re-estimated just the same); with both scoped,
+green under the same load. The reveal's own invalidateLayout (2cadeb25, a
+guess at narrower widths) came out. check-verbs holds the scoped edits (two
+cuts watched).
+
+## The WinUI row image the app never fetched (seen 2026-11-03)
+
+netimage_http_java in the 77eac884 matrix read image@art[a01] "0x0" for 15 s.
+The lane-wide media-server log showed the leg's client asking for every cover
+but cover-320.jpg, the one URL four rows share, so the Java RowImages helper
+never fetched it: either the core sent no image_needed for those rows or the
+binding dropped the job, and the verb trace carried neither. The core's side
+of N8 (docs/network-images-plan.md) is in the verb trace now: scene.rs notes
+every image_needed and image_released it emits with the widget, the template
+node and the row's path. check-flightrec "core image needs", NIN (two cuts
+watched). On the next sighting a `needed` line for the row with no fetch is the
+binding; no line is the core.

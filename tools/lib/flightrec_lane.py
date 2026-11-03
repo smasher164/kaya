@@ -165,10 +165,15 @@ def android_system_events(text):
                r"exceeded timeout|Detaching surface|media: player \d+ failed|"
                r"init\s*: .*media-c2|"
                # docs/traps.md: The sockets a stale freeze destroyed.
-               r"InetDiagMessage: Destroyed live tcp sockets")
+               r"InetDiagMessage: Destroyed live tcp sockets|"
+               # docs/traps.md: The virtual WiFi the host's load disconnected.
+               r"wpa_supplicant: wlan0: CTRL-EVENT-(?:DISCONNECTED|CONNECTED|BEACON-LOSS)|"
+               r"ConnectivityService: \[\d+ (?:WIFI|MOBILE)\] (?:EVENT_NETWORK_INFO_CHANGED|"
+               r"disconnected, was satisfying)|ConnectivityService: Sending CONNECTED broadcast|"
+               r"media: player \d+ captions .* failed")
     lines = [line for line in text.splitlines() if re.search(pattern, line)]
-    return ("Selected focus, ANR, clipboard, drag, media codec and socket destruction "
-            "events from this "
+    return ("Selected focus, ANR, clipboard, drag, media codec, socket destruction and "
+            "network events from this "
             "device's logcat.\n"
             "History can predate this leg; match timestamps against leg-log.txt.\n"
             f"Selected {len(lines)} line(s).\n" + "\n".join(lines) + "\n")

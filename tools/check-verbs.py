@@ -4075,25 +4075,49 @@ cut = g.doctor("flyout reshow cut", real(WINUI_MOD), r'"the flyout would not sho
 if not winui_flyout_reshow(cut):
     fail("check-verbs SELF-TEST: the flyout reshow clause passed with the reshow cut")
 
-# THE iOS REVEAL LAYS ITS RANGE OUT AFRESH (docs/deferred.md, the iOS
-# codesurface gutter): fragments laid at an older width keep their heights.
-def ios_reveal_fresh(src=None):
+# THE HIGHLIGHT CLEAR TOUCHES ONLY THE RUNS THAT ARE THERE (docs/traps.md, the
+# highlight clear that re-estimated the document): a removeAttribute over the
+# whole storage marks the whole document edited on every update pass, and
+# TextKit 2 drops every laid fragment back to an estimate.
+def highlight_clear_scoped(src=None):
     text = src or real(SWIFT)
-    if not re.search(r"layout\.invalidateLayout\(for: laid\)\n +layout\.ensureLayout\(for: laid\)",
-                     text):
-        return ["KayaSwiftUI.swift: the iOS reveal lays its range out over stale fragments "
-                "(no invalidateLayout before ensureLayout)"]
-    return []
+    found = []
+    if re.search(r"storage\.(?:remove|add)Attribute\(.*range: full\)", text):
+        found.append("KayaSwiftUI.swift: an update pass edits an attribute over the whole "
+                     "document (every update pass re-estimates TextKit 2's layout)")
+    if text.count("kayaClearHighlights(storage)") < 2:
+        found.append("KayaSwiftUI.swift: fewer than two applyRanges (mac and iOS) clear through "
+                     "kayaClearHighlights")
+    bold = text[text.find("func kayaPlainSyntheticBold("):]
+    bold = bold[:bold.find("\n}\n")]
+    if ("kayaAddAttributeWhereUnset(storage, .strokeWidth" not in bold
+            or "kayaRemoveAttributeWhereSet(storage, .strokeWidth)" not in bold):
+        found.append("KayaSwiftUI.swift: the synthetic bold no longer edits only the runs that "
+                     "need it")
+    for name, needle in (("kayaRemoveAttributeWhereSet", "if value != nil { runs.append(range) }"),
+                         ("kayaAddAttributeWhereUnset",
+                          "if (held as? NSNumber) != value { runs.append(range) }")):
+        body = text[text.find(f"func {name}("):]
+        body = body[:body.find("\n}\n")]
+        if needle not in body or "if runs.isEmpty { return }" not in body:
+            found.append(f"KayaSwiftUI.swift: {name} no longer limits its edit to the runs "
+                         "that need it")
+    return found
 
 
-if ios_reveal_fresh():
+if highlight_clear_scoped():
     media_status = 1
-    print("\n".join(ios_reveal_fresh()), file=sys.stderr)
-print("check-verbs: the iOS reveal lays its range out afresh")
-cut = g.doctor("iOS reveal invalidate cut", real(SWIFT),
-               r"\n +layout\.invalidateLayout\(for: laid\)", "")
-if not ios_reveal_fresh(cut):
-    fail("check-verbs SELF-TEST: the iOS reveal clause passed with the invalidate cut")
+    print("\n".join(highlight_clear_scoped()), file=sys.stderr)
+print("check-verbs: the highlight clear touches only the runs that are there")
+for label, pattern, repl, want in (
+        ("highlight clear over the whole document",
+         r"kayaClearHighlights\(storage\)\n(\s+)if highlightsFor == text \{",
+         r"storage.removeAttribute(.backgroundColor, range: full)\n\1if highlightsFor == text {",
+         2),
+        ("scoped edits' empty return cut", r"\n +if runs\.isEmpty \{ return \}", "", 2)):
+    cut = g.doctor(label, real(SWIFT), pattern, repl, want=want)
+    if not highlight_clear_scoped(cut):
+        fail(f"check-verbs SELF-TEST: the highlight clear clause passed with the {label}")
 
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
