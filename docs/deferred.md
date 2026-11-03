@@ -1477,6 +1477,13 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   app's; the app wrote 610080 sample(s), 502560 dropped past the 200 ms queue,
   1072320 pulled past its end", the starvation shape of docs/traps.md (a debug
   build's conversion on GTK's frame clock), under host load near 100.
+- From the 77eac884 matrix, not yet read past their sentences: windows
+  netimage_http_java (run 20261103T180100Z-056102) `image@art[a01] reads "0x0",
+  wanted "320x320"`; iOS editor-go (run 20261103T175930Z-051771) `documents
+  "untitled|notes", wanted "draft|notes"` and "no row titled draft"; android
+  media_tracks-compose (run 20261103T175803Z-046610) `label#0 reads "failed
+  network, can_play yes", wanted "failed not_found, can_play yes"`. Each was a
+  single leg of its scene in that run.
 - android music_dock-python (run 20261103T131352Z-079427): the full player's
   pause click left the button "Pause"; the verb trace now carries every player
   command and change (docs/traps.md, the android play/pause the player did not
