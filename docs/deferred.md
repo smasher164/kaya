@@ -1580,6 +1580,19 @@ re-laid out for the new offset); a range on lines 36-40 with the gutter
 reading 18-21 is a stale DRAW. Two filtered iOS runs of codesurface (8 legs)
 were green, so no sighting yet; not fixed, the cause not plain.
 
+Fourth sighting, codesurface-go in the 1b5997a4 matrix (flightrec run
+20261103T161527Z-096407), and the read now discriminates: "caret 1171+0 on
+line 40 of 40; viewport y 854-950 of content 950 ... viewport layout range
+549-711 (lines 17-22), 6 fragment(s) at y 832-953". A STALE LAYOUT: the
+controller laid lines 17-22 out where lines 36-40 belong, the geometry
+TextKit 2 had estimated. The End button selects and then reveals; the select
+can scroll to the end against the estimate first, so the reveal's
+ensureLayout and scroll move nothing and no viewport pass follows. BUILT
+2026-11-03: the reveal re-lays the viewport after its scroll (check-verbs
+holds the call, one cut watched). Not proven: three filtered iOS runs of
+codesurface (9 legs) were green before and after; the next matrices say
+whether the sighting stops.
+
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
 

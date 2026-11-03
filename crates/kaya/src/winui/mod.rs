@@ -26617,23 +26617,52 @@ impl crate::harness::Stage for WinUiStage {
         .map_err(|e| format!("the flyout would not show: {e}"))?;
         let hex = format!("{:02X}{:02X}{:02X}", color.r, color.g, color.b);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        // A flyout light-dismissed before its template ran (another window
+        // taking the foreground) is shown again, and counted (docs/traps.md,
+        // the WinUI colour flyout that closed before its template).
+        let mut reshown = 0u32;
+        let mut closed_polls = 0u32;
         loop {
             let wanted = hex.clone();
-            let wrote = Self::on_ui_read(move |core| {
+            let (wrote, open) = Self::on_ui_read(move |core| {
                 let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
                 let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
                 let Some(field) = hex_box(&swatch.picker.cast()?)? else {
-                    return Ok(false);
+                    return Ok((false, swatch.flyout.IsOpen()?));
                 };
                 field.SetText(&HSTRING::from(&*wanted))?;
-                Ok(true)
+                Ok((true, true))
             })
             .map_err(|e| format!("the hex box would not take the text: {e}"))?;
             if wrote {
+                if reshown > 0 {
+                    eprintln!("KAYA_DIAG pick_color: the flyout closed before its template ran; shown again {reshown} time(s)");
+                }
                 break;
             }
             if std::time::Instant::now() > deadline {
-                return Err("the flyout's ColorPicker never ran its template: no HexTextBox in 10 s".to_owned());
+                let (loaded, rooted) = Self::on_ui_read(move |core| {
+                    let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+                    let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+                    Ok((swatch.picker.IsLoaded()?, swatch.picker.XamlRoot().is_ok()))
+                })
+                .unwrap_or((false, false));
+                return Err(format!(
+                    "the flyout's ColorPicker never ran its template: no HexTextBox in 10 s \
+                     (the flyout open {open}, shown again {reshown} time(s) after closing on its own; \
+                     the picker loaded {loaded}, in a XamlRoot {rooted})"
+                ));
+            }
+            closed_polls = if open { 0 } else { closed_polls + 1 };
+            if closed_polls >= 10 {
+                closed_polls = 0;
+                reshown += 1;
+                Self::on_ui_read(move |core| {
+                    let i = crate::harness::resolve(t.index, core.color_picker_ids.len());
+                    let (swatch, _) = &core.color_swatches[&core.color_picker_ids[i]];
+                    swatch.flyout.ShowAt(&swatch.button.cast::<FrameworkElement>()?)
+                })
+                .map_err(|e| format!("the flyout would not show again: {e}"))?;
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }

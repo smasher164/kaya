@@ -39528,6 +39528,11 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 // a no-op at the call site), so a leg asserting immediately
                 // fails. Wrapped, it lands synchronously (3.95ms).
                 UIView.performWithoutAnimation { view.scrollRangeToVisible(range) }
+                // A select just before may have scrolled there already against
+                // the estimate, so no scroll re-lays the viewport: its fragments
+                // stay where the estimate put them (docs/deferred.md, the iOS
+                // codesurface gutter, lines 17-22 laid at y 832-953).
+                view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             }
             kayaUITextViews[node.id] = KayaWeakTextView(view)
         }

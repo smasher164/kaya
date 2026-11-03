@@ -20113,3 +20113,16 @@ same gap under `timeout 120`, so all three harnesses dump there (harness.rs,
 KayaSwiftUI.swift, KayaCompose.kt): a forced red on every lane left the
 first-failed-step dump in 40 of 40 bundles. check-verbs holds one such site
 per harness (two cuts watched), check-flightrec NDS2.
+
+## The WinUI colour flyout that closed before its template (measured 2026-11-03)
+
+colorpanel_rust and colorpanel_csharp went red under matrix load with "the
+flyout's ColorPicker never ran its template: no HexTextBox in 10 s" while the
+step picture showed no flyout at all: the sentence named a template it had not
+measured. It now says whether the flyout was open, how often it was shown
+again and whether the picker was loaded and rooted, and pick_color shows a
+flyout that has been closed for 500 ms again (a light dismiss when another
+window takes the foreground is the suspected cause, not yet seen). Forced: the
+template's name perturbed printed "the flyout open true, shown again 0
+time(s)"; a Hide right after ShowAt passed with "shown again 1 time(s)".
+check-verbs holds the reshow (one cut watched).
