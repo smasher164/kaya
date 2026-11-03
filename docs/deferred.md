@@ -1457,9 +1457,12 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
 - linux music_header-python-wayland and its dark twin (run 20261103T131359Z-008407):
   after the toast's Undo, `expect_checked checkbox@like off` read "on (the bus's
   ToggleButton #3: checked false, pressed true)" for 15 s while favorite read off.
-  The bundle does not say whether the app wrote like=false; the next sighting's
-  read should start from the verb trace's prop writes, which this leg's trace did
-  not carry.
+  The bundle did not say whether the app wrote like=false. SEEN AGAIN, the
+  same pair, in the 1f257cca matrix (run 20261103T171417Z-008406). The GTK
+  verb trace now carries every toggle checked write with the state before and
+  after ("toggle 91 true -> false, now false"; forced red read back). On the
+  next sighting: no write to the heart after the Undo is the app or the core,
+  a write that left it "now true" is GTK.
 - windows colorpanel_rust (run 20261103T131654Z-090232): "the flyout's
   ColorPicker never ran its template: no HexTextBox in 10 s", under matrix load.
 - linux farend-java-x11 (a8af4b7d matrix, run 20261103T141338Z-008402): the
@@ -1469,6 +1472,11 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
 - iOS editor-go (a8af4b7d matrix, run 20261103T141450Z-076206): `type` refused
   with the caret line at y 406+22 against a frame ending at 427, the keyboard at
   456: one point below the field's frame.
+- android farend-jvm (1f257cca matrix, run 20261103T171343Z-073120): voice 0
+  read silent for 440 Hz: "the platform pulled 48000 frame(s) ... 0 of them the
+  app's; the app wrote 610080 sample(s), 502560 dropped past the 200 ms queue,
+  1072320 pulled past its end", the starvation shape of docs/traps.md (a debug
+  build's conversion on GTK's frame clock), under host load near 100.
 - android music_dock-python (run 20261103T131352Z-079427): the full player's
   pause click left the button "Pause"; the verb trace now carries every player
   command and change (docs/traps.md, the android play/pause the player did not

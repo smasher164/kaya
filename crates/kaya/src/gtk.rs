@@ -18149,9 +18149,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.apply_quiet.set(false);
                 }
                 (NativeWidget::Toggle(toggle), Prop::Checked, Value::Bool(b)) => {
+                    // docs/deferred.md, the music_header heart read "on" after
+                    // the app's Undo: whether the app's write reached the toggle.
+                    let was = gtk4::prelude::ToggleButtonExt::is_active(toggle);
                     core.apply_quiet.set(true);
                     gtk4::prelude::ToggleButtonExt::set_active(toggle, b);
                     core.apply_quiet.set(false);
+                    sheet_note(
+                        "prop_checked",
+                        format_args!(
+                            "toggle {} {was} -> {b}, now {}",
+                            id.0,
+                            gtk4::prelude::ToggleButtonExt::is_active(toggle)
+                        ),
+                    );
                 }
                 (NativeWidget::Slider(slider), Prop::Value, Value::F64(v)) if slider.state.get().dragging => {
                     // THE HELD WRITE (docs/media-player-plan.md M10): the thumb

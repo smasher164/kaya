@@ -214,6 +214,15 @@ def census_voice_graph(src):
     return []
 
 
+def census_gtk_toggle_writes(src):
+    """docs/deferred.md, the music_header heart read on after the Undo: the
+    GTK toggle's checked writes go into the verb trace, before and after."""
+    gtk = src[GTK_RS]
+    if '"prop_checked",' not in gtk or '"toggle {} {was} -> {b}, now {}"' not in gtk:
+        return ["GTK: a toggle's checked write is no longer in the verb trace"]
+    return []
+
+
 def census_documents_why(src):
     """docs/traps.md, the android documents list that never came up: the
     read's refusal names the button, the request, the sheet's state and its
@@ -2806,6 +2815,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("android documents why-not", census_documents_why),
             ("android player trace", census_android_player_trace),
             ("linux voice graph", census_voice_graph),
+            ("GTK toggle writes", census_gtk_toggle_writes),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -3009,6 +3019,10 @@ nds2 = doctored(COMPOSE, r'if \(failuresBefore == 0\) KayaVTrace\.dump\(',
                 "if (false) KayaVTrace.dump(", "NDS2 no trace at the first failed step")
 gate.negative("NDS2 a verdictless android leg with no verb trace",
               lambda: census_documents_why(nds2), want="leaves none")
+nt5 = doctored(GTK_RS, r'"toggle \{\} \{was\} -> \{b\}, now \{\}"',
+               '"toggle {} -> {b}"', "NTW the toggle write's before and after unread")
+gate.negative("NTW a toggle write the trace does not show",
+              lambda: census_gtk_toggle_writes(nt5), want="checked write is no longer")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -4008,6 +4022,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(285 + (5 if DRIVES else 0))
+gate.negatives_ran(286 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
