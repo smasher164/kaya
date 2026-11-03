@@ -34,6 +34,9 @@ function startPeer(frames: kaya.SurfaceFrames, writer: kaya.VoiceWriter): void {
   let shown: { key: string; y: Uint8Array; uv: Uint8Array } | null = null;
   timer = setInterval(() => {
     const elapsed = (performance.now() - start) / 1000;
+    // A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+    if (elapsed - sentFrames / 15 > 2 / 15) sentFrames = Math.floor(elapsed * 15);
+    if (elapsed - sentSamples / 48000 > 0.2) sentSamples = Math.floor((elapsed - 0.2) * 48000 / 480) * 480;
     while (sentFrames / 15 <= elapsed) {
       const key = `${peer.rgb} ${peer.width} ${peer.height}`;
       if (shown === null || shown.key !== key) {

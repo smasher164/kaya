@@ -170,6 +170,9 @@ GATES = [
     # c-shared library os.Getenv is empty forever, and an empty
     # KAYA_SELFTEST is the default arm, not an unknown scene.
     ("check-go-env", ["tools/check-go-env.py"], True, ""),
+    # A far-end peer that fell behind skips to the present rather than
+    # replaying its stall (docs/traps.md, the far end that replayed its stall).
+    ("check-farend-pace", ["tools/check-farend-pace.py"], True, ""),
     ("check-build-id", ["tools/check-build-id.py"], False,
      "it inspects the built libkaya and the built interpreter; this is THE "
      "gate that must never be answered from a cache"),

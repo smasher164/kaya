@@ -35,6 +35,11 @@ let run_peer lock (peer : sends ref) surface voice =
     let now = Mutex.protect lock (fun () -> !peer) in
     if now.on then begin
       let elapsed = Unix.gettimeofday () -. start in
+      (* A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall). *)
+      if elapsed -. (float_of_int !sent_frames /. 15.0) > 2.0 /. 15.0 then
+        sent_frames := int_of_float (elapsed *. 15.0);
+      if elapsed -. (float_of_int !sent_samples /. 48000.0) > 0.2 then
+        sent_samples := int_of_float ((elapsed -. 0.2) *. 48000.0 /. 480.0) * 480;
       while float_of_int !sent_frames /. 15.0 <= elapsed do
         let y, uv =
           match !shown with

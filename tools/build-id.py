@@ -118,6 +118,7 @@ GATES = {
     "check-harness-ceiling": ["crates", "swift", "android", "tools/checks"],
     "check-file-modes": ["crates", "bindings", "swift", "android"],
     "check-go-env": ["bindings", "guests"],
+    "check-farend-pace": ["guests"],
     "check-jni": ["crates", "android/kaya/src", "bindings/java-desktop",
                   "android/build.gradle.kts", "tools/lib/packaging/identity.py",
                   "tools/lib/packaging/android.py", "guests/assets/identity.toml"],

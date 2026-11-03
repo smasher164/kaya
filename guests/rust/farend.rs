@@ -48,6 +48,13 @@ fn run_peer(peer: Arc<Mutex<Peer>>, frames: SurfaceFrames, voice: VoiceWriter) {
             return;
         }
         let elapsed = start.elapsed();
+        // A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+        if elapsed.as_micros() as u64 > sent_frames * 1_000_000 / 15 + 2 * 1_000_000 / 15 {
+            sent_frames = elapsed.as_micros() as u64 * 15 / 1_000_000;
+        }
+        if elapsed.as_micros() as u64 > sent_samples * 1_000 / 48 + 200_000 {
+            sent_samples = (elapsed.as_micros() as u64 - 200_000) * 48 / 1_000 / 480 * 480;
+        }
         while sent_frames * 1_000_000 / 15 <= elapsed.as_micros() as u64 {
             if picture.as_ref().is_none_or(|p| p.0 != now.rgb || p.1 != now.size) {
                 let (y, uv) = nv12(now.size.0, now.size.1, now.rgb);

@@ -40,26 +40,29 @@ runPeer peer view call done = do
           else do
             t <- getMonotonicTimeNSec
             let elapsed = fromIntegral (t - start) / 1e9 :: Double
+                -- A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+                sentFrames' = if elapsed - fromIntegral sentFrames / 15 > 2 / 15 then floor (elapsed * 15) else sentFrames
+                sentSamples' = if elapsed - fromIntegral sentSamples / 48000 > 0.2 then floor ((elapsed - 0.2) * 48000 / 480) * 480 else sentSamples
                 key = (now.sRgb, now.sW, now.sH)
                 planes = case shown of
                   Just (k, p) | k == key -> p
                   _ -> nv12 now.sW now.sH now.sRgb
-                frameDue = fromIntegral sentFrames / 15 <= elapsed
+                frameDue = fromIntegral sentFrames' / 15 <= elapsed
             frames' <-
               if frameDue
                 then do
                   let (y, uv) = planes
                   _ <- surfaceSubmit view (CaptureFrame now.sW now.sH y uv now.sW now.sW (fromIntegral t) 0)
-                  return (sentFrames + 1)
-                else return sentFrames
-            let sampleDue = fromIntegral sentSamples / 48000 <= elapsed
+                  return (sentFrames' + 1)
+                else return sentFrames'
+            let sampleDue = fromIntegral sentSamples' / 48000 <= elapsed
                 step = 2 * pi * now.sHz / 48000
                 chunk = [if now.sHz > 0 then round (sin (phase + step * fromIntegral i) * 12000) else 0 | i <- [0 .. (479 :: Int)]] :: [Int16]
                 phase' = if sampleDue then snd (properFraction ((phase + step * 480) / (2 * pi)) :: (Int, Double)) * 2 * pi else phase
             samples' <-
               if sampleDue
-                then voiceWrite call chunk >> return (sentSamples + 480)
-                else return sentSamples
+                then voiceWrite call chunk >> return (sentSamples' + 480)
+                else return sentSamples'
             if frameDue || sampleDue then return () else threadDelay 5000
             loop frames' (samples' :: Word64) (Just (key, planes)) phase'
   loop (0 :: Word64) 0 Nothing 0

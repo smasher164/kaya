@@ -55,6 +55,13 @@ public final class Farend {
                 hz = peer.hz;
             }
             double elapsed = (System.nanoTime() - start) / 1e9;
+            // A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+            if (elapsed - sentFrames / 15.0 > 2 / 15.0) {
+                sentFrames = (long) (elapsed * 15);
+            }
+            if (elapsed - sentSamples / 48000.0 > 0.2) {
+                sentSamples = (long) ((elapsed - 0.2) * 48000 / 480) * 480;
+            }
             while (sentFrames / 15.0 <= elapsed) {
                 if (planes == null || rgb != shownRgb || w != shownW || h != shownH) {
                     planes = nv12(w, h, rgb);

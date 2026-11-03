@@ -43,6 +43,11 @@ class Peer:
             if not on:
                 return
             elapsed = time.monotonic() - start
+            # A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+            if elapsed - sent_frames / 15 > 2 / 15:
+                sent_frames = int(elapsed * 15)
+            if elapsed - sent_samples / 48000 > 0.2:
+                sent_samples = int((elapsed - 0.2) * 48000 / 480) * 480
             while sent_frames / 15 <= elapsed:
                 if shown is None or shown[0] != (rgb, w, h):
                     shown = ((rgb, w, h), *nv12(w, h, rgb))

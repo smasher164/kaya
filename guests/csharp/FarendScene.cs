@@ -49,6 +49,9 @@ static class FarendScene
                 (rgb, w, h, hz) = (peer.Rgb, peer.W, peer.H, peer.Hz);
             }
             long elapsed = clock.ElapsedTicks * 1_000_000 / Stopwatch.Frequency;
+            // A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+            if (elapsed - sentFrames * 1_000_000 / 15 > 2 * 1_000_000 / 15) sentFrames = elapsed * 15 / 1_000_000;
+            if (elapsed - sentSamples * 1_000 / 48 > 200_000) sentSamples = (elapsed - 200_000) * 48 / 1_000 / 480 * 480;
             while (sentFrames * 1_000_000 / 15 <= elapsed)
             {
                 if (shown is not { } s || s.Rgb != rgb || s.W != w || s.H != h)

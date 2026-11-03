@@ -20177,6 +20177,26 @@ green under the same load. The reveal's own invalidateLayout (2cadeb25, a
 guess at narrower widths) came out. check-verbs holds the scoped edits (two
 cuts watched).
 
+## The far end that replayed its stall (seen 2026-11-03)
+
+farend-jvm read `voice 0 reads silent` for 15 s in two matrices of
+2026-11-03 (1f257cca and ebb0961a), at host loads of 100 to 170: "the
+platform pulled 46080 frame(s) ... 0 of them the app's; the app wrote 502560
+sample(s), 370560 dropped past the 200 ms queue, 906240 pulled past its end".
+The verb trace's attempts show the write count moving in bursts (273120,
+299040, 502560) and then frozen for seconds while the AudioTrack kept
+pulling: the peer, one thread that submits the frames and writes the voice,
+paced by the wall clock, had been starved, and on waking replayed its stall:
+every missed frame back to back (a 1280x720 NV12 conversion each, at the
+submit, on that thread), then seconds of samples into a queue that keeps 200
+ms, so by the time the platform pulled, the queue held the stall's tail and
+then nothing. Every far-end guest carried that loop. A peer more than two
+frames behind now jumps its frame counter to the present, and more than the
+queue behind jumps its sample counter to the queue's edge
+(tools/check-farend-pace.py holds all nine guests, 18 cuts watched). Not
+reproduced by hand: nine android far-end legs under CPU spinners at load 90
+to 150 were green; the matrix is the proof.
+
 ## The WinUI row image the app never fetched (seen 2026-11-03)
 
 netimage_http_java in the 77eac884 matrix read image@art[a01] "0x0" for 15 s.

@@ -1517,7 +1517,13 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   read silent for 440 Hz: "the platform pulled 48000 frame(s) ... 0 of them the
   app's; the app wrote 610080 sample(s), 502560 dropped past the 200 ms queue,
   1072320 pulled past its end", the starvation shape of docs/traps.md (a debug
-  build's conversion on GTK's frame clock), under host load near 100.
+  build's conversion on GTK's frame clock), under host load near 100. SEEN
+  AGAIN in the ebb0961a matrix (run 20261103T211445Z-020207, host load 169) and
+  read: the peer's write count moved in bursts and froze between them, the
+  starved peer replaying its stall into the queue (docs/traps.md, the far end
+  that replayed its stall). All nine far-end guests now skip to the present
+  after a stall (tools/check-farend-pace.py); not reproduced by hand (nine
+  android legs under spinners green), so the matrix is the proof.
 - From the 77eac884 matrix, read 2026-11-03 (the stability pass):
   - windows netimage_http_java (run 20261103T180100Z-056102) `image@art[a01]
     reads "0x0"`: the media-server log shows the leg's client asked for every

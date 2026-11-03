@@ -62,6 +62,13 @@ func (p *peer) run(frames kaya.SurfaceFrames, voice kaya.VoiceWriter, done chan<
 			return
 		}
 		elapsed := time.Since(start).Microseconds()
+		// A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+		if elapsed-sentFrames*1_000_000/15 > 2*1_000_000/15 {
+			sentFrames = elapsed * 15 / 1_000_000
+		}
+		if elapsed-sentSamples*1_000/48 > 200_000 {
+			sentSamples = (elapsed - 200_000) * 48 / 1_000 / 480 * 480
+		}
 		for sentFrames*1_000_000/15 <= elapsed {
 			if shown.y == nil || shown.rgb != now.rgb || shown.w != now.w || shown.h != now.h {
 				shown.rgb, shown.w, shown.h = now.rgb, now.w, now.h

@@ -2255,6 +2255,19 @@ KAYA_SELFTEST is not an unknown scene name, it is the default arm.
 A parser rather than a grep, because every file the rule protects
 documents the rule)
 
+## tools/check-farend-pace.py
+
+`tools/check-farend-pace.py` (every far-end guest skips to the present
+after a stall: the peer paces frames and samples by the wall clock, and a
+peer the host starved for seconds replayed every missed frame back to
+back, a 1280x720 conversion each on the thread that also writes the
+voice, and wrote seconds of samples into a 200 ms queue that dropped
+them; android farend-jvm read silence for 15 s in two matrices of
+2026-11-03 with the app's write count frozen between bursts. Each of
+the nine guests carries the two skips before its catch-up loops, in its
+own spelling; the gate holds all nine and cuts each skip in a copy, 18
+watched negatives. docs/traps.md, the far end that replayed its stall)
+
 ## tools/check-wheel.py
 
 `tools/check-wheel.py`

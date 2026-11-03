@@ -37,6 +37,9 @@ func runPeer(_ peer: OSAllocatedUnfairLock<Sends>, _ frames: KayaSurfaceFrames, 
         let now = peer.withLock { $0 }
         if !now.on { return }
         let elapsed = Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9
+        // A peer that fell behind skips to the present (docs/traps.md, the far end that replayed its stall).
+        if elapsed - Double(sentFrames) / 15 > 2 / 15 { sentFrames = Int(elapsed * 15) }
+        if elapsed - Double(sentSamples) / 48000 > 0.2 { sentSamples = Int((elapsed - 0.2) * 48000 / 480) * 480 }
         while Double(sentFrames) / 15 <= elapsed {
             if shown == nil || shown!.0 != now.rgb || shown!.1 != now.width || shown!.2 != now.height {
                 let (y, uv) = nv12(now.width, now.height, now.rgb)

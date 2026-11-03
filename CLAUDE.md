@@ -358,6 +358,8 @@ docs/gates.md.
      handler.
    - `tools/check-go-env.py` — a Go guest reads the host environment through
      kaya.Env, never os.Getenv.
+   - `tools/check-farend-pace.py` — every far-end guest skips to the present
+     after a stall instead of replaying it.
    - `tools/check-wheel.py` — the built python wheel installs and imports
      through the installed package.
    - `python3 bindings/python/kaya_app_checks.py` — the python surface's
