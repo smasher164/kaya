@@ -10302,6 +10302,25 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
             laid = String(
                 format: "viewport layout range %d-%d (lines %d-%d), %d fragment(s) at y %.0f-%.0f",
                 from, to, lineAt(from), lineAt(max(from, to - 1)), count, top, bottom)
+            // What sits ABOVE the range: the laid fragments from the document's
+            // start, their heights, and the container's width against the
+            // view's, so a range laid too low says whether the lines above it
+            // are laid tall (an older, narrower width) or missing.
+            var above = 0
+            var tallest: CGFloat = 0
+            var first = CGRect.null
+            tlm.enumerateTextLayoutFragments(from: tlm.documentRange.location, options: []) { fragment in
+                if fragment.rangeInElement.location.compare(range.location) != .orderedAscending { return false }
+                if first.isNull { first = fragment.layoutFragmentFrame }
+                tallest = max(tallest, fragment.layoutFragmentFrame.height)
+                above += 1
+                return true
+            }
+            laid += String(
+                format: "; above it %d fragment(s), the first at y %.0f h %.0f, the tallest %.0f high; "
+                    + "container width %.0f, view width %.0f",
+                above, first.isNull ? -1 : first.minY, first.isNull ? -1 : first.height, tallest,
+                view.textContainer.size.width, view.bounds.width)
         }
         return String(
             format: " (caret %d+%d on line %d of %d; viewport y %.0f-%.0f of content %.0f, inset bottom %.0f; first responder %@; %@)",
@@ -39528,11 +39547,6 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 // a no-op at the call site), so a leg asserting immediately
                 // fails. Wrapped, it lands synchronously (3.95ms).
                 UIView.performWithoutAnimation { view.scrollRangeToVisible(range) }
-                // A select just before may have scrolled there already against
-                // the estimate, so no scroll re-lays the viewport: its fragments
-                // stay where the estimate put them (docs/deferred.md, the iOS
-                // codesurface gutter, lines 17-22 laid at y 832-953).
-                view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             }
             kayaUITextViews[node.id] = KayaWeakTextView(view)
         }

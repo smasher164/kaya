@@ -1717,10 +1717,9 @@ comparing both sides. AND BOTH iOS MENU BAR READS ASK FOR A BUILD since
 driver knows its shift, and run-sim starts the watcher for both verbs and for
 `press`; four cuts watched. AND A GTK SURFACE'S FRAMES ARE DRAWN LINEAR since
 2026-11-03 (docs/traps.md, the GTK surface mipmap stall); two cuts watched.
-AND A WINUI COLOUR FLYOUT CLOSED EARLY IS SHOWN AGAIN, AND THE iOS REVEAL
-RE-LAYS ITS VIEWPORT, since 2026-11-03 (docs/traps.md, the WinUI colour flyout
-that closed before its template; docs/deferred.md, the iOS codesurface gutter);
-one cut watched each.
+AND A WINUI COLOUR FLYOUT CLOSED EARLY IS SHOWN AGAIN since 2026-11-03
+(docs/traps.md, the WinUI colour flyout that closed before its template); one
+cut watched.
 Twenty-eight watched negatives and a fake-name
 census, counts printed)
 

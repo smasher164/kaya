@@ -4075,29 +4075,6 @@ cut = g.doctor("flyout reshow cut", real(WINUI_MOD), r'"the flyout would not sho
 if not winui_flyout_reshow(cut):
     fail("check-verbs SELF-TEST: the flyout reshow clause passed with the reshow cut")
 
-# THE iOS REVEAL RE-LAYS THE VIEWPORT after its scroll (docs/deferred.md, the
-# iOS codesurface gutter): a select that already scrolled there leaves the
-# fragments where TextKit 2's estimate put them.
-def ios_reveal_relayout(src=None):
-    text = src or real(SWIFT)
-    at = text.find("UIView.performWithoutAnimation { view.scrollRangeToVisible(range) }")
-    tail = text[at:at + 600] if at >= 0 else ""
-    if "textViewportLayoutController.layoutViewport()" not in tail:
-        return ["KayaSwiftUI.swift: the iOS reveal does not re-lay the viewport after "
-                "its scroll"]
-    return []
-
-
-if ios_reveal_relayout():
-    media_status = 1
-    print("\n".join(ios_reveal_relayout()), file=sys.stderr)
-print("check-verbs: the iOS reveal re-lays the viewport after its scroll")
-cut = g.doctor("iOS reveal relayout cut", real(SWIFT),
-               r"\n +view\.textLayoutManager\?\.textViewportLayoutController"
-               r"\.layoutViewport\(\)", "")
-if not ios_reveal_relayout(cut):
-    fail("check-verbs SELF-TEST: the iOS reveal relayout clause passed with the relayout cut")
-
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its

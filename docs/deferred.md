@@ -1587,11 +1587,16 @@ line 40 of 40; viewport y 854-950 of content 950 ... viewport layout range
 controller laid lines 17-22 out where lines 36-40 belong, the geometry
 TextKit 2 had estimated. The End button selects and then reveals; the select
 can scroll to the end against the estimate first, so the reveal's
-ensureLayout and scroll move nothing and no viewport pass follows. BUILT
-2026-11-03: the reveal re-lays the viewport after its scroll (check-verbs
-holds the call, one cut watched). Not proven: three filtered iOS runs of
-codesurface (9 legs) were green before and after; the next matrices say
-whether the sighting stops.
+ensureLayout and scroll move nothing and no viewport pass follows. TRIED
+2026-11-03 and taken out: a layoutViewport() after the reveal's scroll; the
+next matrix (1f257cca) read codesurface-swift and codesurface-go red with the
+identical range and y, so a fresh viewport pass lays lines 17-22 at y 832 too:
+the geometry of the lines ABOVE is what is off. The read grew to say so: the
+fragments above the range, the first one's frame, the tallest one's height,
+and the container's width against the view's (forced red, healthy layout:
+"above it 35 fragment(s), the first at y 0 h 20, the tallest 142 high;
+container width 309, view width 343"). On the next sighting compare those
+with that healthy reading.
 
 ## DEFECT — iOS media_session-swiftui: a routed remote pause left the player playing, and the bundle cannot say why (seen once 2026-10-03, under a capture,media_ matrix)
 KEY: media_session-swiftui, session_send pause, routed 2, remote command action=2, expect_now_playing, ios media_session
