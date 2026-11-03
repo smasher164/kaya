@@ -141,6 +141,13 @@ def census_android_app_shot(src):
     if "val keyboard = keyboardBand(activity, bitmap)" not in shot:
         found.append("android: KayaFailShot no longer marks the keyboard's band over the app's "
                      "picture (docs/traps.md, the android red leg's picture without its keyboard)")
+    if "val surfaces = surfaceLayers(activity, bitmap)" not in shot:
+        found.append("android: KayaFailShot no longer draws each SurfaceView's own surface "
+                     "(docs/traps.md, the android red leg's white self-view)")
+    layers = shot[shot.find("private fun surfaceLayers("):shot.find("private fun sheetLayers(")]
+    if "is android.view.SurfaceView" not in layers \
+            or "android.view.PixelCopy.request(view, layer," not in layers:
+        found.append("android: surfaceLayers does not copy each SurfaceView it finds")
     band = shot[shot.find("private fun keyboardBand("):]
     if "WindowInsetsCompat.Type.ime()" not in band or "covered its bottom ${bottom}px" not in band:
         found.append("android: KayaFailShot's keyboard band does not read the ime inset off the "
@@ -2905,6 +2912,15 @@ na7 = doctored(COMPOSE, r"^ *val keyboard = keyboardBand\(activity, bitmap\)\n",
                "NA7 cut the keyboard's band from the app's picture, as shipped")
 gate.negative("NA7 the app's picture without its keyboard",
               lambda: census_android_app_shot(na7), want="no longer marks the keyboard's band")
+na9 = doctored(COMPOSE, r"^ *val surfaces = surfaceLayers\(activity, bitmap\)\n", "",
+               "NA9 the surfaces' layers cut")
+gate.negative("NA9 the fail shot without the SurfaceViews' content",
+              lambda: census_android_app_shot(na9), want="each SurfaceView's own surface")
+na10 = doctored(COMPOSE, r"android\.view\.PixelCopy\.request\(view, layer,",
+                "android.view.PixelCopy.request(activity.window, layer,",
+                "NA10 the surface copy aimed at the window")
+gate.negative("NA10 a surface layer copied from the window, which holds only its hole",
+              lambda: census_android_app_shot(na10), want="does not copy each SurfaceView")
 na8 = doctored(COMPOSE, r"covered its bottom \$\{bottom\}px", "covered its bottom",
                "NA8 the keyboard sentence interpolating nothing")
 gate.negative("NA8 a keyboard sentence that measured nothing",
@@ -3896,6 +3912,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(276 + (5 if DRIVES else 0))
+gate.negatives_ran(278 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

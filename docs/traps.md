@@ -20021,3 +20021,19 @@ for (a `press tab` with no other bridge verb waited 30 s for nobody).
 kayaNoMenuBuild names what the key ask answered; all three of its branches
 were forced to print. check-verbs holds the calls, the driver's key and the
 runner's verbs (four cuts watched).
+
+## The android red leg's white self-view (measured 2026-11-03)
+
+KayaFailShot's PixelCopy of the activity's window holds only the hole each
+SurfaceView punches (CameraX's PreviewView in PERFORMANCE mode, media3's
+PlayerSurface), transparent, which a viewer draws white; the camera
+self-view of a red chatcall leg read as a white box. Each shown SurfaceView
+is now copied on its own (`PixelCopy.request(SurfaceView, ...)`) and drawn
+UNDER the window's copy through its views' transforms, so it shows only
+through the hole. The view tree cannot place it alone: the PreviewView's fill
+is 107x143 for a 107x80 box, and the clip that cut it to 80 is Compose's
+render-node clip, which neither the views' bounds nor getGlobalVisibleRect
+carries; the hole is the only record of it (forced red: "8560 transparent of
+15301 px there", the picture equal to `adb screencap` of the same frame).
+With no hole the layer is drawn over, and the sentence says so.
+check-flightrec NA9/NA10.

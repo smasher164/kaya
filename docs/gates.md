@@ -988,7 +988,11 @@ AND A BUNDLE NAMES ANOTHER APP'S PROCESS, NEVER ITS WINDOW TITLES since
 a title only for its `--own` pid, the frontmost and new-app sentences are
 driven on a listing with a foreign title, and the real binary is asked
 both ways; four cuts watched.
-Two hundred and seventy-six watched negatives, counts printed)
+AND THE ANDROID PICTURE CARRIES ITS SURFACES since 2026-11-03 (docs/traps.md,
+the android red leg's white self-view): KayaFailShot copies each shown
+SurfaceView on its own and composites it under the window's hole; two cuts
+watched.
+Two hundred and seventy-eight watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 

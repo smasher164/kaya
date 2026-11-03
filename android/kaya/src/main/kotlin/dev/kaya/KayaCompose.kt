@@ -2738,11 +2738,12 @@ object KayaFailShot {
                 } else if (result != android.view.PixelCopy.SUCCESS) {
                     "no picture: PixelCopy answered $result"
                 } else {
+                    val surfaces = surfaceLayers(activity, bitmap)
                     val sheets = sheetLayers(activity, bitmap)
                     val keyboard = keyboardBand(activity, bitmap)
                     f.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
                     "PixelCopy of the app's own window (${w}x$h, its surface alone: no system " +
-                        "bars' icons, no other app's window)$sheets$keyboard, taken in process at $why"
+                        "bars' icons, no other app's window)$surfaces$sheets$keyboard, taken in process at $why"
                 }
             }
         } catch (e: Exception) {
@@ -2766,6 +2767,109 @@ object KayaFailShot {
             Handler(android.os.Looper.getMainLooper()),
         )
         return bitmap to (if (latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) result else null)
+    }
+
+    /** Each shown SurfaceView's own surface, composited where it sits: the
+     * window's copy holds only the hole a SurfaceView punches, which read as a
+     * white camera self-view (docs/traps.md, the android red leg's white
+     * self-view). */
+    private fun surfaceLayers(activity: ComponentActivity, base: Bitmap): String {
+        val decor = activity.window.decorView
+        // Each surface with where it lands in the window: its bounds through
+        // every ancestor's transform (a PreviewView scales its SurfaceView to
+        // fill, so the view's own size is not its size on screen) and the part
+        // of that the ancestors leave visible.
+        val found = ArrayList<Triple<android.view.SurfaceView, android.graphics.Matrix, android.graphics.Rect>>()
+        val latch = java.util.concurrent.CountDownLatch(1)
+        Handler(android.os.Looper.getMainLooper()).post {
+            fun placed(v: android.view.View): android.graphics.Matrix {
+                val m = android.graphics.Matrix()
+                var cur = v
+                while (cur !== decor) {
+                    m.postConcat(cur.matrix)
+                    m.postTranslate(cur.left.toFloat(), cur.top.toFloat())
+                    val parent = cur.parent as? android.view.View ?: break
+                    m.postTranslate(-parent.scrollX.toFloat(), -parent.scrollY.toFloat())
+                    cur = parent
+                }
+                return m
+            }
+            fun walk(v: android.view.View) {
+                if (v is android.view.SurfaceView && v.isShown) {
+                    // Clipped to every ancestor's own box, as the compositor showed it
+                    // (a PreviewView's fill overflows its 107x80 holder; the
+                    // view tree's visible rect did not clip it).
+                    val box = android.graphics.RectF(0f, 0f, v.width.toFloat(), v.height.toFloat())
+                    placed(v).mapRect(box)
+                    var up = v.parent as? android.view.View
+                    while (up != null) {
+                        val bounds = android.graphics.RectF(0f, 0f, up.width.toFloat(), up.height.toFloat())
+                        placed(up).mapRect(bounds)
+                        if (!box.intersect(bounds)) box.setEmpty()
+                        if (up === decor) break
+                        up = up.parent as? android.view.View
+                    }
+                    val shown = android.graphics.Rect()
+                    box.roundOut(shown)
+                    found.add(Triple(v, placed(v), shown))
+                }
+                if (v is android.view.ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+            }
+            walk(decor)
+            latch.countDown()
+        }
+        if (!latch.await(2, java.util.concurrent.TimeUnit.SECONDS)) {
+            return "; surfaces unread: the main thread did not answer within 2s"
+        }
+        val said = ArrayList<String>()
+        for ((index, entry) in found.withIndex()) {
+            val (view, placed, shown) = entry
+            val w = view.width
+            val h = view.height
+            if (w <= 0 || h <= 0) { said.add("surface $index: ${w}x$h"); continue }
+            if (shown.isEmpty) { said.add("surface $index (${w}x$h): no part of it visible"); continue }
+            val layer = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val done = java.util.concurrent.CountDownLatch(1)
+            var result = -1
+            android.view.PixelCopy.request(view, layer, { r -> result = r; done.countDown() },
+                Handler(android.os.Looper.getMainLooper()))
+            if (!done.await(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                said.add("surface $index (${w}x$h): PixelCopy did not answer within 2s"); continue
+            }
+            if (result != android.view.PixelCopy.SUCCESS) {
+                said.add("surface $index (${w}x$h): PixelCopy answered $result"); continue
+            }
+            // The hole the surface punches is transparent in the window's copy
+            // when the app drew nothing over it: the layer goes UNDER the copy,
+            // so the app's own clip and anything drawn above stay as shown.
+            shown.intersect(0, 0, base.width, base.height)
+            val pixels = IntArray(shown.width() * shown.height())
+            base.getPixels(pixels, 0, shown.width(), shown.left, shown.top, shown.width(), shown.height())
+            val holes = pixels.count { (it ushr 24) == 0 }
+            val under = Bitmap.createBitmap(base.width, base.height, Bitmap.Config.ARGB_8888)
+            Canvas(under).apply {
+                clipRect(shown)
+                concat(placed)
+                drawBitmap(layer, 0f, 0f, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG))
+            }
+            val box = android.graphics.RectF(0f, 0f, w.toFloat(), h.toFloat()).also { placed.mapRect(it) }
+            val where = "through its views' transforms into (${box.left.toInt()},${box.top.toInt()}) " +
+                "${box.width().toInt()}x${box.height().toInt()}, within (${shown.left},${shown.top}) " +
+                "${shown.width()}x${shown.height()}"
+            if (holes > 0) {
+                Canvas(under).drawBitmap(base, 0f, 0f, null)
+                Canvas(base).drawBitmap(under, 0f, 0f,
+                    android.graphics.Paint().apply { xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC) })
+                said.add("surface $index's own content (${w}x$h) drawn under the window's copy $where, " +
+                    "showing through its $holes transparent of ${pixels.size} px there")
+            } else {
+                Canvas(base).drawBitmap(under, 0f, 0f, null)
+                said.add("surface $index's own content (${w}x$h) drawn OVER the window's copy $where, " +
+                    "which held no transparent pixel there (of ${pixels.size}), so anything the app drew " +
+                    "above the surface is covered")
+            }
+        }
+        return if (said.isEmpty()) "; no SurfaceView shown" else "; " + said.joinToString("; ")
     }
 
     /** Each open sheet's own window drawn over [base] where it sits: a sheet
