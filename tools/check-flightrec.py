@@ -2786,6 +2786,10 @@ def census_gutter_context(src):
     if "if verdict.0 == nil { return (nil, verdict.1 + kayaGutterContext(node)) }" not in text:
         return ["SwiftUI: a refused iOS gutter read no longer says where the caret and the "
                 "viewport were (kayaGutterContext)"]
+    above = '"; above it %d fragment(s), the first at y %.0f h %.0f, the tallest %.0f high; "'
+    if above not in text:
+        return ["SwiftUI: the iOS gutter context no longer says what is laid above the "
+                "viewport's range"]
     return []
 
 
@@ -2897,6 +2901,10 @@ for label, pattern, repl, want in (
     changed = doctored(SWIFTUI, pattern, repl, label)
     gate.negative(label, lambda: census_session_answer(changed), want=want)
 
+ga = doctored(SWIFTUI, r'"; above it %d fragment\(s\)', '"; over it %d fragment(s)',
+              "NGA the geometry above the range unread")
+gate.negative("NGA a gutter refusal that does not say what is laid above",
+              lambda: census_gutter_context(ga), want="laid above the viewport")
 gc = doctored(SWIFTUI, r"verdict\.1 \+ kayaGutterContext\(node\)", "verdict.1",
               "NG the gutter refusal without its context")
 gate.negative("NG the gutter refusal without its context",
@@ -4000,6 +4008,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(284 + (5 if DRIVES else 0))
+gate.negatives_ran(285 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")
