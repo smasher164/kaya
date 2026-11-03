@@ -1459,7 +1459,7 @@ no sheet. The read now names the button, the request, the sheet's state and
 its window before the list is put away (docs/traps.md, the android documents
 list that never came up). Read that clause first on the next sighting.
 
-## DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)
+## ~~DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)~~ FIXED 2026-11-03: a surface draws its frames with a linear filter, measured 9 of 147 main-thread samples in glGenerateMipmap before and 0 of 145 after (docs/traps.md, the GTK surface mipmap stall)
 KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter
 
 Run 20261103T093015Z-008418: farend rust, python, go, ocaml and haskell on x11

@@ -3999,6 +3999,44 @@ for label, kw, pattern, repl in (
     if not ios_menu_build(**{kw: cut}):
         fail(f"check-verbs SELF-TEST: the iOS menu build clause passed with {label}")
 
+# A GTK SURFACE'S FRAME IS DRAWN LINEAR (docs/traps.md, the GTK surface
+# mipmap stall): GTK mipmaps a texture drawn well below its size, per frame,
+# on the UI thread, which llvmpipe pays in CPU.
+GTK_SRC = "crates/kaya/src/gtk.rs"
+
+
+def gtk_surface_linear(src=None):
+    text = src or real(GTK_SRC)
+    bad = []
+    surface = text[text.find("pub(super) fn build_surface("):]
+    surface = surface[:surface.find("\n    }\n")]
+    if "super::linear_frame::LinearFrame::default()" not in surface \
+            or "shown.show(texture" not in surface:
+        bad.append("gtk.rs: build_surface does not draw its frames through "
+                   "linear_frame::LinearFrame")
+    if "set_paintable(Some(&texture))" in surface:
+        bad.append("gtk.rs: build_surface hands the picture a bare texture, which GTK mipmaps")
+    frame = text[text.find("mod linear_frame {"):text.find("mod bounded_paintable {")]
+    if "gtk4::gsk::ScalingFilter::Linear" not in frame:
+        bad.append("gtk.rs: linear_frame does not draw with gsk::ScalingFilter::Linear")
+    return bad
+
+
+gtk_linear_out = gtk_surface_linear()
+if gtk_linear_out:
+    media_status = 1
+    print("check-verbs: a GTK surface's frames can be mipmapped:", file=sys.stderr)
+    print("\n".join(gtk_linear_out), file=sys.stderr)
+print("check-verbs: a GTK surface's frames are drawn with a linear filter")
+for label, pattern, repl in (
+        ("surface frames as bare textures", r"shown\.show\(texture\.upcast\(\)\);",
+         "picture.set_paintable(Some(&texture));"),
+        ("linear frame drawn trilinear", r"gtk4::gsk::ScalingFilter::Linear,",
+         "gtk4::gsk::ScalingFilter::Trilinear,")):
+    cut = g.doctor(label, real(GTK_SRC), pattern, repl)
+    if not gtk_surface_linear(cut):
+        fail(f"check-verbs SELF-TEST: the GTK surface filter clause passed with {label}")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its

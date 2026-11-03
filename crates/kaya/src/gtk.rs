@@ -9323,6 +9323,71 @@ fn picture_texture_size(picture: &gtk4::Picture) -> Option<(i32, i32)> {
     Some((texture.intrinsic_width(), texture.intrinsic_height()))
 }
 
+/// A surface's frame drawn with a LINEAR filter: GTK's default for a texture
+/// drawn well below its size builds a mipmap chain per frame, which on
+/// llvmpipe is UI-thread CPU (docs/traps.md, the GTK surface mipmap stall).
+mod linear_frame {
+    use gtk4::gdk;
+    use gtk4::glib;
+    use gtk4::prelude::*;
+    use gtk4::subclass::prelude::*;
+    use std::cell::RefCell;
+
+    #[derive(Default)]
+    pub struct LinearFrameInner {
+        texture: RefCell<Option<gdk::Texture>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for LinearFrameInner {
+        const NAME: &'static str = "KayaLinearFrame";
+        type Type = LinearFrame;
+        type Interfaces = (gdk::Paintable,);
+    }
+
+    impl ObjectImpl for LinearFrameInner {}
+
+    impl PaintableImpl for LinearFrameInner {
+        fn intrinsic_width(&self) -> i32 {
+            self.texture.borrow().as_ref().map_or(0, |t| t.width())
+        }
+        fn intrinsic_height(&self) -> i32 {
+            self.texture.borrow().as_ref().map_or(0, |t| t.height())
+        }
+        fn snapshot(&self, snapshot: &gdk::Snapshot, width: f64, height: f64) {
+            let Some(texture) = self.texture.borrow().clone() else { return };
+            let Some(snap) = snapshot.downcast_ref::<gtk4::Snapshot>() else { return };
+            snap.append_scaled_texture(
+                &texture,
+                gtk4::gsk::ScalingFilter::Linear,
+                &gtk4::graphene::Rect::new(0.0, 0.0, width as f32, height as f32),
+            );
+        }
+    }
+
+    glib::wrapper! {
+        pub struct LinearFrame(ObjectSubclass<LinearFrameInner>) @implements gdk::Paintable;
+    }
+
+    impl Default for LinearFrame {
+        fn default() -> Self {
+            glib::Object::new()
+        }
+    }
+
+    impl LinearFrame {
+        pub fn show(&self, texture: gdk::Texture) {
+            let resized = self.imp().texture.borrow().as_ref().map(|t| (t.width(), t.height()))
+                != Some((texture.width(), texture.height()));
+            self.imp().texture.replace(Some(texture));
+            if resized {
+                self.invalidate_size();
+            }
+            self.invalidate_contents();
+        }
+    }
+}
+
 mod bounded_paintable {
     use gtk4::gdk;
     use gtk4::glib;
@@ -31319,7 +31384,8 @@ mod gtk_media {
         caption.set_visible(false);
         let seen = std::cell::Cell::new(0u64);
         let shape = std::cell::Cell::new((0u32, 0u32, 0u32));
-        let shown = frame.clone();
+        let shown = super::linear_frame::LinearFrame::default();
+        let picture = frame.clone();
         overlay.add_tick_callback(move |_, _| {
             if let Some((w, h, rotation, seq, rgba)) = crate::farend::take_rgba(id, seen.get()) {
                 seen.set(seq);
@@ -31331,7 +31397,10 @@ mod gtk_media {
                     &glib::Bytes::from_owned(rgba),
                     (uw * 4) as usize,
                 );
-                shown.set_paintable(Some(&texture));
+                shown.show(texture.upcast());
+                if picture.paintable().is_none() {
+                    picture.set_paintable(Some(&shown));
+                }
                 if shape.get() != (w, h, rotation) {
                     shape.set((w, h, rotation));
                     layout.set_rotation(rotation);

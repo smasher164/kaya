@@ -20050,3 +20050,19 @@ sheet that was up): "the documents button is in the tree; the list is asked
 to show; the sheet is Expanded going to Expanded; a dialog window showing 1
 document row(s)". Both forced branches printed (the press cut; the rows
 refused). check-flightrec ND1/ND2 (android documents why-not).
+
+## The GTK surface mipmap stall (measured 2026-11-03)
+
+GTK 4.24's GL renderer builds a mipmap chain for a texture drawn well below
+its size, and a surface (farend's 80x60 and 4:3 boxes) shows a new texture
+every frame, so the UI thread ran glGenerateMipmap per frame; on llvmpipe
+that waits on rasterizer threads, and under a starved host five farend x11
+legs sat 60 s in it (flight recorder run 20261103T093015Z-008418). Sampling
+the farend-rust guest's main thread with `eu-stack -b` over a 20 s settle:
+9 of 147 samples in glGenerateMipmap (libgallium+0x476133, called from
+libgtk+0x67eddb) before, 0 of 145 after. The surface now draws its frames
+through linear_frame::LinearFrame, `append_scaled_texture(..,
+ScalingFilter::Linear, ..)`. The capture preview is a GtkPicture over
+gtk4paintablesink, whose Debian build (0.15.2) has no `scaling-filter`
+property, so that path still takes GTK's default. check-verbs holds the
+surface's filter (two cuts watched).
