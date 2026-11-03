@@ -580,16 +580,14 @@ def frontmost_from_listing(out, rc, err):
                 f"{rc}{': ' + first[0] if first else ''}")
     seen = 0
     for line in (out or "").splitlines():
-        # Greedy up to the LAST ` title=`, and the title to end of line: both
-        # fields are Swift debugDescription literals and may hold anything.
         m = re.match(r"win=\d+ pid=(\d+) layer=(-?\d+) bounds=\S+ "
-                     r"app=\"(.*)\" title=(.*)$", line)
+                     r"app=\"(.*?)\"(?: title=.*)?$", line)
         if not m:
             continue
         seen += 1
         if m.group(2) != "0":
             continue
-        return f"{m.group(3)} {m.group(4)} (pid {m.group(1)})"
+        return f"{m.group(3)} (pid {m.group(1)})"
     return (f"unknown: flightrec-winlist listed {seen} window(s), none of "
             f"them at layer 0")
 
@@ -639,7 +637,8 @@ def mac_no_trace_sentence(scratch, log):
 
 
 def mac_frontmost(root):
-    """`frontmost <app> "<title>" (pid N)` right now, or why it cannot be told.
+    """`frontmost <app> (pid N)` right now, or why it cannot be told; never
+    the window's title (docs/traps.md, foreign window titles).
 
     Module-level beside winlist_bin() and for its reason: a caller may want
     the reading WITHOUT a recorder. tools/validate-mac.py prints it on a red
@@ -2156,7 +2155,9 @@ class MacRecorder(LaneRecorder):
                            "\n".join(wanted) + "\n")
         winlist = self.winlist_bin()
         if winlist:
-            self.section(bundle, "windows", [winlist])
+            guest = self._sampler_pid(scratch)
+            self.section(bundle, "windows",
+                         [winlist] + (["--own", guest] if guest else []))
             self._shot(bundle, scratch)
         else:
             no_list = ("flightrec: no swiftc, or "

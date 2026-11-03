@@ -1039,6 +1039,69 @@ def census_frontmost(src):
     return found
 
 
+def census_foreign_titles(src):
+    """A BUNDLE NAMES ANOTHER APP'S PROCESS, NEVER ITS WINDOW TITLES
+    (docs/traps.md, foreign window titles): the window list prints a title
+    only inside its `--own` branch, and the two sentences that read the
+    list are driven here on a listing that carries a foreign title."""
+    found = []
+    winlist = src[WINLIST]
+    branch = re.search(r"if let own, pid == own \{\n(.*?)\n    \}", winlist, re.S)
+    if winlist.count("kCGWindowName") != 1 or not branch \
+            or "kCGWindowName" not in branch.group(1):
+        found.append("mac: flightrec-winlist reads kCGWindowName outside its "
+                     "`--own` branch, so another app's window title reaches a bundle")
+    secret = "PRIVATE-TAB-TITLE"
+    listing = (f'win=13 pid=77 layer=0 bounds=0,0,1400,900 app="browser" title="{secret}"\n'
+               f'win=11 pid=500 layer=0 bounds=0,33,900,560 app="guest" title="{secret}"\n')
+    for rel, name, call in ((LANE_PY, "frontmost_from_listing", lambda f: f(listing, 0, "")),
+                            (LANE_HEALTH, "window_sentence", lambda f: f(500, listing, ""))):
+        space = {"re": re}
+        try:
+            exec(py_block(src[rel], name), space)
+            said = call(space[name])
+        except Exception as e:  # noqa: BLE001 - any failure is the finding
+            found.append(f"{rel}: {name} could not be driven ({e!r})")
+            continue
+        if secret in said:
+            found.append(f"{rel}: {name} repeats a window title ({said!r})")
+    collect = py_block(src[LANE_PY], "MacRecorder")
+    if '["--own", guest]' not in collect:
+        found.append("mac: the bundle's `windows` section does not pass the guest "
+                     "as --own, so the guest's own titles are lost")
+    return found
+
+
+def winlist_titles_only_own():
+    """The real binary: no --own, no line carries a title; --own <pid of a
+    listed window>, only that pid's lines do."""
+    import subprocess
+    from flightrec_lane import winlist_bin
+    binary = winlist_bin(pathlib.Path(__file__).resolve().parent.parent)
+    if not binary:
+        return ["mac: the window list did not build, so its title rule is unverified"]
+    plain = subprocess.run([binary], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", check=False).stdout
+    lines = [ln for ln in plain.splitlines() if ln.startswith("win=")]
+    if not lines:
+        return ["mac: flightrec-winlist listed no window, so its title rule is unexercised"]
+    found = [f"mac: flightrec-winlist without --own printed a title: {ln.split(' app=')[0]}"
+             for ln in lines if " title=" in ln][:3]
+    pid = re.match(r"win=\d+ pid=(\d+) ", lines[0]).group(1)
+    owned = subprocess.run([binary, "--own", pid], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", check=False).stdout
+    rows = [re.match(r"win=\d+ pid=(\d+) .*?( title=)?", ln) for ln in owned.splitlines()
+            if ln.startswith("win=")]
+    titled = {m.group(1) for m in rows if m and " title=" in m.string}
+    if titled != {pid}:
+        found.append(f"mac: flightrec-winlist --own {pid} titled the windows of pids "
+                     f"{sorted(titled)}")
+    if not found:
+        print(f"check-flightrec: flightrec-winlist titles only --own: {len(lines)} window(s) "
+              f"untitled, pid {pid}'s titled under --own")
+    return found
+
+
 MENU_SHOT = "tools/mac/menu-shot.py"
 
 
@@ -1104,9 +1167,9 @@ def census_host_captures(texts):
 
 def foreign_window_checks():
     from flightrec_lane import foreign_windows
-    listing = ("win=11 pid=500 layer=0 bounds=0,33,900,560 app=\"guest\" title=\"\"\n"
-               "win=12 pid=500 layer=101 bounds=10,40,200,300 app=\"guest\" title=\"\"\n"
-               "win=13 pid=77 layer=0 bounds=0,0,1400,900 app=\"browser\" title=\"x\"\n")
+    listing = ("win=11 pid=500 layer=0 bounds=0,33,900,560 app=\"guest\"\n"
+               "win=12 pid=500 layer=101 bounds=10,40,200,300 app=\"guest\"\n"
+               "win=13 pid=77 layer=0 bounds=0,0,1400,900 app=\"browser\"\n")
     found = []
     if foreign_windows([11, 12], listing, 500):
         found.append("foreign_windows refuses the guest's own windows")
@@ -2668,6 +2731,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("linux focus ring", census_focus_ring),
             ("hand run", census_hand_run), ("iOS SDK stamp", census_ios_stamp),
             ("no frontmost shot", census_frontmost),
+            ("no foreign window title", census_foreign_titles),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -2697,6 +2761,8 @@ for line in android_report_checks(REAL, echo=True):
 if sys.platform == "darwin":
     for line in winlist_refuses_nonsense():
         gate.finding(line, at="no frontmost shot")
+    for line in winlist_titles_only_own():
+        gate.finding(line, at="no foreign window title")
 for line in desktop_shot_checks(REAL):
     gate.finding(line, at="desktop shot on an idle host")
 HOST_CAPTURES = host_capture_sources()
@@ -2777,6 +2843,20 @@ nf2 = doctored(WINLIST, r'is not a pid"\)', 'is odd")',
                "NF2 removed the window list's refusal sentence")
 gate.negative("NF2 the window list reading nonsense as no filter",
               lambda: census_frontmost(nf2), want="does not refuse an argument")
+
+for label, rel, pattern, repl, want in (
+        ("NT1 the window list titling every window", WINLIST,
+         r"if let own, pid == own \{", "if true {", "outside its `--own` branch"),
+        ("NT2 the frontmost sentence repeating the title", LANE_PY,
+         r'return f"\{m\.group\(3\)\} \(pid', 'return f"{m.group(3)} {m.string} (pid',
+         "frontmost_from_listing repeats a window title"),
+        ("NT3 a new app's window sentence repeating its title", LANE_HEALTH,
+         r'f"layer \{m\.group\(2\)\} at', 'f"layer {m.group(2)} {m.string} at',
+         "window_sentence repeats a window title"),
+        ("NT4 the bundle's window list without the guest's titles", LANE_PY,
+         r'\["--own", guest\]', '[]', "does not pass the guest")):
+    changed = doctored(rel, pattern, repl, label)
+    gate.negative(label, lambda: census_foreign_titles(changed), want=want)
 
 for label, pattern, repl, want in (
         ("HC1 menu-shot shooting a screen rect", r'"-x", "-o", f"-l\{win\}"',
@@ -3816,6 +3896,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(272 + (5 if DRIVES else 0))
+gate.negatives_ran(276 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

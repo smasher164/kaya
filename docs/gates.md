@@ -983,7 +983,12 @@ menu-shot rect capture, which photographed the maintainer's browser): every
 screencapture argv under tools/ carries `-l` and no `-R`, shot_desktop the
 one ruled exception, and menu-shot refuses a window of another pid before
 its first capture; three cuts watched.
-Two hundred and seventy-two watched negatives, counts printed)
+AND A BUNDLE NAMES ANOTHER APP'S PROCESS, NEVER ITS WINDOW TITLES since
+2026-11-02 (docs/traps.md, foreign window titles): the window list prints
+a title only for its `--own` pid, the frontmost and new-app sentences are
+driven on a listing with a foreign title, and the real binary is asked
+both ways; four cuts watched.
+Two hundred and seventy-six watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 

@@ -19986,3 +19986,17 @@ its apk (`QUIET_GUESTS`, written after the apk's proofs, removed before any
 build) and a reuse requires it equal; the rerun printed "go builds its apk"
 and went red on Android as on the other four.
 
+
+## Foreign window titles in a red leg's summary (2026-11-01)
+
+tools/mac/flightrec-winlist.swift printed every on-screen window's
+kCGWindowName, and three readers repeated it: a red mac leg's verdict line
+(`mac_frontmost`, "frontmost <app> <title>"), the bundle's `windows`
+section, and the new-app census in tools/lib/lane_health.py. On a host the
+maintainer is using, those are his browser tabs and documents, and the
+2026-11-01 growfit run wrote them into lane logs. A bundle may name another
+app's process, pid, layer and bounds, never its titles: the list prints a
+title only for the `--own <pid>` the caller names (the recorder passes the
+leg's guest), and the two sentences no longer print one. check-flightrec's
+"no foreign window title" census drives both sentences on a listing with a
+foreign title and asks the real binary, beside four watched cuts (NT1-NT4).

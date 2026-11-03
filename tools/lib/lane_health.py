@@ -873,14 +873,14 @@ def requester_sentence(app, text, problem):
 def window_sentence(pid, text, problem):
     if problem:
         return f"its windows unreadable ({problem})"
-    own = [m for m in (re.match(r"win=\d+ pid=(\d+) layer=(-?\d+) bounds=(\S+) app=\".*\" "
-                                r"title=(.*)$", ln) for ln in text.splitlines())
+    own = [m for m in (re.match(r"win=\d+ pid=(\d+) layer=(-?\d+) bounds=(\S+) app=", ln)
+                       for ln in text.splitlines())
            if m and int(m.group(1)) == pid]
     if not own:
         tail = [ln for ln in text.splitlines() if ln.startswith("flightrec-winlist:")]
         return (f"no window of its own on screen when first seen "
                 f"({tail[-1] if tail else 'the window list printed no count'})")
-    shown = ", ".join(f"layer {m.group(2)} {m.group(4)} at {m.group(3)}" for m in own[:4])
+    shown = ", ".join(f"layer {m.group(2)} at {m.group(3)}" for m in own[:4])
     return f"{len(own)} window(s) of its own on screen when first seen: {shown}"
 
 
@@ -1728,8 +1728,8 @@ SIGHTING_LOG = """Timestamp               Ty Process[PID:TID]
 2026-10-14 16:00:38.929 Df runningboardd[422:10d97bb4] [com.apple.runningboard:ttl] Acquiring assertion targeting app<application.com.apple.Preview.1.2(501)> from originator [osservice<com.apple.coreservices.uiagent(501)>:652] with description <RBSAssertionDescriptor| "LS launch com.apple.Preview" ID:422-652-1326377 target:app<application.com.apple.Preview.1.2(501)> attributes:[
 2026-10-14 16:00:38.940 Df launchservicesd[384:10d97cfb] [com.apple.launchservices:cas] CHECKIN:0x0-0x25e44f00 84150 com.apple.Preview
 """
-WINLIST = ('win=12 pid=84150 layer=0 bounds=0,25,800,600 app="Preview" title="Open"\n'
-           'win=13 pid=700 layer=25 bounds=0,0,10,10 app="Dock" title=""\n'
+WINLIST = ('win=12 pid=84150 layer=0 bounds=0,25,800,600 app="Preview"\n'
+           'win=13 pid=700 layer=25 bounds=0,0,10,10 app="Dock"\n'
            "flightrec-winlist: 2 window(s)\n")
 APPS_PS = ("    1     0 05-10:00:00   9:00.00   0.0 /sbin/launchd\n"
            "84150     1 00:05   0:01.00   3.0 /System/Applications/Preview.app/Contents/MacOS/Preview\n"
@@ -2109,7 +2109,7 @@ def drive():
             ("stub moved", "WindowServer moved Preview's stub 0x0-0x25e44e1f to pid 84118 "
              "(kaya-go) at 16:00:38.876"),
             ("window on screen", "1 window(s) of its own on screen when first seen: layer 0 "
-             "\"Open\" at 0,25,800,600; still running at the lane's end"),
+             "at 0,25,800,600; still running at the lane's end"),
             ("lane binary under another id", "launched 2026/10/14 16:00:38 while "
              "scroll-go-swiftui, scrollto-rust-swiftui ran; its executable is the lane's own "
              "(a binary built in the tree) but it checked in as com.apple.Preview"),
