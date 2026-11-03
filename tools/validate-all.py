@@ -238,7 +238,15 @@ BUDGETS = {
     # docs/measurements/lane-ceilings-2026-10-16.md): 273 legs read 897s net
     # on the matrix at ee6b56b6, the 258 shared legs 24% slower with no
     # change in kind (the host's load under the matrix). 960 is about 1.07x.
-    "android": 960,
+    # 1100 since 2026-11-03 (the stability pass; docs/deferred.md, the
+    # android lane at its four-emulator floor): the two matrices of that
+    # pass read 1028s and 1041s net with the legs' sum within 2% of the
+    # previous run (3477s and 3539s over 310 legs, about 880s per emulator
+    # at four wide), night4's read 981 to 1120, so the lane sits at its
+    # floor plus 140s of boot, builds and queueing and the ceiling had no
+    # headroom. 1100 is about 1.06x over the two reads; for the maintainer
+    # to re-rule (a fifth emulator is the other way down).
+    "android": 1100,
     # 490 since 2026-08-23, KEPT for the delayed-and-four-wide schedule
     # of 2026-09-07 until it has samples: one at a time the sweep read
     # 348s delayed behind Android (2026-08-24) and 422s on the last such

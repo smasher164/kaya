@@ -241,6 +241,31 @@ def census_save_cancel_leftovers(src):
     return found
 
 
+def census_sheet_show(src):
+    """docs/deferred.md, editor-go's sheets seen "Hidden going to Hidden": the
+    font sheet's moves go into the verb trace like the documents sheet's, both
+    sheets get kaya's show once their anchors exist, and the font why-not
+    prints the anchors and the dialog window's size."""
+    kt = src[COMPOSE]
+    found = []
+    if 'kayaTraceSheet("font_sheet", state)' not in kt:
+        found.append("android: the font sheet's moves are not in the verb trace")
+    if kt.count("kayaShowSheetWhenAnchored(state)") < 2:
+        found.append("android: fewer than two sheets (font and documents) get kaya's show once "
+                     "anchored")
+    body = kt[kt.find("fun kayaShowSheetWhenAnchored("):]
+    body = body[:body.find("\n}\n")]
+    if "snapshotFlow { state.hasExpandedState }" not in body or "state.show()" not in body:
+        found.append("android: kayaShowSheetWhenAnchored no longer waits for the anchors and shows")
+    why = kt[kt.find("private fun kayaFontSheetWhyNot("):]
+    why = why[:why.find("\n    }\n")]
+    for needle in ("anchors expanded", "state.requireOffset()",
+                   "its decor ${window.decorView.width}"):
+        if needle not in why:
+            found.append(f"android: the font sheet why-not no longer prints `{needle}`")
+    return found
+
+
 SCENE_RS = "crates/kaya/src/scene.rs"
 
 
@@ -2885,6 +2910,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("core image needs", census_core_image_needs),
             ("android modem network", census_android_modem_network),
             ("iOS save cancel leftovers", census_save_cancel_leftovers),
+            ("android sheet show", census_sheet_show),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -3113,6 +3139,14 @@ nsc1 = doctored(SWIFTUI, r'\+ \(save \? "; " \+ kayaSaveCancelLeftovers\(\) : ""
                 "NSC1 the save cancel's leftovers unread")
 gate.negative("NSC1 a save sheet's cancel that says nothing of the directory",
               lambda: census_save_cancel_leftovers(nsc1), want="no longer says what the armed")
+nss1 = doctored(COMPOSE, r'kayaTraceSheet\("font_sheet", state\)', "Unit",
+                "NSS1 the font sheet's moves untraced")
+gate.negative("NSS1 a font sheet whose moves the trace does not show",
+              lambda: census_sheet_show(nss1), want="font sheet's moves are not")
+nss2 = doctored(COMPOSE, r"snapshotFlow \{ state\.hasExpandedState \}", "snapshotFlow { false }",
+                "NSS2 the anchored show cut")
+gate.negative("NSS2 a sheet nobody shows once anchored",
+              lambda: census_sheet_show(nss2), want="no longer waits for the anchors")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -4112,6 +4146,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(292 + (5 if DRIVES else 0))
+gate.negatives_ran(294 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

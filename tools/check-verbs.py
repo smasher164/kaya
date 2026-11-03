@@ -4075,6 +4075,26 @@ cut = g.doctor("flyout reshow cut", real(WINUI_MOD), r'"the flyout would not sho
 if not winui_flyout_reshow(cut):
     fail("check-verbs SELF-TEST: the flyout reshow clause passed with the reshow cut")
 
+# EVERY EXPECT STEP'S DISPATCH IS POLLED (docs/deferred.md, the identity caption
+# mark read before its region): a `Step::Expect… => Some(stage.…())` arm reads
+# once, 50 ms into the leg, what every other read retries inside its ceiling.
+def expects_polled(src=None):
+    text = src or real(HARNESS)
+    arms = re.findall(
+        r"Step::Expect\w+(?:\([^)]*\)| \{[^}]*\})? => Some\(stage\.\w+\([^)]*\)\)", text)
+    return [f"crates/kaya/src/harness.rs: an Expect step reads once instead of polling: `{arm}`"
+            for arm in arms]
+
+
+if expects_polled():
+    media_status = 1
+    print("\n".join(expects_polled()), file=sys.stderr)
+print("check-verbs: every Expect step's dispatch is polled")
+cut = g.doctor("caption menu read once", real(HARNESS),
+               r"Some\(poll\(\|\| stage\.caption_menu\(\)\)\)", "Some(stage.caption_menu())")
+if not expects_polled(cut):
+    fail("check-verbs SELF-TEST: the polled-expect clause passed a one-shot caption menu read")
+
 # THE HIGHLIGHT CLEAR TOUCHES ONLY THE RUNS THAT ARE THERE (docs/traps.md, the
 # highlight clear that re-estimated the document): a removeAttribute over the
 # whole storage marks the whole document edited on every update pass, and

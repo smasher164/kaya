@@ -7557,7 +7557,11 @@ fn run_with_log(
                 Ok(got) => Err(format!("player {n} open {got}, wanted {want}")),
                 Err(why) => Err(format!("player {n}: {why}")),
             })),
-            Step::ExpectCaptionMenu => Some(stage.caption_menu()),
+            // Polled like every other read: the non-client icon region is
+            // published after the title bar lays out, and a one-shot read 50 ms
+            // into the leg found it empty under a matrix (docs/deferred.md, the
+            // identity caption mark read before its region).
+            Step::ExpectCaptionMenu => Some(poll(|| stage.caption_menu())),
             Step::ExpectBadge(want) => Some(poll(|| {
                 let got = stage.badge();
                 if got == *want {

@@ -1449,6 +1449,21 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
+SEEN AGAIN in the 0b8e8e42 matrix (run 20261103T222416Z-011009, host load
+above 100), and the clause read: "dialog 4 is held; the sheet is Hidden going
+to Hidden; a dialog window whose compose root is AndroidComposeView" for 50 s:
+the request arrived, the ModalBottomSheet composed in its dialog window and
+never moved, the same shape as the documents list's sighting above. Material's
+own show runs only while the sheet holds an Expanded anchor at the
+composition that reads `hasExpandedState`. BUILT 2026-11-03: the font sheet's
+moves go into the verb trace like the documents sheet's (font_sheet), both
+sheets get kaya's own show once their anchors exist and the sheet is still
+Hidden (kayaShowSheetWhenAnchored, traced as "sheet_show"), and the why-not
+prints the anchors (expanded, partial), the offset and the dialog window's
+decor size. check-flightrec "android sheet show", NSS1 and NSS2. On the next
+sighting: anchors "no" with a 0x0 decor is a dialog window that never laid
+out; anchors "yes" and still Hidden is a show that never ran.
+
 ## ~~DEFECT — android: the emulator's virtual WiFi dropped under host load and failed the fetch in flight (media_tracks-compose in the 77eac884 matrix; media_feed-compose and netimage_http-go on 2026-10-24)~~ FIXED 2026-11-03: the pool runs on the modem's network, read back on every run (docs/traps.md, the virtual WiFi the host's load disconnected)
 KEY: CTRL-EVENT-DISCONNECTED, CTRL-EVENT-BEACON-LOSS, modem_network, svc wifi disable, Transports: CELLULAR, failed network, captions fetch, wlan0
 
@@ -1489,6 +1504,48 @@ bytes, modified 5.4 s ago): the platform cancelled a save it had written"
 (didPick routed through the cancel delegate, the interpreter doctored and
 restored by copy). check-flightrec "iOS save cancel leftovers", NSC1. On the
 next sighting that sentence is the whole reading.
+
+## WATCH — iOS numberfield-swiftui and numberfieldde-swiftui: `press return` found kaya's focus nowhere and no first responder (seen once, both legs of the 0b8e8e42 matrix, 2026-11-03)
+KEY: numberfield-swiftui, numberfieldde-swiftui, press return, the simdrive watcher did not answer, focus is node nowhere, the first responder is nothing, keyboard_done
+
+Run 20261103T222534Z-016040: after `click number_field@amount`, `set_text`,
+`type "{fmt:field 12.5 0.5}"` and `expect label@commits "commits: 0"`, the
+`press return` read "the simdrive watcher did not answer #9 type_b64 Cg==
+within 60s; the watcher's account: queue 11 ms; kaya's focus is node nowhere
+(); the first responder is nothing; node's own text view is unregistered"
+while the driver's own log says each type_b64 was answered ok within 0.6 s
+and the window's metrics moved 734 -> 460 -> 378 -> 446 -> 412 -> 426 -> 734
+in two seconds (the keyboard's bar arriving and the keyboard leaving). Both
+numberfield legs, the same sentence, host load above 100; green in every
+earlier matrix of the day. The reading so far: the keyboard left between the
+typed digits and the return, taking the first responder with it, and the
+return went to nobody. Not reproduced by hand; read the driver's account and
+the metrics storm first on the next sighting.
+
+## ~~DEFECT — windows identity_rust: `expect_caption_menu` read the caption mark's hit test 50 ms into the leg, before the non-client icon region was published (seen once, the 0b8e8e42 matrix, 2026-11-03)~~ FIXED 2026-11-03: the read is polled inside its ceiling like every other Expect step; check-verbs holds that no Expect step's dispatch reads once
+KEY: expect_caption_menu, ExpectCaptionMenu, HTSYSMENU, InputNonClientPointerSource, publishes Icon [], identity_rust, expects_polled
+
+Run 20261103T222437Z-011751: "the caption's mark (16x16 at 30,369) answers
+hit test 2 from its window InputNonClientPointerSource at its centre, not
+HTSYSMENU (3); the non-client input publishes Icon [] and Passthrough [...]",
+at +1475 ms, 50 ms after the previous step, under a matrix. The icon region
+is set after the title bar lays out, and `Step::ExpectCaptionMenu` was the
+one Expect arm dispatched as a one-shot `stage.caption_menu()` where every
+other read goes through `poll`. Now polled; the gate's self-test puts the
+one-shot back in a copy (1 substitution) and the clause names it.
+
+## RULING WANTED — the android lane's ceiling: 1100 since 2026-11-03, provisionally, from the 960 the maintainer ruled on 2026-10-16
+KEY: android ceiling, DURATION ANOMALY, 1100, four-emulator floor, queued-compose, KAYA_ANDROID_EMUS
+
+Both matrices of the stability pass read the android lane over its 960 s
+ceiling (1028 s and 1041 s net) with the legs' sum within 2% of the previous
+run (3477 s and 3539 s over 310 legs), and night4's matrices read 981 to 1120
+s; the lane's four emulators carry about 880 s of leg time each at full
+parallelism, plus boot, four builds and the queue (about 140 s), so 960 had
+no headroom and the anomaly alone would fail an all-green matrix. Raised to
+1100 (about 1.06x over the two reads) so the record can be ALL PASS; the
+other way down is a fifth emulator (KAYA_ANDROID_EMUS), which is the
+maintainer's call, as is the ceiling itself.
 
 ## WATCH — three reds of the 72b602fb matrix, each green alone (2026-11-03)
 KEY: music_header-python-wayland, checkbox@like checked reads on, colorpanel_rust, HexTextBox, music_dock-python, full_play_pause, player_command

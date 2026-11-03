@@ -9762,9 +9762,12 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
         val state = KayaSceneModel.fontSheetState
         val window = KayaSceneModel.fontSheetWindow
         val drawn = if (state == null) "the sheet is not composed" else
-            "the sheet is ${state.currentValue} going to ${state.targetValue}"
+            "the sheet is ${state.currentValue} going to ${state.targetValue}, anchors expanded " +
+                "${if (state.hasExpandedState) "yes" else "no"} partial ${if (state.hasPartiallyExpandedState) "yes" else "no"}, " +
+                "offset ${runCatching { state.requireOffset().toInt().toString() }.getOrDefault("none")}"
         val root = if (window == null) "no dialog window" else
-            "a dialog window whose compose root is ${kayaComposeRoot(window.decorView)?.javaClass?.simpleName}"
+            "a dialog window whose compose root is ${kayaComposeRoot(window.decorView)?.javaClass?.simpleName}, " +
+                "its decor ${window.decorView.width}x${window.decorView.height}"
         val picker = KayaSceneModel.fontPicker ?: return "no request is held; $drawn; $root"
         return "dialog ${picker.dialog} is held; $drawn; $root"
     }
@@ -25065,6 +25068,7 @@ fun KayaDocumentsSheet() {
             kayaDocumentsScope = null
         }
     }
+    kayaShowSheetWhenAnchored(state)
     ModalBottomSheet(onDismissRequest = { KayaSceneModel.documentsListShown = false }, sheetState = state) {
         val view = LocalView.current
         androidx.compose.runtime.SideEffect {
@@ -27721,14 +27725,48 @@ internal fun kayaFontAnswer(picker: KayaFontPicker, chosen: Boolean) {
     }
 }
 
+/** A sheet's moves in the verb trace, the documents sheet's shape. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun kayaTraceSheet(verb: String, state: androidx.compose.material3.SheetState) {
+    androidx.compose.runtime.LaunchedEffect(state) {
+        KayaVTrace.note(verb, "composed: ${state.currentValue} going to ${state.targetValue}")
+        androidx.compose.runtime.snapshotFlow { state.currentValue to state.targetValue }.collect { (now, to) ->
+            KayaVTrace.note(verb, "$now going to $to")
+        }
+    }
+}
+
+/** Material's own show runs only while the sheet has an Expanded anchor at
+ *  the composition that reads it; a sheet seen composed and "Hidden going to
+ *  Hidden" for 50 s under load (docs/deferred.md, editor-go's sheets) gets
+ *  kaya's show once the anchors exist, a no-op when Material's ran. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun kayaShowSheetWhenAnchored(state: androidx.compose.material3.SheetState) {
+    androidx.compose.runtime.LaunchedEffect(state) {
+        androidx.compose.runtime.snapshotFlow { state.hasExpandedState }.collect { anchored ->
+            if (anchored && state.currentValue == SheetValue.Hidden && state.targetValue == SheetValue.Hidden) {
+                KayaVTrace.note("sheet_show", "anchored and still Hidden: kaya shows it")
+                state.show()
+            }
+        }
+    }
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun KayaFontSheet() {
     val picker = KayaSceneModel.fontPicker ?: return
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     KayaSceneModel.fontSheetState = state
+    // docs/deferred.md, editor-go's Font… that opened no sheet: the sheet's
+    // moves in the verb trace, and kaya's own show once the anchors exist.
+    kayaTraceSheet("font_sheet", state)
+    kayaShowSheetWhenAnchored(state)
     androidx.compose.runtime.DisposableEffect(picker) {
         onDispose {
+            KayaVTrace.note("font_sheet", "disposed")
             KayaSceneModel.fontSheetState = null
             KayaSceneModel.fontSheetWindow = null
         }
