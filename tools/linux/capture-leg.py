@@ -305,10 +305,22 @@ def main(argv):
         sampler.start()
         guest_proc = subprocess.Popen(guest, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                       text=True, errors="replace")
+        voice_graph = []
         for line in guest_proc.stdout:
             sys.stdout.write(line)
             sys.stdout.flush()
             guest_lines.append(line)
+            # docs/traps.md, the linux voice the graph never pulled: the app's
+            # node and its links exist only while it runs, so they are read at
+            # the first refused voice step, not at the leg's end.
+            if not voice_graph and "step-failed voice" in line:
+                for argv_ in (["pw-link", "--links", "--id"], ["pw-cli", "ls", "Node"]):
+                    code, said = quiet(argv_, stack_env)
+                    voice_graph.append(f"$ {' '.join(argv_)} (exit {code})\n{said}")
+        if voice_graph:
+            print("--- pipewire at the first refused voice step ---", file=sys.stderr)
+            for block in voice_graph:
+                print(block, file=sys.stderr)
         status = guest_proc.wait()
         routes = [line for line in guest_lines if ROUTE in line]
         findings.extend(route_findings(regime, guest_lines))

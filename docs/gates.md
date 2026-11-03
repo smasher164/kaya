@@ -995,8 +995,10 @@ watched. AND AN ANDROID DOCUMENTS READ SAYS WHY THE LIST IS NOT UP since
 2026-11-03 (docs/traps.md, the android documents list that never came up),
 read before the list is put away; two cuts watched. AND THE ANDROID PLAYER'S
 COMMANDS ARE IN THE VERB TRACE since 2026-11-03 (docs/traps.md, the android
-play/pause the player did not take); one cut watched.
-Two hundred and eighty-one watched negatives, counts printed)
+play/pause the player did not take); one cut watched. AND A LINUX VOICE RED
+CARRIES ITS GRAPH since 2026-11-03 (docs/traps.md, the linux voice the graph
+never pulled); one cut watched.
+Two hundred and eighty-two watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 

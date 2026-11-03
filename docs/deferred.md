@@ -1462,6 +1462,13 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   not carry.
 - windows colorpanel_rust (run 20261103T131654Z-090232): "the flyout's
   ColorPicker never ran its template: no HexTextBox in 10 s", under matrix load.
+- linux farend-java-x11 (a8af4b7d matrix, run 20261103T141338Z-008402): the
+  app's voice node sat suspended and nothing was pulled; the graph is now read
+  at the first refused voice step (docs/traps.md, the linux voice the graph
+  never pulled).
+- iOS editor-go (a8af4b7d matrix, run 20261103T141450Z-076206): `type` refused
+  with the caret line at y 406+22 against a frame ending at 427, the keyboard at
+  456: one point below the field's frame.
 - android music_dock-python (run 20261103T131352Z-079427): the full player's
   pause click left the button "Pause"; the verb trace now carries every player
   command and change (docs/traps.md, the android play/pause the player did not
@@ -1476,6 +1483,15 @@ read "<the documents list is not up yet>" for three attempts at host load
 no sheet. The read now names the button, the request, the sheet's state and
 its window before the list is put away (docs/traps.md, the android documents
 list that never came up). Read that clause first on the next sighting.
+
+SEEN AGAIN in the a8af4b7d matrix (run 20261103T141318Z-070264), and the new
+clause read: "the documents button is in the tree; the list is asked to show;
+the sheet is Hidden going to Hidden; a dialog window showing 1 document
+row(s)". The ModalBottomSheet was composed in its dialog window and never
+animated toward Expanded. Not yet explained: whether its own show was never
+started (anchors unmeasured under load) or was cancelled by the previous
+read's hide; the next step is to trace the sheet state's transitions in the
+verb trace.
 
 ## ~~DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)~~ FIXED 2026-11-03: a surface draws its frames with a linear filter, measured 9 of 147 main-thread samples in glGenerateMipmap before and 0 of 145 after (docs/traps.md, the GTK surface mipmap stall)
 KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter

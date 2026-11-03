@@ -102,6 +102,8 @@ GATES = {
     "check-flightrec": ["crates/kaya/src/winui/mod.rs", "crates/kaya/src/harness.rs",
                         "swift/KayaSwiftUI.swift",
                         "android/kaya/src/main/kotlin/dev/kaya/KayaCompose.kt",
+                        "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt",
+                        "tools/linux/capture-leg.py",
                         "crates/kaya/src/gtk.rs"],
     # No binding: the card is a lowering. swift/ is an input because the
     # iOS synthesized tier draws it and the mac clause reads that file.

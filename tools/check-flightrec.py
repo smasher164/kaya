@@ -112,7 +112,7 @@ def sources():
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
              LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE,
-             ANDROID_MEDIA)}
+             ANDROID_MEDIA, CAPTURE_LEG)}
 
 
 def census_android_app_shot(src):
@@ -198,6 +198,20 @@ def census_android_player_trace(src):
         if needle not in kt:
             found.append(f"android: the verb trace no longer carries the player's {said}")
     return found
+
+
+CAPTURE_LEG = "tools/linux/capture-leg.py"
+
+
+def census_voice_graph(src):
+    """docs/traps.md, the linux voice the graph never pulled: the app's node
+    and its links are read at the first refused voice step, while it runs."""
+    body = src[CAPTURE_LEG]
+    loop = body[body.find("for line in guest_proc.stdout:"):body.find("status = guest_proc.wait()")]
+    if '"step-failed voice" in line' not in loop or '["pw-link", "--links", "--id"]' not in loop:
+        return ["linux: capture-leg no longer reads the PipeWire links at the first refused "
+                "voice step"]
+    return []
 
 
 def census_documents_why(src):
@@ -2782,6 +2796,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("no foreign window title", census_foreign_titles),
             ("android documents why-not", census_documents_why),
             ("android player trace", census_android_player_trace),
+            ("linux voice graph", census_voice_graph),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -2969,6 +2984,10 @@ np1 = doctored(ANDROID_MEDIA,
                "NM1 the Pause command untraced")
 gate.negative("NM1 a pause the trace does not show",
               lambda: census_android_player_trace(np1), want="player's Pause command")
+nv1 = doctored(CAPTURE_LEG, r'"step-failed voice" in line', '"step-failed voice" in ""',
+               "NV1 the voice graph never read")
+gate.negative("NV1 a voice red without the graph it ran in",
+              lambda: census_voice_graph(nv1), want="PipeWire links")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -3968,6 +3987,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(281 + (5 if DRIVES else 0))
+gate.negatives_ran(282 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

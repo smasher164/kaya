@@ -20088,3 +20088,14 @@ command and every playWhenReady, state and isPlaying change now goes into the
 verb trace with what the player held (forced red read back: "player 1 Pause:
 playWhenReady=true state=3 isPlaying=true item=0 at=444ms", then
 "playWhenReady -> false (reason 1)"). check-flightrec NM1.
+
+## The linux voice the graph never pulled (seen 2026-11-03)
+
+farend-java-x11 in the a8af4b7d matrix read `voice 0 reads none` for every
+voice step: "the platform pulled 0 frame(s)", the app's pipewiresink node
+("= java") suspended in every pw-top sample while echo-cancel ran. The node
+and its links exist only while the app runs, and the leg-end dump came after
+it left, so the bundle could not say whether WirePlumber ever linked it.
+capture-leg now reads `pw-link --links --id` and `pw-cli ls Node` at the first
+refused voice step (forced red read back: "java:output_FL" linked into
+echo-cancel-sink:playback_FL). check-flightrec NV1.
