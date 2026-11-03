@@ -41,6 +41,7 @@ editorfmt = 'https://claude.ai/artifact/7PtETtTpi3bPZscDSSQwJ7'
 doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
 fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
 rulings1101 = 'https://claude.ai/artifact/64X8oeghtQchdNVYmdQMJn'
+growfit = 'https://claude.ai/artifact/SsduV7PtFoi344sadJopgo'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -177,7 +178,7 @@ unblocks = "the chat app's calls"
 plan = 'docs/capture-plan.md'
 review = 'calls'
 plan_built_part = "stage C10 is capture-plan §8; the plan's BUILT is capture itself"
-text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Ruled 2026-11-01 and built (9b59dfd0; review {review:rulings1101}): every call button shows its symbol beside its title, and the self-view sits smaller under the peer's picture until the layering entry lets it float over a corner; the settled choices are capture-plan §12, ratified."
+text = "SHIPPED 2026-10-31 (c90f6f4b; review {review:calls}): stage C10 (docs/capture-plan.md §8). Call and Video in a thread's header open a call screen in the Go app: the peer's picture, the self-view, camera and microphone pickers, Mute, Camera off and Hang up; the scripted peer answers over its own loopback connection with a test pattern and a tone, and calls back as an ordinary notification with Answer and Decline. CallKit and Android's call service stay out. The chatcall scene runs it on five lanes. Ruled 2026-11-01 and built (9b59dfd0; review {review:rulings1101}): every call button shows its symbol beside its title, and the self-view sits smaller under the peer's picture until the layering entry lets it float over a corner; the settled choices are capture-plan §12, ratified. The call screen has one geometry on every lane (211bc322), and a growing video view or surface fills until either axis of its room is used up on all five, ruled 2026-11-01 (cfebe2c5; review {review:growfit}; docs/media-plan.md §3)."
 
 [[menu]]
 title = '<b>Six more languages on a phone</b>'
