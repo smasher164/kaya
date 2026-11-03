@@ -20099,3 +20099,13 @@ it left, so the bundle could not say whether WirePlumber ever linked it.
 capture-leg now reads `pw-link --links --id` and `pw-cli ls Node` at the first
 refused voice step (forced red read back: "java:output_FL" linked into
 echo-cancel-sink:playback_FL). check-flightrec NV1.
+
+## The android leg with no verb trace (measured 2026-11-03)
+
+The Compose harness dumped its verb trace only at the verdict and at its own
+step ceiling. editor-go with seven failed steps of 15 s each ran past the
+runner's leg ceiling and was ended before either, so two matrices' bundles
+carried a 63-byte trace while the cause sat in the ring. The ring is now
+also dumped at the first failed step (append mode, so a verdict's dump
+follows it); forced red: a leg ended without a verdict left 3774 bytes
+starting "dump reason=\"the first failed step: ...\"". check-flightrec NDS2.

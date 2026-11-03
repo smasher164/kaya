@@ -998,7 +998,7 @@ COMMANDS ARE IN THE VERB TRACE since 2026-11-03 (docs/traps.md, the android
 play/pause the player did not take); one cut watched. AND A LINUX VOICE RED
 CARRIES ITS GRAPH since 2026-11-03 (docs/traps.md, the linux voice the graph
 never pulled); one cut watched.
-Two hundred and eighty-three watched negatives, counts printed)
+Two hundred and eighty-four watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 

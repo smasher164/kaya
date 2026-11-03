@@ -230,6 +230,9 @@ def census_documents_why(src):
                      "puts the list away")
     if 'KayaVTrace.note("documents_sheet", "$now going to $to")' not in kt:
         found.append("android: the documents sheet's moves are not in the verb trace")
+    if 'if (failuresBefore == 0) KayaVTrace.dump("the first failed step: $line")' not in kt:
+        found.append("android: the verb trace is dumped only at the verdict, so a leg ended at "
+                     "the runner's ceiling leaves none")
     if kt.count("($kayaDocumentsWhy)") != 2:
         found.append("android: a documents refusal does not say why the list is not up "
                      "($kayaDocumentsWhy)")
@@ -2994,6 +2997,10 @@ nd3 = doctored(COMPOSE, r'KayaVTrace\.note\("documents_sheet", "\$now going to \
                "NDS1 the sheet's moves untraced")
 gate.negative("NDS1 a documents sheet whose moves the trace does not show",
               lambda: census_documents_why(nd3), want="sheet's moves are not in the verb trace")
+nds2 = doctored(COMPOSE, r'if \(failuresBefore == 0\) KayaVTrace\.dump\(',
+                "if (false) KayaVTrace.dump(", "NDS2 no trace at the first failed step")
+gate.negative("NDS2 a verdictless android leg with no verb trace",
+              lambda: census_documents_why(nds2), want="leaves none")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -3993,6 +4000,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(283 + (5 if DRIVES else 0))
+gate.negatives_ran(284 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

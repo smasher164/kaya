@@ -17383,6 +17383,9 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     // check-verbs.py holds this level with harness.rs and
                     // KayaSwiftUI.swift.
                     mountedActivity?.let { KayaFailShot.take(it, "the first failed step, $line") }
+                    // A leg the runner ends at its ceiling never reaches the
+                    // verdict's dump (docs/traps.md, the android leg with no verb trace).
+                    if (failuresBefore == 0) KayaVTrace.dump("the first failed step: $line")
                     for (i in failuresBefore until failures.size) {
                         Log.i("kaya", "KAYA_HARNESS: step-failed ${failures[i]}")
                         // The trace's anchor: where the failure sits among
