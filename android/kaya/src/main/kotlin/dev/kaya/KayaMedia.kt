@@ -255,9 +255,24 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
         exo.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
-    fun play() = exo.play()
+    /** docs/traps.md, the android play/pause the player did not take: what the
+     * player held when told, and every change after, in the verb trace. */
+    private fun held() = "playWhenReady=${exo.playWhenReady} state=${exo.playbackState} " +
+        "isPlaying=${exo.isPlaying} item=${exo.currentMediaItemIndex} at=${exo.currentPosition}ms"
 
-    fun pause() = exo.pause()
+    fun play() {
+        KayaVTrace.note("player_command", "player $id Play: ${held()}")
+        exo.play()
+    }
+
+    fun pause() {
+        KayaVTrace.note("player_command", "player $id Pause: ${held()}")
+        exo.pause()
+    }
+
+    override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        KayaVTrace.note("player_state", "player $id playWhenReady -> $playWhenReady (reason $reason): ${held()}")
+    }
 
     fun seek(ms: Long, report: Boolean) {
         wakeAtTheBound(generation)
@@ -267,6 +282,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
     }
 
     override fun onPlaybackStateChanged(state: Int) {
+        KayaVTrace.note("player_state", "player $id state -> $state: ${held()}")
         when (state) {
             Player.STATE_READY -> {
                 if (!loaded) {
@@ -299,6 +315,7 @@ internal class KayaMediaPlayer(val id: Long, context: Context) : Player.Listener
     }
 
     override fun onIsPlayingChanged(isPlaying: Boolean) {
+        KayaVTrace.note("player_state", "player $id isPlaying -> $isPlaying: ${held()}")
         kayaPlayerReport(id) { KayaPresent.playerRate(id, isPlaying) }
         main.removeCallbacks(tick)
         if (isPlaying) {

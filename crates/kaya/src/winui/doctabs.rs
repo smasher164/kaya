@@ -437,6 +437,17 @@ fn forget(core: &mut CoreState, doc: u64, user: bool) -> windows_core::Result<()
         if items.IndexOf(&record.item.cast::<windows_core::IInspectable>()?, &mut at)? {
             items.RemoveAt(at)?;
             reflow(window, &tabs.view)?;
+            // docs/traps.md, the WinUI tab close that selected another tab.
+            let kept = core.docs.active.get(&window).filter(|a| **a != doc).and_then(|a| core.docs.pages.get(a));
+            if let Some(kept) = kept {
+                let now = tabs.view.SelectedItem().ok().and_then(|i| doc_of(&i));
+                if now != doc_of(&kept.item.cast()?) {
+                    eprintln!(
+                        "KAYA_DIAG doctabs: removing document {doc} moved the TabView's selection to {now:?}; put back"
+                    );
+                    tabs.view.SetSelectedItem(&kept.item.cast::<windows_core::IInspectable>()?)?;
+                }
+            }
         }
     }
     if let Some(order) = core.docs.order.get_mut(&window) {

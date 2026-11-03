@@ -113,6 +113,20 @@ def prop_findings(texts, props):
     return out
 
 
+def kept_selection_findings(text):
+    """docs/traps.md, the WinUI tab close that selected another tab: forget()
+    puts the active tab back after removing another, before the TabView's own
+    SelectionChanged is read as the user's."""
+    body = text[text.find("fn forget("):]
+    body = body[:body.find("\n}\n")]
+    remove = body.find("items.RemoveAt(at)?;")
+    restore = body.find("tabs.view.SetSelectedItem(&kept.item")
+    if remove < 0 or not remove < restore:
+        return [f"{WINUI}: forget() removes a tab without putting the active tab's "
+                "selection back, so WinUI's own move reads as the user selecting another"]
+    return []
+
+
 def document_occurrences(header):
     return [m.lower() for m in re.findall(r"#define KAYA_OCCURRENCE_(\w*DOCUMENT\w*) \d+", header)]
 
@@ -153,8 +167,9 @@ if len(occurrences) < 7:
 bindings = {path: gate.read(path) for path, _, _ in BINDINGS.values()}
 
 status = 0
+winui_doctabs = gate.read(WINUI)
 findings = (private_findings(block) + prop_findings(texts, props)
-            + binding_findings(bindings, occurrences))
+            + binding_findings(bindings, occurrences) + kept_selection_findings(winui_doctabs))
 for f in findings:
     print(f"check-doctabs: {f}", file=sys.stderr)
     status = 1
@@ -183,8 +198,16 @@ if not binding_findings({**bindings, BINDINGS["haskell"][0]: n4}, occurrences):
           file=sys.stderr)
     status = 1
 
+n5 = gate.doctor("N5 (the kept selection not put back)", winui_doctabs,
+                 r"tabs\.view\.SetSelectedItem\(&kept\.item", "let _ = (&kept.item")
+if not kept_selection_findings(n5):
+    print("check-doctabs: self-test N5 passed a forget() that leaves WinUI's selection move",
+          file=sys.stderr)
+    status = 1
+
 if status == 0:
     print(f"check-doctabs: OK (the Mac document block uses public API; {len(props)} document "
           f"props applied or depth-stubbed on 4 backends; {len(BINDINGS)} bindings spell "
-          f"{len(CALLS)} calls and hear {len(occurrences)} occurrences; 4 watched negatives red)")
+          f"{len(CALLS)} calls and hear {len(occurrences)} occurrences; 5 watched negatives red; "
+          f"WinUI keeps the active tab on a close)")
 sys.exit(status)

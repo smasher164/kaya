@@ -993,8 +993,10 @@ the android red leg's white self-view): KayaFailShot copies each shown
 SurfaceView on its own and composites it under the window's hole; two cuts
 watched. AND AN ANDROID DOCUMENTS READ SAYS WHY THE LIST IS NOT UP since
 2026-11-03 (docs/traps.md, the android documents list that never came up),
-read before the list is put away; two cuts watched.
-Two hundred and eighty watched negatives, counts printed)
+read before the list is put away; two cuts watched. AND THE ANDROID PLAYER'S
+COMMANDS ARE IN THE VERB TRACE since 2026-11-03 (docs/traps.md, the android
+play/pause the player did not take); one cut watched.
+Two hundred and eighty-one watched negatives, counts printed)
 
 ## tools/check-diagnostics.py
 
@@ -2184,9 +2186,10 @@ tooltip or mark is caught before a review page. And every one of the nine
 bindings defines add_document, select_document, close_document and add_region
 in its own spelling and has a dispatch arm for each document occurrence the
 generated header names, so a new occurrence is wanted in every binding the day
-it lands and a binding whose handler never fires is caught without a leg. Four
-watched negatives, perturbed in memory with their counts printed, red on every
-run)
+it lands and a binding whose handler never fires is caught without a leg. AND
+WINUI KEEPS THE ACTIVE TAB WHEN ANOTHER CLOSES since 2026-11-03 (docs/traps.md,
+the WinUI tab close that selected another tab). Five watched negatives,
+perturbed in memory with their counts printed, red on every run)
 
 ## tools/check-keyed.py
 

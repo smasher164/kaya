@@ -1449,6 +1449,24 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
+## WATCH — three reds of the 72b602fb matrix, each green alone (2026-11-03)
+KEY: music_header-python-wayland, checkbox@like checked reads on, colorpanel_rust, HexTextBox, music_dock-python, full_play_pause, player_command
+
+All three were green in `validate-all --only music_header,music_dock,colorpanel,doctabs`
+right after (mac 23, linux 42, ios 10, android 10 legs).
+- linux music_header-python-wayland and its dark twin (run 20261103T131359Z-008407):
+  after the toast's Undo, `expect_checked checkbox@like off` read "on (the bus's
+  ToggleButton #3: checked false, pressed true)" for 15 s while favorite read off.
+  The bundle does not say whether the app wrote like=false; the next sighting's
+  read should start from the verb trace's prop writes, which this leg's trace did
+  not carry.
+- windows colorpanel_rust (run 20261103T131654Z-090232): "the flyout's
+  ColorPicker never ran its template: no HexTextBox in 10 s", under matrix load.
+- android music_dock-python (run 20261103T131352Z-079427): the full player's
+  pause click left the button "Pause"; the verb trace now carries every player
+  command and change (docs/traps.md, the android play/pause the player did not
+  take).
+
 ## WATCH — Android editor-go: the documents list did not come up under load (seen once 2026-11-03, a matrix stopped on battery); the read now says which part failed
 KEY: editor-go android, the documents list is not up yet, kayaDocumentsWhyNot, kayaDocumentsWhy, documentsSheetState
 

@@ -111,7 +111,8 @@ def sources():
             (LANE_PY, LANE_SH, LINUX, IOS, ANDROID, WIN,
              STEPS, WINUI, GUEST_PS1, FOCUS_RING, HAND, WINLIST, HARNESS, SWIFTUI,
              DOOR_RECORD, ACT2_EXEC, COMPOSE, JOURNAL, *DOOR_LEGS, LEG_CEILING, STACK_NAMES, GTK_RS,
-             LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE)}
+             LANE_HEALTH, VALIDATE_ALL, MAC_RUNNER, LINUX_HOST, MAC_LANE,
+             ANDROID_MEDIA)}
 
 
 def census_android_app_shot(src):
@@ -176,6 +177,26 @@ def census_android_app_shot(src):
     if not all(a in rec for a in adopts):
         found.append("android: the recorder does not adopt the app's picture as `shot` and the "
                      "screencap as `desktop-shot`")
+    return found
+
+
+ANDROID_MEDIA = "android/kaya/src/main/kotlin/dev/kaya/KayaMedia.kt"
+
+
+def census_android_player_trace(src):
+    """docs/traps.md, the android play/pause the player did not take: each
+    command and each player change is in the verb trace with what it held."""
+    kt = src[ANDROID_MEDIA]
+    found = []
+    for needle, said in (
+            ('KayaVTrace.note("player_command", "player $id Play: ${held()}")', "Play command"),
+            ('KayaVTrace.note("player_command", "player $id Pause: ${held()}")', "Pause command"),
+            ('KayaVTrace.note("player_state", "player $id isPlaying -> $isPlaying: ${held()}")',
+             "isPlaying change"),
+            ('"player $id playWhenReady -> $playWhenReady (reason $reason): ${held()}"',
+             "playWhenReady change")):
+        if needle not in kt:
+            found.append(f"android: the verb trace no longer carries the player's {said}")
     return found
 
 
@@ -2760,6 +2781,7 @@ CENSUSES = (("sections", census_sections), ("skip writers", census_skips),
             ("no frontmost shot", census_frontmost),
             ("no foreign window title", census_foreign_titles),
             ("android documents why-not", census_documents_why),
+            ("android player trace", census_android_player_trace),
             ("Android history", census_android_history),
             ("Android app shot", census_android_app_shot),
             ("mac app shot", census_mac_app_shot),
@@ -2942,6 +2964,11 @@ na10 = doctored(COMPOSE, r"android\.view\.PixelCopy\.request\(view, layer,",
                 "NA10 the surface copy aimed at the window")
 gate.negative("NA10 a surface layer copied from the window, which holds only its hole",
               lambda: census_android_app_shot(na10), want="does not copy each SurfaceView")
+np1 = doctored(ANDROID_MEDIA,
+               r'(?m)^ *KayaVTrace\.note\("player_command", "player \$id Pause: .*\n', "",
+               "NM1 the Pause command untraced")
+gate.negative("NM1 a pause the trace does not show",
+              lambda: census_android_player_trace(np1), want="player's Pause command")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -3941,6 +3968,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(280 + (5 if DRIVES else 0))
+gate.negatives_ran(281 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

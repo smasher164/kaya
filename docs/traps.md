@@ -20066,3 +20066,25 @@ ScalingFilter::Linear, ..)`. The capture preview is a GtkPicture over
 gtk4paintablesink, whose Debian build (0.15.2) has no `scaling-filter`
 property, so that path still takes GTK's default. check-verbs holds the
 surface's filter (two cuts watched).
+
+## The WinUI tab close that selected another tab (measured 2026-11-03)
+
+Removing a tab that is not selected from a TabView's TabItems sometimes moves
+the TabView's own selection (closing "c" with "untitled 1" selected left "a"
+selected), and its SelectionChanged then read as the user selecting "a":
+doctabs_js and doctabs_go read "selected a" where the app wrote "closed c",
+and the later `select_document "a"` raised nothing. One leg in six per
+matrix; three forced runs of the six legs each printed "removing document 12
+moved the TabView's selection to Some(10)". forget() now puts the active tab
+back after the removal (that KAYA_DIAG line says when it had to), before the
+async SelectionChanged is read. check-doctabs N5.
+
+## The android play/pause the player did not take (seen 2026-11-03)
+
+music_dock-python in the 72b602fb matrix clicked the full player's play/pause
+and read the button "Pause" for 15 s; the click reached the app (batches
+followed) and nothing said what the player was told. Every Play and Pause
+command and every playWhenReady, state and isPlaying change now goes into the
+verb trace with what the player held (forced red read back: "player 1 Pause:
+playWhenReady=true state=3 isPlaying=true item=0 at=444ms", then
+"playWhenReady -> false (reason 1)"). check-flightrec NM1.
