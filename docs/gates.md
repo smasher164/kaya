@@ -1701,7 +1701,11 @@ THE BOX'S WIDTH IS THE PICTURE'S LONGER SIDE AT ITS NATURAL SCALE SINCE
 wide rather than the upright picture's 180: the doors carry the
 self-view's frames and rotation, never its fitted size, and the scene
 reads the box's size (`"320x180"`) in all three harnesses, each held to
-comparing both sides. Twenty-eight watched negatives and a fake-name
+comparing both sides. AND BOTH iOS MENU BAR READS ASK FOR A BUILD since
+2026-11-03 (docs/traps.md, the iOS main menu built only on a hardware key):
+`expect_menu_bar` and `expect_menu ... titled` call kayaAwaitMenuBuild, the
+driver knows its shift, and run-sim starts the watcher for both verbs and for
+`press`; four cuts watched. Twenty-eight watched negatives and a fake-name
 census, counts printed)
 
 ## tools/check-file-modes.py

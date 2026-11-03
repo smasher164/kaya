@@ -1495,6 +1495,9 @@ BRIDGE_VERBS = frozenset((
     "pick_font", "expect_font_dialog",
     # The colour picker is a remote view too (docs/color-picker-plan.md §4.2).
     "pick_color",
+    # `press tab|space|up|down` is the driver's hardware key (kayaPressFocusKey),
+    # and the menu bar read sends one (kayaAwaitMenuBuild).
+    "press", "expect_menu_bar",
 ))
 
 
@@ -1507,8 +1510,19 @@ def script_verbs(script):
 
 
 def needs_bridge(script):
-    """Does this leg's script reach the host bridge? Read off its verbs."""
-    return any(verb in BRIDGE_VERBS for verb in script_verbs(script))
+    """Does this leg's script reach the host bridge? Read off its verbs; a
+    read of the built menu bar sends the driver a hardware key first
+    (kayaAwaitMenuBuild)."""
+    return any(verb in BRIDGE_VERBS or step == "expect_menu_title"
+               for verb, step in zip(script_verbs(script), menu_title_steps(script)))
+
+
+def menu_title_steps(script):
+    """script_verbs' steps, with `expect_menu "<path>" titled` spelled
+    expect_menu_title."""
+    return ["expect_menu_title" if re.match(r'expect_menu ".*" titled$', step.strip()) else ""
+            for line in script.splitlines() if not line.lstrip().startswith("#")
+            for step in line.split(";") if step.strip()]
 
 
 # The derivation watched both ways before any leg trusts it, and over a
@@ -1516,6 +1530,10 @@ def needs_bridge(script):
 # watcher, sixty seconds of silence; docs/traps.md).
 if not needs_bridge('expect label#0 "x"\ntype "an"') \
         or not needs_bridge('expect label#0 "x"\nselect_section 1; type "an"') \
+        or not needs_bridge('expect label#0 "x"\nexpect_menu_bar "File"') \
+        or not needs_bridge('expect label#0 "x"\nexpect_menu "View>Sort" titled') \
+        or needs_bridge('expect label#0 "x"\nexpect_menu "View>Sort" checked') \
+        or not needs_bridge('expect label#0 "x"\npress tab') \
         or needs_bridge('expect label#0 "x"\n# type "an"'):
     die("run-sim: needs_bridge does not read the script's verbs — the host "
         "bridge would be started by luck")

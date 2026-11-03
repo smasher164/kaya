@@ -19675,6 +19675,8 @@ window tabs without them (docs/native-tabs-study.md, option A).
 
 ## The iOS main menu is built lazily and no API returns it (measured 2026-10-27)
 
+(Since 2026-10-30 it does not reliably run at launch either: the next entry,
+the iOS main menu built only on a hardware key.)
 `buildMenu(with:)` runs at launch, before the guest has declared a catalog,
 and `UIMenuSystem.main.setNeedsRebuild()` builds again only when something
 asks (a hardware keyboard's HUD, the iPad's bar shown); there is no getter for
@@ -20000,3 +20002,22 @@ title only for the `--own <pid>` the caller names (the recorder passes the
 leg's guest), and the two sentences no longer print one. check-flightrec's
 "no foreign window title" census drives both sentences on a listing with a
 foreign title and asks the real binary, beside four watched cuts (NT1-NT4).
+
+## The iOS main menu built only on a hardware key (measured 2026-11-03)
+
+From 2026-10-30 every phone in the pool, and on 2026-11-03 the iPad too,
+stopped calling `buildMenu(with:)` for the main system at launch: a probe
+launch with KAYA_MENU_TRACE=1 printed four "rebuild requested" lines and no
+build, and `setNeedsRebuild()` never brought one (nothing asked). The sims
+were not rebooted; what moved the device state is unknown (the pools are left
+alone). One hardware key event reaching the app's own process makes UIKit
+build at once: `press tab` ahead of `expect_menu_bar` turned all four menus
+legs green on the same devices, and the unmodified scene went red again in the
+next run. So both iOS bar reads (`expect_menu_bar`, `expect_menu ... titled`)
+call kayaAwaitMenuBuild, which sends the lane's driver a lone shift (no focus
+moves) when no build is on hand and waits 3 s for one; the runner starts the
+driver's watcher for those verbs and for `press`, which it had never started
+for (a `press tab` with no other bridge verb waited 30 s for nobody).
+kayaNoMenuBuild names what the key ask answered; all three of its branches
+were forced to print. check-verbs holds the calls, the driver's key and the
+runner's verbs (four cuts watched).

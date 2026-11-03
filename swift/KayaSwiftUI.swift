@@ -16278,6 +16278,9 @@ private func kayaRunScript(_ script: String) {
                     failures.append("expect_menu_bar wants quoted menu titles: \(line)")
                     break
                 }
+                #if !os(macOS)
+                    kayaAwaitMenuBuild()
+                #endif
                 var verdict: Result<String, KayaBarFailure> = .failure(KayaBarFailure("unread"))
                 for attempt in 0..<40 {
                     if attempt > 0 { Thread.sleep(forTimeInterval: 0.1) }
@@ -17256,6 +17259,9 @@ private func kayaRunScript(_ script: String) {
                     failures.append("\(bad): \(line)")
                     break
                 }
+                #if !os(macOS)
+                    if aspect == .title { kayaAwaitMenuBuild() }
+                #endif
                 let got = DispatchQueue.main.sync { kayaMenuStateRead(path, aspect) }
                 if got == wantS {
                     observed.append("menu \"\(path)\" \(wantS)")
@@ -35258,11 +35264,37 @@ let kayaToolbarSymbolIdent = "kaya-toolbar-symbol:"
     var kayaSystemMenuRoot: UIMenu?
     var kayaOtherMenuBuilds = 0
     var kayaMenuRebuildAsks = 0
+    var kayaMenuKeyAnswer = "no hardware key was sent"
+
+    /// docs/traps.md, the iOS main menu built only on a hardware key. On the
+    /// harness thread, never main: the driver's answer is awaited.
+    func kayaAwaitMenuBuild() {
+        if DispatchQueue.main.sync(execute: { kayaSystemMenuRoot != nil }) { return }
+        let (ok, lines) = KayaSimdrive.ask("key shift", timeout: 30)
+        let asked = Date()
+        var built = false
+        while Date().timeIntervalSince(asked) < 3 {
+            if DispatchQueue.main.sync(execute: { kayaSystemMenuRoot != nil }) {
+                built = true
+                break
+            }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        let said =
+            "a hardware shift through the lane's driver "
+            + (ok ? "was answered" : "was refused: \(lines.first ?? "no sentence")")
+            + (built
+                ? " and a build followed \(Int(Date().timeIntervalSince(asked) * 1000)) ms later"
+                : " and no build followed within 3 s")
+        kayaDiag("menu build: \(said)")
+        DispatchQueue.main.sync { kayaMenuKeyAnswer = said }
+    }
 
     /// Why no main build is on hand, as far as this process saw.
     func kayaNoMenuBuild() -> String {
         "UIKit has not built the menu bar (buildMenu(with:) never ran for the main system; "
             + "\(kayaOtherMenuBuilds) build(s) for other menu systems, \(kayaMenuRebuildAsks) rebuild request(s) since launch, "
+            + "\(kayaMenuKeyAnswer), "
             + "the hardware keyboard GCKeyboard.coalesced names: \(String(describing: GCKeyboard.coalesced?.vendorName)))"
     }
 

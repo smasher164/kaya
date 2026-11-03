@@ -1449,7 +1449,7 @@ composed; no dialog window", "the sheet is Expanded going to Expanded;
 a dialog window whose compose root is AndroidComposeView", and "no
 request is held". Read that clause first on the next sighting.
 
-## DEFECT — iOS kaya-sim-0 never builds the main menu: every expect_menu_bar leg placed on it is red (seen 2026-10-31, residue pass)
+## ~~DEFECT — iOS kaya-sim-0 never builds the main menu: every expect_menu_bar leg placed on it is red (seen 2026-10-31, residue pass)~~ FIXED 2026-11-03: UIKit builds the main menu on a hardware key, so both iOS bar reads send the driver a shift first (docs/traps.md, the iOS main menu built only on a hardware key)
 KEY: buildMenu, expect_menu_bar, kayaNoMenuBuild, kayaOtherMenuBuilds, kayaMenuRebuildAsks, kaya-sim-0, 8F0680C5
 
 editor-go went red on iOS in two filtered runs at `expect_menu_bar "File"

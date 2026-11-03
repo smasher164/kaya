@@ -3949,6 +3949,56 @@ if not menu_bar_sentences(kotlin_src=mb_cut):
     fail("check-verbs SELF-TEST: the menu bar verdict passed with Compose's chord sentence "
          "reworded")
 
+# THE iOS MAIN MENU IS BUILT ON A HARDWARE KEY (docs/traps.md, the iOS main
+# menu built only on a hardware key): both bar reads send the driver a shift
+# first, the driver knows the key, and the runner starts the watcher for them.
+IOS_DRIVER = "tools/ios/xcuidrive/KayaDrive.swift"
+IOS_RUNNER = "tools/ios/run-sim.py"
+
+
+def ios_menu_build(swift_src=None, driver_src=None, runner_src=None):
+    swift = swift_src or real(SWIFT)
+    bad = []
+    bar = swift[swift.find('case "expect_menu_bar":'):]
+    bar = bar[:bar.find("kayaMenuBarRead()")]
+    if "kayaAwaitMenuBuild()" not in bar:
+        bad.append("KayaSwiftUI.swift: expect_menu_bar reads the iOS bar without "
+                   "kayaAwaitMenuBuild() first")
+    if "if aspect == .title { kayaAwaitMenuBuild() }" not in swift:
+        bad.append("KayaSwiftUI.swift: expect_menu ... titled reads the iOS bar without "
+                   "kayaAwaitMenuBuild() first")
+    if 'KayaSimdrive.ask("key shift"' not in swift:
+        bad.append("KayaSwiftUI.swift: kayaAwaitMenuBuild sends the driver no shift")
+    if '"shift": XCUIKeyboardKey.shift.rawValue' not in (driver_src or real(IOS_DRIVER)):
+        bad.append(f"{IOS_DRIVER}: the driver has no shift key for kayaAwaitMenuBuild")
+    runner = runner_src or real(IOS_RUNNER)
+    if '"press", "expect_menu_bar"' not in runner \
+            or "not needs_bridge('expect label#0 \"x\"\\nexpect_menu_bar" not in runner:
+        bad.append(f"{IOS_RUNNER}: expect_menu_bar (or press) does not start the "
+                   "watcher, or its self-check is gone")
+    return bad
+
+
+ios_menu_out = ios_menu_build()
+if ios_menu_out:
+    media_status = 1
+    print("check-verbs: the iOS menu build is not asked for:", file=sys.stderr)
+    print("\n".join(ios_menu_out), file=sys.stderr)
+print("check-verbs: both iOS bar reads ask the driver's shift before reading")
+for label, kw, pattern, repl in (
+        ("iOS bar read without its key", "swift_src",
+         r"(#if !os\(macOS\)\n +)kayaAwaitMenuBuild\(\)(\n +#endif\n +var verdict)", r"\1\2"),
+        ("iOS titled read without its key", "swift_src",
+         r"if aspect == \.title \{ kayaAwaitMenuBuild\(\) \}", ""),
+        ("driver without shift", "driver_src",
+         r'"shift": XCUIKeyboardKey', '"shiftx": XCUIKeyboardKey'),
+        ("runner not bridging the bar read", "runner_src",
+         r'"press", "expect_menu_bar"', '"press"')):
+    src = {"swift_src": SWIFT, "driver_src": IOS_DRIVER, "runner_src": IOS_RUNNER}[kw]
+    cut = g.doctor(label, real(src), pattern, repl)
+    if not ios_menu_build(**{kw: cut}):
+        fail(f"check-verbs SELF-TEST: the iOS menu build clause passed with {label}")
+
 # --- THE GTK MEDIA ARM (docs/media-plan.md §2, §3, §5, §7a) -------------
 # The mac clause's rules on Linux, none of which a scene can see: THE VIEW IS
 # a GtkPicture over gtk4paintablesink's paintable, never GtkVideo (its
