@@ -25014,8 +25014,18 @@ struct KayaLabelTint: ViewModifier {
         let rgb = dark ? brand[6] : brand[1]
         accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255, 1]
     }
+    // UNDER A PICTURE the fills compose over the picture's own colour at the
+    // probe, never the page (docs/looks-plan.md §3.5: the chat thread's bubbles
+    // over its wallpaper).
+    var holder = kayaScene.parents[node.id]
+    while let id = holder, kayaScene.nodes[id]?.ground != groundImage { holder = kayaScene.parents[id] }
+    var art: [Double]? = nil
+    if let id = holder, let pictured = kayaScene.nodes[id], let behind = kayaSkinFrame(pictured) {
+        art = kayaPictureAt(pictured, CGPoint(x: probe.midX - behind.minX, y: probe.midY - behind.minY), behind.size)
+    }
+    let under: [Double] = art.map { $0 + [1] } ?? ground
     func over(_ c: [Double]) -> [Double] {
-        (0..<3).map { c[$0] * c[3] + ground[$0] * (1 - c[3]) }
+        (0..<3).map { c[$0] * c[3] + under[$0] * (1 - c[3]) }
     }
     // The capture carries no window background where nothing was drawn, so
     // it is composited over the resolved ground, as the screen composites it.
@@ -25041,12 +25051,12 @@ struct KayaLabelTint: ViewModifier {
     func layered(_ top: [Double], _ under: [Double]) -> [Double] {
         (0..<3).map { top[$0] * top[3] + under[$0] * (1 - top[3]) }
     }
-    let resting = [(layered(skin.hover, Array(ground.prefix(3))), Array(ground.prefix(3))),
+    let resting = [(layered(skin.hover, Array(under.prefix(3))), Array(under.prefix(3))),
                    (layered(skin.hover, over(skin.neutral)), over(skin.neutral))]
     let skinned = [("hovered", resting[0].0), ("hovered", resting[1].0), ("selected", over(skin.selected)),
-                   ("pressed", layered(skin.pressed, Array(ground.prefix(3)))),
+                   ("pressed", layered(skin.pressed, Array(under.prefix(3)))),
                    ("pressed", layered(skin.pressed, over(skin.neutral)))]
-    let candidates = [("none", Array(ground.prefix(3))), ("accent", over(accent))]
+    let candidates = [("none", Array(under.prefix(3))), ("accent", over(accent))]
         + others.map { ($0.0, over($0.1)) } + skinned
     func hex(_ c: [Double]) -> String {
         String(format: "%02X%02X%02X", Int((c[0] * 255).rounded()), Int((c[1] * 255).rounded()), Int((c[2] * 255).rounded()))
@@ -25070,11 +25080,11 @@ struct KayaLabelTint: ViewModifier {
         let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
         return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
     }
-    var holder = kayaScene.parents[node.id]
-    while let id = holder, kayaScene.nodes[id]?.ground != groundImage { holder = kayaScene.parents[id] }
-    if let id = holder, let pictured = kayaScene.nodes[id], let behind = kayaSkinFrame(pictured),
-        let art = kayaPictureAt(pictured, CGPoint(x: probe.midX - behind.minX, y: probe.midY - behind.minY), behind.size)
-    {
+    // A fill the candidates name within a dozen units a channel is that fill,
+    // whatever its luminance (an accent bubble over a pale wallpaper read as
+    // overlay on Compose, 2026-11-04).
+    let named = ranked[0].2 <= 3 * pow(12.0 / 255, 2)
+    if let art, !named {
         let (mine, theirs) = (lum(px), lum(art))
         if 1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2 {
             return "overlay (sampled \(got) at \(probeAt), luminance \(String(format: "%.3f", mine)) over the picture's "

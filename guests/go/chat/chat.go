@@ -266,73 +266,86 @@ func App() *kaya.App {
 					tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).Symbol(kaya.SymbolPhone).Titled().A11yID("call")
 					tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).Symbol(kaya.SymbolVideo).Titled().A11yID("videocall")
 				})
-				tx.Scroll(func() {
-					thread = MessageCollection(tx)
-					threadList = MessageEachSum(tx, thread,
-						func(mine kaya.SumCase[string, Mine]) {
-							mine.Row(func() {
-								mine.Spacer()
-								bubble := mine.Column(func() {
-									text := mine.Label(func(m *Mine) *string { return &m.Text })
-									mine.SetA11yID(text, "text")
+				// The thread over the conversation's own wallpaper (docs/looks-plan.md
+				// §3.5): the bubbles are filled, which is what makes their text legal
+				// over a picture (docs/styling-pass-plan.md Y3), and the rows above
+				// stay off it.
+				paper := tx.Asset("wallpapers/" + id + ".jpg")
+				wallpaper := paper.Bytes()
+				paper.Close()
+				tx.Column(func() {
+					tx.Scroll(func() {
+						thread = MessageCollection(tx)
+						threadList = MessageEachSum(tx, thread,
+							func(mine kaya.SumCase[string, Mine]) {
+								mine.Row(func() {
+									mine.Spacer()
+									bubble := mine.Column(func() {
+										text := mine.Label(func(m *Mine) *string { return &m.Text })
+										mine.SetA11yID(text, "text")
+									})
+									mine.SetFilled(bubble, kaya.TintAccent)
+									mine.SetA11yID(bubble, "bubble")
 								})
-								mine.SetFilled(bubble, kaya.TintAccent)
-							})
-						},
-						func(pending kaya.SumCase[string, Pending]) {
-							pending.Row(func() {
-								pending.Spacer()
-								bubble := pending.Column(func() {
-									text := pending.Label(func(m *Pending) *string { return &m.Text })
-									pending.SetA11yID(text, "text")
-									state := pending.CaptionText("Sending…")
-									pending.SetA11yID(state, "state")
+							},
+							func(pending kaya.SumCase[string, Pending]) {
+								pending.Row(func() {
+									pending.Spacer()
+									bubble := pending.Column(func() {
+										text := pending.Label(func(m *Pending) *string { return &m.Text })
+										pending.SetA11yID(text, "text")
+										state := pending.CaptionText("Sending…")
+										pending.SetA11yID(state, "state")
+									})
+									pending.SetFilled(bubble, kaya.TintAccent)
+									pending.SetA11yID(bubble, "bubble")
 								})
-								pending.SetFilled(bubble, kaya.TintAccent)
-							})
-						},
-						func(theirs kaya.SumCase[string, Theirs]) {
-							theirs.Row(func() {
-								bubble := theirs.Column(func() {
-									text := theirs.Label(func(m *Theirs) *string { return &m.Text })
-									theirs.SetA11yID(text, "text")
+							},
+							func(theirs kaya.SumCase[string, Theirs]) {
+								theirs.Row(func() {
+									bubble := theirs.Column(func() {
+										text := theirs.Label(func(m *Theirs) *string { return &m.Text })
+										theirs.SetA11yID(text, "text")
+									})
+									theirs.SetFilled(bubble, kaya.TintNeutral)
+									theirs.SetA11yID(bubble, "bubble")
+									theirs.Spacer()
 								})
-								theirs.SetFilled(bubble, kaya.TintNeutral)
-								theirs.Spacer()
-							})
-						},
-						func(reply kaya.SumCase[string, Reply]) {
-							reply.Row(func() {
-								bubble := reply.Column(func() {
-									quote := reply.ButtonBound(func(m *Reply) *string { return &m.Quote },
-										func(tx *kaya.Tx, key string) {
-											for _, m := range c.messages {
-												if m.key == key {
-													tx.ScrollToRow(threadList, m.quote)
+							},
+							func(reply kaya.SumCase[string, Reply]) {
+								reply.Row(func() {
+									bubble := reply.Column(func() {
+										quote := reply.ButtonBound(func(m *Reply) *string { return &m.Quote },
+											func(tx *kaya.Tx, key string) {
+												for _, m := range c.messages {
+													if m.key == key {
+														tx.ScrollToRow(threadList, m.quote)
+													}
 												}
-											}
-										})
-									reply.SetA11yID(quote, "quote")
-									reply.SetRole(quote, kaya.RolePlain)
-									text := reply.Label(func(m *Reply) *string { return &m.Text })
-									reply.SetA11yID(text, "text")
+											})
+										reply.SetA11yID(quote, "quote")
+										reply.SetRole(quote, kaya.RolePlain)
+										text := reply.Label(func(m *Reply) *string { return &m.Text })
+										reply.SetA11yID(text, "text")
+									})
+									reply.SetFilled(bubble, kaya.TintNeutral)
+									reply.SetA11yID(bubble, "bubble")
+									reply.Spacer()
 								})
-								reply.SetFilled(bubble, kaya.TintNeutral)
-								reply.Spacer()
-							})
-						},
-						func(photo kaya.SumCase[string, Photo]) {
-							photo.Row(func() {
-								photo.Spacer()
-								image := photo.Image(func(m *Photo) *[]byte { return &m.Image })
-								photo.SetA11yID(image, "photo")
-								photo.SetMaxWidth(image, 240)
-								photo.SetMaxHeight(image, 240)
-							})
-						},
-					)
-					tx.SetA11yID(threadList, "thread")
-				}).Grow(1).FollowsEnd()
+							},
+							func(photo kaya.SumCase[string, Photo]) {
+								photo.Row(func() {
+									photo.Spacer()
+									image := photo.Image(func(m *Photo) *[]byte { return &m.Image })
+									photo.SetA11yID(image, "photo")
+									photo.SetMaxWidth(image, 240)
+									photo.SetMaxHeight(image, 240)
+								})
+							},
+						)
+						tx.SetA11yID(threadList, "thread")
+					}).Grow(1).FollowsEnd()
+				}).Grow(1).Inset(8).GroundImage(wallpaper).A11yID("thread_ground")
 				tx.Row(func() {
 					// The compose field: one line at rest, growing with the message
 					// to five (docs/grow-lines-plan.md); Return sends and

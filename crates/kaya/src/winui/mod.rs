@@ -28706,6 +28706,23 @@ impl crate::harness::Stage for WinUiStage {
             ensure_accent_surface()?;
             let page = resolve("ApplicationPageBackgroundThemeBrush")?;
             let ground = ground_under(&skin::ax_element(&element.cast()?), page)?;
+            // UNDER A PICTURE the fills compose over the picture's own colour
+            // at the probe, never the page (docs/looks-plan.md §3.5: the chat
+            // thread's bubbles over its wallpaper).
+            let probe = (element.ActualWidth()? - 4.0, element.ActualHeight()? / 2.0);
+            let id = target_widget_id(core, t).map(WidgetId);
+            let shot = skin::read::Shot::take(core);
+            let mut art: Option<[f64; 3]> = None;
+            if let (Some(id), Ok(shot)) = (id, &shot) {
+                if let Some(pictured) = skin::read::pictured_ancestor(core, id) {
+                    let behind: UIElement = core.widgets[&pictured].inner_element()?;
+                    let mine: UIElement = element.cast()?;
+                    if let (Some(m), Some(b)) = (shot.frame(&mine), shot.frame(&behind)) {
+                        art = skin::read::picture_at(pictured, m.0 + probe.0 - b.0, m.1 + probe.1 - b.1, b.2, b.3);
+                    }
+                }
+            }
+            let ground = art.map_or(ground, |a| [a[0] * 255.0, a[1] * 255.0, a[2] * 255.0, ground[3]]);
             let mut candidates = vec![("none", [ground[0], ground[1], ground[2]])];
             for (name, tint) in [("accent", 1), ("success", 2), ("warning", 3), ("critical", 4), ("neutral", 5)] {
                 let c = resolve(tint_brush_key(tint))?;
@@ -28736,34 +28753,24 @@ impl crate::harness::Stage for WinUiStage {
             let hex = |c: &[f64; 3]| {
                 format!("{:02X}{:02X}{:02X}", c[0].round() as u8, c[1].round() as u8, c[2].round() as u8)
             };
-            let probe = (element.ActualWidth()? - 4.0, element.ActualHeight()? / 2.0);
-            let id = target_widget_id(core, t).map(WidgetId);
-            let shot = skin::read::Shot::take(core);
             // THE OVERLAY (Y3) is a material, with no one colour to rank
             // against: it reads as overlay when its light foreground passes 4.5:1
             // on the sample and the sample is under half as bright as the picture
             // its image ground draws behind it (docs/traps.md, the overlay read
             // over a pale picture).
-            if let (Some(id), Ok(shot)) = (id, &shot) {
-                if let Some(pictured) = skin::read::pictured_ancestor(core, id) {
-                    let behind: UIElement = core.widgets[&pictured].inner_element()?;
-                    let mine: UIElement = element.cast()?;
-                    let (Some(m), Some(b)) = (shot.frame(&mine), shot.frame(&behind)) else {
-                        return Ok("<the overlay's frames are not laid out>".to_owned());
-                    };
-                    let px = got.map(|v| v / 255.0);
-                    if let Some(art) =
-                        skin::read::picture_at(pictured, m.0 + probe.0 - b.0, m.1 + probe.1 - b.1, b.2, b.3)
-                    {
-                        let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
-                        if 1.05 / (own + 0.05) >= 4.5 && own < theirs / 2.0 {
-                            return Ok(format!(
-                                "overlay (sampled {} at ({x},{y}), luminance {own:.3} over the picture's {} at {theirs:.3})",
-                                hex(&got),
-                                skin::read::hex(art)
-                            ));
-                        }
-                    }
+            // A FILL THE CANDIDATES NAME within a dozen units a channel is that
+            // fill, whatever its luminance (an accent bubble over a pale
+            // wallpaper read as overlay on Compose, 2026-11-04).
+            let named = dist(&candidates[0].1) <= 3.0 * 12.0 * 12.0;
+            if let (Some(art), false) = (art, named) {
+                let px = got.map(|v| v / 255.0);
+                let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
+                if 1.05 / (own + 0.05) >= 4.5 && own < theirs / 2.0 {
+                    return Ok(format!(
+                        "overlay (sampled {} at ({x},{y}), luminance {own:.3} over the picture's {} at {theirs:.3})",
+                        hex(&got),
+                        skin::read::hex(art)
+                    ));
                 }
             }
             // A SELECTED item is ListView's own (Y4): the accent pill at the

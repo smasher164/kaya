@@ -165,6 +165,35 @@ row).
 | C9 | the connection drops and comes back; messages queue meanwhile (BUILT 2026-09-25: the peer drops after a scripted answer and stays away six seconds; the thread says Offline, a message sent meanwhile is a `Pending` case with a Sending… caption, and on the redial the queue goes out and each becomes `Mine` in place. Pending is its own case because an empty caption holds a line in every sent bubble, seen in the first capture) | nothing new in kaya; the app's reconnect over `post` |
 | C10 | calls (BUILT 2026-10-31: Call and Video in the thread's header open a call screen pushed above it, with the peer's picture on a surface, the self-view, camera and microphone pickers, Mute and Camera off, and Hang up; the simulated peer answers over its own loopback connection with 1E5AC8 frames and a 660 Hz tone, and after a voice call with Maya, Sam calls back as an ordinary notification whose activation opens Answer and Decline; tools/scenes/chatcall.steps on five lanes; docs/capture-plan.md §8, §12) | the far end (docs/capture-plan.md §5), built first |
 
+## §6 — the app's own look (docs/looks-plan.md §3.5, BUILT 2026-11-04)
+
+An open thread sits on the conversation's own wallpaper, the way Messages
+and WhatsApp let a thread wear one:
+
+- guests/assets/wallpapers holds three 960x960 JPEGs, one per conversation,
+  each the avatar's two colours moved most of the way toward white with its
+  motif tiled large and faint; tools/gen-wallpapers.py writes them from the
+  same colours and motifs as tools/gen-avatars.py, byte-stably, and
+  tools/check-assets.py regenerates and compares (its N38c negative flips a
+  byte). The family's README carries the derivation; no upstream material.
+- The thread's scroll is wrapped in a column that takes `ground image` from
+  the open conversation's wallpaper (`thread_ground`), written when the
+  conversation opens, since the pane is built per opening.
+- The bubbles are the fills they already were (mine the accent, theirs
+  neutral), which is what makes their text legal over a picture
+  (docs/styling-pass-plan.md Y3); each bubble column is named `bubble` so the
+  scene reads its fill. The rows above the scroll (the search, the match
+  count, the connection label) stay off the picture, and the pending
+  bubble's "Sending…" caption is inside its fill.
+- The root's refusal is the guard: a bare caption mounted inside the
+  wallpaper column dies at declare time with the Y3 sentence, watched red on
+  the mac chat leg (four refusal lines, the guest restored byte for byte).
+
+What the scene reads (tools/scenes/chat.steps): `expect_ground
+column@thread_ground image` after opening Maya, `expect_fill
+column@bubble[m27] neutral` and, after a message is sent, `expect_fill
+column@bubble[u1] accent`.
+
 A LATER REVISION carries emoji and images beyond C5 and C6. Colour emoji
 inside a message body need nothing from kaya on four platforms; the linux
 container very likely lacks a colour emoji font, the missing-librsvg

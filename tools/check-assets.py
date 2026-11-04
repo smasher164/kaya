@@ -67,7 +67,8 @@ PRUNE = {".git", ".gradle", ".build", "build", "target", "target-linux",
 # The floor. Not "some number": the families this tree is known to
 # carry, so a walk that lost one says which.
 FLOOR = 6
-KNOWN = ["fonts/sora-wght.ttf", "icons/kaya-mark.png", "identity.toml"]
+KNOWN = ["fonts/sora-wght.ttf", "icons/kaya-mark.png", "identity.toml",
+         "wallpapers/maya.jpg"]
 
 LEGAL = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$")
@@ -1076,6 +1077,10 @@ def avatars_derivation(root):
     return derivation(root, "avatars", "gen-avatars.py")
 
 
+def wallpapers_derivation(root):
+    return derivation(root, "wallpapers", "gen-wallpapers.py")
+
+
 def catalogue_derivation(root):
     """C14 (docs/media-player-plan.md M2): the Jamendo snapshot cannot be
     regenerated without a client id and the network, so it is READ: every
@@ -1544,6 +1549,18 @@ g.negative("N38b (a committed avatar its generator no longer writes)",
            lambda: avatars_derivation(s),
            want="differs from what tools/gen-avatars.py generates")
 
+# N38c — C13: one committed wallpaper drifts from its generator.
+s = fresh("n38c")
+jpg = s / "guests/assets/wallpapers/maya.jpg"
+raw = bytearray(jpg.read_bytes())
+raw[len(raw) // 2] ^= 1
+jpg.write_bytes(bytes(raw))
+print("check-assets: N38c flipped 1 byte of guests/assets/wallpapers/maya.jpg "
+      "in the shadow")
+g.negative("N38c (a committed wallpaper its generator no longer writes)",
+           lambda: wallpapers_derivation(s),
+           want="differs from what tools/gen-wallpapers.py generates")
+
 # N39 — C14: one snapshot entry's licence doctored to BY-NC.
 s = fresh("n39")
 doctor_shadow("N39's BY-NC licence", s, "guests/assets/catalogue/api.json",
@@ -1606,7 +1623,7 @@ snap_path.write_text(json.dumps(snap, ensure_ascii=False, indent=1, sort_keys=Tr
 g.negative("N43 (a named search with an answer missing)",
            lambda: catalogue_derivation(s), want="has no answer")
 
-g.negatives_ran(46)
+g.negatives_ran(47)
 
 # The vacuity floor rule 5 asks for, over the census the checker walks.
 g.counted("files under the asset root",
@@ -1619,6 +1636,7 @@ out, bad = check(ROOT)
 bad += media_derivation(ROOT)
 bad += covers_derivation(ROOT)
 bad += avatars_derivation(ROOT)
+bad += wallpapers_derivation(ROOT)
 bad += catalogue_derivation(ROOT)
 print("\n".join(out))
 if bad:

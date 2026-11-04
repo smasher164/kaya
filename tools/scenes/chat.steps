@@ -27,6 +27,12 @@ expect_tint label@unread[maya] accent
 expect_selected row@convo[alex] off
 click row@convo[maya]
 expect_scrolled_to column@thread m27
+# THE LOOK (docs/looks-plan.md §3.5): the thread sits on the conversation's
+# own wallpaper and every bubble is a fill over it, theirs neutral and mine
+# the accent; a bare label over the picture is refused at declare time
+# (docs/styling-pass-plan.md Y3).
+expect_ground column@thread_ground image
+expect_fill column@bubble[m27] neutral
 expect_selected row@convo[maya] on
 expect_selected row@convo[sam] off
 expect label@unread[maya] ""
@@ -56,6 +62,7 @@ type "On my way"
 press return
 expect label@text[u1] "On my way"
 expect_scrolled_to column@thread u1
+expect_fill column@bubble[u1] accent
 expect textarea@compose ""
 expect label@text[p1] "See you soon"
 # The thread FOLLOWS ITS END (docs/follow-end-plan.md): the reply arrived with

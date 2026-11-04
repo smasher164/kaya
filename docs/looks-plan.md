@@ -254,6 +254,8 @@ guests/go/chat, tools/scenes/chat.steps, docs/chat-plan.md.
   the bubbles' `expect_fill accent` and `neutral` over it; the Y3 refusal
   watched red by mounting a bare caption in a scratch copy.
 
+BUILT 2026-11-04: three wallpapers from tools/gen-wallpapers.py (check-assets regenerates and compares them), the thread on the open conversation's wallpaper, each bubble named so the scene reads its fill over the picture; chat and chatcall green on all five lanes. The fill readers on SwiftUI, Compose and WinUI now compose each candidate over the picture's own colour at the probe, and a candidate within a dozen units a channel outranks the overlay rule: an accent bubble over a pale wallpaper read as overlay before. WinUI's picture lookup walks the visual tree past the end of the child order. The Y3 refusal was watched red on the mac with a bare caption mounted inside the wallpaper column.
+
 ### §3.6 The portfolio slice
 
 guests/python/portfolio.py, tools/scenes/portfolio.steps,

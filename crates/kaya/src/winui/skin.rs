@@ -1145,12 +1145,32 @@ pub(super) mod read {
 
     /// The nearest container above `id` with an image ground.
     pub(in super::super) fn pictured_ancestor(core: &CoreState, id: WidgetId) -> Option<WidgetId> {
+        let pictured =
+            |p: WidgetId| SKIN.with_borrow(|s| s.grounds.get(&p.0).is_some_and(|g| g.kind == crate::wire::GROUND_IMAGE));
         let mut at = core.child_order.parent_of(id);
         while let Some(p) = at {
-            if SKIN.with_borrow(|s| s.grounds.get(&p.0).is_some_and(|g| g.kind == crate::wire::GROUND_IMAGE)) {
+            if pictured(p) {
                 return Some(p);
             }
             at = core.child_order.parent_of(p);
+        }
+        // A stamped row's chain and a scroll's one child are not in
+        // child_order (a chat bubble under the thread's wallpaper, 2026-11-04):
+        // the visual tree is walked, each ancestor matched to its widget.
+        use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+        let element = core.widgets.get(&id)?.element().ok()?;
+        let mut node: Option<bindings::Microsoft::UI::Xaml::DependencyObject> = VisualTreeHelper::GetParent(&element).ok();
+        while let Some(n) = node {
+            let owner = core.widgets.iter().find(|(_, w)| {
+                w.inner_element().ok().and_then(|e| e.cast::<bindings::Microsoft::UI::Xaml::DependencyObject>().ok()).as_ref()
+                    == Some(&n)
+            });
+            if let Some((wid, _)) = owner {
+                if pictured(*wid) {
+                    return Some(*wid);
+                }
+            }
+            node = VisualTreeHelper::GetParent(&n).ok();
         }
         None
     }

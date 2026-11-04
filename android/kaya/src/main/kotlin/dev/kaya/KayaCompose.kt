@@ -8907,10 +8907,20 @@ object KayaCompose {
         val px = bitmap.getPixel(0, 0)
         bitmap.recycle()
         fun rgb(c: Int) = intArrayOf((c shr 16) and 0xFF, (c shr 8) and 0xFF, c and 0xFF)
+        // UNDER A PICTURE the fills compose over the picture's own colour at
+        // the probe, never the page (docs/looks-plan.md §3.5: the chat
+        // thread's bubbles over its wallpaper).
+        val pictured = gathered[4] as Triple<*, *, *>?
+        val art = pictured?.let { p ->
+            val holderBox = p.first as android.graphics.Rect
+            kayaPictureAt(p.third as Long, p.second as KayaPicture?, (x - origin.x - holderBox.left).toFloat(),
+                (y - origin.y - holderBox.top).toFloat(), holderBox.width().toFloat(), holderBox.height().toFloat())
+        }
+        val under = art?.let { a -> IntArray(3) { Math.round(a[it] * 255).toInt() } } ?: rgb(ground)
         fun over(c: Int): IntArray {
             val a = ((c ushr 24) and 0xFF) / 255.0
-            val f = rgb(c); val g = rgb(ground)
-            return IntArray(3) { Math.round(f[it] * a + g[it] * (1 - a)).toInt() }
+            val f = rgb(c)
+            return IntArray(3) { Math.round(f[it] * a + under[it] * (1 - a)).toInt() }
         }
         val names = listOf("accent", "success", "warning", "critical", "neutral")
         val fills = kayaTintFills
@@ -8924,7 +8934,7 @@ object KayaCompose {
             return IntArray(3) { Math.round(f[it] * a + under[it] * (1 - a)).toInt() }
         }
         val resting = if (skin == null) emptyList() else listOf(
-            overOn(skin.hover, rgb(ground)) to rgb(ground),
+            overOn(skin.hover, under) to under,
             overOn(skin.hover, over(skin.neutral)) to over(skin.neutral),
         )
         val skinned = if (skin == null) emptyList() else listOf(
@@ -8932,27 +8942,27 @@ object KayaCompose {
             "hovered" to resting[1].first,
             "selected" to over(skin.selected),
         )
-        val candidates = listOf("none" to rgb(ground)) + names.zip(fills.map { over(it) }) + skinned
+        val candidates = listOf("none" to under) + names.zip(fills.map { over(it) }) + skinned
         val got = rgb(px)
         // The overlay is the platform's dark panel over media (Y3): a scrim
         // over the art has no one colour to rank against, so it reads as
         // overlay when the sample is dark and under half as bright as the
         // picture the nearest image ground draws behind it.
-        val pictured = gathered[4] as Triple<*, *, *>?
-        if (pictured != null) {
-            val holderBox = pictured.first as android.graphics.Rect
-            val art = kayaPictureAt(pictured.third as Long, pictured.second as KayaPicture?, (x - origin.x - holderBox.left).toFloat(),
-                (y - origin.y - holderBox.top).toFloat(), holderBox.width().toFloat(), holderBox.height().toFloat())
+        fun dist(c: IntArray) = (0..2).sumOf { (c[it] - got[it]) * (c[it] - got[it]) }
+        val ranked = candidates.sortedBy { dist(it.second) }
+        // A fill the candidates name within a dozen units a channel is that
+        // fill, whatever its luminance (an accent bubble over a pale wallpaper
+        // read as overlay, 2026-11-04).
+        val named = dist(ranked[0].second) <= 3 * 12 * 12
+        if (art != null && !named) {
             val sample = got.map { it / 255.0 }.toDoubleArray()
             val mine = kayaLum(sample)
             val legible = skin != null && kayaContrast(sample, kayaRgb(skin.overlayText)) >= 4.5
-            if (art != null && legible && mine < kayaLum(art) / 2) {
+            if (legible && mine < kayaLum(art) / 2) {
                 return String.format("overlay (sampled %02X%02X%02X at ($x,$y), luminance %.3f over the picture's %s at %.3f)",
                     got[0], got[1], got[2], mine, kayaHexOf(art), kayaLum(art))
             }
         }
-        fun dist(c: IntArray) = (0..2).sumOf { (c[it] - got[it]) * (c[it] - got[it]) }
-        val ranked = candidates.sortedBy { dist(it.second) }
         fun hex(c: IntArray) = String.format("%02X%02X%02X", c[0], c[1], c[2])
         if (ranked[0].first == "hovered") {
             val under = resting.firstOrNull { it.first.contentEquals(ranked[0].second) }?.second
