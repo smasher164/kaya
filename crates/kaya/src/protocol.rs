@@ -1893,6 +1893,9 @@ pub enum WidgetKind {
     /// from any thread, uploaded and composited on the display clock, the
     /// last one kept. Reports nothing itself.
     Surface,
+    /// An ICON (docs/looks-plan.md §3.1): one symbol of the vocabulary drawn
+    /// on its own, sized by `text_scale`, coloured by `tint`. Display-only.
+    Icon,
 }
 
 /// A video view's box ratio, width:height (docs/media-plan.md §3, RULED
@@ -2189,7 +2192,7 @@ impl WidgetKind {
     /// export `WidgetKind` into the public header as an opaque handle no C
     /// caller can use. `cfg(test)` because the sweeps that walk it are tests.
     #[cfg(test)]
-    pub(crate) const ALL: [WidgetKind; 27] = [
+    pub(crate) const ALL: [WidgetKind; 28] = [
         WidgetKind::Column,
         WidgetKind::Button,
         WidgetKind::Label,
@@ -2217,6 +2220,7 @@ impl WidgetKind {
         WidgetKind::Segmented,
         WidgetKind::Expander,
         WidgetKind::Surface,
+        WidgetKind::Icon,
     ];
 
     /// Whether a widget of this kind carries an identity tag — the
@@ -2259,7 +2263,8 @@ impl WidgetKind {
             | WidgetKind::Grid
             | WidgetKind::Labeled
             | WidgetKind::Video
-            | WidgetKind::Surface => false,
+            | WidgetKind::Surface
+            | WidgetKind::Icon => false,
         }
     }
 }

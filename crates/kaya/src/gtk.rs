@@ -4033,6 +4033,8 @@ enum NativeWidget {
     ColorPicker(GtkColorField),
     Range(GtkRangePair),
     Image(gtk4::Picture),
+    /// docs/looks-plan.md §3.1: a symbolic icon by its Adwaita name.
+    Icon(gtk4::Image),
     Scroll(gtk4::ScrolledWindow),
     Progress(gtk4::ProgressBar),
     Select(gtk4::DropDown),
@@ -4083,6 +4085,7 @@ impl NativeWidget {
             NativeWidget::ColorPicker(f) => f.button.clone().upcast(),
             NativeWidget::Range(pair) => pair.group.clone().upcast(),
             NativeWidget::Image(w) => w.clone().upcast(),
+            NativeWidget::Icon(w) => w.clone().upcast(),
             NativeWidget::Scroll(w) => w.clone().upcast(),
             NativeWidget::Progress(w) => w.clone().upcast(),
             NativeWidget::Select(w) => w.clone().upcast(),
@@ -5195,6 +5198,7 @@ fn kind_registry(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<gtk4
         K::SecureField => core.secure_fields.iter().map(|w| w.clone().upcast()).collect(),
         K::Segmented => core.segmenteds.iter().map(|w| w.clone().upcast()).collect(),
         K::Expander => core.expanders.iter().map(|x| x.control()).collect(),
+        K::Icon => core.icons.iter().map(|w| w.clone().upcast()).collect(),
         K::ColorPicker => core.color_pickers.iter().map(|f| f.button.clone().upcast()).collect(),
         K::NumberField => core.number_fields.iter().map(|f| f.spin.clone().upcast()).collect(),
         K::Label => core.labels.clone(),
@@ -6244,6 +6248,8 @@ struct CoreState {
     date_pickers: Vec<GtkDateField>,
     time_pickers: Vec<GtkTimeField>,
     images: Vec<gtk4::Picture>,
+    /// docs/looks-plan.md §3.1, in creation order (`icon#N`).
+    icons: Vec<gtk4::Image>,
     /// The video views in creation order (docs/media-plan.md §3).
     videos: Vec<gtk_media::GtkVideoView>,
     /// The surfaces in creation order (docs/capture-plan.md §5): a video
@@ -10238,6 +10244,9 @@ fn set_shape(picture: &gtk4::Picture, shape: i64) {
 }
 
 /// Y7: libadwaita's standalone colours, as its own style classes.
+/// GTK's normal icon size, an icon's at `text_scale` 1 (docs/looks-plan.md §3.1).
+const ICON_PIXEL_SIZE: i32 = 16;
+
 fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
     for class in LABEL_TINT_CLASSES {
         widget.remove_css_class(class);
@@ -12610,6 +12619,7 @@ fn context_anchor_id(core: &CoreState, t: crate::harness::Target) -> u64 {
             .upcast(),
         K::Segmented => core.segmenteds[resolve(t.index, core.segmenteds.len())].clone().upcast(),
         K::Expander => core.expanders[resolve(t.index, core.expanders.len())].widget(),
+        K::Icon => core.icons[resolve(t.index, core.icons.len())].clone().upcast(),
         K::Entry | K::Textarea | K::Search | K::NumberField | K::SecureField => {
             panic!("kaya: editable text is not a context anchor (v1)")
         }
@@ -15934,6 +15944,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     core.images.push(picture.clone());
                     NativeWidget::Image(picture)
                 }
+                WidgetKind::Icon => {
+                    // docs/looks-plan.md §3.1: the symbol arrives as a SetProp;
+                    // 16px is GTK's normal icon size, text_scale multiplies it.
+                    let image = gtk4::Image::new();
+                    image.set_pixel_size(ICON_PIXEL_SIZE);
+                    core.icons.push(image.clone());
+                    NativeWidget::Icon(image)
+                }
                 WidgetKind::DatePicker => {
                     // The compact field, composed (docs/datetime-plan.md §0,
                     // D6): a GtkMenuButton whose face is the held date in the
@@ -18059,6 +18077,20 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Label(label), Prop::Tint, Value::I64(tint)) => {
                     set_label_tint(label.upcast_ref(), tint);
+                }
+                (NativeWidget::Icon(image), Prop::Tint, Value::I64(tint)) => {
+                    set_label_tint(image.upcast_ref(), tint);
+                }
+                (NativeWidget::Icon(image), Prop::Symbol, Value::I64(symbol)) => {
+                    if let Some(display) = gdk::Display::default() {
+                        assert_symbol_icons_resolve(&display);
+                    }
+                    let icon = symbol_icon_name(symbol)
+                        .unwrap_or_else(|| panic!("kaya: symbol {symbol} has no Adwaita name in SYMBOL_ICONS"));
+                    image.set_icon_name(Some(icon));
+                }
+                (NativeWidget::Icon(image), Prop::TextScale, Value::F64(scale)) => {
+                    image.set_pixel_size((f64::from(ICON_PIXEL_SIZE) * scale).round() as i32);
                 }
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
                 | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
@@ -21474,6 +21506,7 @@ pub(crate) fn run_core(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> i32 {
                 date_pickers: Vec::new(),
                 time_pickers: Vec::new(),
                 images: Vec::new(),
+                icons: Vec::new(),
                 videos: Vec::new(),
                 surfaces: Vec::new(),
                 canvases: Vec::new(),
@@ -28475,6 +28508,13 @@ impl crate::harness::Stage for GtkStage {
         Self::on_main(move |core| {
             use gtk4::prelude::{ButtonExt, Cast};
             let Some(widget) = target_widget(core, t) else { return "<no such target>".to_string() };
+            // docs/looks-plan.md §3.1: an icon IS the GtkImage.
+            if let Ok(image) = widget.clone().downcast::<gtk4::Image>() {
+                let Some(icon) = image.icon_name() else { return "<the icon names no Adwaita icon>".to_string() };
+                return symbol_name_of_icon(&icon)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("<the icon draws {icon}, which is not in SYMBOL_ICONS>"));
+            }
             let Ok(button) = widget.downcast::<gtk4::Button>() else {
                 return "<the target is not a GtkButton>".to_string();
             };
@@ -29691,6 +29731,7 @@ fn target_widget(core: &CoreState, target: crate::harness::Target) -> Option<gtk
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
         K::Expander => try_resolve(target.index, core.expanders.len()).map(|i| core.expanders[i].control()),
+        K::Icon => try_resolve(target.index, core.icons.len()).map(|i| core.icons[i].clone().upcast()),
         K::ColorPicker => try_resolve(target.index, core.color_pickers.len())
             .map(|i| core.color_pickers[i].swatch.clone().upcast()),
         K::NumberField => try_resolve(target.index, core.number_fields.len())

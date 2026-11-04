@@ -313,6 +313,7 @@ pub(crate) const KIND_SECURE_FIELD: u32 = 24;
 pub(crate) const KIND_SEGMENTED: u32 = 25;
 pub(crate) const KIND_EXPANDER: u32 = 26;
 pub(crate) const KIND_SURFACE: u32 = 27;
+pub(crate) const KIND_ICON: u32 = 28;
 
 // Draw opcodes (docs/canvas-plan.md §3.3). The op stream is a flat run
 // of tagged values: one of these as an i64, then its operands.
@@ -1969,6 +1970,7 @@ fn widget_kind(raw: u32) -> WidgetKind {
         KIND_SEGMENTED => WidgetKind::Segmented,
         KIND_EXPANDER => WidgetKind::Expander,
         KIND_SURFACE => WidgetKind::Surface,
+        KIND_ICON => WidgetKind::Icon,
         other => panic!("kaya: unknown widget kind {other}"),
     }
 }
@@ -6007,6 +6009,7 @@ fn kind_raw(kind: WidgetKind) -> u32 {
         WidgetKind::Segmented => KIND_SEGMENTED,
         WidgetKind::Expander => KIND_EXPANDER,
         WidgetKind::Surface => KIND_SURFACE,
+        WidgetKind::Icon => KIND_ICON,
     }
 }
 

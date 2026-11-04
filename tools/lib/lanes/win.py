@@ -126,7 +126,7 @@ TEXT_SCALE_LEGS = {"tasksbig_rust": 200, "formatbig_rust": 200, "codesurfacebig_
 # THIS default; the runner calls depth_scenes(), which honours the
 # KAYA_WIN_DEPTH_SCENES override the lane uses for one-off slices.
 DEPTH_SCENES = ["windowed", "canvas", "sizepolicy", "tasks", "notify", "richtext", "flexshrink",
-                "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji",
+                "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji",
                 "ownundo", "richlabel", "notes", "richrows"]
 
 # THE PACKAGED LEGS (docs/packaging-plan.md P3): the SAME Rust guests, run
@@ -490,6 +490,8 @@ ORDER = [
      # (docs/tints-plan.md).
      "tints_rust",
      "tintsdark_rust",
+     # A symbol on its own (docs/looks-plan.md §3.1).
+     "icons_rust",
      # The expander (docs/expander-plan.md): `toggle` takes the header's
      # own door, no real mouse.
      "expander_rust", "expander_python", "expander_js", "expander_go", "expander_csharp",

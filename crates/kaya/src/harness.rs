@@ -129,6 +129,9 @@ pub enum TargetKind {
     /// The surface (docs/capture-plan.md §5): `expect_video_ink` and
     /// `expect_video_box` read the frames it composited as a video view's.
     Surface,
+    /// The icon (docs/looks-plan.md §3.1): `expect_symbol` reads the glyph it
+    /// draws off the platform, as a button's.
+    Icon,
 }
 
 /// Text bound for a secure field (docs/secure-entry-plan.md P6). It has no
@@ -1054,10 +1057,10 @@ pub enum Step {
     /// The SEMANTIC ICON NAME the segment at the 0-based index draws, read
     /// off the platform's own segment (docs/segmented-plan.md G5).
     ExpectSegmentSymbol(Target, usize, String),
-    /// `expect_symbol <button|checkbox> "<name>"`: the SEMANTIC ICON NAME a
-    /// button or a toggle-role checkbox draws, read off the platform's own
-    /// control (docs/media-player-plan.md M8; M16 (14), the repeat toggle
-    /// whose symbol the app swaps).
+    /// `expect_symbol <button|checkbox|icon> "<name>"`: the SEMANTIC ICON NAME a
+    /// button, a toggle-role checkbox or an icon draws, read off the platform's
+    /// own control (docs/media-player-plan.md M8; M16 (14), the repeat toggle
+    /// whose symbol the app swaps; docs/looks-plan.md §3.1).
     ExpectSymbol(Target, String),
     /// `expect_expanded <expander> on|off`: the header's published expanded
     /// state AND the body's presence on screen, read off the platform and
@@ -3208,8 +3211,9 @@ pub trait Stage: Send + 'static {
     /// The SEMANTIC ICON NAME the segment at `index` draws, read off the
     /// platform's own segment, or a sentence saying what was measured.
     fn segment_symbol(&self, target: Target, index: usize) -> String;
-    /// The SEMANTIC ICON NAME a button draws, read off the platform's own
-    /// control, or a sentence saying what was measured.
+    /// The SEMANTIC ICON NAME a button, or an icon (docs/looks-plan.md §3.1),
+    /// draws, read off the platform's own control, or a sentence saying what
+    /// was measured.
     fn button_symbol(&self, target: Target) -> String;
     /// An expander's two platform readings, (the header publishes expanded,
     /// the body's first child is on screen), or a sentence saying what was
@@ -5006,11 +5010,11 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
             }
             "expect_symbol" => {
                 let Some((target, want)) = rest.trim().split_once(char::is_whitespace) else {
-                    return Err(format!("expect_symbol wants a button or checkbox and a quoted symbol name: {line:?}"));
+                    return Err(format!("expect_symbol wants a button, checkbox or icon and a quoted symbol name: {line:?}"));
                 };
                 let target = parse_target(target)?;
-                if !matches!(target.kind, TargetKind::Button | TargetKind::Checkbox) {
-                    return Err(format!("expect_symbol reads a button or a checkbox, not {target:?}"));
+                if !matches!(target.kind, TargetKind::Button | TargetKind::Checkbox | TargetKind::Icon) {
+                    return Err(format!("expect_symbol reads a button, a checkbox or an icon, not {target:?}"));
                 }
                 Step::ExpectSymbol(target, parse_string(want.trim())?)
             }
@@ -5856,6 +5860,7 @@ fn parse_target_kind(kind: &str, spec: &str) -> Result<TargetKind, String> {
         "segmented" => TargetKind::Segmented,
         "expander" => TargetKind::Expander,
         "surface" => TargetKind::Surface,
+        "icon" => TargetKind::Icon,
         other => return Err(format!("unknown target kind {other:?} in {spec:?}")),
     })
 }
@@ -9679,6 +9684,7 @@ pub(crate) fn target_spec(t: &Target) -> String {
         TargetKind::SecureField => "secure_field",
         TargetKind::Segmented => "segmented",
         TargetKind::Expander => "expander",
+        TargetKind::Icon => "icon",
         TargetKind::Surface => "surface",
     };
     if let Some(id) = t.id {

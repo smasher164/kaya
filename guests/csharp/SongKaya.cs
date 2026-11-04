@@ -108,6 +108,8 @@ sealed class SongRow
 
     public Node Button(Field<string> f) => t.Button(f);
 
+    public Node Icon(Symbol symbol) => t.Icon(symbol);
+
     public Node Image(byte[] source) => t.Image(source);
 
     public Node Image(Signal s) => t.Image(s);

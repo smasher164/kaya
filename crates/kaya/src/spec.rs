@@ -4740,6 +4740,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 // docs/capture-plan.md §5: the peer's picture, NV12 frames
                 // the app submits from any thread (kaya_surface_submit).
                 ("surface", 27),
+                // docs/looks-plan.md §3.1: one symbol of the vocabulary drawn on
+                // its own, sized by text_scale, coloured by tint.
+                ("icon", 28),
             ],
         },
         EnumSpec {
@@ -6026,6 +6029,7 @@ mod tests {
                     ("kind", "segmented") => wire::KIND_SEGMENTED,
                     ("kind", "expander") => wire::KIND_EXPANDER,
                     ("kind", "surface") => wire::KIND_SURFACE,
+                    ("kind", "icon") => wire::KIND_ICON,
                     ("kind", "color_picker") => wire::KIND_COLOR_PICKER,
                     ("kind", "range") => wire::KIND_RANGE,
                     ("kind", "video") => wire::KIND_VIDEO,

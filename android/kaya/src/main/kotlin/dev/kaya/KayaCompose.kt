@@ -2176,6 +2176,7 @@ object KayaSceneModel {
     val secureFields = ArrayList<KayaNode>()
     val segmenteds = ArrayList<KayaNode>()
     val expanders = ArrayList<KayaNode>()
+    val icons = ArrayList<KayaNode>()
 
     // Every kind registry, so a destroyed node leaves all of them at once
     // (docs/traps.md 2026-09-14: a torn-down copy stayed addressable).
@@ -3662,7 +3663,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xf2f2a3b7c858b4acuL
+    private const val SPEC_HASH: ULong = 0x19db789d3a45d6f1uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3970,6 +3971,7 @@ object KayaCompose {
     const val KIND_SEGMENTED = 25
     const val KIND_EXPANDER = 26
     const val KIND_SURFACE = 27
+    const val KIND_ICON = 28
     private const val PROP_TEXT = 1
     private const val PROP_CHECKED = 2
     private const val PROP_VALUE = 3
@@ -5050,6 +5052,7 @@ object KayaCompose {
                         KIND_RANGE -> KayaSceneModel.ranges.add(node)
                         KIND_VIDEO -> KayaSceneModel.videos.add(node)
                         KIND_SURFACE -> KayaSceneModel.surfaces.add(node)
+                        KIND_ICON -> KayaSceneModel.icons.add(node)
                         KIND_SECURE_FIELD -> KayaSceneModel.secureFields.add(node)
                         KIND_SEGMENTED -> KayaSceneModel.segmenteds.add(node)
                         KIND_EXPANDER -> {
@@ -9238,7 +9241,8 @@ object KayaCompose {
      * standalone colours; SwiftUI's kayaLabelTintRead. */
     private fun kayaLabelTintRead(activity: ComponentActivity, spec: String): String? {
         val frame = onUi(activity) {
-            target(spec, "label", KayaSceneModel.labels)?.let { Pair(kayaNodeFrames[it.id], it.id) }
+            (target(spec, "label", KayaSceneModel.labels) ?: target(spec, "icon", KayaSceneModel.icons))
+                ?.let { Pair(kayaNodeFrames[it.id], it.id) }
         } ?: return null
         val box = frame.first ?: return "<no laid-out frame>"
         val tokens = kayaSkinTokens ?: return "<no skin tokens resolved>"
@@ -9302,6 +9306,7 @@ object KayaCompose {
      * Icon drew, off the unmerged tree, by symbol name. */
     private fun kayaButtonSymbolRead(activity: ComponentActivity, spec: String): String = onUi(activity) {
         val node = (if (spec.startsWith("checkbox")) target(spec, "checkbox", KayaSceneModel.checkboxes)
+            else if (spec.startsWith("icon")) target(spec, "icon", KayaSceneModel.icons)
             else target(spec, "button", KayaSceneModel.buttons)) ?: return@onUi "<no such target>"
         if (node.a11yId.isEmpty()) return@onUi "<the target has no a11y_id to find it by>"
         val roots = kayaComposeRoots(activity).map { it as RootForTest }
@@ -10613,6 +10618,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
             "secure_field" -> KayaSceneModel.secureFields
             "segmented" -> KayaSceneModel.segmenteds
             "expander" -> KayaSceneModel.expanders
+            "icon" -> KayaSceneModel.icons
             "textarea" -> KayaSceneModel.textareas
             "date_picker" -> KayaSceneModel.datePickers
             "time_picker" -> KayaSceneModel.timePickers
@@ -20989,6 +20995,7 @@ private fun KayaRenderCore(
         KayaCompose.KIND_SEGMENTED -> KayaSegmented(node, a11y, boxFill)
         KayaCompose.KIND_EXPANDER -> KayaExpander(node, a11y, boxFill)
         KayaCompose.KIND_SURFACE -> KayaSurfaceView(node, a11y, boxFill)
+        KayaCompose.KIND_ICON -> KayaIcon(node, a11y, boxFill)
         KayaCompose.KIND_LABELED -> {
             // THE LABELLED ROW (docs/forms-plan.md §3): Material's own
             // labelled row, the value trailing and a WIDE control folded
@@ -26530,6 +26537,29 @@ internal fun kayaExpanderActionWord(context: android.content.Context, open: Bool
         "string", "android")
     return if (id == 0) null else context.getString(id)
 }
+
+/** docs/looks-plan.md §3.1: a symbol on its own, Material's 24dp icon at the
+ * body size times text_scale; the standalone tint or the fill's foreground;
+ * decorative unless the app named it. The glyph rides the semantics for
+ * expect_symbol. */
+@Composable
+internal fun KayaIcon(node: KayaNode, a11y: Modifier, boxFill: Modifier) {
+    val glyph = KayaCompose.symbolIcon(node.symbol)
+        ?: error("kaya: symbol ${node.symbol} is not in this interpreter's table")
+    val base = MaterialTheme.typography.bodyLarge.fontSize
+    val side = with(LocalDensity.current) { (base * KAYA_ICON_OVER_BODY * node.textScale.toFloat()).toDp() }
+    val own = kayaLabelTintColor(node)
+    val tint = LocalKayaOnFill.current ?: (if (own != Color.Unspecified) own else LocalContentColor.current)
+    Icon(
+        glyph,
+        contentDescription = node.a11yLabel.ifEmpty { null },
+        tint = tint,
+        modifier = a11y.then(boxFill).size(side).semantics { this[KayaGlyph] = glyph },
+    )
+}
+
+/** Material's 24dp icon over its 16sp body: the icon's size at text_scale 1. */
+private const val KAYA_ICON_OVER_BODY = 1.5f
 
 /** docs/expander-plan.md K13: Material's list item over the body, its chevron
  * turning with it. */

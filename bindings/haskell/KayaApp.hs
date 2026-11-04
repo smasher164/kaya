@@ -456,6 +456,7 @@ module KayaApp
     segmentedSymbolsOn,
     spacer,
     imageBytes,
+    iconSymbol,
     imageAsset,
     imageBound,
     Paint (..),
@@ -492,6 +493,7 @@ module KayaApp
     TplAttr (..),
     withTplAttrs,
     label,
+    icon,
     heading,
     caption,
     checkbox,
@@ -4231,6 +4233,15 @@ imageBytes bytes = leafish $ do
   emitBIO (W.txSetSource n <$> registerBlob bytes)
   return w
 
+-- | One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+-- §3.1): 'TextScale' sizes it, 'TintAs' colours it, and it is decorative
+-- unless 'A11yLabel' names it.
+iconSymbol :: (LeafArgs r) => Symbol -> r
+iconSymbol sym = leafish $ do
+  w@(Widget n) <- widget W.kindIcon
+  emitB (W.txSetSymbol n (symbolWire sym))
+  return w
+
 -- | The ASSET form of the source slot: the same image, with the picture
 -- NAMED rather than read. THE BYTES NEVER ENTER THIS GUEST'S HEAP: the
 -- core clones one refcount into the blob table.
@@ -5355,6 +5366,14 @@ image :: TplImageSource s => s -> Tpl Node
 image src = do
   n <- widget W.kindImage
   bindImageSource n src
+  return n
+
+-- | A symbol per stamped copy (docs/looks-plan.md §3.1); 'TplSymbol' with a
+-- row's Symbol field gives each copy its own.
+icon :: Symbol -> Tpl Node
+icon sym = do
+  n@(Node i) <- widget W.kindIcon
+  emitT (W.txSetSymbol i (symbolWire sym))
   return n
 
 -- | What a stamped video view shows: one constant player, or the row's

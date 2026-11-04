@@ -172,6 +172,7 @@ mod listrow;
 mod stampbefore;
 mod mountfocus;
 mod tints;
+mod icons;
 
 #[path = "submit.rs"]
 mod submit;
@@ -301,6 +302,7 @@ fn app(ctx: kaya::AppCtx) {
         Ok("stampbefore") => stampbefore::app(ctx),
         Ok("mountfocus") => mountfocus::app(ctx),
         Ok("tints") => tints::app(ctx),
+        Ok("icons") => icons::app(ctx),
         Ok("submit") => submit::app(ctx),
         Ok("tooltips") => tooltips::app(ctx),
         Ok("search") => search::app(ctx),

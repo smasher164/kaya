@@ -160,6 +160,9 @@ enum NativeWidget {
     /// The image under a one-cell Grid that also mounts its loading and
     /// failed looks (docs/network-images-plan.md N4, winui/images.rs).
     Image { host: Grid, image: Image },
+    /// docs/looks-plan.md §3.1: a glyph rebuilt from its symbol, scale and
+    /// tint into the host.
+    Icon { host: Grid, symbol: std::cell::Cell<i64>, scale: std::cell::Cell<f64>, tint: std::cell::Cell<i64> },
     Scroll(ScrollViewer),
     Progress(ProgressBar),
     Select(ComboBox),
@@ -262,6 +265,7 @@ impl NativeWidget {
             NativeWidget::Range(pair) => pair.root.cast(),
             NativeWidget::Video { host, .. } => host.cast(),
             NativeWidget::Expander { expander, .. } => expander.cast(),
+            NativeWidget::Icon { host, .. } => host.cast(),
         }
     }
 
@@ -597,6 +601,9 @@ struct CoreState {
     expander_ids: Vec<u64>,
     expander_hints: HashMap<u64, String>,
     expander_named: std::collections::HashSet<u64>,
+    /// docs/looks-plan.md §3.1, creation-ordered (`icon#N`), the ids beside them.
+    icons: Vec<Grid>,
+    icon_ids: Vec<u64>,
     grids: Vec<Grid>,
     textareas: Vec<RichEditBox>,
     textarea_ids: Vec<u64>,
@@ -1330,6 +1337,37 @@ fn symbol_icon(value: i64) -> windows_core::Result<Option<IconElement>> {
         &HSTRING::from(name),
     )?;
     Ok(Some(element))
+}
+
+/// Fluent's 16px icon beside its 14px body: an icon's size at text_scale 1
+/// (docs/looks-plan.md §3.1).
+const ICON_SIDE: f64 = 16.0;
+
+/// An icon's glyph (docs/looks-plan.md §3.1): a FontIcon at ICON_SIDE times
+/// the scale for every font concept, a PathIcon for the rest, the semantic
+/// name as its UIA name (the read's channel) and the standalone tint's brush
+/// as its foreground.
+fn icon_rebuild(host: &Grid, symbol: i64, scale: f64, tint: i64) -> windows_core::Result<()> {
+    host.Children()?.Clear()?;
+    let (Some(concept), Some(name)) = (symbol_from_wire(symbol), crate::wire::symbol_name(symbol)) else {
+        return Ok(());
+    };
+    let side = ICON_SIDE * scale;
+    let element: IconElement = match fluent_icon(concept) {
+        FluentIcon::Path(data) => path_icon(data, side, name)?,
+        _ => {
+            let icon = FontIcon::new()?;
+            icon.SetGlyph(&HSTRING::from(fluent_glyph(concept).expect("a font concept has a glyph")))?;
+            icon.SetFontSize(side)?;
+            icon.cast()?
+        }
+    };
+    if let Some(key) = skin::standalone_key(tint) {
+        element.SetForeground(&theme_resource::<bindings::Microsoft::UI::Xaml::Media::Brush>(key)?)?;
+    }
+    bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::SetName(&element, &HSTRING::from(name))?;
+    host.Children()?.Append(&element)?;
+    Ok(())
 }
 
 /// A toggle button's glyph (docs/media-player-plan.md M8): the symbol's, or
@@ -17429,6 +17467,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     core.images.push(image.clone());
                     NativeWidget::Image { host, image }
                 }
+                WidgetKind::Icon => {
+                    // docs/looks-plan.md §3.1: the symbol arrives as a SetProp
+                    // and the glyph is rebuilt into the host from the three.
+                    let host = Grid::new()?;
+                    core.icons.push(host.clone());
+                    core.icon_ids.push(id.0);
+                    NativeWidget::Icon {
+                        host,
+                        symbol: std::cell::Cell::new(0),
+                        scale: std::cell::Cell::new(1.0),
+                        tint: std::cell::Cell::new(0),
+                    }
+                }
                 WidgetKind::DatePicker => {
                     // DateChanged fires for a programmatic write too, so the
                     // USER/programmatic split rides apply_quiet; the range and
@@ -18747,6 +18798,18 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     summary.SetText(&HSTRING::from(&s))?;
                     summary.SetVisibility(if s.is_empty() { Visibility::Collapsed } else { Visibility::Visible })?;
                     expander_describe(core, id)?;
+                }
+                (NativeWidget::Icon { host, symbol: held, scale, tint }, Prop::Symbol, Value::I64(symbol)) => {
+                    held.set(symbol);
+                    icon_rebuild(host, held.get(), scale.get(), tint.get())?;
+                }
+                (NativeWidget::Icon { host, symbol, scale, tint }, Prop::TextScale, Value::F64(factor)) => {
+                    scale.set(factor);
+                    icon_rebuild(host, symbol.get(), scale.get(), tint.get())?;
+                }
+                (NativeWidget::Icon { host, symbol, scale, tint: held }, Prop::Tint, Value::I64(tint)) => {
+                    held.set(tint);
+                    icon_rebuild(host, symbol.get(), scale.get(), held.get())?;
                 }
                 (NativeWidget::Expander { glyph, .. }, Prop::Symbol, Value::I64(symbol)) => {
                     glyph.Children()?.Clear()?;
@@ -22350,6 +22413,8 @@ fn setup(occ_tx: OccSink, tx_rx: Receiver<Transaction>) -> windows_core::Result<
             segmenteds: Vec::new(),
             expanders: Vec::new(),
             expander_ids: Vec::new(),
+            icons: Vec::new(),
+            icon_ids: Vec::new(),
             expander_hints: HashMap::new(),
             expander_named: std::collections::HashSet::new(),
             grids: Vec::new(),
@@ -23717,6 +23782,7 @@ fn registry_widget_at(core: &CoreState, kind: crate::harness::TargetKind, i: usi
         K::SecureField => core.secure_ids.get(i).copied(),
         K::Segmented => id_of!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.get(i).copied(),
+        K::Icon => core.icon_ids.get(i).copied(),
         K::ColorPicker => core.color_picker_ids.get(i).copied(),
         K::NumberField => core.number_field_ids.get(i).copied(),
         K::Canvas => core.canvas_ids.get(i).copied(),
@@ -24032,6 +24098,7 @@ fn target_element(
         K::SecureField => nth!(core.secure_fields),
         K::Segmented => nth!(core.segmenteds),
         K::Expander => nth!(core.expanders),
+        K::Icon => nth!(core.icons),
         K::ColorPicker => nth!(core.color_pickers),
         K::NumberField => nth!(core.number_fields),
         K::DatePicker => nth!(core.date_pickers),
@@ -24140,6 +24207,7 @@ fn registry_ids(core: &CoreState, kind: crate::harness::TargetKind) -> Vec<u64> 
         K::SecureField => core.secure_ids.clone(),
         K::Segmented => ids!(core.segmenteds, NativeWidget::Segmented(bar), bar),
         K::Expander => core.expander_ids.clone(),
+        K::Icon => core.icon_ids.clone(),
         K::ColorPicker => core.color_picker_ids.clone(),
         K::NumberField => core.number_field_ids.clone(),
         K::Canvas => core.canvas_ids.clone(),
@@ -28142,6 +28210,7 @@ impl crate::harness::Stage for WinUiStage {
                 K::SecureField => find(core, K::SecureField, &core.secure_fields, &id),
                 K::Segmented => find(core, K::Segmented, &core.segmenteds, &id),
                 K::Expander => find(core, K::Expander, &core.expanders, &id),
+                K::Icon => find(core, K::Icon, &core.icons, &id),
                 K::ColorPicker => find(core, K::ColorPicker, &core.color_pickers, &id),
                 K::NumberField => find(core, K::NumberField, &core.number_fields, &id),
                 K::Canvas => find(core, K::Canvas, &core.canvases, &id),
@@ -30686,6 +30755,33 @@ impl crate::harness::Stage for WinUiStage {
     fn button_symbol(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(element) = target_element(core, t)? else { return Ok("<no such target>".to_owned()) };
+            // docs/looks-plan.md §3.1: an icon's host holds the one glyph it drew.
+            if let Ok(host) = element.cast::<Grid>() {
+                if core.icons.contains(&host) {
+                    let Ok(drawn) = host.Children()?.GetAt(0).and_then(|c| c.cast::<IconElement>()) else {
+                        return Ok("<the icon's host holds no glyph>".to_owned());
+                    };
+                    let name = bindings::Microsoft::UI::Xaml::Automation::AutomationProperties::GetName(&drawn)?.to_string();
+                    return Ok(match drawn.cast::<FontIcon>() {
+                        Ok(icon) => {
+                            let glyph = icon.Glyph()?.to_string();
+                            SYMBOL_ORDER
+                                .into_iter()
+                                .find(|s| fluent_glyph(*s).as_deref() == Some(glyph.as_str()))
+                                .and_then(|s| crate::wire::symbol_name(i64::from(symbol_wire(s))))
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| format!("<the icon draws glyph {glyph:?}, which is not in fluent_icon>"))
+                        }
+                        Err(_) => SYMBOL_ORDER
+                            .into_iter()
+                            .filter(|s| matches!(fluent_icon(*s), FluentIcon::Path(_)))
+                            .filter_map(|s| crate::wire::symbol_name(i64::from(symbol_wire(s))))
+                            .find(|n| *n == name)
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| format!("<the icon draws a path named {name:?}, which is no Path concept in fluent_icon>")),
+                    });
+                }
+            }
             let Ok(button) = element.cast::<bindings::Microsoft::UI::Xaml::Controls::ContentControl>() else {
                 return Ok("<the target is not a Button or ToggleButton>".to_owned());
             };

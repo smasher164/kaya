@@ -1572,6 +1572,25 @@ val time_picker :
 (* An image displaying encoded bytes: decode failure renders the
    placeholder, never a crash. [~source] and [~source_asset] are
    EXCLUSIVE. *)
+(* One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+   §3.1): [~text_scale] sizes it, [~tint] colours it, and it is decorative
+   unless [~a11y_label] names it. *)
+val icon :
+  ?grow:float ->
+  ?fill:bool ->
+  ?a11y_id:string ->
+  ?a11y_id_bind:string signal ->
+  ?a11y_label:string ->
+  ?a11y_label_bind:string signal ->
+  ?help:string ->
+  ?help_bind:string signal ->
+  ?tint:Tint.t ->
+  ?tint_bind:Tint.t signal ->
+  ?text_scale:float ->
+  symbol ->
+  unit ->
+  widget
+
 val image :
   ?grow:float ->
   ?fill:bool ->
@@ -2935,6 +2954,23 @@ module Tpl : sig
   (* An image per stamped copy: [~source] gives every copy the same
      bytes, [~bind] a Blob signal, [~bind_field] each row's own (_,
      bytes) field. *)
+  (* A symbol per stamped copy (docs/looks-plan.md §3.1). *)
+  val icon :
+    ?grow:float ->
+    ?fill:bool ->
+    ?a11y_id:string ->
+    ?a11y_id_bind:string signal ->
+    ?a11y_id_field:('a, string) field ->
+    ?a11y_label:string ->
+    ?a11y_label_bind:string signal ->
+    ?a11y_label_field:('b, string) field ->
+    ?help:string ->
+    ?help_bind:string signal ->
+    ?help_field:('c, string) field ->
+    ?tint:Tint.t ->
+    ?text_scale:float ->
+    ?level:int -> ?a11y_level:int -> symbol -> unit -> node
+
   val image :
     ?grow:float ->
     ?fill:bool ->

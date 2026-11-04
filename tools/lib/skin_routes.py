@@ -532,7 +532,8 @@ def run(g):
          "content.onGeometryChange(for: CGSize.self) { $0.size } action: { record($0) }",
          "KayaInsetReader reads its geometry outside .kayaGeometry"),
         ("a reader attached behind its node", SWIFT, r"\.modifier\(KayaLabelFrameReader\(id: node\.id\)\)",
-         ".background(KayaLabelFrameReader(id: node.id))", "KayaLabelFrameReader is attached with .background", 10),
+         # 11 since the icon kind joined (docs/looks-plan.md §3.1).
+         ".background(KayaLabelFrameReader(id: node.id))", "KayaLabelFrameReader is attached with .background", 11),
         ("a label reader built in a shipped app", SWIFT,
          r"(struct KayaLabelFrameReader: ViewModifier \{[^}]*?func body\(content: Content\) -> some View \{\n\s+)if kayaHarnessActive \{",
          r"\1if true {", "KayaLabelFrameReader is built in a shipped app"),

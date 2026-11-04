@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xf2f2a3b7c858b4acL
+let spec_hash = 0x19db789d3a45d6f1L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -73,6 +73,7 @@ let kind_secure_field = 24
 let kind_segmented = 25
 let kind_expander = 26
 let kind_surface = 27
+let kind_icon = 28
 let draw_op_move_to = 1
 let draw_op_line_to = 2
 let draw_op_close = 3

@@ -3123,6 +3123,15 @@ func (tx *Tx) Image(source []byte) Widget {
 	return w
 }
 
+// Icon draws one symbol of the vocabulary on its own (docs/looks-plan.md
+// §3.1): TextScale sizes it, Tint colours it, and it is decorative unless
+// A11yLabel names it.
+func (tx *Tx) Icon(symbol Symbol) Widget {
+	w := tx.Widget(KindIcon)
+	tx.SetSymbol(w, symbol)
+	return w
+}
+
 // ImageAsset displays the picture THE APP'S OWN BUILD PUT BESIDE IT —
 // Image's request by a different route: the bytes never enter Go, and
 // the redemption clones one refcount into the blob table (FontAsset's
@@ -6592,6 +6601,14 @@ func (t *Tpl) segmentedSymbolsOf(segments []Segment) Node {
 func (t *Tpl) Image(source []byte) Node {
 	n := t.Widget(KindImage)
 	t.tx.emit(TxSetSource(n.id, uint64(blobWire(source))))
+	return n
+}
+
+// Icon draws one symbol per stamped copy (docs/looks-plan.md §3.1); SetSymbol
+// with a row's Symbol field gives each copy its own.
+func (t *Tpl) Icon(symbol Symbol) Node {
+	n := t.Widget(KindIcon)
+	t.SetSymbol(n, symbol)
 	return n
 }
 

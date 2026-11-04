@@ -28,7 +28,7 @@ DEFAULT_KINDS = (
     "column button label entry row checkbox slider image "
     "scroll progress select radio grid textarea canvas "
     "date_picker time_picker labeled search number_field color_picker range video "
-    "secure_field segmented expander surface"
+    "secure_field segmented expander surface icon"
 ).split()
 
 # Kinds a row template REFUSES in the core, so no template zone offers them:

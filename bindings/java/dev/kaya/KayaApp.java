@@ -6437,6 +6437,10 @@ public final class KayaApp {
             return t.image(source);
         }
 
+        public Node icon(Symbol symbol) {
+            return t.icon(symbol);
+        }
+
         public Node image(Signal<byte[]> s) {
             return t.image(s);
         }
@@ -9208,6 +9212,15 @@ public final class KayaApp {
             return w;
         }
 
+        /** One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+         * §3.1): textScale sizes it, tint colours it, and it is decorative
+         * unless a11yLabel names it. */
+        public Widget icon(Symbol symbol) {
+            Widget w = widget(KayaWire.KIND_ICON);
+            setSymbol(w, symbol);
+            return w;
+        }
+
         public Widget image(Signal<byte[]> s) {
             Widget w = widget(KayaWire.KIND_IMAGE);
             bindSource(w, s);
@@ -11088,6 +11101,14 @@ public final class KayaApp {
         public Node image(byte[] source) {
             Node n = widget(KayaWire.KIND_IMAGE);
             tx.emit(KayaWire.txSetSource(n.id, KayaRing.blobRegister(source)));
+            return n;
+        }
+
+        /** A symbol per stamped copy (docs/looks-plan.md §3.1); setSymbol with
+         * a row's Symbol field gives each copy its own. */
+        public Node icon(Symbol symbol) {
+            Node n = widget(KayaWire.KIND_ICON);
+            setSymbol(n, symbol);
             return n;
         }
 

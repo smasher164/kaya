@@ -5726,6 +5726,19 @@ public final class KayaAppTx {
         return w
     }
 
+    /// One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+    /// §3.1): `textScale` sizes it, `tint` colours it, and it is decorative
+    /// unless `setA11yLabel` names it.
+    @discardableResult
+    public func icon(_ symbol: KayaSymbol, textScale: Double? = nil, tint: KayaTint? = nil, grow: Double? = nil) -> KayaWidget {
+        let w = widget(UInt32(KAYA_KIND_ICON))
+        setSymbol(w, symbol)
+        if let textScale { setTextScale(w, textScale) }
+        if let tint { setTint(w, tint) }
+        if let grow { setGrow(w, grow) }
+        return w
+    }
+
     /// An image displaying encoded bytes (PNG, JPEG, ...). Decode failure
     /// renders the placeholder, never a crash.
     @discardableResult
@@ -7559,6 +7572,15 @@ public final class KayaTpl {
     public func label(_ text: String) -> KayaNodeHandle {
         let n = widget(UInt32(KAYA_KIND_LABEL))
         setText(n, text)
+        return n
+    }
+
+    /// A symbol per stamped copy (docs/looks-plan.md §3.1); `setSymbol` with
+    /// a row's Symbol field gives each copy its own.
+    @discardableResult
+    public func icon(_ symbol: KayaSymbol) -> KayaNodeHandle {
+        let n = widget(UInt32(KAYA_KIND_ICON))
+        setSymbol(n, symbol)
         return n
     }
 

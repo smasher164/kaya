@@ -1250,6 +1250,8 @@
 
 #define KAYA_KIND_SURFACE 27
 
+#define KAYA_KIND_ICON 28
+
 /**
  * Property keys.
  */

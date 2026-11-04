@@ -1,0 +1,17 @@
+# docs/looks-plan.md §3.1: a symbol drawn on its own. Each icon reads back
+# the SEMANTIC NAME of the glyph the platform drew, a tinted one reads its
+# tint off its ink, one sits inside an accent fill and takes the pair's
+# foreground, and a stamped one is read by its row's key.
+expect_title "icons"
+expect_symbol icon@plain "star"
+expect_symbol icon@accent "favorite"
+expect_tint icon@accent accent
+expect_symbol icon@critical "warning"
+expect_tint icon@critical critical
+expect_tint icon@plain none
+expect_symbol icon@big "done"
+expect_symbol icon@named "info"
+expect_fill row@fillrow accent
+expect_symbol icon@onfill "send"
+expect_symbol icon@stamped[n1] "edit"
+expect_no_clipping

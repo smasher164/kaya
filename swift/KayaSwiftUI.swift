@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xf2f2a3b7c858b4ac
+let kayaSpecHash: UInt64 = 0x19db789d3a45d6f1
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -260,6 +260,7 @@ private let kindSecureField: UInt32 = 24
 private let kindSegmented: UInt32 = 25
 private let kindExpander: UInt32 = 26
 private let kindSurface: UInt32 = 27
+private let kindIcon: UInt32 = 28
 private let propText: UInt32 = 1
 private let propChecked: UInt32 = 2
 private let propColumns: UInt32 = 11
@@ -1504,6 +1505,7 @@ final class KayaSceneModel {
     var secureFields: [KayaNode] = []
     var segmenteds: [KayaNode] = []
     var expanders: [KayaNode] = []
+    var icons: [KayaNode] = []
     var surfaces: [KayaNode] = []
 
     /// Every kind registry, so a destroyed node leaves all of them at once.
@@ -6533,6 +6535,7 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                 case kindRange: kayaScene.ranges.append(node)
                 case kindVideo: kayaScene.videos.append(node)
                 case kindSurface: kayaScene.surfaces.append(node)
+                case kindIcon: kayaScene.icons.append(node)
                 case kindSecureField: kayaScene.secureFields.append(node)
                 case kindSegmented: kayaScene.segmenteds.append(node)
                 case kindExpander:
@@ -9984,6 +9987,7 @@ private func kayaAnyTarget(_ spec: Substring) -> KayaNode? {
     case "date_picker": return kayaTarget(spec, "date_picker", kayaScene.datePickers)
     case "time_picker": return kayaTarget(spec, "time_picker", kayaScene.timePickers)
     case "image": return kayaTarget(spec, "image", kayaScene.images)
+    case "icon": return kayaTarget(spec, "icon", kayaScene.icons)
     case "canvas": return kayaTarget(spec, "canvas", kayaScene.canvases)
     case "column": return kayaTarget(spec, "column", kayaScene.columns)
     case "row": return kayaTarget(spec, "row", kayaScene.rows)
@@ -14537,6 +14541,11 @@ private func kayaRunScript(_ script: String) {
                 }
                 let wantSymbol = kayaQuoted(Array(parts.dropFirst(2)))
                 func readSymbol() -> String {
+                    if parts[1].hasPrefix("icon") {
+                        return DispatchQueue.main.sync {
+                            kayaTarget(parts[1], "icon", kayaScene.icons).map(kayaIconSymbolRead) ?? "<no such target>"
+                        }
+                    }
                     let toggle = parts[1].hasPrefix("checkbox")
                     guard let (node, centre) = DispatchQueue.main.sync(execute: { () -> (KayaNode, CGPoint?)? in
                         let node = toggle ? kayaTarget(parts[1], "checkbox", kayaScene.checkboxes)
@@ -23556,6 +23565,51 @@ struct KayaSymbolButton: View {
     }
 }
 
+/// A symbol on its own (docs/looks-plan.md §3.1): the body size times
+/// `text_scale`, the standalone tint or the fill's foreground, decorative
+/// unless the app named it. The drawn SF name is recorded for expect_symbol.
+struct KayaIcon: View {
+    let node: KayaNode
+
+    var body: some View {
+        let sf = kayaSFSymbol(node.symbol) ?? "questionmark"
+        Image(systemName: sf)
+            .font(.system(size: kayaIconPointSize * node.textScale))
+            .modifier(KayaLabelTint(tint: node.labelTint))
+            .modifier(KayaLabelFrameReader(id: node.id))
+            .accessibilityHidden(node.a11yLabel.isEmpty)
+            .accessibilityLabel(node.a11yLabel)
+            .onAppear { kayaButtonGlyphs[node.id] = sf }
+            .onChange(of: sf) { _, drawn in kayaButtonGlyphs[node.id] = drawn }
+            .onDisappear { kayaButtonGlyphs[node.id] = nil }
+    }
+}
+
+/// The body text size on each platform, the icon's size at `text_scale` 1.
+#if os(macOS)
+    let kayaIconPointSize: Double = 13
+#else
+    let kayaIconPointSize: Double = 17
+#endif
+
+/// expect_symbol on an icon: the glyph the render arm drew, once the icon
+/// has a laid-out frame and its SF name resolves on this OS (the rename
+/// trap draws blank).
+@MainActor func kayaIconSymbolRead(_ node: KayaNode) -> String {
+    guard let frame = kayaLabelWindowFrames[node.id]?.values.first, frame.width > 1, frame.height > 1 else {
+        return "<the icon has no laid-out frame>"
+    }
+    guard let sf = kayaButtonGlyphs[node.id] else { return "<the icon's body drew no symbol>" }
+    #if os(macOS)
+        guard NSImage(systemSymbolName: sf, accessibilityDescription: nil) != nil else {
+            return "<SF symbol \(sf) does not resolve on this OS>"
+        }
+    #else
+        guard UIImage(systemName: sf) != nil else { return "<SF symbol \(sf) does not resolve on this OS>" }
+    #endif
+    return kayaButtonGlyphName(node.id)
+}
+
 /// The glyph a titled symbol button draws, for expect_symbol (prop 77).
 struct KayaTitledGlyph: ViewModifier {
     let node: KayaNode
@@ -25583,7 +25637,10 @@ func kayaSkinReading(_ parts: [Substring]) -> (String?, String) {
         } else if verb == "expect_shape" {
             return DispatchQueue.main.sync { kayaTarget(parts[1], "image", kayaScene.images).map(kayaShapeRead) }
         } else if verb == "expect_tint" {
-            return DispatchQueue.main.sync { kayaTarget(parts[1], "label", kayaScene.labels).map(kayaLabelTintRead) }
+            return DispatchQueue.main.sync {
+                (kayaTarget(parts[1], "label", kayaScene.labels) ?? kayaTarget(parts[1], "icon", kayaScene.icons))
+                    .map(kayaLabelTintRead)
+            }
         } else {
             let found = DispatchQueue.main.sync { () -> (String, CGPoint?, Int?)? in
                 guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
@@ -30730,6 +30787,8 @@ struct KayaRender: View {
             .background(KayaChoiceAnchor(id: node.id))
         case kindExpander:
             KayaExpander(node: node)
+        case kindIcon:
+            KayaIcon(node: node)
         case kindSegmented:
             KayaSegmented(node: node, stretch: node.grow > 0 || (flexVertical == true && node.fill == true))
         case kindProgress:
@@ -40530,10 +40589,10 @@ let kayaSectionSymbolIdent = "kaya-section-symbol:"
 @MainActor var kayaButtonGlyphs: [UInt64: String] = [:]
 
 @MainActor func kayaButtonGlyphName(_ node: UInt64) -> String {
-    guard let sf = kayaButtonGlyphs[node] else { return "<the button's body drew no symbol>" }
+    guard let sf = kayaButtonGlyphs[node] else { return "<the target's body drew no symbol>" }
     let filled = kayaSymbolOnTable.first { $0.sf == sf }?.value
     return kayaSymbolTable.first { $0.sf == sf || $0.rendered == sf || $0.value == filled }?.name
-        ?? "<the button drew \(sf), which is not in this interpreter's table>"
+        ?? "<the target drew \(sf), which is not in this interpreter's table>"
 }
 
 #if os(macOS)

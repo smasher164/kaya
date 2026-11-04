@@ -87,6 +87,8 @@ LEGS = {
         # (docs/tints-plan.md).
         "tints-compose",
         "tintsdark-compose",
+        # A symbol on its own (docs/looks-plan.md §3.1).
+        "icons-compose",
         "scrollto-compose",
         # The number field in the everyday locale and in German
         # (docs/number-field-plan.md §5); MODS cuts the steps.

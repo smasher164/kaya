@@ -3667,6 +3667,20 @@ let time_picker ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind
    renders the placeholder, never a crash. [~source] ships the bytes and
    [~source_asset] names the picture instead (the bytes never enter the
    OCaml heap). The two are EXCLUSIVE. *)
+(* docs/looks-plan.md §3.1: one symbol of the vocabulary drawn on its own;
+   ~text_scale sizes it, ~tint colours it, decorative unless ~a11y_label
+   names it. *)
+let icon ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?tint ?tint_bind ?text_scale symbol () =
+  let w = widget Kaya_wire.kind_icon in
+  Option.iter (fun g -> set_grow w g) grow;
+  Option.iter (fun v -> set_fill w v) fill;
+  set_a11y ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind w;
+  set_symbol w symbol;
+  Option.iter (fun t -> set_tint w t) tint;
+  Option.iter (fun s -> bind_tint w s) tint_bind;
+  Option.iter (fun v -> set_text_scale w v) text_scale;
+  w
+
 let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?source ?source_asset ?bind ?fit ?phase ?phase_bind ?max_width ?max_height ?shape ?(bleed = false) () =
   let w = widget Kaya_wire.kind_image in
   Option.iter (fun g -> set_grow w g) grow;
@@ -6748,6 +6762,21 @@ module Tpl = struct
 
   let bind_phase_field ?(level = 0) (Node id) (fd : (_, Image_phase.t) field) =
     emit (the_tx ()) (Kaya_wire.tx_bind_phase_element ~level ~field:fd.fd_index id)
+
+  (* docs/looks-plan.md §3.1: a symbol per stamped copy; [set_symbol_field]
+     gives each copy its row's own. *)
+  let icon ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label ?a11y_label_bind
+      ?a11y_label_field ?help ?help_bind ?help_field ?tint ?text_scale ?(level = 0)
+      ?(a11y_level = level) symbol () =
+    let n = Floor.widget Kaya_wire.kind_icon in
+    Option.iter (fun g -> Floor.set_grow n g) grow;
+    Option.iter (fun v -> Floor.set_fill n v) fill;
+    Floor.set_a11y ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label ?a11y_label_bind
+      ?a11y_label_field ?help ?help_bind ?help_field ~a11y_level n;
+    Floor.set_symbol n symbol;
+    Option.iter (set_tint n) tint;
+    Option.iter (set_text_scale n) text_scale;
+    n
 
   let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
       ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?source ?bind ?bind_field

@@ -4417,6 +4417,15 @@ impl<'a> Tx<'a> {
         Widget { id: w, out: (), tx: self }
     }
 
+    /// One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+    /// §3.1): sized by `text_scale`, coloured by `tint`; decorative unless it
+    /// carries an `a11y_label`.
+    pub fn icon(&mut self, symbol: crate::Symbol) -> Widget<'_, 'a> {
+        let w = self.widget(WidgetKind::Icon);
+        self.set(w, Prop::Symbol, symbol as i64);
+        Widget { id: w, out: (), tx: self }
+    }
+
     /// Declare a collection of `T` records: a core-side keyed table a For
     /// renders. The element type IS the schema — `T::VARIANTS` goes on the
     /// wire here, one field-type list per constructor.
@@ -5666,6 +5675,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
         self.tpl().image(src)
+    }
+
+    pub fn icon(&mut self, src: impl Into<TplSource<SymbolKind>>) -> TemplateNodeId {
+        self.tpl().icon(src)
     }
 
     pub fn canvas(&mut self, viewbox: Viewbox, body: impl FnOnce(&mut Draw)) -> TemplateNodeId {
@@ -10023,6 +10036,14 @@ impl<'b> Tpl<'_, 'b> {
     pub fn image(&mut self, src: impl Into<TplSource<BlobKind>>) -> TemplateNodeId {
         let n = self.widget(WidgetKind::Image);
         self.apply_source(n, Prop::Source, src.into().inner);
+        n
+    }
+
+    /// A stamped icon, its symbol constant or a row's Symbol field, the
+    /// blueprint twin of [`Tx::icon`] (docs/looks-plan.md §3.1).
+    pub fn icon(&mut self, src: impl Into<TplSource<SymbolKind>>) -> TemplateNodeId {
+        let n = self.widget(WidgetKind::Icon);
+        self.apply_source(n, Prop::Symbol, src.into().inner);
         n
     }
 

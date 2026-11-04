@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xf2f2a3b7c858b4ac
+specHash = 0x19db789d3a45d6f1
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -108,6 +108,8 @@ kindExpander :: Word32
 kindExpander = 26
 kindSurface :: Word32
 kindSurface = 27
+kindIcon :: Word32
+kindIcon = 28
 drawOpMoveTo :: Word32
 drawOpMoveTo = 1
 drawOpLineTo :: Word32

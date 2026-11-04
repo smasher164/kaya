@@ -6233,6 +6233,24 @@ def _bleed(handle: Widget, bleed: bool) -> None:
     _records().append(wire.tx_set_bleed(handle.id, True))
 
 
+def icon(symbol: Symbol | str | Source, *, tint: Tint | str | Source | None = None,
+         text_scale: float | None = None, a11y_label: TextSource | None = None,
+         grow: float | None = None) -> Widget:
+    """One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+    §3.1): `text_scale` sizes it, `tint` colours it, and it is decorative
+    unless `a11y_label` names it. In a template the symbol may be the row's
+    Symbol field."""
+    handle = _widget(wire.KIND_ICON)
+    _set_symbol(handle, symbol)
+    _set_label_tint(handle, tint)
+    if text_scale is not None:
+        handle.text_scale(text_scale)
+    if a11y_label is not None:
+        handle.a11y_label(a11y_label)
+    _set_grow(handle, grow)
+    return handle
+
+
 def image(source: bytes | bytearray | memoryview | Asset | Source | None = None,
           *, phase: ImagePhase | str | Source | None = None,
           fit: Fit | str | int | None = None,

@@ -87,6 +87,8 @@ legs on five lanes, the gate sweep, a commit, a review page):
 
 ### §3.1 The standalone icon (framework piece a)
 
+BUILT 2026-11-04: kind `icon` (28) on all five backends and in all nine bindings with the C floor's generated floor; the `icons` scene (rust) green on every lane, its two SwiftUI negatives watched red (the drawn glyph swapped, the tint dropped). WinUI's code-surface face handler now leaves a non-text kind's `text_scale` to that kind's own arm, which the windows leg found.
+
 A new kind, `icon` (28): a widget that draws one symbol of the closed
 vocabulary and nothing else. Its props:
 

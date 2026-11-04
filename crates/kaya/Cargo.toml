@@ -634,6 +634,11 @@ path = "../../guests/rust/mountfocus.rs"
 name = "tints"
 path = "../../guests/rust/tints.rs"
 
+# docs/looks-plan.md §3.1.
+[[example]]
+name = "icons"
+path = "../../guests/rust/icons.rs"
+
 # docs/styling-pass-plan.md §5.
 [[example]]
 name = "grounds"

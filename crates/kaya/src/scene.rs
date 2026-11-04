@@ -1284,6 +1284,11 @@ pub(crate) struct Scene {
     expander_dirty: Vec<WidgetId>,
     /// Live expanders whose header text has been set.
     expander_named: HashSet<WidgetId>,
+    /// Live icons created this transaction, held to a symbol at its end
+    /// (docs/looks-plan.md §3.1).
+    icon_dirty: Vec<WidgetId>,
+    /// Live icons whose symbol has been set.
+    icon_symboled: HashSet<WidgetId>,
     /// docs/network-images-plan.md N3: what each live image has declared of
     /// its box and phase, held at the end of each transaction that touched it.
     image_boxes: HashMap<WidgetId, ImageBox>,
@@ -1652,10 +1657,12 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // docs/styling-pass-plan.md Y1: the skin's kinds, no control among them.
         Prop::Ground | Prop::Selected | Prop::Activatable => matches!(kind, WidgetKind::Column | WidgetKind::Row),
         Prop::Shape => kind == WidgetKind::Image,
-        Prop::Tint => kind == WidgetKind::Label,
+        // docs/looks-plan.md §3.1: an icon takes the label's tint and scale.
+        Prop::Tint => matches!(kind, WidgetKind::Label | WidgetKind::Icon),
         // docs/code-surface-plan.md G1, M1.
         Prop::LineNumbers => kind == WidgetKind::Textarea,
-        Prop::Monospaced | Prop::Family | Prop::TextScale => matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea),
+        Prop::Monospaced | Prop::Family => matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea),
+        Prop::TextScale => matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea | WidgetKind::Icon),
         // docs/font-picker-plan.md §2.3.
         Prop::FontWeight | Prop::FontItalic | Prop::FontWidth => {
             matches!(kind, WidgetKind::Label | WidgetKind::Entry | WidgetKind::Textarea)
@@ -1757,7 +1764,7 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // parent at the end of the transaction, docs/segmented-plan.md G3).
         Prop::Symbol => matches!(
             kind,
-            WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander | WidgetKind::Checkbox
+            WidgetKind::Button | WidgetKind::Label | WidgetKind::Expander | WidgetKind::Checkbox | WidgetKind::Icon
         ),
         // A slider takes a widest width too, its grown track capped
         // (docs/media-player-plan.md M16 (17)); a label wraps under it and a
@@ -2941,6 +2948,10 @@ fn short_of_gap(low: f64, high: f64, gap: f64) -> bool {
 const EXPANDER_NAMELESS: &str = "kaya: an expander's header is its text, and the text is its \
     accessible name; give it a non-empty text (docs/expander-plan.md K2)";
 
+/// docs/looks-plan.md §3.1: an icon with no symbol draws nothing.
+const ICON_SYMBOLLESS: &str = "kaya: an icon draws one symbol of the vocabulary and has none; \
+    give it a symbol (docs/looks-plan.md §3.1)";
+
 fn check_labeled_shape(who: &str, kinds: &[WidgetKind]) {
     assert!(
         kinds.len() == 2 || kinds.len() == 3,
@@ -3253,7 +3264,7 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     if let (Prop::Tint, Value::I64(tint)) = (prop, value) {
         assert!(
             (0..=4).contains(tint),
-            "kaya: a label's tint is none (0), accent (1), success (2), warning (3) or critical (4) \
+            "kaya: a label's or an icon's tint is none (0), accent (1), success (2), warning (3) or critical (4) \
              — neutral and overlay are fills with no standalone colour, got {tint}"
         );
     }
@@ -3693,6 +3704,31 @@ impl Scene {
                      toggled value back (docs/expander-plan.md K10)",
                     if in_for { "a Bool field of the row" } else { "a Bool field or signal" }
                 );
+            }
+        }
+    }
+
+    /// docs/looks-plan.md §3.1 in the template zone: a stamped icon names its
+    /// symbol, constant or bound to the row.
+    fn check_icon_template(body: &TplBody) {
+        let mut symboled: HashSet<u64> = HashSet::new();
+        for op in &body.ops {
+            match op {
+                TplOp::SetProp { node, prop: Prop::Symbol, .. } => {
+                    symboled.insert(*node);
+                }
+                TplOp::For { bodies, .. } => {
+                    for b in bodies {
+                        Self::check_icon_template(b);
+                    }
+                }
+                TplOp::When { body, .. } => Self::check_icon_template(body),
+                _ => {}
+            }
+        }
+        for op in &body.ops {
+            if let TplOp::Widget { node, kind: WidgetKind::Icon } = op {
+                assert!(symboled.contains(node), "{ICON_SYMBOLLESS} (template node {node})");
             }
         }
     }
@@ -4227,6 +4263,9 @@ impl Scene {
                         EXPANDERS.store(true, std::sync::atomic::Ordering::Release);
                         self.expander_dirty.push(id);
                     }
+                    if kind == WidgetKind::Icon {
+                        self.icon_dirty.push(id);
+                    }
                     if kind == WidgetKind::Row {
                         // A row centres its children on the cross axis unless
                         // the app says otherwise (DESIGN.md Layout, R5).
@@ -4281,6 +4320,9 @@ impl Scene {
                     }
                     if kind == WidgetKind::Expander && prop == Prop::Text {
                         self.expander_named.insert(widget);
+                    }
+                    if kind == WidgetKind::Icon && prop == Prop::Symbol {
+                        self.icon_symboled.insert(widget);
                     }
                     match value {
                         PropValue::Const(v) => {
@@ -6361,6 +6403,12 @@ impl Scene {
             assert!(
                 !self.widgets.contains_key(&id) || self.expander_named.contains(&id),
                 "{EXPANDER_NAMELESS} (expander {id:?})"
+            );
+        }
+        for id in std::mem::take(&mut self.icon_dirty) {
+            assert!(
+                !self.widgets.contains_key(&id) || self.icon_symboled.contains(&id),
+                "{ICON_SYMBOLLESS} (icon {id:?})"
             );
         }
         for id in std::mem::take(&mut self.image_box_dirty) {
@@ -9764,6 +9812,7 @@ impl Scene {
                             self.check_segmented_template(body);
                             self.check_document_template(body);
                             self.check_expander_template(body, true);
+                            Self::check_icon_template(body);
                             Self::check_image_template(body);
                             Self::check_skin_template(body);
                         }
@@ -9773,6 +9822,7 @@ impl Scene {
                         self.check_segmented_template(body);
                         self.check_document_template(body);
                         self.check_expander_template(body, in_for);
+                        Self::check_icon_template(body);
                         Self::check_image_template(body);
                         Self::check_skin_template(body);
                     }
@@ -13283,6 +13333,13 @@ mod tests {
                         },
                         TxOp::SetProperty { widget: WidgetId(base), prop: Prop::Expanded, value: expanded },
                     ];
+                }
+                if kind == WidgetKind::Icon {
+                    return vec![TxOp::SetProperty {
+                        widget: WidgetId(base),
+                        prop: Prop::Symbol,
+                        value: PropValue::Const(Value::I64(1)),
+                    }];
                 }
                 if kind != WidgetKind::Labeled {
                     return Vec::new();

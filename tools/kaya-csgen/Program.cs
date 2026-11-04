@@ -359,6 +359,8 @@ static class Program
         Fwd("Button", ["string text"], "text");
         Fwd("Button", ["Signal s"], "s");
         Fwd("Button", ["Field<string> f"], "f");
+        // docs/looks-plan.md §3.1.
+        Fwd("Icon", ["Symbol symbol"], "symbol");
         Fwd("Image", ["byte[] source"], "source");
         Fwd("Image", ["Signal s"], "s");
         Fwd("Image", ["Field<byte[]> f"], "f");

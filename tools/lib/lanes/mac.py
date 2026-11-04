@@ -67,7 +67,7 @@ SCENES = [
 # has not landed — built and run rust-only until their guests arrive,
 # when they move into SCENES.
 DEPTH_SCENES = ["typeface", "windowed", "canvas", "dnd", "tasks", "notify", "notes", "richrows",
-                "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "badge", "emoji", "media",
+                "format", "flexshrink", "listrow", "stampbefore", "mountfocus", "tints", "icons", "badge", "emoji", "media",
                 # The capture (docs/capture-plan.md §8), rust-only at depth.
                 "capture",
                 # The far end of a call (docs/capture-plan.md §5), rust-only at depth.
@@ -338,6 +338,8 @@ ORDER = [
     ("mountfocus", ("rust",)),
     # The platform tints on a filled container (docs/tints-plan.md).
     ("tints", ("rust",)),
+    # A symbol on its own (docs/looks-plan.md §3.1).
+    ("icons", ("rust",)),
     ("codesurface", LANGS),
     # docs/font-picker-plan.md §7.
     ("fontpick", LANGS),

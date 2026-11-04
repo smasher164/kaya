@@ -5454,6 +5454,26 @@ function phaseRecord(handle: Widget, phase: ImagePhase | Signal<ImagePhase> | Fi
   throw new TypeError(`kaya: an image's phase takes a kaya.ImagePhase, a Signal of one or a row's ImagePhase field, not ${runtime.describe(phase)}`);
 }
 
+export type IconOptions = GrowOption & {
+  textScale?: number;
+  tint?: TintValue | TintName;
+  a11yLabel?: string;
+};
+
+/** One symbol of the vocabulary drawn on its own (docs/looks-plan.md §3.1):
+ * `textScale` sizes it, `tint` colours it, and it is decorative unless
+ * `a11yLabel` names it. In a template the symbol may be the row's
+ * kaya.Symbol field. */
+export function icon(symbol: SymbolValue | SymbolName | FieldRef, opts: IconOptions = {}): Widget {
+  const handle = widget(wire.KIND_ICON);
+  setSymbol(handle, symbol);
+  if (opts.tint !== undefined) records().push(wire.tx_set_tint(handle.id, tintValue(opts.tint)));
+  if (opts.textScale !== undefined) handle.textScale(opts.textScale);
+  if (opts.a11yLabel !== undefined) handle.a11yLabel(opts.a11yLabel);
+  setGrow(handle, opts);
+  return handle;
+}
+
 /** An image displaying encoded bytes: the toolkit decodes natively. The
  * source is bytes, an Asset, a Signal, or an element field; `phase`,
  * `fit`, `onNeeded` and `onReleased` are docs/network-images-plan.md's,

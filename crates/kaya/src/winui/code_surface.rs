@@ -51,6 +51,20 @@ thread_local! {
 
 /// The four props' apply arms; true when the prop was one of them.
 pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &Value) -> windows_core::Result<bool> {
+    // A face belongs to the text kinds alone; an icon's text_scale is its
+    // own arm (docs/looks-plan.md §3.1), so it is left to the main match.
+    let text_kind = matches!(
+        core.widgets.get(&id),
+        Some(NativeWidget::Label { .. } | NativeWidget::Entry(_) | NativeWidget::Textarea(_))
+    );
+    if !text_kind
+        && matches!(
+            prop,
+            Prop::Monospaced | Prop::Family | Prop::TextScale | Prop::FontWeight | Prop::FontItalic | Prop::FontWidth
+        )
+    {
+        return Ok(false);
+    }
     match (prop, value) {
         (Prop::LineNumbers, Value::Bool(on)) => {
             let Some(NativeWidget::Textarea(field)) = core.widgets.get(&id) else {

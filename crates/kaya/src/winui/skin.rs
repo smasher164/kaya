@@ -712,7 +712,7 @@ pub(super) fn shaper_of(id: WidgetId) -> Option<Grid> {
 
 /// The standalone brush a tint paints text in (docs/styling-plan.md D1's
 /// `standalone`): never the fill's.
-fn standalone_key(tint: i64) -> Option<&'static str> {
+pub(super) fn standalone_key(tint: i64) -> Option<&'static str> {
     match u32::try_from(tint).ok()? {
         crate::wire::TINT_ACCENT => Some("AccentTextFillColorPrimaryBrush"),
         crate::wire::TINT_SUCCESS => Some("SystemFillColorSuccessBrush"),

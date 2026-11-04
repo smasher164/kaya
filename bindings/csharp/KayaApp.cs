@@ -5947,6 +5947,19 @@ sealed class Tx : IDisposable
     /// An image the app fetches declares its box, `fit` with both bounds,
     /// and its `phase` (docs/network-images-plan.md N2, N3); a phase that
     /// follows a signal is SetPhase(image, signal).
+    /// One symbol of the vocabulary drawn on its own (docs/looks-plan.md
+    /// §3.1): textScale sizes it, tint colours it, and it is decorative
+    /// unless SetA11yLabel names it.
+    public Widget Icon(Symbol symbol, double? textScale = null, Tint? tint = null, double? grow = null)
+    {
+        var w = Widget(KayaWire.KindIcon);
+        SetSymbol(w, symbol);
+        if (textScale is double s) SetTextScale(w, s);
+        if (tint is Tint t) SetTint(w, t);
+        if (grow is double g) SetGrow(w, g);
+        return w;
+    }
+
     public Widget Image(byte[]? source = null, Signal? bind = null, double? grow = null,
         Fit? fit = null, double? maxWidth = null, double? maxHeight = null,
         ImagePhase? phase = null, Shape? shape = null)
@@ -7965,6 +7978,15 @@ sealed class Tpl
     {
         var n = Widget(KayaWire.KindButton);
         BindTextField(n, 0, f);
+        return n;
+    }
+
+    /// A symbol per stamped copy (docs/looks-plan.md §3.1); SetSymbol with a
+    /// row's Symbol field gives each copy its own.
+    public Node Icon(Symbol symbol)
+    {
+        var n = Widget(KayaWire.KindIcon);
+        SetSymbol(n, symbol);
         return n;
     }
 

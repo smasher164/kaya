@@ -157,6 +157,8 @@ RUST_SCENES = [
     "mountfocus",
     # The platform tints on a filled container (docs/tints-plan.md).
     "tints",
+    # A symbol on its own (docs/looks-plan.md §3.1).
+    "icons",
     # The submit gesture on the three text kinds (docs/submit-plan.md §5).
     "submit",
     # The secure field (docs/secure-entry-plan.md §5).
