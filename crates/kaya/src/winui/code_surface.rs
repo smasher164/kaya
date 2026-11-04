@@ -75,8 +75,17 @@ fn set_measure(id: u64, field: &RichEditBox, measure: f64) -> windows_core::Resu
 
 fn apply_measure(id: u64, field: &RichEditBox) -> windows_core::Result<()> {
     let Some((measure, base)) = MEASURES.with_borrow(|m| m.get(&id).copied()) else { return Ok(()) };
-    let side = if measure > 0.0 { ((field.ActualWidth()? - measure) / 2.0).max(0.0).floor() } else { 0.0 };
     let pad = field.Padding()?;
+    // NO MEASURE TOUCHES NOTHING but a measure's own sides: the gutter owns
+    // the left padding while it is on (the windows editor capture, numbers
+    // drawn over the text, 2026-11-04).
+    if measure <= 0.0 {
+        if (pad.Right - base.Right).abs() > 0.5 && (pad.Left - pad.Right).abs() < 0.5 {
+            field.SetPadding(Thickness { Left: base.Left, Right: base.Right, ..pad })?;
+        }
+        return Ok(());
+    }
+    let side = ((field.ActualWidth()? - measure) / 2.0).max(0.0).floor();
     let want = Thickness { Left: base.Left.max(side), Right: base.Right.max(side), ..pad };
     if (pad.Left - want.Left).abs() > 0.5 || (pad.Right - want.Right).abs() > 0.5 {
         field.SetPadding(want)?;
