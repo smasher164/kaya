@@ -8913,7 +8913,7 @@ const TINT_CSS: &str = "\
 .kaya-table-body > viewport > box > .kaya-activatable-pad { padding: 5px 12px; }
 .kaya-filled.osd { background-clip: border-box; }
 button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
-.kaya-tint-accent { background-color: @accent_bg_color; color: @accent_fg_color; }
+.kaya-tint-accent { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
 .kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
@@ -26929,8 +26929,22 @@ impl crate::harness::Stage for GtkStage {
                 .collect::<Vec<_>>();
             let got = [got[0], got[1], got[2]];
             let mut candidates = vec![("none", [ground[0] * 255.0, ground[1] * 255.0, ground[2] * 255.0])];
+            // THE ACCENT FILL AS KAYA'S SHEET DRAWS IT: the brand's fill when
+            // the app set one, else the style manager's (docs/looks-plan.md
+            // §3.7; `@accent_bg_color` is the system's under the override).
+            let manager = adw::StyleManager::default();
+            let accent_fill = match *core.brand.borrow() {
+                Some(brand) => {
+                    let rgb = if manager.is_dark() { brand.dark.fill } else { brand.light.fill };
+                    [f64::from((rgb >> 16) & 0xFF) / 255.0, f64::from((rgb >> 8) & 0xFF) / 255.0, f64::from(rgb & 0xFF) / 255.0, 1.0]
+                }
+                None => {
+                    let c = manager.accent_color().to_rgba();
+                    [c.red(), c.green(), c.blue(), c.alpha()].map(f64::from)
+                }
+            };
+            candidates.push(("accent", [0, 1, 2].map(|i| (accent_fill[i] * accent_fill[3] + ground[i] * (1.0 - accent_fill[3])) * 255.0)));
             for (name, color) in [
-                ("accent", "accent_bg_color"),
                 ("success", "success_bg_color"),
                 ("warning", "warning_bg_color"),
                 ("critical", "error_bg_color"),

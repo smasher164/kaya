@@ -110,6 +110,10 @@ READS = [
 MODEL = (r"image_shape\(|IMAGE_SHAPE_KEY|has_css_class|css_classes\(\)|state_flags\(|LABEL_TINT_CLASSES|"
          r"SHAPE_CLASSES|ACTIVATABLE_CLASS|skin\.activations")
 CALLS = [
+    # docs/looks-plan.md §3.7: `@accent_bg_color` is the SYSTEM accent under
+    # the brand's override, so the accent fill reads the brand's variables.
+    ("the accent fill wears the brand's accent",
+     ".kaya-tint-accent { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }"),
     ("a container's cross placement follows its axis, not its kind (M21)",
      "set_container_vertical(container.upcast_ref::<gtk4::Widget>(), mode == 1);"),
     ("the align arm reads the container's axis (M21)", "let vertical = container_vertical(&container).unwrap_or(true);"),
