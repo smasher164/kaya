@@ -345,7 +345,7 @@ func App() *kaya.App {
 						)
 						tx.SetA11yID(threadList, "thread")
 					}).Grow(1).FollowsEnd()
-				}).Grow(1).Inset(8).GroundImage(wallpaper).A11yID("thread_ground")
+				}).Grow(1).Fill(true).Inset(8).GroundImage(wallpaper).A11yID("thread_ground")
 				tx.Row(func() {
 					// The compose field: one line at rest, growing with the message
 					// to five (docs/grow-lines-plan.md); Return sends and

@@ -32,6 +32,8 @@ expect_scrolled_to column@thread m27
 # the accent; a bare label over the picture is refused at declare time
 # (docs/styling-pass-plan.md Y3).
 expect_ground column@thread_ground image
+# The wallpaper spans the pane, which GTK and WinUI hugged to the bubbles.
+expect_breadth column@thread_ground
 expect_fill column@bubble[m27] neutral
 expect_selected row@convo[maya] on
 expect_selected row@convo[sam] off

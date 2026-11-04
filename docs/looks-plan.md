@@ -366,4 +366,35 @@ reader does not take it for a ruling:
 
 Anything that turns out to need a design decision beyond §1 is written here
 as a question with options and a recommendation, and the piece parks while
-the rest continues. None yet.
+the rest continues.
+
+### Q-L1: a wallpaper in the dark appearance (OPEN, 2026-11-04)
+
+The chat review captures show it. The wallpapers are pale (the avatar's
+colours moved most of the way toward white), and in the dark appearance the
+thread keeps that pale picture while the page around it goes dark. On
+macOS, iOS, GTK and WinUI the neutral bubble is a translucent fill with the
+appearance's light text, so the other person's messages are pale text on a
+pale picture and cannot be read. Compose's neutral fill is opaque, so its
+bubbles stay legible, but the thread is still a bright panel in a dark
+window. The rulings said "a wallpaper per conversation" and did not say what
+it does in the dark.
+
+- A. Each wallpaper gets a dark twin (the same gradient and motif moved most
+  of the way toward the dark page instead of white), and an image ground
+  takes an optional second picture for the dark appearance, lowered to each
+  platform's own appearance variants (an asset catalogue's dark appearance,
+  Android's `-night` resources, a WinUI theme dictionary, GTK's dark style)
+  and switched live when the appearance changes. New prop, one picture per
+  appearance, the app supplies both.
+- B. kaya dims every image ground in the dark appearance with a scrim in the
+  page's colour at a fixed opacity, as WhatsApp's wallpaper dimming does.
+  One picture; also darkens the music app's artist photo in the dark.
+- C. A fill over a picture is always opaque (the fill composed over the
+  page colour), so the bubbles read in both appearances; the wallpaper stays
+  bright in a dark window.
+
+Recommendation: A. Every platform already carries an image in two
+appearances, the picture is designed for each mode rather than filtered, and
+nothing else that sits on an image ground changes. The chat slice is
+committed as it stands in the light appearance; the dark half waits on this.
