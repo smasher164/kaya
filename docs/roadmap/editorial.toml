@@ -215,7 +215,7 @@ star = false
 status = 'open'
 size = 'S each'
 unblocks = 'no app'
-key = 'ios codesurface'
+key = 'media_session-swiftui'
 text = "Most of it done 2026-10-31 (398fadd2, 8303eadd, bacb578f, 5c1492cc): the Windows launchers are derived from the roster, the iOS typeface is read, the Windows dnd_java face folded into its successor watch, WinUI swipe items draw their symbols, the colour picker's panel scene (<code>pick_color</code>) runs on five lanes, and capture's C floor parsers and a C capture guest exist. The iOS codesurface gutter defect is fixed 2026-11-03: reproduced 3 of 3 under host load, the update pass's full-storage attribute edits re-estimated TextKit 2's whole document between the reveal and the read; both edits are scoped to the runs that carry the attribute and the legs are green under the same load (docs/traps.md, the attribute edits that re-estimated the document). Left: the iOS media session's remote pause seen once leaving the player playing (the player's answer is recorded around every routed command; not reproduced in 15 runs of its legs on 2026-11-03). The iOS main menu that stopped being built is fixed 2026-11-03 (2211aafb): UIKit builds it on a hardware key, so both bar reads send one through the lane's driver first. The three rulings came 2026-11-01 and are built: the checkbox closed as measured (406562bf), the number field fills its column (6401f838), and every host refuses a scene it does not carry at launch (50c0a246); review {review:rulings1101}."
 
 [[menu]]
