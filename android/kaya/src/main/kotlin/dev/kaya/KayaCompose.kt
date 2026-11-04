@@ -27745,10 +27745,21 @@ fun kayaTraceSheet(verb: String, state: androidx.compose.material3.SheetState) {
 @Composable
 fun kayaShowSheetWhenAnchored(state: androidx.compose.material3.SheetState) {
     androidx.compose.runtime.LaunchedEffect(state) {
+        val composedAt = System.nanoTime()
         androidx.compose.runtime.snapshotFlow { state.hasExpandedState }.collect { anchored ->
-            if (anchored && state.currentValue == SheetValue.Hidden && state.targetValue == SheetValue.Hidden) {
-                KayaVTrace.note("sheet_show", "anchored and still Hidden: kaya shows it")
+            // A show whose animation ended back at Hidden with the offset at the
+            // expanded anchor (seen once under load: "Hidden going to Expanded"
+            // then "Hidden going to Hidden", offset 97 of 800) is shown again,
+            // twice at most and only inside the sheet's first two seconds, so a
+            // sheet the user dismissed is never re-opened.
+            var tries = 0
+            while (anchored && state.currentValue == SheetValue.Hidden && state.targetValue == SheetValue.Hidden
+                && tries < 2 && System.nanoTime() - composedAt < 2_000_000_000L
+            ) {
+                tries += 1
+                KayaVTrace.note("sheet_show", "anchored and still Hidden: kaya shows it (try $tries)")
                 state.show()
+                KayaVTrace.note("sheet_show", "show ended ${state.currentValue} going to ${state.targetValue}")
             }
         }
     }

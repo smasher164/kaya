@@ -1549,6 +1549,34 @@ day's slowest read) so the record can be ALL PASS; the other way down is a
 fifth emulator (KAYA_ANDROID_EMUS), which is the maintainer's call, as is the
 ceiling itself.
 
+## WATCH — linux music_dockdark-python-x11: after `click button@play_album` the dock read "Owl Time" where the album's first track is "In Tune" (seen once, the 06e197ac matrix, 2026-11-03)
+KEY: music_dockdark-python-x11, dock_title reads "Owl Time", play_album, card_116452, In Tune
+
+Run 20261104T001424Z-008412: `click column@card_116452` resolved the card at
+index 9 and `click button@play_album` at +373 ms, and from the dock title's
+first read at +411 ms every read that depends on the first track failed for
+its 15 s (the title, the row's accent tint, now-playing, the play/pause
+button), 194 s in all; the player trace shows one load, one Play and the
+session's pause and play, no track change. So the album played from another
+track, or another album's card was clicked. Green in the three matrices
+before. On the next sighting read the album page's title and rows beside the
+dock title first, and whether the x11 and wayland twins of the scene share any
+state the python guest keeps between legs (a recently played order would move
+the cards).
+
+## WATCH — linux chatcall-go-x11: the app's capture read "frames none, samples none" with both synthetic devices offered (seen once, the 06e197ac matrix, 2026-11-03); the graph is read at a refused capture step now
+KEY: chatcall-go-x11, capture 0 reads frames none, 0 samples arrived in the last 1000 ms, pwsynth, kaya-synthetic-camera-1, step-failed capture
+
+Run 20261104T001424Z-008412: "capture 0 reads frames none, samples none,
+wanted frames 640x480 1E5AC8, samples 440 Hz; 0 samples arrived in the last
+1000 ms at a declared 48000 Hz" with pwsynth having offered both cameras and
+both microphones and the default source set. The bundle holds the devices'
+offer and nothing of the graph while the app ran, because capture-leg read
+`pw-link`/`pw-cli` only at a refused VOICE step; it reads them at a refused
+capture step too now (the chatcall family's shape of docs/traps.md, the linux
+voice the graph never pulled). On the next sighting the links section says
+whether the app's capture node was ever linked to the synthetic source.
+
 ## WATCH — three reds of the 72b602fb matrix, each green alone (2026-11-03)
 KEY: music_header-python-wayland, checkbox@like checked reads on, colorpanel_rust, HexTextBox, music_dock-python, full_play_pause, player_command
 

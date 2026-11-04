@@ -313,7 +313,10 @@ def main(argv):
             # docs/traps.md, the linux voice the graph never pulled: the app's
             # node and its links exist only while it runs, so they are read at
             # the first refused voice step, not at the leg's end.
-            if not voice_graph and "step-failed voice" in line:
+            # And at the first refused capture read (chatcall-go-x11 read
+            # "frames none, samples none" under a matrix with the devices
+            # offered and no graph in its bundle, 2026-11-03).
+            if not voice_graph and ("step-failed voice" in line or "step-failed capture" in line):
                 for argv_ in (["pw-link", "--links", "--id"], ["pw-cli", "ls", "Node"]):
                     code, said = quiet(argv_, stack_env)
                     voice_graph.append(f"$ {' '.join(argv_)} (exit {code})\n{said}")
