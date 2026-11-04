@@ -181,7 +181,7 @@ fill under the line in the day's colour), and the portfolio's chart fills
 its area today.
 
 The values are kaya's chart palette's, in crates/kaya/src/canvas.rs beside
-the series: light `up` 1F9D55, `down` D93A2B; dark `up` 4FD37A, `down`
+the series: light `up` 209D55, `down` D93A2B; dark `up` 4FD37A, `down`
 FF6B5E; each fill the line at the series fill's alpha (33 light, 1E dark).
 "The platform's own green and red" in the ruling is honoured as closely as
 the canvas allows: docs/canvas-plan.md §6 (RULED 2026-08-26) has kaya own a
@@ -378,7 +378,9 @@ reader does not take it for a ruling:
   in both appearances; the fill is not clamped (the gradient's clamp exists
   because the gradient's text is the appearance's primary colour; here the
   text follows the fill).
-- The paints' values (§3.3): light `up` 1F9D55, `down` D93A2B, dark `up`
+- The paints' values (§3.3): light `up` 209D55 (1F9D55 at first, moved one
+  unit of red because a Mac's Display P3 window returns 1F as 1D, past
+  `expect_ink`'s ±1; docs/traps.md), `down` D93A2B, dark `up`
   4FD37A, `down` FF6B5E, fills at the series fill's alpha.
 - The task lists' colours: Inbox 2F6FED, Today F2B01E, Upcoming D9486A,
   Anytime 1FA2A0, Logbook 2E9E5B; the project palette, by order: 8E6FE0,

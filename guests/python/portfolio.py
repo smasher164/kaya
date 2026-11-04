@@ -138,7 +138,7 @@ SIDE_TINT = {"buy": kaya.Tint.SUCCESS, "sell": kaya.Tint.CRITICAL}
 
 # The canvas's own up and down paints (docs/looks-plan.md §4), the mark's
 # blue when the day is flat, and a grey for a holding that did not move.
-UP = kaya.Color.from_hex(0x1F9D55FF)
+UP = kaya.Color.from_hex(0x209D55FF)
 DOWN = kaya.Color.from_hex(0xD93A2BFF)
 FLAT = kaya.Color.from_hex(0x1C71D8FF)
 STILL = kaya.Color.from_hex(0x8E8E93FF)

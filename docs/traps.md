@@ -20267,3 +20267,15 @@ scene does not read a table cell's fill until that is understood; the next
 reader to try one starts from the item's own opacity and from what the
 capture composes over.
 
+## A saturated paint can cost two units in a Mac's Display P3 round trip (measured 2026-11-04)
+
+The canvas scene's trend probe read the light `up` paint 1F9D55 as 1D9D55 on
+the mac lane, six runs out of six, once the host was in the light appearance
+(the earlier runs were dark, whose `up` 4FD37A returns as 50D37A, within one).
+The arithmetic is the round trip "A canvas ink read crosses the display's
+colour space" describes: sRGB into Display P3 at 8 bits and back. Modelled with
+the two standard matrices it gives 1D9D55 and D93B2B for 1F9D55 and D93A2B
+exactly as the window returned them, so a low channel of a saturated colour
+can lose two units. The paint moved to 209D55, which the model and the lane
+both return unchanged. A new saturated paint gets the model run first.
+

@@ -209,8 +209,8 @@ expect_title "portfolio"
 click button#2
 expect label#0 "Portfolio: $10169.00"
 expect label#1 "+$126.62 (+1.26%) today"
-expect_fill_color column@day_pill "1F9D55 on black"
-expect_ground_color column@hero "light 5ED084 dark 188145"
+expect_fill_color column@day_pill "209D55 on black"
+expect_ground_color column@hero "light 5ED084 dark 198145"
 expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2EBDD dark 16181C/1D2F27"
 
 # THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END

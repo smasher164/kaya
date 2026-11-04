@@ -522,9 +522,9 @@ const PALETTE_LIGHT: [(i64, u32); 9] = [
     (wire::PAINT_GROUND, 0xFFFFFFFF),
     // docs/looks-plan.md §3.3: a series in the day's direction, the fills
     // at the series fill's alpha.
-    (wire::PAINT_UP, 0x1F9D55FF),
+    (wire::PAINT_UP, 0x209D55FF),
     (wire::PAINT_DOWN, 0xD93A2BFF),
-    (wire::PAINT_UP_FILL, 0x1F9D5533),
+    (wire::PAINT_UP_FILL, 0x209D5533),
     (wire::PAINT_DOWN_FILL, 0xD93A2B33),
 ];
 
@@ -1276,7 +1276,7 @@ mod tests {
         };
         assert_eq!(
             format!("{} {}", ink(Mode::Light, "light"), ink(Mode::Dark, "dark")),
-            "light 1F9D55/D2EBDD/D93A2B/F7D8D5 dark 4FD37A/1D2F27/FF6B5E/322324",
+            "light 209D55/D2EBDD/D93A2B/F7D8D5 dark 4FD37A/1D2F27/FF6B5E/322324",
             "tools/scenes/canvas.steps freezes exactly this string for canvas@trend"
         );
     }
