@@ -261,7 +261,9 @@ pub const PROPS: &[(&'static str, u32, PropKind)] = &[
     // docs/photo-attach-plan.md §2, §5: an image's bound in points. The
     // picture scales down to fit inside both with its shape kept and never
     // scales up. Positive. max_width also caps a slider's width
-    // (docs/media-player-plan.md M16 (17)).
+    // (docs/media-player-plan.md M16 (17)). On a textarea it is the reading
+    // measure, the text column at most this wide and centred, 0 lifting it
+    // (docs/looks-plan.md §3.8).
     ("max_width", 42, PropKind::F64),
     ("max_height", 43, PropKind::F64),
     // docs/color-picker-plan.md §2: a colour picker's committed value, and
@@ -2344,6 +2346,18 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                   dropped, a later write is refused, and no occurrence of its \
                   follows.",
         },
+        Record {
+            kind: 98,
+            name: "register_typeface",
+            fields: &[f("font", FieldTy::Value)],
+            payload: None,
+            doc: "Register a font FILE the app ships (a Blob) with this \
+                  process's text system, so a `family` prop naming its family \
+                  resolves on every platform (docs/looks-plan.md §3.7). It \
+                  changes nothing else: the brand typeface is set_brand_typeface. \
+                  Any time, any number of fonts; a second registration of the \
+                  same bytes is harmless.",
+        },
     ],
     apply: &[
         Record {
@@ -3490,6 +3504,15 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
             fields: &[f("voice", FieldTy::U64)],
             payload: None,
             doc: "Stop the platform voice output and drop it.",
+        },
+        Record {
+            kind: 86,
+            name: "register_typeface",
+            fields: &[f("font", FieldTy::Value)],
+            payload: None,
+            doc: "The tx record's font, verbatim: the backend hands the bytes to \
+                  its platform's app-font API and adds the family they carry to \
+                  what `family` resolves and to the family lists it answers.",
         },
     ],
     occurrence: &[
@@ -5609,6 +5632,7 @@ mod tests {
             ("list_font_faces", wire::TX_LIST_FONT_FACES),
             ("create_voice", wire::TX_CREATE_VOICE),
             ("release_voice", wire::TX_RELEASE_VOICE),
+            ("register_typeface", wire::TX_REGISTER_TYPEFACE),
         ];
         assert_eq!(pins.len(), SPEC.tx.len());
         for (name, kind) in pins {
@@ -5705,6 +5729,7 @@ mod tests {
                 ("list_font_faces", wire::APPLY_LIST_FONT_FACES),
                 ("create_voice", wire::APPLY_CREATE_VOICE),
                 ("release_voice", wire::APPLY_RELEASE_VOICE),
+                ("register_typeface", wire::APPLY_REGISTER_TYPEFACE),
             ]
         );
         // The WHOLE list, not indexed asserts: an indexed pin says

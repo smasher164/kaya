@@ -49,6 +49,41 @@ thread_local! {
     static GUTTERS: RefCell<HashMap<u64, Gutter>> = RefCell::new(HashMap::new());
 }
 
+pub(super) fn register_font(family: String, source: String, path: std::path::PathBuf) {
+    super::fontpick::register(family, source, path);
+}
+
+thread_local! {
+    /// The reading measure per textarea (docs/looks-plan.md §3.8): points,
+    /// and the box's own padding before the measure took its sides.
+    static MEASURES: RefCell<HashMap<u64, (f64, Thickness)>> = RefCell::new(HashMap::new());
+}
+
+fn set_measure(id: u64, field: &RichEditBox, measure: f64) -> windows_core::Result<()> {
+    let fresh = MEASURES.with_borrow(|m| !m.contains_key(&id));
+    let base = match MEASURES.with_borrow(|m| m.get(&id).map(|(_, b)| *b)) {
+        Some(base) => base,
+        None => field.Padding()?,
+    };
+    MEASURES.with_borrow_mut(|m| m.insert(id, (measure, base)));
+    if fresh {
+        let follow = field.clone();
+        field.SizeChanged(&SizeChangedEventHandler::new(move |_, _| apply_measure(id, &follow)))?;
+    }
+    apply_measure(id, field)
+}
+
+fn apply_measure(id: u64, field: &RichEditBox) -> windows_core::Result<()> {
+    let Some((measure, base)) = MEASURES.with_borrow(|m| m.get(&id).copied()) else { return Ok(()) };
+    let side = if measure > 0.0 { ((field.ActualWidth()? - measure) / 2.0).max(0.0).floor() } else { 0.0 };
+    let pad = field.Padding()?;
+    let want = Thickness { Left: base.Left.max(side), Right: base.Right.max(side), ..pad };
+    if (pad.Left - want.Left).abs() > 0.5 || (pad.Right - want.Right).abs() > 0.5 {
+        field.SetPadding(want)?;
+    }
+    Ok(())
+}
+
 /// The four props' apply arms; true when the prop was one of them.
 pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &Value) -> windows_core::Result<bool> {
     // A face belongs to the text kinds alone; an icon's text_scale is its
@@ -66,6 +101,11 @@ pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &V
         return Ok(false);
     }
     match (prop, value) {
+        (Prop::MaxWidth, Value::F64(measure)) => {
+            let Some(NativeWidget::Textarea(field)) = core.widgets.get(&id) else { return Ok(false) };
+            set_measure(id.0, field, *measure)?;
+            Ok(true)
+        }
         (Prop::LineNumbers, Value::Bool(on)) => {
             let Some(NativeWidget::Textarea(field)) = core.widgets.get(&id) else {
                 panic!("kaya: winui: line_numbers reached a widget that is not a textarea");
@@ -121,16 +161,8 @@ pub(super) fn after_role(core: &CoreState, id: WidgetId) -> windows_core::Result
 
 /// Is this family in the system font collection? (M2's presence check.)
 pub(super) fn installed(family: &str) -> bool {
-    use windows::Win32::Graphics::DirectWrite::*;
     unsafe {
-        let Ok(factory) = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) else {
-            return false;
-        };
-        let mut collection: Option<IDWriteFontCollection> = None;
-        if factory.GetSystemFontCollection(&mut collection, false).is_err() {
-            return false;
-        }
-        let Some(collection) = collection else { return false };
+        let Ok(collection) = super::fontpick::font_collection() else { return false };
         let wide: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
         let mut index = 0u32;
         let mut exists = windows_core::BOOL(0);
@@ -168,7 +200,11 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let base = platform_size(widget)?;
     FACES.with_borrow_mut(|faces| -> windows_core::Result<()> {
         let Some(face) = faces.get_mut(&id.0) else { return Ok(()) };
-        let wanted: Option<String> = if !face.family.is_empty() && installed(&face.family) {
+        let wanted: Option<String> = if let Some(source) =
+            (!face.family.is_empty()).then(|| super::fontpick::registered_source(&face.family)).flatten()
+        {
+            Some(source)
+        } else if !face.family.is_empty() && installed(&face.family) {
             Some(face.family.clone())
         } else if face.monospaced {
             Some(MONOSPACE_SOURCE.to_owned())
@@ -258,8 +294,14 @@ fn apply_face(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
                 if face.before_doc_size.is_none() {
                     face.before_doc_size = Some(format.Size().unwrap_or(0.0));
                 }
+                // A registered family's source is `file#Family`, and the
+                // document's format takes the family alone (docs/looks-plan.md §3.7).
                 let name = match &wanted {
-                    Some(source) => first_installed(source).unwrap_or_else(|| source.split(',').next().unwrap_or("").trim().to_owned()),
+                    Some(source) => {
+                        let first = first_installed(source)
+                            .unwrap_or_else(|| source.split(',').next().unwrap_or("").trim().to_owned());
+                        first.rsplit_once('#').map_or(first.clone(), |(_, family)| family.to_owned())
+                    }
                     None => family.Source()?.to_string().split(',').next().unwrap_or("").trim().to_owned(),
                 };
                 if !name.is_empty() {
@@ -482,10 +524,7 @@ pub(super) fn list_font_families(core: &CoreState) {
     use windows::Win32::Graphics::DirectWrite::*;
     let names = (|| -> windows_core::Result<Vec<String>> {
         unsafe {
-            let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-            let mut collection: Option<IDWriteFontCollection> = None;
-            factory.GetSystemFontCollection(&mut collection, true)?;
-            let collection = collection.expect("S_OK carries a collection");
+            let collection = super::fontpick::font_collection()?;
             let mut out = Vec::new();
             for i in 0..collection.GetFontFamilyCount() {
                 out.push(localized_string(&collection.GetFontFamily(i)?.GetFamilyNames()?)?);
@@ -570,14 +609,7 @@ pub(super) mod read {
     fn monospaced(family: &str) -> bool {
         use windows::Win32::Graphics::DirectWrite::*;
         unsafe {
-            let Ok(factory) = DWriteCreateFactory::<IDWriteFactory>(DWRITE_FACTORY_TYPE_SHARED) else {
-                return false;
-            };
-            let mut collection: Option<IDWriteFontCollection> = None;
-            if factory.GetSystemFontCollection(&mut collection, false).is_err() {
-                return false;
-            }
-            let Some(collection) = collection else { return false };
+            let Ok(collection) = super::super::fontpick::font_collection() else { return false };
             let wide: Vec<u16> = family.encode_utf16().chain(std::iter::once(0)).collect();
             let mut index = 0u32;
             let mut exists = windows_core::BOOL(0);
@@ -593,6 +625,23 @@ pub(super) mod read {
                 .map(|font| font.IsMonospacedFont().as_bool())
                 .unwrap_or(false)
         }
+    }
+
+    /// expect_measure (docs/looks-plan.md §3.8): the text column between the
+    /// box's padding, against the padding the box had before the measure.
+    pub(in super::super) fn measure(core: &CoreState, id: u64) -> windows_core::Result<Result<crate::harness::MeasureRead, String>> {
+        let Some(NativeWidget::Textarea(field)) = core.widgets.get(&WidgetId(id)) else {
+            return Ok(Err("is not a textarea".to_owned()));
+        };
+        let width = field.ActualWidth()?;
+        let pad = field.Padding()?;
+        let base = MEASURES.with_borrow(|m| m.get(&id).map(|(_, b)| *b)).unwrap_or(pad);
+        Ok(Ok(crate::harness::MeasureRead {
+            column: width - pad.Left - pad.Right,
+            leading: pad.Left,
+            trailing: pad.Right,
+            unmeasured: width - base.Left - base.Right,
+        }))
     }
 
     /// M4: the family the control's source resolves to on this machine (the

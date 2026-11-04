@@ -4410,6 +4410,10 @@ let brand_accent ?light ?dark seed =
    one font slot and are EXCLUSIVE. SET ONCE, BEFORE THE FIRST MOUNT. A
    FAMILY A PLATFORM DOES NOT HAVE leaves that platform's own typeface in
    place, deliberately and silently. *)
+(* Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7). *)
+let register_typeface font =
+  emit (the_tx ()) (Kaya_wire.tx_register_typeface (Kaya_wire.Blob (Kaya_runtime.asset_blob font)))
+
 let brand_typeface ?(platforms = []) ?font ?font_asset family =
   let pairs =
     (* The filters' encoding one tier over: a FLAT list read in twos,

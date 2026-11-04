@@ -6680,6 +6680,15 @@ sealed class Tx : IDisposable
             new KayaWire.BlobHandle(font.Blob())));
     }
 
+    /// Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7).
+    public void RegisterTypeface(Asset font)
+    {
+        if (font is null)
+            throw new ArgumentNullException(nameof(font),
+                "kaya: RegisterTypeface got no asset — open one with tx.Asset(\"fonts/...\")");
+        Records.Add(KayaWire.TxRegisterTypeface(new KayaWire.BlobHandle(font.Blob())));
+    }
+
     /// DECLARE the app's identity (docs/app-identity-plan.md,
     /// docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
     /// picture that stands for it and the reverse-DNS id it registers

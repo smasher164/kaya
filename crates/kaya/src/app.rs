@@ -3032,6 +3032,13 @@ impl<'a> Tx<'a> {
         }));
     }
 
+    /// Register a font file the app ships, so a `family` prop naming its
+    /// family resolves on every platform (docs/looks-plan.md §3.7):
+    /// `tx.register_typeface(&tx.asset("fonts/jetbrains-mono-wght.ttf"))`.
+    pub fn register_typeface(&mut self, font: &dyn BlobSource) {
+        self.ops.push(TxOp::RegisterTypeface(crate::protocol::Blob(font.blob_bytes())));
+    }
+
     /// Declare the app's identity (docs/app-identity-plan.md,
     /// docs/tasks-s3-plan.md N4): no arguments, reads the asset root's own
     /// `identity.toml`.

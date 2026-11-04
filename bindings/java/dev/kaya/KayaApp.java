@@ -10067,6 +10067,15 @@ public final class KayaApp {
          * Everything else is
          * {@link #brandTypeface(String, Map, byte[])}'s, verbatim.
          */
+        /** Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7). */
+        public void registerTypeface(Asset font) {
+            if (font == null) {
+                throw new IllegalArgumentException(
+                        "kaya: registerTypeface got no asset — open one with tx.asset(\"fonts/...\")");
+            }
+            emit(KayaWire.txRegisterTypeface(new KayaWire.BlobHandle(font.blob())));
+        }
+
         public void brandTypeface(String family, Map<Platform, String> platforms, Asset font) {
             java.util.List<Object> pairs = new java.util.ArrayList<>();
             if (platforms != null) {

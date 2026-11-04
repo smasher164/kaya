@@ -144,10 +144,12 @@ func docName(dest *kaya.PickedFile) string {
 
 const findKey = "bar"
 
-// The default face, a family each platform's code-only picker lists so Font…
-// opens on it: Apple's `monospaced` face is SF Mono, which no picker lists
-// (docs/font-picker-plan.md §6).
-var codeFamilies = []string{"Menlo", "Cascadia Mono", "DejaVu Sans Mono", "Droid Sans Mono"}
+// The coding face the app ships (guests/assets/fonts), registered at build
+// so every platform draws the buffer in it (docs/looks-plan.md §3.7).
+const codeFamily = "JetBrains Mono"
+
+// Writing Mode's reading measure, in points (docs/looks-plan.md §4).
+const measure = 480
 
 // Spelled rather than formatted: "1 matches" is what a person reads.
 func tally(n int) string {
@@ -158,6 +160,15 @@ func tally(n int) string {
 		return "1 match"
 	}
 	return fmt.Sprintf("%d matches", n)
+}
+
+// The document's words, as a word processor's status bar counts them.
+func wordCount(text string) string {
+	n := len(strings.Fields(text))
+	if n == 1 {
+		return "1 word"
+	}
+	return fmt.Sprintf("%d words", n)
 }
 
 // Where the caret is, as VS Code's status bar says it: "Ln 51, Col 1", with
@@ -192,7 +203,7 @@ type document struct {
 	status      kaya.Signal[string]
 	where       kaya.Signal[string]
 	count       kaya.Signal[string]
-	countTint   kaya.Signal[kaya.Tint]
+	words       kaya.Signal[string]
 	// A WORKAROUND — docs/traps.md, "A live-zone `When` stamps an EMPTY
 	// key path".
 	findRows kaya.Collection
@@ -227,9 +238,12 @@ func App() *kaya.App {
 		// The View menu's state (docs/code-surface-plan.md §4), shown for the
 		// active document.
 		numbersOn kaya.Signal[bool]
-		// The face every document wears, the app's preference, else the
-		// first installed of codeFamilies (docs/font-picker-plan.md §6).
+		// The face every document wears: the app's preference, else the
+		// bundled coding face (docs/looks-plan.md §3.7).
 		font kaya.FontChoice
+		// Writing Mode, the app's (docs/looks-plan.md §3.7).
+		writing   bool
+		writingOn kaya.Signal[bool]
 		// The Format menu's check marks: what holds over the active buffer's
 		// selection (docs/phone-format-plan.md §3).
 		inline = map[string]kaya.Signal[bool]{}
@@ -246,8 +260,6 @@ func App() *kaya.App {
 	refind := func(tx *kaya.Tx, d *document) {
 		d.hits = nil
 		d.at = 0
-		// LIVE zone: a stamped copy has no id select_range can aim at.
-		tx.Write(d.countTint, kaya.TintNone)
 		if !d.open {
 			tx.HighlightRanges(d.buffer, nil)
 			tx.Write(d.count, "")
@@ -263,7 +275,6 @@ func App() *kaya.App {
 		if err != nil {
 			tx.HighlightRanges(d.buffer, nil)
 			tx.Write(d.count, "bad pattern")
-			tx.Write(d.countTint, kaya.TintCritical)
 			return
 		}
 		// GO STRING INDICES, unconverted: a UTF-16 backend converts its side.
@@ -276,9 +287,6 @@ func App() *kaya.App {
 		}
 		tx.HighlightRanges(d.buffer, d.hits)
 		tx.Write(d.count, tally(len(d.hits)))
-		if len(d.hits) == 0 {
-			tx.Write(d.countTint, kaya.TintCritical)
-		}
 	}
 
 	show := func(tx *kaya.Tx, d *document, i int) {
@@ -303,14 +311,32 @@ func App() *kaya.App {
 		tx.Write(numbersOn, d.numbers)
 	}
 
+	// The editors' zoom steps, a multiple of the platform's size.
+	zooms := []float64{0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3}
+
+	// Writing Mode wears the platform's own text face a zoom step up, no
+	// gutter, at the reading measure; off, the coding face, the document's
+	// gutter and zoom (docs/looks-plan.md §3.7).
 	wear := func(tx *kaya.Tx, d *document) {
-		if font.Family == "" {
+		if writing {
+			tx.SetFamily(d.buffer, "")
+			tx.SetMonospaced(d.buffer, false)
+			tx.SetFontWeight(d.buffer, 400)
+			tx.SetFontItalic(d.buffer, false)
+			tx.SetFontWidth(d.buffer, 5)
+			tx.SetLineNumbers(d.buffer, false)
+			tx.SetTextScale(d.buffer, zooms[min(d.zoom+1, len(zooms)-1)])
+			tx.SetMaxWidth(d.buffer, measure)
 			return
 		}
+		tx.SetMonospaced(d.buffer, true)
 		tx.SetFamily(d.buffer, font.Family)
 		tx.SetFontWeight(d.buffer, font.Weight)
 		tx.SetFontItalic(d.buffer, font.Italic)
 		tx.SetFontWidth(d.buffer, font.Width)
+		tx.SetLineNumbers(d.buffer, d.numbers)
+		tx.SetTextScale(d.buffer, zooms[d.zoom])
+		tx.SetMaxWidth(d.buffer, 0)
 	}
 
 	activate := func(tx *kaya.Tx, d *document) {
@@ -431,6 +457,7 @@ func App() *kaya.App {
 				// it also spends the field's native undo history.
 				tx.SetText(d.buffer, body)
 				tx.Write(d.where, position(d.text, d.sel.Range))
+				tx.Write(d.words, wordCount(d.text))
 				tx.Focus(d.buffer)
 				tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
 				mark(tx, d)
@@ -439,12 +466,10 @@ func App() *kaya.App {
 		}()
 	}
 
-	// The editors' zoom steps, a multiple of the platform's size.
-	zooms := []float64{0.5, 0.67, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3}
 	setZoom := func(tx *kaya.Tx, step int) {
 		d := active
 		d.zoom = min(max(step, 0), len(zooms)-1)
-		tx.SetTextScale(d.buffer, zooms[d.zoom])
+		wear(tx, d)
 		tx.Write(d.status, fmt.Sprintf("zoom %d%%", int(zooms[d.zoom]*100+0.5)))
 	}
 
@@ -457,7 +482,7 @@ func App() *kaya.App {
 		d.status = tx.Signal("new file")
 		d.where = tx.Signal(position("", kaya.TextRange{}))
 		d.count = tx.Signal("")
-		d.countTint = tx.Signal(kaya.TintNone)
+		d.words = tx.Signal(wordCount(""))
 		tx.AddDocument(d.id).Title(untitled).Select().
 			OnSelected(func(tx *kaya.Tx) { activate(tx, d) }).
 			OnCloseRequested(func(tx *kaya.Tx) { ask(tx, d, func(tx *kaya.Tx) { closeDoc(tx, d) }) }).
@@ -473,9 +498,10 @@ func App() *kaya.App {
 				// Every user edit arrives here, a native undo included.
 				d.text = s
 				tx.Write(d.where, position(d.text, d.sel.Range))
+				tx.Write(d.words, wordCount(d.text))
 				mark(tx, d)
 				refind(tx, d)
-			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich().LineNumbers(true).Monospaced(true)
+			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich()
 
 			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
 			// (editor.steps reads it). SetInset rides the STAMPED row.
@@ -504,12 +530,14 @@ func App() *kaya.App {
 			// INSET ON THE CHROME, NOT THE WINDOW: Inset(0) takes this row's
 			// margin with it (docs/deferred.md, the inset entry). One line of
 			// small text, as compact as a code editor's status bar, its sides
-			// clear of the window's rounded corner (docs/editor-plan.md E7).
+			// clear of the window's rounded corner (docs/editor-plan.md E7), on
+			// the accent's solid strip (docs/looks-plan.md §3.7).
 			tx.Row(func() {
 				tx.Label(d.status).TextScale(0.85).Grow(1).A11yID(id("status"))
-				tx.Label(d.count).TextScale(0.85).BindTint(d.countTint).A11yID(id("matches"))
+				tx.Label(d.count).TextScale(0.85).A11yID(id("matches"))
+				tx.Label(d.words).TextScale(0.85).A11yID(id("words"))
 				tx.Label(d.where).TextScale(0.85).A11yID(id("position"))
-			}).Inset(6, 14).A11yID(id("statusbar"))
+			}).Inset(6, 14).Filled(kaya.TintAccent).A11yID(id("statusbar"))
 		}).Align(kaya.AlignStretch).Spacing(0))
 
 		// REGISTERED AGAINST THE TEMPLATE NODE, once, for every copy ever
@@ -538,29 +566,11 @@ func App() *kaya.App {
 				marks(tx, d)
 			}
 		})
-		tx.SetLineNumbers(d.buffer, d.numbers)
 		wear(tx, d)
 		active = d
 		tx.Focus(d.buffer)
 		return d
 	}
-
-	app.OnFontFamilies(func(tx *kaya.Tx, families []string) {
-		if font.Family != "" {
-			return
-		}
-		for _, want := range codeFamilies {
-			for _, have := range families {
-				if have == want {
-					font = kaya.FontChoice{Family: want, Weight: 400, Width: 5}
-					for _, d := range docs {
-						wear(tx, d)
-					}
-					return
-				}
-			}
-		}
-	})
 
 	app.Build(func(tx *kaya.Tx) {
 		font = kaya.FontChoice{
@@ -570,8 +580,10 @@ func App() *kaya.App {
 			Width:  int(kaya.Prefs().GetI64("font.width", 5)),
 		}
 		if font.Family == "" {
-			tx.ListFontFamilies()
+			font = kaya.FontChoice{Family: codeFamily, Weight: 400, Width: 5}
 		}
+		writing = kaya.Prefs().GetBool("view.writing", false)
+		tx.RegisterTypeface(tx.Asset("fonts/jetbrains-mono-wght.ttf"))
 		// Before anything mounts (the set-once wall); a REQUEST, not a rule.
 		tx.BrandAccent(0x0F7B6C)
 		// Inset 0 leaves a phone's safe area alone. The window is titled by
@@ -719,7 +731,16 @@ func App() *kaya.App {
 		view.Toggle("Line Numbers").BindChecked(numbersOn).OnToggle(func(tx *kaya.Tx, on bool) {
 			active.numbers = on
 			tx.Write(numbersOn, on)
-			tx.SetLineNumbers(active.buffer, on)
+			wear(tx, active)
+		})
+		writingOn = tx.Signal(writing)
+		view.Toggle("Writing Mode").BindChecked(writingOn).OnToggle(func(tx *kaya.Tx, on bool) {
+			writing = on
+			kaya.Prefs().SetBool("view.writing", on)
+			tx.Write(writingOn, on)
+			for _, d := range docs {
+				wear(tx, d)
+			}
 		})
 		view.Separator()
 		view.Item("Zoom In").Shortcut("primary+equal").OnActivate(func(tx *kaya.Tx) { setZoom(tx, active.zoom+1) })

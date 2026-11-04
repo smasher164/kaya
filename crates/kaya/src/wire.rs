@@ -88,6 +88,7 @@ pub(crate) const TX_SHOW_FONT_DIALOG: u16 = 94;
 pub(crate) const TX_LIST_FONT_FACES: u16 = 95;
 pub(crate) const TX_CREATE_VOICE: u16 = 96;
 pub(crate) const TX_RELEASE_VOICE: u16 = 97;
+pub(crate) const TX_REGISTER_TYPEFACE: u16 = 98;
 pub(crate) const TX_ADD_SECTION: u16 = 25;
 pub(crate) const TX_SELECT_SECTION: u16 = 26;
 pub(crate) const TX_SET_SECTION_PROP: u16 = 27;
@@ -221,6 +222,7 @@ pub(crate) const APPLY_PRESENT_FONT_DIALOG: u16 = 82;
 pub(crate) const APPLY_LIST_FONT_FACES: u16 = 83;
 pub(crate) const APPLY_CREATE_VOICE: u16 = 84;
 pub(crate) const APPLY_RELEASE_VOICE: u16 = 85;
+pub(crate) const APPLY_REGISTER_TYPEFACE: u16 = 86;
 pub(crate) const APPLY_ADD_SECTION: u16 = 15;
 pub(crate) const APPLY_SELECT_SECTION: u16 = 16;
 pub(crate) const APPLY_SET_SECTION_PROP: u16 = 17;
@@ -2614,6 +2616,10 @@ pub fn decode_transaction_with_blobs(
             TX_RELEASE_CAPTURE => TxOp::ReleaseCapture { capture: crate::protocol::CaptureId(r.u64()) },
             TX_CREATE_VOICE => TxOp::CreateVoice { voice: crate::protocol::VoiceId(r.u64()) },
             TX_RELEASE_VOICE => TxOp::ReleaseVoice { voice: crate::protocol::VoiceId(r.u64()) },
+            TX_REGISTER_TYPEFACE => match r.value() {
+                Value::Blob(font) => TxOp::RegisterTypeface(font),
+                other => panic!("kaya: register_typeface carries {other:?}, wanted a font file's bytes (a blob)"),
+            },
             TX_REQUEST_PERMISSION => {
                 let kind = capture_kind(r.u32(), "request_permission");
                 let _reserved = r.u32();
@@ -4952,6 +4958,9 @@ impl Writer {
             ApplyOp::ReleaseVoice(voice) => self.record(APPLY_RELEASE_VOICE, |b, _| {
                 b.extend_from_slice(&voice.0.to_le_bytes());
             }),
+            ApplyOp::RegisterTypeface(font) => self.record(APPLY_REGISTER_TYPEFACE, |b, blobs| {
+                write_value(b, &Value::Blob(font.clone()), blobs);
+            }),
             ApplyOp::RequestPermission(kind) => self.record(APPLY_REQUEST_PERMISSION, |b, _| {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());
                 b.extend_from_slice(&0u32.to_le_bytes());
@@ -5722,6 +5731,9 @@ impl Writer {
             }),
             TxOp::ReleaseVoice { voice } => self.record(TX_RELEASE_VOICE, |b, _| {
                 b.extend_from_slice(&voice.0.to_le_bytes());
+            }),
+            TxOp::RegisterTypeface(font) => self.record(TX_REGISTER_TYPEFACE, |b, blobs| {
+                write_value(b, &Value::Blob(font.clone()), blobs);
             }),
             TxOp::RequestPermission { kind } => self.record(TX_REQUEST_PERMISSION, |b, _| {
                 b.extend_from_slice(&capture_kind_raw(*kind).to_le_bytes());

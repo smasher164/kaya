@@ -3679,6 +3679,14 @@ func (tx *Tx) BrandTypeface(family string, overrides ...TypefaceOverride) {
 	tx.emit(TxSetBrandTypeface(mask, family, platforms, font))
 }
 
+// RegisterTypeface: Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7).
+func (tx *Tx) RegisterTypeface(font *Asset) {
+	if font == nil {
+		panic("kaya: RegisterTypeface got no asset — open one with tx.Asset(\"fonts/...\")")
+	}
+	tx.emit(TxRegisterTypeface(BlobHandle(font.blobHandle())))
+}
+
 // AppIdentity DECLARES the app's identity (docs/app-identity-plan.md,
 // docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the
 // picture that stands for it and the reverse-DNS id it registers under

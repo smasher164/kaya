@@ -18391,6 +18391,21 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // custom caption takes away from the first.
             apply_app_identity(core, &identity)?;
         }
+        ApplyOp::RegisterTypeface(font) => {
+            // docs/looks-plan.md §3.7: the file under the app's ms-appx root,
+            // drawn from by XAML and added to DirectWrite's collection here.
+            match register_font_blob(&font.0) {
+                Ok(source) => {
+                    let (uri, family) = source.rsplit_once('#').expect("register_font_blob names its family");
+                    let file = uri.rsplit('/').next().unwrap_or_default();
+                    match app_root() {
+                        Ok(root) => code_surface::register_font(family.to_owned(), source.clone(), root.join(FONT_DIR).join(file)),
+                        Err(why) => eprintln!("kaya: winui register_typeface: {why}"),
+                    }
+                }
+                Err(why) => eprintln!("kaya: winui register_typeface: {why}"),
+            }
+        }
         ApplyOp::SetTypeface(req) => {
             // TWO ROUTES, BECAUSE THE PLATFORM HAS TWO KINDS OF TEXT and
             // no single write reaches both: the CONTROLS take the family
@@ -25450,6 +25465,16 @@ impl crate::harness::Stage for WinUiStage {
     }
 
     /// docs/code-surface-plan.md G5 (winui/code_surface.rs).
+    fn measure(&self, t: crate::harness::Target) -> Result<crate::harness::MeasureRead, String> {
+        Self::on_ui_read(move |core| {
+            let Some(i) = crate::harness::try_resolve(t.index, core.textarea_ids.len()) else {
+                return Ok(Err("no such target".to_owned()));
+            };
+            code_surface::read::measure(core, core.textarea_ids[i])
+        })
+        .unwrap_or_else(|e| Err(format!("unreadable: {e}")))
+    }
+
     fn gutter(&self, t: crate::harness::Target) -> Result<Option<crate::harness::GutterRead>, String> {
         Self::on_ui_read(move |core| {
             let Some(i) = crate::harness::try_resolve(t.index, core.textarea_ids.len()) else {

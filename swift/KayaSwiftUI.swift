@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xc6027a0f8193144b
+let kayaSpecHash: UInt64 = 0x585cc259da5c8c75
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -50,6 +50,7 @@ private let applyRevealRange: UInt16 = 30
 private let applyPresentSaveDialog: UInt16 = 31
 private let applySetBrand: UInt16 = 32
 private let applySetTypeface: UInt16 = 33
+private let applyRegisterTypeface: UInt16 = 86
 private let applyPostNotification: UInt16 = 41
 private let applyCancelNotification: UInt16 = 42
 /// The app's declared identity (docs/app-identity-plan.md). The lowering
@@ -6949,6 +6950,16 @@ private func kayaApply(_ batch: Data, _ blobs: [UInt64: Data]) {
                     kayaDiag(
                         "typeface \(wanted) is not installed — the platform ramp stands")
                 }
+            case applyRegisterTypeface:
+                // docs/looks-plan.md §3.7: a font the app ships, registered for
+                // `family` to find; the process's font list then carries it.
+                let type = raw.loadUnaligned(fromByteOffset: body, as: UInt32.self)
+                if type == valueBlob {
+                    let handle = raw.loadUnaligned(fromByteOffset: body + 8, as: UInt64.self)
+                    if let data = blobs[handle], kayaRegisterFont(data) == nil {
+                        kayaDiag("register_typeface: \(data.count) bytes registered no family")
+                    }
+                }
             case applySetAppIdentity:
                 // ONE DECLARATION, TWO PLATFORMS THAT REACH IT DIFFERENTLY
                 // (docs/app-identity-plan.md I1, I8): macOS hands the picture
@@ -10266,6 +10277,19 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
     /// expect_no_overscroll (docs/editor-plan.md E7): the visible rect
     /// against the text's last layout fragment, laid out first, in the text
     /// view's coordinates: (viewport, offset, end, line).
+    /// expect_measure (docs/looks-plan.md §3.8): harness.rs's MeasureRead,
+    /// (column, leading, trailing, unmeasured), off the container's inset.
+    @MainActor func kayaMeasureRead(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
+        guard let view = kayaMacTextViews[node.id]?.view else { return .failure("no text view on screen") }
+        let pad = view.textContainer?.lineFragmentPadding ?? 0
+        let inset = view.textContainerInset.width
+        let base = 2 + kayaGutterWidth(view, on: node.lineNumbers)
+        let width = view.bounds.width
+        return .success((
+            Double(width - 2 * inset - 2 * pad), Double(inset + pad), Double(inset + pad),
+            Double(width - 2 * base - 2 * pad)))
+    }
+
     @MainActor func kayaTextFoot(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
         guard let view = kayaMacTextViews[node.id]?.view else { return .failure("no text view on screen") }
         guard let layout = view.textLayoutManager else { return .failure("the text view has no TextKit 2 layout") }
@@ -10424,6 +10448,19 @@ func kayaGutterVerdict(_ read: ([KayaGutterRow], [Int])?, _ clause: [Substring])
     /// expect_no_overscroll (docs/editor-plan.md E7): the caret rect at the
     /// text's end, laid out first, against the bounds less the adjusted
     /// insets: (viewport, offset, end, line).
+    /// expect_measure (docs/looks-plan.md §3.8): harness.rs's MeasureRead
+    /// off the sides' insets, the gutter the unmeasured left.
+    @MainActor func kayaMeasureRead(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
+        guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
+        let pad = view.textContainer.lineFragmentPadding
+        let base = view.subviews.compactMap({ $0 as? KayaUIGutter }).first?.frame.width ?? 0
+        let (left, right) = (view.textContainerInset.left, view.textContainerInset.right)
+        let width = view.bounds.width
+        return .success((
+            Double(width - left - right - 2 * pad), Double(left + pad), Double(right + pad),
+            Double(width - base - 2 * pad)))
+    }
+
     @MainActor func kayaTextFoot(_ node: KayaNode) -> KayaRead<(Double, Double, Double, Double)> {
         guard let view = kayaLiveUITextView(node.id) else { return .failure("no text view on screen") }
         if let layout = view.textLayoutManager { layout.ensureLayout(for: layout.documentRange) }
@@ -16702,6 +16739,43 @@ private func kayaRunScript(_ script: String) {
                     break
                 }
                 kayaAwaitAnswer(pickAnswered)
+            case "expect_measure":
+                // docs/looks-plan.md §3.8: harness.rs's measure_verdict.
+                guard parts.count == 3, let want = Double(parts[2]), want > 0 else {
+                    failures.append("expect_measure wants a textarea and a width in points: \(line)")
+                    break
+                }
+                func readMeasure() -> (String?, String) {
+                    DispatchQueue.main.sync {
+                        guard let node = kayaTarget(parts[1], "textarea", kayaScene.textareas) else {
+                            return (nil, ": no such target")
+                        }
+                        switch kayaMeasureRead(node) {
+                        case .failure(let why): return (nil, ": \(why)")
+                        case .success(let (column, leading, trailing, unmeasured)):
+                            let wanted = min(want, unmeasured)
+                            let got = String(
+                                format: "a %.0f-unit column, %.0f and %.0f from the box's edges, of %.0f unmeasured",
+                                column, leading, trailing, unmeasured)
+                            if abs(column - wanted) > 2 {
+                                return (nil, " reads \(got), wanted a \(String(format: "%.0f", wanted))-unit column")
+                            }
+                            if abs(leading - trailing) > 2 { return (nil, " reads \(got), wanted it centred") }
+                            return (got, "")
+                        }
+                    }
+                }
+                var measured = readMeasure()
+                let measureDeadline = Date().addingTimeInterval(5)
+                while measured.0 == nil && Date() < measureDeadline {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    measured = readMeasure()
+                }
+                if let ok = measured.0 {
+                    observed.append("\(parts[1]) measure \(ok)")
+                } else {
+                    failures.append("\(parts[1]) measure\(measured.1)")
+                }
             case "expect_face":
                 // docs/code-surface-plan.md M4: harness.rs's face_verdict.
                 let want = parts.count == 3 ? String(parts[2]) : ""
@@ -27426,8 +27500,17 @@ func kayaRegularFace(_ family: String) -> KayaFace {
         configuration.filteredTraits = codeOnly ? .traitMonoSpace : []
         let picker = UIFontPickerViewController(configuration: configuration)
         if !family.isEmpty, kayaFamilyPresent(family) {
-            picker.selectedFontDescriptor =
-                (kayaResolveFace(family: family, mono: false, want: initial, size: 17).font as UIFont).fontDescriptor
+            // A registered variable font's resolved descriptor is an instance
+            // the remote picker cannot match to a style row, so it is named by
+            // family and face (docs/looks-plan.md §3.7).
+            if kayaRegisteredFamilies.contains(family),
+                let face = kayaFamilyFaces(family).first(where: { $0.face == initial })?.name
+            {
+                picker.selectedFontDescriptor = UIFontDescriptor(fontAttributes: [.family: family, .face: face])
+            } else {
+                picker.selectedFontDescriptor =
+                    (kayaResolveFace(family: family, mono: false, want: initial, size: 17).font as UIFont).fontDescriptor
+            }
         }
         let delegate = KayaFontPickerDelegate(dialog: dialog, faces: faces, asked: family, initial: initial)
         delegate.picker = picker
@@ -27470,6 +27553,9 @@ func kayaFaceWord(_ font: KayaPlatformFont) -> String {
 /// FAMILY NAME the registration produced. IN-PROCESS SCOPE: kaya never installs
 /// anything on a user's machine, and afterwards the family is present exactly as
 /// a system-supplied one is (Slice 2b's register-then-resolve).
+/// The families kaya registered in this process (docs/looks-plan.md §3.7).
+nonisolated(unsafe) var kayaRegisteredFamilies: Set<String> = []
+
 func kayaRegisterFont(_ bytes: Data) -> String? {
     guard
         let descriptors = CTFontManagerCreateFontDescriptorsFromData(bytes as CFData)
@@ -27483,7 +27569,9 @@ func kayaRegisterFont(_ bytes: Data) -> String? {
     // instead. FILE-BACKED ON PURPOSE, measured 2026-08-16: descriptors from
     // DATA carry no URL and registered none of a variable font's instances.
     let dir = FileManager.default.temporaryDirectory
-    let url = dir.appendingPathComponent("kaya-brand-font-\(ProcessInfo.processInfo.processIdentifier).ttf")
+    // One file per font: a second registration must not overwrite the first's.
+    let url = dir.appendingPathComponent(
+        "kaya-font-\(ProcessInfo.processInfo.processIdentifier)-\(String(UInt64(bitPattern: Int64(bytes.hashValue)), radix: 16)).ttf")
     do {
         try bytes.write(to: url)
     } catch {
@@ -27497,7 +27585,9 @@ func kayaRegisterFont(_ bytes: Data) -> String? {
                 + String(describing: cfError?.takeRetainedValue()))
         return nil
     }
-    return CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute) as? String
+    let family = CTFontDescriptorCopyAttribute(first, kCTFontFamilyNameAttribute) as? String
+    if let family { kayaRegisteredFamilies.insert(family) }
+    return family
 }
 
 /// THE HONEST READ, for `expect_typeface`: the family the TEXT SYSTEM ended up
@@ -38376,6 +38466,21 @@ struct KayaTextarea: View {
 /// a click into an empty editor would leave `focusedId` on the old widget.
 private final class KayaTextView: NSTextView {
     var onFocusChange: ((Bool) -> Void)?
+    /// The reading measure (docs/looks-plan.md §3.8): the text column at most
+    /// this wide, centred by the container's inset, recomputed as the view
+    /// resizes. 0 is none.
+    var measure: CGFloat = 0
+    var baseInset = CGSize(width: 2, height: 2)
+    func measuredInset() -> CGSize {
+        guard measure > 0 else { return baseInset }
+        let pad = textContainer?.lineFragmentPadding ?? 0
+        return CGSize(width: max(baseInset.width, (bounds.width - measure - 2 * pad) / 2), height: baseInset.height)
+    }
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let inset = measuredInset()
+        if textContainerInset != inset { textContainerInset = inset }
+    }
     /// Whose widget this is, so the view can ask the model whether it should be
     /// focused at a moment only the view knows about.
     var nodeId: UInt64 = 0
@@ -38817,9 +38922,11 @@ private struct KayaMacTextarea: NSViewRepresentable {
         // box's 2pt inset gave nothing of (docs/grow-lines-plan.md).
         // The gutter's width rides the text container's inset, which is
         // symmetric, so the text keeps a matching margin on its trailing side.
-        let inset = CGSize(
+        view.baseInset = CGSize(
             width: 2 + kayaGutterWidth(view, on: node.lineNumbers),
             height: node.maxLines > 0 ? kayaGrowingInset(inComposer: chromeless) : 2)
+        view.measure = CGFloat(node.maxWidth)
+        let inset = view.measuredInset()
         if view.textContainerInset != inset { view.textContainerInset = inset }
         let font = kayaNodeFontSet(node)
             ? kayaNodeFont(node, .body) : (kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body))
@@ -39674,6 +39781,10 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                 own.rich = rich
             }
             kayaApplyUIGutter(view, on: node.lineNumbers)
+            if let own = view as? KayaTextView {
+                own.measure = CGFloat(node.maxWidth)
+                own.applyMeasure()
+            }
             kayaApplyKeyboardBar(view, keyboardBar)
             // docs/code-surface-plan.md M1, M2, S1: the node's own face and size.
             if kayaNodeFontSet(node) {
@@ -39859,6 +39970,19 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         var pendingOff: Set<NSAttributedString.Key> = []
         /// docs/code-surface-plan.md G6: the line-number gutter, when on.
         var gutter: KayaUIGutter?
+        /// The reading measure (docs/looks-plan.md §3.8), 0 for none: the
+        /// sides' insets centre a column at most this wide.
+        var measure: CGFloat = 0
+        func applyMeasure() {
+            let base = gutter?.frame.width ?? 0
+            let pad = textContainer.lineFragmentPadding
+            let side = measure > 0 ? max(0, (bounds.width - measure - 2 * pad) / 2) : 0
+            let left = max(base, side)
+            if abs(textContainerInset.left - left) > 0.5 || abs(textContainerInset.right - side) > 0.5 {
+                textContainerInset.left = left
+                textContainerInset.right = side
+            }
+        }
         /// The height the caret was last kept inside.
         private var keptHeight: CGFloat = 0
 
@@ -39885,6 +40009,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
 
         override func layoutSubviews() {
             super.layoutSubviews()
+            applyMeasure()
             let now = String(
                 format: "%.3f %.0fx%.0f c%.0f h%.0f o%.0f", Date().timeIntervalSince1970,
                 bounds.width, bounds.height, textContainer.size.width, contentSize.height,

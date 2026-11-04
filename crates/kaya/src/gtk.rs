@@ -4853,6 +4853,50 @@ fn children_of(widget: &impl IsA<gtk4::Widget>) -> Vec<gtk4::Widget> {
 /// every layout and every read of the container's children.
 const GROUND_PICTURE_KEY: &str = "kaya-ground-picture";
 
+/// The reading measure (docs/looks-plan.md §3.8): the width in points, and
+/// the view's own margins before the measure took them.
+const MEASURE_KEY: &str = "kaya-measure";
+const MEASURE_BASE_KEY: &str = "kaya-measure-base";
+
+fn set_measure(scroller: &gtk4::ScrolledWindow, view: &gtk4::TextView, measure: f64) {
+    use gtk4::prelude::{AdjustmentExt, ObjectExt, TextViewExt};
+    // SAFETY: both keys are private to this module and only ever hold the
+    // types written here.
+    let wired = unsafe { view.data::<(i32, i32)>(MEASURE_BASE_KEY).is_some() };
+    unsafe { view.set_data(MEASURE_KEY, measure) };
+    if !wired {
+        unsafe { view.set_data(MEASURE_BASE_KEY, (view.left_margin(), view.right_margin())) };
+        let follow = view.clone();
+        scroller.hadjustment().connect_page_size_notify(move |_| apply_measure(&follow));
+    }
+    apply_measure(view);
+}
+
+fn measure_of(view: &gtk4::TextView) -> (f64, (i32, i32)) {
+    use gtk4::prelude::{ObjectExt, TextViewExt};
+    // SAFETY: as set_measure.
+    unsafe {
+        let measure = view.data::<f64>(MEASURE_KEY).map_or(0.0, |m| *m.as_ref());
+        let base = view
+            .data::<(i32, i32)>(MEASURE_BASE_KEY)
+            .map_or((view.left_margin(), view.right_margin()), |b| *b.as_ref());
+        (measure, base)
+    }
+}
+
+fn apply_measure(view: &gtk4::TextView) {
+    use gtk4::prelude::{TextViewExt, WidgetExt};
+    let (measure, (left, right)) = measure_of(view);
+    let side = if measure > 0.0 { ((f64::from(view.width()) - measure) / 2.0).max(0.0).floor() as i32 } else { 0 };
+    let (l, r) = (left.max(side), right.max(side));
+    if view.left_margin() != l {
+        view.set_left_margin(l);
+    }
+    if view.right_margin() != r {
+        view.set_right_margin(r);
+    }
+}
+
 fn is_ground_picture(widget: &gtk4::Widget) -> bool {
     // SAFETY: the key is private to this module and only ever set to `true`.
     unsafe { widget.data::<bool>(GROUND_PICTURE_KEY).is_some() }
@@ -17363,6 +17407,13 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 apply_identity_icon(core, id);
             }
         }
+        ApplyOp::RegisterTypeface(font) => {
+            // docs/looks-plan.md §3.7: pango's map then carries the family, so
+            // `family`, the family list and the font dialog all find it.
+            if register_font_blob(core, &font.0, "").is_none() {
+                kaya_diag!("KAYA_DIAG register_typeface: {} bytes registered no family", font.0.len());
+            }
+        }
         ApplyOp::SetTypeface(request) => {
             // THE BRAND TYPEFACE, GTK's half (docs/styling-plan.md Slice 2b):
             // one `:root { font-family }` rule at APPLICATION priority. THE
@@ -18014,6 +18065,9 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 // docs/grow-lines-plan.md §2: the scroller takes its child's
                 // natural height between one line and max_lines lines of the
                 // view's own font, and the fixed 96px goes.
+                (NativeWidget::Textarea(scroller, view), Prop::MaxWidth, Value::F64(measure)) => {
+                    set_measure(scroller, view, measure);
+                }
                 (NativeWidget::Textarea(scroller, view), Prop::MaxLines, Value::F64(lines)) => {
                     use gtk4::prelude::{AdjustmentExt, ObjectExt, TextViewExt, WidgetExt};
                     let metrics = view.pango_context().metrics(None, None);
@@ -22943,6 +22997,23 @@ impl crate::harness::Stage for GtkStage {
     /// docs/code-surface-plan.md G5: the rows from GtkTextView's own display
     /// lines (forward_display_line and each line's iter_location), the
     /// numbers from the gutter's last snapshot, both in buffer coordinates.
+    fn measure(&self, target: crate::harness::Target) -> Result<crate::harness::MeasureRead, String> {
+        Self::on_main(move |core| {
+            use gtk4::prelude::{TextViewExt, WidgetExt};
+            let widget = target_widget(core, target).ok_or("no such target")?;
+            let view = widget.downcast::<gtk4::TextView>().map_err(|_| "not a textarea".to_owned())?;
+            let (_, (left, right)) = measure_of(&view);
+            let width = f64::from(view.width());
+            let (l, r) = (f64::from(view.left_margin()), f64::from(view.right_margin()));
+            Ok(crate::harness::MeasureRead {
+                column: width - l - r,
+                leading: l,
+                trailing: r,
+                unmeasured: width - f64::from(left) - f64::from(right),
+            })
+        })
+    }
+
     fn gutter(
         &self, target: crate::harness::Target,
     ) -> Result<Option<crate::harness::GutterRead>, String> {

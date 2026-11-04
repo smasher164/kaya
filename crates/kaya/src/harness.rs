@@ -1274,6 +1274,10 @@ pub enum Step {
     /// The face a text kind's toolkit RESOLVED, `monospaced` or
     /// `proportional` (docs/code-surface-plan.md M4).
     ExpectFace(Target, String),
+    /// A textarea's reading measure (docs/looks-plan.md §3.8): its text
+    /// column is the smaller of this width and what the box leaves it,
+    /// within 2 units, and sits centred in the box.
+    ExpectMeasure(Target, f64),
     /// The face a text kind (or a range of a textarea's text) DRAWS:
     /// weight class, slope and width, and whether kaya or the toolkit
     /// synthesized a slope or a bold, read off the resolved font, never
@@ -1454,6 +1458,7 @@ impl Step {
             Step::ExpectInk(t, _, _) => vec![t],
             Step::ExpectRevealed(t, _, _) => vec![t],
             Step::ExpectGutter(t, _) | Step::ExpectFace(t, _) | Step::ExpectScaled(t, _) => vec![t],
+            Step::ExpectMeasure(t, _) => vec![t],
             Step::ExpectNoOverscroll(t) | Step::ExpectCaretContrast(t) => vec![t],
             Step::ExpectWeight(t, _, _) => vec![t],
             Step::ExpectFontFace(t, _, _, label) => std::iter::once(t).chain(label.as_mut()).collect(),
@@ -1802,6 +1807,7 @@ impl Step {
             Step::ExpectSelection { .. } => true,
             Step::ExpectRevealed { .. } => true,
             Step::ExpectGutter { .. } | Step::ExpectFace { .. } | Step::ExpectScaled { .. } => true,
+            Step::ExpectMeasure { .. } => true,
             Step::ExpectNoOverscroll(_) | Step::ExpectCaretContrast(_) => true,
             Step::ExpectWeight { .. } => true,
             Step::ExpectFontFace { .. } | Step::ExpectFontDialog(_) => true,
@@ -2067,6 +2073,32 @@ pub struct FaceRead {
     pub monospaced: bool,
     pub family: String,
     pub asked: String,
+}
+
+/// A textarea's text column as the toolkit lays it out, in the box's units:
+/// its width, its gaps to the box's content edges, and the width the column
+/// would have with no measure (the box less the platform's own padding).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MeasureRead {
+    pub column: f64,
+    pub leading: f64,
+    pub trailing: f64,
+    pub unmeasured: f64,
+}
+
+pub(crate) fn measure_verdict(read: &MeasureRead, want: f64) -> Result<String, String> {
+    let wanted = want.min(read.unmeasured);
+    let got = format!(
+        "a {:.0}-unit column, {:.0} and {:.0} from the box's edges, of {:.0} unmeasured",
+        read.column, read.leading, read.trailing, read.unmeasured
+    );
+    if (read.column - wanted).abs() > 2.0 {
+        return Err(format!("reads {got}, wanted a {wanted:.0}-unit column"));
+    }
+    if (read.leading - read.trailing).abs() > 2.0 {
+        return Err(format!("reads {got}, wanted it centred"));
+    }
+    Ok(got)
 }
 
 pub(crate) fn face_verdict(read: &FaceRead, want: &str) -> Result<String, String> {
@@ -3571,6 +3603,11 @@ pub trait Stage: Send + 'static {
     fn face(&self, target: Target) -> Result<FaceRead, String> {
         let _ = target;
         Err("expect_face is a depth slice on this backend (docs/code-surface-plan.md §6)".to_owned())
+    }
+    /// A textarea's text column, read off the toolkit (docs/looks-plan.md §3.8).
+    fn measure(&self, target: Target) -> Result<MeasureRead, String> {
+        let _ = target;
+        Err("expect_measure is a depth slice on this backend (docs/looks-plan.md §3.8)".to_owned())
     }
     /// The weight the widget draws `range` at, as `bold ...` or `regular ...`
     /// followed by what the reading measured (docs/phone-format-plan.md §6).
@@ -5719,6 +5756,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     parse_range(range).map_err(|e| format!("{e}: {line:?}"))?,
                     word.to_owned(),
                 )
+            }
+            "expect_measure" => {
+                let (target, width) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_measure wants a textarea and a width in points: {line:?}"))?;
+                let width: f64 = width
+                    .trim()
+                    .parse()
+                    .ok()
+                    .filter(|w: &f64| w.is_finite() && *w > 0.0)
+                    .ok_or_else(|| format!("expect_measure's width is a positive number of points: {line:?}"))?;
+                Step::ExpectMeasure(parse_target(target.trim())?, width)
             }
             "expect_scaled" => {
                 let (target, multiple) = rest
@@ -9096,6 +9145,11 @@ fn run_with_log(
                 let what = target_spec(target);
                 let read = stage.caret_colors(*target).map_err(|why| format!("{what} caret: {why}"))?;
                 caret_verdict(&read).map_err(|why| format!("{what} caret {why}"))
+            })),
+            Step::ExpectMeasure(target, want) => Some(poll(|| {
+                let what = format!("{} measure", target_spec(target));
+                let read = stage.measure(*target).map_err(|why| format!("{what}: {why}"))?;
+                measure_verdict(&read, *want).map_err(|why| format!("{what} {why}"))
             })),
             Step::ExpectFace(target, want) => Some(poll(|| {
                 let what = format!("{} face", target_spec(target));
@@ -13299,6 +13353,14 @@ mod tests {
             .unwrap_err()
             .contains("reads 400 italic 5 synthesized"));
         assert!(drawn_face_verdict(&drawn(300, false, false, false), &parse_face_words("300 upright 5").unwrap()).is_ok());
+        // docs/looks-plan.md §3.8: the reading measure's verdict and grammar.
+        let m = |column, leading, trailing, unmeasured| MeasureRead { column, leading, trailing, unmeasured };
+        assert!(measure_verdict(&m(640.0, 180.0, 180.0, 1000.0), 640.0).is_ok());
+        assert!(measure_verdict(&m(343.0, 0.0, 0.0, 343.0), 640.0).is_ok(), "a phone narrower than the measure");
+        assert!(measure_verdict(&m(1000.0, 0.0, 0.0, 1000.0), 640.0).unwrap_err().contains("wanted a 640-unit column"));
+        assert!(measure_verdict(&m(640.0, 300.0, 60.0, 1000.0), 640.0).unwrap_err().contains("wanted it centred"));
+        assert!(parse("expect_measure textarea@buffer-1 640").is_ok());
+        assert!(parse("expect_measure textarea@buffer-1 0").is_err());
         let listed = |name: &str, fixed, alias| ListedFamily { name: name.into(), fixed, alias };
         let mono = vec![listed("Menlo", true, false), listed("Monaco", true, false)];
         assert!(font_dialog_verdict(Some(&mono), "code_only").is_ok());

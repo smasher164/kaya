@@ -413,6 +413,7 @@ pub const KAYA_TX_LIST_FONT_FACES: u16 = 95;
 /// CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
 pub const KAYA_TX_CREATE_VOICE: u16 = 96;
 pub const KAYA_TX_RELEASE_VOICE: u16 = 97;
+pub const KAYA_TX_REGISTER_TYPEFACE: u16 = 98;
 pub const KAYA_TX_ADD_SECTION: u16 = 25;
 pub const KAYA_TX_SELECT_SECTION: u16 = 26;
 pub const KAYA_TX_SET_SECTION_PROP: u16 = 27;
@@ -770,6 +771,7 @@ const _: () = assert!(
         && KAYA_TX_LIST_FONT_FACES == wire::TX_LIST_FONT_FACES
         && KAYA_TX_CREATE_VOICE == wire::TX_CREATE_VOICE
         && KAYA_TX_RELEASE_VOICE == wire::TX_RELEASE_VOICE
+        && KAYA_TX_REGISTER_TYPEFACE == wire::TX_REGISTER_TYPEFACE
         && KAYA_TX_ADD_SECTION == wire::TX_ADD_SECTION
         && KAYA_TX_SELECT_SECTION == wire::TX_SELECT_SECTION
         && KAYA_TX_SET_SECTION_PROP == wire::TX_SET_SECTION_PROP
@@ -894,6 +896,7 @@ pub const KAYA_APPLY_LIST_FONT_FACES: u16 = 83;
 /// CREATE_VOICE, RELEASE_VOICE { u64 voice } (docs/capture-plan.md §5).
 pub const KAYA_APPLY_CREATE_VOICE: u16 = 84;
 pub const KAYA_APPLY_RELEASE_VOICE: u16 = 85;
+pub const KAYA_APPLY_REGISTER_TYPEFACE: u16 = 86;
 pub const KAYA_APPLY_ADD_SECTION: u16 = 15;
 pub const KAYA_APPLY_SELECT_SECTION: u16 = 16;
 pub const KAYA_APPLY_SET_SECTION_PROP: u16 = 17;
@@ -1051,6 +1054,7 @@ const _: () = assert!(
         && KAYA_APPLY_LIST_FONT_FACES == wire::APPLY_LIST_FONT_FACES
         && KAYA_APPLY_CREATE_VOICE == wire::APPLY_CREATE_VOICE
         && KAYA_APPLY_RELEASE_VOICE == wire::APPLY_RELEASE_VOICE
+        && KAYA_APPLY_REGISTER_TYPEFACE == wire::APPLY_REGISTER_TYPEFACE
         && KAYA_APPLY_ADD_SECTION == wire::APPLY_ADD_SECTION
         && KAYA_APPLY_SELECT_SECTION == wire::APPLY_SELECT_SECTION
         && KAYA_APPLY_SET_SECTION_PROP == wire::APPLY_SET_SECTION_PROP
@@ -8303,6 +8307,7 @@ mod tests {
             ("list_font_faces", KAYA_TX_LIST_FONT_FACES),
             ("create_voice", KAYA_TX_CREATE_VOICE),
             ("release_voice", KAYA_TX_RELEASE_VOICE),
+            ("register_typeface", KAYA_TX_REGISTER_TYPEFACE),
         ];
         let apply = [
             ("create", KAYA_APPLY_CREATE),
@@ -8388,6 +8393,7 @@ mod tests {
             ("list_font_faces", KAYA_APPLY_LIST_FONT_FACES),
             ("create_voice", KAYA_APPLY_CREATE_VOICE),
             ("release_voice", KAYA_APPLY_RELEASE_VOICE),
+            ("register_typeface", KAYA_APPLY_REGISTER_TYPEFACE),
         ];
         for (spec, consts) in [(crate::spec::SPEC.tx, &tx[..]), (crate::spec::SPEC.apply, &apply[..])] {
             assert_eq!(

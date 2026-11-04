@@ -7,7 +7,7 @@
 // kaya value types.
 
 // SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-export const SPEC_HASH = 0xc6027a0f8193144bn;
+export const SPEC_HASH = 0x585cc259da5c8c75n;
 export const VERSION = "0.0.0";
 
 export const VALUE_BOOL = 1;
@@ -542,6 +542,7 @@ export const TX_SHOW_FONT_DIALOG = 94;
 export const TX_LIST_FONT_FACES = 95;
 export const TX_CREATE_VOICE = 96;
 export const TX_RELEASE_VOICE = 97;
+export const TX_REGISTER_TYPEFACE = 98;
 export const APPLY_CREATE = 1;
 export const APPLY_SET_PROP = 2;
 export const APPLY_ADD_CHILD = 3;
@@ -625,6 +626,7 @@ export const APPLY_PRESENT_FONT_DIALOG = 82;
 export const APPLY_LIST_FONT_FACES = 83;
 export const APPLY_CREATE_VOICE = 84;
 export const APPLY_RELEASE_VOICE = 85;
+export const APPLY_REGISTER_TYPEFACE = 86;
 export const OCC_BUTTON_CLICKED = 1;
 export const OCC_TEXT_CHANGED = 2;
 export const OCC_TOGGLED = 3;
@@ -1697,6 +1699,13 @@ export function tx_release_voice(voice: number): Uint8Array {
   enc.begin();
   enc.u64(voice);
   return enc.end(TX_RELEASE_VOICE);
+}
+
+/** Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless. */
+export function tx_register_typeface(font: WireValue): Uint8Array {
+  enc.begin();
+  enc.value(font);
+  return enc.end(TX_REGISTER_TYPEFACE);
 }
 
 /** A civil date as the wire's I64: year * 10000 + month * 100 + day. */

@@ -1922,6 +1922,9 @@ val brand_typeface :
   ?platforms:(platform * string) list ->
   ?font:bytes -> ?font_asset:asset -> string -> unit
 
+(* Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7). *)
+val register_typeface : asset -> unit
+
 (* DECLARE this app's identity from the asset root's own identity.toml.
    SET ONCE, BEFORE THE FIRST MOUNT. *)
 val app_identity : unit -> unit

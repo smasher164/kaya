@@ -1488,7 +1488,8 @@ refused(s, "the startup sheet lowered through the clamp appears 0 time(s)",
 # N34 — C12: the vacuity floor. With no readable variable font the clause
 # would pass any stylesheet, so it refuses a verdict instead.
 s = fresh("n34")
-(s / "guests/assets/fonts/sora-wght.ttf").write_bytes(b"not a font")
+for font in (s / "guests/assets/fonts").glob("*.ttf"):
+    font.write_bytes(b"not a font")
 refused(s, "a census that reads no font agrees with everything",
         "N34 (no vendored variable font to check against)")
 

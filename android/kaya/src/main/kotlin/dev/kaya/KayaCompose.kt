@@ -3684,7 +3684,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xc6027a0f8193144buL
+    private const val SPEC_HASH: ULong = 0x585cc259da5c8c75uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -3708,6 +3708,7 @@ object KayaCompose {
     private const val APPLY_PRESENT_SAVE_DIALOG = 31
     private const val APPLY_SET_BRAND = 32
     private const val APPLY_SET_TYPEFACE = 33
+    private const val APPLY_REGISTER_TYPEFACE = 86
 
     /**
      * The app's declared identity (docs/app-identity-plan.md). THE
@@ -6309,6 +6310,10 @@ object KayaCompose {
                         ?: error("kaya: set_drawing targets unknown widget $id")
                     node.drawingScale = if (scale.isFinite() && scale > 0.0) scale else 1.0
                     node.drawing = kayaDrawingBitmap(blobs[handle], width, height)
+                }
+                APPLY_REGISTER_TYPEFACE -> {
+                    // docs/looks-plan.md §3.7: a font the app ships.
+                    kayaRegisterTypeface(mountedActivity, blobs[readBlobHandle(b)])
                 }
                 APPLY_SET_TYPEFACE -> {
                     // { u32 mask; u32 platform } then the default
@@ -9957,6 +9962,28 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
      * named by the shaped font's name table, and judged fixed-pitch by its
      * own advances; never the request.
      */
+    /** expect_measure (docs/looks-plan.md §3.8): harness.rs's measure_verdict, in dp. */
+    private fun kayaMeasureReading(activity: ComponentActivity, spec: String, want: Double): Pair<String?, String> =
+        onUi(activity) {
+            val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
+            val (inner, outer) = kayaMeasureBoxes[node.id] ?: return@onUi null to ": no measured column on screen"
+            val density = activity.resources.displayMetrics.density
+            val column = inner.width / density
+            val leading = (inner.left - outer.left) / density
+            val trailing = (outer.right - inner.right) / density
+            val unmeasured = outer.width / density
+            val wanted = minOf(want, unmeasured.toDouble())
+            val got = String.format(java.util.Locale.ROOT,
+                "a %.0f-unit column, %.0f and %.0f from the box's edges, of %.0f unmeasured",
+                column, leading, trailing, unmeasured)
+            when {
+                Math.abs(column - wanted) > 2 ->
+                    null to " reads $got, wanted a ${String.format(java.util.Locale.ROOT, "%.0f", wanted)}-unit column"
+                Math.abs(leading - trailing) > 2 -> null to " reads $got, wanted it centred"
+                else -> got to ""
+            }
+        }
+
     private fun kayaFaceReading(activity: ComponentActivity, spec: String, want: String): Pair<String?, String> =
         onUi(activity) {
             val node = kayaTextTarget(spec) ?: return@onUi null to ": no such target"
@@ -15797,6 +15824,22 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                             }
                             got.first?.let { observed.add("${parts[1]} gutter $it") }
                                 ?: failures.add("${parts[1]} gutter ${got.second}")
+                        }
+                    }
+                    "expect_measure" -> {
+                        // docs/looks-plan.md §3.8: harness.rs's measure_verdict.
+                        val want = parts.getOrNull(2)?.toDoubleOrNull()
+                        if (parts.size != 3 || want == null || want <= 0.0) {
+                            failures.add("expect_measure wants a textarea and a width in points: $line")
+                        } else {
+                            var got = kayaMeasureReading(activity, parts[1], want)
+                            val deadline = System.nanoTime() + 5_000_000_000L
+                            while (got.first == null && System.nanoTime() < deadline) {
+                                Thread.sleep(100)
+                                got = kayaMeasureReading(activity, parts[1], want)
+                            }
+                            got.first?.let { observed.add("${parts[1]} measure $it") }
+                                ?: failures.add("${parts[1]} measure${got.second}")
                         }
                     }
                     "expect_face" -> if (parts.contains("face")) {
@@ -21942,7 +21985,7 @@ fun KayaTextField(
                 // around the decoration: the inner field IS the scrolling
                 // viewport, so a decoration-level draw would sit still
                 // while the text moved under it.
-                innerTextField = { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, inner) } },
+                innerTextField = { KayaMeasure(node) { KayaGutter(node, fieldStyle) { KayaHighlightLayer(node, palette, inner) } } },
                 enabled = true,
                 singleLine = singleLine,
                 visualTransformation = VisualTransformation.None,
@@ -22553,6 +22596,10 @@ internal fun kayaInstalledFamilyMap(): Map<String, FontFamily> {
                 font.style.slant == android.graphics.fonts.FontStyle.FONT_SLANT_UPRIGHT
             if (!files.containsKey(name) || regular) files[name] = font
         }
+        for (font in kayaRegisteredFonts) {
+            val name = kayaFontFamilyName(font.buffer, font.ttcIndex) ?: continue
+            files[name] = font
+        }
     }
     val out = LinkedHashMap<String, FontFamily>()
     for ((name, font) in files) {
@@ -22817,6 +22864,29 @@ private fun kayaDeviceFamilyPresent(
  * `Font(File)` THROW at RESOLVE, inside composition, where
  * `Typeface.Builder(file).build()` returns null (§6.3).
  */
+/** The fonts the app registered (docs/looks-plan.md §3.7). Android has no
+ *  app-font registry, so kaya keeps this one, and `family`, the family list
+ *  and the picker read it beside the system's. */
+internal val kayaRegisteredFonts = ArrayList<android.graphics.fonts.Font>()
+
+internal fun kayaRegisterTypeface(context: android.content.Context?, bytes: ByteArray?) {
+    if (context == null || bytes == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+        Log.w("kaya", "kaya: register_typeface had no activity, no bytes or an API below 29; nothing registered")
+        return
+    }
+    val font = try {
+        val file = java.io.File(context.filesDir, "kaya-font-${Integer.toHexString(bytes.contentHashCode())}")
+        file.writeBytes(bytes)
+        android.graphics.fonts.Font.Builder(file).build()
+    } catch (e: Exception) {
+        Log.w("kaya", "kaya: register_typeface's ${bytes.size} bytes are not a font this platform loads: $e")
+        return
+    }
+    kayaRegisteredFonts.add(font)
+    kayaInstalledFamilies = null
+    kayaFamilyFacesCache = null
+}
+
 private fun kayaFontFromBytes(context: android.content.Context, bytes: ByteArray): FontFamily? {
     return try {
         // ONE FILE, overwritten: the brand is set once before the first
@@ -23487,6 +23557,35 @@ internal val kayaNodeVisible = HashMap<Long, androidx.compose.ui.geometry.Rect>(
 
 /** The view each text field is composed in, whose root is its window's. */
 internal val kayaFieldViews = HashMap<Long, android.view.View>()
+
+/** expect_measure's reading (docs/looks-plan.md §3.8): the text column's
+ *  left and right and the box it is centred in, window pixels. */
+internal val kayaMeasureBoxes = HashMap<Long, Pair<androidx.compose.ui.geometry.Rect, androidx.compose.ui.geometry.Rect>>()
+
+/** The reading measure: the inner field at most `max_width` wide, centred in
+ *  the decoration's width, which keeps its box and its scroll. */
+@Composable
+internal fun KayaMeasure(node: KayaNode, content: @Composable () -> Unit) {
+    if (node.kind != KayaCompose.KIND_TEXTAREA || node.maxWidth <= 0.0) {
+        kayaMeasureBoxes.remove(node.id)
+        content()
+        return
+    }
+    var outer by remember { mutableStateOf(androidx.compose.ui.geometry.Rect.Zero) }
+    Box(
+        Modifier.fillMaxWidth().onGloballyPositioned { outer = it.boundsInWindow() },
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        // The column TAKES the measure: Box hands its child no minimum
+        // unless told, and the field then hugs its text (120 of 328, measured).
+        Box(
+            Modifier.widthIn(max = node.maxWidth.dp).fillMaxWidth().onGloballyPositioned { c ->
+                kayaMeasureBoxes[node.id] = c.boundsInWindow() to outer
+            },
+            propagateMinConstraints = true,
+        ) { content() }
+    }
+}
 
 internal val kayaFieldCompositions = HashMap<Long, Int>()
 
@@ -27628,6 +27727,7 @@ internal fun kayaAllFamilyFaces(): Map<String, List<KayaFamilyFace>> {
     // condensed twin), while fonts.xml declares Roboto-Regular.ttf eighteen
     // times, by wght and ital.
     for (font in kayaFontsXmlFonts()) if (font.ttcIndex == 0) add(font)
+    for (font in kayaRegisteredFonts) add(font)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
         for (font in android.graphics.fonts.SystemFonts.getAvailableFonts()) {
             if (font.file == null || font.ttcIndex != 0) continue

@@ -13,7 +13,7 @@ import java.util.List;
 
 public final class KayaWire {
     /** SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-    public static final long SPEC_HASH = 0xc6027a0f8193144bL;
+    public static final long SPEC_HASH = 0x585cc259da5c8c75L;
     public static final String VERSION = "0.0.0";
 
     public static final int VALUE_BOOL = 1;
@@ -547,6 +547,7 @@ public final class KayaWire {
     public static final short TX_KIND_LIST_FONT_FACES = 95;
     public static final short TX_KIND_CREATE_VOICE = 96;
     public static final short TX_KIND_RELEASE_VOICE = 97;
+    public static final short TX_KIND_REGISTER_TYPEFACE = 98;
     public static final short APPLY_KIND_CREATE = 1;
     public static final short APPLY_KIND_SET_PROP = 2;
     public static final short APPLY_KIND_ADD_CHILD = 3;
@@ -630,6 +631,7 @@ public final class KayaWire {
     public static final short APPLY_KIND_LIST_FONT_FACES = 83;
     public static final short APPLY_KIND_CREATE_VOICE = 84;
     public static final short APPLY_KIND_RELEASE_VOICE = 85;
+    public static final short APPLY_KIND_REGISTER_TYPEFACE = 86;
     public static final short OCC_KIND_BUTTON_CLICKED = 1;
     public static final short OCC_KIND_TEXT_CHANGED = 2;
     public static final short OCC_KIND_TOGGLED = 3;
@@ -1676,6 +1678,13 @@ public final class KayaWire {
     public static byte[] txReleaseVoice(long voice) {
         Enc b = begin(TX_KIND_RELEASE_VOICE);
         b.putLong(voice);
+        return finish(b);
+    }
+
+    /** Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless. */
+    public static byte[] txRegisterTypeface(Object font) {
+        Enc b = begin(TX_KIND_REGISTER_TYPEFACE);
+        encodeValue(b, font);
         return finish(b);
     }
 

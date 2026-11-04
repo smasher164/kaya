@@ -24,7 +24,7 @@ data Value = VBool Bool | VI64 Int64 | VF64 Double | VStr String | VBlob Word64
 
 -- | specHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
 specHash :: Word64
-specHash = 0xc6027a0f8193144b
+specHash = 0x585cc259da5c8c75
 kayaVersion :: String
 kayaVersion = "0.0.0"
 
@@ -1090,6 +1090,8 @@ txKindCreateVoice :: Word16
 txKindCreateVoice = 96
 txKindReleaseVoice :: Word16
 txKindReleaseVoice = 97
+txKindRegisterTypeface :: Word16
+txKindRegisterTypeface = 98
 applyKindCreate :: Word16
 applyKindCreate = 1
 applyKindSetProp :: Word16
@@ -1256,6 +1258,8 @@ applyKindCreateVoice :: Word16
 applyKindCreateVoice = 84
 applyKindReleaseVoice :: Word16
 applyKindReleaseVoice = 85
+applyKindRegisterTypeface :: Word16
+applyKindRegisterTypeface = 86
 occKindButtonClicked :: Word16
 occKindButtonClicked = 1
 occKindTextChanged :: Word16
@@ -1817,6 +1821,10 @@ txCreateVoice voice = wireRecord txKindCreateVoice (word64LE voice)
 -- Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows.
 txReleaseVoice :: Word64 -> Builder
 txReleaseVoice voice = wireRecord txKindReleaseVoice (word64LE voice)
+
+-- Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless.
+txRegisterTypeface :: Value -> Builder
+txRegisterTypeface font = wireRecord txKindRegisterTypeface (encodeValue font)
 
 -- A civil date as the wire's I64: year * 10000 + month * 100 + day.
 packDate :: Int -> Int -> Int -> Int64

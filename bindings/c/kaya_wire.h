@@ -199,7 +199,7 @@ static inline void kaya_wire_end(KayaTx *tx, size_t start) {
     }
 }
 /* KAYA_SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees. */
-#define KAYA_SPEC_HASH 0xc6027a0f8193144bULL
+#define KAYA_SPEC_HASH 0x585cc259da5c8c75ULL
 #define KAYA_VERSION "0.0.0"
 
 
@@ -1075,6 +1075,13 @@ static inline void kaya_tx_create_voice(KayaTx *tx, uint64_t voice) {
 static inline void kaya_tx_release_voice(KayaTx *tx, uint64_t voice) {
     size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_RELEASE_VOICE);
     kaya_wire_u64(tx, voice);
+    kaya_wire_end(tx, kaya_at);
+}
+
+/* Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless. */
+static inline void kaya_tx_register_typeface(KayaTx *tx, KayaVal font) {
+    size_t kaya_at = kaya_wire_begin(tx, KAYA_TX_REGISTER_TYPEFACE);
+    kaya_wire_value(tx, font);
     kaya_wire_end(tx, kaya_at);
 }
 

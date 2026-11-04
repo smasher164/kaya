@@ -131,6 +131,7 @@ module KayaApp
     brandAccent,
     BrandAttr (..),
     brandTypeface,
+    registerTypeface,
     TypefaceAttr (..),
     appIdentity,
     Asset,
@@ -1133,6 +1134,10 @@ instance (a ~ ()) => TypefaceArgs (Build a) where
 
 instance (a ~ TypefaceAttr, r ~ Build ()) => TypefaceArgs ([a] -> r) where
   typefacish = emitTypeface
+
+-- | Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7).
+registerTypeface :: Asset -> Build ()
+registerTypeface font = emitBIO (W.txRegisterTypeface . W.VBlob <$> R.assetBlob font)
 
 emitTypeface :: Text -> [TypefaceAttr] -> Build ()
 emitTypeface family attrs =

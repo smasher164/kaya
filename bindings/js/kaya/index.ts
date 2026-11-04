@@ -3980,6 +3980,14 @@ export type TypefaceOptions = { platforms?: Readonly<Record<string, string>> | R
 /** REQUEST the app's brand typeface (docs/styling-plan.md Slice 2b): one
  * family name is the whole call. Per-platform rows travel unresolved;
  * font bytes ride the blob channel. Set once, before the first mount. */
+/** Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7). */
+export function registerTypeface(font: Asset): void {
+  if (!(font instanceof Asset)) {
+    throw new TypeError(`kaya: registerTypeface takes the font file as kaya.asset('fonts/...'), not ${runtime.describe(font)}`);
+  }
+  records().push(wire.tx_register_typeface(new BlobHandle(blobOf(font))));
+}
+
 export function brandTypeface(family: string, opts: TypefaceOptions = {}): void {
   const pairs: wire.WireValue[] = [];
   if (opts.platforms !== undefined) {

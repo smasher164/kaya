@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0xc6027a0f8193144bL
+let spec_hash = 0x585cc259da5c8c75L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -564,6 +564,7 @@ let tx_kind_show_font_dialog = 94
 let tx_kind_list_font_faces = 95
 let tx_kind_create_voice = 96
 let tx_kind_release_voice = 97
+let tx_kind_register_typeface = 98
 let apply_kind_create = 1
 let apply_kind_set_prop = 2
 let apply_kind_add_child = 3
@@ -647,6 +648,7 @@ let apply_kind_present_font_dialog = 82
 let apply_kind_list_font_faces = 83
 let apply_kind_create_voice = 84
 let apply_kind_release_voice = 85
+let apply_kind_register_typeface = 86
 let occ_kind_button_clicked = 1
 let occ_kind_text_changed = 2
 let occ_kind_toggled = 3
@@ -1456,6 +1458,11 @@ let tx_create_voice voice =
 let tx_release_voice voice =
   finish tx_kind_release_voice (fun b ->
       Buffer.add_int64_le b voice)
+
+(* Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless. *)
+let tx_register_typeface font =
+  finish tx_kind_register_typeface (fun b ->
+      encode_value b font)
 
 (* A civil date as the wire's I64: year * 10000 + month * 100 + day. *)
 let pack_date year month day =

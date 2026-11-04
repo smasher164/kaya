@@ -11,13 +11,51 @@ use bindings::Microsoft::UI::Xaml::Controls::Border;
 use bindings::Microsoft::UI::Xaml::SizeChangedEventHandler;
 use windows::Win32::Graphics::DirectWrite::*;
 
-fn collection() -> windows_core::Result<IDWriteFontCollection> {
+thread_local! {
+    /// The fonts the app registered (docs/looks-plan.md §3.7): each family,
+    /// the XAML source it is drawn from and the file DirectWrite reads.
+    static REGISTERED: RefCell<Vec<(String, String, std::path::PathBuf)>> = const { RefCell::new(Vec::new()) };
+}
+
+pub(super) fn register(family: String, source: String, path: std::path::PathBuf) {
+    REGISTERED.with_borrow_mut(|r| {
+        if !r.iter().any(|(f, _, _)| *f == family) {
+            r.push((family, source, path));
+        }
+    });
+}
+
+/// The XAML source a registered family is drawn from.
+pub(super) fn registered_source(family: &str) -> Option<String> {
+    REGISTERED.with_borrow(|r| r.iter().find(|(f, _, _)| f.eq_ignore_ascii_case(family)).map(|(_, s, _)| s.clone()))
+}
+
+/// The installed families and the app's registered ones, one collection, so
+/// every reader and the picker see what `family` can draw.
+pub(super) fn font_collection() -> windows_core::Result<IDWriteFontCollection> {
+    let files: Vec<std::path::PathBuf> = REGISTERED.with_borrow(|r| r.iter().map(|(_, _, p)| p.clone()).collect());
     unsafe {
-        let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
-        let mut collection: Option<IDWriteFontCollection> = None;
-        factory.GetSystemFontCollection(&mut collection, false)?;
-        Ok(collection.expect("S_OK carries a collection"))
+        if files.is_empty() {
+            let factory: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+            let mut collection: Option<IDWriteFontCollection> = None;
+            factory.GetSystemFontCollection(&mut collection, false)?;
+            return Ok(collection.expect("S_OK carries a collection"));
+        }
+        let factory: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
+        let builder: IDWriteFontSetBuilder1 = factory.CreateFontSetBuilder()?.cast()?;
+        builder.AddFontSet(&factory.GetSystemFontSet()?)?;
+        for path in files {
+            let wide: Vec<u16> = path.as_os_str().to_string_lossy().encode_utf16().chain(std::iter::once(0)).collect();
+            let file = factory.CreateFontFileReference(windows_core::PCWSTR(wide.as_ptr()), None)?;
+            builder.AddFontFile(&file)?;
+        }
+        let set = builder.CreateFontSet()?;
+        factory.CreateFontCollectionFromFontSet(&set)?.cast()
     }
+}
+
+fn collection() -> windows_core::Result<IDWriteFontCollection> {
+    font_collection()
 }
 
 /// An installed family by its name.

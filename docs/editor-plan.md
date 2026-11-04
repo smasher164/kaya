@@ -103,6 +103,18 @@ these fixed, each with a read that fails without the fix:
   (16 sp), where they drew at foundation's 14 sp; `expect_scaled` refuses a
   text field whose platform size is under it.
 
+### E8 — the app's own look (docs/looks-plan.md §3.7, BUILT 2026-11-04)
+
+The buffer wears JetBrains Mono, the coding face the app ships and registers
+at build, on every platform, unless the user picked a face in Font….
+The status bar is the accent's solid strip with a word count beside the
+match count and the caret's place; the match count's red is gone, since red
+on the strip cannot be read, and its words say what failed. View > Writing
+Mode switches every document to the platform's own text face a zoom step up,
+with no gutter, its text at a reading measure of 480 points centred in the
+buffer; off, the coding face, the gutter and the zoom return. The choice is
+the app's preference, kept across launches.
+
 ## §2 — sequencing
 
 1. The app + the scene + the mac leg green.

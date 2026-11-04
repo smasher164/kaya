@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0xc6027a0f8193144b
+let kayaSpecHash: UInt64 = 0x585cc259da5c8c75
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.
@@ -1007,6 +1007,13 @@ struct KayaTx {
     mutating func releaseVoice(_ voice: UInt64) {
         let kayaAt = self.begin(UInt16(KAYA_TX_RELEASE_VOICE))
         self.u64(voice)
+        self.end(kayaAt)
+    }
+
+    /// Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless.
+    mutating func registerTypeface(_ font: KayaValue) {
+        let kayaAt = self.begin(UInt16(KAYA_TX_REGISTER_TYPEFACE))
+        self.value(font)
         self.end(kayaAt)
     }
 

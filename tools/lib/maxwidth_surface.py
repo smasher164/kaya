@@ -27,7 +27,7 @@ HS = "bindings/haskell/KayaApp.hs"
 # (label, file, pattern, the name inside it a rename cuts)
 ROWS = [
     ("core legality", CORE,
-     r"Prop::MaxWidth => matches!\(\n\s+kind,\n\s+WidgetKind::Image \| WidgetKind::Slider \| WidgetKind::Label \| WidgetKind::Row \| WidgetKind::Column\n\s+\),",
+     r"Prop::MaxWidth => matches!\(\n\s+kind,\n\s+WidgetKind::Image\n\s+\| WidgetKind::Slider\n\s+\| WidgetKind::Label\n\s+\| WidgetKind::Row\n\s+\| WidgetKind::Column\n\s+\| WidgetKind::Textarea\n\s+\),",
      "MaxWidth"),
     ("c floor", C, r"static inline void kaya_tx_set_max_width\(KayaTx \*tx, uint64_t widget_id, double max_width\)", "max_width"),
     ("rust live max_width", RS, r"pub fn max_width\(self, points: f64\) -> Self \{", "max_width"),

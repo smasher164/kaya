@@ -37,3 +37,24 @@ Subsetting, instancing and any other transformation are REFUSED, not
 merely unimplemented: the OFL's Reserved Font Name term makes a modified
 file something that may not be called Sora, and the name is the thing
 the scene reads.
+
+## jetbrains-mono-wght.ttf
+
+`jetbrains-mono-wght.ttf` (upstream name JetBrainsMono[wght].ttf, renamed for
+the same glob reason) is JetBrains Mono 2.304, the variable font, SIL Open Font
+License 1.1 (`OFL-jetbrains-mono.txt` beside it, the upstream OFL.txt renamed
+so the two licences can share this directory). It came from nixpkgs'
+`jetbrains-mono` package at the flake's pinned nixpkgs
+(391b592eb44808b3bd0cb80bb71b63a5a118b8bb), which builds it from the upstream
+release, and the licence from that package's source. 290,308 bytes, SHA-256
+88f248a15a211530c66d648dcf9412c0d59da75ad30a63ce71153e8d2a96657e.
+
+Why it exists: the editor's buffer wears it on every platform, registered with
+`register_typeface` (docs/looks-plan.md §3.7), so the coding face is the same
+on five lanes rather than whichever monospaced family a platform carries.
+
+How to regenerate it: you do not; to take a newer release, build
+`nixpkgs#jetbrains-mono` at a newer pin, copy `share/fonts/truetype/
+JetBrainsMono[wght].ttf` here under this name, and check its name table still
+reports the family `JetBrains Mono`, which the editor scene reads.
+

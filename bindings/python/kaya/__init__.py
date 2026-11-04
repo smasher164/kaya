@@ -4564,6 +4564,15 @@ def brand_typeface(family: str,
     ))
 
 
+def register_typeface(font: Asset) -> None:
+    """Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7).
+    `kaya.register_typeface(kaya.asset("fonts/jetbrains-mono-wght.ttf"))`."""
+    if not isinstance(font, Asset):
+        raise KayaTypeError(
+            f"kaya: register_typeface takes the font file as kaya.asset('fonts/...'), not {type(font).__name__}")
+    _records().append(wire.tx_register_typeface(wire.BlobHandle(_blob_of(font))))
+
+
 def app_identity() -> None:
     """DECLARE the app's identity (docs/app-identity-plan.md,
 docs/tasks-s3-plan.md N4). NO ARGUMENTS: the name it goes by, the

@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xc6027a0f8193144b;
+    public const ulong SpecHash = 0x585cc259da5c8c75;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -546,6 +546,7 @@ static class KayaWire
     public const ushort TxKindListFontFaces = 95;
     public const ushort TxKindCreateVoice = 96;
     public const ushort TxKindReleaseVoice = 97;
+    public const ushort TxKindRegisterTypeface = 98;
     public const ushort ApplyKindCreate = 1;
     public const ushort ApplyKindSetProp = 2;
     public const ushort ApplyKindAddChild = 3;
@@ -629,6 +630,7 @@ static class KayaWire
     public const ushort ApplyKindListFontFaces = 83;
     public const ushort ApplyKindCreateVoice = 84;
     public const ushort ApplyKindReleaseVoice = 85;
+    public const ushort ApplyKindRegisterTypeface = 86;
     public const ushort OccKindButtonClicked = 1;
     public const ushort OccKindTextChanged = 2;
     public const ushort OccKindToggled = 3;
@@ -1746,6 +1748,14 @@ static class KayaWire
         var w = Begin(out var stream);
         w.Write(voice);
         return Finish(stream, w, TxKindReleaseVoice);
+    }
+
+    /// Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless.
+    public static byte[] TxRegisterTypeface(object font)
+    {
+        var w = Begin(out var stream);
+        EncodeValue(w, font);
+        return Finish(stream, w, TxKindRegisterTypeface);
     }
 
     /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

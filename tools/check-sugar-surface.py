@@ -9827,6 +9827,16 @@ check_styling_point(
     r"func brandTypeface\(", r"^brandTypeface ::",
     r"^let brand_typeface ", r"^export function brandTypeface\(")
 
+# A REGISTERED TYPEFACE (docs/looks-plan.md §3.7), the brand typeface's
+# sibling and invisible to every other sweep for the same reason.
+check_styling_point(
+    "register_typeface",
+    r"pub fn register_typeface\(&mut self", r"^def register_typeface\(",
+    r"func \(tx \*Tx\) RegisterTypeface\(",
+    r"public void RegisterTypeface\(", r"public void registerTypeface\(",
+    r"func registerTypeface\(", r"^registerTypeface ::",
+    r"^let register_typeface ", r"^export function registerTypeface\(")
+
 # THE APP IDENTITY (docs/app-identity-plan.md): a transaction verb no
 # other sweep can see, so a binding shipping it wire-only strands
 # apps in that language while every other gate passes. Same base-name

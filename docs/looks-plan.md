@@ -314,7 +314,7 @@ guests/go/editor, tools/scenes/editor.steps, docs/editor-plan.md.
 - A word count, always, as a fourth label; the matches count keeps its
   place.
 - View > Writing Mode, a toggle: on, the buffer takes `text_scale` one step
-  up on the zoom ladder, `line_numbers` off, `max_width` 640 (the reading
+  up on the zoom ladder, `line_numbers` off, `max_width` 480 (the reading
   measure, §3.8), and the platform's own text face (`family` cleared,
   `monospaced` off); off restores the coding face, the gutter and the
   zoom. The choice is remembered in the app's prefs as the gutter's is.
@@ -322,6 +322,20 @@ guests/go/editor, tools/scenes/editor.steps, docs/editor-plan.md.
   accent` on the status bar, the word count's text, `menu_toggle
   "View>Writing Mode"` then `expect_face proportional`, the gutter off, and
   the measure read (§3.8).
+
+BUILT 2026-11-04: `register_typeface` (tx 98, apply 86) in the core and all
+nine bindings, the C floor's generated packer beside them; JetBrains Mono 2.304
+in guests/assets/fonts with its OFL; the buffer wears it on five lanes, Font…
+opens on it everywhere (iOS's remote picker marks the face once its descriptor
+names the family and face, since a variable font's resolved instance matches no
+style row); the status bar a filled accent strip with a word count; View >
+Writing Mode. Each platform's registration: CoreText's process scope; pango's
+font map; a kaya-held list on Compose that `family`, the family list and the
+picker read; on WinUI the file under the app's ms-appx root, drawn by XAML and
+merged into the DirectWrite collection every reader and the picker use. The
+find count no longer turns red on no match: red on the accent strip is
+unreadable, and the words "no matches" and "bad pattern" carry it, as VS Code's
+status bar does.
 
 ### §3.8 The reading measure (framework piece d)
 
@@ -335,6 +349,14 @@ full-width box; GTK `left-margin` and `right-margin` on the GtkTextView set
 from the allocation; WinUI the TextBox's padding set from its size. Read:
 `expect_measure textarea@<id> <width>`, the text column's drawn width off
 the toolkit, within 2 units.
+
+BUILT 2026-11-04 on five lanes, 0 lifting the measure on a textarea alone.
+`expect_measure` reads the column, its two gaps and the width it would have
+with no measure, and wants the smaller of the measure and that width,
+centred; the editor's Writing Mode reads it at 480 (§4). The SwiftUI measure
+forced to 0 watched red on the mac ("wanted a 480-unit column"). Compose's
+first cut hugged the field to its text (120 of 328): the column's box hands
+its minimum on now.
 
 ## §4 Choices the build settled
 
@@ -372,7 +394,11 @@ reader does not take it for a ruling:
 - The editor's writing face is the platform's own text face: the ruling
   named a coding face and said "a writing face" without naming one, and a
   second bundled font is weight the slice does not need. The reading
-  measure is 640 DIP, about 70 characters of the body size.
+  measure is 480 DIP, about 60 characters of the writing face a size up:
+  narrow enough to show inside the editor's 640-wide window, where a 640
+  measure would never take effect and the scene's read could not tell it
+  from none. On a phone the box is narrower than the measure, and the text
+  takes the whole box.
 - The reading measure rides `max_width`, in DIP, rather than a new prop in
   characters: the prop exists, its meaning (a cap, never a stretch) is the
   same, and a measure in characters would move with every face and scale.

@@ -3016,6 +3016,9 @@ pub enum TxOp {
     /// docs/capture-plan.md §5: a voice output's lifetime.
     CreateVoice { voice: VoiceId },
     ReleaseVoice { voice: VoiceId },
+    /// A font file the app ships, registered so `family` resolves to it
+    /// (docs/looks-plan.md §3.7).
+    RegisterTypeface(Blob),
     /// Declare one app-link route (docs/app-links-plan.md §4). The core
     /// keeps the table and does the one match; a malformed or repeated
     /// pattern faults here, like every other declaration refusal.
@@ -3362,6 +3365,7 @@ pub enum ApplyOp {
     /// docs/capture-plan.md §5: a voice output on the platform.
     CreateVoice(VoiceId),
     ReleaseVoice(VoiceId),
+    RegisterTypeface(Blob),
     /// The PLATFORM's track, counting from 1 in its own listing; 0 turns
     /// its captions off.
     SelectTrack { player: PlayerId, kind: TrackKind, index: u32 },

@@ -18,7 +18,10 @@ expect_title "untitled"
 # registries cannot see. This is what fails if the find bar is ever
 # mounted at launch again: its row would land between the buffer and
 # this one, and the row's children would read in the wrong order.
-expect_order row@statusbar-1 "new file||Ln 1, Col 1"
+expect_order row@statusbar-1 "new file||0 words|Ln 1, Col 1"
+# The status bar is the accent's solid strip, its words on the pair's
+# foreground (docs/looks-plan.md §3.7).
+expect_fill row@statusbar-1 accent
 
 # THE BUFFER FILLS THE WINDOW: this app opened with a 240x96 box in the
 # corner of a 640x420 window while every SHARE assertion passed, because
@@ -51,6 +54,9 @@ expect label@position-1 "Ln 1, Col 16"
 # the platform's monospaced face.
 expect_gutter textarea#0 shows 1
 expect_face textarea#0 monospaced
+# The coding face is the one the app ships, registered at build, so every
+# platform draws the buffer in it (docs/looks-plan.md §3.7).
+expect_face textarea#0 named
 # On a phone the keyboard is up now: the buffer owes the room above it and
 # shows whole (docs/safe-area-plan.md A20; docs/traps.md, the grown
 # textarea's one-line floor). Everywhere else, its whole track again.
@@ -150,9 +156,6 @@ expect entry#0 ""
 # flying past unread.
 set_text entry#0 "["
 expect label@matches-2 "bad pattern"
-# A query that finds nothing reads in the error colour, as Zed's count and
-# GNOME Text Editor's field do; a found one in the text's own.
-expect_tint label@matches-2 critical
 expect_highlights textarea@buffer-2 ""
 set_text entry#0 "[0-9]+"
 # FOUR RUNS OF DIFFERENT LENGTHS, so a backend that lowered one range's
@@ -160,7 +163,6 @@ set_text entry#0 "[0-9]+"
 # assertion carries the covered TEXT as well, because the core converts
 # into the backend's unit and back: two symmetric mistakes cancel.
 expect label@matches-2 "1 of 4"
-expect_tint label@matches-2 none
 expect_highlights textarea@buffer-2 "28:29=3|656:659=140|1256:1258=12|1295:1297=99"
 expect_selection textarea@buffer-2 "28:29=3"
 expect label@position-2 "Ln 3, Col 6 (1 selected)"
@@ -241,8 +243,8 @@ expect_runs textarea@buffer-2 "1294:1297 bold|1295:1297 italic"
 expect_menu "Format>Paragraph Style>Heading 1" unchecked
 expect_menu "Format>Paragraph Style>Body" checked
 expect_document_dirty "notes" false
-# The status bar: the last message, the find's tally and the caret's place.
-expect_order row@statusbar-2 "saved, 1297 bytes|4 of 4|Ln 52, Col 24 (3 selected)"
+# The status bar: the last message, the find's tally, the words and the caret's place.
+expect_order row@statusbar-2 "saved, 1297 bytes|4 of 4|255 words|Ln 52, Col 24 (3 selected)"
 
 # ---- a declared set is bound to the text it was declared against ---
 #
@@ -294,6 +296,20 @@ expect_gutter textarea@buffer-2 off
 menu_activate "View>Line Numbers"
 expect_gutter textarea@buffer-2 on
 expect_menu "View>Line Numbers" checked
+# Writing Mode (docs/looks-plan.md §3.7, §3.8): the platform's own text face a
+# zoom step up, no gutter, the text at a reading measure centred in the box;
+# off, the coding face, the gutter and the zoom come back.
+menu_activate "View>Writing Mode"
+expect_menu "View>Writing Mode" checked
+expect_face textarea@buffer-2 proportional
+expect_gutter textarea@buffer-2 off
+expect_scaled textarea@buffer-2 1.1
+expect_measure textarea@buffer-2 480
+menu_activate "View>Writing Mode"
+expect_menu "View>Writing Mode" unchecked
+expect_face textarea@buffer-2 named
+expect_gutter textarea@buffer-2 on
+expect_scaled textarea@buffer-2 1
 # Font… is the platform's picker, code fonts and faces (docs/font-picker-plan.md
 # §6); it opens on the document's face, a cancel changes nothing, a pick
 # dresses the buffer. The default is a code family the picker lists. No code

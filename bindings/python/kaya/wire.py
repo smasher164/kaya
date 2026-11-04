@@ -14,7 +14,7 @@ from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 # SPEC_HASH: the protocol fingerprint; the runtime asserts the loaded core agrees.
-SPEC_HASH = 0xc6027a0f8193144b
+SPEC_HASH = 0x585cc259da5c8c75
 VERSION = "0.0.0"
 
 VALUE_BOOL = 1
@@ -549,6 +549,7 @@ TX_SHOW_FONT_DIALOG = 94
 TX_LIST_FONT_FACES = 95
 TX_CREATE_VOICE = 96
 TX_RELEASE_VOICE = 97
+TX_REGISTER_TYPEFACE = 98
 APPLY_CREATE = 1
 APPLY_SET_PROP = 2
 APPLY_ADD_CHILD = 3
@@ -632,6 +633,7 @@ APPLY_PRESENT_FONT_DIALOG = 82
 APPLY_LIST_FONT_FACES = 83
 APPLY_CREATE_VOICE = 84
 APPLY_RELEASE_VOICE = 85
+APPLY_REGISTER_TYPEFACE = 86
 OCC_BUTTON_CLICKED = 1
 OCC_TEXT_CHANGED = 2
 OCC_TOGGLED = 3
@@ -1173,6 +1175,10 @@ def tx_create_voice(voice: int) -> bytes:
 def tx_release_voice(voice: int) -> bytes:
     """Stop and forget a voice output: what it still holds is dropped, a later write is refused, and no occurrence of its follows."""
     return record(TX_RELEASE_VOICE, struct.pack("<Q", voice))
+
+def tx_register_typeface(font: Value) -> bytes:
+    """Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless."""
+    return record(TX_REGISTER_TYPEFACE, _enc.value(font))
 
 
 def tx_set_text(widget_id: int, text: str) -> bytes:

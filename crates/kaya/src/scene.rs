@@ -874,6 +874,7 @@ fn undo_verdict(op: &TxOp) -> UndoVerdict {
         TxOp::WatchCaptureDevices { .. } => UndoVerdict::Refused("watch_capture_devices"),
         TxOp::CreateVoice { .. } => UndoVerdict::Refused("create_voice"),
         TxOp::ReleaseVoice { .. } => UndoVerdict::Refused("release_voice"),
+        TxOp::RegisterTypeface(_) => UndoVerdict::Refused("register_typeface"),
         TxOp::ListFontFamilies => UndoVerdict::Refused("list_font_families"),
         TxOp::ShowFontDialog(_) => UndoVerdict::Refused("show_font_dialog"),
         TxOp::ListFontFaces { .. } => UndoVerdict::Refused("list_font_faces"),
@@ -1785,9 +1786,15 @@ fn check_prop(kind: WidgetKind, prop: Prop) {
         // A slider takes a widest width too, its grown track capped
         // (docs/media-player-plan.md M16 (17)); a label wraps under it and a
         // container is bounded by it (M20 (2)).
+        // A textarea's is its reading measure (docs/looks-plan.md §3.8).
         Prop::MaxWidth => matches!(
             kind,
-            WidgetKind::Image | WidgetKind::Slider | WidgetKind::Label | WidgetKind::Row | WidgetKind::Column
+            WidgetKind::Image
+                | WidgetKind::Slider
+                | WidgetKind::Label
+                | WidgetKind::Row
+                | WidgetKind::Column
+                | WidgetKind::Textarea
         ),
         Prop::MaxHeight => kind == WidgetKind::Image,
         Prop::Titled => kind == WidgetKind::Button,
@@ -3250,7 +3257,13 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
             panic!("kaya: {prop:?} on {kind:?}: {why}");
         }
     }
-    if let (Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) = (prop, value) {
+    // A textarea's reading measure is lifted by 0 (docs/looks-plan.md §3.8).
+    if let (WidgetKind::Textarea, Prop::MaxWidth, Value::F64(bound)) = (kind, prop, value) {
+        assert!(
+            bound.is_finite() && *bound >= 0.0,
+            "kaya: a textarea's max_width is its reading measure in points, positive, or 0 for none; got {bound}"
+        );
+    } else if let (Prop::MaxWidth | Prop::MaxHeight, Value::F64(bound)) = (prop, value) {
         assert!(
             bound.is_finite() && *bound > 0.0,
             "kaya: {prop:?} is a bound in points, a positive number, got {bound}"
@@ -4776,6 +4789,9 @@ impl Scene {
                 TxOp::WatchCaptureDevices { on } => out.push(ApplyOp::WatchCaptureDevices(on)),
                 TxOp::CreateVoice { voice } => self.voices.create(voice, &mut out),
                 TxOp::ReleaseVoice { voice } => self.voices.release(voice, &mut out),
+                // THE BYTES ARE NOT INSPECTED HERE, the brand typeface's rule:
+                // what family a file carries is the platform's answer.
+                TxOp::RegisterTypeface(font) => out.push(ApplyOp::RegisterTypeface(font)),
                 TxOp::ListFontFamilies => out.push(ApplyOp::ListFontFamilies),
                 TxOp::ListFontFaces { family } => out.push(ApplyOp::ListFontFaces { family }),
                 TxOp::ShowFontDialog(mut spec) => {

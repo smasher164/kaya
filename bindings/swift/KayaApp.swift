@@ -6597,6 +6597,11 @@ public final class KayaAppTx {
             font.map { .blob(kayaRegisterBlob($0)) } ?? .str(""))
     }
 
+    /// Register a font FILE the app ships, so a `family` naming its family resolves on every platform (docs/looks-plan.md §3.7).
+    public func registerTypeface(_ font: KayaAsset) {
+        tx.registerTypeface(.blob(font.blob()))
+    }
+
     /// The ASSET form of the font slot: the same call, with the font NAMED
     /// rather than read. THE BYTES NEVER ENTER THE GUEST'S HEAP.
     public func brandTypeface(

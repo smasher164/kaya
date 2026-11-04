@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xc6027a0f8193144b
+	SpecHash uint64 = 0x585cc259da5c8c75
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -548,6 +548,7 @@ const (
 	txListFontFaces = 95
 	txCreateVoice = 96
 	txReleaseVoice = 97
+	txRegisterTypeface = 98
 	applyCreate = 1
 	applySetProp = 2
 	applyAddChild = 3
@@ -631,6 +632,7 @@ const (
 	applyListFontFaces = 83
 	applyCreateVoice = 84
 	applyReleaseVoice = 85
+	applyRegisterTypeface = 86
 	occButtonClicked = 1
 	occTextChanged = 2
 	occToggled = 3
@@ -2104,6 +2106,13 @@ func TxCreateVoice(voice uint64) []byte {
 func TxReleaseVoice(voice uint64) []byte {
 	b := beginRecord(txReleaseVoice)
 	b = binary.LittleEndian.AppendUint64(b, voice)
+	return endRecord(b)
+}
+
+// TxRegisterTypeface: Register a font FILE the app ships (a Blob) with this process's text system, so a `family` prop naming its family resolves on every platform (docs/looks-plan.md §3.7). It changes nothing else: the brand typeface is set_brand_typeface. Any time, any number of fonts; a second registration of the same bytes is harmless.
+func TxRegisterTypeface(font any) []byte {
+	b := beginRecord(txRegisterTypeface)
+	b = encodeValue(b, font)
 	return endRecord(b)
 }
 
