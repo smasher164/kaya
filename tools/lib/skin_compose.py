@@ -127,6 +127,9 @@ CALLS = [
     ("the plain trim gives both sides back (M20)",
      "layout((placeable.width - 2 * pad).coerceAtLeast(0), placeable.height) { placeable.place(-pad, 0) }"),
     ("the container arm wears its skin", ".then(kayaFilledSurface(node)).then(kayaInsetPadding(node))"),
+    # docs/looks-plan.md §3.6: a scaled face scales its role's line height.
+    ("a scaled face scales its line height",
+     "if (base.lineHeight.isSpecified) style = style.copy(lineHeight = base.lineHeight * node.textScale.toFloat())"),
     ("the phone dock's rhythm (M18)", "val KAYA_DOCK_PAD_Y = 8.dp\nval KAYA_DOCK_LINE = 2.dp"),
     ("a table row's surface reaches the segment's edge (M19)",
      "val groundOut = padX\nval grounds = measurables.subList(nFolded + cols + 1, nFolded + cols + 1 + nRows)"),

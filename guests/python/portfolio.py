@@ -569,7 +569,9 @@ with app.window(title="portfolio", width=900, height=600):
                     # A row hugs, so the pill is as wide as its text.
                     with kaya.row():
                         with kaya.column(inset=6, filled_color=hero_color) as pill:
-                            pill.a11y_id("day_pill")
+                            # A column across a row maximizes its height
+                            # unless it says otherwise (DESIGN.md's breadth ruling).
+                            pill.a11y_id("day_pill").fill(False)
                             kaya.label(bind=day_text).a11y_id("day")  # label#1
                 kaya.label(bind=book_size)  # label#2
                 # A drawing is an image to every accessibility tree, and an

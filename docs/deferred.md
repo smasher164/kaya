@@ -17269,3 +17269,21 @@ KEY: kayaSyncMacMenuBar, kayaOwnedMenuItems, dress, duplicate mac menus, KAYA_WI
   File>Save carries SymbolDone, which an AppKit menu draws as a check mark
   beside "Save", where it reads as a checked toggle. Closing this means
   choosing (a) or (b), building it, and a menu-shot capture of the bar.
+
+
+## OPEN — a GTK table's third stamped row draws its cell's pill bare (measured 2026-11-04, docs/looks-plan.md §3.6)
+
+KEY: portfolio change pill, column@change, filled color table cell, GTK stamped table row, INSET_CLASS, GROUND_CLASS
+- The portfolio's review captures show the brokerage table's third row (VTI)
+  with its change pill neither filled nor inset on GTK, x11 and wayland, light
+  and dark, while the two rows above it and both rows of the next table are
+  right; after the tick and the rally, when every row has been patched and the
+  table re-sorted, the same row is right. macOS, iOS, WinUI and Compose draw it
+  right. A read added by hand, `expect_fill_color column@change[brokerage.VTI]`,
+  answered "fill FFFFFF on black (ink 333338)": the widget the read found
+  carries neither the colour fill's class nor the inset's, so the props reached
+  another widget or none. Closing this means finding which widget the third
+  row's stamped pill props are applied to, and a scene read of a table cell's
+  fill that every lane can make (docs/traps.md, "A fill read inside a WinUI
+  ListView item", is the other half of that read).
+

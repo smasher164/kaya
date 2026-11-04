@@ -22586,7 +22586,12 @@ internal fun kayaNodeStyle(node: KayaNode, base: androidx.compose.ui.text.TextSt
         ?: if (node.monospaced) FontFamily.Monospace else null
     var style = base
     if (family != null) style = style.copy(fontFamily = family)
-    if (node.textScale != 1.0) style = style.copy(fontSize = size * node.textScale.toFloat())
+    if (node.textScale != 1.0) {
+        style = style.copy(fontSize = size * node.textScale.toFloat())
+        // A role's line height is in sp too: unscaled, the lines of a wrapped
+        // scaled heading overlap (docs/looks-plan.md §3.6, the portfolio's total).
+        if (base.lineHeight.isSpecified) style = style.copy(lineHeight = base.lineHeight * node.textScale.toFloat())
+    }
     return kayaNodeFaceStyle(node, style)
 }
 
