@@ -24469,9 +24469,23 @@ private func kayaRGB(_ rgb: UInt32) -> Color {
     node.activatable && node.selected ? 0 : node.filled
 }
 
+/// Whether a node's nearest ground is a picture (docs/looks-plan.md Q-L1).
+@MainActor func kayaOnPicture(_ id: UInt64) -> Bool {
+    var holder = kayaScene.parents[id]
+    while let at = holder {
+        if kayaScene.nodes[at]?.ground == groundImage { return true }
+        holder = kayaScene.parents[at]
+    }
+    return false
+}
+
 struct KayaFilledSurface: ViewModifier {
     let tint: Int64
     var packed: Int64 = 0
+    /// OVER A PICTURE A FILL IS OPAQUE (docs/looks-plan.md Q-L1, RULED C): the
+    /// platform's neutral fill is translucent, which shows the picture through
+    /// the bubble, so it is composed over the page colour first.
+    var onPicture = false
 
     func body(content: Content) -> some View {
         if tint == 0 {
@@ -24493,10 +24507,16 @@ struct KayaFilledSurface: ViewModifier {
                 }
         } else {
             let pair = kayaTintPair(tint, packed: packed)
+            let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
             content
                 .foregroundStyle(pair.fore)
                 .environment(\.kayaInFill, true)
-                .background(pair.fill, in: RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+                .background {
+                    ZStack {
+                        if onPicture { shape.fill(kayaWindowGround()) }
+                        shape.fill(pair.fill)
+                    }
+                }
         }
     }
 }
@@ -25052,6 +25072,8 @@ struct KayaLabelTint: ViewModifier {
         }
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let ground = measuredGround.map { $0 + [1] } ?? rgba(.windowBackgroundColor)
+        // Beside a fill over a picture is the picture, so its page is resolved.
+        let resolvedPage = rgba(.windowBackgroundColor)
         let neutral: NSColor
         if #available(macOS 14, *) { neutral = .secondarySystemFill } else { neutral = .quaternaryLabelColor }
         var accent = rgba(.controlAccentColor)
@@ -25078,6 +25100,7 @@ struct KayaLabelTint: ViewModifier {
         }
         let dark = traits.userInterfaceStyle == .dark
         let ground = rgba(.systemBackground)
+        let resolvedPage = ground
         var accent = rgba(.tintColor)
         let others = [("success", rgba(.systemGreen)), ("warning", rgba(.systemOrange)),
                       ("critical", rgba(.systemRed)), ("neutral", rgba(.secondarySystemFill))]
@@ -25088,9 +25111,8 @@ struct KayaLabelTint: ViewModifier {
         let rgb = dark ? brand[6] : brand[1]
         accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255, 1]
     }
-    // UNDER A PICTURE the fills compose over the picture's own colour at the
-    // probe, never the page (docs/looks-plan.md §3.5: the chat thread's bubbles
-    // over its wallpaper).
+    // UNDER A PICTURE the bare ground is the picture's own colour at the probe,
+    // while a fill is opaque over the page (docs/looks-plan.md Q-L1, RULED C).
     var holder = kayaScene.parents[node.id]
     while let id = holder, kayaScene.nodes[id]?.ground != groundImage { holder = kayaScene.parents[id] }
     var art: [Double]? = nil
@@ -25098,8 +25120,9 @@ struct KayaLabelTint: ViewModifier {
         art = kayaPictureAt(pictured, CGPoint(x: probe.midX - behind.minX, y: probe.midY - behind.minY), behind.size)
     }
     let under: [Double] = art.map { $0 + [1] } ?? ground
+    let page = holder == nil ? ground : resolvedPage
     func over(_ c: [Double]) -> [Double] {
-        (0..<3).map { c[$0] * c[3] + under[$0] * (1 - c[3]) }
+        (0..<3).map { c[$0] * c[3] + page[$0] * (1 - c[3]) }
     }
     // The capture carries no window background where nothing was drawn, so
     // it is composited over the resolved ground, as the screen composites it.
@@ -25154,10 +25177,13 @@ struct KayaLabelTint: ViewModifier {
         let l = c.map { $0 <= 0.04045 ? $0 / 12.92 : pow(($0 + 0.055) / 1.055, 2.4) }
         return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
     }
-    // A fill the candidates name within a dozen units a channel is that fill,
-    // whatever its luminance (an accent bubble over a pale wallpaper read as
-    // overlay on Compose, 2026-11-04).
-    let named = ranked[0].2 <= 3 * pow(12.0 / 255, 2)
+    // A fill the candidates name within six units in every channel is that
+    // fill, whatever its luminance (an accent bubble over a pale wallpaper read
+    // as overlay on Compose, 2026-11-04). Six and not a dozen: an opaque dark
+    // neutral over a picture (docs/looks-plan.md Q-L1) sits nine units from the
+    // dark overlay, which keeps a trace of the picture's hue (30272B against
+    // 303030, the mac music_artist leg).
+    let named = (0..<3).allSatisfy { abs(ranked[0].1[$0] - px[$0]) <= 6.0 / 255 }
     if let art, !named {
         let (mine, theirs) = (lum(px), lum(art))
         if 1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2 {
@@ -30596,7 +30622,7 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .modifier(KayaInsetPadding(node: node))
-            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops))
+            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, onPicture: kayaOnPicture(node.id)))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
             .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))

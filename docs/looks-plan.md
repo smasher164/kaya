@@ -411,7 +411,7 @@ Anything that turns out to need a design decision beyond §1 is written here
 as a question with options and a recommendation, and the piece parks while
 the rest continues.
 
-### Q-L1: a wallpaper in the dark appearance (OPEN, 2026-11-04)
+### Q-L1: a wallpaper in the dark appearance (RULED 2026-11-04: C)
 
 The chat review captures show it. The wallpapers are pale (the avatar's
 colours moved most of the way toward white), and in the dark appearance the
@@ -437,7 +437,29 @@ it does in the dark.
   page colour), so the bubbles read in both appearances; the wallpaper stays
   bright in a dark window.
 
-Recommendation: A. Every platform already carries an image in two
-appearances, the picture is designed for each mode rather than filtered, and
-nothing else that sits on an image ground changes. The chat slice is
-committed as it stands in the light appearance; the dark half waits on this.
+RULED C (the maintainer, 2026-11-04: "yeah let's do C"). A rejected: "if the
+user set a wallpaper for example, then A wouldn't be viable", since a picture
+the user chose has no dark twin. B rejected: "it wouldn't just affect the chat
+wallpaper but also other apps that have stuff like album art. im not sure how
+i feel about that". The bubbles were see-through because the platforms'
+neutral fills are translucent on macOS, iOS, GTK and WinUI, which is invisible
+over a plain page; Compose's is opaque. A later per-ground opt-in dim is a
+note, not work.
+
+BUILT 2026-11-04: a fill whose nearest ground is a picture is composed over the
+page colour of the current appearance: SwiftUI draws the window ground under
+the fill's shape, GTK's sheet gives a filled container under a
+`kaya-picture-ground` the page as its background colour and the fill as an
+image over it, and WinUI's neutral takes Fluent's solid layer
+(SolidBackgroundFillColorQuarternaryBrush) once it finds a picture ground
+above it; Compose's fills were already opaque. The fill readers on SwiftUI,
+Compose and WinUI compose the tints over the page while the bare ground there
+stays the picture. Two readings needed telling apart in the dark, where an
+opaque neutral and the overlay panel look alike: SwiftUI names a fill within
+six units a channel rather than a dozen (its overlay keeps the picture's hue,
+30272B against 303030), and WinUI tells its overlay by the dark theme the panel
+requests (its acrylic falls back to the same 2C2C2C as the solid layer). The
+mac chat leg in the dark read the translucent bubble as faint with the
+underlay cut (watched red), and the windows chat leg read it the same way
+before the ground registered ahead of the picture's decode. GTK's reader
+snapshots the container alone, so it cannot see what is behind a fill.

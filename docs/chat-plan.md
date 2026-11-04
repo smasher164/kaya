@@ -185,6 +185,9 @@ and WhatsApp let a thread wear one:
   scene reads its fill. The rows above the scroll (the search, the match
   count, the connection label) stay off the picture, and the pending
   bubble's "Sending…" caption is inside its fill.
+- In both appearances the bubbles are opaque over the wallpaper: a fill over
+  a picture is composed over the page colour first (docs/looks-plan.md Q-L1,
+  ruled C), since the platforms' neutral fills are translucent.
 - The root's refusal is the guard: a bare caption mounted inside the
   wallpaper column dies at declare time with the Y3 sentence, watched red on
   the mac chat leg (four refusal lines, the guest restored byte for byte).

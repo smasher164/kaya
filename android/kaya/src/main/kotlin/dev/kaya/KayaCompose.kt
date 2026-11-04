@@ -8922,10 +8922,13 @@ object KayaCompose {
                 (y - origin.y - holderBox.top).toFloat(), holderBox.width().toFloat(), holderBox.height().toFloat())
         }
         val under = art?.let { a -> IntArray(3) { Math.round(a[it] * 255).toInt() } } ?: rgb(ground)
+        // A fill is opaque over the page even over a picture (docs/looks-plan.md
+        // Q-L1, RULED C); the bare ground there is the picture.
+        val page = rgb(ground)
         fun over(c: Int): IntArray {
             val a = ((c ushr 24) and 0xFF) / 255.0
             val f = rgb(c)
-            return IntArray(3) { Math.round(f[it] * a + under[it] * (1 - a)).toInt() }
+            return IntArray(3) { Math.round(f[it] * a + page[it] * (1 - a)).toInt() }
         }
         val names = listOf("accent", "success", "warning", "critical", "neutral")
         val fills = kayaTintFills

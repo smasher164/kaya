@@ -1058,7 +1058,7 @@ def fill_reads(swiftui_text):
     if re.search(r"\.filled\b", reader):
         bad.append(f"{SWIFTUI}: kayaFillRead reads the node's `filled` — the verdict must come "
                    "from the pixels, not the prop it is judging")
-    filled_arm = ".modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops))"
+    filled_arm = ".modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, onPicture: kayaOnPicture(node.id)))"
     if filled_arm not in body:
         bad.append(f"{SWIFTUI}: the row/column arm no longer applies KayaFilledSurface")
     return bad

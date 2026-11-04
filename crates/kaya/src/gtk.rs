@@ -8917,6 +8917,11 @@ button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
 .kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
+.kaya-picture-ground .kaya-filled.card { background-color: var(--window-bg-color); background-image: image(var(--card-bg-color)); }
+.kaya-picture-ground .kaya-filled.kaya-tint-accent { background-color: var(--window-bg-color); background-image: image(var(--accent-bg-color)); }
+.kaya-picture-ground .kaya-filled.kaya-tint-success { background-color: var(--window-bg-color); background-image: image(var(--success-bg-color)); }
+.kaya-picture-ground .kaya-filled.kaya-tint-warning { background-color: var(--window-bg-color); background-image: image(var(--warning-bg-color)); }
+.kaya-picture-ground .kaya-filled.kaya-tint-critical { background-color: var(--window-bg-color); background-image: image(var(--error-bg-color)); }
 ";
 
 /// THE SKIN (docs/styling-pass-plan.md §3's GTK row): grounds, image shapes,
@@ -10066,6 +10071,8 @@ fn symbol_button_classes(button: &gtk4::Button) {
 }
 
 const FILLED_CLASS: &str = "kaya-filled";
+/// A container drawing a picture ground (docs/looks-plan.md Q-L1).
+const PICTURE_GROUND_CLASS: &str = "kaya-picture-ground";
 const PLAIN_CLASS: &str = "kaya-plain";
 const FILLED_PAD_CLASS: &str = "kaya-filled-pad";
 const ACTIVATABLE_PAD_CLASS: &str = "kaya-activatable-pad";
@@ -10151,6 +10158,12 @@ fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl
             }
         }
         image_source(picture, &bytes);
+    }
+    // docs/looks-plan.md Q-L1: a fill under this container sits on the page.
+    if ground.kind == crate::wire::GROUND_IMAGE {
+        widget.add_css_class(PICTURE_GROUND_CLASS);
+    } else {
+        widget.remove_css_class(PICTURE_GROUND_CLASS);
     }
     let class = format!("{GROUND_CLASS}{id}");
     if ground.kind == crate::wire::GROUND_NONE && !ground.color_fill {

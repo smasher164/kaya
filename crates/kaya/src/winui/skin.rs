@@ -334,6 +334,31 @@ pub(super) fn paint_color_fill_on(element: &UIElement, brush: &Brush) -> windows
     Ok(())
 }
 
+thread_local! {
+    /// The containers drawing a picture ground, for a fill to find its own
+    /// above it (docs/looks-plan.md Q-L1).
+    static PICTURE_GROUNDS: std::cell::RefCell<Vec<UIElement>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Whether a picture ground is drawn behind this element.
+pub(super) fn on_picture(element: &UIElement) -> bool {
+    use bindings::Microsoft::UI::Xaml::Media::VisualTreeHelper;
+    let grounds = PICTURE_GROUNDS.with_borrow(|g| g.clone());
+    if grounds.is_empty() {
+        return false;
+    }
+    let mut node = VisualTreeHelper::GetParent(element).ok();
+    while let Some(n) = node {
+        if let Ok(e) = n.cast::<UIElement>() {
+            if grounds.contains(&e) {
+                return true;
+            }
+        }
+        node = VisualTreeHelper::GetParent(&n).ok();
+    }
+    false
+}
+
 fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let Some(grid) = container(core, id) else { return Ok(()) };
     let Some(ground) = SKIN.with_borrow(|s| s.grounds.get(&id.0).cloned()) else { return Ok(()) };
@@ -359,6 +384,16 @@ fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
         }))?;
     }
     let fe: FrameworkElement = grid.cast()?;
+    // Registered before the picture decodes: a bubble's Loaded can come first
+    // (the windows chat leg read a translucent bubble, 2026-11-04).
+    if ground.kind == crate::wire::GROUND_IMAGE {
+        let element: UIElement = grid.cast()?;
+        PICTURE_GROUNDS.with_borrow_mut(|g| {
+            if !g.contains(&element) {
+                g.push(element);
+            }
+        });
+    }
     match ground.kind {
         k if k == crate::wire::GROUND_GRADIENT => match ground.packed {
             Some(packed) => grid.SetBackground(&gradient_brush(dark_of(core, Some(&fe)), packed)?),

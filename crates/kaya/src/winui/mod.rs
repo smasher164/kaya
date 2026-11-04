@@ -19061,6 +19061,19 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     } else {
                         grid.SetStyle(&filled_style(tint)?)?;
                     }
+                    if tint == 5 {
+                        // OVER A PICTURE THE NEUTRAL FILL IS OPAQUE
+                        // (docs/looks-plan.md Q-L1, RULED C): Fluent's card fill
+                        // is a translucent white, so the bubble takes Fluent's
+                        // own solid layer once it finds a picture behind it.
+                        let held = grid.clone();
+                        grid.Loaded(&RoutedEventHandler::new(move |_, _| {
+                            if skin::on_picture(&held.cast()?) {
+                                held.SetStyle(&tinted_style(5, "SolidBackgroundFillColorQuarternaryBrush")?)?;
+                            }
+                            Ok(())
+                        }))?;
+                    }
                     skin::repaint_selected(id)?;
                     stamp_container_padding(core, id)?;
                 }
@@ -28747,12 +28760,16 @@ impl crate::harness::Stage for WinUiStage {
                     }
                 }
             }
+            // A fill is opaque over the page even over a picture
+            // (docs/looks-plan.md Q-L1, RULED C); the bare ground there is the
+            // picture.
+            let page = ground;
             let ground = art.map_or(ground, |a| [a[0] * 255.0, a[1] * 255.0, a[2] * 255.0, ground[3]]);
             let mut candidates = vec![("none", [ground[0], ground[1], ground[2]])];
             for (name, tint) in [("accent", 1), ("success", 2), ("warning", 3), ("critical", 4), ("neutral", 5)] {
                 let c = resolve(tint_brush_key(tint))?;
                 let a = c[3] / 255.0;
-                let over = |k: usize| c[k] * a + ground[k] * (1.0 - a);
+                let over = |k: usize| c[k] * a + page[k] * (1.0 - a);
                 candidates.push((name, [over(0), over(1), over(2)]));
             }
             // The skin's surfaces (docs/styling-pass-plan.md Y4): the item's
@@ -28787,6 +28804,23 @@ impl crate::harness::Stage for WinUiStage {
             // fill, whatever its luminance (an accent bubble over a pale
             // wallpaper read as overlay on Compose, 2026-11-04).
             let named = dist(&candidates[0].1) <= 3.0 * 12.0 * 12.0;
+            // In the dark, Fluent's acrylic over media falls back to the same
+            // 2C2C2C as its solid layer under an opaque neutral over a picture
+            // (docs/looks-plan.md Q-L1), so the panel is told by what it asks
+            // for: the overlay requests the dark theme on its own element.
+            let panel_dark = core.widgets.get(&WidgetId(target_widget_id(core, t).unwrap_or(0)))
+                .and_then(|w| w.inner_element().ok())
+                .and_then(|e: UIElement| e.cast::<FrameworkElement>().ok())
+                .is_some_and(|fe| fe.RequestedTheme().is_ok_and(|th| th == ElementTheme::Dark));
+            if let (Some(art), true) = (art, panel_dark) {
+                let px = got.map(|v| v / 255.0);
+                let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
+                return Ok(format!(
+                    "overlay (the panel asks for the dark theme over the picture; sampled {} at ({x},{y}), luminance {own:.3} over the picture's {} at {theirs:.3})",
+                    hex(&got),
+                    skin::read::hex(art)
+                ));
+            }
             if let (Some(art), false) = (art, named) {
                 let px = got.map(|v| v / 255.0);
                 let (own, theirs) = (skin::read::lum(px), skin::read::lum(art));
