@@ -1136,6 +1136,12 @@ pub enum Step {
     /// right, within [`GROUND_COLOR_TOLERANCE`] of the colour for the mode the
     /// window reads (docs/media-player-plan.md M16 (35)).
     ExpectGroundColor(Target, u32, u32),
+    /// `expect_fill_color <container> "RRGGBB on white|black"`: a colour
+    /// fill's drawn surface at `expect_fill`'s probe within
+    /// [`GROUND_COLOR_TOLERANCE`] of the colour the app chose, and the text on
+    /// it white or black, read off the ink in the container's frame
+    /// (docs/looks-plan.md §3.2).
+    ExpectFillColor(Target, u32, bool),
     /// Drive the REAL activation path of the menu item at the `>`-joined
     /// label path — resolved wherever the item surfaced: the bar (or its
     /// phone overflow), or the OPEN context menu after a context_open. The
@@ -1407,6 +1413,7 @@ impl Step {
             | Step::ExpectTextLines(t, _, _)
             | Step::ExpectWidth(t, _)
             | Step::ExpectGroundColor(t, _, _)
+            | Step::ExpectFillColor(t, _, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
@@ -1770,6 +1777,7 @@ impl Step {
             Step::ExpectGap { .. } => true,
             Step::ExpectNoOverlap => true,
             Step::ExpectGroundColor { .. } => true,
+            Step::ExpectFillColor { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
             Step::MenuOpen { .. } => false,
@@ -1841,6 +1849,18 @@ pub(crate) fn lightness(c: [f64; 3]) -> f64 {
     };
     let y = 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
     if y > 216.0 / 24389.0 { 116.0 * y.cbrt() - 16.0 } else { y * 24389.0 / 27.0 }
+}
+
+/// expect_fill_color's ink scan stays this far inside the container's frame
+/// (docs/looks-plan.md §3.2): the rounded corners (radius 12) show the page
+/// through the frame's rectangle, and a dark page read as black ink on an
+/// amber fill (measured 2026-11-04); the text starts at the fill's inset.
+pub(crate) const FILL_INK_INSET: f64 = 10.0;
+
+/// expect_fill_color's text reading: ink at or above CIELAB L* 50 is white
+/// text, below it black (docs/looks-plan.md §3.2).
+pub(crate) fn ink_is_light(rgb: u32) -> bool {
+    lightness([((rgb >> 16) & 0xFF) as f64, ((rgb >> 8) & 0xFF) as f64, (rgb & 0xFF) as f64]) >= 50.0
 }
 
 /// expect_fill's hover floor: None when `sample` stands HOVER_MIN_LIGHTNESS
@@ -3291,6 +3311,11 @@ pub trait Stage: Send + 'static {
     /// A container ground's drawn top as 0xRRGGBB and whether the window reads
     /// dark, off the window's pixels (docs/media-player-plan.md M16 (35)).
     fn ground_top(&self, target: Target) -> Result<(u32, bool), String>;
+    /// A colour fill's drawn surface at `expect_fill`'s probe (4 units inside
+    /// the right edge at mid-height) and the ink on it (the pixel in the
+    /// container's frame farthest from that surface), each 0xRRGGBB off the
+    /// window's pixels (docs/looks-plan.md §3.2).
+    fn fill_color(&self, target: Target) -> Result<(u32, u32), String>;
     /// The scroll viewport's overflow, read from the toolkit after forcing
     /// pending layout: the empty string when the content exceeds the
     /// viewport, otherwise a short platform-flavored description of the two
@@ -5107,6 +5132,26 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_ground_color wants six hex digits per colour: {line:?}"));
                 };
                 Step::ExpectGroundColor(parse_target(target)?, light, dark)
+            }
+            "expect_fill_color" => {
+                let (target, text) = rest
+                    .split_once(char::is_whitespace)
+                    .ok_or_else(|| format!("expect_fill_color wants a container and \"RRGGBB on white|black\": {line:?}"))?;
+                let spec = parse_string(text)?;
+                let words: Vec<&str> = spec.split_whitespace().collect();
+                let [fill, "on", on] = words[..] else {
+                    return Err(format!("expect_fill_color wants \"RRGGBB on white|black\": {line:?}"));
+                };
+                let fill = (fill.len() == 6)
+                    .then(|| u32::from_str_radix(fill, 16).ok())
+                    .flatten()
+                    .ok_or_else(|| format!("expect_fill_color wants six hex digits for the fill: {line:?}"))?;
+                let white = match on {
+                    "white" => true,
+                    "black" => false,
+                    _ => return Err(format!("expect_fill_color's text is white or black: {line:?}")),
+                };
+                Step::ExpectFillColor(parse_target(target)?, fill, white)
             }
             "expect_no_overlap" => {
                 if !rest.trim().is_empty() {
@@ -8804,6 +8849,27 @@ fn run_with_log(
                     Err(why) => Err(format!("{} ground top unread: {why}", target_spec(t))),
                 }
             })),
+            Step::ExpectFillColor(t, fill, white) => Some(poll(|| {
+                let want_text = if *white { "white" } else { "black" };
+                match stage.fill_color(*t) {
+                    Ok((got, ink)) => {
+                        let near = (0..3).all(|k| {
+                            let (a, b) = ((got >> (8 * k)) & 0xFF, (fill >> (8 * k)) & 0xFF);
+                            a.abs_diff(b) <= GROUND_COLOR_TOLERANCE
+                        });
+                        let got_text = if ink_is_light(ink) { "white" } else { "black" };
+                        if near && got_text == want_text {
+                            Ok(format!("{} fill color \"{fill:06X} on {want_text}\"", target_spec(t)))
+                        } else {
+                            Err(format!(
+                                "{} reads fill {got:06X} on {got_text} (ink {ink:06X}), wanted {fill:06X} on {want_text}",
+                                target_spec(t)
+                            ))
+                        }
+                    }
+                    Err(why) => Err(format!("{} fill unread: {why}", target_spec(t))),
+                }
+            })),
             Step::ExpectNoOverlap => Some(poll(|| {
                 let frames = stage.laid_out_frames();
                 match first_overlap(&frames, 1.0) {
@@ -12112,6 +12178,9 @@ mod tests {
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
         }
+        fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
+            Ok((0xF2B01E, 0x000000))
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -13582,6 +13651,9 @@ mod tests {
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
         }
+        fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
+            Ok((0xF2B01E, 0x000000))
+        }
         fn progress_state(&self, _: Target) -> String {
             String::new()
         }
@@ -14167,6 +14239,9 @@ mod tests {
         }
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
+        }
+        fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
+            Ok((0xF2B01E, 0x000000))
         }
         fn progress_state(&self, _: Target) -> String {
             String::new()

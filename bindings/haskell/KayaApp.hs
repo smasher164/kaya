@@ -3450,6 +3450,10 @@ data Attr (c :: WClass) where
   Align :: Align -> Attr 'BoxW
   -- | This container filled with a platform tint. Containers only.
   Filled :: Tint -> Attr 'BoxW
+  -- | A fill in the app's own colour, kaya choosing the text colour on it
+  -- (docs/looks-plan.md §3.2).
+  FilledColor :: Color -> Attr 'BoxW
+  FilledColorBound :: Signal Color -> Attr 'BoxW
   -- | This row or column's ground (docs\/styling-pass-plan.md Y2, Y3): a
   -- gradient from the colour, clamped by the core, into the platform's
   -- window ground, or a picture covering it, text over which sits in a
@@ -3647,6 +3651,12 @@ applyAttr (GroundGradient c) (Widget n) = do
 applyAttr (GroundGradientBound (Signal s)) (Widget n) = do
   emitB (W.txSetGround n (fromIntegral W.groundGradient))
   emitB (W.txBindColor n s)
+applyAttr (FilledColor c) (Widget n) = do
+  emitB (W.txSetFilled n (fromIntegral W.tintColor))
+  emitB (W.txSetColor n (fromIntegral c.r) (fromIntegral c.g) (fromIntegral c.b) (fromIntegral c.a))
+applyAttr (FilledColorBound (Signal s)) (Widget n) = do
+  emitB (W.txSetFilled n (fromIntegral W.tintColor))
+  emitB (W.txBindColor n s)
 applyAttr (GroundImage bytes) (Widget n) = do
   emitB (W.txSetGround n (fromIntegral W.groundImage))
   emitBIO (W.txSetSource n <$> registerBlob bytes)
@@ -3725,6 +3735,10 @@ applyAttr (DropTarget ops) w = setDropTarget w ops
 -- that declares no ground.
 groundT :: Node -> Word32 -> Tpl () -> Tpl ()
 groundT (Node n) kind source = emitT (W.txSetGround n (fromIntegral kind)) >> source
+
+-- | A colour fill's two records (docs/looks-plan.md §3.2).
+filledColorT :: Node -> Tpl () -> Tpl ()
+filledColorT (Node n) source = emitT (W.txSetFilled n (fromIntegral W.tintColor)) >> source
 
 withAttrs :: [Attr c] -> Build Widget -> Build Widget
 withAttrs attrs act = do
@@ -5118,6 +5132,11 @@ data TplAttr where
   TplGroundGradient :: Color -> TplAttr
   TplGroundGradientBound :: Signal Color -> TplAttr
   TplGroundGradientField :: KField Color -> TplAttr
+  -- | docs/looks-plan.md §3.2: a stamped container filled with one colour,
+  -- or each copy's own from a Color field.
+  TplFilledColor :: Color -> TplAttr
+  TplFilledColorBound :: Signal Color -> TplAttr
+  TplFilledColorField :: KField Color -> TplAttr
   TplGroundImage :: BS.ByteString -> TplAttr
   TplGroundImageBound :: Signal BS.ByteString -> TplAttr
   TplGroundImageField :: KField BS.ByteString -> TplAttr
@@ -5179,6 +5198,9 @@ applyTplAttr (TplFilled t) n = setFilledWire n (tintWire t)
 applyTplAttr (TplGroundGradient c) n = groundT n W.groundGradient (bindColorSource n c)
 applyTplAttr (TplGroundGradientBound src) n = groundT n W.groundGradient (bindColorSource n src)
 applyTplAttr (TplGroundGradientField src) n = groundT n W.groundGradient (bindColorSource n src)
+applyTplAttr (TplFilledColor c) n = filledColorT n (bindColorSource n c)
+applyTplAttr (TplFilledColorBound src) n = filledColorT n (bindColorSource n src)
+applyTplAttr (TplFilledColorField src) n = filledColorT n (bindColorSource n src)
 applyTplAttr (TplGroundImage bytes) n = groundT n W.groundImage (bindImageSource n bytes)
 applyTplAttr (TplGroundImageBound src) n = groundT n W.groundImage (bindImageSource n src)
 applyTplAttr (TplGroundImageField src) n = groundT n W.groundImage (bindImageSource n src)

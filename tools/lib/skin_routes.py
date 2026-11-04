@@ -352,7 +352,8 @@ VISIBLE = [
     # Four on GTK, WinUI and Compose: the ground colour's top read is the fourth
     # (docs/media-player-plan.md M16 (35)); SwiftUI's spells its refusal inline.
     (GTK, "GTK's ground, shape and tint readers refuse what their parents clip",
-     "if let Some(why) = unseen_in_shot(&widget, &shot.content,", 4),
+     # Five since the colour fill's reader (docs/looks-plan.md §3.2).
+     "if let Some(why) = unseen_in_shot(&widget, &shot.content,", 5),
     (GTK, "GTK's visible part is its ancestors' clip and the window's",
      "clipped_by_ancestors(widget, content, gtk4::graphene::Rect::new(x, y, w, h))\n.and_then(|r| r.intersection(&whole))", 1),
     (WINUI_SKIN, "WinUI's ground, shape and tint readers refuse what their parents clip",
@@ -362,7 +363,7 @@ VISIBLE = [
     (WINUI_SKIN, "WinUI's visible part walks every ancestor's viewport and slot",
      "crate::winui::ancestors_cut(&fe, &root, rtl, [x, y, x + w, y + h])?", 1),
     (SWIFT, "SwiftUI's ground, shape and tint readers refuse what their parents clip",
-     "if let why = kayaSkinUnseen(node,", 3),
+     "if let why = kayaSkinUnseen(node,", 4),
     (SWIFT, "SwiftUI's visible part is its scrolls', its root's and its anchor's clips",
      "var shown = kayaVisibleFrame(node, probed).shown", 1),
     (SWIFT, "SwiftUI's visible part takes its anchor's clipping views",
@@ -370,7 +371,7 @@ VISIBLE = [
     (SWIFT, "the mac clip view's visible part leaves its content insets, where a table's header floats",
      "let i = clip.contentInsets", 1),
     (COMPOSE, "Compose's ground, shape and tint readers refuse what their parents clip",
-     "onUi(activity) { kayaSkinUnseen(", 4),
+     "onUi(activity) { kayaSkinUnseen(", 5),
     (COMPOSE, "Compose's visible part is the node's bounds in the window", "val visible = kayaNodeVisible[id]", 1),
 ]
 

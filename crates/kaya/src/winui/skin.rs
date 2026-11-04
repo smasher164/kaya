@@ -8,7 +8,7 @@ use std::sync::Arc;
 use super::*;
 use bindings::Microsoft::UI::Xaml::Automation::AutomationProperties;
 use bindings::Microsoft::UI::Xaml::Automation::Peers::AutomationControlType;
-use bindings::Microsoft::UI::Xaml::Controls::ItemContainer;
+use bindings::Microsoft::UI::Xaml::Controls::{ContentControl, ItemContainer, Panel};
 use bindings::Microsoft::UI::Xaml::Media::ImageBrush;
 use bindings::Microsoft::UI::Xaml::{CornerRadius, VerticalAlignment};
 
@@ -154,6 +154,7 @@ pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &V
         (Prop::Color, Value::I64(packed)) if is_container => {
             SKIN.with_borrow_mut(|s| s.grounds.entry(id.0).or_default().packed = Some(*packed));
             paint_ground(core, id)?;
+            paint_color_fill(core, id)?;
         }
         (Prop::Source, Value::Blob(blob)) if is_container => {
             let bytes = blob.0.clone();
@@ -262,6 +263,77 @@ fn gradient_brush(dark: bool, packed: i64) -> windows_core::Result<Brush> {
     .cast()
 }
 
+/// docs/looks-plan.md §3.2: a container filled with the app's own colour,
+/// its `color` packed as the fill (bits 24-47) and the text colour kaya chose
+/// (bits 0-23); the labels inside take that colour as their foreground. Also
+/// run when a child joins, since the fill may be set before its labels are.
+pub(super) fn paint_color_fill(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
+    if core.filled.get(&id) != Some(&i64::from(crate::wire::TINT_COLOR)) {
+        return Ok(());
+    }
+    let Some(packed) = SKIN.with_borrow(|s| s.grounds.get(&id.0).and_then(|g| g.packed)) else { return Ok(()) };
+    let Some(grid) = container(core, id) else { return Ok(()) };
+    let fill = (packed >> 24) & 0xFF_FFFF;
+    // THE BRUSH IS SET ON THE GRID, NOT THROUGH A STYLE SETTER: a literal
+    // colour in a loaded Style's Background setter drew nothing (measured
+    // 2026-11-04, the windows tints leg read the page at the probe).
+    let style: Style = XamlReader::Load(&HSTRING::from(
+        "<Style xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" TargetType=\"Grid\">\
+         <Setter Property=\"CornerRadius\" Value=\"{ThemeResource OverlayCornerRadius}\"/></Style>",
+    ))?
+    .cast()?;
+    grid.SetStyle(&style)?;
+    let fill_brush: Brush = XamlReader::Load(&HSTRING::from(format!(
+        "<SolidColorBrush xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" Color=\"#FF{fill:06X}\"/>"
+    )))?
+    .cast()?;
+    grid.SetBackground(&fill_brush)?;
+    let Some(brush) = color_fill_brush(core, id)? else { return Ok(()) };
+    let children = grid.Children()?;
+    for i in 0..children.Size()? {
+        paint_color_fill_on(&children.GetAt(i)?, &brush)?;
+    }
+    Ok(())
+}
+
+/// The text colour kaya chose for a colour fill, as a brush; None while the
+/// container is no colour fill or its `color` has not arrived.
+pub(super) fn color_fill_brush(core: &CoreState, id: WidgetId) -> windows_core::Result<Option<Brush>> {
+    if core.filled.get(&id) != Some(&i64::from(crate::wire::TINT_COLOR)) {
+        return Ok(None);
+    }
+    let Some(packed) = SKIN.with_borrow(|s| s.grounds.get(&id.0).and_then(|g| g.packed)) else { return Ok(None) };
+    let fg = packed & 0xFF_FFFF;
+    let brush: Brush = XamlReader::Load(&HSTRING::from(format!(
+        "<SolidColorBrush xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" Color=\"#FF{fg:06X}\"/>"
+    )))?
+    .cast()?;
+    Ok(Some(brush))
+}
+
+/// Every text block and glyph under `element` takes the fill's text colour.
+pub(super) fn paint_color_fill_on(element: &UIElement, brush: &Brush) -> windows_core::Result<()> {
+    if let Ok(block) = element.cast::<TextBlock>() {
+        block.SetForeground(brush)?;
+        return Ok(());
+    }
+    if let Ok(icon) = element.cast::<IconElement>() {
+        icon.SetForeground(brush)?;
+        return Ok(());
+    }
+    if let Ok(panel) = element.cast::<Panel>() {
+        let children = panel.Children()?;
+        for i in 0..children.Size()? {
+            paint_color_fill_on(&children.GetAt(i)?, brush)?;
+        }
+    } else if let Ok(control) = element.cast::<ContentControl>() {
+        if let Ok(content) = control.Content()?.cast::<UIElement>() {
+            paint_color_fill_on(&content, brush)?;
+        }
+    }
+    Ok(())
+}
+
 fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
     let Some(grid) = container(core, id) else { return Ok(()) };
     let Some(ground) = SKIN.with_borrow(|s| s.grounds.get(&id.0).cloned()) else { return Ok(()) };
@@ -293,6 +365,10 @@ fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
             }
             None => grid.SetBackground(None::<&Brush>),
         },
+        // A colour fill keeps its brush through the theme change this
+        // handler answers (docs/looks-plan.md §3.2; the windows tintsdark
+        // leg read the page after the flip, 2026-11-04).
+        _ if core.filled.get(&id) == Some(&i64::from(crate::wire::TINT_COLOR)) => paint_color_fill(core, id),
         _ => grid.SetBackground(None::<&Brush>),
     }
 }

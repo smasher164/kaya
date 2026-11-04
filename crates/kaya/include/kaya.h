@@ -1893,6 +1893,11 @@
 #define KAYA_TINT_OVERLAY 6
 
 /**
+ * A fill in the app's own colour (docs/looks-plan.md §3.2).
+ */
+#define KAYA_TINT_COLOR 7
+
+/**
  * The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md
  * D6). A closed set of CONCEPTS each backend maps to its own platform's
  * symbol set; both KAYA_MPROP_SYMBOL and KAYA_SPROP_SYMBOL take them.

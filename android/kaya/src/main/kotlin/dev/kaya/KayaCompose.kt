@@ -1022,11 +1022,15 @@ private fun kayaCustomPair(design: Color): Pair<Color, Color> {
     )
 }
 
-/** The platform's fill for a tint and the foreground paired with it. */
+/** The platform's fill for a tint and the foreground paired with it;
+ * [packed] is a colour fill's `color` as the core sends it
+ * (docs/looks-plan.md §3.2): the fill in bits 24-47, the text colour kaya
+ * chose for it in bits 0-23. */
 @Composable
-fun kayaTintPair(tint: Long): Pair<Color, Color> {
+fun kayaTintPair(tint: Long, packed: Long = 0L): Pair<Color, Color> {
     val scheme = MaterialTheme.colorScheme
     return when (tint) {
+        KAYA_TINT_COLOR -> kayaColorFillPair(packed)
         1L -> Pair(scheme.primary, scheme.onPrimary)
         2L -> kayaCustomPair(KAYA_SUCCESS_DESIGN)
         3L -> kayaCustomPair(KAYA_WARNING_DESIGN)
@@ -1042,6 +1046,20 @@ fun kayaTintPair(tint: Long): Pair<Color, Color> {
 
 /** docs/styling-pass-plan.md §3's Compose row: Material's scrim at 60%. */
 const val KAYA_OVERLAY_SCRIM = 0.6f
+
+/** docs/looks-plan.md §3.2: the fill is the container's `color`. */
+const val KAYA_TINT_COLOR = 7L
+
+/** The one pair the app names rather than the platform (docs/looks-plan.md
+ * §3.2): the fill the app chose and the text colour kaya chose on it, as the
+ * core packed them. */
+fun kayaColorFillPair(packed: Long): Pair<Color, Color> = Pair(
+    Color(0xFF00_0000L or ((packed shr 24) and 0xFF_FFFF)),
+    Color(0xFF00_0000L or (packed and 0xFF_FFFF)),
+)
+
+/** harness.rs's FILL_INK_INSET, in dp. */
+const val KAYA_FILL_INK_INSET = 10f
 
 /** Material's hover state layer, 8% of onSurface: what the ripple draws on
  * hover, held here for the reader's expectation only. */
@@ -1065,7 +1083,7 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
                 r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
         }
         .then(kayaGroundSurface(node))
-    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled).first, MaterialTheme.shapes.medium)
+    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled, node.groundTops).first, MaterialTheme.shapes.medium)
     if (node.selected) surface = surface.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium)
     if (node.activatable) surface = surface.then(kayaActivatable(node))
     return surface
@@ -1552,7 +1570,7 @@ inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable ()
         content()
     } else {
         val onFill = if (node.selected) MaterialTheme.colorScheme.onSecondaryContainer
-            else kayaTintPair(node.filled).second
+            else kayaTintPair(node.filled, node.groundTops).second
         CompositionLocalProvider(
             LocalContentColor provides onFill,
             LocalKayaOnFill provides onFill,
@@ -3663,7 +3681,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0x19db789d3a45d6f1uL
+    private const val SPEC_HASH: ULong = 0xebbcea02a7fea347uL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -9085,6 +9103,61 @@ object KayaCompose {
     /** expect_ground_color's read (docs/media-player-plan.md M16 (35)): the
      * ground's own top probe as RRGGBB and whether the window reads dark, or why
      * not; kayaGroundRead's probe. */
+    /** expect_fill_color's read (docs/looks-plan.md §3.2): the fill at
+     * expect_fill's probe and the ink farthest from it inside the box, each
+     * 0xRRGGBB off the window's pixels, or what was measured instead. */
+    private fun kayaFillColorRead(activity: ComponentActivity, spec: String): Pair<Pair<Int, Int>?, String> {
+        val found = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                Pair(kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }, node.id)
+            }
+        } ?: return Pair(null, "no such target")
+        val (box, nodeId) = found
+        if (box == null) return Pair(null, "<no laid-out frame>")
+        val shot = kayaSkinShot(activity) ?: return Pair(null, "<no window pixels>")
+        val u = shot.density
+        val probed = androidx.compose.ui.geometry.Rect(
+            box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat(),
+        )
+        onUi(activity) { kayaSkinUnseen(nodeId, probed, u) }?.let { return Pair(null, it) }
+        val fill = shot.at(box.right - 4 * u, box.centerY().toFloat()) ?: return Pair(null, "<the probe falls outside the window: $box>")
+        // Inside the corners (harness.rs's FILL_INK_INSET), where the page
+        // shows through the box's rectangle.
+        val inset = KAYA_FILL_INK_INSET * u
+        var ink = fill
+        var best = -1.0
+        var y = box.top + inset
+        while (y < box.bottom - inset) {
+            var x = box.left + inset
+            while (x < box.right - inset) {
+                shot.at(x, y)?.let { c ->
+                    val d = (0..2).sumOf { Math.abs(c[it] - fill[it]) }
+                    if (d > best) { best = d; ink = c }
+                }
+                x += 1f
+            }
+            y += 1f
+        }
+        fun rgb(c: DoubleArray): Int {
+            val b = c.map { Math.round(it * 255).toInt().coerceIn(0, 255) }
+            return (b[0] shl 16) or (b[1] shl 8) or b[2]
+        }
+        return Pair(Pair(rgb(fill), rgb(ink)), "")
+    }
+
+    /** harness.rs's ink_is_light: CIELAB L* 50 splits white text from black. */
+    private fun kayaInkIsLight(rgb: Int): Boolean {
+        val l = listOf((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF).map {
+            val v = it / 255.0
+            if (v <= 0.04045) v / 12.92 else Math.pow((v + 0.055) / 1.055, 2.4)
+        }
+        val y = 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2]
+        val lstar = if (y > 216.0 / 24389.0) 116 * Math.cbrt(y) - 16 else y * 24389.0 / 27.0
+        return lstar >= 50.0
+    }
+
     private fun kayaGroundTopRead(activity: ComponentActivity, spec: String): Pair<Pair<Int, Boolean>?, String> {
         val found = onUi(activity) {
             kayaContainerTarget(spec)?.let { node ->
@@ -16272,6 +16345,34 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                         if (got == want) observed.add("back help \"$want\"") else failures.add("back help \"$got\", wanted \"$want\"")
                     }
                     // docs/styling-pass-plan.md Y9: each a name off the pixels or the tree.
+                    "expect_fill_color" -> {
+                        // harness.rs's ExpectFillColor, the same sentences and tolerance.
+                        val spec = quoted(parts.drop(2)).split(" ")
+                        val wantFill = spec.getOrNull(0)?.takeIf { spec.size == 3 && spec[1] == "on" && (spec[2] == "white" || spec[2] == "black") }?.toIntOrNull(16)
+                        if (wantFill == null) {
+                            failures.add("expect_fill_color wants a container and \"RRGGBB on white|black\": $line")
+                        } else {
+                            val wantText = spec[2]
+                            val said = "%06X on %s".format(wantFill, wantText)
+                            fun near(a: Int, b: Int) = (0..2).all { k -> Math.abs(((a shr (8 * k)) and 0xFF) - ((b shr (8 * k)) and 0xFF)) <= 15 }
+                            fun holds(r: Pair<Int, Int>) = near(r.first, wantFill) && (if (kayaInkIsLight(r.second)) "white" else "black") == wantText
+                            var got = kayaFillColorRead(activity, parts[1])
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (System.currentTimeMillis() < deadline && got.first?.let { !holds(it) } != false) {
+                                Thread.sleep(100)
+                                got = kayaFillColorRead(activity, parts[1])
+                            }
+                            val read = got.first
+                            when {
+                                read == null && got.second == "no such target" -> failures.add("no such target ${parts[1]}")
+                                read == null -> failures.add("${parts[1]} fill unread: ${got.second}")
+                                holds(read) -> observed.add("${parts[1]} fill color \"$said\"")
+                                else -> failures.add(
+                                    "${parts[1]} reads fill %06X on %s (ink %06X), wanted %s".format(
+                                        read.first, if (kayaInkIsLight(read.second)) "white" else "black", read.second, said))
+                            }
+                        }
+                    }
                     "expect_ground_color" -> {
                         // harness.rs's ExpectGroundColor, the same sentences and tolerance.
                         val spec = quoted(parts.drop(2)).split(" ")

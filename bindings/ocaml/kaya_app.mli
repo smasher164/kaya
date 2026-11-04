@@ -1623,6 +1623,11 @@ val bind_phase : widget -> Image_phase.t signal -> unit
    spelling. *)
 val set_ground_gradient : widget -> color -> unit
 val bind_ground_gradient : widget -> color signal -> unit
+
+(* A fill in the app's own colour, kaya choosing the text colour on it
+   (docs/looks-plan.md §3.2). *)
+val set_filled_color : widget -> color -> unit
+val bind_filled_color : widget -> color signal -> unit
 val set_ground_image : widget -> bytes -> unit
 val bind_ground_image : widget -> bytes signal -> unit
 val set_shape : widget -> shape -> unit
@@ -1733,6 +1738,8 @@ val column :
   ?help_bind:string signal ->
   ?spacing:float ->
   ?align:align -> ?inset:float -> ?inset_pair:float * float -> ?filled:Tint.t ->
+  ?filled_color:color ->
+  ?filled_color_bind:color signal ->
   ?ground_gradient:color ->
   ?ground_gradient_bind:color signal ->
   ?ground_image:bytes ->
@@ -1770,6 +1777,8 @@ val row :
   ?align:align ->
   ?inset:float -> ?inset_pair:float * float ->
   ?filled:Tint.t ->
+  ?filled_color:color ->
+  ?filled_color_bind:color signal ->
   ?ground_gradient:color ->
   ?ground_gradient_bind:color signal ->
   ?ground_image:bytes ->
@@ -2409,6 +2418,8 @@ module Tpl : sig
      gives each copy its own colour, picture, tint or selection. *)
   val set_ground_gradient : node -> color -> unit
   val bind_ground_gradient_field : ?level:int -> node -> ('e, color) field -> unit
+  val set_filled_color : node -> color -> unit
+  val bind_filled_color_field : ?level:int -> node -> ('e, color) field -> unit
   val set_ground_image : node -> bytes -> unit
   val bind_ground_image_field : ?level:int -> node -> ('e, bytes) field -> unit
   val set_shape : node -> shape -> unit
@@ -3030,6 +3041,8 @@ module Tpl : sig
     ?a11y_level:int ->
     ?level:int ->
     ?inset:float -> ?inset_pair:float * float ->
+    ?filled_color:color ->
+    ?filled_color_field:('j, color) field ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->
@@ -3117,6 +3130,8 @@ module Tpl : sig
     ?help_bind:string signal ->
     ?help_field:('c, string) field ->
     ?a11y_level:int -> ?level:int -> ?inset:float -> ?inset_pair:float * float ->
+    ?filled_color:color ->
+    ?filled_color_field:('j, color) field ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->
@@ -3156,6 +3171,8 @@ module Tpl : sig
     ?a11y_level:int ->
     ?level:int ->
     ?inset:float -> ?inset_pair:float * float ->
+    ?filled_color:color ->
+    ?filled_color_field:('j, color) field ->
     ?ground_gradient:color ->
     ?ground_gradient_field:('g, color) field ->
     ?ground_image:bytes ->

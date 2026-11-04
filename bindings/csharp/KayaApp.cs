@@ -4711,6 +4711,20 @@ sealed class Tx : IDisposable
     /// A row or column's ground fading from `color`, clamped by the core for
     /// the appearance's text, into the platform's window ground
     /// (docs/styling-pass-plan.md Y2); Kaya.ImageDominant is the usual colour.
+    /// A row or column filled with the app's own colour, kaya choosing the
+    /// text colour on it (docs/looks-plan.md §3.2).
+    public void SetFilledColor(Widget w, Color color)
+    {
+        Records.Add(KayaWire.TxSetFilled(w.Id, (long)KayaWire.TintColor));
+        Records.Add(KayaWire.TxSetColor(w.Id, color.R, color.G, color.B, color.A));
+    }
+
+    public void SetFilledColor(Widget w, Signal s)
+    {
+        Records.Add(KayaWire.TxSetFilled(w.Id, (long)KayaWire.TintColor));
+        Records.Add(KayaWire.TxBindColor(w.Id, s.Id));
+    }
+
     public void SetGroundGradient(Widget w, Color color)
     {
         Records.Add(KayaWire.TxSetGround(w.Id, KayaWire.GroundGradient));
@@ -7717,6 +7731,20 @@ sealed class Tpl
 
     /// A stamped container's gradient ground (Tx.SetGroundGradient); a row
     /// field gives each copy its album's colour.
+    /// A stamped container filled with one colour, or each copy's own from
+    /// a Color field (docs/looks-plan.md §3.2).
+    public void SetFilledColor(Node n, Color color)
+    {
+        tx.Records.Add(KayaWire.TxSetFilled(n.Id, (long)KayaWire.TintColor));
+        tx.Records.Add(KayaWire.TxSetColor(n.Id, color.R, color.G, color.B, color.A));
+    }
+
+    public void SetFilledColor(Node n, Field<Color> f, uint level = 0)
+    {
+        tx.Records.Add(KayaWire.TxSetFilled(n.Id, (long)KayaWire.TintColor));
+        BindColorField(n, level, f);
+    }
+
     public void SetGroundGradient(Node n, Color color)
     {
         tx.Records.Add(KayaWire.TxSetGround(n.Id, KayaWire.GroundGradient));

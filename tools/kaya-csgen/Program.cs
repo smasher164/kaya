@@ -583,6 +583,9 @@ static class Program
         Set("SetPhase", ["Node n", "Signal s"], "n, s");
         Set("SetPhase", ["Node n", "Field<ImagePhase> f", "uint level = 0"], "n, f, level");
         Set("SetAspect", ["Node n", "int width", "int height"], "n, width, height");
+        // docs/looks-plan.md §3.2.
+        Set("SetFilledColor", ["Node n", "Color color"], "n, color");
+        Set("SetFilledColor", ["Node n", "Field<Color> f", "uint level = 0"], "n, f, level");
         Set("SetGroundGradient", ["Node n", "Color color"], "n, color");
         Set("SetGroundGradient", ["Node n", "Signal s"], "n, s");
         Set("SetGroundGradient", ["Node n", "Field<Color> f", "uint level = 0"], "n, f, level");

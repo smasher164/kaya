@@ -2165,6 +2165,18 @@ let bind_ground_gradient (Widget id) (s : color signal) =
   emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
   emit tx (Kaya_wire.tx_bind_color id s.sig_id)
 
+(* docs/looks-plan.md §3.2: a fill in the app's own colour, kaya choosing
+   the text colour on it. *)
+let set_filled_color (Widget id) (c : color) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_filled id (Int64.of_int Kaya_wire.tint_color));
+  emit tx (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a)
+
+let bind_filled_color (Widget id) (s : color signal) =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_filled id (Int64.of_int Kaya_wire.tint_color));
+  emit tx (Kaya_wire.tx_bind_color id s.sig_id)
+
 let set_ground_image (Widget id) data =
   let tx = the_tx () in
   emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
@@ -3821,7 +3833,7 @@ let draw (Widget id) body =
    child list literal only allocates closures and the container realizes
    them left to right ([List.iter]'s specified order IS document order).
    Props are labeled optional arguments, the lablgtk idiom. *)
-let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled
+let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled ?filled_color ?filled_color_bind
     ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind kind children () =
   let parent = widget kind in
   Option.iter (fun g -> set_grow parent g) grow;
@@ -3832,6 +3844,8 @@ let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?h
   Option.iter (fun p -> set_inset parent p) inset;
   Option.iter (fun p -> set_inset_pair parent p) inset_pair;
   Option.iter (fun t -> set_filled parent t) filled;
+  Option.iter (fun c -> set_filled_color parent c) filled_color;
+  Option.iter (fun s -> bind_filled_color parent s) filled_color_bind;
   Option.iter (fun c -> set_ground_gradient parent c) ground_gradient;
   Option.iter (fun s -> bind_ground_gradient parent s) ground_gradient_bind;
   Option.iter (fun d -> set_ground_image parent d) ground_image;
@@ -3944,9 +3958,9 @@ let spacer ?(grow = 1.0) () =
   set_grow w grow;
   w
 
-let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled
+let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled ?filled_color ?filled_color_bind
     ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind children =
-  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled
+  container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled ?filled_color ?filled_color_bind
     ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind Kaya_wire.kind_column children
 
 (* A scroll viewport over EXACTLY ONE child (the signature says so; the
@@ -3968,10 +3982,10 @@ let scroll ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help
    core-evaluated breakpoint (docs/adaptive-layout-plan.md D3). LIVE
    ONLY: [Tpl.row] carries no such label, since a breakpoint's setters
    name live widgets and a template row is stamped per entry. *)
-let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled
+let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled ?filled_color ?filled_color_bind
     ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind ?role ?stack_when ?wrap children () =
   let parent =
-    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled
+    container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help ?help_bind ?spacing ?align ?inset ?inset_pair ?filled ?filled_color ?filled_color_bind
       ?ground_gradient ?ground_gradient_bind ?ground_image ?ground_image_bind ?on_activate ?on_select ?selected ?selected_bind Kaya_wire.kind_row children ()
   in
   (* [Composer] (docs/composer-plan.md §4). *)
@@ -6081,6 +6095,18 @@ module Tpl = struct
     emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_gradient));
     emit tx (Kaya_wire.tx_bind_color_element ~level ~field:fd.fd_index id)
 
+  (* docs/looks-plan.md §3.2: a stamped container filled with one colour, or
+     each copy's own from a Color field. *)
+  let set_filled_color (Node id) (c : color) =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_filled id (Int64.of_int Kaya_wire.tint_color));
+    emit tx (Kaya_wire.tx_set_color id c.Color.r c.Color.g c.Color.b c.Color.a)
+
+  let bind_filled_color_field ?(level = 0) (Node id) (fd : (_, color) field) =
+    let tx = the_tx () in
+    emit tx (Kaya_wire.tx_set_filled id (Int64.of_int Kaya_wire.tint_color));
+    emit tx (Kaya_wire.tx_bind_color_element ~level ~field:fd.fd_index id)
+
   let set_ground_image (Node id) data =
     let tx = the_tx () in
     emit tx (Kaya_wire.tx_set_ground id (Int64.of_int Kaya_wire.ground_image));
@@ -6860,7 +6886,7 @@ module Tpl = struct
      applied creators ([unit -> node] thunks), realized left to
      right; [()] realizes, omitting it nominates a child. *)
   let container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?(level = 0) ?inset ?inset_pair
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?(a11y_level = 0) ?(level = 0) ?inset ?inset_pair ?filled_color ?filled_color_field
       ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field kind children () =
     let parent = Floor.widget kind in
     Option.iter (fun g -> Floor.set_grow parent g) grow;
@@ -6871,6 +6897,8 @@ module Tpl = struct
        floor-only on template containers, in every binding alike. *)
     Option.iter (fun p -> Floor.set_inset parent p) inset;
     Option.iter (fun p -> Floor.set_inset_pair parent p) inset_pair;
+    Option.iter (fun c -> set_filled_color parent c) filled_color;
+    Option.iter (fun fd -> bind_filled_color_field ~level parent fd) filled_color_field;
     Option.iter (fun c -> set_ground_gradient parent c) ground_gradient;
     Option.iter (fun fd -> bind_ground_gradient_field ~level parent fd) ground_gradient_field;
     Option.iter (fun d -> set_ground_image parent d) ground_image;
@@ -6965,10 +6993,10 @@ module Tpl = struct
      supplied, so [container kind_column] would have defaulted every prop
      and swallowed the caller's. *)
   let column ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair ?filled_color ?filled_color_field
       ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field children =
     container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair ?filled_color ?filled_color_field
       ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field Kaya_wire.kind_column children
 
   (* A vertical scroll viewport per stamped copy, over EXACTLY ONE child.
@@ -6986,11 +7014,11 @@ module Tpl = struct
      exactly as it does live: the root admits the prop on Column, Row and
      Grid alone, so [scroll] forwards no inset. *)
   let row ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair
+      ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair ?filled_color ?filled_color_field
       ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field ?wrap children () =
     let parent =
       container ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_id_field ?a11y_label
-        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair
+        ?a11y_label_bind ?a11y_label_field ?help ?help_bind ?help_field ?a11y_level ?level ?inset ?inset_pair ?filled_color ?filled_color_field
         ?ground_gradient ?ground_gradient_field ?ground_image ?ground_image_field ?on_activate ?on_select ?selected ?selected_field Kaya_wire.kind_row children ()
     in
     Option.iter (fun v -> Floor.set_wrap parent v) wrap;

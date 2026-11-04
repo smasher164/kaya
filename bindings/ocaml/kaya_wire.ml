@@ -30,7 +30,7 @@ type drop_values = {
 }
 
 (* spec_hash: the protocol fingerprint; the runtime asserts the loaded core agrees. *)
-let spec_hash = 0x19db789d3a45d6f1L
+let spec_hash = 0xebbcea02a7fea347L
 let version = "0.0.0"
 
 let value_bool = 1
@@ -274,6 +274,7 @@ let tint_warning = 3
 let tint_critical = 4
 let tint_neutral = 5
 let tint_overlay = 6
+let tint_color = 7
 let ground_none = 0
 let ground_gradient = 1
 let ground_image = 2

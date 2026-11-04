@@ -19006,8 +19006,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                 }
                 (NativeWidget::Column(grid) | NativeWidget::Row(grid), Prop::Filled, Value::I64(tint)) => {
                     ensure_accent_surface()?;
-                    grid.SetStyle(&filled_style(tint)?)?;
                     core.filled.insert(id, tint);
+                    if tint == i64::from(crate::wire::TINT_COLOR) {
+                        // docs/looks-plan.md §3.2: the fill is the `color`, painted
+                        // once both are here.
+                        grid.SetStyle(&filled_style(5)?)?;
+                        skin::paint_color_fill(core, id)?;
+                    } else {
+                        grid.SetStyle(&filled_style(tint)?)?;
+                    }
                     skin::repaint_selected(id)?;
                     stamp_container_padding(core, id)?;
                 }
@@ -19802,6 +19809,15 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // BEFORE THE BRANCHES, every one of which returns early for a
             // container this backend does not lower to a panel.
             core.tree_parent.insert(child.0, parent.0);
+            // docs/looks-plan.md §3.2: a child joining a colour fill takes its
+            // text colour now, its element already made and not yet parented.
+            if core.filled.get(&parent) == Some(&i64::from(crate::wire::TINT_COLOR)) {
+                if let Some(brush) = skin::color_fill_brush(core, parent)? {
+                    if let Some(w) = core.widgets.get(&child) {
+                        skin::paint_color_fill_on(&w.inner_element()?, &brush)?;
+                    }
+                }
+            }
             // The viewport's one child (the scene rejects a second):
             // ScrollViewer is a ContentControl, not a panel.
             if let NativeWidget::Scroll(viewer) =
@@ -28572,6 +28588,49 @@ impl crate::harness::Stage for WinUiStage {
     fn dock_player_read(&self) -> String {
         Self::on_ui_read(skin::read::dock_player).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }
+    fn fill_color(&self, t: crate::harness::Target) -> Result<(u32, u32), String> {
+        Self::on_ui_read(move |core| -> windows_core::Result<Result<(u32, u32), String>> {
+            let Some(element) = target_element(core, t)? else {
+                return Ok(Err("<no such target>".to_owned()));
+            };
+            let element: FrameworkElement = element.cast()?;
+            if element.ActualWidth()? < 8.0 || element.ActualHeight()? < 8.0 {
+                return Ok(Err(format!(
+                    "<the container laid out at {}x{}>",
+                    element.ActualWidth()?,
+                    element.ActualHeight()?
+                )));
+            }
+            let at = element_placement(core, &element)?;
+            let grab = match grab_canvas(&at) {
+                Ok(grab) => grab,
+                Err(why) => return Ok(Err(format!("<the container could not be printed: {why}>"))),
+            };
+            let px = (grab.width - 1 - (4.0 * at.scale).round() as i32).max(0) as usize;
+            let py = (grab.height / 2) as usize;
+            let rgb_at = |x: usize, y: usize| {
+                let i = (y * grab.width as usize + x) * 4;
+                [grab.pixels[i + 2], grab.pixels[i + 1], grab.pixels[i]].map(u32::from)
+            };
+            let fill = rgb_at(px, py);
+            let inset = (crate::harness::FILL_INK_INSET * at.scale).round() as usize;
+            let (mut ink, mut best) = (fill, -1i64);
+            for y in inset..(grab.height as usize).saturating_sub(inset) {
+                for x in inset..(grab.width as usize).saturating_sub(inset) {
+                    let c = rgb_at(x, y);
+                    let d: i64 = (0..3).map(|k| (i64::from(c[k]) - i64::from(fill[k])).abs()).sum();
+                    if d > best {
+                        best = d;
+                        ink = c;
+                    }
+                }
+            }
+            let pack = |c: [u32; 3]| (c[0] << 16) | (c[1] << 8) | c[2];
+            Ok(Ok((pack(fill), pack(ink))))
+        })
+        .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+
     fn fill_tint(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| {
             let Some(element) = target_element(core, t)? else {

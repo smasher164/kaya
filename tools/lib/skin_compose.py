@@ -40,7 +40,7 @@ DOORS = [
      ["if (!node.selected) KayaPresent.emitSelectionChanged(node.tag)\nKayaPresent.emitActivated(node.tag)"], []),
     ("filled foreground", "inline fun KayaFilledContent(node: KayaNode, crossinline content: @Composable () -> Unit) {",
      ["if (node.selected) MaterialTheme.colorScheme.onSecondaryContainer"], []),
-    ("overlay pair", "fun kayaTintPair(tint: Long): Pair<Color, Color> {",
+    ("overlay pair", "fun kayaTintPair(tint: Long, packed: Long = 0L): Pair<Color, Color> {",
      ["6L -> Pair(\nscheme.scrim.copy(alpha = KAYA_OVERLAY_SCRIM),\n"
       "if (scheme.background.luminance() < 0.5f) scheme.onSurface else scheme.inverseOnSurface,"], ["Color("]),
     ("image shape", "fun kayaImageShape(node: KayaNode): Modifier = when (node.shape) {",

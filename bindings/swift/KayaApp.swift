@@ -4749,6 +4749,18 @@ public final class KayaAppTx {
     /// the appearance's text, into the platform's window ground
     /// (docs/styling-pass-plan.md Y2); `KayaApp.imageDominant` is the usual
     /// colour, and a signal of a colour is the other source.
+    /// A row or column filled with the app's own colour, kaya choosing the
+    /// text colour on it (docs/looks-plan.md §3.2).
+    public func setFilledColor(_ w: KayaWidget, _ color: KayaColor) {
+        tx.setFilled(w.id, Int64(KAYA_TINT_COLOR))
+        tx.setColor(w.id, color.r, color.g, color.b, color.a)
+    }
+
+    public func setFilledColor(_ w: KayaWidget, _ s: KayaSignal) {
+        tx.setFilled(w.id, Int64(KAYA_TINT_COLOR))
+        tx.bindColor(w.id, s.id)
+    }
+
     public func setGroundGradient(_ w: KayaWidget, _ color: KayaColor) {
         tx.setGround(w.id, Int64(KAYA_GROUND_GRADIENT))
         tx.setColor(w.id, color.r, color.g, color.b, color.a)
@@ -7260,6 +7272,18 @@ public final class KayaTpl {
     /// A stamped container's gradient ground (KayaAppTx.setGroundGradient):
     /// one colour for every copy, or the row's own Color field, each copy its
     /// album's.
+    /// A stamped container filled with one colour, or each copy's own from
+    /// a Color field (docs/looks-plan.md §3.2).
+    public func setFilledColor(_ n: KayaNodeHandle, _ color: KayaColor) {
+        tx.tx.setFilled(n.id, Int64(KAYA_TINT_COLOR))
+        tx.tx.setColor(n.id, color.r, color.g, color.b, color.a)
+    }
+
+    public func setFilledColor(_ n: KayaNodeHandle, level: UInt32 = 0, _ f: KayaField<KayaColor>) {
+        tx.tx.setFilled(n.id, Int64(KAYA_TINT_COLOR))
+        bindColorField(n, level: level, f)
+    }
+
     public func setGroundGradient(_ n: KayaNodeHandle, _ color: KayaColor) {
         tx.tx.setGround(n.id, Int64(KAYA_GROUND_GRADIENT))
         tx.tx.setColor(n.id, color.r, color.g, color.b, color.a)

@@ -106,6 +106,8 @@ public final class EmissionCheck {
         CHAIN.put("fixed()", record(KayaWire.TX_KIND_SET_SIZE_POLICY));
         CHAIN.put("followsEnd()", prop(KayaWire.PROP_FOLLOWS_END));
         CHAIN.put("format(NumberFormat)", prop(KayaWire.PROP_FORMAT));
+        CHAIN.put("filledColor(Color)", prop(KayaWire.PROP_FILLED));
+        CHAIN.put("filledColor(Signal)", prop(KayaWire.PROP_FILLED));
         CHAIN.put("groundGradient(Color)", prop(KayaWire.PROP_GROUND));
         CHAIN.put("groundGradient(Signal)", prop(KayaWire.PROP_GROUND));
         CHAIN.put("groundImage(byte[])", prop(KayaWire.PROP_GROUND));

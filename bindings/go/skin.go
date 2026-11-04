@@ -63,6 +63,26 @@ func (tx *Tx) SetGroundGradient(w Widget, color Color) {
 	tx.emit(TxSetColor(w.id, color.R, color.G, color.B, color.A))
 }
 
+// SetFilledColor fills a row or column with the app's own colour, kaya
+// choosing the text colour on it (docs/looks-plan.md §3.2).
+func (tx *Tx) SetFilledColor(w Widget, color Color) {
+	tx.emit(TxSetFilled(w.id, int64(TintColor)))
+	tx.emit(TxSetColor(w.id, color.R, color.G, color.B, color.A))
+}
+
+// FilledColor is SetFilledColor's chain.
+func (w Widget) FilledColor(color Color) Widget {
+	w.tx.SetFilledColor(w, color)
+	return w
+}
+
+// BindFilledColor takes the fill's colour from a signal.
+func (w Widget) BindFilledColor(s Signal[Color]) Widget {
+	w.tx.emit(TxSetFilled(w.id, int64(TintColor)))
+	w.tx.emit(TxBindColor(w.id, s.id))
+	return w
+}
+
 // GroundGradient is SetGroundGradient's chain.
 func (w Widget) GroundGradient(color Color) Widget {
 	w.tx.SetGroundGradient(w, color)
@@ -187,6 +207,27 @@ func (n Node) OnSelect(fn func(*Tx, []any)) Node {
 	n.tx.app.nodeSelects[n.id] = fn
 	n.tx.emit(TxSetActivatable(n.id, true))
 	return n
+}
+
+// SetFilledColor fills every stamped copy with one colour
+// (docs/looks-plan.md §3.2); BindFilledColor gives each its row's own.
+func (t *Tpl) SetFilledColor(n Node, color Color) {
+	t.tx.emit(TxSetFilled(n.id, int64(TintColor)))
+	t.tx.emit(TxSetColor(n.id, color.R, color.G, color.B, color.A))
+}
+
+// BindFilledColor takes each copy's fill colour from the row's field or a
+// signal.
+func (t *Tpl) BindFilledColor[S interface {
+	Signal[Color] | Field[Color]
+}](n Node, src S) {
+	t.tx.emit(TxSetFilled(n.id, int64(TintColor)))
+	switch v := any(src).(type) {
+	case Signal[Color]:
+		t.tx.emit(TxBindColor(n.id, v.id))
+	case Field[Color]:
+		t.tx.emit(TxBindColorElement(n.id, 0, v.index))
+	}
 }
 
 // SetGroundGradient gives every stamped copy the gradient ground from one

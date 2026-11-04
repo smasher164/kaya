@@ -1017,6 +1017,9 @@ pub(crate) struct Scene {
     /// Every row and column the backends were told to create, live or
     /// stamped: the ids whose `color` is a gradient's (`lower_skin`).
     skin_containers: HashSet<WidgetId>,
+    /// The containers whose `filled` is `color` (docs/looks-plan.md §3.2):
+    /// their `color` is the fill and its text colour, not a gradient's stops.
+    skin_color_fills: HashSet<WidgetId>,
     /// Per live row, column and image, what it declared toward the skin's
     /// pairings (docs/styling-pass-plan.md Y1-Y4, Y6), checked at the end of
     /// the transaction.
@@ -1423,6 +1426,8 @@ struct SkinBox {
     ground_set: bool,
     ground: Option<i64>,
     filled: bool,
+    /// `filled color` (docs/looks-plan.md §3.2): the fill is the `color` prop.
+    color_fill: bool,
     color: bool,
     source: bool,
     selected: bool,
@@ -1442,7 +1447,10 @@ impl SkinBox {
                 self.ground_set = true;
                 self.ground = constant.and_then(|v| if let Value::I64(g) = v { Some(*g) } else { None });
             }
-            Prop::Filled => self.filled = !matches!(constant, Some(Value::I64(0))),
+            Prop::Filled => {
+                self.filled = !matches!(constant, Some(Value::I64(0)));
+                self.color_fill = matches!(constant, Some(Value::I64(v)) if *v == i64::from(crate::wire::TINT_COLOR));
+            }
             Prop::Color => self.color = true,
             Prop::Source => self.source = true,
             Prop::Selected => self.selected = true,
@@ -1485,10 +1493,17 @@ impl SkinBox {
                  itself with ({plan} Y3)"
             ));
         }
-        if self.color && self.ground.is_some_and(|g| g != GROUND_GRADIENT) {
+        if self.color_fill && !self.color {
+            return Some(format!(
+                "kaya: {who} is filled with a colour and declares no `color` — a colour fill is the \
+                 `color` prop (docs/looks-plan.md §3.2)"
+            ));
+        }
+        if self.color && !self.color_fill && self.ground.is_some_and(|g| g != GROUND_GRADIENT) {
             return Some(format!(
                 "kaya: {who} declares a `color` without a gradient ground — a container's colour is \
-                 its gradient's top stop and nothing else ({plan} Y2)"
+                 its gradient's top stop or its colour fill and nothing else ({plan} Y2; \
+                 docs/looks-plan.md §3.2)"
             ));
         }
         if self.source && self.ground.is_some_and(|g| g != GROUND_IMAGE) {
@@ -1497,10 +1512,11 @@ impl SkinBox {
                  is its image ground ({plan} Y3)"
             ));
         }
-        if (self.color || self.source) && !self.ground_set {
+        if ((self.color && !self.color_fill) || self.source) && !self.ground_set {
             return Some(format!(
                 "kaya: {who} declares a {} and no ground — a container's colour and picture belong \
-                 to its `ground` ({plan} Y2, Y3)",
+                 to its `ground` ({plan} Y2, Y3), unless the colour is its fill \
+                 (docs/looks-plan.md §3.2)",
                 if self.color { "`color`" } else { "`source`" }
             ));
         }
@@ -3242,9 +3258,9 @@ fn check_prop_value(kind: WidgetKind, prop: Prop, value: &Value) {
     }
     if let (Prop::Filled, Value::I64(tint)) = (prop, value) {
         assert!(
-            (1..=6).contains(tint),
+            (1..=7).contains(tint),
             "kaya: filled takes a tint (accent=1, success=2, warning=3, critical=4, neutral=5, \
-             overlay=6), got {tint}"
+             overlay=6, color=7), got {tint}"
         );
     }
     if let (Prop::Ground, Value::I64(ground)) = (prop, value) {
@@ -6671,19 +6687,39 @@ impl Scene {
     /// (docs/styling-pass-plan.md Y2). Every op list the backends see passes
     /// here, so no arm ever draws an unclamped data colour.
     fn lower_skin(&mut self, ops: &mut [ApplyOp]) {
-        for op in ops.iter_mut() {
+        // Which containers are colour fills is read FIRST, since a binding
+        // writes `filled` and `color` in either order in one transaction.
+        for op in ops.iter() {
             match op {
                 ApplyOp::Create { id, kind: WidgetKind::Row | WidgetKind::Column, .. } => {
                     self.skin_containers.insert(*id);
                 }
-                ApplyOp::SetProp { id, prop: Prop::Color, value: Value::I64(packed) }
+                ApplyOp::SetProp { id, prop: Prop::Filled, value: Value::I64(tint) }
                     if self.skin_containers.contains(id) =>
                 {
-                    let rgb = ((*packed as u64 >> 8) & 0xFF_FFFF) as u32;
+                    if *tint == i64::from(crate::wire::TINT_COLOR) {
+                        self.skin_color_fills.insert(*id);
+                    } else {
+                        self.skin_color_fills.remove(id);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for op in ops.iter_mut() {
+            if let ApplyOp::SetProp { id, prop: Prop::Color, value: Value::I64(packed) } = op {
+                if !self.skin_containers.contains(id) {
+                    continue;
+                }
+                let rgb = ((*packed as u64 >> 8) & 0xFF_FFFF) as u32;
+                if self.skin_color_fills.contains(id) {
+                    // docs/looks-plan.md §3.2: the fill in bits 24-47, the
+                    // text colour kaya chose for it in bits 0-23.
+                    *packed = (i64::from(rgb) << 24) | i64::from(crate::brand::fill_foreground(rgb));
+                } else {
                     let (light, dark) = crate::brand::gradient_tops(rgb);
                     *packed = (i64::from(light) << 24) | i64::from(dark);
                 }
-                _ => {}
             }
         }
     }
@@ -14176,7 +14212,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "filled takes a tint")]
     fn a_filled_row_refuses_a_value_outside_the_tints() {
-        declare(WidgetKind::Row, Prop::Filled, 7);
+        declare(WidgetKind::Row, Prop::Filled, 8);
     }
 
     #[test]

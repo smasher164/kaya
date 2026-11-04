@@ -210,8 +210,14 @@ fn oklab_linear(l: f64, a: f64, b: f64) -> (f64, f64, f64) {
     )
 }
 
+/// docs/looks-plan.md §3.2: the text colour on a fill in the app's own
+/// colour, white or black, whichever contrasts more with the fill.
+pub fn fill_foreground(rgb: u32) -> u32 {
+    let rgb = rgb & 0xFF_FFFF;
+    if contrast_ratio(rgb, 0xFF_FFFF) >= contrast_ratio(rgb, 0x00_0000) { 0xFF_FFFF } else { 0x00_0000 }
+}
+
 /// WCAG's contrast ratio of two packed sRGB colours.
-#[cfg(test)]
 pub fn contrast_ratio(a: u32, b: u32) -> f64 {
     let (la, lb) = (rel_luminance(a), rel_luminance(b));
     let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };

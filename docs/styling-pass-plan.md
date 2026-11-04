@@ -376,7 +376,8 @@ appears in the reference.
 
 Refused: a gradient on a control; a horizontal or angled gradient; two app
 colours; a gradient window ground; a data colour anywhere else (a label, a
-fill, a chrome element), which stays the T3 tier's own future ruling.
+chrome element), which stays the T3 tier's own future ruling; a FILL in a data
+colour was ruled 2026-11-03 and built as `filled color` (docs/looks-plan.md §3.2).
 
 ### Y3: An image ground on a container, with text allowed only inside an `overlay` fill (RULED 2026-10-15)
 
@@ -647,7 +648,8 @@ recommendation is `system`, with the review page showing both.
 
 - Y2's data-colour tier for anything but the gradient (a project's dot, a
   calendar's colour): T3's own future ruling; KEY: data colour, dominant
-  colour, raw colour tier.
+  colour, raw colour tier. BUILT 2026-11-04 as `filled color`
+  (docs/looks-plan.md §3.2).
 - A skinned expander (docs/deferred.md's DEFER entry stands).
 - Window backdrops (Mica, DesktopAcrylic, the Liquid Glass of macOS and iOS
   26): a window-level material is a platform choice kaya makes per backend,

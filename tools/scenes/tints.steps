@@ -9,4 +9,9 @@ expect_fill row@t_critical critical
 expect_fill row@t_neutral neutral
 expect_fill row@t_plain none
 expect_fill row@bubble[n1] accent
+# docs/looks-plan.md §3.2: a fill in the app's own colour, the text on it
+# white or black by contrast, kaya's choice, live and stamped.
+expect_fill_color row@t_amber "F2B01E on black"
+expect_fill_color row@t_navy "1D6F8C on white"
+expect_fill_color row@swatch[n1] "4A3AA8 on white"
 expect_no_clipping

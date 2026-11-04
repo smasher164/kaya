@@ -5089,6 +5089,9 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("neutral", 5),
                 // The platform's panel over media (docs/styling-pass-plan.md Y3).
                 ("overlay", 6),
+                // docs/looks-plan.md §3.2: a fill in the app's own colour, the
+                // `color` prop, kaya choosing the text colour on it.
+                ("color", 7),
             ],
         },
         EnumSpec {
@@ -6259,6 +6262,7 @@ mod tests {
                     ("tint", "neutral") => wire::TINT_NEUTRAL,
                     ("tint", "none") => wire::TINT_NONE,
                     ("tint", "overlay") => wire::TINT_OVERLAY,
+                    ("tint", "color") => wire::TINT_COLOR,
                     ("symbol", "add") => wire::SYMBOL_ADD,
                     ("symbol", "remove") => wire::SYMBOL_REMOVE,
                     ("symbol", "delete") => wire::SYMBOL_DELETE,

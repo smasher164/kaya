@@ -1752,6 +1752,8 @@ pub const KAYA_TINT_NEUTRAL: u32 = 5;
 pub const KAYA_TINT_NONE: u32 = 0;
 /// The platform's panel over media (docs/styling-pass-plan.md Y3).
 pub const KAYA_TINT_OVERLAY: u32 = 6;
+/// A fill in the app's own colour (docs/looks-plan.md §3.2).
+pub const KAYA_TINT_COLOR: u32 = 7;
 const _: () = assert!(
     KAYA_TINT_ACCENT == wire::TINT_ACCENT
         && KAYA_TINT_SUCCESS == wire::TINT_SUCCESS
@@ -1760,6 +1762,7 @@ const _: () = assert!(
         && KAYA_TINT_NEUTRAL == wire::TINT_NEUTRAL
         && KAYA_TINT_NONE == wire::TINT_NONE
         && KAYA_TINT_OVERLAY == wire::TINT_OVERLAY
+        && KAYA_TINT_COLOR == wire::TINT_COLOR
 );
 
 /// The SEMANTIC ICON VOCABULARY (spec enum "symbol"; docs/styling-plan.md

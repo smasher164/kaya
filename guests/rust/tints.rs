@@ -34,12 +34,25 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.label(plain);
                 })
                 .a11y_id("t_plain");
+                for (id, text, rgb) in [("t_amber", "Amber", (0xF2, 0xB0, 0x1E)), ("t_navy", "Navy", (0x1D, 0x6F, 0x8C))] {
+                    let label = tx.signal(text);
+                    tx.row(|tx| {
+                        tx.label(label);
+                    })
+                    .a11y_id(id)
+                    .filled_color(kaya::Color::rgb(rgb.0, rgb.1, rgb.2));
+                }
                 for mut row in notes.rows(tx) {
                     let (bubble, _) = row.row(|t| {
                         t.label(Note::text());
                     });
                     row.a11y_id(bubble, "bubble");
                     row.filled(bubble, kaya::Tint::Accent);
+                    let (swatch, _) = row.row(|t| {
+                        t.label(Note::text());
+                    });
+                    row.a11y_id(swatch, "swatch");
+                    row.filled_color(swatch, kaya::Color::rgb(0x4A, 0x3A, 0xA8));
                 }
             })
             .spacing(8.0)

@@ -506,6 +506,11 @@ sealed class ClipRow
     public void SetAspect(Node n, int width, int height) =>
         t.SetAspect(n, width, height);
 
+    public void SetFilledColor(Node n, Color color) => t.SetFilledColor(n, color);
+
+    public void SetFilledColor(Node n, Field<Color> f, uint level = 0) =>
+        t.SetFilledColor(n, f, level);
+
     public void SetGroundGradient(Node n, Color color) =>
         t.SetGroundGradient(n, color);
 

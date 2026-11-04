@@ -127,6 +127,8 @@ without, read on every lane in every language.
 
 ### §3.2 The data-colour fill (framework piece b, T3)
 
+BUILT 2026-11-04: `filled color` on all five backends and in all nine bindings; the tints scene reads two live fills and a stamped one through `expect_fill_color`, light and dark; the core's inverted foreground choice watched red on all three. Measured: the ink scan must stay 10 units inside the frame, since the rounded corners show the page through the frame's rectangle and a dark page read as black ink on an amber fill (harness.rs FILL_INK_INSET).
+
 The tint vocabulary grows by `color` (7). `filled` set to `color` on a row
 or column takes its fill from the existing `color` prop (44), the colour
 picker's and the gradient ground's, made legal on row and column when

@@ -2185,6 +2185,13 @@ impl<'t, 'b, R> Widget<'t, 'b, R> {
         self
     }
 
+    /// This container filled with the app's own colour, kaya choosing the
+    /// text colour on it (docs/looks-plan.md §3.2); [`Tx::filled_color`] chained.
+    pub fn filled_color(self, color: impl Into<LiveSource<ColorKind>>) -> Self {
+        self.tx.filled_color(self.id, color);
+        self
+    }
+
     /// This container's image ground — [`Tx::ground_image`] chained.
     pub fn ground_image(self, bytes: impl Into<LiveSource<BlobKind>>) -> Self {
         self.tx.ground_image(self.id, bytes);
@@ -3510,6 +3517,13 @@ impl<'a> Tx<'a> {
     /// usual colour.
     pub fn ground_gradient(&mut self, widget: WidgetId, color: impl Into<LiveSource<ColorKind>>) {
         self.set(widget, Prop::Ground, crate::wire::GROUND_GRADIENT);
+        self.set_live(widget, Prop::Color, color.into());
+    }
+
+    /// A row or column filled with the app's own colour (docs/looks-plan.md
+    /// §3.2): `filled color` and the `color` prop in one act.
+    pub fn filled_color(&mut self, widget: WidgetId, color: impl Into<LiveSource<ColorKind>>) {
+        self.set(widget, Prop::Filled, i64::from(crate::wire::TINT_COLOR));
         self.set_live(widget, Prop::Color, color.into());
     }
 
@@ -5719,6 +5733,10 @@ impl<'b> Row<'_, 'b> {
 
     pub fn ground_gradient(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
         self.tpl().ground_gradient(node, src)
+    }
+
+    pub fn filled_color(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
+        self.tpl().filled_color(node, src)
     }
 
     pub fn ground_image(&mut self, node: TemplateNodeId, src: impl Into<TplSource<BlobKind>>) {
@@ -9761,6 +9779,13 @@ impl<'b> Tpl<'_, 'b> {
     /// [`Tx::ground_gradient`]; a row field gives each copy its album's colour.
     pub fn ground_gradient(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
         self.set(node, Prop::Ground, crate::wire::GROUND_GRADIENT);
+        self.apply_source(node, Prop::Color, src.into().inner);
+    }
+
+    /// A stamped container filled with its row's own colour, the blueprint
+    /// twin of [`Tx::filled_color`] (docs/looks-plan.md §3.2).
+    pub fn filled_color(&mut self, node: TemplateNodeId, src: impl Into<TplSource<ColorKind>>) {
+        self.set(node, Prop::Filled, i64::from(crate::wire::TINT_COLOR));
         self.apply_source(node, Prop::Color, src.into().inner);
     }
 

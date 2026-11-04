@@ -5004,6 +5004,26 @@ def _set_filled(handle: _Handle, tint: Tint | str | None) -> None:
     _records().append(wire.tx_set_filled(handle.id, _tint_value(tint)))
 
 
+def _set_filled_color(handle: _Handle, color: Color | Source | None) -> None:
+    """A container filled with the app's own colour, kaya choosing the text
+    colour on it (docs/looks-plan.md §3.2): a constant, a Signal or the
+    row's Color field."""
+    if color is None:
+        return
+    _records().append(wire.tx_set_filled(handle.id, wire.TINT_COLOR))
+    if isinstance(color, Signal):
+        _records().append(wire.tx_bind_color(handle.id, color.id))
+    elif isinstance(color, FieldRef):
+        _picker_field("a colour fill", color, Color)
+        _records().append(wire.tx_bind_color_element(handle.id, color._level(), color._index))
+    elif isinstance(color, Color):
+        _records().append(wire.tx_set_color(handle.id, color.r, color.g, color.b, color.a))
+    else:
+        raise KayaTypeError(
+            "kaya: a colour fill takes a kaya.Color, a Signal or a Color field, "
+            f"not {type(color).__name__}")
+
+
 def _set_skin(handle: _Handle, ground_gradient: Color | Source | None,
               ground_image: bytes | bytearray | memoryview | Asset | Source | None,
               selected: FlagSource | None, on_activate: Handler | None,
@@ -5482,6 +5502,7 @@ def column(*, grow: float | None = None, spacing: float | None = None,
            align: Align | str | None = None,
            inset: Inset | None = None,
            filled: Tint | str | None = None,
+           filled_color: Color | Source | None = None,
            ground_gradient: Color | Source | None = None,
            ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
            selected: FlagSource | None = None,
@@ -5503,6 +5524,7 @@ def column(*, grow: float | None = None, spacing: float | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
+    _set_filled_color(handle, filled_color)
     _set_skin(handle, ground_gradient, ground_image, selected, on_activate, on_select)
     return _Container(handle)
 
@@ -5561,6 +5583,7 @@ def row(*, grow: float | None = None, spacing: float | None = None,
         align: Align | str | None = None, inset: Inset | None = None,
         stack_when: SizeClass | None = None,
         filled: Tint | str | None = None,
+        filled_color: Color | Source | None = None,
         role: Role | str | None = None,
         ground_gradient: Color | Source | None = None,
         ground_image: bytes | bytearray | memoryview | Asset | Source | None = None,
@@ -5604,6 +5627,7 @@ def row(*, grow: float | None = None, spacing: float | None = None,
     _set_align(handle, align)
     _set_inset(handle, inset)
     _set_filled(handle, filled)
+    _set_filled_color(handle, filled_color)
     _set_skin(handle, ground_gradient, ground_image, selected, on_activate, on_select)
     if role is not None:
         handle.role(role)

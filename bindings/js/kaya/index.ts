@@ -4703,6 +4703,9 @@ function setLayout(handle: Handle, opts: ContainerOptions): void {
  * stamped copy's handler getting its row), `onSelect` hears the user's pick
  * of it, and `selected` then wears the platform's selected surface. */
 export type SkinOptions = {
+  /** A fill in the app's own colour, kaya choosing the text colour on it
+   * (docs/looks-plan.md §3.2): a constant, a Signal or the row's Color field. */
+  filledColor?: Color | Signal<Color> | FieldRef;
   groundGradient?: Color | Signal<Color> | FieldRef;
   groundImage?: ImageSource;
   selected?: boolean | Signal<boolean> | FieldRef;
@@ -4711,6 +4714,16 @@ export type SkinOptions = {
 };
 
 function setSkin(handle: Handle, opts: SkinOptions): void {
+  const fill = opts.filledColor;
+  if (fill !== undefined) {
+    records().push(wire.tx_set_filled(handle.id, wire.TINT_COLOR));
+    if (fill instanceof Signal) records().push(wire.tx_bind_color(handle.id, fill.id));
+    else if (fill instanceof FieldRef) {
+      pickerField("a colour fill", fill, Color, "kaya.Color");
+      records().push(wire.tx_bind_color_element(handle.id, fill._level(), fill._index));
+    } else if (fill instanceof Color) records().push(wire.tx_set_color(handle.id, fill.r, fill.g, fill.b, fill.a));
+    else throw new TypeError(`kaya: a colour fill takes a kaya.Color, a Signal or a Color field, not ${runtime.describe(fill)}`);
+  }
   const color = opts.groundGradient;
   if (color !== undefined) {
     records().push(wire.tx_set_ground(handle.id, wire.GROUND_GRADIENT));

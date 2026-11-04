@@ -1655,6 +1655,7 @@ pub(crate) const TINT_CRITICAL: u32 = 4;
 pub(crate) const TINT_NEUTRAL: u32 = 5;
 pub(crate) const TINT_NONE: u32 = 0;
 pub(crate) const TINT_OVERLAY: u32 = 6;
+pub(crate) const TINT_COLOR: u32 = 7;
 
 /// docs/styling-pass-plan.md Y2, Y3 (spec enum "ground").
 pub(crate) const GROUND_NONE: i64 = 0;

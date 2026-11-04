@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0x19db789d3a45d6f1
+	SpecHash uint64 = 0xebbcea02a7fea347
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -258,6 +258,7 @@ const (
 	TintCritical Tint = 4
 	TintNeutral Tint = 5
 	TintOverlay Tint = 6
+	TintColor Tint = 7
 	GroundNone = 0
 	GroundGradient = 1
 	GroundImage = 2
@@ -879,6 +880,8 @@ func (t Tint) String() string {
 		return "neutral"
 	case TintOverlay:
 		return "overlay"
+	case TintColor:
+		return "color"
 	}
 	return "Tint(" + strconv.FormatInt(int64(t), 10) + ")"
 }

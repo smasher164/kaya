@@ -8877,6 +8877,8 @@ mod skin {
         pub kind: i64,
         pub tops: Option<i64>,
         pub image: Option<std::sync::Arc<[u8]>>,
+        /// docs/looks-plan.md §3.2: `tops` is the fill and its text colour.
+        pub color_fill: bool,
     }
 
     pub struct Skin {
@@ -8904,6 +8906,16 @@ mod skin {
         let mut out = String::new();
         for (id, g) in grounds {
             match g.kind {
+                _ if g.color_fill => {
+                    // docs/looks-plan.md §3.2: the fill and the text colour kaya chose,
+                    // the labels inside inheriting `color`.
+                    let Some(packed) = g.tops else { continue };
+                    let (fill, fg) = ((packed >> 24) & 0xFF_FFFF, packed & 0xFF_FFFF);
+                    out.push_str(&format!(
+                        ".{}{id} {{ background-color: #{fill:06x}; color: #{fg:06x}; }}\n",
+                        super::GROUND_CLASS
+                    ));
+                }
                 k if k == crate::wire::GROUND_GRADIENT => {
                     let Some(tops) = g.tops else { continue };
                     let stop = if dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };
@@ -10029,7 +10041,10 @@ fn set_filled(widget: &gtk4::Widget, tint: i64) {
         widget.remove_css_class(class);
     }
     widget.add_css_class(FILLED_CLASS);
-    widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 6) - 1) as usize]);
+    // A colour fill's rule is its own, written by ground_css (docs/looks-plan.md §3.2).
+    if tint != i64::from(crate::wire::TINT_COLOR) {
+        widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 6) - 1) as usize]);
+    }
     if !widget.css_classes().iter().any(|c| c.starts_with(INSET_CLASS)) {
         widget.add_css_class(FILLED_PAD_CLASS);
     }
@@ -10061,7 +10076,7 @@ fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl
         image_source(picture, &bytes);
     }
     let class = format!("{GROUND_CLASS}{id}");
-    if ground.kind == crate::wire::GROUND_NONE {
+    if ground.kind == crate::wire::GROUND_NONE && !ground.color_fill {
         widget.remove_css_class(&class);
     } else {
         widget.add_css_class(&class);
@@ -18094,7 +18109,10 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                 }
                 (NativeWidget::Column(container), Prop::Filled, Value::I64(tint))
                 | (NativeWidget::Row(container), Prop::Filled, Value::I64(tint)) => {
-                    set_filled(&container.clone().upcast::<gtk4::Widget>(), tint);
+                    let widget = container.clone().upcast::<gtk4::Widget>();
+                    set_filled(&widget, tint);
+                    let color_fill = tint == i64::from(crate::wire::TINT_COLOR);
+                    set_ground(core, id.0, &widget, |g| g.color_fill = color_fill);
                 }
                 // docs/submit-plan.md S2: the set the view's key controller reads.
                 (NativeWidget::Textarea(..), Prop::Submits, Value::Bool(on)) => {
@@ -26361,6 +26379,47 @@ impl crate::harness::Stage for GtkStage {
             };
             let b = top.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
             Ok(((b[0] << 16) | (b[1] << 8) | b[2], shot.dark))
+        })
+    }
+
+    fn fill_color(&self, t: crate::harness::Target) -> Result<(u32, u32), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            let shot = skin::shot_of(&widget)?;
+            let Some(f) = shot.frame(&widget) else { return Err("<no laid-out frame>".to_owned()) };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 8.0 || fh <= 8.0 {
+                return Err(format!("<no laid-out frame: {fw}x{fh}>"));
+            }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return Err(why);
+            }
+            let Some(fill) = shot.at(fx + fw - 4.0, fy + fh / 2.0) else {
+                return Err(format!("<the probe falls outside the window: {fx},{fy} {fw}x{fh}>"));
+            };
+            let step = 1.0 / shot.scale;
+            let inset = crate::harness::FILL_INK_INSET;
+            let (mut ink, mut best) = (fill, -1.0);
+            let mut y = fy + inset;
+            while y < fy + fh - inset {
+                let mut x = fx + inset;
+                while x < fx + fw - inset {
+                    if let Some(c) = shot.at(x, y) {
+                        let d: f64 = (0..3).map(|i| (c[i] - fill[i]).abs()).sum();
+                        if d > best {
+                            best = d;
+                            ink = c;
+                        }
+                    }
+                    x += step;
+                }
+                y += step;
+            }
+            let rgb = |c: [f64; 3]| {
+                let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+                (b[0] << 16) | (b[1] << 8) | b[2]
+            };
+            Ok((rgb(fill), rgb(ink)))
         })
     }
 

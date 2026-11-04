@@ -5263,6 +5263,18 @@ public final class KayaApp {
             return tx;
         }
 
+        /** This container filled with the app's own colour, kaya choosing the
+         * text colour on it (Tx#setFilledColor; docs/looks-plan.md §3.2), chained. */
+        public Widget filledColor(Color color) {
+            building("filledColor").setFilledColor(this, color);
+            return this;
+        }
+
+        public Widget filledColor(Signal<Color> s) {
+            building("filledColor").setFilledColor(this, s);
+            return this;
+        }
+
         /** This container's gradient ground (Tx#setGroundGradient), chained. */
         public Widget groundGradient(Color color) {
             building("groundGradient").setGroundGradient(this, color);
@@ -6741,6 +6753,14 @@ public final class KayaApp {
             t.setFilled(n, tint);
         }
 
+        public void setFilledColor(Node n, Color color) {
+            t.setFilledColor(n, color);
+        }
+
+        public void setFilledColor(Node n, KayaRecords.Field<Color> f) {
+            t.setFilledColor(n, f);
+        }
+
         /** This row's copy of that container's gradient ground (Tpl.setGroundGradient). */
         public void setGroundGradient(Node n, Color color) {
             t.setGroundGradient(n, color);
@@ -7824,6 +7844,18 @@ public final class KayaApp {
          * the core for the appearance's text, into the platform's window
          * ground (docs/styling-pass-plan.md Y2); {@link KayaApp#imageDominant}
          * is the usual colour. */
+        /** A row or column filled with the app's own colour, kaya choosing
+         * the text colour on it (docs/looks-plan.md §3.2). */
+        public void setFilledColor(Widget w, Color color) {
+            emit(KayaWire.txSetFilled(w.id, KayaWire.TINT_COLOR));
+            emit(KayaWire.txSetColor(w.id, color.r(), color.g(), color.b(), color.a()));
+        }
+
+        public void setFilledColor(Widget w, Signal<Color> s) {
+            emit(KayaWire.txSetFilled(w.id, KayaWire.TINT_COLOR));
+            emit(KayaWire.txBindColor(w.id, s.id));
+        }
+
         public void setGroundGradient(Widget w, Color color) {
             emit(KayaWire.txSetGround(w.id, KayaWire.GROUND_GRADIENT));
             emit(KayaWire.txSetColor(w.id, color.r(), color.g(), color.b(), color.a()));
@@ -10388,6 +10420,18 @@ public final class KayaApp {
         /** A stamped container's gradient ground, the blueprint twin of
          * {@link Tx#setGroundGradient}; a row field gives each copy its
          * album's colour. */
+        /** A stamped container filled with one colour, or each copy's own
+         * from a Color field (docs/looks-plan.md §3.2). */
+        public void setFilledColor(Node n, Color color) {
+            tx.emit(KayaWire.txSetFilled(n.id, KayaWire.TINT_COLOR));
+            tx.emit(KayaWire.txSetColor(n.id, color.r(), color.g(), color.b(), color.a()));
+        }
+
+        public void setFilledColor(Node n, KayaRecords.Field<Color> f) {
+            tx.emit(KayaWire.txSetFilled(n.id, KayaWire.TINT_COLOR));
+            bindColorField(n, 0, f);
+        }
+
         public void setGroundGradient(Node n, Color color) {
             tx.emit(KayaWire.txSetGround(n.id, KayaWire.GROUND_GRADIENT));
             tx.emit(KayaWire.txSetColor(n.id, color.r(), color.g(), color.b(), color.a()));

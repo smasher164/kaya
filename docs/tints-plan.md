@@ -54,6 +54,9 @@ Two things the table says that the design has to carry:
   needs it. The task manager's projects are the likely first. This is
   the canvas paint rule one surface over: roles first, literal RGB as the
   named escalation (crates/kaya/src/spec.rs's `paint` enum).
+  BUILT 2026-11-04 as `filled color`, the `color` prop as a container's fill
+  with kaya choosing white or black text on it (docs/looks-plan.md §3.2);
+  text in a data colour stays refused.
 
 ## §2 — What this pass does not do
 

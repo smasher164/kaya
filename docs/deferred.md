@@ -330,7 +330,7 @@ would move them into the core and let each platform use its own transport
 behaviour. Needs the maintainer's ruling on the surface. Trigger: a second
 media app, or the ruling.
 
-## DEFER — the data-colour tier beyond the gradient (docs/styling-pass-plan.md Y2; 2026-10-16)
+## ~~DEFER — the data-colour tier beyond the gradient (docs/styling-pass-plan.md Y2; 2026-10-16)~~ COMPLETE 2026-11-04: ruled yes on the Demo App Looks page (Q2) and built as `filled color` with the `color` prop, kaya choosing white or black text on it by contrast (docs/looks-plan.md §3.2), on five backends and in nine bindings; the tints scene reads it live and stamped, light and dark, the inverted choice watched red; the task manager's project swatches and tiles are its first consumer. Text in a data colour stays refused.
 KEY: data colour, dominant colour, raw colour tier, T3
 
 Y2 admits one data colour, a gradient ground's top stop, under the core's

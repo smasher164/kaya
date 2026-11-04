@@ -24,7 +24,7 @@ public enum KayaValue: Hashable {
 /// A transaction under construction: packed records accumulate in
 /// `bytes`; submit with kaya_submit.
 /// kayaSpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-let kayaSpecHash: UInt64 = 0x19db789d3a45d6f1
+let kayaSpecHash: UInt64 = 0xebbcea02a7fea347
 let kayaVersion = "0.0.0"
 
 /// A civil date as the wire's I64: year * 10000 + month * 100 + day.

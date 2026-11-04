@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0x19db789d3a45d6f1
+let kayaSpecHash: UInt64 = 0xebbcea02a7fea347
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -429,6 +429,8 @@ private let tintCritical: Int64 = 4
 private let tintNeutral: Int64 = 5
 private let tintNone: Int64 = 0
 private let tintOverlay: Int64 = 6
+/// docs/looks-plan.md §3.2: the fill is the container's `color`.
+private let tintColor: Int64 = 7
 // THE RICH TEXT VOCABULARIES, hand-copied APPEND-ONLY wire values held
 // against the core's by tools/check-verbs.py (docs/rich-text-plan.md R3).
 // An attribute NAME rides the wire as a string; these are the numbers the
@@ -15456,6 +15458,55 @@ private func kayaRunScript(_ script: String) {
                 } else {
                     failures.append("text scale \(got), wanted \(parts[1])")
                 }
+            case "expect_fill_color":
+                // harness.rs's ExpectFillColor, the same sentences and tolerance.
+                let fillSpec = kayaQuoted(Array(parts.dropFirst(2))).split(separator: " ").map(String.init)
+                guard fillSpec.count == 3, fillSpec[1] == "on", let wantFill = UInt32(fillSpec[0], radix: 16),
+                    fillSpec[2] == "white" || fillSpec[2] == "black"
+                else {
+                    failures.append("expect_fill_color wants a container and \"RRGGBB on white|black\": \(line)")
+                    break
+                }
+                let wantText = fillSpec[2]
+                func nearFill(_ a: UInt32, _ b: UInt32) -> Bool {
+                    for k: UInt32 in 0..<3 where abs(Int((a >> (8 * k)) & 0xFF) - Int((b >> (8 * k)) & 0xFF)) > 15 {
+                        return false
+                    }
+                    return true
+                }
+                func readFill() -> ((UInt32, UInt32)?, String)? {
+                    DispatchQueue.main.sync { () -> ((UInt32, UInt32)?, String)? in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                            ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                        else { return nil }
+                        return kayaFillColorRead(node)
+                    }
+                }
+                func fillHolds(_ r: (UInt32, UInt32)) -> Bool {
+                    nearFill(r.0, wantFill) && (kayaInkIsLight(r.1) ? "white" : "black") == wantText
+                }
+                var gotFill = readFill()
+                let fillDeadline = Date().addingTimeInterval(5)
+                while Date() < fillDeadline, let g = gotFill, !(g.0.map(fillHolds) ?? false) {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    gotFill = readFill()
+                }
+                let saidFill = String(format: "%06X on %@", wantFill, wantText)
+                switch gotFill {
+                case nil: failures.append("no such target \(parts[1])")
+                case let g?:
+                    if let r = g.0 {
+                        if fillHolds(r) {
+                            observed.append("\(parts[1]) fill color \"\(saidFill)\"")
+                        } else {
+                            failures.append(String(
+                                format: "%@ reads fill %06X on %@ (ink %06X), wanted %@",
+                                String(parts[1]), r.0, kayaInkIsLight(r.1) ? "white" : "black", r.1, saidFill))
+                        }
+                    } else {
+                        failures.append("\(parts[1]) fill unread: \(g.1)")
+                    }
+                }
             case "expect_ground_color":
                 // harness.rs's ExpectGroundColor, the same sentences and tolerance.
                 let spec = kayaQuoted(Array(parts.dropFirst(2))).split(separator: " ").map(String.init)
@@ -24286,8 +24337,14 @@ let kayaFilledDefaultInset: Double = 10
 }
 
 /// The platform's fill for a tint, and the foreground paired with it.
-@MainActor func kayaTintPair(_ tint: Int64) -> (fill: AnyShapeStyle, fore: AnyShapeStyle) {
+/// `packed` is the container's `color` as the core sends a colour fill's
+/// (docs/looks-plan.md §3.2): the fill in bits 24-47, the text colour kaya
+/// chose for it in bits 0-23.
+@MainActor func kayaTintPair(_ tint: Int64, packed: Int64 = 0) -> (fill: AnyShapeStyle, fore: AnyShapeStyle) {
     switch tint {
+    case tintColor:
+        return (AnyShapeStyle(kayaRGB(UInt32((packed >> 24) & 0xFF_FFFF))),
+                AnyShapeStyle(kayaRGB(UInt32(packed & 0xFF_FFFF))))
     case tintAccent:
         if let brand = kayaScene.brand {
             #if os(macOS)
@@ -24330,6 +24387,7 @@ private func kayaRGB(_ rgb: UInt32) -> Color {
 
 struct KayaFilledSurface: ViewModifier {
     let tint: Int64
+    var packed: Int64 = 0
 
     func body(content: Content) -> some View {
         if tint == 0 {
@@ -24350,7 +24408,7 @@ struct KayaFilledSurface: ViewModifier {
                     .environment(\.colorScheme, .dark)
                 }
         } else {
-            let pair = kayaTintPair(tint)
+            let pair = kayaTintPair(tint, packed: packed)
             content
                 .foregroundStyle(pair.fore)
                 .environment(\.kayaInFill, true)
@@ -25348,6 +25406,56 @@ struct KayaSkinFrameHolder: View {
 /// expect_ground_color's read (docs/media-player-plan.md M16 (35)): the ground's
 /// own top probe as 0xRRGGBB and whether the window reads dark, or why not;
 /// kayaGroundRead's probe.
+/// expect_fill_color's read (docs/looks-plan.md §3.2): the fill at
+/// expect_fill's probe and the ink farthest from it inside the frame, each
+/// 0xRRGGBB off the window's pixels, or what was measured instead.
+@MainActor func kayaFillColorRead(_ node: KayaNode) -> ((UInt32, UInt32)?, String) {
+    guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id), frame.width > 8, frame.height > 8 else {
+        return (nil, "<no laid-out frame>")
+    }
+    if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    guard let fill = shot.at(CGPoint(x: frame.maxX - 4, y: frame.midY)) else {
+        return (nil, "<the probe falls outside the window: \(frame)>")
+    }
+    // Inside the corners (radius 12), where the page shows through the
+    // frame's rectangle; the text starts at the fill's inset of 12.
+    let inner = frame.insetBy(dx: kayaFillInkInset, dy: kayaFillInkInset)
+    var ink = fill
+    var best = -1.0
+    let step = 1 / shot.scale
+    var y = inner.minY
+    while y < inner.maxY {
+        var x = inner.minX
+        while x < inner.maxX {
+            if let c = shot.at(CGPoint(x: x, y: y)) {
+                let d = (0..<3).map { abs(c[$0] - fill[$0]) }.reduce(0, +)
+                if d > best { best = d; ink = c }
+            }
+            x += step
+        }
+        y += step
+    }
+    func rgb(_ c: [Double]) -> UInt32 {
+        (0..<3).reduce(UInt32(0)) { ($0 << 8) | UInt32(max(0, min(255, (c[$1] * 255).rounded()))) }
+    }
+    return ((rgb(fill), rgb(ink)), "")
+}
+
+/// harness.rs's FILL_INK_INSET.
+let kayaFillInkInset: CGFloat = 10
+
+/// harness.rs's ink_is_light: CIELAB L* 50 splits white text from black.
+func kayaInkIsLight(_ rgb: UInt32) -> Bool {
+    let lin = [(rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF].map { v -> Double in
+        let c = Double(v) / 255
+        return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+    }
+    let y = 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    let l = y > 216.0 / 24389.0 ? 116 * cbrt(y) - 16 : y * 24389.0 / 27.0
+    return l >= 50
+}
+
 @MainActor func kayaGroundTopRead(_ node: KayaNode) -> (UInt32, Bool)? {
     guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16,
         kayaSkinUnseen(node, frame) == nil, let shot = kayaWindowPixels(),
@@ -30365,7 +30473,7 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .modifier(KayaInsetPadding(node: node))
-            .modifier(KayaFilledSurface(tint: kayaShownFill(node)))
+            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
             .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))
