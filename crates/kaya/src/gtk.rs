@@ -11044,9 +11044,11 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
         core.grid_cols.get(&grid_id).copied().unwrap_or(1)
     }
     .max(1);
-    // Equal shares of the width when the count is the width's.
-    grid.set_column_homogeneous(auto);
     let children = core.grid_children.get(&grid_id).cloned().unwrap_or_default();
+    // Equal shares of the width when the count is the width's, or when a
+    // cell says `fill` (DESIGN.md's grid paragraph; the task manager's tiles).
+    let shares = auto || children.iter().any(|c| fill_of(c) == Some(true));
+    grid.set_column_homogeneous(shares);
     for child in &children {
         if child.parent().is_some() {
             grid.remove(child);
@@ -11076,6 +11078,7 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
         } else {
             child.set_valign(gtk4::Align::Center);
         }
+        child.set_hexpand(shares && fill_of(child) == Some(true));
         grid.attach(child, i % cols, i / cols, 1, 1);
     }
     // docs/traps.md, the GTK auto grid's missing columns.
@@ -18401,6 +18404,14 @@ fn apply(core: &mut CoreState, op: ApplyOp) {
                     let widget = w.widget();
                     set_fill(&widget, on);
                     restamp_cross_align(&widget);
+                    let seat = core
+                        .grid_children
+                        .iter()
+                        .find(|(_, cells)| cells.contains(&widget))
+                        .map(|(grid, _)| *grid);
+                    if let Some(seat) = seat {
+                        reflow_grid(core, seat);
+                    }
                 }
                 // HIDDEN (DESIGN.md, Structural operators): GtkBox and kaya's
                 // own layouts skip an unshown child, gap included; a box this

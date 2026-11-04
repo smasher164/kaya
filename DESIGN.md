@@ -1266,6 +1266,10 @@ The known normalization worklist:
   was given rather than from a size class. An explicit count, or a
   `columns_when` while its class holds, still wins. The observation is
   `expect_grid_columns` after a resize, the adaptive scene's pattern.
+  A grid with an explicit count takes its columns' natural widths unless a
+  cell says `fill`: then every column is an equal share of the grid's width
+  and the grid spans its parent, on every backend (the task manager's
+  tiles; `expect_same_width` across two cells is the observation).
 - A row with `wrap` flows: children keep their natural size and move onto
   the next line when the row runs out of width, leading-aligned, the
   row's spacing on both axes (docs/layout-knobs-plan.md §2). No child of a

@@ -3032,6 +3032,19 @@ fn auto_grid_retry(gid: u64, width: f64) {
     let _ = dispatcher.0.TryEnqueue(&handler);
 }
 
+/// Equal shares of the width when the count is the width's, or when a cell
+/// says `fill` (DESIGN.md's grid paragraph; the task manager's tiles): the
+/// columns are stars and the grid spans its parent.
+fn grid_shares(core: &CoreState, grid_id: u64) -> bool {
+    if core.grid_cols.get(&grid_id).copied() == Some(0) {
+        return true;
+    }
+    let Some(children) = core.grid_children.get(&grid_id) else { return false };
+    core.widgets.iter().any(|(id, w)| {
+        core.fills.get(&id.0).copied().unwrap_or(false) && w.element().is_ok_and(|e| children.contains(&e))
+    })
+}
+
 fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
     let Some(NativeWidget::Grid2D(grid)) = core.widgets.get(&WidgetId(grid_id)) else {
         return Ok(());
@@ -3053,14 +3066,14 @@ fn reflow_grid(core: &CoreState, grid_id: u64) -> windows_core::Result<()> {
         shown.push(child.Visibility()? != Visibility::Collapsed);
     }
     let rows = (shown.iter().filter(|s| **s).count() as i32 + cols - 1) / cols;
+    let shares = grid_shares(core, grid_id);
     let coldefs = grid.ColumnDefinitions()?;
     coldefs.Clear()?;
     for _ in 0..cols {
         let def = ColumnDefinition::new()?;
-        // Equal shares of the width when the count is the width's.
         def.SetWidth(GridLength {
             Value: 1.0,
-            GridUnitType: if auto { GridUnitType::Star } else { GridUnitType::Auto },
+            GridUnitType: if shares { GridUnitType::Star } else { GridUnitType::Auto },
         })?;
         coldefs.Append(&def)?;
     }
@@ -3791,10 +3804,7 @@ fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {
                 ));
         // An auto grid is width-driven, so it takes its column's width
         // (docs/layout-knobs-plan.md §3).
-        let crossing = crossing
-            || (vertical
-                && matches!(widget, NativeWidget::Grid2D(_))
-                && core.grid_cols.get(&child.0).copied() == Some(0));
+        let crossing = crossing || (vertical && matches!(widget, NativeWidget::Grid2D(_)) && grid_shares(core, child.0));
         // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
         // (docs/layout-knobs-plan.md §1).
         let crossing = core.fills.get(&child.0).copied().unwrap_or(crossing);
@@ -18720,6 +18730,16 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
             // (docs/layout-knobs-plan.md §1).
             if let (Prop::Fill, Value::Bool(on)) = (prop, &value) {
                 core.fills.insert(id.0, *on);
+                // A grid's cells are not in child_order, so the grid itself
+                // is marked and its columns re-flow at the flush (DESIGN.md's
+                // grid paragraph); a re-flow here seated the bare cell before
+                // the activatable arm could wrap it.
+                if let Some(element) = core.widgets.get(&id).and_then(|w| w.element().ok()) {
+                    let grid = core.grid_children.iter().find(|(_, kids)| kids.contains(&element)).map(|(g, _)| *g);
+                    if let Some(grid) = grid {
+                        core.child_order.mark(WidgetId(grid));
+                    }
+                }
                 if let Some(parent) = core.child_order.parent_of(id) {
                     core.child_order.mark(parent);
                 }

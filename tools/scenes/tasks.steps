@@ -27,6 +27,8 @@ expect_fill_color column@tile_upcoming "D9486A on black"
 expect_fill_color column@tile_anytime "1FA2A0 on black"
 expect_fill_color column@tile_logbook "2E9E5B on black"
 expect_symbol icon@tile_today_symbol "star"
+# The tiles share the row's width (DESIGN.md's grid paragraph).
+expect_same_width column@tile_today column@tile_upcoming
 expect label@tile_today_count "2"
 expect label@tile_logbook_count "1"
 click column@tile_today

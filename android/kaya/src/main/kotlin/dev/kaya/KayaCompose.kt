@@ -20710,8 +20710,11 @@ private fun KayaRenderCore(
                     } else {
                         fixedCols
                     }
+                // Equal shares when the count is the width's, or when a cell
+                // says `fill` (DESIGN.md's grid paragraph; the task manager's tiles).
+                val shared = (auto || cells.any { it.fill == true }) && constraints.hasBoundedWidth
                 val share =
-                    if (auto && constraints.hasBoundedWidth) {
+                    if (shared) {
                         maxOf(0, (constraints.maxWidth - gapPx * (cols - 1)) / cols)
                     } else {
                         0
@@ -20721,7 +20724,7 @@ private fun KayaRenderCore(
                 // tallest height (docs/media-player-plan.md M16 (1)): its
                 // height is asked first and it is measured once at the row's.
                 val stretch = BooleanArray(measurables.size) { i ->
-                    auto && share > 0 && cells[i].kind in
+                    shared && share > 0 && cells[i].kind in
                         setOf(KayaCompose.KIND_COLUMN, KayaCompose.KIND_ROW, KayaCompose.KIND_GRID)
                 }
                 val tall = IntArray(measurables.size) { i ->
@@ -20740,7 +20743,7 @@ private fun KayaRenderCore(
                 measurables.forEachIndexed { i, m ->
                     if (!stretch[i]) {
                         loose[i] = m.measure(
-                            if (auto && share > 0) {
+                            if (shared && share > 0) {
                                 androidx.compose.ui.unit.Constraints(maxWidth = share)
                             } else {
                                 androidx.compose.ui.unit.Constraints()
@@ -20758,7 +20761,7 @@ private fun KayaRenderCore(
                 placeables.forEachIndexed { i, p ->
                     colW[i % cols] = maxOf(colW[i % cols], p.width)
                 }
-                if (auto && share > 0) for (c in 0 until cols) colW[c] = share
+                if (shared && share > 0) for (c in 0 until cols) colW[c] = share
                 // Coerced into the incoming constraints, so a GROWN grid
                 // takes the track the fill above fixed for it — a Layout
                 // that reports its own size regardless would leave the

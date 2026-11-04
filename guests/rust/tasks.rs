@@ -463,6 +463,7 @@ fn tiles(tx: &mut kaya::Tx, msgs: &kaya::Messages<Msg>, counts: &BTreeMap<List, 
                 tx.label(name).a11y_id(format!("tile_{key}_name"));
             })
             .a11y_id(format!("tile_{key}"))
+            .fill(true)
             .filled_color(list_color(list))
             .on_activate(msgs, Msg::OpenList(list));
         }
