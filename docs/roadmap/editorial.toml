@@ -45,6 +45,16 @@ growfit = 'https://claude.ai/artifact/SsduV7PtFoi344sadJopgo'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
+title = "<b>The four demo apps' own looks</b>"
+star = false
+status = 'open'
+size = 'M'
+unblocks = 'the task manager, the chat app, the portfolio and the text editor'
+plan = 'docs/looks-plan.md'
+key = 'data colour'
+text = "RULED 2026-11-03 on the Demo App Looks page: a colour per list and a tile grid for the task manager, a generated wallpaper per conversation for chat, the day's colour for the portfolio, a bundled coding face with an accent status bar and a Writing Mode for the editor. The framework pieces first: a standalone <code>icon</code> kind, the data-colour fill (the tints plan's T3), up and down chart paints, and a reading measure on the textarea; then one app per slice, each with its review page, and one full matrix at the end."
+
+[[menu]]
 title = '<a href="#item-hscroll">Horizontal scroll axis</a>'
 star = false
 status = 'shipped'

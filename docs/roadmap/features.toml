@@ -969,6 +969,19 @@ tier_reason = "refused by DESIGN's styling ceiling"
 amended = "2026-09-25 (60faea36, 4d000f54): a closed vocabulary of platform tints on a filled container role, for the chat app's bubbles; 2026-10-16 (a6964201, 50e27735): the styling pass's closed vocabulary of grounds, image shapes, cards and a dock for the music app; arbitrary styling stays refused"
 
 [[feature]]
+slug = 'demo_looks'
+name = "The demo apps' own looks: icon kind, data-colour fill, direction paints, reading measure"
+group = 'Presentation'
+need = 3
+parity = 4
+cost = 'M'
+lanes = 'NNNNN'
+need_why = "every category the 2026-10-30 research covered (task managers, chat, finance, editors) puts a colour that is data in a small place, which the semantic tints cannot say; a glyph outside a button is in every toolkit's catalogue"
+parity_why = 'a standalone symbol image is first-party in 10 of 10 full toolkits; an app-chosen fill with a derived foreground is a one-liner in each'
+shape = "a kind (`icon`), a tint value (`color`) with the `color` prop, four paint roles, `max_width` on the textarea"
+kaya = "RULED 2026-11-03 (docs/looks-plan.md): Image(systemName:), Compose Icon, GtkImage by icon name, WinUI FontIcon through the one symbol vocabulary; a filled container in the app's colour with kaya choosing white or black text by contrast; up and down paints in kaya's two-mode chart palette; a textarea's text column capped and centred."
+
+[[feature]]
 slug = 'collection_pipelines'
 name = 'Filter, sort and selection as model objects'
 group = 'Bindings'
