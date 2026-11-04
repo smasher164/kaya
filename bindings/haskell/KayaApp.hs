@@ -4686,7 +4686,7 @@ showCapture (Widget n) c = emitB (W.txSetCapture n (maybe 0 (\(Capture i) -> fro
 -- | The paint ROLE an op names. Never RGB: the roles resolve in the core
 -- per appearance (§3.4).
 -- Prefixed, as Go spells them, so 'Axis' stays the attr every binding names.
-data Paint = PaintSeries | PaintSeriesFill | PaintGrid | PaintAxis | PaintGround
+data Paint = PaintSeries | PaintSeriesFill | PaintGrid | PaintAxis | PaintGround | PaintUp | PaintDown | PaintUpFill | PaintDownFill
 
 paintWire :: Paint -> Int64
 paintWire p = fromIntegral $ case p of
@@ -4695,6 +4695,10 @@ paintWire p = fromIntegral $ case p of
   PaintGrid -> W.paintGrid
   PaintAxis -> W.paintAxis
   PaintGround -> W.paintGround
+  PaintUp -> W.paintUp
+  PaintDown -> W.paintDown
+  PaintUpFill -> W.paintUpFill
+  PaintDownFill -> W.paintDownFill
 
 -- | Which way a fill resolves its own crossings.
 data FillRule = Nonzero | EvenOdd

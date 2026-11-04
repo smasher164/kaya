@@ -5674,6 +5674,10 @@ const PAINTS: Record<string, number> = {
   grid: wire.PAINT_GRID,
   axis: wire.PAINT_AXIS,
   ground: wire.PAINT_GROUND,
+  up: wire.PAINT_UP,
+  down: wire.PAINT_DOWN,
+  up_fill: wire.PAINT_UP_FILL,
+  down_fill: wire.PAINT_DOWN_FILL,
 };
 const FILL_RULES: Record<string, number> = { nonzero: wire.FILL_RULE_NONZERO, even_odd: wire.FILL_RULE_EVEN_ODD };
 const TEXT_ALIGNS: Record<string, number> = { start: wire.TEXT_ALIGN_START, middle: wire.TEXT_ALIGN_MIDDLE, end: wire.TEXT_ALIGN_END };
@@ -5683,7 +5687,7 @@ const TEXT_BASELINES: Record<string, number> = {
   top: wire.TEXT_BASELINE_TOP,
   bottom: wire.TEXT_BASELINE_BOTTOM,
 };
-export type Paint = "series" | "series_fill" | "grid" | "axis" | "ground";
+export type Paint = "series" | "series_fill" | "grid" | "axis" | "ground" | "up" | "down" | "up_fill" | "down_fill";
 export type FillRule = "nonzero" | "even_odd";
 export type TextAlign = "start" | "middle" | "end";
 export type TextBaseline = "alphabetic" | "middle" | "top" | "bottom";

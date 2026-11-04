@@ -65,6 +65,18 @@ KayaApp.run { app in
                 d.font(size: 13.0, asset: "fonts/sora-wght.ttf", weight: 700)
                 d.text(plot.l + 8.0, plot.t + 3.0, "Q3", .series, align: .start, baseline: .top)
             }
+            // The direction paints (docs/looks-plan.md §3.3): four bars over
+            // the ground, each probed at its centre.
+            let trend = tx.canvas(KayaViewbox(200.0, 40.0))
+            tx.setA11yId(trend, "trend")
+            tx.setA11yLabel(trend, "Up and down")
+            tx.draw(trend) { d in
+                d.moveTo(0.0, 0.0).lineTo(200.0, 0.0).lineTo(200.0, 40.0).lineTo(0.0, 40.0).close().fill(.ground, rule: .nonzero)
+                let bars: [(Double, KayaPaint)] = [(0.0, .up), (50.0, .upFill), (100.0, .down), (150.0, .downFill)]
+                for (x, paint) in bars {
+                    d.moveTo(x, 0.0).lineTo(x + 50.0, 0.0).lineTo(x + 50.0, 40.0).lineTo(x, 40.0).close().fill(paint, rule: .nonzero)
+                }
+            }
             return root
         }
         tx.mount(root)

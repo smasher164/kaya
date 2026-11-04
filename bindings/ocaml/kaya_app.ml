@@ -3719,7 +3719,7 @@ let image ?grow ?fill ?a11y_id ?a11y_id_bind ?a11y_label ?a11y_label_bind ?help 
 (* --- THE CANVAS VOCABULARIES (docs/canvas-plan.md §3.3, §3.4) --------
    The paint ROLE an op names, never RGB: the roles resolve in the core
    per appearance. The numbers stay in the generated wire module. *)
-type paint = Series | Series_fill | Grid | Axis | Ground
+type paint = Series | Series_fill | Grid | Axis | Ground | Up | Down | Up_fill | Down_fill
 
 let paint_wire = function
   | Series -> Int64.of_int Kaya_wire.paint_series
@@ -3727,6 +3727,10 @@ let paint_wire = function
   | Grid -> Int64.of_int Kaya_wire.paint_grid
   | Axis -> Int64.of_int Kaya_wire.paint_axis
   | Ground -> Int64.of_int Kaya_wire.paint_ground
+  | Up -> Int64.of_int Kaya_wire.paint_up
+  | Down -> Int64.of_int Kaya_wire.paint_down
+  | Up_fill -> Int64.of_int Kaya_wire.paint_up_fill
+  | Down_fill -> Int64.of_int Kaya_wire.paint_down_fill
 
 (* Which way a fill resolves its own crossings. *)
 type fill_rule = Nonzero | Even_odd

@@ -1641,7 +1641,7 @@ val bind_hidden : widget -> bool signal -> unit
 (* --- THE CANVAS VOCABULARY (docs/canvas-plan.md §3.3, §3.4) --------- *)
 
 (* A fill/stroke's brand-relative color, resolved from the accent seed. *)
-type paint = Series | Series_fill | Grid | Axis | Ground
+type paint = Series | Series_fill | Grid | Axis | Ground | Up | Down | Up_fill | Down_fill
 
 (* [fill]'s ~rule — even-odd or the default nonzero winding. *)
 type fill_rule = Nonzero | Even_odd

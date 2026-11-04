@@ -1129,7 +1129,10 @@ launders an inference into a fact is how a wrong "impossible" calcifies:
 
 **kaya owns a two-mode chart palette, resolved in the core.** The paint
 roles of §3.4 resolve to kaya's own colours for light mode and dark
-mode; only the MODE BIT crosses from the platform. The core re-rasters
+mode; only the MODE BIT crosses from the platform. Since 2026-11-04 the
+roles include `up`, `down` and their fills, a series in the day's
+direction (docs/looks-plan.md §3.3), kaya's own green and red by this
+section's rule. The core re-rasters
 on an appearance change, the same way it re-rasters on a scale change.
 
 RULED 2026-08-27, off mocked captures: the DARK series fill runs at

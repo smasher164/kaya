@@ -1714,6 +1714,11 @@ enum Paint : long
     Axis = KayaWire.PaintAxis,
     /// The plot background.
     Ground = KayaWire.PaintGround,
+    /// A series in the day's direction and the area under it (docs/looks-plan.md §3.3).
+    Up = KayaWire.PaintUp,
+    Down = KayaWire.PaintDown,
+    UpFill = KayaWire.PaintUpFill,
+    DownFill = KayaWire.PaintDownFill,
 }
 
 /// <summary>Which way a fill resolves its own crossings.</summary>

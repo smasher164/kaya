@@ -250,6 +250,11 @@ public enum KayaPaint {
     case axis
     /// The plot background.
     case ground
+    /// A series in the day's direction and the area under it (docs/looks-plan.md §3.3).
+    case up
+    case down
+    case upFill
+    case downFill
 
     var wire: Int64 {
         switch self {
@@ -258,6 +263,10 @@ public enum KayaPaint {
         case .grid: return Int64(KAYA_PAINT_GRID)
         case .axis: return Int64(KAYA_PAINT_AXIS)
         case .ground: return Int64(KAYA_PAINT_GROUND)
+        case .up: return Int64(KAYA_PAINT_UP)
+        case .down: return Int64(KAYA_PAINT_DOWN)
+        case .upFill: return Int64(KAYA_PAINT_UP_FILL)
+        case .downFill: return Int64(KAYA_PAINT_DOWN_FILL)
         }
     }
 }

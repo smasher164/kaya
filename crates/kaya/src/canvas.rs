@@ -514,20 +514,30 @@ fn string_operand(op: &str, which: &str, v: &Value) -> Result<String, String> {
 /// §6 holds the survey behind that ruling).
 ///
 /// Packed as 0xRRGGBBAA.
-const PALETTE_LIGHT: [(i64, u32); 5] = [
+const PALETTE_LIGHT: [(i64, u32); 9] = [
     (wire::PAINT_SERIES, 0x1C71D8FF),
     (wire::PAINT_SERIES_FILL, 0x1C71D833),
     (wire::PAINT_GRID, 0xE1E4EAFF),
     (wire::PAINT_AXIS, 0x4A5160FF),
     (wire::PAINT_GROUND, 0xFFFFFFFF),
+    // docs/looks-plan.md §3.3: a series in the day's direction, the fills
+    // at the series fill's alpha.
+    (wire::PAINT_UP, 0x1F9D55FF),
+    (wire::PAINT_DOWN, 0xD93A2BFF),
+    (wire::PAINT_UP_FILL, 0x1F9D5533),
+    (wire::PAINT_DOWN_FILL, 0xD93A2B33),
 ];
 
-const PALETTE_DARK: [(i64, u32); 5] = [
+const PALETTE_DARK: [(i64, u32); 9] = [
     (wire::PAINT_SERIES, 0x6EA8F0FF),
     (wire::PAINT_SERIES_FILL, 0x6EA8F01E),
     (wire::PAINT_GRID, 0x2C313AFF),
     (wire::PAINT_AXIS, 0xA9B1BFFF),
     (wire::PAINT_GROUND, 0x16181CFF),
+    (wire::PAINT_UP, 0x4FD37AFF),
+    (wire::PAINT_DOWN, 0xFF6B5EFF),
+    (wire::PAINT_UP_FILL, 0x4FD37A1E),
+    (wire::PAINT_DOWN_FILL, 0xFF6B5E1E),
 ];
 
 fn resolve(paint: i64, mode: Mode) -> AlphaColor<Srgb> {
@@ -1220,6 +1230,54 @@ mod tests {
             "light FFFFFF/D2E3F7 dark 16181C/212A35",
             "tools/scenes/canvas.steps freezes exactly this string, and expect_ink \
              allows each channel ±1 around EACH MODE's half"
+        );
+    }
+
+    /// The canvas scene's second canvas (guests/rust/canvas.rs's `trend`):
+    /// the four direction paints as bars over the ground, each read at its
+    /// centre (docs/looks-plan.md §3.3).
+    fn scene_trend() -> Vec<Value> {
+        let mut v = Vec::new();
+        let rect = |v: &mut Vec<Value>, l: f64, r: f64, paint: i64| {
+            v.extend([op(wire::DRAW_MOVE_TO), n(l), n(0.0)]);
+            for (x, y) in [(r, 0.0), (r, 40.0), (l, 40.0)] {
+                v.extend([op(wire::DRAW_LINE_TO), n(x), n(y)]);
+            }
+            v.push(op(wire::DRAW_CLOSE));
+            v.extend([op(wire::DRAW_FILL), op(paint), op(wire::FILL_NONZERO)]);
+        };
+        rect(&mut v, 0.0, 200.0, wire::PAINT_GROUND);
+        for (i, paint) in [wire::PAINT_UP, wire::PAINT_UP_FILL, wire::PAINT_DOWN, wire::PAINT_DOWN_FILL].into_iter().enumerate() {
+            let l = 50.0 * i as f64;
+            rect(&mut v, l, l + 50.0, paint);
+        }
+        v
+    }
+
+    /// tools/scenes/canvas.steps' second ink string, derived here and never
+    /// typed from a platform read (the_scene_probe_points_are_opaque_and_pinned's
+    /// reason).
+    #[test]
+    fn the_trend_probe_points_are_pinned() {
+        let d = validate((200.0, 40.0), &scene_trend()).expect("the trend stream validates");
+        let ink = |mode: Mode, label: &str| -> String {
+            let r = rasterize(&d, d.viewbox, Presentation { scale: 1.0, mode });
+            let cells: Vec<String> = [12.0, 37.0, 62.0, 87.0]
+                .into_iter()
+                .map(|px: f64| {
+                    let x = ((r.width as f64) * px / 100.0) as usize;
+                    let y = ((r.height as f64) * 0.5) as usize;
+                    let i = (y * r.width as usize + x) * 4;
+                    assert_eq!(r.pixels[i + 3], 255, "{label} {px},50 must be opaque");
+                    format!("{:02X}{:02X}{:02X}", r.pixels[i], r.pixels[i + 1], r.pixels[i + 2])
+                })
+                .collect();
+            format!("{label} {}", cells.join("/"))
+        };
+        assert_eq!(
+            format!("{} {}", ink(Mode::Light, "light"), ink(Mode::Dark, "dark")),
+            "light 1F9D55/D2EBDD/D93A2B/F7D8D5 dark 4FD37A/1D2F27/FF6B5E/322324",
+            "tools/scenes/canvas.steps freezes exactly this string for canvas@trend"
         );
     }
 

@@ -22,7 +22,7 @@ import VideoToolbox
 // kaya.h; spelled here for use in switch patterns.
 /// KAYA_SPEC_HASH, asserted against the host's kaya_spec_hash at entry —
 /// the runtime half of the stale-artifact guard, presentation side.
-let kayaSpecHash: UInt64 = 0xebbcea02a7fea347
+let kayaSpecHash: UInt64 = 0xc6027a0f8193144b
 
 private let applyCreate: UInt16 = 1
 private let applySetProp: UInt16 = 2
@@ -475,6 +475,10 @@ private let paintSeriesFill: Int64 = 2
 private let paintGrid: Int64 = 3
 private let paintAxis: Int64 = 4
 private let paintGround: Int64 = 5
+private let paintUp: Int64 = 6
+private let paintDown: Int64 = 7
+private let paintUpFill: Int64 = 8
+private let paintDownFill: Int64 = 9
 private let fillNonzero: Int64 = 0
 private let fillEvenOdd: Int64 = 1
 private let textAlignStart: Int64 = 0
@@ -488,7 +492,7 @@ private let textBaselineBottom: Int64 = 3
 /// unused; nothing reads this array.
 let kayaCanvasVocabulary: [Int64] = [
     drawMoveTo, drawLineTo, drawClose, drawStroke, drawFill, drawFont, drawText, drawImage,
-    paintSeries, paintSeriesFill, paintGrid, paintAxis, paintGround,
+    paintSeries, paintSeriesFill, paintGrid, paintAxis, paintGround, paintUp, paintDown, paintUpFill, paintDownFill,
     fillNonzero, fillEvenOdd,
     textAlignStart, textAlignMiddle, textAlignEnd,
     textBaselineAlphabetic, textBaselineMiddle, textBaselineTop, textBaselineBottom,

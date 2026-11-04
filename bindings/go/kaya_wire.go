@@ -14,7 +14,7 @@ import (
 
 const (
 	// SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-	SpecHash uint64 = 0xebbcea02a7fea347
+	SpecHash uint64 = 0xc6027a0f8193144b
 	Version = "0.0.0"
 
 	ValueBool = 1
@@ -71,6 +71,10 @@ const (
 	PaintGrid = 3
 	PaintAxis = 4
 	PaintGround = 5
+	PaintUp = 6
+	PaintDown = 7
+	PaintUpFill = 8
+	PaintDownFill = 9
 	FillRuleNonzero = 0
 	FillRuleEvenOdd = 1
 	SizePolicyScale = 0

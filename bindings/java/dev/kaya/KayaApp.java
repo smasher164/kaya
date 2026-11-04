@@ -4738,7 +4738,12 @@ public final class KayaApp {
         /** Axis lines and tick labels. */
         AXIS(KayaWire.PAINT_AXIS),
         /** The plot background. */
-        GROUND(KayaWire.PAINT_GROUND);
+        GROUND(KayaWire.PAINT_GROUND),
+        /** A series in the day's direction and the area under it (docs/looks-plan.md §3.3). */
+        UP(KayaWire.PAINT_UP),
+        DOWN(KayaWire.PAINT_DOWN),
+        UP_FILL(KayaWire.PAINT_UP_FILL),
+        DOWN_FILL(KayaWire.PAINT_DOWN_FILL);
 
         final long wire;
 

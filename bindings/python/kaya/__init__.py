@@ -6345,6 +6345,10 @@ _PAINTS = {
     "grid": wire.PAINT_GRID,
     "axis": wire.PAINT_AXIS,
     "ground": wire.PAINT_GROUND,
+    "up": wire.PAINT_UP,
+    "down": wire.PAINT_DOWN,
+    "up_fill": wire.PAINT_UP_FILL,
+    "down_fill": wire.PAINT_DOWN_FILL,
 }
 _FILL_RULES = {
     "nonzero": wire.FILL_RULE_NONZERO,

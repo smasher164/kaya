@@ -172,6 +172,8 @@ entry; the task manager is its first consumer.
 
 ### §3.3 The up and down paints (framework piece c)
 
+BUILT 2026-11-04: `up`, `down`, `up_fill`, `down_fill` in kaya's two-mode palette, in nine bindings and both interpreters' constant tables; the canvas scene's second canvas (`trend`) reads the four at their centres through `expect_ink` on every lane, its string derived by the core's own test and watched red with both modes' `up` nudged (a one-mode nudge is vacuous under the other appearance).
+
 The paint enum grows by `up` (6) and `down` (7), and their fills `up_fill`
 (8) and `down_fill` (9), the series' own pair one surface over: a line
 paint without its fill could not draw the hero chart the page shows (a soft

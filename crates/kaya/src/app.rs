@@ -5175,6 +5175,12 @@ pub enum Paint {
     Axis,
     /// The plot background.
     Ground,
+    /// A series in the day's direction and the area under it: kaya's own
+    /// green and red per mode (docs/looks-plan.md §3.3).
+    Up,
+    Down,
+    UpFill,
+    DownFill,
 }
 
 impl Paint {
@@ -5185,6 +5191,10 @@ impl Paint {
             Paint::Grid => crate::wire::PAINT_GRID,
             Paint::Axis => crate::wire::PAINT_AXIS,
             Paint::Ground => crate::wire::PAINT_GROUND,
+            Paint::Up => crate::wire::PAINT_UP,
+            Paint::Down => crate::wire::PAINT_DOWN,
+            Paint::UpFill => crate::wire::PAINT_UP_FILL,
+            Paint::DownFill => crate::wire::PAINT_DOWN_FILL,
         }
     }
 }

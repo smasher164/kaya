@@ -21,3 +21,7 @@ expect_ink canvas@chart "15,20 70,63 = light FFFFFF/D2E3F7 dark 16181C/212A35"
 # A drawing is an IMAGE to every accessibility tree and the app authors
 # the spoken name (§9): nothing builds a semantics tree out of the ops.
 expect_ax canvas@chart "image/Portfolio value"
+# The direction paints (docs/looks-plan.md §3.3): four bars, up, its fill, down,
+# its fill, each probed at its centre; the fills composite over the palette's
+# ground. FROZEN FROM THE CORE, as above (the_trend_probe_points_are_pinned).
+expect_ink canvas@trend "12,50 37,50 62,50 87,50 = light 1F9D55/D2EBDD/D93A2B/F7D8D5 dark 4FD37A/1D2F27/FF6B5E/322324"

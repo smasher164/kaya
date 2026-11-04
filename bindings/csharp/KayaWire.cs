@@ -12,7 +12,7 @@ using System.Text;
 static class KayaWire
 {
     // SpecHash: the protocol fingerprint; the runtime asserts the loaded core agrees.
-    public const ulong SpecHash = 0xebbcea02a7fea347;
+    public const ulong SpecHash = 0xc6027a0f8193144b;
     public const string Version = "0.0.0";
 
     public const uint ValueBool = 1;
@@ -69,6 +69,10 @@ static class KayaWire
     public const uint PaintGrid = 3;
     public const uint PaintAxis = 4;
     public const uint PaintGround = 5;
+    public const uint PaintUp = 6;
+    public const uint PaintDown = 7;
+    public const uint PaintUpFill = 8;
+    public const uint PaintDownFill = 9;
     public const uint FillRuleNonzero = 0;
     public const uint FillRuleEvenOdd = 1;
     public const uint SizePolicyScale = 0;

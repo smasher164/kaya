@@ -3681,7 +3681,7 @@ object KayaCompose {
     @JvmStatic
     fun canPlay(mime: String, codecs: String): Boolean = kayaCanPlay(mime, codecs)
 
-    private const val SPEC_HASH: ULong = 0xebbcea02a7fea347uL
+    private const val SPEC_HASH: ULong = 0xc6027a0f8193144buL
 
     private const val APPLY_CREATE = 1
     private const val APPLY_SET_PROP = 2
@@ -4273,6 +4273,10 @@ object KayaCompose {
     private const val PAINT_GRID = 3L
     private const val PAINT_AXIS = 4L
     private const val PAINT_GROUND = 5L
+    private const val PAINT_UP = 6L
+    private const val PAINT_DOWN = 7L
+    private const val PAINT_UP_FILL = 8L
+    private const val PAINT_DOWN_FILL = 9L
     private const val FILL_NONZERO = 0L
     private const val FILL_EVEN_ODD = 1L
     private const val TEXT_ALIGN_START = 0L
@@ -4293,6 +4297,7 @@ object KayaCompose {
         APPLY_SET_DRAWING.toLong(),
         DRAW_MOVE_TO, DRAW_LINE_TO, DRAW_CLOSE, DRAW_STROKE, DRAW_FILL, DRAW_FONT, DRAW_TEXT, DRAW_IMAGE,
         PAINT_SERIES, PAINT_SERIES_FILL, PAINT_GRID, PAINT_AXIS, PAINT_GROUND,
+        PAINT_UP, PAINT_DOWN, PAINT_UP_FILL, PAINT_DOWN_FILL,
         FILL_NONZERO, FILL_EVEN_ODD,
         TEXT_ALIGN_START, TEXT_ALIGN_MIDDLE, TEXT_ALIGN_END,
         TEXT_BASELINE_ALPHABETIC, TEXT_BASELINE_MIDDLE, TEXT_BASELINE_TOP,

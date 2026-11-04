@@ -332,6 +332,10 @@ pub(crate) const PAINT_SERIES_FILL: i64 = 2;
 pub(crate) const PAINT_GRID: i64 = 3;
 pub(crate) const PAINT_AXIS: i64 = 4;
 pub(crate) const PAINT_GROUND: i64 = 5;
+pub(crate) const PAINT_UP: i64 = 6;
+pub(crate) const PAINT_DOWN: i64 = 7;
+pub(crate) const PAINT_UP_FILL: i64 = 8;
+pub(crate) const PAINT_DOWN_FILL: i64 = 9;
 
 pub(crate) const FILL_NONZERO: i64 = 0;
 pub(crate) const FILL_EVEN_ODD: i64 = 1;
@@ -375,6 +379,10 @@ pub(crate) const PAINTS: &[(i64, &str)] = &[
     (PAINT_GRID, "grid"),
     (PAINT_AXIS, "axis"),
     (PAINT_GROUND, "ground"),
+    (PAINT_UP, "up"),
+    (PAINT_DOWN, "down"),
+    (PAINT_UP_FILL, "up_fill"),
+    (PAINT_DOWN_FILL, "down_fill"),
 ];
 
 pub(crate) const FILL_RULES: &[(i64, &str)] = &[(FILL_NONZERO, "nonzero"), (FILL_EVEN_ODD, "even_odd")];

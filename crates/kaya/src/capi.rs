@@ -1674,6 +1674,10 @@ pub const KAYA_PAINT_SERIES_FILL: i64 = 2;
 pub const KAYA_PAINT_GRID: i64 = 3;
 pub const KAYA_PAINT_AXIS: i64 = 4;
 pub const KAYA_PAINT_GROUND: i64 = 5;
+pub const KAYA_PAINT_UP: i64 = 6;
+pub const KAYA_PAINT_DOWN: i64 = 7;
+pub const KAYA_PAINT_UP_FILL: i64 = 8;
+pub const KAYA_PAINT_DOWN_FILL: i64 = 9;
 pub const KAYA_FILL_NONZERO: i64 = 0;
 pub const KAYA_FILL_EVEN_ODD: i64 = 1;
 pub const KAYA_TEXT_ALIGN_START: i64 = 0;
@@ -1697,6 +1701,10 @@ const _: () = assert!(
         && KAYA_PAINT_GRID == wire::PAINT_GRID
         && KAYA_PAINT_AXIS == wire::PAINT_AXIS
         && KAYA_PAINT_GROUND == wire::PAINT_GROUND
+        && KAYA_PAINT_UP == wire::PAINT_UP
+        && KAYA_PAINT_DOWN == wire::PAINT_DOWN
+        && KAYA_PAINT_UP_FILL == wire::PAINT_UP_FILL
+        && KAYA_PAINT_DOWN_FILL == wire::PAINT_DOWN_FILL
         && KAYA_FILL_NONZERO == wire::FILL_NONZERO
         && KAYA_FILL_EVEN_ODD == wire::FILL_EVEN_ODD
         && KAYA_TEXT_ALIGN_START == wire::TEXT_ALIGN_START

@@ -1818,6 +1818,14 @@
 
 #define KAYA_PAINT_GROUND 5
 
+#define KAYA_PAINT_UP 6
+
+#define KAYA_PAINT_DOWN 7
+
+#define KAYA_PAINT_UP_FILL 8
+
+#define KAYA_PAINT_DOWN_FILL 9
+
 #define KAYA_FILL_NONZERO 0
 
 #define KAYA_FILL_EVEN_ODD 1

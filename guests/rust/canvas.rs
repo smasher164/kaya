@@ -22,6 +22,11 @@ const TICKS: [(f64, &str); 3] = [(32.0, "$60k"), (55.0, "$40k"), (78.0, "$20k")]
 
 const BOX: Viewbox = Viewbox(300.0, 120.0);
 
+/// The direction paints (docs/looks-plan.md §3.3): four bars over the ground,
+/// each probed at its centre.
+const TREND_BOX: Viewbox = Viewbox(200.0, 40.0);
+const BARS: [(f64, Paint); 4] = [(0.0, Paint::Up), (50.0, Paint::UpFill), (100.0, Paint::Down), (150.0, Paint::DownFill)];
+
 pub(crate) fn app(ctx: kaya::AppCtx) {
     ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW).title("canvas").size(480.0, 360.0);
@@ -61,6 +66,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     // the series, with every assertion green through it.
                     d.font("fonts/sora-wght.ttf", 13.0, 700);
                     d.text(l + 8.0, t + 3.0, "Q3", Paint::Series, TextAlign::Start, TextBaseline::Top);
+                });
+                let trend = tx.canvas(TREND_BOX).a11y_id("trend").a11y_label("Up and down").id();
+                tx.draw(trend, |d| {
+                    d.move_to(0.0, 0.0).line_to(200.0, 0.0).line_to(200.0, 40.0).line_to(0.0, 40.0).close().fill(Paint::Ground, FillRule::Nonzero);
+                    for (x, paint) in BARS {
+                        d.move_to(x, 0.0).line_to(x + 50.0, 0.0).line_to(x + 50.0, 40.0).line_to(x, 40.0).close().fill(paint, FillRule::Nonzero);
+                    }
                 });
             })
             .id();

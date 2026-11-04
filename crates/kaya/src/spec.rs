@@ -4779,6 +4779,12 @@ pub const SPEC: ProtocolSpec = ProtocolSpec {
                 ("grid", 3),
                 ("axis", 4),
                 ("ground", 5),
+                // docs/looks-plan.md §3.3: a series in the day's direction,
+                // kaya's own green and red per mode, each with its fill.
+                ("up", 6),
+                ("down", 7),
+                ("up_fill", 8),
+                ("down_fill", 9),
             ],
         },
         EnumSpec {
@@ -6396,7 +6402,7 @@ mod tests {
         // the negative a signed wire slot can carry.
         for (table, outside) in [
             (wire::DRAW_OPS, [0i64, 9, -1].as_slice()),
-            (wire::PAINTS, &[0, 6, -1]),
+            (wire::PAINTS, &[0, 10, -1]),
             (wire::FILL_RULES, &[-1, 2, 3]),
             (wire::TEXT_ALIGNS, &[-1, 3, 4]),
             (wire::TEXT_BASELINES, &[-1, 4, 5]),
