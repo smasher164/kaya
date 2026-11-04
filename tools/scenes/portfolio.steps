@@ -5,13 +5,13 @@
 # two screens TIE OUT to the byte, and expect_window says the first
 # visible row and the declared total — both DATA, never the band's WIDTH.
 expect label#0 "Portfolio: $10026.50"
-# The day's change from the previous close, red when the book fell, under the
-# total in a header fading from the mark's blue (docs/styling-pass-plan.md Y2,
-# Y7).
+# The day's change from the previous close on a pill in the day's colour,
+# under the total in a header washed in the same colour (docs/looks-plan.md
+# §3.6): a down day here.
 expect label#1 "-$15.88 (-0.16%) today"
-expect_tint label@day critical
+expect_fill_color column@day_pill "D93A2B on black"
 expect_ground column@hero gradient
-expect_ground_color column@hero "light 94C1FF dark 1F6BCB"
+expect_ground_color column@hero "light FFA293 dark D03729"
 expect label#2 "Transactions: 15000"
 expect label#3 "Brokerage"
 expect label#4 "Account total: $7163.50"
@@ -26,13 +26,14 @@ expect label#8 "Account total: $500.00"
 # the money labels, one for the dates), so these four numbers can
 # discriminate at all.
 expect_drawing canvas@chart "220/1,4,98,91"
-expect_drawing_hash canvas@chart "6b2cf4b8a3f05415"
+expect_drawing_hash canvas@chart "56d4e903767da066"
 # THE BLIT, at flat-region CENTRES: 18,36 is plot ground clear of both
-# gridlines, 18,73 deep inside the filled area. Both appearance modes
-# are named, and the pair is necessarily canvas.steps' (the same two
-# paints over the same ground). Derived by canvas.rs's
-# the_scene_probe_points_are_opaque_and_pinned, never from a platform.
-expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2E3F7 dark 16181C/212A35"
+# gridlines, 18,73 deep inside the filled area, in the day's fill. Both
+# appearance modes are named, and the pair is necessarily canvas.steps'
+# (the same paints over the same ground). Derived by canvas.rs's
+# the_scene_probe_points_are_opaque_and_pinned and
+# the_trend_probe_points_are_pinned, never from a platform.
+expect_ink canvas@chart "18,36 18,73 = light FFFFFF/F7D8D5 dark 16181C/322324"
 # Also the chart's TIE-OUT said out loud: `now` is label#0's money to
 # the byte, because the series' last point is the live book.
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10026.50"
@@ -58,29 +59,29 @@ expect_inset 16
 # honoring is window.steps' proof, once.
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
-expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
+expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00/-$9.00|NVDA,4,$950.50,$3802.00/+$0.00|VTI,6,$260.25,$1561.50/+$3.12"
 expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value"
-expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00/-$10.00|VXUS,15,$61.40,$921.00/+$0.00"
 expect_column_edges column@positions[savings] 4
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
-expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
+expect_rows column@positions[savings] "CASH,1,$500.00,$500.00/+$0.00"
 header_click column@positions[retirement] 3
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value ^3"
 expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value"
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
-expect_rows column@positions[retirement] "VXUS,15,$61.40,$921.00|BND,20,$72.10,$1442.00"
-expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00|NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50"
+expect_rows column@positions[retirement] "VXUS,15,$61.40,$921.00/+$0.00|BND,20,$72.10,$1442.00/-$10.00"
+expect_rows column@positions[brokerage] "AAPL,10,$180.00,$1800.00/-$9.00|NVDA,4,$950.50,$3802.00/+$0.00|VTI,6,$260.25,$1561.50/+$3.12"
 header_click column@positions[retirement] 3
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
 expect_column_edges column@positions[retirement] 4
-expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00|VXUS,15,$61.40,$921.00"
+expect_rows column@positions[retirement] "BND,20,$72.10,$1442.00/-$10.00|VXUS,15,$61.40,$921.00/+$0.00"
 header_click column@positions[brokerage] 1
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
 expect_column_edges column@positions[brokerage] 4
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
-expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$1561.50|AAPL,10,$180.00,$1800.00"
+expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00/+$0.00|VTI,6,$260.25,$1561.50/+$3.12|AAPL,10,$180.00,$1800.00/-$9.00"
 # The tick updates every nested collection, preserves each copy's sort,
 # AND POSTS ONE DIVIDEND PER ACCOUNT (a dividend carries no quantity).
 # The view is CLOSED here, so this also pins that a tick with no view
@@ -88,24 +89,24 @@ expect_rows column@positions[brokerage] "NVDA,4,$950.50,$3802.00|VTI,6,$260.25,$
 click button#0
 expect label#0 "Portfolio: $10023.00"
 expect label#1 "-$19.38 (-0.19%) today"
-expect_tint label@day critical
+expect_fill_color column@day_pill "D93A2B on black"
 expect label#2 "Transactions: 15003"
 expect label#4 "Account total: $7153.00"
 expect label#6 "Account total: $2370.00"
-expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
+expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00/-$40.00|VTI,6,$261.00,$1566.00/+$7.62|AAPL,10,$182.50,$1825.00/+$16.00"
 expect_column_edges column@positions[brokerage] 4
-expect_rows column@positions[retirement] "BND,20,$72.00,$1440.00|VXUS,15,$62.00,$930.00"
+expect_rows column@positions[retirement] "BND,20,$72.00,$1440.00/-$12.00|VXUS,15,$62.00,$930.00/+$9.00"
 expect_column_edges column@positions[retirement] 4
 expect_columns column@positions[savings] "Ticker|Qty|Price|Value"
 expect_column_edges column@positions[savings] 4
-expect_rows column@positions[savings] "CASH,1,$500.00,$500.00"
+expect_rows column@positions[savings] "CASH,1,$500.00,$500.00/+$0.00"
 # AND THE CHART FOLLOWED THE PRICES: the tick moves the series' last
 # point and nothing else, so the op count and ink bounds are UNCHANGED
 # while the hash moves — the pairing that proves the hash sees what the
 # bounds cannot (docs/canvas-plan.md §7.4) and that the redeclaration
 # replaced the whole drawing rather than patching it (§2.1).
 expect_drawing canvas@chart "220/1,4,98,91"
-expect_drawing_hash canvas@chart "2a0b4ef7e4c99502"
+expect_drawing_hash canvas@chart "8f0bbaf6b62a3153"
 expect_ax canvas@chart "image/Portfolio value, 90 days to 2026-08-24, $9730.10 to $10357.99, now $10023.00"
 # THE TRANSACTIONS VIEW, one push away. The four status labels are
 # addressed by AUTHORED ID because their creation index sits behind
@@ -186,7 +187,7 @@ expect_title "portfolio"
 expect label#0 "Portfolio: $10023.00"
 expect label#2 "Transactions: 15003"
 expect_columns column@positions[brokerage] "Ticker|Qty|Price|Value ^1"
-expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00|VTI,6,$261.00,$1566.00|AAPL,10,$182.50,$1825.00"
+expect_rows column@positions[brokerage] "NVDA,4,$940.50,$3762.00/-$40.00|VTI,6,$261.00,$1566.00/+$7.62|AAPL,10,$182.50,$1825.00/+$16.00"
 expect_columns column@positions[retirement] "Ticker|Qty|Price|Value v3"
 # A STAMPED BUTTON DRIVEN BY KEY: the view opens filtered to the card's
 # account, so the count, the net line and the filter's own selection say
@@ -203,6 +204,14 @@ back
 expect_entries 0
 settle 600
 expect_title "portfolio"
+# AN UP DAY (docs/looks-plan.md §3.6): the rally moves the book above the
+# previous close, so the wash, the pill and the chart turn green together.
+click button#2
+expect label#0 "Portfolio: $10169.00"
+expect label#1 "+$126.62 (+1.26%) today"
+expect_fill_color column@day_pill "1F9D55 on black"
+expect_ground_color column@hero "light 5ED084 dark 188145"
+expect_ink canvas@chart "18,36 18,73 = light FFFFFF/D2EBDD dark 16181C/1D2F27"
 
 # THE STACKED FOLD (docs/adaptive-layout-plan.md D7), at the scene's END
 # so the phone cut costs nothing above it. Every assert sits after a

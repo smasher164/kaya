@@ -212,3 +212,20 @@ and 2026-08-26 it became this app's second screen.
   "Account total:" to the byte. check-assets' C10 nets the artifact
   against BOOK, derives both lines, and refuses a net line whose money
   the dashboard never says — a tie-out asserted nowhere is not a guard.
+
+## §7 — the app's own look (docs/looks-plan.md §3.6, BUILT 2026-11-04)
+
+The day's colour, as a broker's app shows it:
+
+- The hero's wash is a gradient ground bound to the day's direction: the
+  canvas's `up` green on a day above the previous close, its `down` red
+  below it, the mark's blue on a flat day. The total is large (text scale
+  2.2, weight 600), and the day's change sits on a pill filled with the same
+  colour, kaya choosing the text on it.
+- Each holding's Value cell carries the holding's change for the day on the
+  same pill under its value, grey when it did not move.
+- The chart's line, its filled area and its last point's mark draw in the
+  day's paints.
+- "Rally" moves the book above the previous close, so the scene reads an up
+  day after the tick's down day.
+

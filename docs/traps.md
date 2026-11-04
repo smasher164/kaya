@@ -20254,3 +20254,16 @@ its font family's source and its flow, so the next sighting says whether the
 block measures its word narrower than the probe does (a shaping or fallback
 difference) or asked for less than it measures (a stale layout, as a font
 file loading after the first measure would leave).
+
+## A fill read inside a WinUI ListView item (measured 2026-11-04)
+
+The portfolio's per-holding pills, `filled color` columns inside the
+positions table's cells, read A62C21 on the windows lane where the pill is
+D93A2B and the same reader on the hero's pill outside the table read D93A2B.
+Every channel is 0.765 of the drawn value, which is the arithmetic of the
+pill composed at about 76% over black: the read of an element inside a
+ListViewItem, not the pixels on screen (the step shot shows D93A2B). The
+scene does not read a table cell's fill until that is understood; the next
+reader to try one starts from the item's own opacity and from what the
+capture composes over.
+

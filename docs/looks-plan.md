@@ -277,6 +277,21 @@ docs/portfolio-plan.md.
   (the scene drives a down day and an up day), `expect_fill` on the pills,
   `expect_ink` on the chart's line in both directions.
 
+BUILT 2026-11-04, with three choices the build settled (§4): the pill is one
+`filled_color` column bound to the day's colour rather than two tinted pills
+with `hidden`, since a colour fill is bindable; each holding's change sits on
+the same pill UNDER its value, a two-line Value cell (docs/styling-pass-plan.md
+Y5), because a fifth column overflowed the phone (iOS: cells 32 to 410pt in a
+343pt viewport); and a Rally button drives the up day after the tick's down
+day. The scene reads the hero's wash and pill on a down day, after the tick
+and after the rally, the chart's fill in each direction at canvas.steps'
+derived pairs, and every holding's change through `expect_rows`
+(`$1800.00/-$9.00`). The colour on each holding's pill is not read: a pill in
+a table cell sits below the fold on a phone and in a WinUI ListView item read
+A62C21 for D93A2B (docs/traps.md, "A fill read inside a WinUI ListView item").
+Five lanes green; the guard (the hero colour forced flat) watched red on the
+mac.
+
 ### §3.7 The editor slice
 
 guests/go/editor, tools/scenes/editor.steps, docs/editor-plan.md.
@@ -348,8 +363,10 @@ reader does not take it for a ruling:
   E07A3F, 1D6F8C, C64B8C, 5B9A2F, 8A6E4B. Y2's clamp decides the wash in
   each appearance; the tiles and swatches draw the colour itself.
 - The portfolio's hero colours are the paints' own values for up and down,
-  so the wash, the pills' tints and the line agree; flat keeps the mark's
-  blue.
+  so the wash, the pills and the line agree; flat keeps the mark's blue, and
+  a holding that did not move wears grey 8E8E93. kaya's contrast rule puts
+  black text on all three pill colours (D93A2B is a near tie at 4.58 against
+  4.59).
 - The wallpapers are 960x960: cover-cropped, a square loses the least on
   a landscape pane and a portrait phone alike.
 - The editor's writing face is the platform's own text face: the ruling

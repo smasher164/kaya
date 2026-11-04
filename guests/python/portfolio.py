@@ -15,6 +15,8 @@ class Position:
     qty: str
     price: str
     value: str
+    change: str
+    change_color: kaya.Color
 
 
 @dataclass
@@ -42,6 +44,8 @@ BOOK = {
     "savings": ("Savings", [("CASH", 1, 50000)]),
 }
 TICK = {"AAPL": 250, "NVDA": -1000, "VTI": 75, "BND": -10, "VXUS": 60, "CASH": 0}
+# A second move the scene drives after the tick, so it sees an up day.
+RALLY = {"AAPL": 500, "NVDA": 2000, "VTI": 100, "BND": 20, "VXUS": 40, "CASH": 0}
 ACCOUNT_ORDER = ["brokerage", "retirement", "savings"]
 
 # From the asset root the lane staged, never a path this guest spells.
@@ -132,6 +136,17 @@ PREVIOUS_CLOSE = sum(qty * history[t][-2]
 # does not see the colour.
 SIDE_TINT = {"buy": kaya.Tint.SUCCESS, "sell": kaya.Tint.CRITICAL}
 
+# The canvas's own up and down paints (docs/looks-plan.md §4), the mark's
+# blue when the day is flat, and a grey for a holding that did not move.
+UP = kaya.Color.from_hex(0x1F9D55FF)
+DOWN = kaya.Color.from_hex(0xD93A2BFF)
+FLAT = kaya.Color.from_hex(0x1C71D8FF)
+STILL = kaya.Color.from_hex(0x8E8E93FF)
+
+
+def signed(cents):
+    return ("+" if cents >= 0 else "-") + money(abs(cents))
+
 
 def day_change():
     change = portfolio_total() - PREVIOUS_CLOSE
@@ -139,17 +154,22 @@ def day_change():
     hundredths = round(abs(change) * 10000 / PREVIOUS_CLOSE)
     text = (f"{sign}{money(abs(change))} ({sign}{hundredths // 100}."
             f"{hundredths % 100:02d}%) today")
-    tint = (kaya.Tint.SUCCESS if change > 0
-            else kaya.Tint.CRITICAL if change < 0 else kaya.Tint.NONE)
-    return text, tint
+    return text, change
+
+
+def day_color(change):
+    return UP if change > 0 else DOWN if change < 0 else FLAT
 
 
 def position(account, ticker, qty):
+    moved = qty * (prices[ticker] - history[ticker][-2])
     return Position(
         ticker=ticker,
         qty=str(qty),
         price=money(prices[ticker]),
         value=money(qty * prices[ticker]),
+        change=signed(moved),
+        change_color=UP if moved > 0 else DOWN if moved < 0 else STILL,
     )
 
 
@@ -253,6 +273,9 @@ def draw_chart():
         return bottom - (bottom - top) * (cents - floor) / (ceiling - floor)
 
     points = [(x_at(i), y_at(v)) for i, v in enumerate(values)]
+    # The day's direction (docs/looks-plan.md §3.6).
+    _, change = day_change()
+    line = "up" if change > 0 else "down" if change < 0 else "series"
     gridlines = list(range(floor, ceiling + 1, step))
     chart_summary.set(chart_summary_text(days, values))
     with chart.draw() as d:
@@ -265,8 +288,8 @@ def draw_chart():
         d.stroke("grid", width=1)
         # The area under the series, closed down to the plot's baseline.
         d.polyline(points).line_to(right, bottom).line_to(left, bottom)
-        d.close().fill("series_fill")
-        d.polyline(points).stroke("series", width=1.5)
+        d.close().fill(f"{line}_fill")
+        d.polyline(points).stroke(line, width=1.5)
         d.move_to(left, top).line_to(left, bottom).line_to(right, bottom)
         d.stroke("axis", width=1)
         # CLAMPED INSIDE THE PLOT: the last point IS the right edge.
@@ -274,7 +297,7 @@ def draw_chart():
         y = min(max(points[-1][1], top + MARK), bottom - MARK)
         d.move_to(x - MARK, y - MARK).line_to(x + MARK, y - MARK)
         d.line_to(x + MARK, y + MARK).line_to(x - MARK, y + MARK)
-        d.close().fill("series")
+        d.close().fill(line)
         # kaya's embedded face (`""`), so labels draw with no asset staged.
         d.font(9)
         for cents in gridlines:
@@ -287,7 +310,20 @@ def draw_chart():
 
 
 def tick():
-    for ticker, delta in TICK.items():
+    move(TICK)
+    txns.extend(POSTED)
+    book_size.set(f"Transactions: {len(txns)}")
+    # The view's collections die with the popped entry.
+    if screen:
+        refresh()
+
+
+def rally():
+    move(RALLY)
+
+
+def move(deltas):
+    for ticker, delta in deltas.items():
         prices[ticker] += delta
     for account in ACCOUNT_ORDER:
         table = positions.at(account)
@@ -298,16 +334,11 @@ def tick():
         if account in sorted_accounts:
             apply_order(account, *sorted_accounts[account])
     portfolio_value.set(f"Portfolio: {money(portfolio_total())}")
-    change, tint = day_change()
-    day_text.set(change)
-    day_tint.set(tint)
+    text, change = day_change()
+    day_text.set(text)
+    hero_color.set(day_color(change))
     # The chart's right edge IS the total above it: one transaction.
     draw_chart()
-    txns.extend(POSTED)
-    book_size.set(f"Transactions: {len(txns)}")
-    # The view's collections die with the popped entry.
-    if screen:
-        refresh()
 
 
 # `screen` holds the view's handles only while it is pushed.
@@ -509,19 +540,19 @@ with app.window(title="portfolio", width=900, height=600):
     # The mark's blue, before the first mount per the set-once wall.
     kaya.brand_accent(0x1C71D8)
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
-    change, tint = day_change()
-    day_text = kaya.signal(change)
-    day_tint = kaya.signal(tint)
+    text, change = day_change()
+    day_text = kaya.signal(text)
+    # The hero's wash and the change's pill wear the day's direction
+    # (docs/looks-plan.md §3.6).
+    hero_color = kaya.signal(day_color(change))
     book_size = kaya.signal(f"Transactions: {len(txns)}")
     # STACK ON A PHONE, where unstacked the detail column was clipped, and
     # SCROLL WHEN IT DOES NOT FIT (docs/deferred.md, both entries).
     with kaya.scroll(grow=1):
         with kaya.row(stack_when=kaya.COMPACT):
             with kaya.column():
-                # The total's header fades from the mark's blue
-                # (docs/styling-pass-plan.md Y2).
                 with kaya.column(inset=12, spacing=4,
-                                 ground_gradient=kaya.Color.from_hex(0x1C71D8FF)) as hero:
+                                 ground_gradient=hero_color) as hero:
                     hero.a11y_id("hero")
                     # INLINE WITH THE TITLE: a row hugs, so the chip takes no
                     # share of the column's leftover (docs/deferred.md).
@@ -534,8 +565,12 @@ with app.window(title="portfolio", width=900, height=600):
                             d.polyline(MARK_AREA).close().fill("ground")
                             d.polyline(MARK_AREA).close().fill("series_fill")
                             d.polyline(MARK_LINE).stroke("series", width=2)
-                        kaya.heading(bind=portfolio_value)  # label#0
-                    kaya.label(bind=day_text, tint=day_tint).a11y_id("day")  # label#1
+                        kaya.heading(bind=portfolio_value).text_scale(2.2).font_weight(600)  # label#0
+                    # A row hugs, so the pill is as wide as its text.
+                    with kaya.row():
+                        with kaya.column(inset=6, filled_color=hero_color) as pill:
+                            pill.a11y_id("day_pill")
+                            kaya.label(bind=day_text).a11y_id("day")  # label#1
                 kaya.label(bind=book_size)  # label#2
                 # A drawing is an image to every accessibility tree, and an
                 # empty a11y label is refused at the tx.
@@ -545,6 +580,7 @@ with app.window(title="portfolio", width=900, height=600):
                 draw_chart()
                 kaya.button("Day tick", on_click=tick)  # button#0
                 kaya.button("Transactions", on_click=open_transactions)  # button#1
+                kaya.button("Rally", on_click=rally)  # button#2
             accounts = kaya.collection(Account)
             with kaya.column(grow=1, align="stretch") as detail:  # the detail column
                 detail.a11y_id("detail")
@@ -564,7 +600,14 @@ with app.window(title="portfolio", width=900, height=600):
                                 kaya.label(bind=item.ticker)
                                 kaya.label(bind=item.qty)
                                 kaya.label(bind=item.price)
-                                kaya.label(bind=item.value)
+                                # The value over the day's change on its pill, as a
+                                # stock list shows a holding (a two-line cell,
+                                # docs/styling-pass-plan.md Y5).
+                                with kaya.column(spacing=2):
+                                    kaya.label(bind=item.value)
+                                    with kaya.column(inset=4, filled_color=item.change_color) as cell:
+                                        cell.a11y_id("change")
+                                        kaya.label(bind=item.change)
                         kaya.caption(bind=account.total)
                         # A STAMPED BUTTON, driven by key in the scene.
                         kaya.button("Transactions",

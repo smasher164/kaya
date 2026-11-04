@@ -8477,8 +8477,10 @@ if rows is not None:
     if detail is not None:
         declares(opener(detail), "detail column", "grow", 1)
         declares(opener(detail), "detail column", "align", "stretch")
-    card = sole("account card", "`with ….column(…)` statements inside it",
-                columns_with(rows))
+    # The card is the loop's own column; a pill inside a table cell is a
+    # column too (docs/looks-plan.md §3.6).
+    card = sole("account card", "`with ….column(…)` statements directly in it",
+                [n for n in columns_with(rows) if n in rows.body])
     if card is not None:
         declares(opener(card), "account card", "align", "stretch")
         table = sole("positions table", "`for … in ….columns(…)` loops inside it",
@@ -8533,9 +8535,8 @@ def portfolio_probe():
                  if isinstance(n, ast_mod.With)
                  and any(is_call(i.context_expr, "column")
                          for i in n.items)]
-        inside = list(ast_mod.walk(rows))
         detail = next((n for n in withs if rows in n.body), None)
-        card = next((n for n in withs if n in inside), None)
+        card = next((n for n in withs if n in rows.body), None)
         if detail is not None:
             found["detail"] = next(i.context_expr for i in detail.items
                                    if is_call(i.context_expr,
