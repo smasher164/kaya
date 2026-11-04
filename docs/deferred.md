@@ -17271,7 +17271,7 @@ KEY: kayaSyncMacMenuBar, kayaOwnedMenuItems, dress, duplicate mac menus, KAYA_WI
   choosing (a) or (b), building it, and a menu-shot capture of the bar.
 
 
-## OPEN — a GTK table's third stamped row draws its cell's pill bare (measured 2026-11-04, docs/looks-plan.md §3.6)
+## ~~OPEN — a GTK table's third stamped row draws its cell's pill bare (measured 2026-11-04, docs/looks-plan.md §3.6)~~ FIXED 2026-11-04: the third row is the one the table's first layout report realizes, and GTK applied a band move's ops outside the batch's idle, so the pill took its colour fill's class while the rule that paints it waited for the next batch (the tick). Every band move now ends as a batch ends (`apply_band_ops` in crates/kaya/src/gtk.rs: the asks, the skin's stylesheet, the list rows). The inset was there all along; the reader's sentence named the fill. Proved on the linux lane by hand with two reads added for the run, `expect_fill_color column@change[brokerage.AAPL]` and `[brokerage.VTI]`: VTI red before ("reads fill FFFFFF on black"), x11 and wayland green after; the reads are not kept, since a WinUI ListView item and a phone's fold still stop the other lanes reading a cell (docs/traps.md, "A fill read inside a WinUI ListView item"). GUARD: tools/lib/skin_gtk.py (check-verbs) holds `apply_band_ops`'s four calls and one call per band move in gtk.rs, two cuts watched red (the stylesheet dropped, a band move applied op by op).
 
 KEY: portfolio change pill, column@change, filled color table cell, GTK stamped table row, INSET_CLASS, GROUND_CLASS
 - The portfolio's review captures show the brokerage table's third row (VTI)

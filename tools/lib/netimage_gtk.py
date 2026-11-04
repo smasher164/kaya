@@ -62,7 +62,9 @@ CALLS = [
      "if let NativeWidget::Image(picture) = w {\n with_image(picture, |s| s.labelled = true);\n render_image(picture);"),
     ("the failed glyph's one spelling", '(crate::wire::SYMBOL_IMAGE_MISSING, "image-missing-symbolic"),'),
     ("a band report's asks are sent",
-     "table.reported = Some((first, count));\n }\n for op in ops.unwrap_or_default() {\n apply(core, op);\n }\n send_asks(core);"),
+     "table.reported = Some((first, count));\n }\n apply_band_ops(core, ops.unwrap_or_default());"),
+    ("a band move's ops send their asks",
+     "fn apply_band_ops(core: &mut CoreState, ops: Vec<ApplyOp>) {\n for op in ops {\n apply(core, op);\n }\n send_asks(core);"),
     ("a doorbell rung under a borrowed CORE waits for it (the asks above reach the guest inside "
      "park_table_row's nested main-loop turn)",
      "glib::idle_add(|| {\n drain_when_free();\n glib::ControlFlow::Break"),
@@ -81,7 +83,7 @@ CALLS = [
     ("the reserved size is laid out", "(None, Some(natural)) => reserve_natural(picture, natural),"),
     ("a decoded picture ends the reserved size", "s.pending = false;\n s.pending_natural = None;"),
     ("a parked row's asks are sent",
-     "table.reported = Some((index, count));\n }\n for op in ops.unwrap_or_default() {\n apply(core, op);\n }\n send_asks(core);"),
+     "table.reported = Some((index, count));\n }\n apply_band_ops(core, ops.unwrap_or_default());"),
 ]
 
 
@@ -179,8 +181,8 @@ CUTS = [
      r'\1    if with_image(picture, |s| s.phase) == 1 { return "loading".into(); }\n',
      "reaches the image's state"),
     ("GTK: a band report's asks left queued",
-     r"(table\.reported = Some\(\(first, count\)\);\n\s+\}\n\s+for op in ops\.unwrap_or_default\(\) \{\n\s+apply\(core, op\);\n\s+\}\n)\s+send_asks\(core\);\n",
-     r"\1", "a band report's asks are sent"),
+     r"(fn apply_band_ops\(core: &mut CoreState, ops: Vec<ApplyOp>\) \{\n\s+for op in ops \{\n\s+apply\(core, op\);\n\s+\}\n)\s+send_asks\(core\);\n",
+     r"\1", "a band move's ops send their asks"),
     ("GTK: the doorbell borrowing CORE inside a nested turn",
      r"glib::idle_add\(\|\| \{\n(\s+)drain_when_free\(\);", r"glib::idle_add(|| {\n\1drain_transactions();",
      "a doorbell rung under a borrowed CORE waits"),

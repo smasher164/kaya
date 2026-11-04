@@ -5441,12 +5441,7 @@ fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
     if let Some(table) = core.tables.get_mut(&id) {
         table.reported = Some((index, count));
     }
-    for op in ops.unwrap_or_default() {
-        apply(core, op);
-    }
-    // A band move's asks (N8's needed and released) leave now, not with the
-    // next transaction (capi.rs's band report does the same).
-    send_asks(core);
+    apply_band_ops(core, ops.unwrap_or_default());
     // The entering rows have to exist before the scroll can land
     // on one, and the spacers above them have to be the core's
     // before the adjustment's upper covers the row at all.
@@ -5455,6 +5450,19 @@ fn park_table_row(core: &mut CoreState, id: u64, index: usize) {
     while glib::MainContext::default().iteration(false) {}
     window_report(core, id);
     reflow_table(core, id);
+}
+
+/// A band move's ops land outside a batch's idle, so they end as a batch
+/// ends: the asks leave now (N8; capi.rs's band report does the same) and
+/// a stamped fill's rule is written (docs/deferred.md, the GTK table's
+/// bare third pill).
+fn apply_band_ops(core: &mut CoreState, ops: Vec<ApplyOp>) {
+    for op in ops {
+        apply(core, op);
+    }
+    send_asks(core);
+    skin_refresh(core);
+    refresh_list_rows(core);
 }
 
 /// The app's scroll_to_row (docs/scroll-to-plan.md §3): a windowed table
@@ -6175,10 +6183,7 @@ fn window_report(core: &mut CoreState, id: u64) -> (usize, usize) {
         if let Some(table) = core.tables.get_mut(&id) {
             table.reported = Some((first, count));
         }
-        for op in ops.unwrap_or_default() {
-            apply(core, op);
-        }
-        send_asks(core);
+        apply_band_ops(core, ops.unwrap_or_default());
     }
 
     // THE SPACERS, sized by the core and by nothing here. The content

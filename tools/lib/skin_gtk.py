@@ -48,6 +48,10 @@ DOORS = [
     ("a label's tint", "fn set_label_tint(widget: &gtk4::Widget, tint: i64) {",
      ["crate::wire::TINT_ACCENT => LABEL_TINT_CLASSES[0],", "crate::wire::TINT_CRITICAL => LABEL_TINT_CLASSES[3],"],
      ["RGBA", "set_markup"]),
+    # docs/deferred.md, the GTK table's bare third pill: a row a band move
+    # stamps outside the batch's idle took its fill class with no rule.
+    ("a band move's ops", "fn apply_band_ops(core: &mut CoreState, ops: Vec<ApplyOp>) {",
+     ["apply(core, op);", "send_asks(core);", "skin_refresh(core);", "refresh_list_rows(core);"], []),
     ("the batch's end", "fn skin_refresh(core: &mut CoreState) {",
      ["load_kaya_css(&core.skin.css, \"grounds\", &css, &core.css_error);",
       "widget.update_property(&[gtk4::accessible::Property::Label(&words.join(\", \"))]);",
@@ -236,6 +240,10 @@ def findings(text):
         if sites != 1:
             out.append(f"skin: {LABEL}: {call[:-1]} is sent from {sites} sites in {REL}, wanted one, the press "
                        f"door's (docs/styling-pass-plan.md Y4)")
+    moves, applied = src.count("scene.window_moved("), src.count("apply_band_ops(core, ")
+    if moves != applied:
+        out.append(f"skin: {LABEL}: {moves} band move(s) in {REL} and {applied} apply_band_ops call(s): a band "
+                   f"move's ops must end as a batch ends (docs/deferred.md, the GTK table's bare third pill)")
     for label, call in CALLS:
         if flat(call) not in flat(src):
             out.append(f"skin: {LABEL}: {label} no longer holds — {REL} lacks {call.splitlines()[0][:90]}")
@@ -243,6 +251,11 @@ def findings(text):
 
 
 CUTS = [
+    ("GTK: a band move's ops leave the fill's rule unwritten", r"\n\s+skin_refresh\(core\);\n(\s+)refresh_list_rows\(core\);\n\}",
+     r"\n\1refresh_list_rows(core);\n}", "a band move's ops lacks skin_refresh(core);"),
+    ("GTK: a band move applied op by op", r"apply_band_ops\(core, ops\.unwrap_or_default\(\)\);\n\s+\}\n",
+     "for op in ops.unwrap_or_default() {\n            apply(core, op);\n        }\n    }\n",
+     "band move(s) in"),
     ("GTK: the axis arm leaves the cross placement on the kind (M21)",
      r"\n\s+set_container_vertical\(container\.upcast_ref::<gtk4::Widget>\(\), mode == 1\);", "",
      "a container's cross placement follows its axis, not its kind (M21) no longer holds"),
