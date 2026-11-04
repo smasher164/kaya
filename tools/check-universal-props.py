@@ -176,7 +176,7 @@ BASELINE_LINKS = (
         "remeasure_when_loaded(*child, &element)?;",
         "minimum = minimum.max(longest_word_width(&block)? + chrome);",
     )),
-    (WINUI, "fn longest_word_width(block: &TextBlock)", 900, (
+    (WINUI, "fn longest_word_width(block: &TextBlock)", 1400, (
         "for word in text.split_whitespace() {",
         "Width: f32::INFINITY,",
     )),
@@ -894,7 +894,8 @@ def filled_edges(compose_text, gtk_text):
     bad = []
     for path, text, needles in (
         (COMPOSE, compose_text, ("LocalKayaOnFill provides onFill,",
-                                 "color = kayaCaptionColor(),",
+                                 "color = if (node.labelTint == 0L) kayaCaptionColor() "
+                                 "else kayaLabelTintColor(node),",
                                  "android.view.ContextThemeWrapper(context, theme)")),
         (GTK, gtk_text, (".kaya-filled.card { margin: 1px 2px 3px 2px; }",)),
     ):
@@ -1529,7 +1530,8 @@ for label, path, pattern, repl in (
      r"                        gtk4::PolicyType::External\n",
      "                        gtk4::PolicyType::Automatic\n"),
     ("Compose's caption back on the surface's variant colour", COMPOSE,
-     r"                    color = kayaCaptionColor\(\),\n",
+     r"                    color = if \(node\.labelTint == 0L\) kayaCaptionColor\(\) "
+     r"else kayaLabelTintColor\(node\),\n",
      "                    color = MaterialTheme.colorScheme.onSurfaceVariant,\n"),
     ("Compose's emoji picker on the Activity's theme, headings near-white", COMPOSE,
      r"android\.view\.ContextThemeWrapper\(context, theme\)\)", "context)"),

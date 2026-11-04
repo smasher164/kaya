@@ -97,6 +97,7 @@ mod store {
                         title: row.get(1)?,
                         caption: String::new(),
                         captionless: true,
+                        tint: kaya::Tint::None,
                         done: row.get::<_, i64>(7)? != 0,
                         notes: row.get(2)?,
                         when: row.get(4)?,
@@ -217,6 +218,9 @@ struct TaskRow {
     title: String,
     caption: String,
     captionless: bool,
+    /// The caption's tint from its date (docs/looks-plan.md §3.4): critical
+    /// once past, accent today, warning within two days; derived, never stored.
+    tint: kaya::Tint,
     done: bool,
     notes: String,
     when: String,
@@ -231,6 +235,34 @@ struct TaskRow {
 struct ProjectRow {
     name: String,
     count: String,
+    /// The project's colour (docs/looks-plan.md §3.4), by its place in the
+    /// palette: the swatch in the project list, the header on its screen.
+    color: kaya::Color,
+}
+
+/// The lists' colours and the projects' palette (docs/looks-plan.md §4).
+const LIST_COLORS: [(List, u32); 5] = [
+    (List::Inbox, 0x2F6FED),
+    (List::Today, 0xF2B01E),
+    (List::Upcoming, 0xD9486A),
+    (List::Anytime, 0x1FA2A0),
+    (List::Logbook, 0x2E9E5B),
+];
+const PROJECT_PALETTE: [u32; 6] = [0x8E6FE0, 0xE07A3F, 0x1D6F8C, 0xC64B8C, 0x5B9A2F, 0x8A6E4B];
+
+fn color(rgb: u32) -> kaya::Color {
+    kaya::Color::rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+fn list_color(list: List) -> kaya::Color {
+    color(LIST_COLORS.iter().find(|(l, _)| *l == list).map_or(0x2F6FED, |(_, c)| *c))
+}
+
+/// A project's colour follows its key's order among the projects, so it is
+/// the same after a relaunch and never stored.
+fn project_color(projects: &BTreeMap<String, String>, key: &str) -> kaya::Color {
+    let at = projects.keys().position(|k| k == key).unwrap_or(0);
+    color(PROJECT_PALETTE[at % PROJECT_PALETTE.len()])
 }
 
 // A project screen's rows are bare labels: expect_order reads label children.
@@ -304,6 +336,9 @@ enum Msg {
     Advanced(bool),
     Section(WindowId),
     OpenLogbook,
+    /// A tile's tap (docs/looks-plan.md §3.4): the list's section, or the
+    /// Logbook's screen.
+    OpenList(List),
     LogbookPopped,
     OpenSettings,
     SettingsPopped,
@@ -404,6 +439,37 @@ fn section_of(list: List) -> Option<WindowId> {
     }
 }
 
+/// The Inbox's tile grid (docs/looks-plan.md §3.4, Reminders' shape): four
+/// cards in their lists' colours, a symbol in the corner, the count large over
+/// the name, a tap opening the list.
+fn tiles(tx: &mut kaya::Tx, msgs: &kaya::Messages<Msg>, counts: &BTreeMap<List, kaya::SignalId>) {
+    let tiles = [
+        (List::Today, "today", kaya::Symbol::Star),
+        (List::Upcoming, "upcoming", kaya::Symbol::Forward),
+        (List::Anytime, "anytime", kaya::Symbol::More),
+        (List::Logbook, "logbook", kaya::Symbol::Done),
+    ];
+    tx.grid(2, |tx| {
+        for (list, key, symbol) in tiles {
+            let name = tx.signal(kaya::tr!(key).as_str());
+            let count = counts[&list];
+            tx.column(|tx| {
+                tx.row(|tx| {
+                    tx.label(count).text_scale(2.0).font_weight(700).a11y_id(format!("tile_{key}_count"));
+                    tx.spacer();
+                    tx.icon(symbol).a11y_id(format!("tile_{key}_symbol"));
+                })
+                .align(kaya::Align::Start);
+                tx.label(name).a11y_id(format!("tile_{key}_name"));
+            })
+            .a11y_id(format!("tile_{key}"))
+            .filled_color(list_color(list))
+            .on_activate(msgs, Msg::OpenList(list));
+        }
+    })
+    .a11y_id("tiles");
+}
+
 struct Detail {
     key: String,
     // Stacks are per surface (DESIGN.md, Sections): the detail is pushed
@@ -425,6 +491,8 @@ struct App {
     // (docs/hidden-plan.md).
     queries: BTreeMap<List, String>,
     counts: BTreeMap<List, kaya::SignalId>,
+    /// The Inbox tiles' bare counts (docs/looks-plan.md §3.4).
+    tile_counts: BTreeMap<List, kaya::SignalId>,
     today_badge: kaya::SignalId,
     /// What the last app link did when it named nothing (L4). Empty
     /// otherwise, and cleared by the next link that lands.
@@ -495,6 +563,10 @@ impl App {
         if let Some(sig) = self.counts.get(&list) {
             tx.write(*sig, self.count_text(list));
         }
+        if let Some(sig) = self.tile_counts.get(&list) {
+            let total = self.tasks.values().filter(|(l, _)| *l == list).count();
+            tx.write(*sig, kaya::fmt::number(total as f64, kaya::fmt::NumberOptions::default()));
+        }
         if list == List::Today {
             let total = self.tasks.values().filter(|(l, _)| *l == list).count();
             let shown = if self.hide_badge { 0 } else { total };
@@ -519,6 +591,18 @@ impl App {
         self.update_count(tx, list);
     }
 
+    /// docs/looks-plan.md §3.4: the date's meaning as a tint.
+    fn date_tint(&self, row: &TaskRow) -> kaya::Tint {
+        let today = days(self.today);
+        let soonest = [parse_date(&row.when), parse_date(&row.deadline)].into_iter().flatten().map(days).min();
+        match soonest {
+            Some(d) if d < today => kaya::Tint::Critical,
+            Some(d) if d == today => kaya::Tint::Accent,
+            Some(d) if d <= today + 2 => kaya::Tint::Warning,
+            _ => kaya::Tint::None,
+        }
+    }
+
     fn caption(&self, row: &TaskRow) -> String {
         let mut parts = Vec::new();
         if let Some(w) = parse_date(&row.when) {
@@ -538,6 +622,7 @@ impl App {
     fn place(&mut self, tx: &mut kaya::Tx, key: &str, mut row: TaskRow) {
         row.caption = self.caption(&row);
         row.captionless = row.caption.is_empty();
+        row.tint = self.date_tint(&row);
         let target = self.list_of(&row);
         let current = self.tasks.get(key).map(|(l, _)| *l);
         row.unmatched = !self.matches(target, &row);
@@ -548,6 +633,7 @@ impl App {
                     .title(row.title.clone())
                     .caption(row.caption.clone())
                     .captionless(row.captionless)
+                    .tint(row.tint)
                     .done(row.done)
                     .notes(row.notes.clone())
                     .when(row.when.clone())
@@ -703,7 +789,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     let loaded = store.as_ref().map(|s| s.load()).unwrap_or_default();
     let seed_wanted = store.as_ref().is_none_or(|s| s.fresh);
 
-    let (lists, projects_coll, counts, today_badge, link_note) = ctx.apply(|tx| {
+    let (lists, projects_coll, counts, today_badge, link_note, tile_counts) = ctx.apply(|tx| {
         tx.window(kaya::DEFAULT_WINDOW)
             .title("tasks")
             // A desktop default that fits the details screen (GTK's own
@@ -738,6 +824,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         ];
         let mut lists = Vec::new();
         let mut counts = BTreeMap::new();
+        // The tiles' bare counts (docs/looks-plan.md §3.4), one per list the
+        // grid names, written with the count text.
+        let tile_counts: BTreeMap<List, kaya::SignalId> = [List::Today, List::Upcoming, List::Anytime, List::Logbook]
+            .into_iter()
+            .map(|l| (l, tx.signal(kaya::fmt::number(0.0, kaya::fmt::NumberOptions::default()))))
+            .collect();
         let today_badge = tx.signal(0.0);
         let link_note = tx.signal("");
         for (list, window, name, symbol) in sections {
@@ -759,61 +851,80 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 List::Anytime => "anytime_count",
                 List::Logbook => unreachable!("the logbook has no section"),
             };
+            // The page scrolls as one (docs/looks-plan.md §3.4): the wash, the
+            // tiles and the rows together; a phone at twice the text size has
+            // no room under the tiles for a list of its own.
             let root = tx
-                .column(|tx| {
-                    // The list's search field, first, filtering this list
-                    // alone (docs/search-plan.md S10).
-                    let find = tx
-                        .search()
-                        .placeholder(kaya::tr!("search"))
-                        .a11y_id(format!("{}_find", count_id.trim_end_matches("_count")))
-                        .id();
-                    msgs.on_change(find, move |q| Msg::Search(list, q));
-                    tx.caption(count).a11y_id(count_id).id();
-                    if list == List::Inbox {
-                        // WHAT AN APP LINK DID WHEN IT NAMED NOTHING
-                        // (docs/app-links-plan.md L4): empty otherwise.
-                        tx.caption(link_note).a11y_id("link_note").id();
-                    }
-                    // QUICK-ADD IS A SHEET (S6): the button presents it, and
-                    // the field and the Add button live inside it.
-                    if list == List::Inbox {
-                        let new = tx.button(&kaya::tr!("new-task")).a11y_id("new").id();
-                        msgs.on_click(new, Msg::QuickAdd);
-                    }
-                    let rows = coll.rows(tx);
-                    let list_column = rows.id();
-                    for mut row in rows {
-                        let (task_row, _) = row.row(|t| {
-                            let done = t.checkbox(TaskRow::done());
-                            t.a11y_id(done, "done");
-                            msgs.on_toggle_node(done, Msg::Toggle);
-                            // The title with its date beneath, the platform's
-                            // own list shape: side by side the pair's longest
-                            // words plus the switch and the button overflow a
-                            // phone at twice the text size (docs/flex-shrink-plan.md
-                            // §2, "the app's to fix"; the iOS tasksbig leg).
-                            let (item, _) = t.column(|t| {
-                                let title = t.label(TaskRow::title());
-                                t.a11y_id(title, "title");
-                                let caption = t.caption(TaskRow::caption());
-                                t.a11y_id(caption, "caption");
-                                t.hidden(caption, TaskRow::captionless());
+                .scroll(|tx| {
+                    tx.column(|tx| {
+                        // The header (docs/looks-plan.md §3.4): a wash of the
+                        // list's colour, its name large, its count under it.
+                        let heading = tx.signal(name.as_str());
+                        tx.column(|tx| {
+                            tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id(format!("{}_heading", count_id.trim_end_matches("_count")));
+                            tx.caption(count).a11y_id(count_id).id();
+                        })
+                        .a11y_id(format!("{}_header", count_id.trim_end_matches("_count")))
+                        .inset(12.0)
+                        .fill(true)
+                        .ground_gradient(list_color(list));
+                        if list == List::Inbox {
+                            tiles(tx, &msgs, &tile_counts);
+                        }
+                        // The list's search field, filtering this list alone
+                        // (docs/search-plan.md S10).
+                        let find = tx
+                            .search()
+                            .placeholder(kaya::tr!("search"))
+                            .a11y_id(format!("{}_find", count_id.trim_end_matches("_count")))
+                            .id();
+                        msgs.on_change(find, move |q| Msg::Search(list, q));
+                        if list == List::Inbox {
+                            // WHAT AN APP LINK DID WHEN IT NAMED NOTHING
+                            // (docs/app-links-plan.md L4): empty otherwise.
+                            tx.caption(link_note).a11y_id("link_note").id();
+                        }
+                        // QUICK-ADD IS A SHEET (S6): the button presents it, and
+                        // the field and the Add button live inside it.
+                        if list == List::Inbox {
+                            let new = tx.button(&kaya::tr!("new-task")).a11y_id("new").id();
+                            msgs.on_click(new, Msg::QuickAdd);
+                        }
+                        let rows = coll.rows(tx);
+                        let list_column = rows.id();
+                        for mut row in rows {
+                            let (task_row, _) = row.row(|t| {
+                                let done = t.checkbox(TaskRow::done());
+                                t.a11y_id(done, "done");
+                                msgs.on_toggle_node(done, Msg::Toggle);
+                                // The title with its date beneath, the platform's
+                                // own list shape: side by side the pair's longest
+                                // words plus the switch and the button overflow a
+                                // phone at twice the text size (docs/flex-shrink-plan.md
+                                // §2, "the app's to fix"; the iOS tasksbig leg).
+                                let (item, _) = t.column(|t| {
+                                    let title = t.label(TaskRow::title());
+                                    t.a11y_id(title, "title");
+                                    let caption = t.caption(TaskRow::caption());
+                                    t.a11y_id(caption, "caption");
+                                    t.hidden(caption, TaskRow::captionless());
+                                    t.tint(caption, TaskRow::tint());
+                                });
+                                t.grow(item, 1.0);
                             });
-                            t.grow(item, 1.0);
-                        });
-                        row.a11y_id(task_row, "task");
-                        row.on_activate(task_row, &msgs, Msg::Details);
-                        // The checkbox on the title's line, not the pair's
-                        // middle (docs/flex-shrink-plan.md
-                        // §9; R5's centre unless the app says otherwise).
-                        row.align(task_row, kaya::Align::Baseline);
-                        row.hidden(task_row, TaskRow::unmatched());
-                    }
-                    // The list's column is named so the scene can hold it to
-                    // the section's width (R7): a hugging list hides behind
-                    // rows that fill it.
-                    tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
+                            row.a11y_id(task_row, "task");
+                            row.on_activate(task_row, &msgs, Msg::Details);
+                            // The checkbox on the title's line, not the pair's
+                            // middle (docs/flex-shrink-plan.md
+                            // §9; R5's centre unless the app says otherwise).
+                            row.align(task_row, kaya::Align::Baseline);
+                            row.hidden(task_row, TaskRow::unmatched());
+                        }
+                        // The list's column is named so the scene can hold it to
+                        // the section's width (R7): a hugging list hides behind
+                        // rows that fill it.
+                        tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
+                    });
                 })
                 .id();
             tx.mount_in(section, root);
@@ -830,6 +941,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             .column(|tx| {
                 for mut row in projects_coll.rows(tx) {
                     let (project, _) = row.row(|t| {
+                        // The swatch: a small fill in the project's colour
+                        // (docs/looks-plan.md §3.4).
+                        let (swatch, _) = t.column(|_| {});
+                        t.a11y_id(swatch, "swatch");
+                        t.filled_color(swatch, ProjectRow::color());
+                        t.max_width(swatch, 12.0);
+                        t.inset(swatch, 6.0);
                         let name = t.label(ProjectRow::name());
                         t.a11y_id(name, "name");
                         let count = t.caption(ProjectRow::count());
@@ -842,7 +960,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             })
             .id();
         tx.mount_in(projects_section, projects_root);
-        (lists, projects_coll, counts, today_badge, link_note)
+        (lists, projects_coll, counts, today_badge, link_note, tile_counts)
     });
     msgs.on_undone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
     msgs.on_redone(kaya::DEFAULT_WINDOW, |_, _| Msg::Resync);
@@ -860,6 +978,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
         tasks: BTreeMap::new(),
         queries: BTreeMap::new(),
         counts,
+        tile_counts,
         today_badge,
         link_note,
         projects: BTreeMap::new(),
@@ -892,7 +1011,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             for (key, name) in [("kitchen", "Kitchen"), ("thesis", "Thesis"), ("trip", "Trip")] {
                 app.projects.insert(key.to_string(), name.to_string());
                 app.order.insert(key.to_string(), Vec::new());
-                tx.insert(&app.projects_coll, key, ProjectRow { name: name.into(), count: "0 tasks".into() });
+                let color = project_color(&app.projects, key);
+                tx.insert(&app.projects_coll, key, ProjectRow { name: name.into(), count: "0 tasks".into(), color });
             }
             let seed: [(&str, &str, Option<kaya::Date>, Option<kaya::Date>, &str, bool); 9] = [
                 ("Buy milk", "", None, None, "", false),
@@ -912,6 +1032,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     title: title.into(),
                     caption: String::new(),
                     captionless: true,
+                    tint: kaya::Tint::None,
                     done,
                     notes: notes.into(),
                     when: date_field(when),
@@ -938,7 +1059,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 tx.insert(
                     &app.projects_coll,
                     key.clone(),
-                    ProjectRow { name: name.clone(), count: "0 tasks".into() },
+                    ProjectRow { name: name.clone(), count: "0 tasks".into(), color: project_color(&app.projects, key) },
                 );
             }
             // KEYS ARE `t<n>` AND THE COUNTER RESUMES PAST THE HIGHEST:
@@ -1012,6 +1133,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     title: app.draft.trim().to_string(),
                     caption: String::new(),
                     captionless: true,
+                    tint: kaya::Tint::None,
                     done: false,
                     notes: String::new(),
                     when: String::new(),
@@ -1197,8 +1319,19 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 let lines = ctx.apply(|tx| {
                     let entry = tx.push_entry_in(PROJECTS, PROJECT).title(&name).id();
                     let lines = tx.collection::<Line>();
+                    let color = project_color(&app.projects, &project);
+                    let heading = tx.signal(name.as_str());
+                    let count = tx.signal(kaya::tr!("project-tasks", count = titles.len() as i64));
                     let root = tx
                         .column(|tx| {
+                            tx.column(|tx| {
+                                tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id("project_heading");
+                                tx.caption(count).a11y_id("project_count");
+                            })
+                            .a11y_id("project_header")
+                            .inset(12.0)
+                            .fill(true)
+                            .ground_gradient(color);
                             let pnew = tx.button(&kaya::tr!("new-task")).a11y_id("pnew").id();
                             msgs.on_click(pnew, Msg::ProjectQuickAdd);
                             let rows = lines.rows(tx);
@@ -1257,6 +1390,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     title: app.pdraft.trim().to_string(),
                     caption: String::new(),
                     captionless: true,
+                    tint: kaya::Tint::None,
                     done: false,
                     notes: String::new(),
                     when: String::new(),
@@ -1346,7 +1480,13 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 app.write_settings(&ctx);
             }
             Msg::Section(sid) => app.active = sid,
-            Msg::OpenLogbook => {
+            Msg::OpenList(list) if section_of(list).is_some() => {
+                let window = section_of(list).expect("a list with a section");
+                ctx.apply(|tx| tx.select_section(window));
+                app.active = window;
+            }
+            // The Logbook tile opens the View menu's screen.
+            Msg::OpenLogbook | Msg::OpenList(_) => {
                 if app.logbook_screen.is_some() {
                     continue;
                 }

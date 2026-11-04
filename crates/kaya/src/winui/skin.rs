@@ -1295,7 +1295,8 @@ pub(super) mod read {
             let a = c[3] / 255.0;
             Ok([0, 1, 2].map(|k| c[k] / 255.0 * a + shot.ground[k] * (1.0 - a)))
         };
-        let mut candidates = vec![("none", shot.text)];
+        // A caption's secondary brush is untinted too (docs/looks-plan.md §3.4).
+        let mut candidates = vec![("none", shot.text), ("none", tone("TextFillColorSecondaryBrush")?)];
         for (name, tint) in [
             ("accent", crate::wire::TINT_ACCENT),
             ("success", crate::wire::TINT_SUCCESS),

@@ -2635,6 +2635,25 @@ mod flex {
             if self.is_main(orientation) {
                 (minimum, natural) = main_axis_measure(&main_children, self.spacing.get());
             }
+            // GTK's warning names the box that answered, not what it holds
+            // (docs/traps.md, 2026-09-11); this names the children.
+            if natural < minimum {
+                let names: Vec<String> = {
+                    let mut out = Vec::new();
+                    let mut child = widget.first_child();
+                    while let Some(c) = child {
+                        let (cmin, cnat, _, _) = super::measure_capped(&c, orientation, for_size);
+                        out.push(format!("{}:{}/{}", c.widget_name(), cmin, cnat));
+                        child = c.next_sibling();
+                    }
+                    out
+                };
+                eprintln!(
+                    "kaya: flex box {} answered min {minimum} above natural {natural} ({orientation:?} for {for_size}); children {}",
+                    widget.widget_name(),
+                    names.join(" ")
+                );
+            }
             // A COLUMN'S BASELINE IS ITS FIRST CHILD'S (docs/flex-shrink-plan.md
             // §9): a title-over-date column in a baseline row sits on the
             // title's line; the first child starts at the column's top.
@@ -10266,13 +10285,24 @@ fn set_label_tint(widget: &gtk4::Widget, tint: i64) {
     for class in LABEL_TINT_CLASSES {
         widget.remove_css_class(class);
     }
+    // A tinted caption keeps the tint's own colour: dim-label's opacity
+    // would dull it (docs/looks-plan.md §3.4).
+    let caption = widget.has_css_class("caption");
     let class = match tint as u32 {
         crate::wire::TINT_ACCENT => LABEL_TINT_CLASSES[0],
         crate::wire::TINT_SUCCESS => LABEL_TINT_CLASSES[1],
         crate::wire::TINT_WARNING => LABEL_TINT_CLASSES[2],
         crate::wire::TINT_CRITICAL => LABEL_TINT_CLASSES[3],
-        _ => return,
+        _ => {
+            if caption {
+                widget.add_css_class("dim-label");
+            }
+            return;
+        }
     };
+    if caption {
+        widget.remove_css_class("dim-label");
+    }
     widget.add_css_class(class);
 }
 
@@ -26633,10 +26663,28 @@ impl crate::harness::Stage for GtkStage {
                 y += step;
             }
             let Some(ink) = ink else { return format!("<no pixels in {fx},{fy} {fw}x{fh}>") };
-            let mut candidates = vec![("none", shot.text)];
-            for (name, colour) in
-                [("accent", "accent_color"), ("success", "success_color"), ("warning", "warning_color"), ("critical", "error_color")]
-            {
+            // A caption's dim-label step (libadwaita's 55% of the text) is
+            // untinted too (docs/looks-plan.md §3.4).
+            let dimmed = skin::over([shot.text[0], shot.text[1], shot.text[2], 0.55], shot.ground);
+            let mut candidates = vec![("none", shot.text), ("none", dimmed)];
+            // THE ACCENT AS LIBADWAITA DRAWS IT: the brand's standalone colour
+            // when the app set one, else the style manager's; `@accent_color`
+            // read 000000 under wayland's portal while the label drew 0561BE
+            // (the linux tasks-rust-wayland leg, 2026-11-04).
+            let manager = adw::StyleManager::default();
+            let dark = manager.is_dark();
+            let accent = match *core.brand.borrow() {
+                Some(brand) => {
+                    let rgb = if dark { brand.dark.standalone } else { brand.light.standalone };
+                    [f64::from((rgb >> 16) & 0xFF) / 255.0, f64::from((rgb >> 8) & 0xFF) / 255.0, f64::from(rgb & 0xFF) / 255.0, 1.0]
+                }
+                None => {
+                    let c = manager.accent_color().to_standalone_rgba(dark);
+                    [c.red(), c.green(), c.blue(), c.alpha()].map(f64::from)
+                }
+            };
+            candidates.push(("accent", skin::over(accent, shot.ground).map(|v| v.clamp(0.0, 1.0))));
+            for (name, colour) in [("success", "success_color"), ("warning", "warning_color"), ("critical", "error_color")] {
                 let Some(c) = skin::colour(&widget, colour) else { return format!("<{colour} did not resolve>") };
                 candidates.push((name, skin::over(c, shot.ground).map(|v| v.clamp(0.0, 1.0))));
             }
@@ -26646,7 +26694,7 @@ impl crate::harness::Stage for GtkStage {
                 "{} (ink {}; {})",
                 candidates[0].0,
                 skin::hex(ink),
-                candidates.iter().take(3).map(|(n, c)| format!("{n} {}", skin::hex(*c))).collect::<Vec<_>>().join(", ")
+                candidates.iter().map(|(n, c)| format!("{n} {}", skin::hex(*c))).collect::<Vec<_>>().join(", ")
             )
         })
     }

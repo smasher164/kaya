@@ -489,3 +489,46 @@ S0 lands depth-first on the mac, then the other four lanes wire the one
 Rust guest; every later stage is a feature slice in its own right —
 design pass, depth on the mac, breadth across backends and the eight
 other bindings, the matrix — with this app as its scene.
+
+## §7 — the app's own look (docs/looks-plan.md §3.4, BUILT 2026-11-04)
+
+The task manager wears its lists' colours, the way Reminders and Things do,
+on every lane and in both appearances:
+
+- Each list has a colour (Inbox blue 2F6FED, Today amber F2B01E, Upcoming
+  rose D9486A, Anytime teal 1FA2A0, Logbook green 2E9E5B), and each project
+  one from a six-entry palette by its order of creation, kept in the store.
+- A list's screen opens with a header column on a `ground_gradient` wash of
+  its colour (kaya's clamp makes it pale in light and deep in dark), the
+  list's name as a heading at `text_scale` 1.6 and weight 700, the count
+  caption under it. The project screen does the same from its colour.
+- The Inbox puts a two-column `grid` of tiles above its rows, one per other
+  list, each a column `filled_color` in that list's colour with the bare
+  count at `text_scale` 2 and weight 700, the list's own section symbol as an
+  `icon` in the trailing corner and the list's name under them; kaya chooses
+  the black or white text on each fill, and a tap selects the section (the
+  Logbook tile opens the Logbook screen).
+- A row's date caption is tinted by what the date means: `critical` when it
+  is past, `accent` today, `warning` within two days, untinted otherwise.
+- A project row leads with a 12-unit swatch, a column `filled_color` in the
+  project's colour.
+- The page scrolls as one: each list's root is a `scroll` holding the wash,
+  the tiles, the search field and the rows, since a phone at twice the text
+  size has no room under the tiles for a list of its own (the android
+  tasksbig leg compressed the rows to 4px boxes before this).
+
+What the scene reads (tools/scenes/tasks.steps): `expect_ground gradient` and
+`expect_ground_color` on the Inbox and Today headers and the project header,
+`expect_fill_color` on every tile and on a project swatch, `expect_symbol` on
+a tile's icon, `expect_tint` on a today, a soon, a far and an overdue
+caption, and `click column@tile_today` followed by `expect_section "Today"`.
+The Today header's light string is the middle of the five lanes' readings of
+a steep wash (docs/traps.md, "The steep wash's top").
+
+What the first five-lane run taught (its reds, each fixed forward):
+Compose's plain caption ignored `labelTint`; GTK's `@accent_color` resolved
+to black under wayland's portal, so the tint reader now takes the accent
+from libadwaita's style manager or the brand; the macOS section pane
+swapped roots under one view identity, so every section but the first kept
+a 0x0 scroll viewport (`KayaSectionPane` keys the root now); WinUI's
+longest-word probe measured an Arabic heading in the wrong flow direction.

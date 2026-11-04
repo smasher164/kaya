@@ -4265,6 +4265,17 @@ fn longest_word_width(block: &TextBlock) -> windows_core::Result<f64> {
     probe.SetFontSize(block.FontSize()?)?;
     probe.SetFontWeight(block.FontWeight()?)?;
     probe.SetFontStyle(block.FontStyle()?)?;
+    probe.SetFontStretch(block.FontStretch()?)?;
+    probe.SetTextWrapping(block.TextWrapping()?)?;
+    // An Arabic heading measured 67px in its own RightToLeft flow and 70px in
+    // the probe's LeftToRight one (the windows tasksrtl leg, 2026-11-04).
+    let flow: FrameworkElement = block.cast()?;
+    let probe_element: FrameworkElement = probe.cast()?;
+    probe_element.SetFlowDirection(flow.FlowDirection()?)?;
+    // AND ITS LANGUAGE: the ground carries the locale's tag, and a bold
+    // Arabic word shaped under ar-EG measured 67px where the probe's en-US
+    // shaping gave 70px.
+    probe_element.SetLanguage(&flow.Language()?)?;
     let ui: UIElement = probe.cast()?;
     for word in text.split_whitespace() {
         probe.SetText(&HSTRING::from(word))?;
@@ -29962,8 +29973,16 @@ impl crate::harness::Stage for WinUiStage {
                 }
                 let word = longest_word_width(label)?;
                 if presented(&element, &ground)? && word > width + 1.0 && !capped {
+                    let desired = f64::from(element.DesiredSize()?.Width) - margin.Left - margin.Right;
+                    let (natural, _) = measured_widths(&element)?;
                     return Ok(format!(
-                        "label {text:?} is {width}px wide, narrower than its longest word at {word}px"
+                        "label {text:?} is {width}px wide, narrower than its longest word at {word}px \
+                         (it asked for {desired}px, measures {natural}px unbounded, at {}pt weight {} of {:?}, \
+                         flow {})",
+                        label.FontSize()?,
+                        label.FontWeight()?.Weight,
+                        label.FontFamily()?.Source()?.to_string(),
+                        element.FlowDirection()?.0
                     ));
                 }
             }

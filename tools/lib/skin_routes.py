@@ -365,7 +365,7 @@ VISIBLE = [
     (SWIFT, "SwiftUI's ground, shape and tint readers refuse what their parents clip",
      "if let why = kayaSkinUnseen(node,", 4),
     (SWIFT, "SwiftUI's visible part is its scrolls', its root's and its anchor's clips",
-     "var shown = kayaVisibleFrame(node, probed).shown", 1),
+     "let (visible, cuts) = kayaVisibleFrame(node, probed)", 1),
     (SWIFT, "SwiftUI's visible part takes its anchor's clipping views",
      "shown = shown.intersection(kayaAnchorClips(view, probed))", 1),
     (SWIFT, "the mac clip view's visible part leaves its content insets, where a table's header floats",

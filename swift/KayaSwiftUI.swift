@@ -15465,13 +15465,14 @@ private func kayaRunScript(_ script: String) {
             case "expect_fill_color":
                 // harness.rs's ExpectFillColor, the same sentences and tolerance.
                 let fillSpec = kayaQuoted(Array(parts.dropFirst(2))).split(separator: " ").map(String.init)
-                guard fillSpec.count == 3, fillSpec[1] == "on", let wantFill = UInt32(fillSpec[0], radix: 16),
-                    fillSpec[2] == "white" || fillSpec[2] == "black"
+                // `"RRGGBB"` alone reads the fill of a container holding no text.
+                guard (fillSpec.count == 3 && fillSpec[1] == "on" && (fillSpec[2] == "white" || fillSpec[2] == "black"))
+                    || fillSpec.count == 1, let wantFill = UInt32(fillSpec[0], radix: 16)
                 else {
-                    failures.append("expect_fill_color wants a container and \"RRGGBB on white|black\": \(line)")
+                    failures.append("expect_fill_color wants a container and \"RRGGBB on white|black\" or \"RRGGBB\": \(line)")
                     break
                 }
-                let wantText = fillSpec[2]
+                let wantText: String? = fillSpec.count == 3 ? fillSpec[2] : nil
                 func nearFill(_ a: UInt32, _ b: UInt32) -> Bool {
                     for k: UInt32 in 0..<3 where abs(Int((a >> (8 * k)) & 0xFF) - Int((b >> (8 * k)) & 0xFF)) > 15 {
                         return false
@@ -15487,7 +15488,7 @@ private func kayaRunScript(_ script: String) {
                     }
                 }
                 func fillHolds(_ r: (UInt32, UInt32)) -> Bool {
-                    nearFill(r.0, wantFill) && (kayaInkIsLight(r.1) ? "white" : "black") == wantText
+                    nearFill(r.0, wantFill) && (wantText == nil || (kayaInkIsLight(r.1) ? "white" : "black") == wantText)
                 }
                 var gotFill = readFill()
                 let fillDeadline = Date().addingTimeInterval(5)
@@ -15495,13 +15496,15 @@ private func kayaRunScript(_ script: String) {
                     Thread.sleep(forTimeInterval: 0.1)
                     gotFill = readFill()
                 }
-                let saidFill = String(format: "%06X on %@", wantFill, wantText)
+                let saidFill = wantText.map { String(format: "%06X on %@", wantFill, $0) } ?? String(format: "%06X", wantFill)
                 switch gotFill {
                 case nil: failures.append("no such target \(parts[1])")
                 case let g?:
                     if let r = g.0 {
                         if fillHolds(r) {
                             observed.append("\(parts[1]) fill color \"\(saidFill)\"")
+                        } else if wantText == nil {
+                            failures.append(String(format: "%@ reads fill %06X, wanted %@", String(parts[1]), r.0, saidFill))
                         } else {
                             failures.append(String(
                                 format: "%@ reads fill %06X on %@ (ink %06X), wanted %@",
@@ -23634,9 +23637,12 @@ struct KayaIcon: View {
             .modifier(KayaLabelFrameReader(id: node.id))
             .accessibilityHidden(node.a11yLabel.isEmpty)
             .accessibilityLabel(node.a11yLabel)
+            // NO onDisappear: inside an activatable's label SwiftUI rebuilds the
+            // copy, and the old copy's disappear came after the new one's appear
+            // and emptied the glyph (the task manager's tiles, 2026-11-04). The
+            // laid-out frame is the read's presence check.
             .onAppear { kayaButtonGlyphs[node.id] = sf }
             .onChange(of: sf) { _, drawn in kayaButtonGlyphs[node.id] = drawn }
-            .onDisappear { kayaButtonGlyphs[node.id] = nil }
     }
 }
 
@@ -25388,18 +25394,20 @@ struct KayaSkinFrameHolder: View {
 /// leave of it does not hold all of it (harness.rs's unseen_probe; docs/traps.md,
 /// the shape read of a clipped row).
 @MainActor func kayaSkinUnseen(_ node: KayaNode, _ probed: CGRect) -> String? {
-    var shown = kayaVisibleFrame(node, probed).shown
+    let (visible, cuts) = kayaVisibleFrame(node, probed)
+    var shown = visible
     if let view = kayaSkinAnchors[node.id]?.reversed().lazy.compactMap(\.view).first(where: { $0.window != nil }) {
         shown = shown.intersection(kayaAnchorClips(view, probed))
     }
     let tol: CGFloat = 1
+    let cutBy = cuts.isEmpty ? "" : ", cut by \(cuts.joined(separator: "; "))"
     if shown.isNull || shown.width <= 0 || shown.height <= 0 {
-        return "<nothing on screen, its parents clip all of it: frame \(kayaRectText(probed)), visible none>"
+        return "<nothing on screen, its parents clip all of it: frame \(kayaRectText(probed)), visible none\(cutBy)>"
     }
     if shown.minX > probed.minX + tol || shown.minY > probed.minY + tol || shown.maxX < probed.maxX - tol
         || shown.maxY < probed.maxY - tol
     {
-        return "<clipped by its parents: frame \(kayaRectText(probed)), visible \(kayaRectText(shown))>"
+        return "<clipped by its parents: frame \(kayaRectText(probed)), visible \(kayaRectText(shown))\(cutBy)>"
     }
     return nil
 }
@@ -25690,16 +25698,27 @@ func kayaSystemBarWords() -> (String, String) {
         let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
         // docs/traps.md, the mac's untinted text read as tinted in the dark appearance.
         var plain = shot.text
+        // A caption's secondary step is untinted too (docs/looks-plan.md
+        // §3.4): the grey read nearer the green than the primary text.
+        var secondary = shot.text
         NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
-            if let s = NSColor.labelColor.usingColorSpace(.sRGB) {
-                let a = Double(s.alphaComponent)
-                plain = [s.redComponent, s.greenComponent, s.blueComponent].enumerated().map {
-                    Double($0.element) * a + shot.ground[$0.offset] * (1 - a)
+            for (colour, into) in [(NSColor.labelColor, 0), (NSColor.secondaryLabelColor, 1)] {
+                if let s = colour.usingColorSpace(.sRGB) {
+                    let a = Double(s.alphaComponent)
+                    let over = [s.redComponent, s.greenComponent, s.blueComponent].enumerated().map {
+                        Double($0.element) * a + shot.ground[$0.offset] * (1 - a)
+                    }
+                    if into == 0 { plain = over } else { secondary = over }
                 }
             }
         }
     #else
         let plain = shot.text
+        let secondary: [Double] = {
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
+            UIColor.secondaryLabel.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return [Double(r), Double(g), Double(b)].enumerated().map { $0.element * Double(a) + shot.ground[$0.offset] * (1 - Double(a)) }
+        }()
         func tone(_ c: UIColor) -> [Double] {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
             c.getRed(&r, green: &g, blue: &b, alpha: &a)
@@ -25712,7 +25731,7 @@ func kayaSystemBarWords() -> (String, String) {
         let rgb = shot.dark ? brand[8] : brand[3]
         accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255]
     }
-    let candidates: [(String, [Double])] = [("none", plain), ("accent", accent)] + others
+    let candidates: [(String, [Double])] = [("none", plain), ("none", secondary), ("accent", accent)] + others
     func distance(_ c: [Double]) -> Double {
         var sum = 0.0
         for k in 0..<3 { sum += (c[k] - ink[k]) * (c[k] - ink[k]) }
@@ -30609,7 +30628,9 @@ struct KayaRender: View {
             Group {
                 if node.role == roleLink, let url = URL(string: node.href) {
                     Link(node.text, destination: url)
-                } else if node.role == roleCaption || (node.role == roleHeading && sectionText) {
+                } else if (node.role == roleCaption && node.labelTint == 0) || (node.role == roleHeading && sectionText) {
+                    // A tinted caption keeps the tint's own colour, not the
+                    // secondary step over it (docs/looks-plan.md §3.4).
                     base.foregroundStyle(.secondary)
                 } else {
                     base
@@ -40861,7 +40882,11 @@ struct KayaSectionPane: View {
         NavigationStack(path: kayaNavPath(sectionId)) {
             Group {
                 if let section = scene.sectionsById[sectionId], let root = section.root {
-                    KayaRender(node: root, isRoot: true)
+                    // ONE PANE, MANY ROOTS: the sidebar swaps the root under
+                    // this view, and an unkeyed swap kept the old view's state
+                    // (a scroll's viewport read 0x0 for every section but the
+                    // first; the mac tasks leg, 2026-11-04).
+                    KayaRender(node: root, isRoot: true).id(root.id)
                 }
             }
             // The owning window's inset — same reasoning as the

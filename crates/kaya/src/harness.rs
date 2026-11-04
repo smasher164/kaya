@@ -1141,7 +1141,7 @@ pub enum Step {
     /// [`GROUND_COLOR_TOLERANCE`] of the colour the app chose, and the text on
     /// it white or black, read off the ink in the container's frame
     /// (docs/looks-plan.md §3.2).
-    ExpectFillColor(Target, u32, bool),
+    ExpectFillColor(Target, u32, Option<bool>),
     /// Drive the REAL activation path of the menu item at the `>`-joined
     /// label path — resolved wherever the item surfaced: the bar (or its
     /// phone overflow), or the OPEN context menu after a context_open. The
@@ -5139,17 +5139,22 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     .ok_or_else(|| format!("expect_fill_color wants a container and \"RRGGBB on white|black\": {line:?}"))?;
                 let spec = parse_string(text)?;
                 let words: Vec<&str> = spec.split_whitespace().collect();
-                let [fill, "on", on] = words[..] else {
-                    return Err(format!("expect_fill_color wants \"RRGGBB on white|black\": {line:?}"));
+                // `"RRGGBB"` alone reads the fill of a container holding no text
+                // (a swatch), whose ink is its own.
+                let (fill, on) = match words[..] {
+                    [fill, "on", on] => (fill, Some(on)),
+                    [fill] => (fill, None),
+                    _ => return Err(format!("expect_fill_color wants \"RRGGBB on white|black\" or \"RRGGBB\": {line:?}")),
                 };
                 let fill = (fill.len() == 6)
                     .then(|| u32::from_str_radix(fill, 16).ok())
                     .flatten()
                     .ok_or_else(|| format!("expect_fill_color wants six hex digits for the fill: {line:?}"))?;
                 let white = match on {
-                    "white" => true,
-                    "black" => false,
-                    _ => return Err(format!("expect_fill_color's text is white or black: {line:?}")),
+                    Some("white") => Some(true),
+                    Some("black") => Some(false),
+                    None => None,
+                    Some(_) => return Err(format!("expect_fill_color's text is white or black: {line:?}")),
                 };
                 Step::ExpectFillColor(parse_target(target)?, fill, white)
             }
@@ -8850,7 +8855,6 @@ fn run_with_log(
                 }
             })),
             Step::ExpectFillColor(t, fill, white) => Some(poll(|| {
-                let want_text = if *white { "white" } else { "black" };
                 match stage.fill_color(*t) {
                     Ok((got, ink)) => {
                         let near = (0..3).all(|k| {
@@ -8858,6 +8862,14 @@ fn run_with_log(
                             a.abs_diff(b) <= GROUND_COLOR_TOLERANCE
                         });
                         let got_text = if ink_is_light(ink) { "white" } else { "black" };
+                        let Some(white) = white else {
+                            return if near {
+                                Ok(format!("{} fill color \"{fill:06X}\"", target_spec(t)))
+                            } else {
+                                Err(format!("{} reads fill {got:06X}, wanted {fill:06X}", target_spec(t)))
+                            };
+                        };
+                        let want_text = if *white { "white" } else { "black" };
                         if near && got_text == want_text {
                             Ok(format!("{} fill color \"{fill:06X} on {want_text}\"", target_spec(t)))
                         } else {

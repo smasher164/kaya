@@ -228,6 +228,8 @@ where they read the same screens), docs/tasks-plan.md.
   on a project swatch and on each tile; `expect_symbol` on a tile's icon;
   `click column@tile_today` then `expect_section "Today"`.
 
+BUILT 2026-11-04: the five list colours and the project palette, the wash headers, the Inbox tiles, the dated captions' tints and the project swatches, each list page a scroll (docs/tasks-plan.md §7); tasks, tasksrtl and tasksbig green on all five lanes. The first run's reds and their fixes are in docs/tasks-plan.md §7; the Today wash's light string is the middle of the lanes' readings (docs/traps.md, "The steep wash's top").
+
 ### §3.5 The chat slice
 
 guests/go/chat, tools/scenes/chat.steps, docs/chat-plan.md.

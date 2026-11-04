@@ -20223,3 +20223,34 @@ every image_needed and image_released it emits with the widget, the template
 node and the row's path. check-flightrec "core image needs", NIN (two cuts
 watched). On the next sighting a `needed` line for the row with no fetch is the
 binding; no line is the core.
+
+## The steep wash's top, read four units in (measured 2026-11-04)
+
+The task manager's Today header is a gradient ground from the list's own
+amber, F2B01E, which at L* 76 needs no lift (docs/styling-pass-plan.md Y2), so
+the wash runs from F2B01E at the top to the page's white across the header's
+few dozen pixels: 225 steps of blue in about 80 units. Every lane's
+`expect_ground_color` probe samples four units inside the top edge, where
+that slope is already a dozen or more, and the lanes do not land on the same
+pixel: the SwiftUI readers (mac and iOS) read F3B53D, GTK F2B42A, WinUI F2B326
+and Compose F2B329, a spread of 23 in the blue channel against the verb's
+tolerance of 15 per channel. The scene's light string is the middle of that
+spread (F3B432), not any lane's reading: a value copied from one lane fails
+the two furthest from it. The Inbox's blue (9CBFFF) and the other scenes'
+washes are gentle enough that the same probe agrees within tolerance; a wash
+from a colour that needs no lift is the steep case.
+
+## The Arabic heading three pixels narrower than its own word, then not (seen 2026-11-04)
+
+The windows tasksrtl leg failed its first `expect_no_clipping` three runs in a
+row on the Inbox heading (the new 1.6-scale, weight-700 "الوارد"): the
+TextBlock had asked for 67px and was laid out at 66.18px while the
+longest-word probe measured the same word at 70px, with the probe given the
+block's flow direction, language, wrapping and stretch in turn and still 70.
+The fourth and fifth runs, with no change but to the sentence, passed the
+same step in 6 s. The first three ran beside other lanes; the last two ran
+alone. The sentence now carries what the block itself measures unbounded,
+its font family's source and its flow, so the next sighting says whether the
+block measures its word narrower than the probe does (a shaping or fallback
+difference) or asked for less than it measures (a stale layout, as a font
+file loading after the first measure would leave).

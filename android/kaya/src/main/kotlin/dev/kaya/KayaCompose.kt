@@ -1370,6 +1370,8 @@ fun kayaImageShape(node: KayaNode): Modifier = when (node.shape) {
 class KayaSkinTokens(
     val ground: Int,
     val text: Int,
+    /** The caption's colour, untinted too (docs/looks-plan.md §3.4). */
+    val textSecondary: Int,
     val dark: Boolean,
     val hover: Int,
     val neutral: Int,
@@ -1387,6 +1389,7 @@ fun KayaRecordSkinTokens() {
     val tokens = KayaSkinTokens(
         ground = scheme.background.toArgb(),
         text = scheme.onBackground.toArgb(),
+        textSecondary = scheme.onSurfaceVariant.toArgb(),
         dark = scheme.background.luminance() < 0.5f,
         hover = scheme.onSurface.copy(alpha = KAYA_HOVER_LAYER).toArgb(),
         neutral = kayaTintPair(5L).first.toArgb(),
@@ -9343,7 +9346,7 @@ object KayaCompose {
         }
         val seen = ink ?: return "<no pixels in $box>"
         val names = listOf("accent", "success", "warning", "critical")
-        val candidates = listOf("none" to kayaRgb(tokens.text)) + names.zip(tokens.standalone.map { kayaRgb(it) })
+        val candidates = listOf("none" to kayaRgb(tokens.text), "none" to kayaRgb(tokens.textSecondary)) + names.zip(tokens.standalone.map { kayaRgb(it) })
         fun dist(c: DoubleArray) = (0..2).sumOf { (c[it] - seen[it]) * (c[it] - seen[it]) }
         val ranked = candidates.sortedBy { dist(it.second) }
         return "${ranked[0].first} (ink ${kayaHexOf(seen)}; " +
@@ -16353,14 +16356,17 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                     "expect_fill_color" -> {
                         // harness.rs's ExpectFillColor, the same sentences and tolerance.
                         val spec = quoted(parts.drop(2)).split(" ")
-                        val wantFill = spec.getOrNull(0)?.takeIf { spec.size == 3 && spec[1] == "on" && (spec[2] == "white" || spec[2] == "black") }?.toIntOrNull(16)
+                        // `"RRGGBB"` alone reads the fill of a container holding no text.
+                        val textGiven = spec.size == 3 && spec[1] == "on" && (spec[2] == "white" || spec[2] == "black")
+                        val wantFill = spec.getOrNull(0)?.takeIf { textGiven || spec.size == 1 }?.toIntOrNull(16)
                         if (wantFill == null) {
-                            failures.add("expect_fill_color wants a container and \"RRGGBB on white|black\": $line")
+                            failures.add("expect_fill_color wants a container and \"RRGGBB on white|black\" or \"RRGGBB\": $line")
                         } else {
-                            val wantText = spec[2]
-                            val said = "%06X on %s".format(wantFill, wantText)
+                            val wantText: String? = if (textGiven) spec[2] else null
+                            val said = if (wantText != null) "%06X on %s".format(wantFill, wantText) else "%06X".format(wantFill)
                             fun near(a: Int, b: Int) = (0..2).all { k -> Math.abs(((a shr (8 * k)) and 0xFF) - ((b shr (8 * k)) and 0xFF)) <= 15 }
-                            fun holds(r: Pair<Int, Int>) = near(r.first, wantFill) && (if (kayaInkIsLight(r.second)) "white" else "black") == wantText
+                            fun holds(r: Pair<Int, Int>) = near(r.first, wantFill) &&
+                                (wantText == null || (if (kayaInkIsLight(r.second)) "white" else "black") == wantText)
                             var got = kayaFillColorRead(activity, parts[1])
                             val deadline = System.currentTimeMillis() + 5000
                             while (System.currentTimeMillis() < deadline && got.first?.let { !holds(it) } != false) {
@@ -16372,6 +16378,7 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 read == null && got.second == "no such target" -> failures.add("no such target ${parts[1]}")
                                 read == null -> failures.add("${parts[1]} fill unread: ${got.second}")
                                 holds(read) -> observed.add("${parts[1]} fill color \"$said\"")
+                                wantText == null -> failures.add("${parts[1]} reads fill %06X, wanted %s".format(read.first, said))
                                 else -> failures.add(
                                     "${parts[1]} reads fill %06X on %s (ink %06X), wanted %s".format(
                                         read.first, if (kayaInkIsLight(read.second)) "white" else "black", read.second, said))
@@ -21308,7 +21315,8 @@ private fun KayaRenderCore(
                         KayaCompose.ROLE_CAPTION -> MaterialTheme.typography.bodySmall
                         else -> LocalTextStyle.current
                     }),
-                    color = if (node.role == KayaCompose.ROLE_CAPTION)
+                    // A tinted caption keeps the tint's own colour (docs/looks-plan.md §3.4).
+                    color = if (node.role == KayaCompose.ROLE_CAPTION && node.labelTint == 0L)
                         kayaCaptionColor() else kayaLabelTintColor(node),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = { kayaLabelLayouts[node.id] = it },
@@ -21344,7 +21352,7 @@ private fun KayaRenderCore(
                 Text(
                     node.text,
                     style = kayaNodeStyle(node, MaterialTheme.typography.bodySmall),
-                    color = kayaCaptionColor(),
+                    color = if (node.labelTint == 0L) kayaCaptionColor() else kayaLabelTintColor(node),
                     maxLines = kayaLabelMaxLines(node), overflow = kayaLabelOverflow(node),
                     onTextLayout = {
                         if (!kayaNodeFontSet(node)) kayaTypefaceSites["caption"] = it
