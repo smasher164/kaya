@@ -1534,18 +1534,20 @@ one Expect arm dispatched as a one-shot `stage.caption_menu()` where every
 other read goes through `poll`. Now polled; the gate's self-test puts the
 one-shot back in a copy (1 substitution) and the clause names it.
 
-## RULING WANTED — the android lane's ceiling: 1100 since 2026-11-03, provisionally, from the 960 the maintainer ruled on 2026-10-16
-KEY: android ceiling, DURATION ANOMALY, 1100, four-emulator floor, queued-compose, KAYA_ANDROID_EMUS
+## RULING WANTED — the android lane's ceiling: 1200 since 2026-11-03, provisionally, from the 960 the maintainer ruled on 2026-10-16
+KEY: android ceiling, DURATION ANOMALY, 1200, four-emulator floor, queued-compose, KAYA_ANDROID_EMUS
 
-Both matrices of the stability pass read the android lane over its 960 s
-ceiling (1028 s and 1041 s net) with the legs' sum within 2% of the previous
-run (3477 s and 3539 s over 310 legs), and night4's matrices read 981 to 1120
-s; the lane's four emulators carry about 880 s of leg time each at full
-parallelism, plus boot, four builds and the queue (about 140 s), so 960 had
-no headroom and the anomaly alone would fail an all-green matrix. Raised to
-1100 (about 1.06x over the two reads) so the record can be ALL PASS; the
-other way down is a fifth emulator (KAYA_ANDROID_EMUS), which is the
-maintainer's call, as is the ceiling itself.
+The stability pass's three matrices read the android lane over its 960 s
+ceiling (1028, 1041 and 1111 s net) with the legs' sum within 2% then 6% of
+the previous run (3477, 3539 and 3744 s over 310 legs, the whole third matrix
+1963 s where the two before read 1749 and 1650), and night4's matrices read
+981 to 1120 s; the lane's four emulators carry about 880 to 940 s of leg time
+each at full parallelism, plus boot, four builds and the queue (about 140 s),
+so 960 had no headroom and the anomaly alone fails an all-green matrix
+(validate-all sets status 1 on it). Raised to 1200 (about 1.07x over the
+day's slowest read) so the record can be ALL PASS; the other way down is a
+fifth emulator (KAYA_ANDROID_EMUS), which is the maintainer's call, as is the
+ceiling itself.
 
 ## WATCH — three reds of the 72b602fb matrix, each green alone (2026-11-03)
 KEY: music_header-python-wayland, checkbox@like checked reads on, colorpanel_rust, HexTextBox, music_dock-python, full_play_pause, player_command
@@ -1560,7 +1562,16 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   verb trace now carries every toggle checked write with the state before and
   after ("toggle 91 true -> false, now false"; forced red read back). On the
   next sighting: no write to the heart after the Undo is the app or the core,
-  a write that left it "now true" is GTK.
+  a write that left it "now true" is GTK. READ on the third sighting (the
+  0f42d50b matrix, run 20261103T231741Z-008410): the Undo's write landed
+  ("toggle 91 true -> false, now false" at t=23.6 s), then at t=25.4 s the
+  player reached the end of "Seven Chimes" (0:20, playing since t=5.3 s) and
+  moved to "Athens", the liked track, and the core wrote the header's like
+  for the NEW track ("toggle 91 false -> true, now true"), which the step
+  read. Not GTK, not the app: a scene whose like reads sat more than 20 s
+  after `click button@play_album` under a matrix. The scene pauses the player
+  once the dock's assertions are done (docs/traps.md, the like read after the
+  track ended).
 - windows colorpanel_rust (run 20261103T131654Z-090232): "the flyout's
   ColorPicker never ran its template: no HexTextBox in 10 s", under matrix load.
 - linux farend-java-x11 (a8af4b7d matrix, run 20261103T141338Z-008402): the

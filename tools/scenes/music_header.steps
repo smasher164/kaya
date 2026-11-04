@@ -38,6 +38,11 @@ expect label@dock_title "Seven Chimes"
 expect_ax button@play_pause "button/Pause"
 expect_tint label@track_name[1860160] accent
 expect_no_clipping
+# Paused before the like reads below: the track is 20 s long and a leg under
+# a matrix takes longer, so the player moved to the next, liked track under
+# the read (docs/traps.md, the like read after the track ended).
+click button@play_pause
+expect_ax button@play_pause "button/Play"
 # The desktops go Home through the sidebar (docs/media-player-plan.md §1); a
 # phone goes back (tools/lib/lanes/ios.py, android.py).
 click row@go_home

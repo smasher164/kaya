@@ -20177,6 +20177,20 @@ green under the same load. The reveal's own invalidateLayout (2cadeb25, a
 guess at narrower widths) came out. check-verbs holds the scoped edits (two
 cuts watched).
 
+## The like read after the track ended (measured 2026-11-03)
+
+music_header-python-wayland and its dark twin read `checkbox@like` on after
+the toast's Undo, three matrices apart, green alone every time. The GTK
+toggle writes, traced since 77eac884, settled it on the third sighting: the
+Undo's write landed ("toggle 91 true -> false, now false" at t=23.6 s), and
+1.8 s later the player reached the end of the album's first track (0:20,
+playing since `click button@play_album` at t=5.3 s), moved to the second,
+liked, track, and the core wrote the header's like for it ("toggle 91 false
+-> true, now true"), which the step then read. A leg alone reaches those
+reads inside 20 s; under a matrix it does not. The scene pauses the player
+once the dock's assertions are done, so no read later in it depends on the
+clip's length against the leg's pace.
+
 ## The far end that replayed its stall (seen 2026-11-03)
 
 farend-jvm read `voice 0 reads silent` for 15 s in two matrices of
