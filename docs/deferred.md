@@ -1534,7 +1534,7 @@ one Expect arm dispatched as a one-shot `stage.caption_menu()` where every
 other read goes through `poll`. Now polled; the gate's self-test puts the
 one-shot back in a copy (1 substitution) and the clause names it.
 
-## ~~RULING WANTED — the android lane's ceiling: 1200 since 2026-11-03, provisionally, from the 960 the maintainer ruled on 2026-10-16~~ RULED 2026-11-03: keep 1200 (the maintainer: "keep the 20 minute limit"); no fifth emulator, since more host load is what made most of the stability pass's reds
+## ~~RULING WANTED — the android lane's ceiling: 1200 since 2026-11-03, provisionally, from the 960 the maintainer ruled on 2026-10-16~~ CLOSED 2026-11-03, ruled: keep 1200 (the maintainer: "keep the 20 minute limit"); no fifth emulator, since more host load is what made most of the stability pass's reds
 KEY: android ceiling, DURATION ANOMALY, 1200, four-emulator floor, queued-compose, KAYA_ANDROID_EMUS
 
 The stability pass's three matrices read the android lane over its 960 s
