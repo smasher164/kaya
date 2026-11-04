@@ -246,8 +246,8 @@ BUDGETS = {
     # floor plus 140s of boot, builds and queueing and the ceiling had no
     # headroom; the third matrix of the pass then read 1111s (legs +6%, the
     # whole matrix 1963s where the two before read 1749s and 1650s). 1200 is
-    # about 1.07x over the day's slowest read, 1120; for the maintainer to
-    # re-rule (a fifth emulator is the other way down).
+    # about 1.07x over the day's slowest read, 1120; RULED 2026-11-03 by the
+    # maintainer: keep 1200 rather than a fifth emulator.
     "android": 1200,
     # 490 since 2026-08-23, KEPT for the delayed-and-four-wide schedule
     # of 2026-09-07 until it has samples: one at a time the sweep read
