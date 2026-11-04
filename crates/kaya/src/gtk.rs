@@ -1938,6 +1938,19 @@ fn set_auto_grid(widget: &gtk4::Widget) {
     unsafe { widget.set_data(AUTO_GRID_KEY, true) }
 }
 
+/// A grid whose cells share its width (DESIGN.md's grid paragraph), marked
+/// by reflow_grid so apply_cross_align spans it as it spans an auto grid.
+const SHARED_GRID_KEY: &str = "kaya-grid-shares";
+fn is_shared_grid(widget: &gtk4::Widget) -> bool {
+    // SAFETY: the key is private to this module and only ever set to a
+    // bool by set_shared_grid below.
+    unsafe { widget.data::<bool>(SHARED_GRID_KEY).is_some_and(|p| *p.as_ref()) }
+}
+fn set_shared_grid(widget: &gtk4::Widget, on: bool) {
+    // SAFETY: as above — this is the only writer of the key.
+    unsafe { widget.set_data(SHARED_GRID_KEY, on) }
+}
+
 /// A container a For has stamped ROW copies into (docs/tasks-plan.md §4, R7).
 const STAMPED_ROWS_KEY: &str = "kaya-stamps-rows";
 fn stamps_rows(widget: &gtk4::Widget) -> bool {
@@ -2044,8 +2057,9 @@ fn apply_cross_align(child: &gtk4::Widget, vertical_container: bool, mode: i64) 
     if vertical_container && (is_form(child) || holds_form(child)) {
         align = gtk4::Align::Fill;
     }
-    // An auto grid is width-driven (docs/layout-knobs-plan.md §3).
-    if vertical_container && is_auto_grid(child) {
+    // An auto grid is width-driven (docs/layout-knobs-plan.md §3), and a
+    // grid whose cells share its width spans too (DESIGN.md's grid paragraph).
+    if vertical_container && (is_auto_grid(child) || is_shared_grid(child)) {
         align = gtk4::Align::Fill;
     }
     // THE CHILD'S OWN `fill` OUTRANKS EVERY DEFAULT ABOVE
@@ -11049,6 +11063,8 @@ fn reflow_grid(core: &mut CoreState, grid_id: u64) {
     // cell says `fill` (DESIGN.md's grid paragraph; the task manager's tiles).
     let shares = auto || children.iter().any(|c| fill_of(c) == Some(true));
     grid.set_column_homogeneous(shares);
+    set_shared_grid(grid.upcast_ref(), shares);
+    restamp_cross_align(grid.upcast_ref());
     for child in &children {
         if child.parent().is_some() {
             grid.remove(child);

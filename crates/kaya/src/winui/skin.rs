@@ -349,6 +349,14 @@ fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {
                 Ok(())
             },
         ))?;
+        // AND ON LOADING: an element off the tree hears no theme change, so
+        // the Inbox header came back from under the Settings screen in the
+        // light's stops after the app went dark (the windows dark captures,
+        // 2026-11-04).
+        grid.Loaded(&RoutedEventHandler::new(move |_, _| {
+            images::on_ui(move |core| paint_ground(core, id));
+            Ok(())
+        }))?;
     }
     let fe: FrameworkElement = grid.cast()?;
     match ground.kind {
