@@ -351,18 +351,18 @@ VISIBLE = [
     # Four on GTK, WinUI and Compose: the ground colour's top read is the fourth
     # (docs/media-player-plan.md M16 (35)); SwiftUI's spells its refusal inline.
     (GTK, "GTK's ground, shape and tint readers refuse what their parents clip",
-     # Six since the ground fade's reader (docs/styling-pass-plan.md Y2).
-     "if let Some(why) = unseen_in_shot(&widget, &shot.content,", 6),
+     # Seven since the corner's reader (docs/looks-plan.md §6).
+     "if let Some(why) = unseen_in_shot(&widget, &shot.content,", 7),
     (GTK, "GTK's visible part is its ancestors' clip and the window's",
      "clipped_by_ancestors(widget, content, gtk4::graphene::Rect::new(x, y, w, h))\n.and_then(|r| r.intersection(&whole))", 1),
     (WINUI_SKIN, "WinUI's ground, shape and tint readers refuse what their parents clip",
-     "if let Some(why) = shot.unseen(&element,", 5),
+     "if let Some(why) = shot.unseen(&element,", 6),
     (WINUI_SKIN, "WinUI's ground, shape and tint readers read what the element draws, cut by its own slot",
-     "let Some((fx, fy, fw, fh)) = shot.drawn(&element) else", 5),
+     "let Some((fx, fy, fw, fh)) = shot.drawn(&element) else", 6),
     (WINUI_SKIN, "WinUI's visible part walks every ancestor's viewport and slot",
      "crate::winui::ancestors_cut(&fe, &root, rtl, [x, y, x + w, y + h])?", 1),
     (SWIFT, "SwiftUI's ground, shape and tint readers refuse what their parents clip",
-     "if let why = kayaSkinUnseen(node,", 5),
+     "if let why = kayaSkinUnseen(node,", 6),
     (SWIFT, "SwiftUI's visible part is its scrolls', its root's and its anchor's clips",
      "let (visible, cuts) = kayaVisibleFrame(node, probed)", 1),
     (SWIFT, "SwiftUI's visible part takes its anchor's clipping views",
@@ -370,7 +370,7 @@ VISIBLE = [
     (SWIFT, "the mac clip view's visible part leaves its content insets, where a table's header floats",
      "let i = clip.contentInsets", 1),
     (COMPOSE, "Compose's ground, shape and tint readers refuse what their parents clip",
-     "onUi(activity) { kayaSkinUnseen(", 6),
+     "onUi(activity) { kayaSkinUnseen(", 7),
     (COMPOSE, "Compose's visible part is the node's bounds in the window", "val visible = kayaNodeVisible[id]", 1),
 ]
 
@@ -792,7 +792,7 @@ def run(g):
          "", "GTK's visible part is its ancestors' clip and the window's"),
         ("WinUI's ground, shape and tint reads of a clipped target", WINUI_SKIN,
          r"if let Some\(why\) = shot\.unseen\(&element, \[fx, fy, fw, fh\]\)\? \{",
-         "if let Some(why) = None::<String> {", "WinUI's ground, shape and tint readers refuse", 5),
+         "if let Some(why) = None::<String> {", "WinUI's ground, shape and tint readers refuse", 6),
         ("WinUI's shape read over the wide picture's whole box, as first written", WINUI_SKIN,
          r"let Some\(\(fx, fy, fw, fh\)\) = shot\.drawn\(&element\) else \{ return Ok\(\"<no laid-out frame>\"\.into\(\)\) \};\n(\s+)if fw <= 12\.0",
          r"let Some((fx, fy, fw, fh)) = shot.frame(&element) else { return Ok(\"<no laid-out frame>\".into()) };\n\1if fw <= 12.0",

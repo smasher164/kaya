@@ -1146,6 +1146,12 @@ pub enum Step {
     /// it white or black, read off the ink in the container's frame
     /// (docs/looks-plan.md §3.2).
     ExpectFillColor(Target, u32, Option<bool>),
+    /// `expect_corner <container> capsule|card`: a filled container's drawn
+    /// corner, read off the window's pixels along its top-leading diagonal, is
+    /// nearer half its height (a capsule, one line tall) or the platform's
+    /// card radius (docs/looks-plan.md §6). Where the two coincide within
+    /// [`CORNER_COINCIDE`] the shape is both, and reads as a capsule.
+    ExpectCorner(Target, bool),
     /// Drive the REAL activation path of the menu item at the `>`-joined
     /// label path — resolved wherever the item surfaced: the bar (or its
     /// phone overflow), or the OPEN context menu after a context_open. The
@@ -1423,6 +1429,7 @@ impl Step {
             | Step::ExpectGroundColor(t, _, _)
             | Step::ExpectGroundFade(t)
             | Step::ExpectFillColor(t, _, _)
+            | Step::ExpectCorner(t, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
             | Step::ExpectHelp(t, _)
@@ -1789,6 +1796,7 @@ impl Step {
             Step::ExpectGroundColor { .. } => true,
             Step::ExpectGroundFade { .. } => true,
             Step::ExpectFillColor { .. } => true,
+            Step::ExpectCorner { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
             Step::MenuOpen { .. } => false,
@@ -1868,6 +1876,40 @@ pub(crate) fn lightness(c: [f64; 3]) -> f64 {
 /// through the frame's rectangle, and a dark page read as black ink on an
 /// amber fill (measured 2026-11-04); the text starts at the fill's inset.
 pub(crate) const FILL_INK_INSET: f64 = 10.0;
+
+/// expect_corner's two shapes coincide when half the height and the card
+/// radius are this close, in layout units.
+pub const CORNER_COINCIDE: f64 = 2.0;
+
+/// expect_corner's least gap, 0 to 1 on the channel that differs most,
+/// between a fill and what is behind its corner: Fluent's accent surface sits
+/// 0.094 off its page, a neutral bubble 0.106 off a pale wallpaper.
+pub const CORNER_MIN_SPAN: f64 = 0.06;
+
+/// The drawn corner radius, in pixels, from the coverage of the fill along the
+/// shape's top-leading diagonal: `coverage[k]` is how far pixel k on the
+/// diagonal (its centre k + 0.5 pixels in on each axis) has the fill's colour
+/// rather than what is behind it, 0 to 1. The curve crosses the diagonal at
+/// r(1 - 1/sqrt 2) on each axis; the crossing is where the coverage passes a
+/// half, interpolated between the two pixels around it. None when it never
+/// passes.
+pub fn corner_radius_px(coverage: &[f64]) -> Option<f64> {
+    let k = coverage.iter().position(|c| *c >= 0.5)?;
+    let at = if k == 0 {
+        0.5
+    } else {
+        let (a, b) = (coverage[k - 1], coverage[k]);
+        (k as f64 - 0.5) + if b > a { (0.5 - a) / (b - a) } else { 1.0 }
+    };
+    Some(at / (1.0 - std::f64::consts::FRAC_1_SQRT_2))
+}
+
+/// expect_corner's reading of a radius against the shape's height and the
+/// platform's card radius: true for a capsule (docs/looks-plan.md §6).
+pub fn corner_is_capsule(radius: f64, height: f64, card: f64) -> bool {
+    let half = height / 2.0;
+    (half - card).abs() <= CORNER_COINCIDE || (radius - half).abs() < (radius - card).abs()
+}
 
 /// expect_fill_color's text reading: ink at or above CIELAB L* 50 is white
 /// text, below it black (docs/looks-plan.md §3.2).
@@ -3365,6 +3407,10 @@ pub trait Stage: Send + 'static {
     /// container's frame farthest from that surface), each 0xRRGGBB off the
     /// window's pixels (docs/looks-plan.md §3.2).
     fn fill_color(&self, target: Target) -> Result<(u32, u32), String>;
+    /// A filled container's drawn corner radius, its height and the
+    /// platform's card radius, each in layout units: the radius from
+    /// [`corner_radius_px`] over the window's pixels (docs/looks-plan.md §6).
+    fn corner(&self, target: Target) -> Result<(f64, f64, f64), String>;
     /// The scroll viewport's overflow, read from the toolkit after forcing
     /// pending layout: the empty string when the content exceeds the
     /// viewport, otherwise a short platform-flavored description of the two
@@ -5193,6 +5239,18 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_ground_fade wants a container: {line:?}"));
                 }
                 Step::ExpectGroundFade(parse_target(target)?)
+            }
+            "expect_corner" => {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let [target, shape] = words[..] else {
+                    return Err(format!("expect_corner wants a container and capsule or card: {line:?}"));
+                };
+                let capsule = match shape {
+                    "capsule" => true,
+                    "card" => false,
+                    _ => return Err(format!("expect_corner wants capsule or card, not {shape:?}: {line:?}")),
+                };
+                Step::ExpectCorner(parse_target(target)?, capsule)
             }
             "expect_fill_color" => {
                 let (target, text) = rest
@@ -8945,6 +9003,24 @@ fn run_with_log(
                 }
                 Err(why) => Err(format!("{} ground fade unread: {why}", target_spec(t))),
             })),
+            Step::ExpectCorner(t, capsule) => Some(poll(|| match stage.corner(*t) {
+                Ok((radius, height, card)) => {
+                    let got = corner_is_capsule(radius, height, card);
+                    let name = |c: bool| if c { "capsule" } else { "card" };
+                    if got == *capsule {
+                        Ok(format!("{} corner {}", target_spec(t), name(got)))
+                    } else {
+                        Err(format!(
+                            "{} is drawn as a {}: radius {radius:.1} of height {height:.1} (a capsule's {:.1}, the card's {card:.1}), wanted a {}",
+                            target_spec(t),
+                            name(got),
+                            height / 2.0,
+                            name(*capsule)
+                        ))
+                    }
+                }
+                Err(why) => Err(format!("{} corner unread: {why}", target_spec(t))),
+            })),
             Step::ExpectFillColor(t, fill, white) => Some(poll(|| {
                 match stage.fill_color(*t) {
                     Ok((got, ink)) => {
@@ -12289,6 +12365,9 @@ mod tests {
         fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
             Ok((0xFFFFFF, 0xFFFFFF, false))
         }
+        fn corner(&self, _: Target) -> Result<(f64, f64, f64), String> {
+            Ok((18.0, 36.0, 12.0))
+        }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
         }
@@ -13773,6 +13852,9 @@ mod tests {
         fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
             Ok((0xFFFFFF, 0xFFFFFF, false))
         }
+        fn corner(&self, _: Target) -> Result<(f64, f64, f64), String> {
+            Ok((18.0, 36.0, 12.0))
+        }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
         }
@@ -14364,6 +14446,9 @@ mod tests {
         }
         fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
             Ok((0xFFFFFF, 0xFFFFFF, false))
+        }
+        fn corner(&self, _: Target) -> Result<(f64, f64, f64), String> {
+            Ok((18.0, 36.0, 12.0))
         }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
@@ -15687,7 +15772,7 @@ mod win_exit_tests {
 
 #[cfg(test)]
 mod cells_even_tests {
-    use super::{cells_even, parse, Step};
+    use super::{cells_even, corner_is_capsule, corner_radius_px, parse, Step};
 
     const EVEN: [(f64, f64, f64, f64); 4] =
         [(0.0, 0.0, 150.0, 80.0), (162.0, 0.0, 150.0, 80.0), (324.0, 0.0, 150.0, 80.0), (0.0, 92.0, 150.0, 60.0)];
@@ -15766,6 +15851,33 @@ mod cells_even_tests {
         assert!(parse("expect_ground_color column@header \"light 673946\"").is_err());
         assert!(matches!(parse("expect_ground_fade column@header").expect("parses").as_slice(), [Step::ExpectGroundFade(_)]));
         assert!(parse("expect_ground_fade").is_err());
+        assert!(matches!(parse("expect_corner column@pill capsule").expect("parses").as_slice(), [Step::ExpectCorner(_, true)]));
+        assert!(matches!(parse("expect_corner row@tile card").expect("parses").as_slice(), [Step::ExpectCorner(_, false)]));
+        assert!(parse("expect_corner row@tile round").is_err());
+        assert!(parse("expect_corner row@tile").is_err());
         assert!(parse("expect_ground_fade column@header column@hero").is_err());
+    }
+
+    /// docs/looks-plan.md §6: the diagonal reading recovers a drawn radius, and
+    /// the nearer of the two shapes wins.
+    #[test]
+    fn a_corner_radius_reads_off_its_diagonal() {
+        for r in [8.0_f64, 12.0, 18.0, 26.0] {
+            let coverage: Vec<f64> = (0..40)
+                .map(|k| {
+                    let c = k as f64 + 0.5;
+                    let dist = ((c - r).powi(2) * 2.0).sqrt();
+                    let inside = if c >= r { 1.0 } else { (0.5 + (r - dist)).clamp(0.0, 1.0) };
+                    inside
+                })
+                .collect();
+            let got = corner_radius_px(&coverage).expect("crosses");
+            assert!((got - r).abs() < 1.0, "radius {r} read as {got}");
+        }
+        assert!(corner_radius_px(&[0.0, 0.1, 0.2]).is_none());
+        assert!(corner_is_capsule(17.0, 36.0, 12.0));
+        assert!(!corner_is_capsule(12.5, 36.0, 12.0));
+        assert!(!corner_is_capsule(13.0, 60.0, 12.0));
+        assert!(corner_is_capsule(12.0, 24.0, 12.0), "half the height is the card radius: both");
     }
 }

@@ -69,7 +69,7 @@ func App() *kaya.App {
 	phone := &calls{app: app, peer: peer, convs: convs}
 
 	app.Build(func(tx *kaya.Tx) {
-		tx.Window(0).Title("chat").Size(900, 640).Panes(2)
+		tx.Window(0).Title("chat").Size(900, 640).Panes(2).Inset(0)
 		list := ConversationCollection(tx)
 
 		// The open thread: which conversation, its collection and its For.
@@ -228,44 +228,43 @@ func App() *kaya.App {
 			at := -1
 			matches := tx.Signal("")
 			pane := tx.Column(func() {
-				tx.Row(func() {
-					tx.Search(func(tx *kaya.Tx, text string) {
-						query := strings.ToLower(strings.TrimSpace(text))
-						found, at = nil, -1
-						for i := len(c.messages) - 1; i >= 0 && query != ""; i-- {
-							if strings.Contains(strings.ToLower(c.messages[i].text), query) {
-								found = append(found, c.messages[i].key)
+				tx.Column(func() {
+					tx.Row(func() {
+						tx.Search(func(tx *kaya.Tx, text string) {
+							query := strings.ToLower(strings.TrimSpace(text))
+							found, at = nil, -1
+							for i := len(c.messages) - 1; i >= 0 && query != ""; i-- {
+								if strings.Contains(strings.ToLower(c.messages[i].text), query) {
+									found = append(found, c.messages[i].key)
+								}
 							}
-						}
-						switch {
-						case query == "":
-							tx.Write(matches, "")
-						case len(found) == 1:
-							tx.Write(matches, "1 match")
-						default:
-							tx.Write(matches, fmt.Sprintf("%d matches", len(found)))
-						}
-					}).Placeholder("Search").A11yID("find").Grow(1).
-						OnSubmitted(func(tx *kaya.Tx, text string) {
-							if len(found) == 0 {
-								return
+							switch {
+							case query == "":
+								tx.Write(matches, "")
+							case len(found) == 1:
+								tx.Write(matches, "1 match")
+							default:
+								tx.Write(matches, fmt.Sprintf("%d matches", len(found)))
 							}
-							at = (at + 1) % len(found)
-							tx.ScrollToRow(threadList, found[at])
-							tx.Write(matches, fmt.Sprintf("%d of %d", at+1, len(found)))
-						})
-					tx.Label(matches).A11yID("matches")
-				})
-				tx.Row(func() {
-					tx.Button("Newest", func(tx *kaya.Tx) {
-						tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
-					}).Role(kaya.RolePlain).A11yID("newest")
-					tx.Spacer()
-					tx.Label(connection).A11yID("connection")
-					// C10 (docs/capture-plan.md §8): a call and a video call.
-					tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).Symbol(kaya.SymbolPhone).Titled().A11yID("call")
-					tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).Symbol(kaya.SymbolVideo).Titled().A11yID("videocall")
-				})
+						}).Placeholder("Search").A11yID("find").Grow(1).
+							OnSubmitted(func(tx *kaya.Tx, text string) {
+								if len(found) == 0 {
+									return
+								}
+								at = (at + 1) % len(found)
+								tx.ScrollToRow(threadList, found[at])
+								tx.Write(matches, fmt.Sprintf("%d of %d", at+1, len(found)))
+							})
+						tx.Label(matches).A11yID("matches")
+						tx.Button("Newest", func(tx *kaya.Tx) {
+							tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
+						}).Role(kaya.RolePlain).A11yID("newest")
+						tx.Label(connection).A11yID("connection")
+						// C10 (docs/capture-plan.md §8): a call and a video call.
+						tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).Symbol(kaya.SymbolPhone).Titled().A11yID("call")
+						tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).Symbol(kaya.SymbolVideo).Titled().A11yID("videocall")
+					}).Align(kaya.AlignCenter)
+				}).Inset(12, 16)
 				// The thread over the conversation's own wallpaper (docs/looks-plan.md
 				// §3.5): the bubbles are filled, which is what makes their text legal
 				// over a picture (docs/styling-pass-plan.md Y3), and the rows above
@@ -285,6 +284,7 @@ func App() *kaya.App {
 										mine.SetA11yID(text, "text")
 									})
 									mine.SetFilled(bubble, kaya.TintAccent)
+									mine.SetInset(bubble, 8, 12)
 									mine.SetA11yID(bubble, "bubble")
 								})
 							},
@@ -298,6 +298,7 @@ func App() *kaya.App {
 										pending.SetA11yID(state, "state")
 									})
 									pending.SetFilled(bubble, kaya.TintAccent)
+									pending.SetInset(bubble, 8, 12)
 									pending.SetA11yID(bubble, "bubble")
 								})
 							},
@@ -308,6 +309,7 @@ func App() *kaya.App {
 										theirs.SetA11yID(text, "text")
 									})
 									theirs.SetFilled(bubble, kaya.TintNeutral)
+									theirs.SetInset(bubble, 8, 12)
 									theirs.SetA11yID(bubble, "bubble")
 									theirs.Spacer()
 								})
@@ -329,6 +331,7 @@ func App() *kaya.App {
 										reply.SetA11yID(text, "text")
 									})
 									reply.SetFilled(bubble, kaya.TintNeutral)
+									reply.SetInset(bubble, 8, 12)
 									reply.SetA11yID(bubble, "bubble")
 									reply.Spacer()
 								})
@@ -344,8 +347,9 @@ func App() *kaya.App {
 							},
 						)
 						tx.SetA11yID(threadList, "thread")
+						tx.SetInset(threadList, 12, 16)
 					}).Grow(1).FollowsEnd()
-				}).Grow(1).Fill(true).Inset(8).GroundImage(wallpaper).A11yID("thread_ground")
+				}).Grow(1).Fill(true).GroundImage(wallpaper).A11yID("thread_ground")
 				tx.Row(func() {
 					// The compose field: one line at rest, growing with the message
 					// to five (docs/grow-lines-plan.md); Return sends and
@@ -364,8 +368,8 @@ func App() *kaya.App {
 					}).Role(kaya.RoleComposer).Grow(1)
 					tx.Button("Send", func(tx *kaya.Tx) { send(tx, draft) }).
 						Symbol(kaya.SymbolSend).Role(kaya.RoleProminent).A11yID("send")
-				}).Align(kaya.AlignEnd)
-			})
+				}).Align(kaya.AlignEnd).Inset(12, 16)
+			}).Spacing(0).A11yID("thread_pane")
 			tx.MountIn(entry, pane)
 			for _, m := range c.messages {
 				insert(tx, m)
@@ -476,7 +480,7 @@ func App() *kaya.App {
 				convo.OnActivate(func(tx *kaya.Tx, keys []any) { openThread(tx, keys[0].(string)) })
 				row.ContextMenu(convo, rowActions)
 			}
-		}))
+		}).Inset(16))
 		for _, id := range order {
 			c := convs[id]
 			picture := tx.Asset("avatars/" + id + ".jpg")

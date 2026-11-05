@@ -1071,7 +1071,40 @@ const val KAYA_HOVER_LAYER = 0.08f
 /** The core's HOVER_MIN_LIGHTNESS (crates/kaya/src/harness.rs). */
 const val KAYA_HOVER_MIN_LIGHTNESS = 3.0
 
-/** The fill itself, at Material's medium shape, and the box expect_fill crops. */
+/** crates/kaya/src/flex.rs's CAPSULE_MAX_LINES; harness.rs's CORNER_COINCIDE. */
+const val KAYA_CAPSULE_MAX_LINES = 1.5f
+const val KAYA_CORNER_COINCIDE = 2.0
+const val KAYA_CORNER_MIN_SPAN = 0.06
+
+/** Material's medium shape, the card's radius in dp. */
+const val KAYA_CARD_RADIUS = 12.0
+
+/** A FILL ONE LINE TALL IS A CAPSULE (docs/looks-plan.md §6): its content, the
+ * height less its own inset above and below, under CAPSULE_MAX_LINES body
+ * lines; a taller fill keeps the card's shape. */
+data class KayaFillShape(val card: androidx.compose.ui.graphics.Shape, val inset: Float, val line: Float) :
+    androidx.compose.ui.graphics.Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density) =
+        if (size.height - 2 * inset < KAYA_CAPSULE_MAX_LINES * line) {
+            RoundedCornerShape(50).createOutline(size, layoutDirection, density)
+        } else {
+            card.createOutline(size, layoutDirection, density)
+        }
+}
+
+@Composable
+fun kayaFillShape(node: KayaNode): androidx.compose.ui.graphics.Shape {
+    val density = LocalDensity.current
+    val line = with(density) { MaterialTheme.typography.bodyLarge.lineHeight.toPx() }
+    val inset = with(density) { kayaFilledInset(node).dp.toPx() }
+    return KayaFillShape(MaterialTheme.shapes.medium, inset, line)
+}
+
+/** harness.rs's corner_is_capsule. */
+fun kayaCornerIsCapsule(radius: Double, height: Double, card: Double): Boolean =
+    Math.abs(height / 2 - card) <= KAYA_CORNER_COINCIDE || Math.abs(radius - height / 2) < Math.abs(radius - card)
+
+/** The fill itself, at Material's medium shape or a capsule, and the box expect_fill crops. */
 @Composable
 fun kayaFilledSurface(node: KayaNode): Modifier {
     if (node.role == KayaCompose.ROLE_COMPOSER) {
@@ -1086,7 +1119,7 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
                 r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
         }
         .then(kayaGroundSurface(node))
-    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled, node.groundTops).first, MaterialTheme.shapes.medium)
+    if (node.filled != 0L) surface = surface.background(kayaTintPair(node.filled, node.groundTops).first, kayaFillShape(node))
     if (node.selected) surface = surface.background(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.shapes.medium)
     if (node.activatable) surface = surface.then(kayaActivatable(node))
     return surface
@@ -1338,7 +1371,7 @@ fun kayaActivatable(node: KayaNode): Modifier {
             onClick = activate,
         )
     }
-    return Modifier.clip(MaterialTheme.shapes.medium).then(press)
+    return Modifier.clip(if (node.filled != 0L) kayaFillShape(node) else MaterialTheme.shapes.medium).then(press)
         .semantics(mergeDescendants = true) { if (name.isNotEmpty()) contentDescription = name }
 }
 
@@ -1822,6 +1855,14 @@ internal fun KayaFlexRow(
             growers.forEachIndexed { k, i ->
                 extents[i] = if (k == growers.size - 1) leftover - spent
                     else Math.round(leftover * grow[i] / pool).toDouble().also { spent += it }
+            }
+            // A GROWER NEVER GOES UNDER ITS OWN MINIMUM, as a CSS flex item's
+            // min-content holds: a text field handed no width threw out of
+            // Material's own padding arithmetic (docs/traps.md, the field
+            // measured under its padding).
+            for (i in growers) {
+                val floor = measurables[i].minIntrinsicWidth(heightHint)
+                extents[i] = maxOf(extents[i], floor.toDouble())
             }
         }
         val widths = IntArray(n) { Math.round(extents[it]).toInt().coerceAtLeast(0) }
@@ -9177,6 +9218,48 @@ object KayaCompose {
         return Pair(Pair(rgb(fill), rgb(ink)), "")
     }
 
+    /** expect_corner's read (harness.rs's corner_radius_px): the fill's coverage
+     * along the box's top-leading diagonal, between the pixel at the box's
+     * corner and the fill's own probe; the radius, the height and the card
+     * radius in dp, or why not. */
+    private fun kayaCornerRead(activity: ComponentActivity, spec: String): Pair<Triple<Double, Double, Double>?, String> {
+        val found = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                Pair(kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }, node.id)
+            }
+        } ?: return Pair(null, "no such target")
+        val (box, nodeId) = found
+        if (box == null) return Pair(null, "<no laid-out frame>")
+        val shot = kayaSkinShot(activity) ?: return Pair(null, "<no window pixels>")
+        val u = shot.density
+        val probed = androidx.compose.ui.geometry.Rect(
+            box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat(),
+        )
+        onUi(activity) { kayaSkinUnseen(nodeId, probed, u) }?.let { return Pair(null, it) }
+        val behind = shot.at(box.left + 0.5f, box.top + 0.5f)
+        val fill = shot.at(box.right - 4 * u, box.centerY().toFloat())
+        if (behind == null || fill == null) return Pair(null, "<the corner or the fill probe falls outside the window: $box>")
+        fun hex(c: DoubleArray) = c.joinToString("") { "%02X".format(java.util.Locale.ROOT, Math.round(it * 255).toInt().coerceIn(0, 255)) }
+        val channel = (0..2).maxByOrNull { Math.abs(fill[it] - behind[it]) } ?: 0
+        val span = fill[channel] - behind[channel]
+        if (Math.abs(span) < KAYA_CORNER_MIN_SPAN) {
+            return Pair(null, "<the fill ${hex(fill)} and what is behind its corner ${hex(behind)} are too close to tell apart>")
+        }
+        val coverage = ArrayList<Double>()
+        for (k in 0 until minOf(box.width(), box.height()) / 2) {
+            val c = shot.at(box.left + k + 0.5f, box.top + k + 0.5f) ?: break
+            coverage.add(((c[channel] - behind[channel]) / span).coerceIn(0.0, 1.0))
+        }
+        val k = coverage.indexOfFirst { it >= 0.5 }
+        if (k < 0) return Pair(null, "<no fill on the corner's diagonal in ${coverage.size} pixels>")
+        val crossing = if (k == 0) 0.5
+            else k - 0.5 + if (coverage[k] > coverage[k - 1]) (0.5 - coverage[k - 1]) / (coverage[k] - coverage[k - 1]) else 1.0
+        val radius = crossing / (1 - 1 / Math.sqrt(2.0)) / u
+        return Pair(Triple(radius, box.height() / u.toDouble(), KAYA_CARD_RADIUS), "")
+    }
+
     /** harness.rs's ink_is_light: CIELAB L* 50 splits white text from black. */
     private fun kayaInkIsLight(rgb: Int): Boolean {
         val l = listOf((rgb shr 16) and 0xFF, (rgb shr 8) and 0xFF, rgb and 0xFF).map {
@@ -16509,6 +16592,32 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 else -> failures.add(
                                     "${parts[1]} ground top %06X in the %s, wanted %06X".format(
                                         read.first, if (read.second) "dark" else "light", if (read.second) dark else light))
+                            }
+                        }
+                    }
+                    "expect_corner" -> {
+                        // harness.rs's ExpectCorner, the same sentences and rule.
+                        if (parts.size != 3 || (parts[2] != "capsule" && parts[2] != "card")) {
+                            failures.add("expect_corner wants a container and capsule or card: $line")
+                        } else {
+                            val want = parts[2] == "capsule"
+                            var got = kayaCornerRead(activity, parts[1])
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (System.currentTimeMillis() < deadline &&
+                                got.first?.let { kayaCornerIsCapsule(it.first, it.second, it.third) != want } == true) {
+                                Thread.sleep(100)
+                                got = kayaCornerRead(activity, parts[1])
+                            }
+                            val read = got.first
+                            fun name(c: Boolean) = if (c) "capsule" else "card"
+                            when {
+                                read == null && got.second == "no such target" -> failures.add("no such target ${parts[1]}")
+                                read == null -> failures.add("${parts[1]} corner unread: ${got.second}")
+                                kayaCornerIsCapsule(read.first, read.second, read.third) == want ->
+                                    observed.add("${parts[1]} corner ${name(want)}")
+                                else -> failures.add(String.format(java.util.Locale.ROOT,
+                                    "%s is drawn as a %s: radius %.1f of height %.1f (a capsule's %.1f, the card's %.1f), wanted a %s",
+                                    parts[1], name(!want), read.first, read.second, read.second / 2, read.third, name(want)))
                             }
                         }
                     }

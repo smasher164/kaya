@@ -17287,3 +17287,55 @@ KEY: portfolio change pill, column@change, filled color table cell, GTK stamped 
   fill that every lane can make (docs/traps.md, "A fill read inside a WinUI
   ListView item", is the other half of that read).
 
+
+## GAP — a data colour on a glyph or a title (docs/design-rules.md, found 2026-11-04, not ruled)
+
+KEY: data colour on text, color tint on a label, icon tint color, Reminders title colour, Y7 raw colour on text
+- Reminders draws a list's large title and its icon in the list's own colour.
+  kaya's `color` tint is a fill only: docs/styling-pass-plan.md Y7 refuses a
+  raw colour on text, so the task manager draws a white glyph inside a
+  `filled color` badge and leaves the title in the primary colour.
+- Options: (a) keep the refusal; the badge is the spelling (today). (b) Allow
+  `tint color` on an icon only, the core checking its contrast against the
+  page in both appearances and refusing a colour that fails. (c) Allow it on
+  an icon and a heading, under the same check, clamped per appearance the way
+  Y2's wash is clamped. Recommendation: (b); a glyph carries no reading, so a
+  contrast check is enough, while text in an app's colour is what Y7 exists
+  to stop.
+- Closing this means a ruling and, for (b) or (c), the tint on five backends
+  with a scene read of the drawn colour.
+
+## GAP — a quiet colour for Markdown's marks (docs/design-rules.md, found 2026-11-04, not ruled)
+
+KEY: Markdown marks colour, secondary text run, rich text colour run, Writing Mode marks, iA Writer marks
+- iA Writer keeps the `#`, `*` and `>` it shows but draws them in a quiet
+  grey. kaya's rich text has no colour run (docs/rich-text-plan.md R3 left
+  colour out of the first vocabulary), so the editor's Writing Mode draws the
+  marks in the text colour.
+- Options: (a) leave it. (b) An inline run `secondary` (a flag) drawn in the
+  platform's secondary text colour, semantic like the tints, on all five
+  backends. (c) A colour run carrying a value, which is the canvas palette's
+  question R3 deferred. Recommendation: (b): one semantic role, no raw colour,
+  the bytes unchanged.
+- Closing this means a ruling and, for (b), the run on five backends and nine
+  bindings with a scene read of a mark's colour.
+
+## GAP — a list paragraph kind (docs/design-rules.md, found 2026-11-04, not ruled)
+
+KEY: list block kind, hanging indent, bullet paragraph, rich text lists, list marker
+- A `- ` item in Writing Mode is a body paragraph that starts with two
+  characters, so a wrapped item's second line starts under the dash, not
+  under the text. docs/rich-text-plan.md R3 deferred lists with a rule for
+  when they come: kaya's block model owns list semantics and no marker is
+  ever in the guest-visible text.
+- Options: (a) leave it; the marks stay characters, as iA Writer keeps them.
+  (b) A block kind `list_item` drawn with a hanging indent and a marker the
+  text never holds (R3's rule), which the editor would use only outside
+  Writing Mode's Markdown, since there the marker IS in the text. (c) A
+  `hanging` paragraph attribute (an indent for lines after the first),
+  which keeps the Markdown's own dash and needs no marker. Recommendation:
+  (c) for Writing Mode, since it is what makes Markdown items hang; (b)
+  stays R3's when a rich editor wants real lists.
+- Closing this means a ruling and the attribute or kind on five backends with
+  a read of a wrapped item's second-line offset.
+

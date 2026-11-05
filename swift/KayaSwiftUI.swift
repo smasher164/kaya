@@ -1081,6 +1081,10 @@ final class KayaNode: Identifiable {
     var rich = false
     var richRuns: [KayaRichRun] = []
     var richSeq = 0
+    /// The `richSeq` the live view last drew. Behind it, a whole-document
+    /// write is waiting for the view, so a ranged act edits the model and
+    /// rides that push (docs/traps.md, the binding's document after set_text).
+    @ObservationIgnored var richShown = -1
     /// The app owns this textarea's undo (docs/rich-text-plan.md R6, §14),
     /// and its live answers for Edit>Undo/Redo's enablement.
     var ownUndo = false
@@ -15630,6 +15634,43 @@ private func kayaRunScript(_ script: String) {
                     }
                 case let (nil, why)?: failures.append("\(parts[1]) ground fade unread: \(why)")
                 }
+            case "expect_corner":
+                // harness.rs's ExpectCorner, the same sentences and rule.
+                guard parts.count == 3, parts[2] == "capsule" || parts[2] == "card" else {
+                    failures.append("expect_corner wants a container and capsule or card: \(line)")
+                    break
+                }
+                let wantCapsule = parts[2] == "capsule"
+                func cornerRead() -> ((Double, Double, Double)?, String)? {
+                    DispatchQueue.main.sync { () -> ((Double, Double, Double)?, String)? in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                            ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                        else { return nil }
+                        return kayaCornerRead(node)
+                    }
+                }
+                var corner = cornerRead()
+                let cornerDeadline = Date().addingTimeInterval(5)
+                while Date() < cornerDeadline, case let (read?, _)? = corner,
+                    kayaCornerIsCapsule(read.0, read.1, read.2) != wantCapsule
+                {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    corner = cornerRead()
+                }
+                switch corner {
+                case nil: failures.append("no such target \(parts[1])")
+                case let (read?, _)?:
+                    let got = kayaCornerIsCapsule(read.0, read.1, read.2)
+                    let name = { (c: Bool) in c ? "capsule" : "card" }
+                    if got == wantCapsule {
+                        observed.append("\(parts[1]) corner \(name(got))")
+                    } else {
+                        failures.append(String(
+                            format: "%@ is drawn as a %@: radius %.1f of height %.1f (a capsule's %.1f, the card's %.1f), wanted a %@",
+                            String(parts[1]), name(got), read.0, read.1, read.1 / 2, read.2, name(wantCapsule)))
+                    }
+                case let (nil, why)?: failures.append("\(parts[1]) corner unread: \(why)")
+                }
             case "expect_no_overlap":
                 var (overlap, overlapCount) = DispatchQueue.main.sync { kayaOverlapReport() }
                 let overlapDeadline = Date().addingTimeInterval(5)
@@ -24517,6 +24558,8 @@ private func kayaRGB(_ rgb: UInt32) -> Color {
 struct KayaFilledSurface: ViewModifier {
     let tint: Int64
     var packed: Int64 = 0
+    /// The inset above and below the content, which the capsule rule takes off.
+    var inset: CGFloat = 0
     /// OVER A PICTURE A FILL IS OPAQUE (docs/looks-plan.md Q-L1, RULED C): the
     /// platform's neutral fill is translucent, which shows the picture through
     /// the bubble, so it is composed over the page colour first.
@@ -24537,12 +24580,12 @@ struct KayaFilledSurface: ViewModifier {
                         Rectangle().fill(.regularMaterial)
                         Color.black.opacity(kayaOverlayScrim)
                     }
-                    .clipShape(RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
+                    .clipShape(KayaFillShape(inset: inset, line: kayaBodyLineHeight()))
                     .environment(\.colorScheme, .dark)
                 }
         } else {
             let pair = kayaTintPair(tint, packed: packed)
-            let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
+            let shape = KayaFillShape(inset: inset, line: kayaBodyLineHeight())
             content
                 .foregroundStyle(pair.fore)
                 .environment(\.kayaInFill, true)
@@ -24940,7 +24983,9 @@ struct KayaActivatableStyle: ButtonStyle {
     let hovering: Bool
 
     func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous)
+        let shape = node.filled != 0
+            ? AnyShape(KayaFillShape(inset: CGFloat(kayaFilledInset(node)), line: kayaBodyLineHeight()))
+            : AnyShape(RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous))
         configuration.label
             .background {
                 if node.selected { shape.fill(kayaSelectedPair().fill) }
@@ -25589,6 +25634,76 @@ struct KayaSkinFrameHolder: View {
 
 /// harness.rs's FILL_INK_INSET.
 let kayaFillInkInset: CGFloat = 10
+
+/// harness.rs's CAPSULE_MAX_LINES and CORNER_COINCIDE.
+let kayaCapsuleMaxLines: CGFloat = 1.5
+let kayaCornerCoincide: Double = 2
+let kayaCornerMinSpan: Double = 0.06
+
+/// harness.rs's corner_is_capsule.
+func kayaCornerIsCapsule(_ radius: Double, _ height: Double, _ card: Double) -> Bool {
+    abs(height / 2 - card) <= kayaCornerCoincide || abs(radius - height / 2) < abs(radius - card)
+}
+
+/// One body line at the user's text size, what CAPSULE_MAX_LINES counts in.
+@MainActor func kayaBodyLineHeight() -> CGFloat {
+    #if os(macOS)
+        let font = kayaPlatformFont(.body) ?? NSFont.preferredFont(forTextStyle: .body)
+        return ceil(font.ascender - font.descender + font.leading)
+    #else
+        return ceil((kayaPlatformFont(.body) ?? UIFont.preferredFont(forTextStyle: .body)).lineHeight)
+    #endif
+}
+
+/// A FILL ONE LINE TALL IS A CAPSULE (docs/looks-plan.md §6): its content, the
+/// height less its own inset above and below, under CAPSULE_MAX_LINES body
+/// lines; a taller fill keeps the card radius.
+struct KayaFillShape: Shape {
+    var inset: CGFloat
+    var line: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        rect.height - 2 * inset < kayaCapsuleMaxLines * line
+            ? Capsule(style: .continuous).path(in: rect)
+            : RoundedRectangle(cornerRadius: kayaFilledRadius, style: .continuous).path(in: rect)
+    }
+}
+
+/// expect_corner's read (harness.rs's corner_radius_px): the fill's coverage
+/// along the frame's top-leading diagonal, between the pixel at the frame's
+/// corner (behind the curve) and the fill's own probe; the radius, the height
+/// and the card radius in points, or why not.
+@MainActor func kayaCornerRead(_ node: KayaNode) -> ((Double, Double, Double)?, String) {
+    guard let frame = kayaNodeFrames[node.id] ?? kayaAnchoredFrame(node.id), frame.width > 8, frame.height > 8 else {
+        return (nil, "<no laid-out frame>")
+    }
+    if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    let step = 1 / shot.scale
+    guard let behind = shot.at(CGPoint(x: frame.minX + step / 2, y: frame.minY + step / 2)),
+        let fill = shot.at(CGPoint(x: frame.maxX - 4, y: frame.midY))
+    else { return (nil, "<the corner or the fill probe falls outside the window: \(kayaRectText(frame))>") }
+    let channel = (0..<3).max { abs(fill[$0] - behind[$0]) < abs(fill[$1] - behind[$1]) }!
+    let span = fill[channel] - behind[channel]
+    guard abs(span) >= kayaCornerMinSpan else {
+        return (nil, "<the fill \(kayaHex(fill)) and what is behind its corner \(kayaHex(behind)) are too close to tell apart>")
+    }
+    let reach = Int(min(frame.width, frame.height) / 2 * shot.scale)
+    var coverage: [Double] = []
+    for k in 0..<reach {
+        let at = (CGFloat(k) + 0.5) * step
+        guard let c = shot.at(CGPoint(x: frame.minX + at, y: frame.minY + at)) else { break }
+        coverage.append(max(0, min(1, (c[channel] - behind[channel]) / span)))
+    }
+    guard let k = coverage.firstIndex(where: { $0 >= 0.5 }) else {
+        return (nil, "<no fill on the corner's diagonal in \(coverage.count) pixels>")
+    }
+    let crossing = k == 0
+        ? 0.5
+        : Double(k) - 0.5 + (coverage[k] > coverage[k - 1] ? (0.5 - coverage[k - 1]) / (coverage[k] - coverage[k - 1]) : 1)
+    let radius = crossing / (1 - 1 / 2.0.squareRoot()) / Double(shot.scale)
+    return ((radius, Double(frame.height), Double(kayaFilledRadius)), "")
+}
 
 /// harness.rs's ink_is_light: CIELAB L* 50 splits white text from black.
 func kayaInkIsLight(_ rgb: UInt32) -> Bool {
@@ -30670,7 +30785,7 @@ struct KayaRender: View {
                     id: node.id, vertical: vertical,
                     crossInset: kayaIsGroupedFlow(node) ? Double(2 * kayaFoldSectionPadX) : 0))
             .modifier(KayaInsetPadding(node: node))
-            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, onPicture: kayaOnPicture(node.id)))
+            .modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, inset: CGFloat(kayaFilledInset(node)), onPicture: kayaOnPicture(node.id)))
             .modifier(KayaGroundSurface(node: node))
             .modifier(KayaActivatable(node: node))
             .modifier(KayaSkinFrameReader(id: node.id, insetOuter: true))
@@ -38544,6 +38659,7 @@ private final class KayaTextView: NSTextView {
     /// this wide, centred by the container's inset, recomputed as the view
     /// resizes. 0 is none.
     var measure: CGFloat = 0
+    var bodyFont: NSFont?
     var baseInset = CGSize(width: 2, height: 2)
     func measuredInset() -> CGSize {
         guard measure > 0 else { return baseInset }
@@ -39004,6 +39120,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
         if view.textContainerInset != inset { view.textContainerInset = inset }
         let font = kayaNodeFontSet(node)
             ? kayaNodeFont(node, .body) : (kayaPlatformFont(.body) ?? .preferredFont(forTextStyle: .body))
+        view.bodyFont = font
         if view.font != font {
             view.font = font
             context.coordinator.richDone = -1
@@ -39028,6 +39145,7 @@ private struct KayaMacTextarea: NSViewRepresentable {
                 !view.hasMarkedText(), let storage = view.textStorage
             {
                 context.coordinator.richDone = richSeq
+                node.richShown = richSeq
                 let selection = view.selectedRange
                 storage.setAttributedString(
                     kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view)))
@@ -39178,13 +39296,16 @@ final class KayaGutterView: NSView {
     /// coordinates, for the reader's viewport check.
     var inked: [(number: Int, box: NSRect)] = []
     var thickness: CGFloat = 28
+    var observers: [NSObjectProtocol] = []
 
     override var isFlipped: Bool { true }
     override func isAccessibilityElement() -> Bool { false }
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+    /// The body's size, not the first character's: a rich document opening on
+    /// a heading drew every number at the heading's size.
     func numberFont() -> NSFont {
-        let size = (textView?.font?.pointSize ?? NSFont.systemFontSize) * 0.9
+        let size = ((textView as? KayaTextView)?.bodyFont?.pointSize ?? textView?.font?.pointSize ?? NSFont.systemFontSize) * 0.9
         return .monospacedDigitSystemFont(ofSize: size, weight: .regular)
     }
 
@@ -39254,7 +39375,11 @@ final class KayaGutterView: NSView {
 @MainActor func kayaApplyGutter(_ scroll: NSScrollView, _ view: NSTextView, on: Bool) {
     let held = kayaFloatingGutter(scroll)
     if !on {
-        held?.removeFromSuperview()
+        if let held {
+            held.observers.forEach(NotificationCenter.default.removeObserver)
+            held.observers = []
+            held.removeFromSuperview()
+        }
         return
     }
     let gutter = held ?? KayaGutterView(frame: .zero)
@@ -39264,26 +39389,29 @@ final class KayaGutterView: NSView {
         gutter.textView = view
         scroll.addFloatingSubview(gutter, for: .horizontal)
         scroll.contentView.postsBoundsChangedNotifications = true
+        // THE OBSERVERS LEAVE WITH THE GUTTER: the frame one re-seated a gutter
+        // the node had turned off on the next resize (docs/traps.md, the
+        // Writing Mode gutter).
         let center = NotificationCenter.default
-        center.addObserver(
+        gutter.observers.append(center.addObserver(
             forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: .main
-        ) { [weak gutter] _ in gutter?.needsDisplay = true }
-        center.addObserver(forName: NSText.didChangeNotification, object: view, queue: .main) {
+        ) { [weak gutter] _ in gutter?.needsDisplay = true })
+        gutter.observers.append(center.addObserver(forName: NSText.didChangeNotification, object: view, queue: .main) {
             [weak gutter, weak scroll] _ in
             MainActor.assumeIsolated {
-                guard let gutter, let scroll else { return }
+                guard let gutter, let scroll, gutter.superview != nil else { return }
                 kayaApplyGutter(scroll, view, on: true)
                 gutter.needsDisplay = true
             }
-        }
+        })
         view.postsFrameChangedNotifications = true
-        center.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: .main) {
-            [weak scroll] _ in
+        gutter.observers.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: view, queue: .main) {
+            [weak gutter, weak scroll] _ in
             MainActor.assumeIsolated {
-                guard let scroll else { return }
+                guard let gutter, let scroll, gutter.superview != nil else { return }
                 kayaApplyGutter(scroll, view, on: true)
             }
-        }
+        })
     }
     let width = gutter.fittedWidth()
     let height = max(view.frame.height, scroll.contentView.bounds.height)
@@ -39473,7 +39601,9 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
     let key = kayaRichKey(name)
     let off = removed || (name == "block" && value == "body")
-    if let view = kayaMacTextViews[node.id]?.view as? KayaTextView, let storage = view.textStorage {
+    if node.richShown == node.richSeq, let view = kayaMacTextViews[node.id]?.view as? KayaTextView,
+        let storage = view.textStorage
+    {
         guard NSMaxRange(range) <= storage.length else {
             return "range \(range) is past the \(storage.length)-unit text"
         }
@@ -39858,6 +39988,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
             if let own = view as? KayaTextView {
                 own.measure = CGFloat(node.maxWidth)
                 own.applyMeasure()
+                own.bodyFont = kayaNodeFont(node, .body, traits: view.traitCollection)
             }
             kayaApplyKeyboardBar(view, keyboardBar)
             // docs/code-surface-plan.md M1, M2, S1: the node's own face and size.
@@ -39884,6 +40015,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
                     view.markedTextRange == nil
                 {
                     context.coordinator.richDone = richSeq
+                    node.richShown = richSeq
                     let selection = view.selectedRange
                     view.textStorage.setAttributedString(
                         kayaAttributedDocument(text, richRuns, base: kayaRichBaseFont(view), baseBold: kayaRichBaseBold(view)))
@@ -40026,6 +40158,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
     /// delegate hook on UIKit (docs/rich-text-plan.md R4/R5).
     private final class KayaTextView: UITextView {
         var nodeId: UInt64 = 0
+        var bodyFont: UIFont?
         /// docs/rich-text-plan.md: the widget publishes attributed content.
         var rich = false
         /// A composition this view reported as live (its end is
@@ -40152,7 +40285,9 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         required init?(coder: NSCoder) { fatalError("kaya: KayaUIGutter is built in code") }
 
         func numberFont() -> UIFont {
-            .monospacedDigitSystemFont(ofSize: (textView?.font?.pointSize ?? 17) * 0.9, weight: .regular)
+            .monospacedDigitSystemFont(
+                ofSize: ((textView as? KayaTextView)?.bodyFont?.pointSize ?? textView?.font?.pointSize ?? 17) * 0.9,
+                weight: .regular)
         }
 
         /// Wide enough for the document's last number, at least two digits.
@@ -40732,7 +40867,7 @@ var kayaMacTextViews: [UInt64: KayaWeakTextView] = [:]
         guard kayaRichNames.contains(name) else { return "\(name) is not a rich attribute" }
         let key = kayaRichKey(name)
         let off = removed || (name == "block" && value == "body")
-        if let view = kayaLiveUITextView(node.id) as? KayaTextView {
+        if node.richShown == node.richSeq, let view = kayaLiveUITextView(node.id) as? KayaTextView {
             let storage = view.textStorage
             guard NSMaxRange(range) <= storage.length else {
                 return "range \(range) is past the \(storage.length)-unit text"

@@ -242,7 +242,7 @@ struct ProjectRow {
 
 /// The lists' colours and the projects' palette (docs/looks-plan.md §4).
 const LIST_COLORS: [(List, u32); 5] = [
-    (List::Inbox, 0x2F6FED),
+    (List::Inbox, 0x2563EB),
     (List::Today, 0xF2B01E),
     (List::Upcoming, 0xD9486A),
     (List::Anytime, 0x1FA2A0),
@@ -255,7 +255,7 @@ fn color(rgb: u32) -> kaya::Color {
 }
 
 fn list_color(list: List) -> kaya::Color {
-    color(LIST_COLORS.iter().find(|(l, _)| *l == list).map_or(0x2F6FED, |(_, c)| *c))
+    color(LIST_COLORS.iter().find(|(l, _)| *l == list).map_or(0x2563EB, |(_, c)| *c))
 }
 
 /// A project's colour follows its key's order among the projects, so it is
@@ -465,6 +465,7 @@ fn tiles(tx: &mut kaya::Tx, msgs: &kaya::Messages<Msg>, counts: &BTreeMap<List, 
             .a11y_id(format!("tile_{key}"))
             .fill(true)
             .filled_color(list_color(list))
+            .inset((16.0, 12.0))
             .on_activate(msgs, Msg::OpenList(list));
         }
     })
@@ -852,23 +853,35 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                 List::Anytime => "anytime_count",
                 List::Logbook => unreachable!("the logbook has no section"),
             };
-            // The page scrolls as one (docs/looks-plan.md §3.4): the wash, the
+            // The page scrolls as one (docs/looks-plan.md §3.4): the header, the
             // tiles and the rows together; a phone at twice the text size has
             // no room under the tiles for a list of its own.
             let root = tx
                 .scroll(|tx| {
                     tx.column(|tx| {
-                        // The header (docs/looks-plan.md §3.4): a wash of the
-                        // list's colour, its name large, its count under it.
+                        // The header (docs/looks-plan.md §6): the list's badge,
+                        // its name large, its count under it.
+                        let key = count_id.trim_end_matches("_count");
                         let heading = tx.signal(name.as_str());
-                        tx.column(|tx| {
-                            tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id(format!("{}_heading", count_id.trim_end_matches("_count")));
-                            tx.caption(count).a11y_id(count_id).id();
+                        tx.row(|tx| {
+                            tx.column(|tx| {
+                                tx.icon(symbol).text_scale(1.25).a11y_id(format!("{key}_badge_symbol"));
+                            })
+                            .inset(8.0)
+                            .filled_color(list_color(list))
+                            .a11y_id(format!("{key}_badge"))
+                            // A column across a row maximizes its height unless
+                            // it says otherwise (DESIGN.md's breadth ruling).
+                            .fill(false);
+                            tx.column(|tx| {
+                                tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id(format!("{}_heading", count_id.trim_end_matches("_count")));
+                                tx.caption(count).a11y_id(count_id).id();
+                            })
+                            .spacing(0.0);
                         })
-                        .a11y_id(format!("{}_header", count_id.trim_end_matches("_count")))
-                        .inset(12.0)
-                        .fill(true)
-                        .ground_gradient(list_color(list));
+                        .align(kaya::Align::Center)
+                        .spacing(12.0)
+                        .a11y_id(format!("{}_header", count_id.trim_end_matches("_count")));
                         if list == List::Inbox {
                             tiles(tx, &msgs, &tile_counts);
                         }
@@ -925,7 +938,12 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         // the section's width (R7): a hugging list hides behind
                         // rows that fill it.
                         tx.a11y_id(list_column, format!("{}_list", count_id.trim_end_matches("_count")));
-                    });
+                    })
+                    .spacing(16.0)
+                    // The page spans the scroll: nothing in it draws a ground
+                    // edge to edge any more, and a hugging page squeezed the
+                    // tiles on a phone.
+                    .fill(true);
                 })
                 .id();
             tx.mount_in(section, root);
@@ -1325,14 +1343,23 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     let count = tx.signal(kaya::tr!("project-tasks", count = titles.len() as i64));
                     let root = tx
                         .column(|tx| {
-                            tx.column(|tx| {
-                                tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id("project_heading");
-                                tx.caption(count).a11y_id("project_count");
+                            tx.row(|tx| {
+                                tx.column(|tx| {
+                                    tx.icon(kaya::Symbol::Queue).text_scale(1.25);
+                                })
+                                .inset(8.0)
+                                .filled_color(color)
+                                .a11y_id("project_badge")
+                                .fill(false);
+                                tx.column(|tx| {
+                                    tx.heading(heading).text_scale(1.6).font_weight(700).a11y_id("project_heading");
+                                    tx.caption(count).a11y_id("project_count");
+                                })
+                                .spacing(0.0);
                             })
-                            .a11y_id("project_header")
-                            .inset(12.0)
-                            .fill(true)
-                            .ground_gradient(color);
+                            .align(kaya::Align::Center)
+                            .spacing(12.0)
+                            .a11y_id("project_header");
                             let pnew = tx.button(&kaya::tr!("new-task")).a11y_id("pnew").id();
                             msgs.on_click(pnew, Msg::ProjectQuickAdd);
                             let rows = lines.rows(tx);

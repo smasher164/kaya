@@ -44,7 +44,8 @@ def load(over=None):
 # (file, the block that owns the flex row, the min-content read inside it).
 FLEX_LINKS = (
     (SWIFTUI, "struct KayaFlex: Layout {", "kayaMinContent(nodes[i], natural: extents[i])"),
-    (COMPOSE, "internal fun KayaFlexRow(", "measurables[i].minIntrinsicWidth(heightHint)"),
+    (COMPOSE, "internal fun KayaFlexRow(",
+     "measurables[i].minIntrinsicWidth(heightHint).toDouble()"),
     (GTK, "fn main_extents(&self, widget: &gtk4::Widget, main_total: i32, cross_total: i32)",
      "crate::flex::shrink(&naturals, &minimums, f64::from(main_total - gaps))"),
     (WINUI, "fn reindex(core: &CoreState, parent: WidgetId) -> windows_core::Result<()> {",
@@ -1059,7 +1060,7 @@ def fill_reads(swiftui_text):
         bad.append(f"{SWIFTUI}: kayaFillRead reads the node's `filled` — the verdict must come "
                    "from the pixels, not the prop it is judging")
     filled_arm = (".modifier(KayaFilledSurface(tint: kayaShownFill(node), packed: node.groundTops, "
-                  "onPicture: kayaOnPicture(node.id)))")
+                  "inset: CGFloat(kayaFilledInset(node)), onPicture: kayaOnPicture(node.id)))")
     if filled_arm not in body:
         bad.append(f"{SWIFTUI}: the row/column arm no longer applies KayaFilledSurface")
     return bad

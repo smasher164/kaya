@@ -13,14 +13,16 @@ expect_section "Inbox"
 # sections live in window#0, so the sidebar arm is asserted on every lane
 # — the desktops' sidebar rows and the phones' bar.
 expect_section_symbol "Inbox" "home"
-# THE LOOK (docs/looks-plan.md §3.4): each list opens on a wash of its colour
-# with its name large and its count under it; the Inbox's tiles are cards in
-# their lists' colours, a symbol in the corner, the count over the name, and a
-# tap opens that list. The stops and the text colours are kaya's: the clamp
-# and the contrast choice, read off the pixels.
-expect_ground column@inbox_header gradient
-expect_ground_fade column@inbox_header
-expect_ground_color column@inbox_header "light 9CBFFF dark 2D65D7"
+# THE LOOK (docs/looks-plan.md §3.4, §6): each list opens on a plain page, its
+# badge (the list's symbol in a fill of its colour) beside its name large and
+# its count under it; the Inbox's tiles are cards in their lists' colours, a
+# symbol in the corner, the count over the name, and a tap opens that list. The
+# text colours are kaya's contrast choice, read off the pixels.
+expect_fill_color column@inbox_badge "2563EB on white"
+expect_symbol icon@inbox_badge_symbol "home"
+# One line tall, the badge is a capsule; a tile keeps the card radius
+# (docs/looks-plan.md §6).
+expect_corner column@inbox_badge capsule
 expect label@inbox_heading "Inbox"
 expect label@inbox_count "2 in inbox"
 expect_fill_color column@tile_today "F2B01E on black"
@@ -28,16 +30,14 @@ expect_fill_color column@tile_upcoming "D9486A on black"
 expect_fill_color column@tile_anytime "1FA2A0 on black"
 expect_fill_color column@tile_logbook "2E9E5B on black"
 expect_symbol icon@tile_today_symbol "star"
+expect_corner column@tile_today card
 # The tiles share the row's width (DESIGN.md's grid paragraph).
 expect_same_width column@tile_today column@tile_upcoming
 expect label@tile_today_count "2"
 expect label@tile_logbook_count "1"
 click column@tile_today
 expect_section "Today"
-# The amber wash runs from F2B01E to the page in a few dozen pixels, so the
-# probe four units in reads F2B326 to F3B53D across the lanes (docs/traps.md,
-# the steep wash's top).
-expect_ground_color column@today_header "light F3B432 dark 8C6414"
+expect_fill_color column@today_badge "F2B01E on black"
 select_section 0
 expect_section "Inbox"
 expect label@title[t1] "Buy milk"
@@ -205,11 +205,11 @@ select_section 4
 expect_section "Projects"
 expect label@name[trip] "Trip"
 expect label@pcount[trip] "2 tasks"
-# Each project led by a swatch of its colour; its screen opens on that colour.
+# Each project led by a swatch of its colour; its screen's badge wears it.
 expect_fill_color column@swatch[trip] "1D6F8C"
 click row@proj[trip]
 expect_entries 1
-expect_ground column@project_header gradient
+expect_fill_color column@project_badge "1D6F8C on white"
 expect label@project_heading "Trip"
 expect_order column@rows "Book the flights|Renew passport"
 drag label@ptitle[t6] to label@ptitle[t5] before

@@ -2685,6 +2685,7 @@ mod flex {
         }
 
         fn allocate(&self, widget: &gtk4::Widget, width: i32, height: i32, baseline: i32) {
+            super::capsule_follows(widget, height);
             let vertical = self.orientation.get() == gtk4::Orientation::Vertical;
             let (main_total, cross_total) = if vertical {
                 (height, width)
@@ -8912,6 +8913,7 @@ const BADGE_CLASS: &str = "kaya-badge";
 /// is. The padding class is the default inset, dropped when the app set one.
 const TINT_CSS: &str = "\
 .kaya-filled { border-radius: 12px; }
+.kaya-filled.kaya-capsule { border-radius: 9999px; }
 .kaya-filled.card { margin: 1px 2px 3px 2px; }
 .kaya-filled-pad { padding: 12px; }
 .kaya-activatable-pad { padding: 12px; }
@@ -8922,11 +8924,11 @@ button.text-button.kaya-plain { margin-left: -17px; margin-right: -17px; }
 .kaya-tint-success { background-color: @success_bg_color; color: @success_fg_color; }
 .kaya-tint-warning { background-color: @warning_bg_color; color: @warning_fg_color; }
 .kaya-tint-critical { background-color: @error_bg_color; color: @error_fg_color; }
-.kaya-picture-ground .kaya-filled.card { background-color: var(--window-bg-color); background-image: image(var(--card-bg-color)); }
-.kaya-picture-ground .kaya-filled.kaya-tint-accent { background-color: var(--window-bg-color); background-image: image(var(--accent-bg-color)); }
-.kaya-picture-ground .kaya-filled.kaya-tint-success { background-color: var(--window-bg-color); background-image: image(var(--success-bg-color)); }
-.kaya-picture-ground .kaya-filled.kaya-tint-warning { background-color: var(--window-bg-color); background-image: image(var(--warning-bg-color)); }
-.kaya-picture-ground .kaya-filled.kaya-tint-critical { background-color: var(--window-bg-color); background-image: image(var(--error-bg-color)); }
+.kaya-picture-ground .kaya-filled.card { background-color: var(--window-bg-color); background-image: image(var(--card-bg-color)); background-origin: border-box; }
+.kaya-picture-ground .kaya-filled.kaya-tint-accent { background-color: var(--window-bg-color); background-image: image(var(--accent-bg-color)); background-origin: border-box; }
+.kaya-picture-ground .kaya-filled.kaya-tint-success { background-color: var(--window-bg-color); background-image: image(var(--success-bg-color)); background-origin: border-box; }
+.kaya-picture-ground .kaya-filled.kaya-tint-warning { background-color: var(--window-bg-color); background-image: image(var(--warning-bg-color)); background-origin: border-box; }
+.kaya-picture-ground .kaya-filled.kaya-tint-critical { background-color: var(--window-bg-color); background-image: image(var(--error-bg-color)); background-origin: border-box; }
 ";
 
 /// THE SKIN (docs/styling-pass-plan.md §3's GTK row): grounds, image shapes,
@@ -10076,6 +10078,38 @@ fn symbol_button_classes(button: &gtk4::Button) {
 }
 
 const FILLED_CLASS: &str = "kaya-filled";
+/// A filled container one line tall (docs/looks-plan.md §6).
+const CAPSULE_CLASS: &str = "kaya-capsule";
+/// libadwaita's card radius, TINT_CSS's `.kaya-filled`.
+const FILLED_RADIUS: f64 = 12.0;
+
+/// A FILL ONE LINE TALL IS A CAPSULE (docs/looks-plan.md §6): the content box
+/// the layout is handed, against the body lines of the widget's own font. The
+/// class moves after the allocation, which is no place to restyle.
+fn capsule_follows(widget: &gtk4::Widget, height: i32) {
+    use gtk4::prelude::WidgetExt;
+    if !widget.has_css_class(FILLED_CLASS) {
+        if widget.has_css_class(CAPSULE_CLASS) {
+            widget.remove_css_class(CAPSULE_CLASS);
+        }
+        return;
+    }
+    let metrics = widget.pango_context().metrics(None, None);
+    let line = f64::from(metrics.ascent() + metrics.descent()) / f64::from(gtk4::pango::SCALE);
+    let one = f64::from(height) < crate::flex::CAPSULE_MAX_LINES * line;
+    if one == widget.has_css_class(CAPSULE_CLASS) {
+        return;
+    }
+    let weak = widget.downgrade();
+    glib::idle_add_local_once(move || {
+        let Some(widget) = weak.upgrade() else { return };
+        if one {
+            widget.add_css_class(CAPSULE_CLASS);
+        } else {
+            widget.remove_css_class(CAPSULE_CLASS);
+        }
+    });
+}
 /// A container drawing a picture ground (docs/looks-plan.md Q-L1).
 const PICTURE_GROUND_CLASS: &str = "kaya-picture-ground";
 const PLAIN_CLASS: &str = "kaya-plain";
@@ -10130,6 +10164,8 @@ fn set_filled(widget: &gtk4::Widget, tint: i64) {
         widget.remove_css_class(class);
     }
     widget.add_css_class(FILLED_CLASS);
+    // The capsule's height check rides the flex layout's allocation.
+    ensure_flex(widget);
     // A colour fill's rule is its own, written by ground_css (docs/looks-plan.md §3.2).
     if tint != i64::from(crate::wire::TINT_COLOR) {
         widget.add_css_class(TINT_CLASSES[(tint.clamp(1, 6) - 1) as usize]);
@@ -26552,6 +26588,51 @@ impl crate::harness::Stage for GtkStage {
                 (b[0] << 16) | (b[1] << 8) | b[2]
             };
             Ok((rgb(last), rgb(under), shot.dark))
+        })
+    }
+
+    fn corner(&self, t: crate::harness::Target) -> Result<(f64, f64, f64), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            let shot = skin::shot_of(&widget)?;
+            let Some(f) = shot.frame(&widget) else { return Err("<no laid-out frame>".to_owned()) };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 8.0 || fh <= 8.0 {
+                return Err(format!("<no laid-out frame: {fw}x{fh}>"));
+            }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return Err(why);
+            }
+            let step = 1.0 / shot.scale;
+            let (Some(behind), Some(fill)) = (shot.at(fx + step / 2.0, fy + step / 2.0), shot.at(fx + fw - 4.0, fy + fh / 2.0)) else {
+                return Err(format!("<the corner or the fill probe falls outside the window: {fx},{fy} {fw}x{fh}>"));
+            };
+            let hex = |c: [f64; 3]| {
+                let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+                format!("{:06X}", (b[0] << 16) | (b[1] << 8) | b[2])
+            };
+            let channel = (0..3)
+                .max_by(|a, b| (fill[*a] - behind[*a]).abs().total_cmp(&(fill[*b] - behind[*b]).abs()))
+                .unwrap_or(0);
+            let span = fill[channel] - behind[channel];
+            if span.abs() < crate::harness::CORNER_MIN_SPAN {
+                return Err(format!(
+                    "<the fill {} and what is behind its corner {} are too close to tell apart>",
+                    hex(fill),
+                    hex(behind)
+                ));
+            }
+            let reach = (fw.min(fh) / 2.0 * shot.scale) as usize;
+            let mut coverage = Vec::with_capacity(reach);
+            for k in 0..reach {
+                let at = (k as f64 + 0.5) * step;
+                let Some(c) = shot.at(fx + at, fy + at) else { break };
+                coverage.push(((c[channel] - behind[channel]) / span).clamp(0.0, 1.0));
+            }
+            let Some(px) = crate::harness::corner_radius_px(&coverage) else {
+                return Err(format!("<no fill on the corner's diagonal in {} pixels>", coverage.len()));
+            };
+            Ok((px / shot.scale, fh, FILLED_RADIUS))
         })
     }
 

@@ -2693,6 +2693,46 @@ fn tint_brush_key(tint: i64) -> &'static str {
     }
 }
 
+/// Fluent's body line (Body, 14 on 20), what CAPSULE_MAX_LINES counts in.
+const BODY_LINE: f64 = 20.0;
+
+thread_local! {
+    /// The filled grids already following their height (docs/looks-plan.md §6).
+    static CAPSULE_FOLLOWED: RefCell<BTreeSet<u64>> = const { RefCell::new(BTreeSet::new()) };
+}
+
+/// A FILL ONE LINE TALL IS A CAPSULE (docs/looks-plan.md §6): the content (the
+/// height less the grid's padding and border) against the body line at the
+/// user's text scale; a local corner radius over the style's card radius.
+fn follow_capsule(id: WidgetId, grid: &Grid) -> windows_core::Result<()> {
+    if CAPSULE_FOLLOWED.with(|f| !f.borrow_mut().insert(id.0)) {
+        return capsule_shape(grid);
+    }
+    let held = grid.clone();
+    let element: FrameworkElement = grid.cast()?;
+    element.SizeChanged(&bindings::Microsoft::UI::Xaml::SizeChangedEventHandler::new(move |_, _| {
+        capsule_shape(&held)
+    }))?;
+    capsule_shape(grid)
+}
+
+fn capsule_shape(grid: &Grid) -> windows_core::Result<()> {
+    let height = grid.ActualHeight()?;
+    let (pad, border) = (grid.Padding()?, grid.BorderThickness()?);
+    let content = height - pad.Top - pad.Bottom - border.Top - border.Bottom;
+    let scale = windows::UI::ViewManagement::UISettings::new().and_then(|s| s.TextScaleFactor()).unwrap_or(1.0);
+    let radius = if height > 0.0 && content < crate::flex::CAPSULE_MAX_LINES * BODY_LINE * scale {
+        let r = height / 2.0;
+        bindings::Microsoft::UI::Xaml::CornerRadius { TopLeft: r, TopRight: r, BottomRight: r, BottomLeft: r }
+    } else {
+        theme_resource::<IReference<bindings::Microsoft::UI::Xaml::CornerRadius>>("OverlayCornerRadius")?.Value()?
+    };
+    if grid.CornerRadius()? != radius {
+        grid.SetCornerRadius(radius)?;
+    }
+    Ok(())
+}
+
 /// The fill as a style of {ThemeResource} setters, so it follows the
 /// element's own theme; the neutral card wears Fluent's card stroke, since
 /// its fill alone is a translucent white.
@@ -19076,6 +19116,7 @@ fn apply(core: &mut CoreState, op: ApplyOp) -> windows_core::Result<()> {
                     }
                     skin::repaint_selected(id)?;
                     stamp_container_padding(core, id)?;
+                    follow_capsule(id, grid)?;
                 }
                 // docs/submit-plan.md S2: the set the field's KeyDown reads.
                 (NativeWidget::Textarea(_), Prop::Submits, Value::Bool(on)) => {
@@ -28701,6 +28742,10 @@ impl crate::harness::Stage for WinUiStage {
             Ok(Ok((pack(fill), pack(ink))))
         })
         .unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
+
+    fn corner(&self, t: crate::harness::Target) -> Result<(f64, f64, f64), String> {
+        Self::on_ui_read(move |core| skin::read::corner(core, t)).unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
     }
 
     fn fill_tint(&self, t: crate::harness::Target) -> String {

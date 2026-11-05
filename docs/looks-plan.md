@@ -465,3 +465,76 @@ mac chat leg in the dark read the translucent bubble as faint with the
 underlay cut (watched red), and the windows chat leg read it the same way
 before the ground registered ahead of the picture's decode. GTK's reader
 snapshots the container alone, so it cannot see what is behind a fill.
+
+## §6 The design pass (RULED 2026-11-04)
+
+The maintainer judged the built looks against real apps ("for all of these
+and more, is it possible for you to wield a UI design skill or something, so
+these apps actually look beautiful?"). The design pass wrote
+docs/design-rules.md (a spacing scale, padding inside fills, grounds edge to
+edge, one loud colour per screen, a type hierarchy, a reference app per demo)
+and prototyped each app on the Mac. On the approval page
+(https://claude.ai/artifact/VRg9U4i2uTfNt16HTzUS9W) the maintainer ruled:
+"i like your recommendations". That takes, for each app:
+
+- **Task manager: A.** A coloured badge on a plain page, as Reminders and
+  Things do: the list's symbol, white, in a fill of the list's colour beside
+  the large title and its count. The wash is gone from every header. Inbox
+  moves from 2F6FED to 2563EB so kaya's contrast rule picks a white glyph on
+  it. The tiles keep their colours and take R2's 16 of padding.
+- **Portfolio: A.** A plain page. The day's colour goes only on the chart and
+  the change figures, as Robinhood does: the hero's wash is gone, the pill
+  keeps the day's colour with R2's padding (4, 8).
+- **Chat:** the wallpaper fills the conversation pane edge to edge, between
+  the header and the composer: the window inset 0, the thread's ground with
+  no inset, the header (one row) and the composer padded (12, 16) on the
+  page, the bubbles padded (8, 12).
+- **Writing Mode:** Markdown kept as text and drawn styled, as iA Writer
+  does: a heading line takes its heading block, a `> ` line a quote, `**`
+  spans bold, `*` spans italic, backticked spans code, the marks themselves
+  kept visible.
+- **The capsule: YES.** A one-line fill is a capsule (radius half its
+  height) on every platform; a taller fill keeps the platform's card radius.
+  A framework change on all five backends, not per app.
+
+The other gaps the rules found (a data colour on a glyph or a title, a quiet
+colour for Markdown's marks, a list paragraph kind) were not ruled; each is a
+GAP in docs/deferred.md with its options.
+
+BUILT 2026-11-04 (the build's choices are in §4's list below the rulings'):
+
+- The four apps take the prototype as approved (docs/design-rules.md R1-R5).
+  The task manager's badge is a `filled color` column around an `icon` at
+  `text_scale` 1.25; the portfolio's hero column keeps its id for the scene
+  and draws no ground; the chat pane is `thread_pane`, its window inset 0.
+- The capsule: a filled container is one line while its content (its height
+  less its own inset above and below) is under `CAPSULE_MAX_LINES` (1.5) of
+  the platform's body lines at the user's text size (crates/kaya/src/flex.rs;
+  the two interpreters carry the number, held by check-verbs). SwiftUI draws
+  `Capsule(style: .continuous)` from a shape that measures its rect, GTK
+  moves a `kaya-capsule` class after its flex layout's allocation, WinUI sets
+  the grid's corner radius from its SizeChanged, and Compose's fill shape
+  picks `RoundedCornerShape(50)` from its outline's size. The pressed and
+  hover layers of a filled activatable container take the same shape.
+- The read: `expect_corner <container> capsule|card`, the drawn radius off
+  the window's pixels along the corner's diagonal against half the height
+  and the platform's card radius (harness.rs `corner_radius_px`). The tints
+  scene reads a live and a stamped one-line fill and a two-line card; the
+  task manager its badge and a tile, the chat a one-line and a quoted
+  bubble, the portfolio its pill. SwiftUI watched red both ways: no capsule
+  ("row@t_accent is drawn as a card: radius 12.0 of height 36.0") and always
+  a capsule ("column@t_card is drawn as a capsule: radius 30.1 of height
+  60.0").
+- Writing Mode over Markdown reads in editor.steps on a tab just opened,
+  which is where the Mac's gutter came back (docs/traps.md, the Writing Mode
+  gutter); the editor opens a file with `SetText` again, since the bindings
+  now keep their document after a plain write (docs/traps.md, the binding's
+  document after set_text).
+
+Choices the build settled for §6: one line is under 1.5 body lines (a 1.25
+icon and a single label are one line; a label over a caption, 1.8, is not);
+the read takes the nearer of the two radii and calls a shape whose half
+height is within `CORNER_COINCIDE` (2) of the card radius a capsule, since it
+is both; the selected and hover surfaces of an unfilled row keep the card
+radius, since the rule is about fills.
+

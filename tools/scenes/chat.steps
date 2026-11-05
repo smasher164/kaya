@@ -32,9 +32,16 @@ expect_scrolled_to column@thread m27
 # the accent; a bare label over the picture is refused at declare time
 # (docs/styling-pass-plan.md Y3).
 expect_ground column@thread_ground image
-# The wallpaper spans the pane, which GTK and WinUI hugged to the bubbles.
+# The wallpaper spans the pane, which GTK and WinUI hugged to the bubbles, and
+# reaches its edges: neither the pane nor the ground has an inset (docs/looks-plan.md
+# §6, docs/design-rules.md R3).
 expect_breadth column@thread_ground
+expect_inset column@thread_pane 0
+expect_inset column@thread_ground 0
 expect_fill column@bubble[m27] neutral
+# A quoted message is two lines, a card; a one-line bubble is a capsule
+# (docs/looks-plan.md §6).
+expect_corner column@bubble[m27] card
 expect_selected row@convo[maya] on
 expect_selected row@convo[sam] off
 expect label@unread[maya] ""
@@ -65,6 +72,7 @@ press return
 expect label@text[u1] "On my way"
 expect_scrolled_to column@thread u1
 expect_fill column@bubble[u1] accent
+expect_corner column@bubble[u1] capsule
 expect textarea@compose ""
 expect label@text[p1] "See you soon"
 # The thread FOLLOWS ITS END (docs/follow-end-plan.md): the reply arrived with

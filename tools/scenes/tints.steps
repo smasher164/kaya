@@ -14,4 +14,10 @@ expect_fill row@bubble[n1] accent
 expect_fill_color row@t_amber "F2B01E on black"
 expect_fill_color row@t_navy "1D6F8C on white"
 expect_fill_color row@swatch[n1] "4A3AA8 on white"
+# docs/looks-plan.md §6: a fill one line tall is a capsule, its radius half
+# its height, read off the drawn corner; a taller one keeps the platform's
+# card radius. Live and stamped.
+expect_corner row@t_accent capsule
+expect_corner row@bubble[n1] capsule
+expect_corner column@t_card card
 expect_no_clipping

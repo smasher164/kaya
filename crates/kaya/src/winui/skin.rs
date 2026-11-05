@@ -1259,6 +1259,56 @@ pub(super) mod read {
         Ok(Ok((rgb(last), rgb(under), shot.dark)))
     }
 
+    /// expect_corner's read (harness.rs's corner_radius_px): the fill's coverage
+    /// along the frame's top-leading diagonal, between the pixel at the frame's
+    /// corner and the fill's own probe; the radius, the height and the card
+    /// radius in DIP, or why not.
+    pub(in super::super) fn corner(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<Result<(f64, f64, f64), String>> {
+        let Some(element) = target_element(core, t)? else { return Ok(Err("<no such target>".into())) };
+        let shot = match Shot::take(core) {
+            Ok(shot) => shot,
+            Err(why) => return Ok(Err(format!("<no window pixels: {why}>"))),
+        };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok(Err("<no laid-out frame>".into())) };
+        if fw <= 8.0 || fh <= 8.0 {
+            return Ok(Err(format!("<no laid-out frame: {fw}x{fh}>")));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(Err(why));
+        }
+        let step = 1.0 / shot.scale;
+        let (Some(behind), Some(fill)) = (shot.at(fx + step / 2.0, fy + step / 2.0), shot.at(fx + fw - 4.0, fy + fh / 2.0)) else {
+            return Ok(Err(format!("<the corner or the fill probe falls outside the window: {fx},{fy} {fw}x{fh}>")));
+        };
+        let hex = |c: [f64; 3]| {
+            let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+            format!("{:06X}", (b[0] << 16) | (b[1] << 8) | b[2])
+        };
+        let channel = (0..3)
+            .max_by(|a, b| (fill[*a] - behind[*a]).abs().total_cmp(&(fill[*b] - behind[*b]).abs()))
+            .unwrap_or(0);
+        let span = fill[channel] - behind[channel];
+        if span.abs() < crate::harness::CORNER_MIN_SPAN {
+            return Ok(Err(format!(
+                "<the fill {} and what is behind its corner {} are too close to tell apart>",
+                hex(fill),
+                hex(behind)
+            )));
+        }
+        let reach = (fw.min(fh) / 2.0 * shot.scale) as usize;
+        let mut coverage = Vec::with_capacity(reach);
+        for k in 0..reach {
+            let at = (k as f64 + 0.5) * step;
+            let Some(c) = shot.at(fx + at, fy + at) else { break };
+            coverage.push(((c[channel] - behind[channel]) / span).clamp(0.0, 1.0));
+        }
+        let Some(px) = crate::harness::corner_radius_px(&coverage) else {
+            return Ok(Err(format!("<no fill on the corner's diagonal in {} pixels>", coverage.len())));
+        };
+        let card = theme_resource::<IReference<CornerRadius>>("OverlayCornerRadius")?.Value()?;
+        Ok(Ok((px / shot.scale, fh, card.TopLeft)))
+    }
+
     pub(in super::super) fn ground(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<String> {
         let Some(id) = target_widget_id(core, t).map(WidgetId) else { return Ok("<no such target>".into()) };
         let Some(element) = target_element(core, t)? else { return Ok("<no such target>".into()) };

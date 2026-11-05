@@ -20,6 +20,19 @@
 #define VIDEO_INK_TOLERANCE 2
 
 /**
+ * expect_corner's two shapes coincide when half the height and the card
+ * radius are this close, in layout units.
+ */
+#define CORNER_COINCIDE 2.0
+
+/**
+ * expect_corner's least gap, 0 to 1 on the channel that differs most,
+ * between a fill and what is behind its corner: Fluent's accent surface sits
+ * 0.094 off its page, a neutral bubble 0.106 off a pale wallpaper.
+ */
+#define CORNER_MIN_SPAN 0.06
+
+/**
  * expect_ground_color's per-channel tolerance: the skin readers' 0.06 of full scale
  * (docs/media-player-plan.md M16 (35)); the two interpreters carry the same number.
  */

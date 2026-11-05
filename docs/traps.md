@@ -20300,3 +20300,58 @@ under it at `GROUND_FADE_TOLERANCE` 4: both pixels come from one capture, so
 there is no display profile between them to absorb. The old stop, restored
 on the grounds scene's dark Mac leg, reads "ends at 1E1E1E on its last row
 over the page's 24282A".
+
+
+## The Writing Mode gutter that came back on a resize (measured 2026-11-04)
+
+On the Mac, View > Writing Mode in a tab just opened on a Markdown file left
+the line numbers drawn ("gutter is drawn: 1 2 3 ..."), while the same toggle
+on a tab whose gutter had been toggled by hand, or Writing Mode on before the
+file opened, hid them. The gutter's three observers (the clip's bounds, the
+text's change, the text view's frame) outlived the gutter: hiding it removed
+the view and left the observers, and the frame one called
+`kayaApplyGutter(..., on: true)`, which seated a new gutter on the next resize.
+Writing Mode's styling (a heading a size up) is that resize. The observers now
+belong to the gutter and leave with it, and the two that re-apply it stop once
+it has no superview. The same pass found the numbers drawn at the heading's
+size: the gutter read `NSTextView.font`, which is the first character's. Both
+gutters (macOS and iOS) read the body font the node asked for. Read by
+editor.steps' Writing Mode block (`expect_gutter textarea@buffer-3 off` on a
+tab just opened), red with the removal and the guard both cut.
+
+
+## The binding's document after set_text (measured 2026-11-04)
+
+A heading the editor's Writing Mode applied to a file it had just opened
+landed on the first paragraph. Three layers each kept the old text after a
+plain text write on a rich textarea, and a `block` act snaps its range to
+whole paragraphs of whatever text it reads. (1) Every binding's own
+Document (the mirror `document()` reads and the ranged act's snap uses)
+followed set_document and the widget's deltas but not set_text: the snap
+ran over the old text and sent the first paragraph's range ("0:5
+block=heading1" for a heading asked over the second). The bindings now seed
+the mirror when a widget is made rich, with any plain text the same
+transaction wrote before it, and a plain write on a rich widget replaces it
+(the text, no runs), as the core's does. (2) The core moved its own mirror
+for a plain write only at the batch's end (absorb_text_writes), so a
+format_text later in the same batch read the old text; it now moves in the
+batch's order. (3) SwiftUI's ranged act edited the live NSTextView's storage
+while the text write was still waiting for the view to draw it, so the run
+went onto the old text and the push then wiped it; the act now edits the
+model while a whole-document push is pending (`richShown`). The C floor keeps
+no mirror. Read by richtext.steps' `replace` (button#7) in all nine
+languages; each binding's cut reads "0:5 block=heading1", the core's unit
+test `a_block_act_after_a_plain_write_in_one_batch_snaps_to_the_new_text`.
+
+
+## The field measured under its padding (measured 2026-11-04)
+
+The chat's header became one row on the design pass (a search field that
+grows, a count, three buttons and a label), and on a phone the row's fixed
+cells took all the width. Compose's flex row handed the growing search field
+the leftover, 0, and Material's TextField threw out of its intrinsic height
+("maxWidth must be >= than minWidth") while working out its own padding: the
+app died opening a conversation. A grower now never goes under its own
+minimum intrinsic width, as a CSS flex item's min-content holds. Read by
+chat.steps on the android lane (every leg after the click died), red with
+the floor cut.

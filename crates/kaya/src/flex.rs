@@ -5,6 +5,14 @@
 //! longest word), and a cell that would go below its minimum is frozen
 //! there with the rest redistributed among the others.
 
+/// A filled container is ONE LINE, and draws as a capsule, while its content
+/// (its height less its own top and bottom inset) is under this many of the
+/// platform's body lines at the user's text size (docs/looks-plan.md §6). The
+/// half line is room for a scaled icon or label; a label over a caption is
+/// past it. The two interpreters carry the same number.
+#[allow(dead_code)]
+pub(crate) const CAPSULE_MAX_LINES: f64 = 1.5;
+
 /// The fixed cells' extents in a row with `room` for them (the main extent
 /// less the gaps): natural while they fit, else shrunk as above. Growers
 /// are not among these; they divide what is left.

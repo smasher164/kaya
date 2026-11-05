@@ -542,17 +542,15 @@ with app.window(title="portfolio", width=900, height=600):
     portfolio_value = kaya.signal(f"Portfolio: {money(portfolio_total())}")
     text, change = day_change()
     day_text = kaya.signal(text)
-    # The hero's wash and the change's pill wear the day's direction
-    # (docs/looks-plan.md §3.6).
+    # The change's pill wears the day's direction (docs/looks-plan.md §3.6, §6).
     hero_color = kaya.signal(day_color(change))
     book_size = kaya.signal(f"Transactions: {len(txns)}")
     # STACK ON A PHONE, where unstacked the detail column was clipped, and
     # SCROLL WHEN IT DOES NOT FIT (docs/deferred.md, both entries).
     with kaya.scroll(grow=1):
-        with kaya.row(stack_when=kaya.COMPACT):
-            with kaya.column():
-                with kaya.column(inset=12, spacing=4,
-                                 ground_gradient=hero_color) as hero:
+        with kaya.row(stack_when=kaya.COMPACT, spacing=32):
+            with kaya.column(spacing=16):
+                with kaya.column(spacing=8) as hero:
                     hero.a11y_id("hero")
                     # INLINE WITH THE TITLE: a row hugs, so the chip takes no
                     # share of the column's leftover (docs/deferred.md).
@@ -568,7 +566,7 @@ with app.window(title="portfolio", width=900, height=600):
                         kaya.heading(bind=portfolio_value).text_scale(2.2).font_weight(600)  # label#0
                     # A row hugs, so the pill is as wide as its text.
                     with kaya.row():
-                        with kaya.column(inset=6, filled_color=hero_color) as pill:
+                        with kaya.column(inset=(4, 8), filled_color=hero_color) as pill:
                             # A column across a row maximizes its height
                             # unless it says otherwise (DESIGN.md's breadth ruling).
                             pill.a11y_id("day_pill").fill(False)
@@ -580,9 +578,10 @@ with app.window(title="portfolio", width=900, height=600):
                 chart = kaya.canvas(CHART_BOX)
                 chart.a11y_id("chart").a11y_label(chart_summary)
                 draw_chart()
-                kaya.button("Day tick", on_click=tick)  # button#0
-                kaya.button("Transactions", on_click=open_transactions)  # button#1
-                kaya.button("Rally", on_click=rally)  # button#2
+                with kaya.row():
+                    kaya.button("Day tick", on_click=tick)  # button#0
+                    kaya.button("Transactions", on_click=open_transactions)  # button#1
+                    kaya.button("Rally", on_click=rally)  # button#2
             accounts = kaya.collection(Account)
             with kaya.column(grow=1, align="stretch") as detail:  # the detail column
                 detail.a11y_id("detail")
@@ -607,7 +606,7 @@ with app.window(title="portfolio", width=900, height=600):
                                 # docs/styling-pass-plan.md Y5).
                                 with kaya.column(spacing=2):
                                     kaya.label(bind=item.value)
-                                    with kaya.column(inset=4, filled_color=item.change_color) as cell:
+                                    with kaya.column(inset=(4, 8), filled_color=item.change_color) as cell:
                                         cell.a11y_id("change")
                                         kaya.label(bind=item.change)
                         kaya.caption(bind=account.total)

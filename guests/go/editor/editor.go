@@ -95,6 +95,67 @@ Things to remember
 
 Miles walked so far:`
 
+// The Writing Mode showcase: Markdown kept as text and drawn styled.
+const essayDoc = `# Notes on walking
+
+A good walk has *no plan* beyond the first turning. You set off, and the **day decides** the rest.
+
+## What to carry
+
+- a map you can fold with one hand
+- water, and more than you think
+- something to read at the top
+
+## Why it works
+
+> The legs keep time, and the mind follows.
+
+Walking is the one *slow* thing most of us still do every day. It asks for **nothing** but attention, and it gives back a clear head.
+`
+
+var (
+	mdStrong = regexp.MustCompile(`\*\*[^*\n]+\*\*`)
+	mdEmph   = regexp.MustCompile(`(^|[^*])(\*[^*\n]+\*)`)
+	mdCode   = regexp.MustCompile("`[^`\n]+`")
+)
+
+// markdownRuns is the styling Writing Mode draws over Markdown text: one
+// block per heading or quote line, and the inline marks over their spans,
+// the marks themselves included, as iA Writer keeps them.
+func markdownRuns(text string) []kaya.TextRun {
+	var runs []kaya.TextRun
+	at := 0
+	for _, line := range strings.SplitAfter(text, "\n") {
+		body := strings.TrimSuffix(line, "\n")
+		end := at + len(body)
+		kind := kaya.Block("")
+		switch {
+		case strings.HasPrefix(body, "### "):
+			kind = kaya.Heading3
+		case strings.HasPrefix(body, "## "):
+			kind = kaya.Heading2
+		case strings.HasPrefix(body, "# "):
+			kind = kaya.Heading1
+		case strings.HasPrefix(body, "> "):
+			kind = kaya.Quote
+		}
+		if kind != "" && end > at {
+			runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: at, End: end}, Name: "block", Value: string(kind)})
+		}
+		at += len(line)
+	}
+	for _, m := range mdStrong.FindAllStringIndex(text, -1) {
+		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[0], End: m[1]}, Name: "bold", Value: kaya.FlagValue})
+	}
+	for _, m := range mdEmph.FindAllStringSubmatchIndex(text, -1) {
+		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[4], End: m[5]}, Name: "italic", Value: kaya.FlagValue})
+	}
+	for _, m := range mdCode.FindAllStringIndex(text, -1) {
+		runs = append(runs, kaya.TextRun{Range: kaya.TextRange{Start: m[0], End: m[1]}, Name: "code", Value: kaya.FlagValue})
+	}
+	return runs
+}
+
 // readDoc reads a picked file whole.
 func readDoc(file kaya.PickedFile) (string, error) {
 	f, _, err := file.Open(kaya.FileModeRead)
@@ -227,6 +288,9 @@ func App() *kaya.App {
 	if err := os.WriteFile(filepath.Join(dir, "notes"), []byte(notesDoc), 0o644); err != nil {
 		panic("kaya: the editor could not write its notes document: " + err.Error())
 	}
+	if err := os.WriteFile(filepath.Join(dir, "essay"), []byte(essayDoc), 0o644); err != nil {
+		panic("kaya: the editor could not write its essay: " + err.Error())
+	}
 	if err := os.WriteFile(filepath.Join(dir, "decoy"), []byte("decoy"), 0o644); err != nil {
 		panic("kaya: the editor could not write the decoy: " + err.Error())
 	}
@@ -337,6 +401,23 @@ func App() *kaya.App {
 		tx.SetLineNumbers(d.buffer, d.numbers)
 		tx.SetTextScale(d.buffer, zooms[d.zoom])
 		tx.SetMaxWidth(d.buffer, 0)
+	}
+
+	restyle := func(tx *kaya.Tx, d *document) {
+		if d.text == "" {
+			return
+		}
+		all := kaya.TextRange{Start: 0, End: len(d.text)}
+		for _, name := range []string{"bold", "italic", "code"} {
+			tx.UnformatRange(d.buffer, all, name)
+		}
+		tx.FormatRange(d.buffer, all, "block", string(kaya.Body))
+		if !writing {
+			return
+		}
+		for _, run := range markdownRuns(d.text) {
+			tx.FormatRange(d.buffer, run.Range, run.Name, run.Value)
+		}
 	}
 
 	activate := func(tx *kaya.Tx, d *document) {
@@ -462,6 +543,9 @@ func App() *kaya.App {
 				tx.Write(d.status, fmt.Sprintf("opened, %d bytes", len(body)))
 				mark(tx, d)
 				refind(tx, d)
+				if writing {
+					restyle(tx, d)
+				}
 			})
 		}()
 	}
@@ -501,6 +585,9 @@ func App() *kaya.App {
 				tx.Write(d.words, wordCount(d.text))
 				mark(tx, d)
 				refind(tx, d)
+				if writing {
+					restyle(tx, d)
+				}
 			}).Grow(1).A11yID(id("buffer")).A11yLabel("Document").Rich()
 
 			// STAMPED AND TORN DOWN, not hidden, so each Find… starts empty
@@ -739,6 +826,7 @@ func App() *kaya.App {
 			kaya.Prefs().SetBool("view.writing", on)
 			tx.Write(writingOn, on)
 			for _, d := range docs {
+				restyle(tx, d)
 				wear(tx, d)
 			}
 		})

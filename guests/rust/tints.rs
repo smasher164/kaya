@@ -11,7 +11,7 @@ struct Note {
 pub(crate) fn app(ctx: kaya::AppCtx) {
     let msgs = kaya::Messages::<()>::new();
     ctx.apply(|tx| {
-        tx.window(kaya::DEFAULT_WINDOW).title("tints").size(420.0, 520.0);
+        tx.window(kaya::DEFAULT_WINDOW).title("tints").size(420.0, 620.0);
         let notes = tx.collection::<Note>();
         let root = tx
             .column(|tx| {
@@ -42,6 +42,15 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     .a11y_id(id)
                     .filled_color(kaya::Color::rgb(rgb.0, rgb.1, rgb.2));
                 }
+                // Two lines: the platform's card radius, where every one-line
+                // fill above is a capsule (docs/looks-plan.md §6).
+                let (first, second) = (tx.signal("Two lines"), tx.signal("of filled text"));
+                tx.column(|tx| {
+                    tx.label(first);
+                    tx.label(second);
+                })
+                .a11y_id("t_card")
+                .filled(kaya::Tint::Accent);
                 for mut row in notes.rows(tx) {
                     let (bubble, _) = row.row(|t| {
                         t.label(Note::text());

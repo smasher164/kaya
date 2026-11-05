@@ -118,7 +118,7 @@ CALLS = [
     # the brand's override, so the accent fill reads the brand's variables.
     # docs/looks-plan.md Q-L1 (RULED C): a fill over a picture sits on the page.
     ("a neutral fill over a picture is opaque",
-     ".kaya-picture-ground .kaya-filled.card { background-color: var(--window-bg-color); background-image: image(var(--card-bg-color)); }"),
+     ".kaya-picture-ground .kaya-filled.card { background-color: var(--window-bg-color); background-image: image(var(--card-bg-color)); background-origin: border-box; }"),
     ("the accent fill wears the brand's accent",
      ".kaya-tint-accent { background-color: var(--accent-bg-color); color: var(--accent-fg-color); }"),
     ("a container's cross placement follows its axis, not its kind (M21)",

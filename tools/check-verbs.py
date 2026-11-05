@@ -1233,6 +1233,42 @@ for label, rel, pattern in FADE_MIRRORS:
                             + " sets its ground fade tolerance to 15, "),
                  f"widening {label}'s ground fade tolerance to 15")
 
+# THE CAPSULE'S LINE COUNT (docs/looks-plan.md §6): one number where a fill
+# stops being one line tall; GTK and WinUI read crates/kaya/src/flex.rs's own.
+CAPSULE_RULED = "1.5"
+CAPSULE_MIRRORS = [
+    ("flex.rs", "crates/kaya/src/flex.rs",
+     r"pub\(crate\) const CAPSULE_MAX_LINES: f64 = ([\d.]+);"),
+    ("KayaSwiftUI.swift", SWIFT, r"let kayaCapsuleMaxLines: CGFloat = ([\d.]+)\b"),
+    ("KayaCompose.kt", KOTLIN, r"const val KAYA_CAPSULE_MAX_LINES = ([\d.]+)f"),
+]
+
+
+def capsule_lines(**srcs):
+    bad = []
+    for label, rel, pattern in CAPSULE_MIRRORS:
+        m = re.search(pattern, srcs.get(label) or real(rel))
+        if not m:
+            bad.append(label + " declares no capsule line count")
+        elif m.group(1) != CAPSULE_RULED:
+            bad.append(label + " sets its capsule line count to "
+                       + m.group(1) + ", not " + CAPSULE_RULED)
+    return bad
+
+
+capsule_out = capsule_lines()
+capsule_status = 1 if capsule_out else 0
+if capsule_out:
+    print("check-verbs: the capsule's line count moved:\n"
+          + "\n".join(capsule_out), file=sys.stderr)
+for label, rel, pattern in CAPSULE_MIRRORS:
+    drifted = perturb(f"capsule-lines ({label} moved to 2.5)", rel,
+                      "(" + pattern.split(r"([\d.]+)")[0] + r")[\d.]+", "2.5")
+    score_or_die(introduced(capsule_lines(**{label: drifted}), capsule_out,
+                            "^" + re.escape(label)
+                            + " sets its capsule line count to 2.5, "),
+                 f"moving {label}'s capsule line count to 2.5")
+
 # An ABSENT mirror is a failure that NAMES IT, never a skip.
 gone = clip_mirrors(kotlin_src=g.scratch() / "no-such-mirror.kt")
 if not any("cannot read" in b and "KayaCompose.kt" in b for b in gone):
@@ -6240,7 +6276,7 @@ if failures:
         print(f"check-verbs: {f_}", file=sys.stderr)
     raise SystemExit(1)
 if (clip_status or window_status or ink_status or ax_status
-        or drop_tol_status or fade_tol_status
+        or drop_tol_status or fade_tol_status or capsule_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status
