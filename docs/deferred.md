@@ -17349,7 +17349,7 @@ KEY: list block kind, hanging indent, bullet paragraph, rich text lists, list ma
   a read of a wrapped item's second-line offset.
 
 
-## OPEN — iOS reads a plain caption as success in the dark (seen 2026-11-04, the design pass's captures)
+## ~~OPEN — iOS reads a plain caption as success in the dark (seen 2026-11-04, the design pass's captures)~~ FIXED 2026-11-05: the reader resolved its colours in the process's light traits, not the window's; the window pixels now carry the inks and tints in the shot window's own appearance, and tints.steps reads a caption in the dark on iOS (docs/traps.md, the iOS tint read that resolved its colours light)
 
 KEY: expect_tint none, caption[t8], iOS dark tint read, 8D8D93, secondaryLabel
 - The review captures run the task manager with its window asked for the
@@ -17363,3 +17363,15 @@ KEY: expect_tint none, caption[t8], iOS dark tint read, 8D8D93, secondaryLabel
 - Closing this means the iOS tint reader comparing the ink with the
   appearance's own secondary text colour before the tints, and a dark
   tasks leg on iOS (or a dark caption in tints.steps) that reads it.
+- FIXED 2026-11-05. The ink was right: the capture's caption pixels are
+  8D8D92, the dark secondaryLabel over black. The reader resolved
+  secondaryLabel, tintColor and the system colours with a bare getRed, which
+  reads them in the process's current traits (light), so every candidate was
+  a light colour. KayaWindowPixels now carries the untinted inks and the
+  tints resolved with the window's own traits (the mac's own
+  effectiveAppearance), and one reader serves both platforms; the mac had no
+  gap only because its override is app-wide. Guard: `expect_tint
+  label@t_caption none` in tints.steps, red with the old reader on
+  tintsdark-swiftui ("tint success (ink 8D8D93; success 34C759, ...)", run
+  20261105T104330Z-081707) and green after on all five lanes
+  (`validate-all --only tints,tasks`, 40 legs).

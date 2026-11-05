@@ -19607,7 +19607,25 @@ and the editor's status label `(ink DEDEDF; accent C4D1CE, none FFFFFF, ...)`.
 labelColor is white at about 85% alpha in the dark appearance, and the reader's
 `none` candidate dropped the alpha, so plain text sat nearer a pale accent than
 white. Since 2026-10-26 the label tint reader composites labelColor over the
-window ground (kayaLabelTintRead's `plain`).
+window ground (KayaWindowPixels' `plainInks`).
+
+## The iOS tint read that resolved its colours light (measured 2026-11-05)
+
+`expect_tint label@t_caption none` read "tint success (ink 8D8D93; success
+34C759, warning FF8D28, critical FF383C)" on iOS in the dark appearance (the
+tintsdark-swiftui leg; first seen on the task manager's caption[t8]). The ink
+is right: the capture's caption pixels are 8D8D92, which is the dark
+secondaryLabel (EBEBF5 at 60%) over black. The reader was wrong: it resolved
+secondaryLabel, tintColor and the system colours with UIColor's bare
+getRed, which reads them in the process's current trait collection, not the
+window's, so every candidate was the LIGHT colour (34C759 is the light
+systemGreen; the dark one is 30D158) and the grey sat nearer the green than
+the light secondary over black. Since 2026-11-05 the window pixels carry the
+untinted inks and the tints resolved with the shot window's own trait
+collection (on the mac, its own effectiveAppearance), and both platforms'
+reader takes them from there. The mac did not show the gap only because its
+appearance override is app-wide (NSApp.appearance). Guard: tints.steps reads
+the caption `t_caption` as none, in the dark on iOS and Android.
 
 ## An accessory guest has no menu bar to photograph (measured 2026-10-27)
 

@@ -177,7 +177,9 @@ def native_table_findings(swift):
 READS = [
     ("the window's pixels", "func kayaWindowPixels() -> KayaWindowPixels? {",
      ["kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image", "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)",
-      "rgba(.windowBackgroundColor)", "rgba(.systemBackground)"]),
+      "rgba(.windowBackgroundColor)", "rgba(.systemBackground)",
+      # docs/traps.md, the iOS tint read that resolved its colours light.
+      "c.resolvedColor(with: traits)", "rgba(.secondaryLabel)", "rgba(.secondaryLabelColor)"]),
     ("expect_ground's reader", "func kayaGroundRead(_ node: KayaNode) -> String {",
      ["kayaWindowPixels()", "kayaContrast(mid, shot.text)", "contrast >= 4.5", "kayaColourGap(bottom, under ?? page)", "let under = shot.at(CGPoint(x: x, y: frame.maxY + 1))",
       "kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground"]),
@@ -189,7 +191,7 @@ READS = [
      ["kayaPictureAt(pictured,", "1.05 / (mine + 0.05) >= 4.5 && mine < theirs / 2",
       "let faint = kayaFaintHover(px, under)", "if #available(macOS 14, *) { hover = .secondarySystemFill }"]),
     ("expect_tint's reader", "func kayaLabelTintRead(_ node: KayaNode) -> String {",
-     ["kayaWindowPixels()", "kayaAnchoredFrame(node.id)", "shot.text", "tone(.systemGreen)"]),
+     ["kayaWindowPixels()", "kayaAnchoredFrame(node.id)", "shot.plainInks", "shot.tints"]),
     ("the platform's frame for a skinned node", "func kayaAnchoredFrame(_ id: UInt64) -> CGRect? {",
      ["kayaHarnessRect(view.bounds, in: view)", "view.convert(view.bounds, to: nil)"]),
     ("expect_selected's readers", "func kayaAxSelectedRead(_ identifier: String, at centre: CGPoint?) -> String {", []),

@@ -34,6 +34,8 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                     tx.label(plain);
                 })
                 .a11y_id("t_plain");
+                let note = tx.signal("Updated today");
+                tx.caption(note).a11y_id("t_caption");
                 for (id, text, rgb) in [("t_amber", "Amber", (0xF2, 0xB0, 0x1E)), ("t_navy", "Navy", (0x1D, 0x6F, 0x8C))] {
                     let label = tx.signal(text);
                     tx.row(|tx| {

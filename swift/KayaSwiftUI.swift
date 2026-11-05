@@ -25294,6 +25294,12 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
     let groupedGround: [Double]
     let text: [Double]
     let dark: Bool
+    /// The untinted inks (primary and secondary text, each over the ground;
+    /// docs/looks-plan.md §3.4) and the tints, resolved in THIS window's
+    /// appearance (docs/traps.md, the mac's untinted text read as tinted in
+    /// the dark appearance, and the iOS tint read that resolved its colours light).
+    let plainInks: [[Double]]
+    let tints: [(String, [Double])]
 
     func at(_ p: CGPoint) -> [Double]? {
         let x = Int(p.x * scale), y = Int(p.y * scale)
@@ -25323,6 +25329,9 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
         let ground = rgba(.windowBackgroundColor), text = rgba(.labelColor)
         let groupedGround = ground
         let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let inks = [rgba(.labelColor), rgba(.secondaryLabelColor)]
+        let tints = [("accent", rgba(.controlAccentColor)), ("success", rgba(.systemGreen)),
+            ("warning", rgba(.systemOrange)), ("critical", rgba(.systemRed))]
         let points = content.bounds.width
     #else
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
@@ -25339,6 +25348,9 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
         let ground = rgba(.systemBackground), text = rgba(.label)
         let groupedGround = rgba(.systemGroupedBackground)
         let dark = traits.userInterfaceStyle == .dark
+        let inks = [rgba(.label), rgba(.secondaryLabel)]
+        let tints = [("accent", rgba(.tintColor)), ("success", rgba(.systemGreen)),
+            ("warning", rgba(.systemOrange)), ("critical", rgba(.systemRed))]
         let points = window.bounds.width
     #endif
     let (w, h) = (cg.width, cg.height)
@@ -25358,7 +25370,9 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
     return KayaWindowPixels(
         rgba: buf, width: w, height: h, scale: CGFloat(w) / points,
         ground: Array(ground.prefix(3)), groupedGround: Array(groupedGround.prefix(3)),
-        text: Array(text.prefix(3)), dark: dark)
+        text: Array(text.prefix(3)), dark: dark,
+        plainInks: inks.map { c in (0..<3).map { c[$0] * c[3] + ground[$0] * (1 - c[3]) } },
+        tints: tints.map { ($0.0, Array($0.1.prefix(3))) })
 }
 
 func kayaHex(_ c: [Double]) -> String {
@@ -25933,7 +25947,7 @@ func kayaSystemBarWords() -> (String, String) {
 }
 
 /// expect_tint's read (Y7): the label's most inked pixel, nearest of the
-/// standalone colours and the primary text colour.
+/// standalone colours and the untinted inks.
 @MainActor func kayaLabelTintRead(_ node: KayaNode) -> String {
     let frames = [kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]].compactMap { $0 }
     guard let frame = frames.first,
@@ -25959,52 +25973,13 @@ func kayaSystemBarWords() -> (String, String) {
         y += step
     }
     guard let ink else { return "<no pixels in \(frame)>" }
-    #if os(macOS)
-        func tone(_ c: NSColor) -> [Double] {
-            var out: [Double] = [0, 0, 0]
-            NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
-                if let s = c.usingColorSpace(.sRGB) { out = [s.redComponent, s.greenComponent, s.blueComponent] }
-            }
-            return out
-        }
-        var accent = tone(.controlAccentColor)
-        let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
-        // docs/traps.md, the mac's untinted text read as tinted in the dark appearance.
-        var plain = shot.text
-        // A caption's secondary step is untinted too (docs/looks-plan.md
-        // §3.4): the grey read nearer the green than the primary text.
-        var secondary = shot.text
-        NSApp.effectiveAppearance.performAsCurrentDrawingAppearance {
-            for (colour, into) in [(NSColor.labelColor, 0), (NSColor.secondaryLabelColor, 1)] {
-                if let s = colour.usingColorSpace(.sRGB) {
-                    let a = Double(s.alphaComponent)
-                    let over = [s.redComponent, s.greenComponent, s.blueComponent].enumerated().map {
-                        Double($0.element) * a + shot.ground[$0.offset] * (1 - a)
-                    }
-                    if into == 0 { plain = over } else { secondary = over }
-                }
-            }
-        }
-    #else
-        let plain = shot.text
-        let secondary: [Double] = {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-            UIColor.secondaryLabel.getRed(&r, green: &g, blue: &b, alpha: &a)
-            return [Double(r), Double(g), Double(b)].enumerated().map { $0.element * Double(a) + shot.ground[$0.offset] * (1 - Double(a)) }
-        }()
-        func tone(_ c: UIColor) -> [Double] {
-            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
-            c.getRed(&r, green: &g, blue: &b, alpha: &a)
-            return [Double(r), Double(g), Double(b)]
-        }
-        var accent = tone(.tintColor)
-        let others = [("success", tone(.systemGreen)), ("warning", tone(.systemOrange)), ("critical", tone(.systemRed))]
-    #endif
+    var accent = shot.tints[0].1
+    let others = Array(shot.tints.dropFirst())
     if let brand = kayaScene.brand {
         let rgb = shot.dark ? brand[8] : brand[3]
         accent = [Double((rgb >> 16) & 0xFF) / 255, Double((rgb >> 8) & 0xFF) / 255, Double(rgb & 0xFF) / 255]
     }
-    let candidates: [(String, [Double])] = [("none", plain), ("none", secondary), ("accent", accent)] + others
+    let candidates: [(String, [Double])] = shot.plainInks.map { ("none", $0) } + [("accent", accent)] + others
     func distance(_ c: [Double]) -> Double {
         var sum = 0.0
         for k in 0..<3 { sum += (c[k] - ink[k]) * (c[k] - ink[k]) }

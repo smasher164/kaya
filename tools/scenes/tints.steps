@@ -8,6 +8,9 @@ expect_fill row@t_warning warning
 expect_fill row@t_critical critical
 expect_fill row@t_neutral neutral
 expect_fill row@t_plain none
+# A caption's secondary ink is untinted in either appearance (docs/traps.md,
+# the iOS tint read that resolved its colours light).
+expect_tint label@t_caption none
 expect_fill row@bubble[n1] accent
 # docs/looks-plan.md §3.2: a fill in the app's own colour, the text on it
 # white or black by contrast, kaya's choice, live and stamped.
