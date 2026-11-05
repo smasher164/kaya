@@ -17339,3 +17339,18 @@ KEY: list block kind, hanging indent, bullet paragraph, rich text lists, list ma
 - Closing this means a ruling and the attribute or kind on five backends with
   a read of a wrapped item's second-line offset.
 
+
+## OPEN — iOS reads a plain caption as success in the dark (seen 2026-11-04, the design pass's captures)
+
+KEY: expect_tint none, caption[t8], iOS dark tint read, 8D8D93, secondaryLabel
+- The review captures run the task manager with its window asked for the
+  dark appearance. On iOS (run 20261105T062758Z-056751, ios-tasks-swiftui)
+  `expect_tint label@caption[t8] none` read "tint success (ink 8D8D93;
+  success 34C759, warning FF8D28, critical FF383C)": the plain caption's
+  secondary grey ink was named the nearest of the tints, so the reader has
+  no "none" candidate that wins in the dark. The lanes never ask the task
+  manager for the dark appearance, so no leg sees it. The other four lanes
+  read the same step in the dark green in the same captures.
+- Closing this means the iOS tint reader comparing the ink with the
+  appearance's own secondary text colour before the tints, and a dark
+  tasks leg on iOS (or a dark caption in tints.steps) that reads it.

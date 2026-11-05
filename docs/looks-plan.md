@@ -536,5 +536,9 @@ icon and a single label are one line; a label over a caption, 1.8, is not);
 the read takes the nearer of the two radii and calls a shape whose half
 height is within `CORNER_COINCIDE` (2) of the card radius a capsule, since it
 is both; the selected and hover surfaces of an unfilled row keep the card
-radius, since the rule is about fills.
+radius, since the rule is about fills. The phones settled two more: the chat
+header is two rows (the search, then the actions), since the approved single
+row ran off a phone and on Android crashed the app (docs/traps.md, the field
+measured under its padding); and the portfolio's three buttons stack on a
+compact window, since three in a row wrapped "Day tick".
 

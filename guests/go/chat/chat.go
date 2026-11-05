@@ -228,6 +228,8 @@ func App() *kaya.App {
 			at := -1
 			matches := tx.Signal("")
 			pane := tx.Column(func() {
+				// The search and the actions take a row each: one row did not fit a
+				// phone (docs/looks-plan.md §6).
 				tx.Column(func() {
 					tx.Row(func() {
 						tx.Search(func(tx *kaya.Tx, text string) {
@@ -256,15 +258,18 @@ func App() *kaya.App {
 								tx.Write(matches, fmt.Sprintf("%d of %d", at+1, len(found)))
 							})
 						tx.Label(matches).A11yID("matches")
+					}).Align(kaya.AlignCenter)
+					tx.Row(func() {
 						tx.Button("Newest", func(tx *kaya.Tx) {
 							tx.ScrollToRow(threadList, c.messages[len(c.messages)-1].key)
 						}).Role(kaya.RolePlain).A11yID("newest")
+						tx.Spacer()
 						tx.Label(connection).A11yID("connection")
 						// C10 (docs/capture-plan.md §8): a call and a video call.
 						tx.Button("Call", func(tx *kaya.Tx) { phone.start(tx, c, false) }).Symbol(kaya.SymbolPhone).Titled().A11yID("call")
 						tx.Button("Video", func(tx *kaya.Tx) { phone.start(tx, c, true) }).Symbol(kaya.SymbolVideo).Titled().A11yID("videocall")
 					}).Align(kaya.AlignCenter)
-				}).Inset(12, 16)
+				}).Inset(12, 16).Spacing(8)
 				// The thread over the conversation's own wallpaper (docs/looks-plan.md
 				// §3.5): the bubbles are filled, which is what makes their text legal
 				// over a picture (docs/styling-pass-plan.md Y3), and the rows above

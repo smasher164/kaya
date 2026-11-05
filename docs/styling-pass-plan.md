@@ -344,7 +344,7 @@ whatever page sits behind the container shows through and the surface melts
 into it the way the reference's header does, in both appearances (ruled
 2026-11-04 after the maintainer saw a dark header end on a band darker than the
 Mac's page: "isn't the transparency supposed to gradually increase?";
-`expect_ground_fade` reads it, docs/traps.md). The clamp, one function in the core beside
+`expect_ground_fade` reads it, docs/traps.md; every why-not branch of its reader was made to print on all four backends, the Mac's on 2026-11-04 and GTK's, WinUI's and Compose's the same day in one perturbed grounds run per lane, each target forcing one branch). The clamp, one function in the core beside
 the brand derivation (docs/styling-plan.md D1): in the dark appearance the top
 stop keeps its hue and chroma and its L* is clamped to at most 48, where white
 text passes 4.5:1 (§7: 4.82:1 at 48, 4.48:1 at 50); in the light appearance

@@ -578,7 +578,8 @@ with app.window(title="portfolio", width=900, height=600):
                 chart = kaya.canvas(CHART_BOX)
                 chart.a11y_id("chart").a11y_label(chart_summary)
                 draw_chart()
-                with kaya.row():
+                # Three buttons in a row wrapped "Day tick" on a phone.
+                with kaya.row(stack_when=kaya.COMPACT):
                     kaya.button("Day tick", on_click=tick)  # button#0
                     kaya.button("Transactions", on_click=open_transactions)  # button#1
                     kaya.button("Rally", on_click=rally)  # button#2
