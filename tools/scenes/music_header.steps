@@ -14,6 +14,7 @@ click column@card_201715
 expect_image_phase image@album_art shown
 expect_shape image@album_art rounded
 expect_ground column@album_header gradient
+expect_ground_fade column@album_header
 # M16 (35): the gradient's drawn top is the cover's vivid colour clamped by the core.
 expect_ground_color column@album_header "light E3ABB9 dark 673946"
 expect_inset 0

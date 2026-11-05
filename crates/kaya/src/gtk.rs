@@ -8988,7 +8988,7 @@ mod skin {
 
     /// The ground stylesheet for every live ground, in the appearance the
     /// session is in now: the gradient's top stop is the core's clamped one,
-    /// its bottom stop libadwaita's own window ground.
+    /// its bottom stop the same colour at alpha 0 (Y2's fade).
     pub fn ground_css(grounds: &BTreeMap<u64, Ground>, dark: bool) -> String {
         let mut out = String::new();
         for (id, g) in grounds {
@@ -9007,7 +9007,7 @@ mod skin {
                     let Some(tops) = g.tops else { continue };
                     let stop = if dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };
                     out.push_str(&format!(
-                        ".{}{id} {{ background-image: linear-gradient(to bottom, #{stop:06x}, var(--window-bg-color)); \
+                        ".{}{id} {{ background-image: linear-gradient(to bottom, #{stop:06x}, #{stop:06x}00); \
                          background-origin: border-box; }}\n",
                         super::GROUND_CLASS
                     ));
@@ -26528,6 +26528,33 @@ impl crate::harness::Stage for GtkStage {
         })
     }
 
+    fn ground_fade(&self, t: crate::harness::Target) -> Result<(u32, u32, bool), String> {
+        Self::on_main(move |core| {
+            let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
+            let shot = skin::shot_of(&widget)?;
+            let Some(f) = shot.frame(&widget) else { return Err("<no laid-out frame>".to_owned()) };
+            let (fx, fy, fw, fh) = (f64::from(f.x()), f64::from(f.y()), f64::from(f.width()), f64::from(f.height()));
+            if fw <= 8.0 || fh <= 16.0 {
+                return Err(format!("<no laid-out frame: {fw}x{fh}>"));
+            }
+            if let Some(why) = unseen_in_shot(&widget, &shot.content, [fx, fy, fw, fh]) {
+                return Err(why);
+            }
+            let (x, last_y, under_y) = (fx + fw - 4.0, fy + fh - 1.0 / shot.scale, fy + fh + 1.0);
+            let (Some(last), Some(under)) = (shot.at(x, last_y), shot.at(x, under_y)) else {
+                return Err(format!(
+                    "<the probes at y {last_y} and {under_y} fall outside the window's {} points: {fx},{fy} {fw}x{fh}>",
+                    shot.content.height()
+                ));
+            };
+            let rgb = |c: [f64; 3]| {
+                let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+                (b[0] << 16) | (b[1] << 8) | b[2]
+            };
+            Ok((rgb(last), rgb(under), shot.dark))
+        })
+    }
+
     fn fill_color(&self, t: crate::harness::Target) -> Result<(u32, u32), String> {
         Self::on_main(move |core| {
             let Some(widget) = skin_layout_widget(core, t) else { return Err("<no such target>".to_owned()) };
@@ -26589,9 +26616,11 @@ impl crate::harness::Stage for GtkStage {
             let (Some(top), Some(bottom), Some(mid)) = (shot.at(x, fy + 4.0), shot.at(x, fy + fh - 4.0), shot.at(x, fy + fh / 2.0)) else {
                 return format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>");
             };
+            let under = shot.at(x, fy + fh + 1.0);
             let seen = format!(
-                "top {}, middle {}, bottom {}, ground {}",
-                skin::hex(top), skin::hex(mid), skin::hex(bottom), skin::hex(shot.ground)
+                "top {}, middle {}, bottom {}, ground {}{}",
+                skin::hex(top), skin::hex(mid), skin::hex(bottom), skin::hex(shot.ground),
+                under.map_or_else(|| ", nothing under it".to_owned(), |u| format!(", under {}", skin::hex(u)))
             );
             let ground = id.and_then(|id| core.skin.grounds.borrow().get(&id).cloned()).unwrap_or_default();
             // A probe drawn as the picture there and NOT as the page names the
@@ -26620,7 +26649,9 @@ impl crate::harness::Stage for GtkStage {
             let want = [(stop >> 16) & 0xFF, (stop >> 8) & 0xFF, stop & 0xFF].map(|c| c as f64 / 255.0);
             let contrast = skin::contrast(mid, shot.text);
             let detail = format!("{seen}, the clamped stop {}, text {contrast:.1}:1 at the middle", skin::hex(want));
-            if skin::gap(top, want) <= SKIN_TOLERANCE && skin::gap(bottom, shot.ground) <= SKIN_TOLERANCE && contrast >= 4.5 {
+            // The bottom fades into the page drawn under the container (docs/traps.md,
+            // a gradient ground's dark edge inside the colour tolerance).
+            if skin::gap(top, want) <= SKIN_TOLERANCE && skin::gap(bottom, under.unwrap_or(shot.ground)) <= SKIN_TOLERANCE && contrast >= 4.5 {
                 format!("gradient ({detail})")
             } else {
                 format!("unmatched ({detail})")

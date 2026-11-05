@@ -2,7 +2,7 @@
 loaded by tools/lib/skin_routes.py (run from tools/check-verbs.py).
 
 grounds.steps, shapes.steps, cards.steps, tracks.steps and dock.steps read what
-the arm drew. But a gradient whose bottom stop is a literal draws the same
+the arm drew. But a gradient whose bottom stop is opaque draws the same
 header on the lane's one window colour, a hover painted in kaya's grey passes
 the nearest-candidate read, a panel drawn as kaya's dark fill reads as overlay
 over the art, a reader that answers from the arm's own classes agrees with
@@ -21,8 +21,8 @@ LABEL = "the GTK arm"
 DOORS = [
     ("the ground stylesheet", "pub fn ground_css(grounds: &BTreeMap<u64, Ground>, dark: bool) -> String {",
      ["let stop = if dark { tops & 0xFF_FFFF } else { (tops >> 24) & 0xFF_FFFF };",
-      "linear-gradient(to bottom, #{stop:06x}, var(--window-bg-color));",
-      "var(--window-bg-color)); \\ background-origin: border-box;"],
+      "linear-gradient(to bottom, #{stop:06x}, #{stop:06x}00);",
+      "#{stop:06x}00); \\ background-origin: border-box;"],
      ["rgb(", "rgba(", "#000", "#fff", "url(", "base64"]),
     ("the image ground", "fn set_ground(core: &mut CoreState, id: u64, widget: &gtk4::Widget, change: impl FnOnce(&mut skin::Ground)) {",
      ["picture.set_data(GROUND_PICTURE_KEY, true)", "picture.set_content_fit(gtk4::ContentFit::Cover);",
@@ -68,7 +68,7 @@ DOORS = [
 READS = [
     ("expect_ground's reader", "fn ground_read(&self, t: crate::harness::Target) -> String {",
      ["skin::shot_of(&widget)", "shot.at(x, fy + 4.0)", "shot.at(x, fy + fh - 4.0)", "skin::contrast(mid, shot.text)",
-      "&& contrast >= 4.5", "skin::gap(bottom, shot.ground) <= SKIN_TOLERANCE",
+      "&& contrast >= 4.5", "skin::gap(bottom, under.unwrap_or(shot.ground)) <= SKIN_TOLERANCE", "let under = shot.at(x, fy + fh + 1.0);",
       "skin::picture_at(&t, (fw - 4.0, 4.0), (fw, fh))", "ground_texture(core, id)"]),
     ("expect_shape's reader", "fn shape_read(&self, t: crate::harness::Target) -> String {",
      ["skin::shot_of(&widget)", "shot.at(fx - 4.0, fy + fh / 2.0)", "shot.at(fx + 1.0, fy + 1.0)",
@@ -265,8 +265,8 @@ CUTS = [
     ("GTK: the plain button's padding kept (M20)",
      r"button\.text-button\.kaya-plain \{ margin-left: -17px; margin-right: -17px; \}\n", "",
      "the plain button's label on the text column (M20) no longer holds"),
-    ("GTK: the gradient's bottom stop a literal", r"var\(--window-bg-color\)\); \\",
-     r"#242424); \\", "the ground stylesheet lacks linear-gradient"),
+    ("GTK: the gradient's bottom stop opaque", r"#\{stop:06x\}00\); \\",
+     r"var(--window-bg-color)); \\", "the ground stylesheet lacks linear-gradient"),
     ("GTK: the top stop one appearance's", r"let stop = if dark \{ tops & 0xFF_FFFF \} else \{ \(tops >> 24\) & 0xFF_FFFF \};",
      "let stop = tops & 0xFF_FFFF;", "the ground stylesheet lacks let stop"),
     ("GTK: the image ground decoded on the main thread", r"\n\s+image_source\(picture, &bytes\);",
@@ -274,8 +274,8 @@ CUTS = [
      "the image ground lacks image_source"),
     ("GTK: the ground picture laid out as a child", r"if c\.is_visible\(\) && !super::is_ground_picture\(&c\) \{\n(\s+)let weight",
      r"if c.is_visible() {\n\1let weight", "the ground picture stays out of the flex layout"),
-    ("GTK: the ground tiling inside the inset", r"(var\(--window-bg-color\)\); \\\n\s+)background-origin: border-box; ",
-     r"\1", "the ground stylesheet lacks var(--window-bg-color)); \\ background-origin"),
+    ("GTK: the ground tiling inside the inset", r"(#\{stop:06x\}00\); \\\n\s+)background-origin: border-box; ",
+     r"\1", "the ground stylesheet lacks #{stop:06x}00); \\ background-origin"),
     ("GTK: the table's body back inside the card (M19)",
      r"\.kaya-table-head, \.kaya-table-body, \.kaya-table-divider \{ margin-left: -12px; margin-right: -12px; \}\n", "",
      "a table's head, body and divider reach the card's stroke (M19) no longer holds"),

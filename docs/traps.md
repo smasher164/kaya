@@ -20253,7 +20253,11 @@ alone. The sentence now carries what the block itself measures unbounded,
 its font family's source and its flow, so the next sighting says whether the
 block measures its word narrower than the probe does (a shaping or fallback
 difference) or asked for less than it measures (a stale layout, as a font
-file loading after the first measure would leave).
+file loading after the first measure would leave). The next sighting (2026-11-04,
+host load 77 in a filtered matrix) read "asked for 67px, measures 67px
+unbounded" against the probe's 70px: the block measures its own word narrower
+than the probe does, so the stale-layout cause is out and the two measures
+disagree on shaping or fallback.
 
 ## A fill read inside a WinUI ListView item (measured 2026-11-04)
 
@@ -20279,3 +20283,20 @@ exactly as the window returned them, so a low channel of a saturated colour
 can lose two units. The paint moved to 209D55, which the model and the lane
 both return unchanged. A new saturated paint gets the model run first.
 
+
+## A gradient ground's dark edge inside the colour tolerance (measured 2026-11-04)
+
+On the Mac in the dark appearance the page a window draws is 24282A while
+`windowBackgroundColor` resolves to 1E1E1E, so a gradient whose bottom stop
+was that resolved colour ended on a band darker than the page under it: the
+maintainer saw the hard edge on the portfolio's and the task manager's
+headers. In the light appearance both are white and the edge cannot be seen.
+The two greys differ by at most 12 per channel, inside the skin readers'
+`GROUND_COLOR_TOLERANCE` of 15, which is why `expect_ground`'s bottom probe
+(compared with the resolved ground) passed through it. The bottom stop is now
+the top colour at alpha 0 (docs/styling-pass-plan.md Y2), and
+`expect_ground_fade` compares the ground's last row with the page one unit
+under it at `GROUND_FADE_TOLERANCE` 4: both pixels come from one capture, so
+there is no display profile between them to absorb. The old stop, restored
+on the grounds scene's dark Mac leg, reads "ends at 1E1E1E on its last row
+over the page's 24282A".

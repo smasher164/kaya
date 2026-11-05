@@ -1198,6 +1198,41 @@ for label, rel, pattern in DROP_MIRRORS:
                             + " sets its drop tolerance to 25, "),
                  f"widening {label}'s drop tolerance to 25")
 
+# THE GROUND FADE'S TOLERANCE (docs/styling-pass-plan.md Y2): a widened
+# copy passes the dark edge of 2026-11-04 (gap 12) as a fade.
+FADE_RULED = 4
+FADE_MIRRORS = [
+    ("harness.rs", HARNESS, r"pub const GROUND_FADE_TOLERANCE: u32 = (\d+);"),
+    ("KayaSwiftUI.swift", SWIFT, r"let kayaGroundFadeTolerance = (\d+)\b"),
+    ("KayaCompose.kt", KOTLIN, r"const val KAYA_GROUND_FADE_TOLERANCE = (\d+)\b"),
+]
+
+
+def fade_tolerance(**srcs):
+    bad = []
+    for label, rel, pattern in FADE_MIRRORS:
+        m = re.search(pattern, srcs.get(label) or real(rel))
+        if not m:
+            bad.append(label + " declares no ground fade tolerance constant")
+        elif int(m.group(1)) != FADE_RULED:
+            bad.append(label + " sets its ground fade tolerance to "
+                       + m.group(1) + ", not " + str(FADE_RULED))
+    return bad
+
+
+fade_out = fade_tolerance()
+fade_tol_status = 1 if fade_out else 0
+if fade_out:
+    print("check-verbs: the expect_ground_fade tolerance moved:\n"
+          + "\n".join(fade_out), file=sys.stderr)
+for label, rel, pattern in FADE_MIRRORS:
+    drifted = perturb(f"fade-tolerance ({label} widened to 15)", rel,
+                      "(" + pattern.split(r"(\d+)")[0] + r")\d+", "15")
+    score_or_die(introduced(fade_tolerance(**{label: drifted}), fade_out,
+                            "^" + re.escape(label)
+                            + " sets its ground fade tolerance to 15, "),
+                 f"widening {label}'s ground fade tolerance to 15")
+
 # An ABSENT mirror is a failure that NAMES IT, never a skip.
 gone = clip_mirrors(kotlin_src=g.scratch() / "no-such-mirror.kt")
 if not any("cannot read" in b and "KayaCompose.kt" in b for b in gone):
@@ -6205,7 +6240,7 @@ if failures:
         print(f"check-verbs: {f_}", file=sys.stderr)
     raise SystemExit(1)
 if (clip_status or window_status or ink_status or ax_status
-        or drop_tol_status
+        or drop_tol_status or fade_tol_status
         or words_status or label_status or polish_status
         or metrics_status or keyed_status or drop_line_status
         or vtrace_status or norm_status or ind_status

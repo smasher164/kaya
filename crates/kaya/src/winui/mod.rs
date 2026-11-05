@@ -28616,6 +28616,9 @@ impl crate::harness::Stage for WinUiStage {
     fn ground_top(&self, t: crate::harness::Target) -> Result<(u32, bool), String> {
         Self::on_ui_read(move |core| skin::read::ground_top(core, t)).unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
     }
+    fn ground_fade(&self, t: crate::harness::Target) -> Result<(u32, u32, bool), String> {
+        Self::on_ui_read(move |core| skin::read::ground_fade(core, t)).unwrap_or_else(|e| Err(format!("<unreadable: {e}>")))
+    }
     fn ground_read(&self, t: crate::harness::Target) -> String {
         Self::on_ui_read(move |core| skin::read::ground(core, t)).unwrap_or_else(|e| format!("<unreadable: {e}>"))
     }

@@ -277,7 +277,7 @@ themselves, which is the argument for them (docs/tints-plan.md §0). The two
 things this pass adds that tokens do not cover are handled structurally:
 - A data colour under text. The gradient's top stop is clamped in the core so
   the appearance's text colour passes 4.5:1 against it (Y2; the numbers are
-  §7), and the bottom stop is the platform's own ground. A picture under text
+  §7), and the bottom stop is the top at alpha 0 over the page. A picture under text
   has no clamp possible, so a label whose nearest ground is an image and that
   sits in no filled container between is REFUSED at the root (Y3): text over
   art goes inside an `overlay` fill, the platform's own panel-over-media, or
@@ -289,7 +289,10 @@ things this pass adds that tokens do not cover are handled structurally:
   Transparency on Apple and Transparency effects on Windows turn the
   platforms' materials opaque by themselves; kaya uses those materials rather
   than its own alpha, so nothing more is needed, and a gate holds that no arm
-  spells its own alpha for the `overlay` tint.
+  spells its own alpha for the `overlay` tint. The gradient's fade to alpha 0
+  (Y2) is not a material: it blends only over the page the same window draws
+  under it, never over another window or the desktop, so the drawn result is
+  as opaque as the page and Reduce Transparency has nothing to turn off.
 - Selection and activation are accessibility facts first: `selected` is a
   state every platform's tree has (`AXSelected`, Compose's `selected`
   semantics, AT-SPI `selected`, UIA `SelectionItem`), and an activatable card
@@ -336,10 +339,12 @@ the root. A `gradient` ground takes its colour from the existing `color` prop
 (44, `PropKind::Color`, the colour picker's), made legal on row and column
 when `ground` is `gradient`, and refused without it. The gradient is vertical,
 top to bottom, always: the TOP stop is the given colour CLAMPED by the core,
-the BOTTOM stop is the platform's window ground as the backend resolves it at
-that moment (`windowBackgroundColor`, `scheme.background`, `window_bg_color`,
-`ApplicationPageBackgroundThemeBrush`), so the surface melts into the page the
-way the reference's header does. The clamp, one function in the core beside
+the BOTTOM stop is the same colour at alpha 0 (never black at alpha 0), so
+whatever page sits behind the container shows through and the surface melts
+into it the way the reference's header does, in both appearances (ruled
+2026-11-04 after the maintainer saw a dark header end on a band darker than the
+Mac's page: "isn't the transparency supposed to gradually increase?";
+`expect_ground_fade` reads it, docs/traps.md). The clamp, one function in the core beside
 the brand derivation (docs/styling-plan.md D1): in the dark appearance the top
 stop keeps its hue and chroma and its L* is clamped to at most 48, where white
 text passes 4.5:1 (§7: 4.82:1 at 48, 4.48:1 at 50); in the light appearance
@@ -663,11 +668,11 @@ recommendation is `system`, with the review page showing both.
 
 | backend | gradient ground (Y2) | image ground and `overlay` (Y3) | activatable, hover, selected (Y4) | shape (Y6) | tinted label (Y7) | dock (Y8) |
 |---|---|---|---|---|---|---|
-| SwiftUI, macOS | `.background(LinearGradient(colors: [top, ground], startPoint: .top, endPoint: .bottom))`, the ground `Color(nsColor: .windowBackgroundColor)` | `.background(Image.resizable().scaledToFill().clipped())`; `overlay` is `.regularMaterial` under a 40% black tint with `.white` foreground; the root's refusal of bare text | a `Button` with a plain style around the content for the press and the AX role; `.onHover` toggling a `.fill.quaternary` overlay (13: `quaternaryLabelColor`); `selected` paints `selectedContentBackgroundColor` with `alternateSelectedControlTextColor` inherited; `.accessibilityAddTraits(.isSelected)`; on the native table tier the `NSTableView`'s own selection and `doubleAction` | `.clipShape(Circle())` / `RoundedRectangle(cornerRadius: 12, style: .continuous)`, on the picture and on the loading and failed looks | `.foregroundStyle(Color.accentColor)`, `.green`, `.orange`, `.red` (the standalone system colours) | `.safeAreaInset(edge: .bottom)` on the window's content root, the bar's ground `.bar` material to the edge |
-| SwiftUI, iOS | as macOS, the ground `Color(uiColor: .systemBackground)` | as macOS, `overlay` the `.regularMaterial` | the `Button` for press and role; no hover; `.hoverEffect(.highlight)` for an iPad pointer; `selected` UIKit's selected-cell `systemGray4` with `label` (M16 (4)), `.isSelected` trait | as macOS | as macOS | iOS 26: `.tabViewBottomAccessory` when the window has sections; otherwise `.safeAreaInset(edge: .bottom)` on the content, above the tab bar; the ground to the home indicator (A2) |
-| Compose | `Modifier.background(Brush.verticalGradient(listOf(top, scheme.background)), shape)` | `Modifier.paint(painter, contentScale = Crop)`; `overlay` is `scheme.scrim` at 60% with `inverseOnSurface` text | `Modifier.clickable(indication = ripple())` so the 8% hover layer and the ripple come from Material; `Modifier.selectable(selected)` for the semantics, the surface `secondaryContainer` / `onSecondaryContainer` through the same `LocalKayaOnFill` the filled container uses; `Role.Button` | `Modifier.clip(CircleShape)` / `MaterialTheme.shapes.medium`, `ContentScale.Crop` for the circle | `scheme.primary`, `scheme.error`, `kayaCustomPair(...)`'s fill colour as text | `Scaffold(bottomBar = { Column { dock; NavigationBar } })`; the dock's ground `surfaceContainer` consuming `navigationBars` insets when there is no bar |
-| GTK | a per-container CSS rule `background-image: linear-gradient(to bottom, <top>, var(--window-bg-color))` through the container-inset provider's sibling | `GtkOverlay` with a `GtkPicture` (`ContentFit::Cover`) under the children; `overlay` is the `.osd` class on the filled box | a `GtkListBoxRow`-shaped activatable: `.card.activatable` for a card (its own `:hover`/`:active`), `row-activated` for the occurrence; `selected` through `GtkListBoxRow:selected` where the container is a row of a For, the `.card` `:checked` state otherwise, `GTK_ACCESSIBLE_STATE_SELECTED` | a wrapper `GtkBox` with `border-radius: 12px` or `9999px` and `gtk_widget_set_overflow(GTK_OVERFLOW_HIDDEN)`, measured at the depth that the clip reaches the `GtkPicture`'s paintable | the `accent`, `success`, `warning`, `error` style classes (libadwaita's standalone colours) | `AdwToolbarView` with the dock as a bottom bar; `AdwBottomSheet`'s bottom-bar form weighed at the depth |
-| WinUI | a `LinearGradientBrush` from `(0,0)` to `(0,1)` with the top stop and `{ThemeResource ApplicationPageBackgroundThemeBrush}`'s colour, installed per theme dictionary, the HC dictionary mapping it to `SystemColorWindowColor` | an `ImageBrush` (`UniformToFill`) as the Grid's background; `overlay` is `SmokeFillColorDefaultBrush` with `AcrylicBrush` when `UISettings.AdvancedEffectsEnabled`, `TextOnAccentFillColorPrimaryBrush` text | a `Button` with a subtle style around the content for press, hover (`SubtleFillColorSecondaryBrush` on PointerOver) and the UIA role; `selected` paints `ListViewItemBackgroundSelected` and the accent indicator pill, `SelectionItemPattern` exposed | an `Ellipse` or a `Rectangle` with `RadiusX`/`RadiusY` 8 filled by an `ImageBrush`; the plain `Image` for rect; the loading `Border` and the failed glyph clipped the same way | `AccentTextFillColorPrimaryBrush`, `SystemFillColorSuccessBrush`, `SystemFillColorCautionBrush`, `SystemFillColorCriticalBrush` | a Grid row under the `NavigationView` spanning the window, ground `LayerFillColorDefaultBrush` |
+| SwiftUI, macOS | `.background(LinearGradient(colors: [top, top.opacity(0)], startPoint: .top, endPoint: .bottom))` | `.background(Image.resizable().scaledToFill().clipped())`; `overlay` is `.regularMaterial` under a 40% black tint with `.white` foreground; the root's refusal of bare text | a `Button` with a plain style around the content for the press and the AX role; `.onHover` toggling a `.fill.quaternary` overlay (13: `quaternaryLabelColor`); `selected` paints `selectedContentBackgroundColor` with `alternateSelectedControlTextColor` inherited; `.accessibilityAddTraits(.isSelected)`; on the native table tier the `NSTableView`'s own selection and `doubleAction` | `.clipShape(Circle())` / `RoundedRectangle(cornerRadius: 12, style: .continuous)`, on the picture and on the loading and failed looks | `.foregroundStyle(Color.accentColor)`, `.green`, `.orange`, `.red` (the standalone system colours) | `.safeAreaInset(edge: .bottom)` on the window's content root, the bar's ground `.bar` material to the edge |
+| SwiftUI, iOS | as macOS | as macOS, `overlay` the `.regularMaterial` | the `Button` for press and role; no hover; `.hoverEffect(.highlight)` for an iPad pointer; `selected` UIKit's selected-cell `systemGray4` with `label` (M16 (4)), `.isSelected` trait | as macOS | as macOS | iOS 26: `.tabViewBottomAccessory` when the window has sections; otherwise `.safeAreaInset(edge: .bottom)` on the content, above the tab bar; the ground to the home indicator (A2) |
+| Compose | `Modifier.background(Brush.verticalGradient(listOf(top, top.copy(alpha = 0f))), shape)` | `Modifier.paint(painter, contentScale = Crop)`; `overlay` is `scheme.scrim` at 60% with `inverseOnSurface` text | `Modifier.clickable(indication = ripple())` so the 8% hover layer and the ripple come from Material; `Modifier.selectable(selected)` for the semantics, the surface `secondaryContainer` / `onSecondaryContainer` through the same `LocalKayaOnFill` the filled container uses; `Role.Button` | `Modifier.clip(CircleShape)` / `MaterialTheme.shapes.medium`, `ContentScale.Crop` for the circle | `scheme.primary`, `scheme.error`, `kayaCustomPair(...)`'s fill colour as text | `Scaffold(bottomBar = { Column { dock; NavigationBar } })`; the dock's ground `surfaceContainer` consuming `navigationBars` insets when there is no bar |
+| GTK | a per-container CSS rule `background-image: linear-gradient(to bottom, <top>, <top>00)` through the container-inset provider's sibling | `GtkOverlay` with a `GtkPicture` (`ContentFit::Cover`) under the children; `overlay` is the `.osd` class on the filled box | a `GtkListBoxRow`-shaped activatable: `.card.activatable` for a card (its own `:hover`/`:active`), `row-activated` for the occurrence; `selected` through `GtkListBoxRow:selected` where the container is a row of a For, the `.card` `:checked` state otherwise, `GTK_ACCESSIBLE_STATE_SELECTED` | a wrapper `GtkBox` with `border-radius: 12px` or `9999px` and `gtk_widget_set_overflow(GTK_OVERFLOW_HIDDEN)`, measured at the depth that the clip reaches the `GtkPicture`'s paintable | the `accent`, `success`, `warning`, `error` style classes (libadwaita's standalone colours) | `AdwToolbarView` with the dock as a bottom bar; `AdwBottomSheet`'s bottom-bar form weighed at the depth |
+| WinUI | a `LinearGradientBrush` from `(0,0)` to `(0,1)` with the top stop and the top at alpha 0, the HC arm both stops `{ThemeResource SystemColorWindowColor}` | an `ImageBrush` (`UniformToFill`) as the Grid's background; `overlay` is `SmokeFillColorDefaultBrush` with `AcrylicBrush` when `UISettings.AdvancedEffectsEnabled`, `TextOnAccentFillColorPrimaryBrush` text | a `Button` with a subtle style around the content for press, hover (`SubtleFillColorSecondaryBrush` on PointerOver) and the UIA role; `selected` paints `ListViewItemBackgroundSelected` and the accent indicator pill, `SelectionItemPattern` exposed | an `Ellipse` or a `Rectangle` with `RadiusX`/`RadiusY` 8 filled by an `ImageBrush`; the plain `Image` for rect; the loading `Border` and the failed glyph clipped the same way | `AccentTextFillColorPrimaryBrush`, `SystemFillColorSuccessBrush`, `SystemFillColorCautionBrush`, `SystemFillColorCriticalBrush` | a Grid row under the `NavigationView` spanning the window, ground `LayerFillColorDefaultBrush` |
 
 Three things every arm must hold, since no scene can see them: the gradient's
 stops resolved from tokens and the data colour only (never a literal brush);
@@ -727,7 +732,8 @@ cut on the phones through check-steps' phone cut.
 1. `grounds.steps`: a column with `ground gradient` from a saturated colour,
    `expect_ground column@header gradient` (the pixel 4 units inside the top
    edge at mid-width is the clamped stop the backend resolves, the one 4
-   units inside the bottom edge is the window ground, the two differ by more
+   units inside the bottom edge is the page one unit under the container (the
+   window ground when nothing of the window is under it), the two differ by more
    than the ink tolerance, and the midpoint's contrast against the appearance's
    text passes 4.5:1, computed by the reader from its own pixel); a label
    inside, `expect_ax` and a contrast reading on its pixels; the same in dark

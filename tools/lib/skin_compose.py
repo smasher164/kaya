@@ -1,8 +1,8 @@
 """docs/styling-pass-plan.md Y2-Y9, §3: the Compose arm's skin doors, loaded by
 tools/lib/skin_routes.py (run from tools/check-verbs.py).
 
-A gradient whose stop is a literal draws the same header on the lane's one
-album, a hover or selection painted in kaya's own colours passes the
+A gradient whose stop is a literal or opaque draws the same header on the
+lane's one album, a hover or selection painted in kaya's own colours passes the
 nearest-candidate read, an overlay drawn as a flat dark fill reads as overlay
 over the art, a shape left off the loading look is read by no scene that
 loads first and then shows, and a reader that answers from the node agrees
@@ -19,7 +19,7 @@ LABEL = "the Compose arm"
 # (label, opener, what the block must hold, what it may never name)
 DOORS = [
     ("gradient and image ground", "fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {",
-     ["val stops = listOf(Color(0xFF00_0000L or top), scheme.background)",
+     ["val stop = Color(0xFF00_0000L or top)", "val stops = listOf(stop, stop.copy(alpha = 0f))",
       "Modifier.background(Brush.verticalGradient(stops))", "Brush.verticalGradient(stops, startY = -up,",
       "if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF",
       "else (node.groundTops shr 24) and 0xFF_FFFF", "KayaPictureDoor(node)", "ContentScale.Crop.computeScaleFactor(painter.intrinsicSize, area)",
@@ -79,7 +79,7 @@ DOORS = [
 READS = [
     ("expect_ground's reader", "private fun kayaGroundRead(activity: ComponentActivity, spec: String): String? {",
      ["kayaSkinShot(activity)", "kayaContrast(mid, kayaRgb(tokens.text))", "contrast >= 4.5",
-      "kayaGap(bottom, ground) <= KAYA_SKIN_TOLERANCE", "kayaPictureAt(nodeId, got.second,"]),
+      "kayaGap(bottom, under ?: ground) <= KAYA_SKIN_TOLERANCE", "val under = shot.at(x, box.bottom + u)", "kayaPictureAt(nodeId, got.second,"]),
     ("expect_shape's reader", "private fun kayaShapeRead(activity: ComponentActivity, spec: String): String? {",
      ["kayaSkinShot(activity)", "shot.at(box.left + 1 * u, box.top + 1 * u)", "shot.at(box.left + 6 * u, box.top + 6 * u)",
       "shot.at(box.left - 4 * u, box.center.y)", "shot.at(box.left - 4 * u, box.top + 1 * u)",
@@ -250,10 +250,10 @@ CUTS = [
      r"if \(!node\.selected\) KayaPresent\.emitSelectionChanged\(node\.tag\)\n(\s+)KayaPresent\.emitActivated\(node\.tag\)",
      r"KayaPresent.emitActivated(node.tag)\n\1if (!node.selected) KayaPresent.emitSelectionChanged(node.tag)",
      "press door lacks if (!node.selected)"),
-    ("Compose: the gradient's top stop a literal", r"listOf\(Color\(0xFF00_0000L or top\), scheme\.background\)",
-     "listOf(Color(0xFF5B2A86), scheme.background)", "gradient and image ground lacks"),
-    ("Compose: the bottom stop a literal", r"listOf\(Color\(0xFF00_0000L or top\), scheme\.background\)",
-     "listOf(Color(0xFF00_0000L or top), Color(0xFF141218))", "gradient and image ground lacks"),
+    ("Compose: the gradient's top stop a literal", r"val stop = Color\(0xFF00_0000L or top\)",
+     "val stop = Color(0xFF5B2A86)", "gradient and image ground lacks"),
+    ("Compose: the bottom stop opaque", r"listOf\(stop, stop\.copy\(alpha = 0f\)\)",
+     "listOf(stop, scheme.background)", "gradient and image ground lacks"),
     ("Compose: the gradient's stop unclamped", r"node\.groundTops and 0xFF_FFFF", "node.color and 0xFF_FFFF",
      "gradient and image ground lacks"),
     ("Compose: the image ground stretched", r"ContentScale\.Crop\.computeScaleFactor\(painter\.intrinsicSize, area\)",

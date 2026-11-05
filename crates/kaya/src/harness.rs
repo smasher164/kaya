@@ -1136,6 +1136,10 @@ pub enum Step {
     /// right, within [`GROUND_COLOR_TOLERANCE`] of the colour for the mode the
     /// window reads (docs/media-player-plan.md M16 (35)).
     ExpectGroundColor(Target, u32, u32),
+    /// `expect_ground_fade <container>`: the gradient ground's last row, 4
+    /// units in from the right, within [`GROUND_FADE_TOLERANCE`] of the page
+    /// one unit under the container (docs/styling-pass-plan.md Y2's fade).
+    ExpectGroundFade(Target),
     /// `expect_fill_color <container> "RRGGBB on white|black"`: a colour
     /// fill's drawn surface at `expect_fill`'s probe within
     /// [`GROUND_COLOR_TOLERANCE`] of the colour the app chose, and the text on
@@ -1417,6 +1421,7 @@ impl Step {
             | Step::ExpectTextLines(t, _, _)
             | Step::ExpectWidth(t, _)
             | Step::ExpectGroundColor(t, _, _)
+            | Step::ExpectGroundFade(t)
             | Step::ExpectFillColor(t, _, _)
             | Step::ExpectAx(t, _)
             | Step::ExpectAxHint(t, _)
@@ -1782,6 +1787,7 @@ impl Step {
             Step::ExpectGap { .. } => true,
             Step::ExpectNoOverlap => true,
             Step::ExpectGroundColor { .. } => true,
+            Step::ExpectGroundFade { .. } => true,
             Step::ExpectFillColor { .. } => true,
             Step::MenuActivate { .. } => false,
             Step::ContextOpen { .. } => false,
@@ -2401,6 +2407,12 @@ pub(crate) fn last_drop_x(widget: u64) -> Option<f64> {
 /// (docs/media-player-plan.md M16 (35)); the two interpreters carry the same number.
 pub const GROUND_COLOR_TOLERANCE: u32 = 15;
 
+/// expect_ground_fade's per-channel tolerance, tighter than
+/// GROUND_COLOR_TOLERANCE because both pixels come from one capture
+/// (docs/traps.md, a gradient ground's dark edge inside the colour tolerance);
+/// the two interpreters carry the same number.
+pub const GROUND_FADE_TOLERANCE: u32 = 4;
+
 /// The `expect_no_overlap` rule (docs/media-player-plan.md M16 (34)): the first two
 /// frames in one window whose intersection is wider and taller than `tolerance`.
 /// The two interpreters carry the same rule and sentence.
@@ -2919,7 +2931,8 @@ pub trait Stage: Send + 'static {
     fn back_help(&self, window: u64) -> String;
     /// A container's ground off its pixels (§5.1): `gradient` when the
     /// probe 4 units in at the top is the clamped stop and the one 4 units in
-    /// at the bottom the window ground and the midpoint holds 4.5:1 against
+    /// at the bottom the page one unit under the container (the window ground
+    /// when nothing is under it) and the midpoint holds 4.5:1 against
     /// the appearance's text, `image` when the top probe is the picture,
     /// `none` otherwise; then what it sampled, for the failure sentence.
     fn ground_read(&self, target: Target) -> String;
@@ -3343,6 +3356,10 @@ pub trait Stage: Send + 'static {
     /// A container ground's drawn top as 0xRRGGBB and whether the window reads
     /// dark, off the window's pixels (docs/media-player-plan.md M16 (35)).
     fn ground_top(&self, target: Target) -> Result<(u32, bool), String>;
+    /// A container ground's last row and the page one unit under the
+    /// container, 4 units in from its right edge, each 0xRRGGBB, and whether
+    /// the window reads dark, off the window's pixels (Y2's fade).
+    fn ground_fade(&self, target: Target) -> Result<(u32, u32, bool), String>;
     /// A colour fill's drawn surface at `expect_fill`'s probe (4 units inside
     /// the right edge at mid-height) and the ink on it (the pixel in the
     /// container's frame farthest from that surface), each 0xRRGGBB off the
@@ -5169,6 +5186,13 @@ pub fn parse(script: &str) -> Result<Vec<Step>, String> {
                     return Err(format!("expect_ground_color wants six hex digits per colour: {line:?}"));
                 };
                 Step::ExpectGroundColor(parse_target(target)?, light, dark)
+            }
+            "expect_ground_fade" => {
+                let target = rest.trim();
+                if target.is_empty() || target.contains(char::is_whitespace) {
+                    return Err(format!("expect_ground_fade wants a container: {line:?}"));
+                }
+                Step::ExpectGroundFade(parse_target(target)?)
             }
             "expect_fill_color" => {
                 let (target, text) = rest
@@ -8903,6 +8927,24 @@ fn run_with_log(
                     Err(why) => Err(format!("{} ground top unread: {why}", target_spec(t))),
                 }
             })),
+            Step::ExpectGroundFade(t) => Some(poll(|| match stage.ground_fade(*t) {
+                Ok((last, under, is_dark)) => {
+                    let meets = (0..3).all(|k| {
+                        let (a, b) = ((last >> (8 * k)) & 0xFF, (under >> (8 * k)) & 0xFF);
+                        a.abs_diff(b) <= GROUND_FADE_TOLERANCE
+                    });
+                    if meets {
+                        Ok(format!("{} ground fades into the page", target_spec(t)))
+                    } else {
+                        let mode = if is_dark { "dark" } else { "light" };
+                        Err(format!(
+                            "{} ground ends at {last:06X} on its last row over the page's {under:06X} under it in the {mode}",
+                            target_spec(t)
+                        ))
+                    }
+                }
+                Err(why) => Err(format!("{} ground fade unread: {why}", target_spec(t))),
+            })),
             Step::ExpectFillColor(t, fill, white) => Some(poll(|| {
                 match stage.fill_color(*t) {
                     Ok((got, ink)) => {
@@ -12244,6 +12286,9 @@ mod tests {
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
         }
+        fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
+            Ok((0xFFFFFF, 0xFFFFFF, false))
+        }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
         }
@@ -13725,6 +13770,9 @@ mod tests {
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
         }
+        fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
+            Ok((0xFFFFFF, 0xFFFFFF, false))
+        }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
         }
@@ -14313,6 +14361,9 @@ mod tests {
         }
         fn ground_top(&self, _: Target) -> Result<(u32, bool), String> {
             Ok((0x673946, false))
+        }
+        fn ground_fade(&self, _: Target) -> Result<(u32, u32, bool), String> {
+            Ok((0xFFFFFF, 0xFFFFFF, false))
         }
         fn fill_color(&self, _: Target) -> Result<(u32, u32), String> {
             Ok((0xF2B01E, 0x000000))
@@ -15713,5 +15764,8 @@ mod cells_even_tests {
             [Step::ExpectGroundColor(_, 0x673946, 0x3B2128)]
         ));
         assert!(parse("expect_ground_color column@header \"light 673946\"").is_err());
+        assert!(matches!(parse("expect_ground_fade column@header").expect("parses").as_slice(), [Step::ExpectGroundFade(_)]));
+        assert!(parse("expect_ground_fade").is_err());
+        assert!(parse("expect_ground_fade column@header column@hero").is_err());
     }
 }

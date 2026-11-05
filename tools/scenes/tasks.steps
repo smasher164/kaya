@@ -19,6 +19,7 @@ expect_section_symbol "Inbox" "home"
 # tap opens that list. The stops and the text colours are kaya's: the clamp
 # and the contrast choice, read off the pixels.
 expect_ground column@inbox_header gradient
+expect_ground_fade column@inbox_header
 expect_ground_color column@inbox_header "light 9CBFFF dark 2D65D7"
 expect label@inbox_heading "Inbox"
 expect label@inbox_count "2 in inbox"

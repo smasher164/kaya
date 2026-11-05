@@ -1061,6 +1061,9 @@ fun kayaColorFillPair(packed: Long): Pair<Color, Color> = Pair(
 /** harness.rs's FILL_INK_INSET, in dp. */
 const val KAYA_FILL_INK_INSET = 10f
 
+/** harness.rs's GROUND_FADE_TOLERANCE. */
+const val KAYA_GROUND_FADE_TOLERANCE = 4
+
 /** Material's hover state layer, 8% of onSurface: what the ripple draws on
  * hover, held here for the reader's expectation only. */
 const val KAYA_HOVER_LAYER = 0.08f
@@ -1090,7 +1093,7 @@ fun kayaFilledSurface(node: KayaNode): Modifier {
 }
 
 /** A container's ground (docs/styling-pass-plan.md Y2, Y3): the core's
- * clamped stop for this appearance fading into the scheme's background, or
+ * clamped stop for this appearance fading to itself at alpha 0, or
  * the picture through the image's own door, covering the container. */
 @Composable
 fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
@@ -1098,8 +1101,9 @@ fun kayaGroundSurface(node: KayaNode): Modifier = when (node.ground) {
         val scheme = MaterialTheme.colorScheme
         val top = if (scheme.background.luminance() < 0.5f) node.groundTops and 0xFF_FFFF
             else (node.groundTops shr 24) and 0xFF_FFFF
-        val stops = listOf(Color(0xFF00_0000L or top), scheme.background)
-        val reach = kayaGroundReach(node) { Pair(stops[0].toArgb(), stops[1].toArgb()) }
+        val stop = Color(0xFF00_0000L or top)
+        val stops = listOf(stop, stop.copy(alpha = 0f))
+        val reach = kayaGroundReach(node) { Pair(stop.toArgb(), scheme.background.toArgb()) }
         if (reach == null) {
             Modifier.background(Brush.verticalGradient(stops))
         } else {
@@ -9206,6 +9210,40 @@ object KayaCompose {
         return Pair(Pair((rgb[0] shl 16) or (rgb[1] shl 8) or rgb[2], tokens.dark), "")
     }
 
+    /** expect_ground_fade's read (docs/styling-pass-plan.md Y2): the ground's
+     * last row and the page one unit under the container, 4 units in from its
+     * right edge, each RRGGBB, and whether the window reads dark; or why not. */
+    private fun kayaGroundFadeRead(activity: ComponentActivity, spec: String): Pair<Triple<Int, Int, Boolean>?, String> {
+        val found = onUi(activity) {
+            kayaContainerTarget(spec)?.let { node ->
+                Pair(kayaFillBoxes[node.id] ?: kayaNodeFrames[node.id]?.let {
+                    android.graphics.Rect(it.left.toInt(), it.top.toInt(), it.right.toInt(), it.bottom.toInt())
+                }, node.id)
+            }
+        } ?: return Pair(null, "no such target")
+        val (box, nodeId) = found
+        if (box == null) return Pair(null, "<no laid-out frame>")
+        val tokens = kayaSkinTokens ?: return Pair(null, "<no skin tokens resolved>")
+        val shot = kayaSkinShot(activity) ?: return Pair(null, "<no window pixels>")
+        val u = shot.density
+        val probed = androidx.compose.ui.geometry.Rect(
+            box.left.toFloat(), box.top.toFloat(), box.right.toFloat(), box.bottom.toFloat(),
+        )
+        onUi(activity) { kayaSkinUnseen(nodeId, probed, u) }?.let { return Pair(null, it) }
+        val x = box.right - 4 * u
+        val (lastY, underY) = Pair(box.bottom - 1f, box.bottom + u)
+        val last = shot.at(x, lastY)
+        val under = shot.at(x, underY)
+        if (last == null || under == null) {
+            return Pair(null, "<the probes at y $lastY and $underY fall outside the window's ${shot.bitmap.height} pixels: $box>")
+        }
+        fun rgb(c: DoubleArray): Int {
+            val b = c.map { Math.round(it * 255).toInt().coerceIn(0, 255) }
+            return (b[0] shl 16) or (b[1] shl 8) or b[2]
+        }
+        return Pair(Triple(rgb(last), rgb(under), tokens.dark), "")
+    }
+
     private fun kayaGroundRead(activity: ComponentActivity, spec: String): String? {
         val found = onUi(activity) {
             kayaContainerTarget(spec)?.let { node ->
@@ -9230,7 +9268,9 @@ object KayaCompose {
         val mid = shot.at(x, box.exactCenterY())
         if (top == null || bottom == null || mid == null) return "<the probes fall outside the window: $box>"
         val ground = kayaRgb(tokens.ground)
-        val seen = "top ${kayaHexOf(top)}, middle ${kayaHexOf(mid)}, bottom ${kayaHexOf(bottom)}, ground ${kayaHexOf(ground)}"
+        val under = shot.at(x, box.bottom + u)
+        val seen = "top ${kayaHexOf(top)}, middle ${kayaHexOf(mid)}, bottom ${kayaHexOf(bottom)}, ground ${kayaHexOf(ground)}" +
+            (under?.let { ", under ${kayaHexOf(it)}" } ?: ", nothing under it")
         if (kayaGap(top, ground) <= KAYA_SKIN_TOLERANCE) return "none ($seen)"
         val art = kayaPictureAt(nodeId, got.second, box.width() - 4 * u, 4 * u, box.width().toFloat(), box.height().toFloat())
         if (art != null && kayaGap(art, top) <= KAYA_SKIN_TOLERANCE * 2) {
@@ -9241,7 +9281,9 @@ object KayaCompose {
         val want = kayaRgb(stop.toInt())
         val contrast = kayaContrast(mid, kayaRgb(tokens.text))
         val detail = "$seen, the clamped stop ${kayaHexOf(want)}, text ${String.format("%.1f", contrast)}:1 at the middle"
-        if (kayaGap(top, want) <= KAYA_SKIN_TOLERANCE && kayaGap(bottom, ground) <= KAYA_SKIN_TOLERANCE &&
+        // The bottom fades into the page drawn under the container (docs/traps.md,
+        // a gradient ground's dark edge inside the colour tolerance).
+        if (kayaGap(top, want) <= KAYA_SKIN_TOLERANCE && kayaGap(bottom, under ?: ground) <= KAYA_SKIN_TOLERANCE &&
             contrast >= 4.5
         ) {
             return "gradient ($detail)"
@@ -16467,6 +16509,31 @@ private fun kayaDockHeightRead(activity: ComponentActivity): String = onUi(activ
                                 else -> failures.add(
                                     "${parts[1]} ground top %06X in the %s, wanted %06X".format(
                                         read.first, if (read.second) "dark" else "light", if (read.second) dark else light))
+                            }
+                        }
+                    }
+                    "expect_ground_fade" -> {
+                        // harness.rs's ExpectGroundFade, the same sentences and tolerance.
+                        if (parts.size != 2) {
+                            failures.add("expect_ground_fade wants a container: $line")
+                        } else {
+                            fun meets(a: Int, b: Int) = (0..2).all { k ->
+                                Math.abs(((a shr (8 * k)) and 0xFF) - ((b shr (8 * k)) and 0xFF)) <= KAYA_GROUND_FADE_TOLERANCE
+                            }
+                            var got = kayaGroundFadeRead(activity, parts[1])
+                            val deadline = System.currentTimeMillis() + 5000
+                            while (System.currentTimeMillis() < deadline && got.first?.let { !meets(it.first, it.second) } == true) {
+                                Thread.sleep(100)
+                                got = kayaGroundFadeRead(activity, parts[1])
+                            }
+                            val read = got.first
+                            when {
+                                read == null && got.second == "no such target" -> failures.add("no such target ${parts[1]}")
+                                read == null -> failures.add("${parts[1]} ground fade unread: ${got.second}")
+                                meets(read.first, read.second) -> observed.add("${parts[1]} ground fades into the page")
+                                else -> failures.add(
+                                    "${parts[1]} ground ends at %06X on its last row over the page's %06X under it in the %s".format(
+                                        read.first, read.second, if (read.third) "dark" else "light"))
                             }
                         }
                     }

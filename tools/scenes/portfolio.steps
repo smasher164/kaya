@@ -11,6 +11,7 @@ expect label#0 "Portfolio: $10026.50"
 expect label#1 "-$15.88 (-0.16%) today"
 expect_fill_color column@day_pill "D93A2B on black"
 expect_ground column@hero gradient
+expect_ground_fade column@hero
 expect_ground_color column@hero "light FFA293 dark D03729"
 expect label#2 "Transactions: 15000"
 expect label#3 "Brokerage"

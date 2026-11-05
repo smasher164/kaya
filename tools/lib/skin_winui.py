@@ -1,7 +1,7 @@
 """docs/styling-pass-plan.md Y2-Y9, §3's WinUI row: the WinUI arm's doors,
 loaded by tools/lib/skin_routes.py (run from tools/check-verbs.py).
 
-A gradient whose bottom stop is a literal draws the same header on the lane's
+A gradient whose bottom stop is opaque draws the same header on the lane's
 light VM, a High Contrast arm that paints the album anyway is seen by no lane
 (no lane runs High Contrast), an overlay drawn in kaya's own alpha reads as
 overlay over the art, a hover painted by kaya passes the nearest-candidate
@@ -24,7 +24,7 @@ MODEL = r"shape_of\(|\.shapes\b|\.tints\b|\.selected\b|holds_widget\("
 DOORS = [
     ("gradient", "fn gradient_brush(dark: bool, packed: i64) -> windows_core::Result<Brush> {",
      ["if high_contrast() {", r'Color=\"{ThemeResource SystemColorWindowColor}\"',
-      'let ground = rgb_of(resolve("ApplicationPageBackgroundThemeBrush", dark)?);',
+      r'Color=\"#FF{top:06X}\"', r'Color=\"#00{top:06X}\"',
       "packed & 0xFF_FFFF", "(packed >> 24) & 0xFF_FFFF", r'StartPoint=\"0,0\" EndPoint=\"0,1\"'],
      ["SolidColorBrush", "Colors::", "Color {"]),
     ("ground's paint", "fn paint_ground(core: &CoreState, id: WidgetId) -> windows_core::Result<()> {",
@@ -92,7 +92,7 @@ DOORS = [
 # (label, opener, what the block must hold) -- and never MODEL
 READS = [
     ("expect_ground's reader", "pub(in super::super) fn ground(core: &CoreState, t: crate::harness::Target)",
-     ["Shot::take(core)", "let ratio = contrast(mid, shot.text);", "&& ratio >= 4.5", "gap(bottom, shot.ground) <= TOLERANCE",
+     ["Shot::take(core)", "let ratio = contrast(mid, shot.text);", "&& ratio >= 4.5", "gap(bottom, under.unwrap_or(shot.ground)) <= TOLERANCE", "let under = shot.at(x, fy + fh + 1.0);",
       "picture_at(id, fw - 4.0, 4.0, fw, fh)"]),
     ("expect_shape's reader", "pub(in super::super) fn shape(core: &CoreState, t: crate::harness::Target)",
      ["Shot::take(core)", "shot.at(fx - 4.0, fy + fh / 2.0)", "shot.at(fx + 1.0, fy + 1.0)", "shot.at(fx + 6.0, fy + 6.0)",
@@ -256,14 +256,11 @@ CUTS = [
      "a table row keeps Fluent's vertical room (M19 G) no longer holds"),
     ("WinUI: expect_row_centered passing an off-centre cell (M19)", r"if off\.abs\(\) > 2\.0 => format!\(", "if off.abs() > 200.0 => format!(",
      "expect_row_centered's reader lacks"),
-    ("WinUI: the gradient's bottom stop a literal",
-     r'let ground = rgb_of\(resolve\("ApplicationPageBackgroundThemeBrush", dark\)\?\);', "let ground = 0x202020u32;",
-     "gradient lacks let ground"),
     ("WinUI: the album painted in High Contrast", r"if high_contrast\(\) \{", "if false {", "gradient lacks if high_contrast"),
     ("WinUI: a SolidColorBrush in the gradient",
      r"(fn gradient_brush\(dark: bool, packed: i64\) -> windows_core::Result<Brush> \{\n)",
      r"\1    let _ = SolidColorBrush::new();\n", "gradient names SolidColorBrush"),
-    ("WinUI: a raw bottom stop", r'Color=\\"#FF\{ground:06X\}\\"', r'Color=\\"#FF202020\\"', "raw colour #FF202020"),
+    ("WinUI: an opaque raw bottom stop", r'Color=\\"#00\{top:06X\}\\"', r'Color=\\"#FF202020\\"', "raw colour #FF202020"),
     ("WinUI: the overlay in kaya's alpha", r"\{ThemeResource AcrylicInAppFillColorDefaultBrush\}", "#99000000",
      "overlay panel lacks {ThemeResource AcrylicInAppFillColorDefaultBrush}"),
     ("WinUI: the overlay's text left light-themed", r"\n(\s+)grid\.SetRequestedTheme\(ElementTheme::Dark\)\?;", "",

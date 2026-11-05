@@ -26,6 +26,14 @@
 #define GROUND_COLOR_TOLERANCE 15
 
 /**
+ * expect_ground_fade's per-channel tolerance, tighter than
+ * GROUND_COLOR_TOLERANCE because both pixels come from one capture
+ * (docs/traps.md, a gradient ground's dark edge inside the colour tolerance);
+ * the two interpreters carry the same number.
+ */
+#define GROUND_FADE_TOLERANCE 4
+
+/**
  * expect_now_playing_art's tolerance per channel: the system's own copy is
  * rescaled and re-encoded (Android's is 300 px for a 600 px cover), and
  * the scene's two covers differ by more than 100 in every channel.

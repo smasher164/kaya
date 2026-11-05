@@ -137,10 +137,6 @@ pub(super) fn resolve(key: &str, dark: bool) -> windows_core::Result<[f64; 4]> {
     Ok([c.R, c.G, c.B, c.A].map(f64::from))
 }
 
-fn rgb_of(c: [f64; 4]) -> u32 {
-    (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32
-}
-
 /// The skin's props. Answers whether this arm took the prop.
 pub(super) fn set_prop(core: &mut CoreState, id: WidgetId, prop: Prop, value: &Value) -> windows_core::Result<bool> {
     let is_container = container(core, id).is_some();
@@ -240,9 +236,9 @@ pub(super) fn forget(core: &mut CoreState, id: WidgetId) {
 // --- Y2, Y3: grounds ---------------------------------------------------
 
 /// The gradient's top stop is the core's clamped colour for the appearance
-/// (light in bits 24-47, dark in 0-23), its bottom stop the window ground
-/// resolved from its token at this moment; in High Contrast both stops are
-/// the window colour, flat, as a {ThemeResource}.
+/// (light in bits 24-47, dark in 0-23), its bottom stop the same colour at
+/// alpha 0 (Y2's fade); in High Contrast both stops are the window colour,
+/// flat, as a {ThemeResource}.
 fn gradient_brush(dark: bool, packed: i64) -> windows_core::Result<Brush> {
     let stops = if high_contrast() {
         "<GradientStop Offset=\"0\" Color=\"{ThemeResource SystemColorWindowColor}\"/>\
@@ -250,10 +246,9 @@ fn gradient_brush(dark: bool, packed: i64) -> windows_core::Result<Brush> {
             .to_owned()
     } else {
         let top = if dark { packed & 0xFF_FFFF } else { (packed >> 24) & 0xFF_FFFF };
-        let ground = rgb_of(resolve("ApplicationPageBackgroundThemeBrush", dark)?);
         format!(
             "<GradientStop Offset=\"0\" Color=\"#FF{top:06X}\"/>\
-             <GradientStop Offset=\"1\" Color=\"#FF{ground:06X}\"/>"
+             <GradientStop Offset=\"1\" Color=\"#00{top:06X}\"/>"
         )
     };
     XamlReader::Load(&HSTRING::from(format!(
@@ -1235,6 +1230,35 @@ pub(super) mod read {
         Ok(Ok(((b[0] << 16) | (b[1] << 8) | b[2], shot.dark)))
     }
 
+    /// expect_ground_fade's read (Y2's fade): the ground's last row and the
+    /// page one unit under the container, 4 units in from its right edge.
+    pub(in super::super) fn ground_fade(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<Result<(u32, u32, bool), String>> {
+        let Some(element) = target_element(core, t)? else { return Ok(Err("<no such target>".into())) };
+        let shot = match Shot::take(core) {
+            Ok(shot) => shot,
+            Err(why) => return Ok(Err(format!("<no window pixels: {why}>"))),
+        };
+        let Some((fx, fy, fw, fh)) = shot.drawn(&element) else { return Ok(Err("<no laid-out frame>".into())) };
+        if fw <= 8.0 || fh <= 16.0 {
+            return Ok(Err(format!("<no laid-out frame: {fw}x{fh}>")));
+        }
+        if let Some(why) = shot.unseen(&element, [fx, fy, fw, fh])? {
+            return Ok(Err(why));
+        }
+        let (x, last_y, under_y) = (fx + fw - 4.0, fy + fh - 1.0 / shot.scale, fy + fh + 1.0);
+        let (Some(last), Some(under)) = (shot.at(x, last_y), shot.at(x, under_y)) else {
+            let tall = shot.root.cast::<FrameworkElement>()?.ActualHeight()?;
+            return Ok(Err(format!(
+                "<the probes at y {last_y} and {under_y} fall outside the window's {tall} units: {fx},{fy} {fw}x{fh}>"
+            )));
+        };
+        let rgb = |c: [f64; 3]| {
+            let b = c.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u32);
+            (b[0] << 16) | (b[1] << 8) | b[2]
+        };
+        Ok(Ok((rgb(last), rgb(under), shot.dark)))
+    }
+
     pub(in super::super) fn ground(core: &CoreState, t: crate::harness::Target) -> windows_core::Result<String> {
         let Some(id) = target_widget_id(core, t).map(WidgetId) else { return Ok("<no such target>".into()) };
         let Some(element) = target_element(core, t)? else { return Ok("<no such target>".into()) };
@@ -1254,9 +1278,11 @@ pub(super) mod read {
         else {
             return Ok(format!("<the probes fall outside the window: {fx},{fy} {fw}x{fh}>"));
         };
+        let under = shot.at(x, fy + fh + 1.0);
         let seen = format!(
-            "top {}, middle {}, bottom {}, ground {}",
-            hex(top), hex(mid), hex(bottom), hex(shot.ground)
+            "top {}, middle {}, bottom {}, ground {}{}",
+            hex(top), hex(mid), hex(bottom), hex(shot.ground),
+            under.map_or_else(|| ", nothing under it".to_owned(), |u| format!(", under {}", hex(u)))
         );
         if gap(top, shot.ground) <= TOLERANCE {
             return Ok(format!("none ({seen})"));
@@ -1273,7 +1299,9 @@ pub(super) mod read {
         let want = [(stop >> 16) & 0xFF, (stop >> 8) & 0xFF, stop & 0xFF].map(|v| v as f64 / 255.0);
         let ratio = contrast(mid, shot.text);
         let detail = format!("{seen}, the clamped stop {}, text {ratio:.1}:1 at the middle", hex(want));
-        if gap(top, want) <= TOLERANCE && gap(bottom, shot.ground) <= TOLERANCE && ratio >= 4.5 {
+        // The bottom fades into the page drawn under the container (docs/traps.md,
+        // a gradient ground's dark edge inside the colour tolerance).
+        if gap(top, want) <= TOLERANCE && gap(bottom, under.unwrap_or(shot.ground)) <= TOLERANCE && ratio >= 4.5 {
             return Ok(format!("gradient ({detail})"));
         }
         Ok(format!("unmatched ({detail})"))

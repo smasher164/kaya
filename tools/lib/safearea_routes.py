@@ -265,7 +265,7 @@ NATIVE = [
     # appearances the clamped header and the page agree on the icons, so a
     # claim that outlived its screen is green on every leg.
     (COMPOSE, "Compose's gradient ground runs through the safe area it touches",
-     "val reach = kayaGroundReach(node) { Pair(stops[0].toArgb(), stops[1].toArgb()) }"),
+     "val reach = kayaGroundReach(node) { Pair(stop.toArgb(), scheme.background.toArgb()) }"),
     # docs/media-player-plan.md M15: an image ground does as a gradient does, and
     # claims the bars with what its picture shows under them; the grounds phone
     # tails read the reach and the icons.
@@ -650,7 +650,7 @@ def run(g):
     ]
     cuts += [
         ("Compose's gradient stopping at the safe area, as shipped", COMPOSE,
-         r"val reach = kayaGroundReach\(node\) \{ Pair\(stops\[0\]\.toArgb\(\), stops\[1\]\.toArgb\(\)\) \}",
+         r"val reach = kayaGroundReach\(node\) \{ Pair\(stop\.toArgb\(\), scheme\.background\.toArgb\(\)\) \}",
          "val reach: Pair<WindowInsets, BooleanArray>? = null", "Compose's gradient ground runs through"),
         ("Compose's image ground stopping at the safe area, as shipped", COMPOSE,
          r"val reach = kayaGroundReach\(node\) \{ ext ->",

@@ -15594,6 +15594,42 @@ private func kayaRunScript(_ script: String) {
                         failures.append(String(format: "%@ ground top %06X in the %@, wanted %06X", String(parts[1]), read.0, read.1 ? "dark" : "light", want))
                     }
                 }
+            case "expect_ground_fade":
+                // harness.rs's ExpectGroundFade, the same sentences and tolerance.
+                guard parts.count == 2 else {
+                    failures.append("expect_ground_fade wants a container: \(line)")
+                    break
+                }
+                func fadeRead() -> ((UInt32, UInt32, Bool)?, String)? {
+                    DispatchQueue.main.sync { () -> ((UInt32, UInt32, Bool)?, String)? in
+                        guard let node = kayaTarget(parts[1], "column", kayaScene.columns)
+                            ?? kayaTarget(parts[1], "row", kayaScene.rows)
+                        else { return nil }
+                        return kayaGroundFadeRead(node)
+                    }
+                }
+                func meets(_ a: UInt32, _ b: UInt32) -> Bool {
+                    (0..<3).allSatisfy { (k: UInt32) in
+                        abs(Int((a >> (8 * k)) & 0xFF) - Int((b >> (8 * k)) & 0xFF)) <= kayaGroundFadeTolerance
+                    }
+                }
+                var fade = fadeRead()
+                let fadeDeadline = Date().addingTimeInterval(5)
+                while Date() < fadeDeadline, case let (read?, _)? = fade, !meets(read.0, read.1) {
+                    Thread.sleep(forTimeInterval: 0.1)
+                    fade = fadeRead()
+                }
+                switch fade {
+                case nil: failures.append("no such target \(parts[1])")
+                case let (read?, _)?:
+                    let mode = read.2 ? "dark" : "light"
+                    if meets(read.0, read.1) {
+                        observed.append("\(parts[1]) ground fades into the page")
+                    } else {
+                        failures.append(String(format: "%@ ground ends at %06X on its last row over the page's %06X under it in the %@", String(parts[1]), read.0, read.1, mode))
+                    }
+                case let (nil, why)?: failures.append("\(parts[1]) ground fade unread: \(why)")
+                }
             case "expect_no_overlap":
                 var (overlap, overlapCount) = DispatchQueue.main.sync { kayaOverlapReport() }
                 let overlapDeadline = Date().addingTimeInterval(5)
@@ -23387,7 +23423,6 @@ private struct KayaGroupedSections: View {
                             KayaRender(node: node, flexVertical: true, flexStretch: true)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .topLeading)
-                                .environment(\.kayaOnGroupedGround, true)
                         case .none:
                             EmptyView()
                         }
@@ -24530,19 +24565,6 @@ private struct KayaInFillKey: EnvironmentKey {
     static let defaultValue = false
 }
 
-private struct KayaOnGroupedGroundKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-extension EnvironmentValues {
-    /// Whether a grounded container stands on a grouped screen's ground,
-    /// which is then its gradient's bottom stop (D7.5, Y2).
-    var kayaOnGroupedGround: Bool {
-        get { self[KayaOnGroupedGroundKey.self] }
-        set { self[KayaOnGroupedGroundKey.self] = newValue }
-    }
-}
-
 extension EnvironmentValues {
     /// Whether a view sits on a filled or selected surface, whose foreground
     /// a label's tint yields to (docs/styling-pass-plan.md Y7).
@@ -24552,13 +24574,12 @@ extension EnvironmentValues {
     }
 }
 
-/// The platform's window ground, the gradient's bottom stop (Y2); on a
-/// grouped screen the screen's grouped ground (D7.5).
-@MainActor func kayaWindowGround(grouped: Bool = false) -> Color {
+/// The platform's window ground.
+@MainActor func kayaWindowGround() -> Color {
     #if os(macOS)
         Color(nsColor: .windowBackgroundColor)
     #else
-        Color(uiColor: grouped ? .systemGroupedBackground : .systemBackground)
+        Color(uiColor: .systemBackground)
     #endif
 }
 
@@ -24570,11 +24591,10 @@ private func kayaPackedRGB(_ rgb: Int64) -> Color {
 }
 
 /// A row's or column's ground: the core's clamped top stop for this
-/// appearance fading into the window ground, or a picture covering it.
+/// appearance fading to itself at alpha 0, or a picture covering it.
 struct KayaGroundSurface: ViewModifier {
     let node: KayaNode
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.kayaOnGroupedGround) private var grouped
 
     func body(content: Content) -> some View {
         switch node.ground {
@@ -24582,7 +24602,7 @@ struct KayaGroundSurface: ViewModifier {
             let top = scheme == .dark ? node.groundTops & 0xFF_FFFF : (node.groundTops >> 24) & 0xFF_FFFF
             content.background(
                 LinearGradient(
-                    colors: [kayaPackedRGB(top), kayaWindowGround(grouped: grouped)],
+                    colors: [kayaPackedRGB(top), kayaPackedRGB(top).opacity(0)],
                     startPoint: .top, endPoint: .bottom))
         case groundImage:
             let reach = kayaGroundEdges(node)
@@ -25320,6 +25340,9 @@ func kayaContrast(_ a: [Double], _ b: [Double]) -> Double {
 /// probe 4 units in has moved a little further toward its other stop).
 let kayaSkinTolerance = 0.06
 
+/// harness.rs's GROUND_FADE_TOLERANCE.
+let kayaGroundFadeTolerance = 4
+
 
 @MainActor func kayaSkinFrame(_ node: KayaNode) -> CGRect? {
     kayaAnchoredFrame(node.id) ?? kayaNodeFrames[node.id]
@@ -25587,6 +25610,27 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
     return ((b[0] << 16) | (b[1] << 8) | b[2], shot.dark)
 }
 
+/// expect_ground_fade's read (docs/styling-pass-plan.md Y2): the ground's
+/// last row and the page one unit under the container, 4 units in from its
+/// right edge, each 0xRRGGBB, and whether the window reads dark; or why not.
+@MainActor func kayaGroundFadeRead(_ node: KayaNode) -> ((UInt32, UInt32, Bool)?, String) {
+    guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16 else {
+        return (nil, "<no laid-out frame>")
+    }
+    if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    let x = frame.maxX - 4
+    guard let last = shot.at(CGPoint(x: x, y: frame.maxY - 1 / shot.scale)),
+        let below = shot.at(CGPoint(x: x, y: frame.maxY + 1))
+    else {
+        return (nil, "<the probes at y \(frame.maxY - 1 / shot.scale) and \(frame.maxY + 1) fall outside the window's \(CGFloat(shot.height) / shot.scale) points: \(kayaRectText(frame))>")
+    }
+    func rgb(_ c: [Double]) -> UInt32 {
+        (0..<3).reduce(UInt32(0)) { ($0 << 8) | UInt32(max(0, min(255, (c[$1] * 255).rounded()))) }
+    }
+    return ((rgb(last), rgb(below), shot.dark), "")
+}
+
 @MainActor func kayaGroundRead(_ node: KayaNode) -> String {
     guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 16 else {
         return "<no laid-out frame>"
@@ -25599,7 +25643,9 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
         let mid = shot.at(CGPoint(x: x, y: frame.midY))
     else { return "<the probes fall outside the window: \(frame)>" }
     let page = kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground
+    let under = shot.at(CGPoint(x: x, y: frame.maxY + 1))
     let seen = "top \(kayaHex(top)), middle \(kayaHex(mid)), bottom \(kayaHex(bottom)), ground \(kayaHex(page))"
+        + (under.map { ", under \(kayaHex($0))" } ?? ", nothing under it")
     // The nearer of the two answers when a dark picture's corner sits within
     // the tolerance of a dark ground (docs/traps.md, a dark picture's corner
     // read as the bare ground).
@@ -25619,7 +25665,9 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
     let want = [Double((stop >> 16) & 0xFF) / 255, Double((stop >> 8) & 0xFF) / 255, Double(stop & 0xFF) / 255]
     let contrast = kayaContrast(mid, shot.text)
     let detail = "\(seen), the clamped stop \(kayaHex(want)), text \(String(format: "%.1f", contrast)):1 at the middle"
-    if kayaColourGap(top, want) <= kayaSkinTolerance && kayaColourGap(bottom, page) <= kayaSkinTolerance
+    // The bottom fades into the page drawn under the container (Y2's fade;
+    // docs/traps.md, a gradient ground's dark edge inside the colour tolerance).
+    if kayaColourGap(top, want) <= kayaSkinTolerance && kayaColourGap(bottom, under ?? page) <= kayaSkinTolerance
         && contrast >= 4.5
     {
         return "gradient (\(detail))"
