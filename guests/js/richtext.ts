@@ -10,6 +10,7 @@ const app = new kaya.App();
 
 // BYTE-IDENTICAL to guests/rust/richtext.rs's DOC.
 const DOC = "Héllo world\nSecond line";
+const REPLACED = "First\nSecond";
 
 /** The core's spelling of runs (`expect_runs`), so the binding's document
  * and the core's mirror are compared as one string. */
@@ -61,6 +62,12 @@ function onPrefix(): void {
   runs.set(spell(editor.document().runs));
 }
 
+function onReplace(): void {
+  editor.setText(REPLACED);
+  editor.formatRange([8, 9], "block", kaya.Block.HEADING1);
+  runs.set(spell(editor.document().runs));
+}
+
 const { last, runs, editor } = app.window({ title: "richtext" }, () => {
   const last = kaya.signal("");
   const runs = kaya.signal("");
@@ -77,6 +84,7 @@ const { last, runs, editor } = app.window({ title: "richtext" }, () => {
       kaya.button("heading", { onClick: onHeading }); // button#4
       kaya.button("focus", { onClick: onFocus }); // button#5
       kaya.button("prefix", { onClick: onPrefix }); // button#6
+      kaya.button("replace", { onClick: onReplace }); // button#7
     });
     return editor;
   });

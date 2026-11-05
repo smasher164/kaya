@@ -384,6 +384,19 @@ function records(): Uint8Array[] {
   return _tx!;
 }
 
+// This transaction's plain text writes, so a widget made rich after its text
+// seeds its mirror with that text, as the core's does.
+let _plain: [Uint8Array[] | null, Map<number, string>] = [null, new Map()];
+
+function notePlainText(widget: number, text: string): void {
+  if (_plain[0] !== _tx) _plain = [_tx, new Map()];
+  _plain[1].set(widget, text);
+}
+
+function plainText(widget: number): string {
+  return _plain[0] === _tx ? (_plain[1].get(widget) ?? "") : "";
+}
+
 /** THE IMPLICIT TRANSACTION (docs/js-plan.md §4): a mutation with no
  * transaction open opens one and a microtask commits it — one
  * continuation, one atomic batch. Declarations never open one, and a
@@ -934,6 +947,7 @@ export class Handle {
    * none of that exists and the widget is the plain uncontrolled field.
    * Chains. */
   rich(on = true): this {
+    if (this instanceof Widget && !this.isNode) app()._mirrorRich(this.id, Boolean(on));
     records().push(wire.tx_set_rich(this.id, Boolean(on)));
     return this;
   }
@@ -1205,6 +1219,8 @@ export class Widget extends Handle {
   setText(text: string): this {
     this._live("setText()");
     records().push(wire.tx_set_text(this.id, textValue("setText", text)));
+    notePlainText(this.id, text);
+    app()._mirrorText(this.id, text);
     return this;
   }
 
@@ -5323,7 +5339,10 @@ function bindDocument(handle: Widget, field: unknown): void {
  * (docs/submit-plan.md S2); off, Return is the newline. */
 export function textarea(opts: TextAreaOptions = {}): Widget {
   const handle = widget(wire.KIND_TEXTAREA);
-  if (opts.text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
+  if (opts.text !== undefined) {
+    records().push(wire.tx_set_text(handle.id, textValue("textarea text", opts.text)));
+    notePlainText(handle.id, opts.text);
+  }
   if (opts.document !== undefined) bindDocument(handle, opts.document);
   else if (opts.rich === true) handle.rich(true);
   if (opts.submits === true) handle.submits(true);
@@ -5396,7 +5415,10 @@ export function label(opts: LabelOptions): Widget;
 export function label(a: string | LabelOptions, b?: LabelOptions): Widget {
   const [text, opts] = textOrOpts(a, b);
   const handle = widget(wire.KIND_LABEL);
-  if (text !== undefined) records().push(wire.tx_set_text(handle.id, textValue("label text", text)));
+  if (text !== undefined) {
+    records().push(wire.tx_set_text(handle.id, textValue("label text", text)));
+    notePlainText(handle.id, text);
+  }
   if (opts.bind !== undefined) bindText("label", handle, opts.bind);
   if (opts.rich === true) handle.rich(true);
   if (opts.href !== undefined) handle.href(opts.href);
@@ -7733,6 +7755,20 @@ export class App {
   /** @internal */
   _seedDocument(widget: number, document: Document): void {
     this._documents.set(widget, new Document(document.text, document.runs));
+  }
+
+  /** @internal The mirror lives while `rich` is on, as the core's does. */
+  _mirrorRich(widget: number, on: boolean): void {
+    if (!on) this._documents.delete(widget);
+    else if (!this._documents.has(widget)) this._documents.set(widget, new Document(plainText(widget)));
+  }
+
+  /** @internal A plain write on a rich widget is a whole document with no
+   * runs, as the core folds it (docs/traps.md, the binding's document after
+   * set_text). */
+  _mirrorText(widget: number, text: string): void {
+    const doc = this._documents.get(widget);
+    if (doc !== undefined && doc.text !== text) this._documents.set(widget, new Document(text));
   }
 
   /** @internal */

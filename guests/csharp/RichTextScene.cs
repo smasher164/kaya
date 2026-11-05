@@ -10,6 +10,7 @@ using System.Collections.Generic;
 static class RichTextScene
 {
     const string Doc = "Héllo world\nSecond line";
+    const string Replaced = "First\nSecond";
     const string Url = "https://kaya.dev";
 
     /// The core's spelling of runs (`expect_runs`), so the binding's
@@ -88,6 +89,12 @@ static class RichTextScene
                     tx.Button("prefix", onClick: t => // button#6
                     {
                         t.ApplyEdit(editor, Edit.Insert(TextRange.In(Doc, 0, 0), "> "));
+                        t.Write(runs, Spell(app.Document(editor).Runs));
+                    });
+                    tx.Button("replace", onClick: t => // button#7
+                    {
+                        t.SetText(editor, Replaced);
+                        t.FormatRange(editor, TextRange.In(Replaced, 8, 1), "block", BlockKind.Heading1.Name());
                         t.Write(runs, Spell(app.Document(editor).Runs));
                     });
                 });

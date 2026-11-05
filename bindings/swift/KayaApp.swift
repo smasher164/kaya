@@ -3332,6 +3332,23 @@ public final class KayaApp {
         documents[w.id] ?? KayaDocument()
     }
 
+    /// The mirror lives while `rich` is on, as the core's does.
+    fileprivate func mirrorRich(_ widget: UInt64, _ on: Bool, seed: String) {
+        if !on {
+            documents[widget] = nil
+        } else if documents[widget] == nil {
+            documents[widget] = KayaDocument(seed)
+        }
+    }
+
+    /// A plain write on a rich widget is a whole document with no runs, as
+    /// the core folds it (docs/traps.md, the binding's document after set_text).
+    fileprivate func mirrorText(_ widget: UInt64, _ text: String) {
+        if let doc = documents[widget], doc.text != text {
+            documents[widget] = KayaDocument(text)
+        }
+    }
+
     /// Seed from a write, so a read after `setDocument` answers it.
     fileprivate func seedDocument(_ widget: UInt64, _ document: KayaDocument) {
         documents[widget] = document
@@ -4474,6 +4491,9 @@ public final class KayaAppTx {
     // vanishes with no error (tools/check-tx-liveness.py).
     private var storage = KayaTx()
     private var closed = false
+    /// This transaction's plain text writes, so a widget made rich after its
+    /// text seeds its mirror with that text, as the core's does.
+    private var plainTexts: [UInt64: String] = [:]
     /// Whether undoable() has already named this batch — one name per
     /// step, and the marker is a head-of-batch singleton on the wire.
     private var named = false
@@ -4617,6 +4637,8 @@ public final class KayaAppTx {
 
     public func setText(_ w: KayaWidget, _ text: String) {
         tx.setText(w.id, text)
+        plainTexts[w.id] = text
+        app.mirrorText(w.id, text)
     }
 
     /// Declare the column header bar on a For's container. One title per
@@ -5132,6 +5154,7 @@ public final class KayaAppTx {
     /// `KayaApp.onEdit`.
     func setRich(_ w: KayaWidget, _ on: Bool = true) {
         tx.setRich(w.id, on)
+        app.mirrorRich(w.id, on, seed: plainTexts[w.id] ?? "")
     }
 
     /// Replace a `rich` textarea's whole document: echoes nothing and,
@@ -5198,7 +5221,7 @@ public final class KayaAppTx {
         formatRange(w, range, name, on ? kayaFlagValue : "false")
     }
 
-    func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ value: String) {
+    public func formatRange(_ w: KayaWidget, _ range: Range<Int>, _ name: String, _ value: String) {
         // A silent document write moves the fold, as applyEdit does
         // (docs/rich-text-plan.md §17).
         let at = app.rangedActBounds(w.id, range, name)

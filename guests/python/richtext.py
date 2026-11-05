@@ -12,6 +12,7 @@ app = kaya.App()
 
 # BYTE-IDENTICAL to guests/rust/richtext.rs's DOC.
 DOC = "Héllo world\nSecond line"
+REPLACED = "First\nSecond"
 
 
 def spell(runs):
@@ -71,6 +72,12 @@ def on_prefix():
     runs.set(spell(editor.document().runs))
 
 
+def on_replace():
+    editor.set_text(REPLACED)
+    editor.format_range(range(8, 9), "block", kaya.Block.HEADING1)
+    runs.set(spell(editor.document().runs))
+
+
 with app.window(title="richtext"):
     last = kaya.signal("")
     runs = kaya.signal("")
@@ -88,5 +95,6 @@ with app.window(title="richtext"):
             kaya.button("heading", on_click=on_heading)          # button#4
             kaya.button("focus", on_click=on_focus)              # button#5
             kaya.button("prefix", on_click=on_prefix)            # button#6
+            kaya.button("replace", on_click=on_replace)          # button#7
 
 sys.exit(app.run())

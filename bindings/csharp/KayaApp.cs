@@ -2838,6 +2838,20 @@ sealed class KayaApp
             ? new global::Document(doc.Text, new List<TextRun>(doc.Marks))
             : new global::Document("");
 
+    /// The mirror lives while `rich` is on, as the core's does.
+    internal void MirrorRich(ulong widget, string seed)
+    {
+        if (!documents.ContainsKey(widget)) documents[widget] = new global::Document(seed);
+    }
+
+    /// A plain write on a rich widget is a whole document with no runs, as
+    /// the core folds it (docs/traps.md, the binding's document after set_text).
+    internal void MirrorText(ulong widget, string text)
+    {
+        if (documents.TryGetValue(widget, out var doc) && doc.Text != text)
+            documents[widget] = new global::Document(text);
+    }
+
     internal void SeedDocument(ulong widget, Document document) =>
         documents[widget] = new global::Document(document.Text,
             new List<TextRun>(document.Marks));
@@ -4652,7 +4666,16 @@ sealed class Tx : IDisposable
             Records.Add(KayaWire.TxAddChild(p, id));
     }
 
-    public void SetText(Widget w, string text) => Records.Add(KayaWire.TxSetText(w.Id, text));
+    // This transaction's plain text writes, so a widget made rich after its
+    // text seeds its mirror with that text, as the core's does.
+    readonly Dictionary<ulong, string> plainTexts = new();
+
+    public void SetText(Widget w, string text)
+    {
+        plainTexts[w.Id] = text;
+        App.MirrorText(w.Id, text);
+        Records.Add(KayaWire.TxSetText(w.Id, text));
+    }
 
     public void BindText(Widget w, Signal s) => Records.Add(KayaWire.TxBindText(w.Id, s.Id));
 
@@ -5265,7 +5288,11 @@ sealed class Tx : IDisposable
         if (onChange != null) App.OnChange(w, onChange);
         if (onSubmit != null) App.OnSubmitted(w, onSubmit);
         if (grow is double g) SetGrow(w, g);
-        if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
+        if (rich)
+        {
+            App.MirrorRich(w.Id, plainTexts.GetValueOrDefault(w.Id, ""));
+            Records.Add(KayaWire.TxSetRich(w.Id, true));
+        }
         if (ownUndo) Records.Add(KayaWire.TxSetOwnUndo(w.Id, true));
         if (submits) Records.Add(KayaWire.TxSetSubmits(w.Id, true));
         return w;
@@ -5318,7 +5345,11 @@ sealed class Tx : IDisposable
         if (bind is Signal s) BindText(w, s);
         if (grow is double g) SetGrow(w, g);
         if (role is Role r) SetRole(w, r);
-        if (rich) Records.Add(KayaWire.TxSetRich(w.Id, true));
+        if (rich)
+        {
+            App.MirrorRich(w.Id, plainTexts.GetValueOrDefault(w.Id, ""));
+            Records.Add(KayaWire.TxSetRich(w.Id, true));
+        }
         if (tint is Tint t) SetTint(w, t);
         return w;
     }

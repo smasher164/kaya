@@ -11,6 +11,9 @@ import KayaApp
 docSource :: Text
 docSource = "Héllo world\nSecond line"
 
+replaced :: Text
+replaced = "First\nSecond"
+
 -- The core's spelling of runs (`expect_runs`), so the binding's document
 -- and the core's mirror are compared as one string.
 spell :: [Run] -> Text
@@ -68,6 +71,13 @@ main = kayaMain $ \app -> do
               -- holds the edit, the app's document takes it now
               buttonOn "prefix" $ do
                 submitTx app (applyEdit app editor (insertEdit 0 "> "))
+                doc <- document app editor
+                submitTx app (writeSignal runs (spell doc.runs)),
+              -- button#7 — a block act after a plain write
+              buttonOn "replace" $ do
+                submitTx app $ do
+                  setText editor replaced
+                  formatTextRange app editor (8, 9) "block" (Spelled "heading1")
                 doc <- document app editor
                 submitTx app (writeSignal runs (spell doc.runs))
             ]

@@ -2771,7 +2771,11 @@ foldRowDocument app (Node n) path0 f = do
 -- 'onEdit'. A textarea edits them; a label draws them read-only
 -- (docs\/rich-text-plan.md R8, §15).
 setRich :: Widget -> Bool -> Build ()
-setRich (Widget n) on = emitB (W.txSetRich n on)
+setRich (Widget n) on = emitBIO $ do
+  seed <- Map.findWithDefault "" n <$> readIORef plainTextsRef
+  modifyIORef' documentsRef $
+    if on then Map.insertWith (\_ old -> old) n (documentOf seed) else Map.delete n
+  return (W.txSetRich n on)
 
 -- | The app owns this textarea's history (docs\/rich-text-plan.md R6, §14):
 -- the platform's own stack goes off and Edit>Undo reaches the app through
@@ -2996,7 +3000,31 @@ selectionOfTail tail_ = case tail_ of
 -- label. LIVE WIDGETS ONLY — the same write on a template Node is the
 -- floor spelling 'setTextProp' (docs\/tpl-props-plan.md F3).
 setText :: Widget -> Text -> Build ()
-setText = setTextProp
+setText w@(Widget n) txt = do
+  setTextProp w txt
+  emitBIO (mirrorText n txt >> return mempty)
+
+-- | The rich mirror, process-wide as the core is ("one core per process"),
+-- so a plain write reaches it from a 'Build' that carries no 'App'.
+documentsRef :: IORef (Map.Map Word64 Document)
+documentsRef = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE documentsRef #-}
+
+-- | This transaction's plain text writes, so a widget made rich after its
+-- text seeds its mirror with that text, as the core's does; 'stageTx'
+-- empties it.
+plainTextsRef :: IORef (Map.Map Word64 Text)
+plainTextsRef = unsafePerformIO (newIORef Map.empty)
+{-# NOINLINE plainTextsRef #-}
+
+-- | A plain write on a rich widget is a whole document with no runs, as
+-- the core folds it (docs\/traps.md, the binding's document after set_text).
+mirrorText :: Word64 -> Text -> IO ()
+mirrorText n txt = do
+  modifyIORef' plainTextsRef (Map.insert n txt)
+  modifyIORef' documentsRef $ \docs -> case Map.lookup n docs of
+    Just doc | doc.text /= txt -> Map.insert n (documentOf txt) docs
+    _ -> docs
 
 bindText :: Widget -> Signal Text -> Build ()
 bindText (Widget w) (Signal s) = emitB (W.txBindText w s)
@@ -5763,6 +5791,7 @@ stageTx app (Build f) = do
   -- core — in record order, immediately before the submit whose handle table
   -- they fill.
   records <- s.bRecords
+  writeIORef plainTextsRef Map.empty
   writeIORef (app.appCounters) (s.bCounters)
   writeIORef (app.appModel) (s.bModel, s.bChildren)
   writeIORef (app.appFresh) (s.bFresh)
@@ -6554,7 +6583,7 @@ newApp =
     <*> newIORef Map.empty -- appNodeSubmits
     <*> newIORef Map.empty -- appWidgetSelects
     <*> newIORef Map.empty -- appNodeSelects
-    <*> newIORef Map.empty -- appDocuments
+    <*> pure documentsRef -- appDocuments
     <*> newIORef Map.empty -- appDocumentBinds
     <*> newIORef Map.empty -- appNodeEdits
     <*> newIORef Map.empty -- appNodeFormats

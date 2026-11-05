@@ -7,6 +7,13 @@
 expect_title "richtext"
 expect_runs textarea#0 ""
 expect_edit textarea#0 ""
+# A BLOCK ACT AFTER A PLAIN WRITE: set_text is a whole-document write with
+# no runs, and the app's Document follows it, so a heading over the second
+# paragraph snaps to that paragraph and not to the old text's first
+# (docs/traps.md, the binding's document after set_text).
+click button#7
+expect_runs textarea#0 "6:12 block=heading1"
+expect label#1 "6:12 block=heading1"
 # THE DECLARATION: text and runs in one write, the widget's whole content.
 click button#0
 expect_runs textarea#0 "0:6 bold|7:12 link=https://kaya.dev|13:24 block=heading2"

@@ -6,6 +6,7 @@
 open Kaya_app
 
 let doc_source = "Héllo world\nSecond line"
+let replaced = "First\nSecond"
 
 (* The core's spelling of runs ([expect_runs]), so the binding's document
    and the core's mirror are compared as one string. *)
@@ -91,6 +92,12 @@ let () =
                  button ~text:"prefix"
                    ~on_click:(fun () ->
                      apply_edit editor (Edit.insert 0 "> ");
+                     write runs ((spell (document editor).runs)));
+                 (* button#7 *)
+                 button ~text:"replace"
+                   ~on_click:(fun () ->
+                     set_text editor replaced;
+                     format_range editor (8, 9) "block" "heading1";
                      write runs ((spell (document editor).runs)));
                ];
            ]

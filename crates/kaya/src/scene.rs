@@ -4431,6 +4431,22 @@ impl Scene {
                                     }
                                 }
                             }
+                            // A plain write on a rich widget moves the mirror
+                            // HERE, in the batch's order, so a ranged act after
+                            // it in the same transaction reads the new text
+                            // (docs/traps.md, the binding's document after
+                            // set_text); absorb_text_writes then finds it moved.
+                            if let (Prop::Text, Value::Str(text)) = (prop, &v) {
+                                if let Some(doc) = self.rich.get_mut(&widget) {
+                                    if doc.text != *text {
+                                        doc.text = text.clone();
+                                        doc.runs.clear();
+                                        doc.queued.clear();
+                                        doc.selection = TextRange::new(0, 0);
+                                        self.refresh_selected(widget);
+                                    }
+                                }
+                            }
                             if prop == Prop::Columns {
                                 if let Value::F64(cols) = &v {
                                     self.authored_columns.insert(widget, *cols);
@@ -19815,6 +19831,27 @@ mod tests {
             value: Some("heading1".into()),
             range: Some(TextRange::new(0, 5)),
         }]);
+    }
+
+    /// docs/traps.md, the binding's document after set_text.
+    #[test]
+    fn a_block_act_after_a_plain_write_in_one_batch_snaps_to_the_new_text() {
+        let mut scene = Scene::new();
+        scene.apply(rich_editor(""));
+        scene.apply(vec![
+            TxOp::SetProperty {
+                widget: WidgetId(1),
+                prop: Prop::Text,
+                value: PropValue::Const(Value::Str("First\nSecond".into())),
+            },
+            TxOp::FormatText {
+                widget: WidgetId(1),
+                name: "block".into(),
+                value: Some("heading1".into()),
+                range: Some(TextRange::new(8, 9)),
+            },
+        ]);
+        assert_eq!(scene.rich_runs_string(WidgetId(1)).unwrap(), "6:12 block=heading1");
     }
 
     #[test]

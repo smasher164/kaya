@@ -14,6 +14,8 @@ import (
 
 const document = "Héllo world\nSecond line"
 
+const replaced = "First\nSecond"
+
 // spell is the core's spelling of runs (`expect_runs`), so the binding's
 // document and the core's mirror are compared as one string.
 func spell(runs []kaya.TextRun) string {
@@ -86,6 +88,11 @@ func App() *kaya.App {
 				})
 				tx.Button("prefix", func(tx *kaya.Tx) { // button#6
 					tx.ApplyEdit(editor, kaya.Insert(0, "> "))
+					tx.Write(runs, spell(app.Document(editor).Runs))
+				})
+				tx.Button("replace", func(tx *kaya.Tx) { // button#7
+					tx.SetText(editor, replaced)
+					tx.FormatRange(editor, kaya.TextRange{Start: 8, End: 9}, "block", string(kaya.Heading1))
 					tx.Write(runs, spell(app.Document(editor).Runs))
 				})
 			})

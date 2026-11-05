@@ -684,6 +684,9 @@ func (a *App) registerCollection(id uint64) {
 type Tx struct {
 	app     *App
 	records [][]byte
+	// This transaction's plain text writes, so a widget made rich after its
+	// text seeds its mirror with that text, as the core's does.
+	plainTexts map[uint64]string
 	// Derived-signal registrations made this transaction, promoted into
 	// the app registry only on commit — an abandoned transaction
 	// abandons its registrations with its records.
@@ -888,6 +891,11 @@ func (tx *Tx) autoParent(id uint64) {
 // the app declared over it (Tx.HighlightRanges) and spends the field's
 // native undo history.
 func (tx *Tx) SetText(w Widget, text string) {
+	if tx.plainTexts == nil {
+		tx.plainTexts = map[uint64]string{}
+	}
+	tx.plainTexts[w.id] = text
+	tx.app.mirrorText(w.id, text)
 	tx.emit(TxSetText(w.id, text))
 }
 
@@ -2176,6 +2184,9 @@ func (s Selection) Block() Block {
 // too, read-only — Tx.SetDocument and Tx.ApplyEdit write it, App.Document
 // reads it, and no delta ever comes back (docs/rich-text-plan.md R8, §15).
 func (w Widget) Rich() Widget {
+	if _, ok := w.tx.app.documents[w.id]; !ok {
+		w.tx.app.documents[w.id] = Document{Text: w.tx.plainTexts[w.id]}
+	}
 	w.tx.emit(TxSetRich(w.id, true))
 	return w
 }
@@ -7281,6 +7292,15 @@ func (a *App) Document(w Widget) Document {
 
 func (a *App) seedDocument(widget uint64, doc Document) {
 	a.documents[widget] = doc
+}
+
+// mirrorText moves a rich widget's mirror on a plain text write, as the
+// core's moves: the whole document, no runs (docs/traps.md, the binding's
+// document after set_text).
+func (a *App) mirrorText(widget uint64, text string) {
+	if doc, ok := a.documents[widget]; ok && doc.Text != text {
+		a.documents[widget] = Document{Text: text}
+	}
 }
 
 // absorbEdit folds one delivered edit into a LIVE widget's mirror.

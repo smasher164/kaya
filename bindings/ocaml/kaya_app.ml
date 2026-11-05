@@ -1361,6 +1361,9 @@ and tx = {
   (* Deriveds registered in this transaction: promoted on submit,
      abandoned with a rolled-back tx (their signals were never made). *)
   mutable pending_derived : (int64 * (unit -> unit)) list;
+  (* This transaction's plain text writes, so a widget made rich after its
+     text seeds its mirror with that text, as the core's does. *)
+  mutable plain_texts : (int64 * string) list;
 }
 
 (* The ambient transaction: set for the extent of [build] (handler
@@ -1682,7 +1685,8 @@ let build app (program : unit -> 'a) =
   let released_before = app.media.released_captures in
   app.media.released_captures <- [];
   let tx =
-    { app; records = List.rev carried; undo_group = None; journal = []; pending_derived = [] }
+    { app; records = List.rev carried; undo_group = None; journal = []; pending_derived = [];
+      plain_texts = [] }
   in
   let outer = !ambient_tx in
   ambient_tx := Some tx;
@@ -2012,7 +2016,16 @@ let widget kind =
    write. A write that CHANGES a textarea's text DROPS whatever ranges
    were declared over it and spends the field's native undo history,
    which is why undo's D7 treats it as an episode boundary. *)
-let set_text (Widget id) text = emit (the_tx ()) (Kaya_wire.tx_set_text id text)
+(* A plain write on a rich widget is a whole document with no runs, as the
+   core folds it (docs/traps.md, the binding's document after set_text). *)
+let set_text (Widget id) text =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_text id text);
+  tx.plain_texts <- (id, text) :: tx.plain_texts;
+  match Hashtbl.find_opt tx.app.documents id with
+  | Some (doc : Document.t) when doc.text <> text ->
+      Hashtbl.replace tx.app.documents id (Document.create text)
+  | _ -> ()
 
 (* Set a widget's flex weight within its row/column: 0 is natural size,
    positive weights divide the container's leftover main-axis space in
@@ -2742,7 +2755,13 @@ let document (Widget id) = the_document (the_tx ()).app id
 (* This widget carries attribute runs: [set_document], [apply_edit],
    [~on_edit]. A textarea edits them; a label draws them read-only
    (docs/rich-text-plan.md R8, §15). *)
-let set_rich (Widget id) on = emit (the_tx ()) (Kaya_wire.tx_set_rich id on)
+let set_rich (Widget id) on =
+  let tx = the_tx () in
+  emit tx (Kaya_wire.tx_set_rich id on);
+  if not on then Hashtbl.remove tx.app.documents id
+  else if not (Hashtbl.mem tx.app.documents id) then
+    Hashtbl.replace tx.app.documents id
+      (Document.create (Option.value (List.assoc_opt id tx.plain_texts) ~default:""))
 
 (* This textarea sends on the platform's submit gesture instead of taking
    the newline (docs/submit-plan.md S2). *)

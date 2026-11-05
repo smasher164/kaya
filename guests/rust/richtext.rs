@@ -5,6 +5,7 @@
 //! fail (docs/ranges-units.md).
 
 const DOC: &str = "Héllo world\nSecond line";
+const REPLACED: &str = "First\nSecond";
 
 #[derive(Clone)]
 enum Msg {
@@ -17,6 +18,7 @@ enum Msg {
     Heading,
     Focus,
     Prefix,
+    Replace,
 }
 
 /// The core's spelling of runs (`expect_runs`), so the binding's document
@@ -56,6 +58,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
                         ("heading", Msg::Heading),
                         ("focus", Msg::Focus),
                         ("prefix", Msg::Prefix),
+                        ("replace", Msg::Replace),
                     ] {
                         let button = tx.button(title).id();
                         msgs.on_click(button, msg);
@@ -126,6 +129,14 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
             Msg::Prefix => {
                 let edit = kaya::Edit::insert(0, "> ");
                 ctx.apply(|tx| tx.apply_edit(editor, &edit));
+                let mirror = spell(&ctx.document(editor).runs);
+                ctx.apply(|tx| tx.write(runs, mirror.clone()));
+            }
+            Msg::Replace => {
+                ctx.apply(|tx| {
+                    tx.set_text(editor, REPLACED);
+                    tx.format_range(editor, 8..9, "block", "heading1");
+                });
                 let mirror = spell(&ctx.document(editor).runs);
                 ctx.apply(|tx| tx.write(runs, mirror.clone()));
             }

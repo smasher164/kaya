@@ -1496,6 +1496,31 @@ impl AppCtx {
         self.documents.borrow_mut().insert(widget, document.clone());
     }
 
+    /// `rich` and a plain text write move the mirror as they move the core's
+    /// (scene.rs: the mirror lives while `rich` is on, and a text write on a
+    /// rich widget is a whole-document write with no runs). Without it a block
+    /// act after `set_text` snapped to the old text's paragraphs (docs/traps.md,
+    /// the binding's document after set_text).
+    fn mirror_write(&self, widget: u64, prop: Prop, value: &Value, seed: &str) {
+        let mut documents = self.documents.borrow_mut();
+        match (prop, value) {
+            (Prop::Rich, Value::Bool(true)) => {
+                documents.entry(widget).or_insert_with(|| Document::new(seed));
+            }
+            (Prop::Rich, Value::Bool(false)) => {
+                documents.remove(&widget);
+            }
+            (Prop::Text, Value::Str(text)) => {
+                if let Some(doc) = documents.get_mut(&widget) {
+                    if doc.text != *text {
+                        *doc = Document::new(text.as_str());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// One delivered edit, folded by the core's own rules.
     fn absorb_edit(&self, widget: u64, range: TextRange, inserted: &str, runs: &[Run]) {
         let mut documents = self.documents.borrow_mut();
@@ -2940,10 +2965,25 @@ impl<'a> Tx<'a> {
     }
 
     pub fn set(&mut self, widget: WidgetId, prop: Prop, value: impl Into<Value>) {
+        let value = value.into();
+        // A widget made rich after its text seeds the mirror with that text,
+        // as the core's does.
+        let seed = match (prop, &value) {
+            (Prop::Rich, Value::Bool(true)) => self.ops.iter().rev().find_map(|op| match op {
+                TxOp::SetProperty { widget: w, prop: Prop::Text, value: PropValue::Const(Value::Str(text)) }
+                    if *w == widget =>
+                {
+                    Some(text.as_str())
+                }
+                _ => None,
+            }),
+            _ => None,
+        };
+        self.ctx.mirror_write(widget.0, prop, &value, seed.unwrap_or(""));
         self.ops.push(TxOp::SetProperty {
             widget,
             prop,
-            value: PropValue::Const(value.into()),
+            value: PropValue::Const(value),
         });
     }
 

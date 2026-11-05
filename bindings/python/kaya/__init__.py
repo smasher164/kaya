@@ -342,6 +342,22 @@ def _records() -> list[bytes]:
     return _tx
 
 
+# This transaction's plain text writes, so a widget made rich after its text
+# seeds its mirror with that text, as the core's does.
+_plain: tuple[list[bytes] | None, dict[int, str]] = (None, {})
+
+
+def _note_plain_text(widget: int, text: str) -> None:
+    global _plain
+    if _plain[0] is not _tx:
+        _plain = (_tx, {})
+    _plain[1][widget] = text
+
+
+def _plain_text(widget: int) -> str:
+    return _plain[1].get(widget, "") if _plain[0] is _tx else ""
+
+
 def _journal_once(obj: object, restore: Callable[[], None]) -> None:
     """Record how to undo obj's mirror state, once per transaction: a
     handler that raises abandons its records and the mirrors both."""
@@ -816,6 +832,8 @@ class _Handle:
         R1): `set_document`, `apply_edit`, `format`, and the `on_edit`
         and `on_format` deltas. Off, none of that exists and the widget
         is the plain uncontrolled field. Returns the handle."""
+        if isinstance(self, Widget):
+            _app._mirror_rich(self.id, bool(on))
         _records().append(wire.tx_set_rich(self.id, bool(on)))
         return self
 
@@ -1120,6 +1138,8 @@ class Widget(_Handle):
         app's declared ranges (`highlight_ranges`) and spends the field's
         native undo history. Returns the widget."""
         _records().append(wire.tx_set_text(self.id, _text_value("set_text", text)))
+        _note_plain_text(self.id, text)
+        _app._mirror_text(self.id, text)
         return self
 
     def highlight_ranges(self, ranges: Sequence[Span]) -> None:
@@ -6100,6 +6120,7 @@ def textarea(text: str | None = None, *, on_change: Handler | None = None,
     handle = _widget(wire.KIND_TEXTAREA)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("textarea text", text)))
+        _note_plain_text(handle.id, text)
     if document is not None:
         _bind_document(handle, document)
     elif rich:
@@ -6201,6 +6222,7 @@ def label(text: str | None = None, bind: TextSource | None = None, *,
     handle = _widget(wire.KIND_LABEL)
     if text is not None:
         _records().append(wire.tx_set_text(handle.id, _text_value("label text", text)))
+        _note_plain_text(handle.id, text)
     if isinstance(bind, Signal):
         _records().append(wire.tx_bind_text(handle.id, bind.id))
     elif isinstance(bind, Element):
@@ -9073,6 +9095,21 @@ class App:
         self._documents[widget] = Document(
             document.text,
             [Run(r.range.start, r.range.stop, r.name, r.value) for r in document.runs])
+
+    def _mirror_rich(self, widget: int, on: bool) -> None:
+        """The mirror lives while `rich` is on, as the core's does."""
+        if on:
+            self._documents.setdefault(widget, Document(_plain_text(widget)))
+        else:
+            self._documents.pop(widget, None)
+
+    def _mirror_text(self, widget: int, text: str) -> None:
+        """A plain write on a rich widget is a whole document with no runs,
+        as the core folds it (docs/traps.md, the binding's document after
+        set_text)."""
+        doc = self._documents.get(widget)
+        if doc is not None and doc.text != text:
+            self._documents[widget] = Document(text)
 
     def _absorb_edit(self, widget: int, start: int, stop: int, inserted: str,
                      runs: Sequence[Run]) -> None:

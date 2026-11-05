@@ -6,6 +6,7 @@ import Foundation
 import Kaya
 
 let document = "Héllo world\nSecond line"
+let replaced = "First\nSecond"
 
 /// The core's spelling of runs (`expect_runs`), so the binding's document
 /// and the core's mirror are compared as one string.
@@ -78,6 +79,11 @@ KayaApp.run { app in
                 }
                 tx.button("prefix") { t in  // button#6
                     t.applyEdit(editor, KayaEdit.insert(at: 0, "> "))
+                    t.write(runs, .str(spell(app.document(editor).runs)))
+                }
+                tx.button("replace") { t in  // button#7
+                    t.setText(editor, replaced)
+                    t.formatRange(editor, 8..<9, "block", KayaBlock.heading1.rawValue)
                     t.write(runs, .str(spell(app.document(editor).runs)))
                 }
             }

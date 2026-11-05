@@ -5364,6 +5364,7 @@ public final class KayaApp {
                     "kaya: rich on a widget outside its build transaction"
                     + " — declare it where the textarea is made");
             }
+            tx.mirrorRich(id);
             tx.emit(KayaWire.txSetRich(id, true));
             return this;
         }
@@ -7387,6 +7388,10 @@ public final class KayaApp {
 
         private final List<byte[]> records = new ArrayList<>();
 
+        // This transaction's plain text writes, so a widget made rich after
+        // its text seeds its mirror with that text, as the core's does.
+        private final Map<Long, String> plainTexts = new HashMap<>();
+
         /**
          * THE ONE CHOKEPOINT: the only place that appends to a
          * transaction, so the liveness check cannot be forgotten at a
@@ -7735,6 +7740,12 @@ public final class KayaApp {
          */
         public void setText(Widget w, String text) {
             emit(KayaWire.txSetText(w.id, text));
+            plainTexts.put(w.id, text);
+            mirrorText(w.id, text);
+        }
+
+        void mirrorRich(long widget) {
+            documents.putIfAbsent(widget, new Document(plainTexts.getOrDefault(widget, "")));
         }
 
         public void setChecked(Widget w, boolean checked) {
@@ -12183,6 +12194,16 @@ public final class KayaApp {
     public Document document(Widget w) {
         Document doc = documents.get(w.id);
         return doc == null ? new Document("") : new Document(doc.content, doc.marks);
+    }
+
+    /** A plain write on a rich widget is a whole document with no runs, as
+     * the core folds it (docs/traps.md, the binding's document after
+     * set_text). */
+    private void mirrorText(long widget, String text) {
+        Document doc = documents.get(widget);
+        if (doc != null && !doc.content.equals(text)) {
+            documents.put(widget, new Document(text));
+        }
     }
 
     private void seedDocument(long widget, Document document) {

@@ -25,6 +25,7 @@ public final class RichText {
      * compiles this directory passes no {@code -encoding}
      * (android/javahost/build.gradle.kts). */
     private static final String DOC = "H\u00e9llo world\nSecond line";
+    private static final String REPLACED = "First\nSecond";
 
     private static final String URL = "https://kaya.dev";
 
@@ -95,6 +96,11 @@ public final class RichText {
                     tx.button("prefix", t -> { // button#6
                         t.applyEdit(refs.editor,
                                 KayaApp.Edit.insert(KayaApp.TextRange.in(DOC, 0, 0), "> "));
+                        t.write(runs, spell(app.document(refs.editor).runs()));
+                    });
+                    tx.button("replace", t -> { // button#7
+                        t.setText(refs.editor, REPLACED);
+                        t.formatRange(refs.editor, KayaApp.TextRange.in(REPLACED, 8, 9), "block", "heading1");
                         t.write(runs, spell(app.document(refs.editor).runs()));
                     });
                 });
