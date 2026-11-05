@@ -42,6 +42,7 @@ doctabs = 'https://claude.ai/artifact/MTybFzBnEG27neXDb7JB13'
 fontpicker = 'https://claude.ai/artifact/6RrGZauKea4rQyycBPn3oC'
 rulings1101 = 'https://claude.ai/artifact/64X8oeghtQchdNVYmdQMJn'
 growfit = 'https://claude.ai/artifact/SsduV7PtFoi344sadJopgo'
+richdoc = 'https://claude.ai/artifact/8PxsiUURHiARrkG5tgxMXq'
 timecode = '~/Projects/kaya-handoffs/2026-10-04-timecode/review/index.html'
 
 [[menu]]
@@ -157,6 +158,15 @@ unblocks = 'the video editor'
 plan = 'docs/dnd-plan.md'
 scene = 'tools/scenes/dnd.steps'
 text = 'SHIPPED 2026-10-06 (f835b14b): <code>drag &lt;src&gt; to &lt;dst&gt; at N%</code> releases a drag N% of the way across its destination and <code>expect_drop_at</code> reads the x the backend delivered in the <code>dropped</code> occurrence, within ±5, on all four backends (docs/dnd-plan.md D1); the dnd scene drops at 25% and at 75% and <code>validate-all --only dnd</code> was ALL PASS, 43 legs on five lanes. Unblocks the editor placing a clip at a time on a track. No card.'
+
+[[menu]]
+title = '<a href="#item-rich_document">The rich document</a>'
+star = true
+status = 'needs ruling'
+size = 'XL'
+unblocks = "the text editor's Writing Mode; a notes app on a CRDT"
+plan = 'docs/rich-document-plan.md'
+text = "Asked by the maintainer on 2026-11-05: Writing Mode as a traditional rich document, with indentation, lists and a free text colour built into kaya's rich text, saved in its own format and extendable to the CRDT notes idea. Researched across Automerge, Peritext, json-joy, Yjs, Apple Notes, RTF, DOCX, the JSON editor formats and SQLite; thirteen rulings asked on {review:richdoc}. Depth on the Mac first, then the four other arms and eight bindings."
 
 [[menu]]
 title = '<b>The video editor itself</b>'

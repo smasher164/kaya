@@ -17349,6 +17349,9 @@ KEY: Markdown marks colour, secondary text run, rich text colour run, Writing Mo
   the bytes unchanged.
 - Closing this means a ruling and, for (b), the run on five backends and nine
   bindings with a scene read of a mark's colour.
+- 2026-11-05: docs/rich-document-plan.md RD11 would retire the question (a
+  rich tab imports Markdown's marks rather than drawing them) and RD4 asks
+  for a colour mark; both await the maintainer's ruling.
 
 ## GAP — a list paragraph kind (docs/design-rules.md, found 2026-11-04, not ruled)
 
@@ -17368,6 +17371,9 @@ KEY: list block kind, hanging indent, bullet paragraph, rich text lists, list ma
   stays R3's when a rich editor wants real lists.
 - Closing this means a ruling and the attribute or kind on five backends with
   a read of a wrapped item's second-line offset.
+- 2026-11-05: docs/rich-document-plan.md RD2 and RD3 propose option (b)'s
+  shape in full (a `list` and an `indent` paragraph attribute, markers drawn
+  and never in the text), awaiting the maintainer's ruling.
 
 
 ## ~~OPEN — iOS reads a plain caption as success in the dark (seen 2026-11-04, the design pass's captures)~~ FIXED 2026-11-05: the reader resolved its colours in the process's light traits, not the window's; the window pixels now carry the inks and tints in the shot window's own appearance, and tints.steps reads a caption in the dark on iOS (docs/traps.md, the iOS tint read that resolved its colours light)
