@@ -20355,3 +20355,17 @@ app died opening a conversation. A grower now never goes under its own
 minimum intrinsic width, as a CSS flex item's min-content holds. Read by
 chat.steps on the android lane (every leg after the click died), red with
 the floor cut.
+
+
+## The popover the flex layout placed as a cell (measured 2026-11-05)
+
+The capsule put every filled container on kaya's flex layout manager (its
+allocation is where the height check runs). The music player's context menu
+on a filled row then never came back on wayland: `MenuActivate("Play")` sat
+for its 60 s ceiling, four times out of four, quiet or loaded, while x11
+passed. The flex and flow layouts counted every visible child as a cell, and
+a context menu's GtkPopover is a child of its anchor while it shows, so the
+layout measured and allocated the popover as a cell of the row; GtkBox's own
+layout leaves a popover to its surface. `is_cell` in crates/kaya/src/gtk.rs
+now leaves popovers out of every placement loop, as `children_of` already
+did. Read by music_context.steps on the wayland leg.

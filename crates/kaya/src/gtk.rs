@@ -2506,7 +2506,7 @@ mod flex {
             let mut children = Vec::new();
             let mut child = widget.first_child();
             while let Some(c) = child {
-                if c.is_visible() && !super::is_ground_picture(&c) {
+                if super::is_cell(&c) {
                     let weight = super::grow_weight(&c);
                     let (minimum, natural) = if weight > 0.0 {
                         // A grower's own natural size is deliberately not
@@ -2634,7 +2634,7 @@ mod flex {
             let mut main_children = Vec::new();
             let mut child = widget.first_child();
             while let Some(c) = child {
-                if c.is_visible() && !super::is_ground_picture(&c) {
+                if super::is_cell(&c) {
                     let (cmin, cnat, _, _) = super::measure_capped(&c, orientation, for_size);
                     if self.is_main(orientation) {
                         let weight = super::grow_weight(&c);
@@ -2674,7 +2674,7 @@ mod flex {
             if vertical && self.is_main(orientation) {
                 let mut child = widget.first_child();
                 while let Some(c) = child {
-                    if c.is_visible() && !super::is_ground_picture(&c) {
+                    if super::is_cell(&c) {
                         let (_, _, bmin, bnat) = super::measure_capped(&c, orientation, for_size);
                         return (minimum, natural, bmin, bnat);
                     }
@@ -2801,7 +2801,7 @@ mod flex {
         let mut child = widget.first_child();
         while let Some(c) = child {
             child = c.next_sibling();
-            if !c.is_visible() || super::is_ground_picture(&c) {
+            if !super::is_cell(&c) {
                 continue;
             }
             let (_, w, _, _) = c.measure(gtk4::Orientation::Horizontal, -1);
@@ -2842,7 +2842,7 @@ mod flex {
                 let mut child = widget.first_child();
                 while let Some(c) = child {
                     child = c.next_sibling();
-                    if !c.is_visible() || super::is_ground_picture(&c) {
+                    if !super::is_cell(&c) {
                         continue;
                     }
                     let (cmin, cnat, _, _) = c.measure(orientation, -1);
@@ -4896,6 +4896,14 @@ fn apply_measure(view: &gtk4::TextView) {
     if view.right_margin() != r {
         view.set_right_margin(r);
     }
+}
+
+/// A child the flex and flow layouts place: shown, not the ground picture, and
+/// not a context menu's popover, which is its own surface (docs/traps.md, the
+/// popover the flex layout placed as a cell).
+fn is_cell(widget: &gtk4::Widget) -> bool {
+    use gtk4::prelude::WidgetExt;
+    widget.is_visible() && !is_ground_picture(widget) && !widget.is::<gtk4::Popover>()
 }
 
 fn is_ground_picture(widget: &gtk4::Widget) -> bool {

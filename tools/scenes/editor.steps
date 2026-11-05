@@ -375,39 +375,15 @@ expect_documents "draft"
 expect_document "draft"
 expect_title "draft"
 
-# ---- Writing Mode over Markdown (docs/looks-plan.md §6) -------------
-#
-# The Markdown stays text and is drawn styled: a heading line takes its
-# heading block, a `> ` line a quote, `**` spans bold and `*` spans italic,
-# the marks kept. WRITING MODE IN A TAB JUST OPENED: the Mac's gutter came
-# back on the first resize the styling caused (docs/traps.md, the Writing
-# Mode gutter), so the gutter is read here, before anything else touches it.
-file_dialog_goto $TMP/kaya-editor-$PID
-menu_activate "File>Open…"
-expect_file_dialog kaya-editor-$PID decoy draft essay notes
-file_choose essay
-expect_document "essay"
-menu_activate "View>Writing Mode"
-expect_menu "View>Writing Mode" checked
-expect_gutter textarea@buffer-3 off
-expect_runs textarea@buffer-3 "0:18 block=heading1|36:45 italic|93:108 bold|120:136 block=heading2|238:253 block=heading2|255:298 block=quote|319:325 italic|375:386 bold"
-menu_activate "View>Writing Mode"
-expect_menu "View>Writing Mode" unchecked
-expect_gutter textarea@buffer-3 on
-expect_runs textarea@buffer-3 ""
-expect_document_dirty "essay" false
-menu_activate "File>Close Tab"
-expect_documents "draft"
-expect_document "draft"
 menu_activate "File>New"
-expect label@status-4 "new file"
+expect label@status-3 "new file"
 
 # DIRTY AGAIN FOR THE SECOND DOOR, and this keystroke is load-bearing: a
 # CLEAN document does not ask, so the close would run through the guard
 # and end the app. A TAP ON THE NEW BUFFER FIRST, as a person makes: on a
 # phone the list the reads above opened took the keyboard down with it.
-click textarea@buffer-4
-expect_focused textarea@buffer-4
+click textarea@buffer-3
+expect_focused textarea@buffer-3
 type "q"
 expect_documents "draft|untitled"
 expect_document "untitled"
@@ -422,6 +398,32 @@ expect_windows 1
 expect_documents "draft|untitled"
 expect_document_dirty "untitled" true
 
+# ---- Writing Mode over Markdown (docs/looks-plan.md §6) -------------
+#
+# The Markdown stays text and is drawn styled: a heading line takes its
+# heading block, a `> ` line a quote, `**` spans bold and `*` spans italic,
+# the marks kept. WRITING MODE IN A TAB JUST OPENED: the Mac's gutter came
+# back on the first resize the styling caused (docs/traps.md, the Writing
+# Mode gutter), so the gutter is read here, before anything else touches it.
+# After the window's close, so the phones' cut leaves it out: a phone's leg
+# ran out of its 120 seconds on this second picker under a matrix's load.
+file_dialog_goto $TMP/kaya-editor-$PID
+menu_activate "File>Open…"
+expect_file_dialog kaya-editor-$PID decoy draft essay notes
+file_choose essay
+expect_document "essay"
+menu_activate "View>Writing Mode"
+expect_menu "View>Writing Mode" checked
+expect_gutter textarea@buffer-4 off
+expect_runs textarea@buffer-4 "0:18 block=heading1|36:45 italic|93:108 bold|120:136 block=heading2|238:253 block=heading2|255:298 block=quote|319:325 italic|375:386 bold"
+menu_activate "View>Writing Mode"
+expect_menu "View>Writing Mode" unchecked
+expect_gutter textarea@buffer-4 on
+expect_runs textarea@buffer-4 ""
+menu_activate "File>Close Tab"
+expect_documents "draft|untitled"
+expect_document "untitled"
+
 # One REAL-TREE read at the end: everything above reads kaya's own model
 # and would pass for an arm that drew nothing.
-expect_ax label@status-4 "label/new file"
+expect_ax label@status-3 "label/new file"

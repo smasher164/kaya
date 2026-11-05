@@ -526,6 +526,9 @@ BUILT 2026-11-04 (the build's choices are in §4's list below the rulings'):
   a capsule ("column@t_card is drawn as a capsule: radius 30.1 of height
   60.0").
 - Writing Mode over Markdown reads in editor.steps on a tab just opened,
+  after the window's close so the phones' cut leaves it out (a second
+  picker ran an iOS leg past its 120 seconds under the matrix's load; the
+  phones read Writing Mode itself earlier in the scene),
   which is where the Mac's gutter came back (docs/traps.md, the Writing Mode
   gutter); the editor opens a file with `SetText` again, since the bindings
   now keep their document after a plain write (docs/traps.md, the binding's
