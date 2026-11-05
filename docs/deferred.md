@@ -1670,6 +1670,15 @@ hide the reader asks (forced red read back: "composed: Hidden going to Hidden",
 "Hidden going to Expanded", "hide asked at Expanded going to Expanded", "hide
 ended"); read those first on the next sighting.
 
+SEEN A THIRD TIME in the 326dd2a2 matrix (run 20261105T091023Z-087496, the
+no-exclusive half, at `select_document "draft"`), and the trace answers the
+open question: the reader's show started the sheet ("Hidden going to
+Expanded" at t=42078) and 825 ms later it read "Hidden going to Hidden" with
+no hide asked between, so the show was not undone by the previous read's
+hide; the sheet's own animation was turned back. What turned it back is not
+in the bundle yet. Looped four times by hand under a fourteen-spinner load
+afterwards, green four times.
+
 ## ~~DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)~~ FIXED 2026-11-03: a surface draws its frames with a linear filter, measured 9 of 147 main-thread samples in glGenerateMipmap before and 0 of 145 after (docs/traps.md, the GTK surface mipmap stall)
 KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter
 
