@@ -20067,7 +20067,40 @@ state; the first version read it after and printed "not asked to show" for a
 sheet that was up): "the documents button is in the tree; the list is asked
 to show; the sheet is Expanded going to Expanded; a dialog window showing 1
 document row(s)". Both forced branches printed (the press cut; the rows
-refused). check-flightrec ND1/ND2 (android documents why-not).
+refused). check-flightrec ND1/ND2 (android documents why-not). The cause,
+found 2026-11-05, is the next entry.
+
+## The Android sheet left between anchors by the keyboard (measured 2026-11-05)
+
+Both of editor-go's bottom sheets (the documents list and Font…) open while
+the editor's keyboard is up, so Material 3 (1.3.1, BOM 2024.10.01) lays the
+sheet out in a room 275 px short (`fillMaxSize().imePadding()` inside its
+dialog): Hidden at 525, Expanded at 525 less the sheet's height. The dialog
+then takes focus, the keyboard goes, the room becomes 800, and the anchors
+move while the show is still animating. Material's AnchoredDraggableState
+handles a move mid-animation by restarting it toward the new anchor, but if
+the move lands just as the animation ends, the restart never runs, and
+anchoredDrag's `finally` clears the target and confirms a value only for an
+anchor within half a pixel of the offset. The offset sits at the OLD
+Expanded anchor, which is no anchor any more, so the sheet rests between
+anchors with currentValue Hidden and targetValue Hidden: up on screen to
+the eye, closed to every read. The trace that named it (flight recorder run
+20261105T111746Z-014282, the font sheet, under four other lanes' load):
+"layout: the sheet 476 px tall in 525", "Hidden going to Expanded", "dialog
+window focus gained", "layout: the sheet 500 px tall in 800", "dialog
+keyboard inset 0 px", "Hidden going to Hidden; anchors expanded yes partial
+no, offset 49", with no "confirm" line after the show began. A user's own
+dismiss always settles on Hidden and confirms it, so a show that comes to
+rest Hidden with no settle confirmed since it began is this race and
+nothing else: kayaShowSheetWhenAnchored shows such a sheet again (traced
+"came to rest Hidden between anchors", logged as KAYA_SHEET). Its first
+version never did: Material's own show cancels kaya's on the sheet's first
+frame, and the cancellation ended kaya's watcher too (368 "kaya shows it"
+lines across the bundles, no "show ended", no "try 2"). The watcher now
+outlives a show Material cancelled. One more trap on the way: Material keys
+the sheet's state on the `confirmValueChange` function's identity, so a
+confirm function built anew in each composition builds a new state each
+time; it is remembered. check-flightrec NSS1 to NSS8 (android sheet show).
 
 ## The GTK surface mipmap stall (measured 2026-11-03)
 

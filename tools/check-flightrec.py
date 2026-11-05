@@ -244,25 +244,63 @@ def census_save_cancel_leftovers(src):
 def census_sheet_show(src):
     """docs/deferred.md, editor-go's sheets seen "Hidden going to Hidden": the
     font sheet's moves go into the verb trace like the documents sheet's, both
-    sheets get kaya's show once their anchors exist, and the font why-not
-    prints the anchors and the dialog window's size."""
+    sheets get kaya's show once their anchors exist, and both why-nots print
+    the anchors and the dialog window's size. And the next sighting names what
+    turned a show back (docs/deferred.md, the documents list's third
+    sighting): each sheet's trace carries Material's settle confirmations, its
+    layout height and room, the dialog window's focus and keyboard inset, the
+    state's identity, and kaya's show's cancellation."""
     kt = src[COMPOSE]
     found = []
     if 'kayaTraceSheet("font_sheet", state)' not in kt:
         found.append("android: the font sheet's moves are not in the verb trace")
-    if kt.count("kayaShowSheetWhenAnchored(state)") < 2:
+    if kt.count('kayaShowSheetWhenAnchored("') < 2:
         found.append("android: fewer than two sheets (font and documents) get kaya's show once "
                      "anchored")
     body = kt[kt.find("fun kayaShowSheetWhenAnchored("):]
     body = body[:body.find("\n}\n")]
-    if "snapshotFlow { state.hasExpandedState }" not in body or "state.show()" not in body:
+    if ("Triple(state.hasExpandedState, state.currentValue, state.targetValue)" not in body
+            or "state.show()" not in body):
         found.append("android: kayaShowSheetWhenAnchored no longer waits for the anchors and shows")
-    why = kt[kt.find("private fun kayaFontSheetWhyNot("):]
-    why = why[:why.find("\n    }\n")]
-    for needle in ("anchors expanded", "state.requireOffset()",
-                   "its decor ${window.decorView.width}"):
-        if needle not in why:
-            found.append(f"android: the font sheet why-not no longer prints `{needle}`")
+    for name, fun in (("font", "private fun kayaFontSheetWhyNot("),
+                      ("documents", "private fun kayaDocumentsWhyNot(")):
+        why = kt[kt.find(fun):]
+        why = why[:why.find("\n    }\n")]
+        for needle in ("kayaSheetPlace(state)", "its decor ${window.decorView.width}"):
+            if needle not in why:
+                found.append(f"android: the {name} sheet why-not no longer prints `{needle}`")
+    place = kt[kt.find("fun kayaSheetPlace("):]
+    place = place[:place.find("\n\n")]
+    for needle in ("anchors expanded", "state.requireOffset()"):
+        if needle not in place:
+            found.append(f"android: kayaSheetPlace no longer prints `{needle}`")
+    for verb in ("documents_sheet", "font_sheet"):
+        for needle, what in (
+                (f'kayaSheetConfirm("{verb}", settles)', "settle confirmations"),
+                (f'modifier = kayaSheetLayoutTrace("{verb}")', "layout height and room"),
+                (f'kayaSheetWindowTrace("{verb}")', "dialog window's focus and keyboard"),
+                (f'kayaTraceSheet("{verb}", state)', "moves")):
+            if needle not in kt:
+                found.append(f"android: the {verb}'s {what} are not in the verb trace")
+    trace = kt[kt.find("fun kayaTraceSheet("):]
+    trace = trace[:trace.find("\n}\n")]
+    if "sheet state $id" not in trace or "kayaSheetPlace(state)" not in trace:
+        found.append("android: kayaTraceSheet no longer names the state's identity and place")
+    if "'s show cancelled by ${e.javaClass.simpleName}" not in body:
+        found.append("android: kaya's show no longer says what cancelled it")
+    # docs/traps.md, the Android sheet left between anchors by the keyboard.
+    for needle, what in (
+            ("val stranded = showBegan >= 0 && settles.count == showBegan",
+             "no longer shows again a sheet that came to rest Hidden between anchors"),
+            ("showBegan = settles.count\n",
+             "no longer judges Material's show from where it took over"),
+            ("?.isActive == false) throw e", "dies with the show Material's own show cancelled")):
+        if needle not in body:
+            found.append(f"android: kayaShowSheetWhenAnchored {what}")
+    for verb in ("documents_sheet", "font_sheet"):
+        if f'remember(settles) {{ kayaSheetConfirm("{verb}", settles) }}' not in kt:
+            found.append(f"android: the {verb}'s confirm function is not remembered, and Material "
+                         "keys the sheet's state on it")
     return found
 
 
@@ -318,7 +356,7 @@ def census_documents_why(src):
     if why < 0 or not 0 <= why < hide:
         found.append("android: kayaDocumentsRead does not read why the list is not up before it "
                      "puts the list away")
-    if 'KayaVTrace.note("documents_sheet", "$now going to $to")' not in kt:
+    if 'kayaTraceSheet("documents_sheet", state)' not in kt:
         found.append("android: the documents sheet's moves are not in the verb trace")
     if 'if (failuresBefore == 0) KayaVTrace.dump("the first failed step: $line")' not in kt:
         found.append("android: the verb trace is dumped only at the verdict, so a leg ended at "
@@ -3106,7 +3144,7 @@ nv1 = doctored(CAPTURE_LEG, r'"step-failed voice" in line', '"step-failed voice"
                "NV1 the voice graph never read")
 gate.negative("NV1 a voice red without the graph it ran in",
               lambda: census_voice_graph(nv1), want="PipeWire links")
-nd3 = doctored(COMPOSE, r'KayaVTrace\.note\("documents_sheet", "\$now going to \$to"\)', "Unit",
+nd3 = doctored(COMPOSE, r'kayaTraceSheet\("documents_sheet", state\)', "Unit",
                "NDS1 the sheet's moves untraced")
 gate.negative("NDS1 a documents sheet whose moves the trace does not show",
               lambda: census_documents_why(nd3), want="sheet's moves are not in the verb trace")
@@ -3143,10 +3181,36 @@ nss1 = doctored(COMPOSE, r'kayaTraceSheet\("font_sheet", state\)', "Unit",
                 "NSS1 the font sheet's moves untraced")
 gate.negative("NSS1 a font sheet whose moves the trace does not show",
               lambda: census_sheet_show(nss1), want="font sheet's moves are not")
-nss2 = doctored(COMPOSE, r"snapshotFlow \{ state\.hasExpandedState \}", "snapshotFlow { false }",
+nss2 = doctored(COMPOSE, r"Triple\(state\.hasExpandedState, ", "Triple(false, ",
                 "NSS2 the anchored show cut")
 gate.negative("NSS2 a sheet nobody shows once anchored",
               lambda: census_sheet_show(nss2), want="no longer waits for the anchors")
+nss3 = doctored(COMPOSE,
+                r'remember\(settles\) \{ kayaSheetConfirm\("documents_sheet", settles\) \}',
+                "{ _: SheetValue -> true }", "NSS3 the settle confirmations unread")
+gate.negative("NSS3 a documents sheet whose settles the trace does not show",
+              lambda: census_sheet_show(nss3), want="settle confirmations are not")
+nss4 = doctored(COMPOSE, r'(?m)^ *kayaSheetWindowTrace\("font_sheet"\)\n', "",
+                "NSS4 the font dialog window's focus unread")
+gate.negative("NSS4 a font sheet whose window's focus the trace does not show",
+              lambda: census_sheet_show(nss4), want="focus and keyboard are not")
+nss5 = doctored(COMPOSE, r"'s show cancelled by \$\{e\.javaClass\.simpleName\}", "'s show stopped",
+                "NSS5 the show's cancellation unnamed")
+gate.negative("NSS5 a cancelled show that does not say by what",
+              lambda: census_sheet_show(nss5), want="what cancelled it")
+nss6 = doctored(COMPOSE, r"val stranded = showBegan >= 0 && settles\.count == showBegan",
+                "val stranded = false", "NSS6 the stranded sheet left where it rests")
+gate.negative("NSS6 a show left Hidden between anchors",
+              lambda: census_sheet_show(nss6), want="between anchors")
+nss7 = doctored(COMPOSE, r"\?\.isActive == false\) throw e", "?.isActive != null) throw e",
+                "NSS7 the watcher dying with its cancelled show")
+gate.negative("NSS7 kaya's watcher gone with the first show Material cancels",
+              lambda: census_sheet_show(nss7), want="dies with the show")
+nss8 = doctored(COMPOSE, r'remember\(settles\) \{ kayaSheetConfirm\("font_sheet", settles\) \}',
+                'kayaSheetConfirm("font_sheet", settles)',
+                "NSS8 the confirm built anew each composition")
+gate.negative("NSS8 a sheet state rebuilt by a new confirm function",
+              lambda: census_sheet_show(nss8), want="not remembered")
 nd1 = doctored(COMPOSE, r"(?m)^ *kayaDocumentsWhy = if \(rows == null\).*\n", "",
                "ND1 the documents why-not unread")
 gate.negative("ND1 a documents refusal read after the list is put away",
@@ -4146,6 +4210,6 @@ for label, pattern, repl, shell, want in (
         reader = gate.doctor(label, reader, pattern, repl)
     gate.negative(label, lambda: verdict_reader_checks(reader, shell_text), want=want)
 
-gate.negatives_ran(294 + (5 if DRIVES else 0))
+gate.negatives_ran(300 + (5 if DRIVES else 0))
 gate.verdict(f"{len(TABLE)} lanes, "
              f"{sum(len(v) for v in TABLE.values())} sections")

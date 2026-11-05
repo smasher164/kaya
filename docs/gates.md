@@ -997,8 +997,15 @@ read before the list is put away; two cuts watched. AND THE ANDROID PLAYER'S
 COMMANDS ARE IN THE VERB TRACE since 2026-11-03 (docs/traps.md, the android
 play/pause the player did not take); one cut watched. AND A LINUX VOICE RED
 CARRIES ITS GRAPH since 2026-11-03 (docs/traps.md, the linux voice the graph
-never pulled); one cut watched.
-Two hundred and eighty-six watched negatives, counts printed)
+never pulled); one cut watched. AND AN ANDROID SHEET'S SHOW IS TRACED THROUGH
+ITS ANCHORS AND SHOWN AGAIN WHEN THE KEYBOARD STRANDS IT since 2026-11-05
+(docs/traps.md, the Android sheet left between anchors by the keyboard):
+settle confirmations, layout height and room, the dialog window's focus and
+keyboard inset, the state's identity, kaya's show's cancellation, the
+re-show of a show at rest between anchors, a watcher that outlives the show
+Material cancels, and a remembered confirm function; eight cuts watched.
+Three hundred watched negatives, five more where the drives run, counts
+printed)
 
 ## tools/check-diagnostics.py
 

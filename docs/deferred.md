@@ -1427,7 +1427,7 @@ the next sighting. The leg stays in the pool: one sighting at host load 138
 is not a measured reason to run it alone (the maintainer's rule that every
 exclusive leg needs one).
 
-## WATCH — Android editor-go: View>Font… opened no sheet (seen once 2026-10-30); the read now says which half failed
+## ~~WATCH — Android editor-go: View>Font… opened no sheet (seen once 2026-10-30); the read now says which half failed~~ FIXED 2026-11-05: the keyboard's going away moved the sheet's anchors as Material's show ended and left it at rest Hidden between anchors; kaya shows such a sheet again (docs/traps.md, the Android sheet left between anchors by the keyboard; the documents list's entry below has the measurement)
 KEY: editor-go android, the font picker is not up and settled, file dialog 3 is already live, kayaFontDialog, choose_font compose
 
 In edfix's filtered run (validate-all --only editor,a11yrows, flightrec run
@@ -1649,7 +1649,7 @@ right after (mac 23, linux 42, ios 10, android 10 legs).
   command and change (docs/traps.md, the android play/pause the player did not
   take).
 
-## WATCH — Android editor-go: the documents list did not come up under load (seen once 2026-11-03, a matrix stopped on battery); the read now says which part failed
+## ~~WATCH — Android editor-go: the documents list did not come up under load (seen once 2026-11-03, a matrix stopped on battery); the read now says which part failed~~ FIXED 2026-11-05: the show was left at rest Hidden between anchors when the keyboard's going away moved them as it ended, and kaya shows such a sheet again; 1 red in 10 loops under four lanes' load before, 30 green of 30 after with 8 strandings shown again (docs/traps.md, the Android sheet left between anchors by the keyboard)
 KEY: editor-go android, the documents list is not up yet, kayaDocumentsWhyNot, kayaDocumentsWhy, documentsSheetState
 
 Flight recorder run 20261103T092933Z-089600: `expect_document_dirty "untitled" true`
@@ -1678,6 +1678,27 @@ no hide asked between, so the show was not undone by the previous read's
 hide; the sheet's own animation was turned back. What turned it back is not
 in the bundle yet. Looped four times by hand under a fourteen-spinner load
 afterwards, green four times.
+
+FIXED 2026-11-05. The recorder grew first (each sheet's settle confirmations,
+its height and room at each layout, the dialog window's focus and keyboard
+inset, the state's identity, and kaya's show's cancellation; each line forced
+to print, runs 20261105T111055Z-006584 and 20261105T111321Z-008055). Then
+editor-go looped on the android lane while the linux, iOS, windows and mac
+lanes ran filtered scenes beside it (host load 25-143), and the first loop's
+red (run 20261105T111746Z-014282, the Font… sheet this time) named the
+cause: the sheet opened over the editor's keyboard in a 525 px room, the
+show ran to that room's Expanded anchor (offset 49), the dialog took focus,
+the keyboard went, and the room became 800 as the show ended; no settle was
+confirmed, and the sheet rested Hidden at offset 49 between the new anchors.
+Material's AnchoredDraggableState restarts an animation whose anchors move,
+but not one that has just finished (docs/traps.md, the Android sheet left
+between anchors by the keyboard). kaya's own show, built for this, had never
+run past its first frame: Material's show cancelled it and the cancellation
+ended its watcher. Now a show that comes to rest Hidden with no settle
+confirmed since it began is shown again, and the watcher outlives a
+cancelled show. Before: 1 red in 10 loops. After: 30 green of 30, with 8
+strandings in 5 of them shown again (KAYA_SHEET in the app's log), and a
+forced-red canary read red first. check-flightrec NSS1 to NSS8.
 
 ## ~~DEFECT — GTK x11: five farend legs blocked 60 s in the GTK main thread generating mipmaps on llvmpipe (seen once 2026-11-03, a matrix stopped on battery)~~ FIXED 2026-11-03: a surface draws its frames with a linear filter, measured 9 of 147 main-thread samples in glGenerateMipmap before and 0 of 145 after (docs/traps.md, the GTK surface mipmap stall)
 KEY: farend x11, llvmpipe_fence_finish, st_generate_mipmap, GtkPicture, build_surface, append_scaled_texture, ScalingFilter
