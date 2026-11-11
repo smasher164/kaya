@@ -478,8 +478,8 @@ file_dialog_goto $TMP/kaya-editor-$PID
 menu_activate "File>Open…"
 file_choose essay
 expect_document "essay"
-expect_runs textarea@buffer-6 "0:16 block=heading1|33:40 italic|67:80 block=heading2|81:173 list=bullet|114:144 indent=1|125:129 color=#016FEF|174:215 block=quote"
-expect_markers textarea@buffer-6 "81:0 •|114:1 ◦|145:0 •"
+expect_runs textarea@buffer-6 "0:16 block=heading1|33:40 italic|67:80 block=heading2|81:173 list=bullet|114:144 indent=1|125:129 color=#016FEF|174:183 block=heading2|184:222 list=numbered|223:243 checked|223:243 color=#0D8501|223:256 list=check|257:298 block=quote"
+expect_markers textarea@buffer-6 "81:0 •|114:1 ◦|145:0 •|184:0 1.|199:0 2.|223:0 [x]|244:0 [ ]"
 menu_activate "File>Close Tab"
 menu_activate "View>Writing Mode"
 expect_menu "View>Writing Mode" unchecked

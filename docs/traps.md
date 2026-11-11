@@ -14854,6 +14854,17 @@ and the fix is `DisplaySwitch.exe /internal` run the same way, after which
 that read answered `\\.\DISPLAY2 primary=True {X=0,Y=0,Width=1280,Height=800}`
 alone.
 
+A FROZEN DISPLAY CLIENT, AND THE WAY BACK (measured 2026-11-11): UTM's window for
+the VM had shown one frame since 10/21 while the lanes ran, because the guest
+kept its 1280x800 mode; a Windows Update restart then brought it back at
+1024x768 with no monitor configuration arriving, and UTM's Resize Console
+button and a window resize changed nothing. The sequence that restored it: a
+guest `shutdown /s /t 0` over ssh (UTM went on saying `started` with no VM
+process left, and `utmctl start` answered "Operation not available"), quitting
+UTM (its sheet says quitting kills running VMs; there were none), opening
+UTM, `utmctl start Windows`, and `DisplaySwitch.exe /internal` as an `/it`
+task for the second 800x600 display the boot brought back.
+
 ## A scene negative read green once with its cut in the tree, and the guard that refuses that (measured 2026-10-03)
 
 The capture depth slice's scene cut "the synthetic microphone's rate

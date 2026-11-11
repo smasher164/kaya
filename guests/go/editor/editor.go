@@ -104,6 +104,11 @@ func essayDoc() kaya.Document {
 		"a map you can fold with one hand\n" +
 		"water, and more than you think\n" +
 		"something to read at the top\n" +
+		"The route\n" +
+		"Leave by eight\n" +
+		"Turn left at the chapel\n" +
+		"check the tide times\n" +
+		"pack a torch\n" +
 		"The legs keep time, and the mind follows."
 	at := func(s string) (int, int) {
 		i := strings.Index(text, s)
@@ -116,6 +121,11 @@ func essayDoc() kaya.Document {
 	_, lb := at("at the top")
 	wa, wb := at("water, and more than you think")
 	ma, mb := at("more")
+	ra, rb := at("The route")
+	na, _ := at("Leave by eight")
+	_, nb := at("at the chapel")
+	ca, cb := at("check the tide times")
+	_, tb := at("pack a torch")
 	qa, qb := at("The legs keep time, and the mind follows.")
 	return kaya.NewDocument(text).
 		Block(h1a, h1b, kaya.Heading1).
@@ -124,6 +134,11 @@ func essayDoc() kaya.Document {
 		List(la, lb, kaya.ListBullet).
 		Indent(wa, wb, 1).
 		Color(ma, mb, "#016FEF").
+		Block(ra, rb, kaya.Heading2).
+		List(na, nb, kaya.ListNumbered).
+		List(ca, tb, kaya.ListCheck).
+		Checked(ca, cb).
+		Color(ca, cb, "#0D8501").
 		Block(qa, qb, kaya.Quote)
 }
 
