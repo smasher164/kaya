@@ -16477,6 +16477,67 @@ fn capture(
     }
 }
 
+/// THE MARKERS' PLACEMENT, READ OFF THE WINDOW'S PRINT (`expect_markers`): in
+/// each drawn marker's own row band, the first text pixel right of its edge
+/// must sit `MARKER_GAP` after it, within `MARKER_PLACE_TOLERANCE`. Off the
+/// pixels and not off TOM, whose coordinates are what `place` draws from: a
+/// Writing Mode measure's padding drew every marker 80 px left of its text with
+/// the drawn spelling still right (the review capture, 2026-11-11).
+#[cfg(feature = "harness")]
+fn marker_misplaced(core: &CoreState, field: &RichEditBox, widget: u64) -> windows_core::Result<Option<String>> {
+    const MARKER_PLACE_TOLERANCE: f64 = 4.0;
+    let drawn = richdoc::drawn_elements(widget);
+    if drawn.is_empty() {
+        return Ok(None);
+    }
+    let at = element_placement(core, &field.cast::<FrameworkElement>()?)?;
+    let grab = match grab_canvas(&at) {
+        Ok(grab) => grab,
+        Err(why) => return Ok(Some(format!("no picture of the window to place the markers on: {why}"))),
+    };
+    let to: UIElement = field.cast()?;
+    let px = |x: i32, y: i32| -> [u8; 3] {
+        let o = ((y * grab.width + x) * 4) as usize;
+        [grab.pixels[o + 2], grab.pixels[o + 1], grab.pixels[o]]
+    };
+    for (start, text, element) in drawn {
+        let origin = element.TransformToVisual(&to)?.TransformPoint(Point { X: 0.0, Y: 0.0 })?;
+        let frame: FrameworkElement = element.cast()?;
+        let (w, h) = (frame.ActualWidth()?, frame.ActualHeight()?);
+        let right = f64::from(origin.X) + w;
+        let (y0, y1) = (
+            ((f64::from(origin.Y) + h * 0.25) * at.scale) as i32,
+            ((f64::from(origin.Y) + h * 0.75) * at.scale) as i32,
+        );
+        if y0 < 0 || y1 > grab.height || right < 0.0 {
+            continue;
+        }
+        let x0 = ((right + 1.0) * at.scale).ceil() as i32;
+        let mut counts: HashMap<[u8; 3], usize> = HashMap::new();
+        for y in y0..y1 {
+            for x in x0.max(0)..grab.width {
+                *counts.entry(px(x, y)).or_default() += 1;
+            }
+        }
+        let Some(ground) = counts.into_iter().max_by_key(|(_, n)| *n).map(|(p, _)| p) else { continue };
+        let far = |p: [u8; 3]| -> i32 { (0..3).map(|c| (i32::from(p[c]) - i32::from(ground[c])).abs()).sum() };
+        let first = (x0.max(0)..grab.width).find(|&x| (y0..y1).any(|y| far(px(x, y)) > 120));
+        let Some(first) = first else {
+            return Ok(Some(format!("marker {text:?} at byte {start}: no text drawn right of it in its row")));
+        };
+        let item = f64::from(first) / at.scale;
+        if (item - right - richdoc::MARKER_GAP).abs() > MARKER_PLACE_TOLERANCE {
+            return Ok(Some(format!(
+                "marker {text:?} at byte {start} ends at x={right:.1} and its item's text starts at x={item:.1}, \
+                 where the marker should end at {:.1} (MARKER_GAP {} before the text)",
+                item - richdoc::MARKER_GAP,
+                richdoc::MARKER_GAP
+            )));
+        }
+    }
+    Ok(None)
+}
+
 /// The canvas's box, cut out of a print of the WHOLE WINDOW: `PrintWindow`
 /// with `PW_RENDERFULLCONTENT` addresses the window by HWND rather than by
 /// screen position, so an occluded or PARTLY OFF-SCREEN window still answers
@@ -25740,6 +25801,11 @@ impl crate::harness::Stage for WinUiStage {
             let Some(numbered) = core.scene.rich_markers_string(WidgetId(widget)) else {
                 return Ok(Err(format!("widget {widget} holds no rich document")));
             };
+            if let Some(field) = textarea_by_id(core, widget) {
+                if let Some(why) = marker_misplaced(core, &field, widget)? {
+                    return Ok(Err(why));
+                }
+            }
             Ok(Ok((richdoc::drawn_spelling(widget), numbered)))
         })
         .unwrap_or_else(|e| Err(format!("unreadable: {e}")))

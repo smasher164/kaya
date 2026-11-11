@@ -15,7 +15,7 @@ use bindings::Microsoft::UI::Text::ParagraphAlignment;
 /// from its level, a plain paragraph's at its level (the Mac arm's 24 pt).
 pub(super) const LIST_INDENT_STEP: f32 = 24.0;
 /// The gap between a marker's trailing edge and the item's text.
-const MARKER_GAP: f64 = 6.0;
+pub(super) const MARKER_GAP: f64 = 6.0;
 /// A checklist item's box: the CheckBox template's own glyph square.
 const CHECK_SIZE: f64 = 20.0;
 
@@ -32,6 +32,7 @@ pub(super) struct Drawn {
     pub level: u32,
     pub text: String,
     pub check: Option<CheckBox>,
+    pub element: UIElement,
 }
 
 thread_local! {
@@ -141,6 +142,17 @@ fn overlay(field: &RichEditBox, widget: u64) -> windows_core::Result<Option<(Can
         place_later(widget);
         Ok(())
     }))?;
+    // THE TEXT MOVES WITHOUT THE CANVAS: a Padding write (the Writing Mode
+    // measure, code_surface.rs apply_measure) re-lays the text presenter
+    // inside an unchanged box, so its own size change places the markers
+    // again (the review capture, 2026-11-11: every marker 80 px left of its
+    // text).
+    if let Some(text_view) = presenter(&content).and_then(|p| p.cast::<FrameworkElement>().ok()) {
+        text_view.SizeChanged(&bindings::Microsoft::UI::Xaml::SizeChangedEventHandler::new(move |_, _| {
+            place_later(widget);
+            Ok(())
+        }))?;
+    }
     OVERLAYS.with_borrow_mut(|map| {
         map.insert(widget, Overlay { canvas: canvas.clone(), content: content.clone() });
     });
@@ -310,6 +322,7 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
                     level: marker.level,
                     text: if shown { "[x]" } else { "[ ]" }.to_owned(),
                     check: Some(check),
+                    element: element.clone(),
                 });
                 continue;
             }
@@ -329,6 +342,7 @@ fn place(field: &RichEditBox, widget: u64) -> windows_core::Result<()> {
                 level: marker.level,
                 text: block.Text()?.to_string(),
                 check: None,
+                element: element.clone(),
             });
         }
         // Clipped to the viewport the text scrolls in, so a marker scrolled
@@ -360,6 +374,16 @@ pub(super) fn drawn_spelling(widget: u64) -> String {
                     .collect::<Vec<_>>()
                     .join("|")
             })
+            .unwrap_or_default()
+    })
+}
+
+/// The drawn markers' elements, for `expect_markers`' placement read.
+#[cfg(feature = "harness")]
+pub(super) fn drawn_elements(widget: u64) -> Vec<(u64, String, UIElement)> {
+    DRAWN.with_borrow(|map| {
+        map.get(&widget)
+            .map(|d| d.iter().map(|d| (d.start, d.text.clone(), d.element.clone())).collect())
             .unwrap_or_default()
     })
 }
