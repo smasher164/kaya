@@ -1,6 +1,7 @@
 # The rich document: the design pass (2026-11-05, rulings ASKED)
 
-Status: PROPOSED. Thirteen rulings below (RD1-RD13) are the maintainer's,
+Status: PROPOSED; RD9 RULED A and the safe save through a picked file (§4.1)
+RULED, both 2026-11-11. Sixteen rulings below (RD1-RD16) are the maintainer's,
 each with options, a recommendation and the reason in plain words. Nothing
 here is built. The review page is
 https://claude.ai/artifact/8PxsiUURHiARrkG5tgxMXq.
@@ -520,8 +521,11 @@ paragraphs of spans:
 - Unknown keys at any level are preserved on a round trip (RD8), and an
   unknown name in `requires` opens the document read-only.
 - The codec is in the core (RD13), so nine bindings write the same bytes.
-- Writes go through the platform's safe save (a new file, then a replace),
-  which is what kaya's save flow and every sync client handle.
+- The app writes its own files. Where it holds a path (the desktops'
+  picked files, and `app_data_dir()` on every platform, S4) it writes a
+  temporary file and renames it over the old one itself; kaya adds nothing
+  there. Through a picked file on a phone there is no path to rename into,
+  and the safe save is kaya's (§4.1).
 - A later collaborative app keeps its Automerge history BESIDE the file, in
   its own library (below), and a `.kdoc` stays the shareable snapshot. If a
   file must carry history, an optional `history` member holds an Automerge
@@ -538,27 +542,167 @@ DESIGN.md already rules for app data (`app_data_dir`, the task manager's
 one row per note holding the `.kdoc` JSON (or its Automerge chunks: one
 snapshot row and incremental rows, the automerge-repo storage pattern,
 compacted in one transaction), a plain-text column for full-text search, and
-attachments as blobs. As a USER-PICKED FILE, SQLite meets four walls the
+attachments as blobs. As a USER-PICKED FILE, SQLite meets three walls the
 research documents: its rollback journal is a sibling file, and a sandboxed
 iOS app has no way to create one beside a document picked in Files
 (https://developer.apple.com/forums/thread/729369), while Android's picker
 hands kaya a `content://` URI with no sibling at all (kaya's own picker,
-android/kaya/src/main/kotlin/dev/kaya/KayaPresent.kt); sync folders corrupt
-open SQLite files (Anki: "can lead to database corruption when files are
-synced while in use", https://docs.ankiweb.net/files.html; SQLite's own
-https://sqlite.org/howtocorrupt.html §1.2 and §1.4); Apple's document
+android/kaya/src/main/kotlin/dev/kaya/KayaPresent.kt); Apple's document
 architecture is write-new-then-replace, which an in-place commit bypasses
 (NSPersistentDocument gives up async saving and save-to,
 https://developer.apple.com/documentation/appkit/nspersistentdocument); and
 a few kilobytes of text costs an 8 to 30 KB file (measured, 4096-byte
-pages). Its strengths (atomic incremental writes, attachments, `application_id`
-and `user_version` for identity and migration,
+pages). One more fact, which is not a criterion the maintainer set: a
+sync client copying an open SQLite file can corrupt it (Anki: "can lead to
+database corruption when files are synced while in use",
+https://docs.ankiweb.net/files.html; SQLite's own
+https://sqlite.org/howtocorrupt.html §1.2 and §1.4). Its strengths (atomic
+incremental writes, attachments, `application_id` and `user_version` for
+identity and migration,
 https://sqlite.org/appfileformat.html) matter for a library and barely for
 one document. rusqlite 0.40.2 with `bundled` is already built on all five
 lanes for the task manager, phones included (docs/tasks-s4-plan.md §2 item
 5), as a dev-dependency; libkaya links no SQLite, and the notes app would
 not change that, since the app owns its library (the rich-text plan §5's
 rule that no CRDT or store appears in kaya's API).
+
+### §4.1 Safe save through a picked file (RULED 2026-11-11)
+
+The maintainer, 2026-11-11: "i think your suggestions are fine as well as
+the idea to look into the truncation bug". The suggestions were these: a
+safe save through a picked file is kaya's job, because a guest holds only a
+raw handle; on Android, back up, overwrite, verify, delete the backup, and
+restore or offer a leftover backup at the next launch; on iOS, Apple's
+coordinated safe save; on the desktops, the guest's own temporary file and
+rename, with nothing from kaya. Nothing here is built; it waits for the rich
+document rulings and its own slice. RD14 to RD16 hold what is still open.
+
+**The problem, from zero.** A SAFE SAVE is a save that, if the app crashes
+or the power goes halfway through, leaves either the old document or the new
+one, never half of each. With a path it is easy: write the new bytes to a
+temporary file beside the old one, flush it to the disk (`fsync`, the call
+that returns only once the bytes are on the storage device), then RENAME it
+over the old name. A rename within one directory is atomic: any reader sees
+the old file or the new file. A picked file on a phone has no path to do
+that with. On Android the picker answers a `content://` URI, a name that only
+the providing app can resolve; kaya opens it with
+`ContentResolver.openFileDescriptor` and hands the guest a descriptor, and
+there is no directory to put a temporary file in and no rename (the
+document API's `renameDocument` changes the display name only, and says
+nothing about a name already taken). On iOS the picker answers a
+security-scoped URL whose path is usable only while kaya holds the scope
+(DESIGN.md, File dialogs, measurements 1 to 4), and `kaya_open_picked`
+releases the scope before it returns. So the guest cannot do the rename, and
+kaya must.
+
+**The truncation finding (measured 2026-11-11, docs/traps.md).** Before any
+of this: overwriting a longer document with a shorter one must not leave the
+old tail. Every writable provider on the API 35 emulator honours `wt`
+(ExternalStorageProvider, DownloadStorageProvider's `msf:` and `raw:` ids,
+MediaDocumentsProvider) and none honours a bare `w`; `ftruncate` on the
+returned descriptor works on all of them. Google Drive, the provider the
+reports name, could not be measured (no account on the emulator). kaya now
+truncates a seekable Write descriptor itself after the `wt` open, and
+save.steps writes a save-back shorter than the draft it opened. iOS, GTK,
+WinUI and the Mac open Write with `O_TRUNC` (or `TRUNCATE_EXISTING`) on a
+real path, which the kernel honours, so they have no such gap.
+
+**How it lowers.**
+
+- **Android**, inside one blocking call:
+  1. Take a persistable grant on the URI
+     (`takePersistableUriPermission`), so a restore at the next launch does
+     not depend on the picker's grant, which ends with the activity. kaya
+     takes none today.
+  2. Copy the current contents through an `r` open into the app's private
+     storage (`<files dir>/kaya-safesave/<n>/old`), beside a small record:
+     the URI, the display name, the old length and hash, and the NEW length
+     and hash. `fsync` the copy, the record and their directory.
+  3. Open the URI `wt`, truncate (the hardening above), write, `fsync`,
+     close. A provider that answered a pipe cannot `fsync` (`EINVAL`); its
+     close is its commit, and the record says the pipe was seen.
+  4. Read the document back through a fresh `r` open and compare it with
+     the new bytes (RD16 decides the comparison).
+  5. Delete the backup and its record, `fsync` the directory, and release
+     the persistable grant unless the app already held one.
+  If step 3 or 4 fails inside the call, kaya writes the backup back over the
+  document before returning the error, and keeps the backup if that write
+  fails too.
+- **iOS**: start the security scope; coordinate a write with
+  `NSFileCoordinator.coordinate(writingItemAt:options: .forReplacing)`;
+  inside it, write the bytes to a file in
+  `FileManager.url(for: .itemReplacementDirectory, in: .userDomainMask,
+  appropriateFor: url, create: true)` (a directory on the document's own
+  volume), `fsync` it, and `FileManager.replaceItemAt(url, withItemAt:)`;
+  stop the scope. This is what `UIDocument` does for its own saves, and the
+  coordinator is how a File Provider (iCloud Drive, a third-party cloud)
+  learns the item changed. What the slice must measure first: that
+  `replaceItemAt` on a picked URL in On My iPhone and in iCloud Drive keeps
+  the item's identity rather than reading to the provider as a delete and a
+  create.
+- **Mac, GTK, WinUI**: the picked file has a re-openable path
+  (`local_path`), so the safe save is a temporary file in the same directory,
+  `fsync`, and a rename over the name (`rename(2)`; on Windows
+  `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH`,
+  or `ReplaceFileW`, which keeps the old file's attributes). A guest can do
+  this itself; RD14 asks whether kaya's call covers the desktops anyway, so
+  that a guest writes one save for every platform.
+
+**What the guest sees.** One semantics in nine bindings (invariant 1): a
+picked file gains a save that takes the whole new contents as bytes, blocks,
+is safe from any thread (like `open`), and either returns success, after
+which the document holds exactly those bytes, or fails, after which it
+holds the old contents. On Android only, a failure kaya could not undo
+leaves a backup that the next launch reports (below); that carve-out is
+stated the same way in every binding, since a rename cannot leave one. The
+spelling follows each language's existing `open`: `PickedFile::save(&self,
+bytes: &[u8]) -> io::Result<()>` in Rust, an exception where the binding's
+`open` raises one, an error value where it returns one. The C floor is one
+call, `kaya_save_picked(handle, bytes, len)`, answering an errno like
+`kaya_open_picked`. The sweep's verdict is do in Rust, Python, Go, C#, Java,
+Swift, OCaml, Haskell and JS, and the C floor. A save-dialog destination is
+a picked file too, so the same save writes a new document.
+
+**After a crash: the next launch.** Only Android can leave a backup behind
+(step 2 to step 5 span several calls, and a process can die between any
+two). When the app next starts, kaya reads `kaya-safesave/` before the app's
+first build and classifies each record by reading the document's current
+length and hash:
+
+- it holds the OLD bytes: the save never began to write; the backup is
+  deleted, nothing is reported;
+- it holds the NEW bytes: the save finished but for the cleanup; the backup
+  is deleted, nothing is reported;
+- it holds NEITHER: the write was torn, or another app changed the document
+  since. kaya cannot tell those two apart, so overwriting silently could
+  destroy another app's edit; RD15 decides what happens;
+- the URI no longer opens (the document was deleted, or the grant was
+  revoked): the backup is the only copy of the old contents; RD15 decides
+  this too.
+
+What the user or app is told depends on RD15. Whatever it decides, kaya
+never deletes a backup it could not prove redundant without the app's
+answer.
+
+**The guards the slice needs** (invariant 3, each on a path a session walks
+into):
+
+- The core's state machine as a unit test with a fault-injecting source: a
+  failure after each of the five steps, then the next launch's
+  classification, every branch made to print (invariant 3's diagnostics
+  rule: the sentence for "neither" must say kaya cannot tell a torn write
+  from another app's edit, because it cannot).
+- A scene on every lane: save long over short and short over long through
+  the new call, and read the exact bytes back (save.steps' shape). On the
+  desktops the directory listing `expect_file_dialog` reads shows no
+  temporary file left behind.
+- An Android second act: a fault knob kills the process between step 3 and
+  step 5, the relaunch (the scene runner's second act) reads the report, and
+  the restore reads the old bytes back.
+- A code-shape gate over each arm: `fsync` before the rename or the backup
+  delete, the iOS arm inside `coordinate(writingItemAt:options:
+  .forReplacing)`, the Android arm's persistable grant taken before the copy.
+- check-sugar-surface's row for the save in all nine bindings.
 
 ## §5. Colour (RD4, RD5, RD6)
 
@@ -733,7 +877,8 @@ byte on five lanes.
    dark, each viewed before it is published.
 6. Then, each its own slice: the clipboard's RTF and HTML (RD12 next), the
    highlight (RD6), the notes app over a SQLite library with Automerge
-   behind it (RD9, RD10).
+   behind it (RD9, RD10), and the safe save through a picked file (§4.1,
+   RD14 to RD16).
 
 Every guard this plan's build needs is named where it is built: the
 corroboration wall (`expect_runs` fails when an arm's own runs disagree with
@@ -875,16 +1020,21 @@ by an older one.
 
 ### RD9. The container: a JSON file now, SQLite for an app's library later
 
+RULED A, 2026-11-11 ("i think your suggestions are fine"), with two
+corrections the maintainer made the same day: sync folders are not a
+criterion he set, so they left the weighing; and kaya provides no save for
+ordinary paths, since the guest writes its own files (`app_data_dir()`, S4)
+and `kaya_open_picked` already exists. The picked-file safe save is §4.1.
+
 The maintainer's "repurposed sqlite" thought, weighed:
 
 | | A. JSON `.kdoc` | B. Automerge binary | C. SQLite file | D. a zip package |
 |---|---|---|---|---|
-| atomic save | the platform's safe save (new file, replace) | the same | a transaction, in place | the same as A |
+| atomic save | the app's temporary file and rename; on a picked file on a phone, kaya's safe save (§4.1) | the same | a transaction, in place | the same as A |
 | incremental writes | rewrite (documents are small) | append a chunk | native | rewrite |
 | a few KB of text costs | the text and some keys | about 30% over the text, with all history | 8 to 30 KB (measured) | the zip's overhead |
 | history | none (it lives in the app's library) | all of it, deleted text included | as the app stores it | as stored |
 | user-picked files on iOS and Android | fine | fine | its journal has no sibling to live in | fine |
-| sync folders (iCloud Drive, Dropbox) | what they are built for | the same, and a conflicted copy merges | documented corruption | fine |
 | other tools can open it | any text editor, any language | Automerge only (no OCaml, Haskell or full Go binding) | sqlite3, but the text is a blob | unzip, then JSON |
 | attachments | later, as a package | inside | a table | natural |
 | identity and migration | `version` and `requires` | Automerge's chunk magic plus kaya's keys | `application_id`, `user_version` | a manifest |
@@ -899,7 +1049,7 @@ The maintainer's "repurposed sqlite" thought, weighed:
 
 RECOMMEND A. SQLite is the right store exactly where the research found it
 used well, an app's library; as a picked file it breaks on both phones'
-pickers and in sync folders. Automerge-as-the-file puts every deleted word
+pickers. Automerge-as-the-file puts every deleted word
 in every emailed file and makes the format unreadable without one library.
 D becomes the answer the day documents carry images; A's `embeds` table
 (§2) is shaped so the move is additive.
@@ -959,3 +1109,63 @@ reader is the hardest piece in this survey.
 RECOMMEND A. Invariant 1: one observable semantics. Nine hand-written JSON
 writers would disagree about key order, number formats and unknown keys
 within a month; one codec with nine thin doors cannot.
+
+### RD14. Whether the picked file's save covers the desktops too
+
+§4.1's mechanism, short: on a phone kaya must do the safe save, since the
+guest has no path. On the Mac, GTK and WinUI the picked file has a path, and
+the ruling of 2026-11-11 says the guest's own temporary file and rename is
+enough there. The question is the guest's code, not the mechanism: a guest
+that saves the same document on every platform either calls one save, or
+asks whether `local_path` is empty and writes two saves.
+
+- A. One call on every platform. On the desktops kaya's arm is the temporary
+  file and rename the guest would have written (about twenty lines over
+  `std::fs`, `MoveFileExW` on Windows); a guest may still do its own.
+- B. The call exists only where there is no path (iOS, Android); a desktop
+  guest does its own rename, and the call refuses there in one sentence
+  naming `local_path`.
+
+RECOMMEND A. Invariant 1 asks for one observable semantics, and B makes
+every portable guest branch on the platform to save a file. A adds no
+mechanism the ruling refused: kaya does not provide a save for ordinary
+paths, only for the handle its own picker answered.
+
+### RD15. What happens to a backup the next launch cannot prove redundant
+
+§4.1's mechanism, short: on Android only, a crash between the overwrite and
+the cleanup leaves a copy of the old contents in the app's private storage.
+At the next launch kaya deletes it silently when the document holds exactly
+the old bytes or exactly the new ones. Two cases remain: the document holds
+neither (a torn write, or another app edited it since, which kaya cannot
+tell apart), or the document no longer opens.
+
+- A. Silent: kaya writes the backup back over the document, then deletes
+  it. (A torn write is repaired; another app's edit is lost without a word.)
+- B. Tell the app: kaya delivers one occurrence per leftover backup before
+  the app's first build is shown, carrying the document's name, a readable
+  handle on the backup, a handle on the document when it still opens, and
+  what kaya measured ("holds neither the old nor the new contents"). The app
+  answers restore or discard, or asks its user in its own words; a backup
+  nobody answered stays for the next launch.
+- C. kaya asks the user itself with a system alert ("<name> was not saved
+  completely. Restore the last saved version?").
+
+RECOMMEND B. Only the app knows whether its user should be asked, and A
+destroys another app's edit in exactly the case kaya cannot detect. C puts
+kaya's words in every app's mouth. Under B the occurrence never fires on
+iOS or the desktops, since a rename cannot leave a backup, and every
+binding says so the same way.
+
+### RD16. How the Android save checks what it wrote
+
+§4.1's mechanism, short: after the overwrite, kaya reads the document back
+through a fresh open before it deletes the backup.
+
+- A. Length and a hash (SHA-256) of the bytes read back against those of
+  the bytes written.
+- B. Length only.
+
+RECOMMEND A. Documents are small, the read is needed for the length anyway,
+and a length check passes a provider that wrote the right number of wrong
+bytes. The hash is kaya's own and never leaves the device.
