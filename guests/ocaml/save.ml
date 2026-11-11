@@ -53,7 +53,7 @@ let () =
   (* THE DECOY MUST SORT FIRST: with one file in the directory a dialog
      completes with it when nothing is selected (docs/traps.md). *)
   (try Unix.mkdir save_dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  write_file (Filename.concat save_dir "draft") "first draft";
+  write_file (Filename.concat save_dir "draft") "the first draft";
   write_file (Filename.concat save_dir "decoy") "decoy";
 
   let app = Kaya_app.create () in

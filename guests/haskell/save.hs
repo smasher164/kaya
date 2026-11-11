@@ -55,7 +55,7 @@ main = kayaMain $ \app -> do
   createDirectoryIfMissing True dir
   -- The decoy must SORT BEFORE the real file (docs/traps.md, "Pressing Open
   -- with nothing selected still returns a file").
-  writeFile (dir </> "draft") "first draft"
+  writeFile (dir </> "draft") "the first draft"
   writeFile (dir </> "decoy") "decoy"
 
   -- Handles, never paths — the phones have no re-openable path. IORefs

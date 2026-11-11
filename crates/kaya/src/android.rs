@@ -1329,6 +1329,17 @@ impl crate::protocol::PickedSource for UriSource {
         // regular file yesterday.
         let file = unsafe { crate::protocol::file_from_raw(fd) };
         let seekable = file.metadata().map(|m| m.is_file()).unwrap_or(false);
+        // Truncated HERE as well as by `wt`: reports name providers that
+        // ignore the `t` (docs/traps.md, the provider that keeps the old
+        // tail; tools/scenes/save.steps reads the exact bytes back).
+        if mode == crate::protocol::FileMode::Write && seekable {
+            file.set_len(0).map_err(|e| {
+                std::io::Error::new(
+                    e.kind(),
+                    format!("kaya: truncating {} for write failed: {e}", self.uri),
+                )
+            })?;
+        }
         Ok((crate::protocol::raw_handle(file), seekable))
     }
 

@@ -33,7 +33,7 @@ public final class Save {
         try {
             Files.createDirectories(dir);
             Files.write(dir.resolve("draft"),
-                    "first draft".getBytes(StandardCharsets.UTF_8));
+                    "the first draft".getBytes(StandardCharsets.UTF_8));
             Files.write(dir.resolve("decoy"),
                     "decoy".getBytes(StandardCharsets.UTF_8));
         } catch (IOException e) {

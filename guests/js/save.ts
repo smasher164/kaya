@@ -13,7 +13,7 @@ const app = new kaya.App();
 const saveDir = join(tmpdir(), `kaya-save-${process.pid}`);
 mkdirSync(saveDir, { recursive: true });
 // The decoy MUST sort before "draft" (guests/js/filedialog.ts says why).
-writeFileSync(join(saveDir, "draft"), "first draft", { encoding: "utf-8" });
+writeFileSync(join(saveDir, "draft"), "the first draft", { encoding: "utf-8" });
 writeFileSync(join(saveDir, "decoy"), "decoy", { encoding: "utf-8" });
 
 // HANDLES and never paths: the phones have no re-openable path.

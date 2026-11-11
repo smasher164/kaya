@@ -71,7 +71,7 @@ static class SaveScene
             Path.GetTempPath(),
             $"kaya-save-{System.Environment.ProcessId}");
         Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "draft"), "first draft");
+        File.WriteAllText(Path.Combine(dir, "draft"), "the first draft");
         File.WriteAllText(Path.Combine(dir, "decoy"), "decoy");
 
         // Handles, never paths — the phones have no re-openable path.

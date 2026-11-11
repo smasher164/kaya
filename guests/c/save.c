@@ -55,7 +55,7 @@ static void make_scene_files(void) {
     }
     /* THE DECOY: with one file in the directory a dialog completes with it
      * having selected nothing, and "decoy" sorts FIRST (docs/traps.md). */
-    write_scene_file("draft", "first draft");
+    write_scene_file("draft", "the first draft");
     write_scene_file("decoy", "decoy");
 }
 

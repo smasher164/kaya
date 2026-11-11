@@ -17,7 +17,7 @@ save_dir = pathlib.Path(tempfile.gettempdir()) / f"kaya-save-{os.getpid()}"
 save_dir.mkdir(parents=True, exist_ok=True)
 # The decoy the picker needs (guests/python/filedialog.py says why):
 # "decoy" MUST sort before "draft".
-(save_dir / "draft").write_text("first draft")
+(save_dir / "draft").write_text("the first draft")
 (save_dir / "decoy").write_text("decoy")
 
 # HANDLES and never paths: the phones have no re-openable path.

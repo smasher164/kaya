@@ -69,7 +69,7 @@ pub(crate) fn app(ctx: kaya::AppCtx) {
     // The decoy the picker needs; guests/rust/filedialog.rs says why.
     let dir = save_dir();
     std::fs::create_dir_all(&dir).expect("failed to make the scene's directory");
-    std::fs::write(dir.join("draft"), b"first draft").expect("failed to write the file");
+    std::fs::write(dir.join("draft"), b"the first draft").expect("failed to write the file");
     std::fs::write(dir.join("decoy"), b"decoy").expect("failed to write the decoy");
 
     let msgs = kaya::Messages::<Msg>::new();

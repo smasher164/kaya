@@ -2945,7 +2945,7 @@ def save_missing_handles(text):
     prefix = ['expect label#0 "no file"', 'click button#1',
               'expect label#0 "nothing open to save"', 'click button#3',
               'expect label#0 "nothing to reopen"']
-    opened = ['expect label#0 "opened first draft"', 'click button#3',
+    opened = ['expect label#0 "opened the first draft"', 'click button#3',
               'expect label#0 "nothing to reopen"', 'click button#1',
               'expect label#0 "saved second draft"']
     bad = []
@@ -2953,6 +2953,16 @@ def save_missing_handles(text):
         bad.append("save.steps must exercise save/reopen before any handle exists")
     if "\n".join(opened) not in "\n".join(lines):
         bad.append("save.steps must exercise reopen with a source but no destination")
+    drafts = [re.fullmatch(r'expect label#0 "(opened|saved) (.*)"', line)
+              for line in lines]
+    drafts = [m for m in drafts if m]
+    first_open = next((m for m in drafts if m[1] == "opened"), None)
+    first_save = next((m for m in drafts if m[1] == "saved"), None)
+    if not first_open or not first_save or len(first_save[2]) >= len(first_open[2]):
+        bad.append("save.steps' save-back must write FEWER bytes than the draft "
+                   "it opened, or a write that never truncated still reads back "
+                   "right (docs/traps.md, the Android provider that keeps the "
+                   "old tail)")
     return bad
 
 
@@ -2967,15 +2977,22 @@ for label, before, after in [
      'expect label#0 "nothing to reopen"\n',
      'expect label#0 "nothing open to save"\n'),
     ("reopen before destination",
-     'expect label#0 "opened first draft"\nclick button#3\n'
+     'expect label#0 "opened the first draft"\nclick button#3\n'
      'expect label#0 "nothing to reopen"\n',
-     'expect label#0 "opened first draft"\n'),
+     'expect label#0 "opened the first draft"\n'),
 ]:
     changed, count = sub_count(re.escape(before), after, save_script)
     findings = save_missing_handles(changed)
     print(f"check-steps: {label}: {count} substitution(s), {len(findings)} finding(s)")
     if count != 1 or len(findings) != 1:
         selftest_fail(f"{label}: missing-handle script cut did not refuse exactly once")
+changed, count = sub_count(re.escape('expect label#0 "opened the first draft"'),
+                           'expect label#0 "opened draft"', save_script)
+findings = [f for f in save_missing_handles(changed) if "FEWER bytes" in f]
+print(f"check-steps: save-back no shorter than the draft: {count} substitution(s), "
+      f"{len(findings)} finding(s)")
+if count != 1 or len(findings) != 1:
+    selftest_fail("save-back no shorter than the draft: the length clause did not refuse")
 
 
 def java_dialog_coverage(rosters):

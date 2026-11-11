@@ -4,6 +4,28 @@ Each of these cost a debugging session (or would have). Most now have a
 structural guard; the guard is named where it exists. Do not re-derive
 these the hard way.
 
+## The Android provider that keeps the old tail: `w` never truncates, `wt` did everywhere we could reach (measured 2026-11-11)
+
+Reports name providers (Google Drive among them) where a document opened
+`wt` and written shorter keeps the old content's tail. On the API 35
+emulator every provider that can be written was driven with the mode
+strings `openPickedUri` passes, from a probe calling
+`IContentProvider.openFile` under `su 1000`: ExternalStorageProvider,
+DownloadStorageProvider (`msf:` and `raw:` ids) and MediaDocumentsProvider.
+A 29-byte file written `SHORT` read back `SHORT` under `wt` and `rwt` on
+all four, and `SHORTCONTENT 0123456789ABCDEF` under `w` and `rw`. Every
+descriptor was a regular file at offset 0, and `ftruncate(fd, 0)` on it
+after a bare `w` read back `SHORT` on all four. Drive is installed on the
+image but its provider answers nothing without an account, so the provider
+the reports name is the one we could not measure. `UriSource::open`
+therefore truncates a seekable Write descriptor itself after the `wt`
+open, so the length after close never depends on the provider; save.steps
+writes a save-back shorter than the draft it opened and reads the exact
+bytes, and check-steps holds those lengths. The other four have no such
+gap: iOS's `kaya_swiftui_open_picked` opens the picked path with `O_TRUNC`,
+and the desktops' `PathSource` with `.truncate(true)` (`O_TRUNC`,
+`TRUNCATE_EXISTING`), which the kernel applies with no provider in between.
+
 ## A WinUI button target read one button over (measured 2026-11-01)
 
 On the windows lane's chatcall leg every read of a call-screen button by its

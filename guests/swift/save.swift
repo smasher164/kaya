@@ -21,7 +21,7 @@ KayaApp.run { app in
     // directory a dialog completes with it when nothing is selected (docs/traps.md).
     FileManager.default.createFile(
         atPath: (saveDir as NSString).appendingPathComponent("draft"),
-        contents: Data("first draft".utf8))
+        contents: Data("the first draft".utf8))
     FileManager.default.createFile(
         atPath: (saveDir as NSString).appendingPathComponent("decoy"),
         contents: Data("decoy".utf8))

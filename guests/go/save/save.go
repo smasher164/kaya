@@ -78,7 +78,7 @@ func App() *kaya.App {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		panic("failed to make the scene's directory: " + err.Error())
 	}
-	if err := os.WriteFile(filepath.Join(dir, "draft"), []byte("first draft"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "draft"), []byte("the first draft"), 0o644); err != nil {
 		panic("failed to write the file: " + err.Error())
 	}
 	if err := os.WriteFile(filepath.Join(dir, "decoy"), []byte("decoy"), 0o644); err != nil {
