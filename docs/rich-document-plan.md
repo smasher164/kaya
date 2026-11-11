@@ -1,9 +1,12 @@
-# The rich document: the design pass (2026-11-05, rulings ASKED)
+# The rich document: the design pass (2026-11-05, rulings TAKEN 2026-11-11)
 
-Status: PROPOSED; RD9 RULED A and the safe save through a picked file (§4.1)
-RULED, both 2026-11-11. Sixteen rulings below (RD1-RD16) are the maintainer's,
-each with options, a recommendation and the reason in plain words. Nothing
-here is built. The review page is
+Status: RULED 2026-11-11; nothing here is built. RD9 RULED A and the safe save
+through a picked file (§4.1) RULED; every other ruling (RD1-RD8, RD10, RD11,
+RD13-RD16) RULED as recommended ("I like all the recommendations except
+rd12"); RD12 RULED as amended: no Markdown and no DOCX, the clipboard's RTF
+and HTML in the first build (the maintainer: "why do we even have markdown
+import and export?" and "i feel like that's out of scope for our rich text
+editor"). The review page is
 https://claude.ai/artifact/8PxsiUURHiARrkG5tgxMXq.
 
 The maintainer's ask, 2026-11-05: the editor's Writing Mode should look like
@@ -405,7 +408,7 @@ paragraphs, validated where `block` is validated today:
 | `list` | `bullet`, `numbered`, `check` | none | RD2; legal on `body` and `quote` paragraphs, refused on a heading or a code block |
 | `indent` | `1` to `8` | `0` (no run) | RD3; the level, for list items and for plain paragraphs alike |
 | `checked` | `true` | unchecked (no run) | RD2; legal only on a `check` paragraph |
-| `start` | a positive integer | counted | RD2; on the first item of a numbered run, from Markdown's `3.` |
+| `start` | a positive integer | counted | RD2; on the first item of a numbered run, from a pasted list's start |
 | `align` | `center`, `end`, `justify` | `start` (no run) | native on all five (the 2026-09-11 survey); no consumer asked, so it is in RD1 for the maintainer to keep or drop |
 
 **Inline marks**, the R3 vocabulary plus one (RD4), each with the expand
@@ -791,30 +794,21 @@ way a TOM link's hidden field did, R3's amendment); and what a screen reader
 says for a drawn marker on GTK and Compose, where AT-SPI and TalkBack see
 none unless the arm exposes the item's position.
 
-## §7. Import and export (RD12)
+## §7. Exchange with other apps (RD12, RULED 2026-11-11 as amended)
 
-- NOW: Markdown in and out, in the core, through pulldown-cmark (the popular
-  CommonMark crate, GFM's task lists and strikethrough included; memory's
-  "prefer existing crates" rule). Import maps headings, quotes, code blocks,
-  bullet, ordered and task lists with their nesting and start, emphasis,
-  strong, strike, code and links, and keeps any other block (a table, an
-  HTML block) as body text verbatim. Export is lossy and says so where it
-  happens (the editor's Export as Markdown names what it dropped):
-  underline becomes `<u>`, colour is dropped (GitHub strips inline styles,
-  §1.9), alignment is dropped, an indented plain paragraph becomes a plain
-  one.
-- NEXT: RTF (and HTML) on the CLIPBOARD, both ways. Copy writes RTF beside
+- No Markdown import or export, and no DOCX: the `.kdoc` is the only file
+  format. A plain text file made rich becomes body paragraphs as written
+  (TextEdit's Make Rich Text interprets nothing). Either can be added later
+  if a need appears; nothing in the format is in the way. §1.7 and §1.9 stay
+  as research.
+- IN THE FIRST BUILD: RTF (and HTML) on the CLIPBOARD, both ways. Copy writes RTF beside
   the plain text, with `\cf0` for automatic ink, a `\colortbl` for colours,
   `\listtable` plus `\listtext` for lists; paste reads RTF or HTML through
   one normaliser in the core that keeps only kaya's vocabulary (today every
   paste is plain by design, rich-text plan §7). This is what makes copying
-  to and from Mail, Pages, Word and Notes work, and it is a slice of its
-  own because each platform's clipboard flavour is its own measurement.
-- LATER: DOCX export (writing a subset is moderate: `w:p`, `w:r`,
-  `numbering.xml`), and DOCX import after it (reading is the hard half,
-  §1.7). RTF as a FILE format is not proposed: RTF as the clipboard's
-  flavour covers the interchange, and nothing writes RTF files any more
-  that also does not read DOCX or paste.
+  to and from Mail, Pages, Word and Notes work; each platform's clipboard
+  flavour is its own measurement in §9's step 0. RTF as a FILE format is
+  not proposed.
 
 ## §8. Writing Mode in the editor (RD11)
 
@@ -829,19 +823,17 @@ document (a text file: the coding face, the gutter, the plain text saved) or
 a RICH document (a `.kdoc`: the reading face and measure, real formatting,
 lists and colours, saved as the document). Opening a `.kdoc` opens a rich
 tab; opening anything else opens a plain one. Format > Make Rich Text turns
-a plain tab rich (a Markdown file's marks are IMPORTED: `**word**` becomes a
-bold "word" and the asterisks go), and its next Save asks for a `.kdoc`
+a plain tab rich (its text becomes body paragraphs as written), and its next Save asks for a `.kdoc`
 name, since the file type changed; Format > Make Plain Text asks first when
 formatting would be lost ("Converting this document to plain text will lose
-its formatting", TextEdit's question) and offers Export as Markdown beside
-it. View > Writing Mode keeps its name as the look a rich tab wears, and the
+its formatting", TextEdit's question). View > Writing Mode keeps its name as the look a rich tab wears, and the
 app preference becomes "new documents are rich". The formatting acts (the
 Format menu, the phone's keyboard bar) are enabled only on a rich tab. The
 Markdown-drawn-styled rule of 2026-11-04 is superseded: in a rich tab there
 are no Markdown marks to draw.
 
 The scene, tools/scenes/editor.steps, grows a rich tab: make rich over the
-walking journal (the import's runs read with `expect_runs`), a list, an
+walking journal (body paragraphs read with `expect_runs`), a list, an
 indent, a colour from a preset, the numbering read, Return in an empty item,
 save as `.kdoc`, close, reopen, and the runs and text read again byte for
 byte on five lanes.
@@ -858,10 +850,11 @@ byte on five lanes.
 1. **The root**, spec-first (invariant 7): the paragraph attribute names and
    their scope rule in spec.rs (the hash moves), the `color` mark and its
    value check, the expand table driving `typed_runs`, numbering, the
-   colour mapping, the `.kdoc` codec and the Markdown codec, with unit tests
+   colour mapping, the `.kdoc` codec and the clipboard's RTF and HTML
+   writer and normaliser, with unit tests
    (a round trip of every attribute, an unknown name kept, a higher major
-   version refused, a `requires` name opening read-only, Markdown both
-   ways); the Rust sugar and `Document`'s file pair.
+   version refused, a `requires` name opening read-only, RTF and HTML
+   both ways); the Rust sugar and `Document`'s file pair.
 2. **Depth on the Mac**: the NSTextView arm (lists, indent, colour through
    the dynamic provider, `changeColor:` caught), a `richdoc.steps` scene with
    a Rust guest, `expect_runs` over the new names, `expect_markers` (the
@@ -869,13 +862,14 @@ byte on five lanes.
    no marker is text), and the drawn colour read off the window's pixels in
    both appearances (`expect_ink`'s route).
 3. **The editor on the Mac**: the Go sugar, Make Rich Text, the menus, the
-   `.kdoc` save and open, Export as Markdown, editor.steps' rich tab.
+   `.kdoc` save and open, copy and paste with formatting, editor.steps'
+   rich tab.
 4. **Breadth**: iOS, GTK, WinUI and Compose arms; the seven other bindings'
    sugar (the sweep's verdict is do in all nine, RD13); check-sugar-surface
    rows; check-verbs for both interpreters; the matrix.
 5. **The review page** with captures of a rich tab on every lane, light and
    dark, each viewed before it is published.
-6. Then, each its own slice: the clipboard's RTF and HTML (RD12 next), the
+6. Then, each its own slice: the
    highlight (RD6), the notes app over a SQLite library with Automerge
    behind it (RD9, RD10), and the safe save through a picked file (§4.1,
    RD14 to RD16).
@@ -1083,7 +1077,9 @@ colour a word and lose it on save without being told. C splits the forcing
 artifact the editor already is. B supersedes design-rules' "Writing Mode's
 Markdown drawn styled" of 2026-11-04.
 
-### RD12. Markdown now, the clipboard's RTF and HTML next, DOCX later
+### RD12. RULED 2026-11-11 as amended: no Markdown, no DOCX; the clipboard's RTF and HTML in the first build
+
+As asked:
 
 - A. Markdown import and export now (pulldown-cmark, in the core); RTF and
   HTML on the clipboard as the next slice; DOCX export later, DOCX import
@@ -1096,9 +1092,17 @@ needs it; the clipboard is where users meet other apps' rich text every day
 (Mail, Pages, Word, Notes all paste RTF), and it is cheaper than DOCX, whose
 reader is the hardest piece in this survey.
 
+RULED 2026-11-11, amended: the maintainer asked "why do we even have markdown
+import and export?" (Markdown was a leftover of Writing Mode's 2026-11-04
+design, where `.md` files were the documents) and, of DOCX, "i feel like
+that's out of scope for our rich text editor". So no Markdown and no DOCX;
+copy and paste with formatting, through RTF and HTML on the clipboard, is in
+the first build, since a rich document whose copy drops its formatting reads
+as broken. Word still takes kaya's formatting through a paste.
+
 ### RD13. The codec lives in the core, and all nine bindings reach it
 
-- A. The `.kdoc` and Markdown codecs are Rust in the core behind one C pair,
+- A. The `.kdoc` codec and the clipboard's RTF and HTML codec are Rust in the core behind one C pair,
   and each binding's `Document` gains a file pair spelled in its idiom
   (`Document::from_kdoc(bytes)` / `to_kdoc()` in Rust; the others on the
   review page before they ship), so nine languages write identical bytes.

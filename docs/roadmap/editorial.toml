@@ -166,7 +166,7 @@ status = 'needs ruling'
 size = 'XL'
 unblocks = "the text editor's Writing Mode; a notes app on a CRDT"
 plan = 'docs/rich-document-plan.md'
-text = "Asked by the maintainer on 2026-11-05: Writing Mode as a traditional rich document, with indentation, lists and a free text colour built into kaya's rich text, saved in its own format and extendable to the CRDT notes idea. Researched across Automerge, Peritext, json-joy, Yjs, Apple Notes, RTF, DOCX, the JSON editor formats and SQLite; thirteen rulings asked on {review:richdoc}. Depth on the Mac first, then the four other arms and eight bindings."
+text = "Asked by the maintainer on 2026-11-05: Writing Mode as a traditional rich document, with indentation, lists and a free text colour built into kaya's rich text, saved in its own format and extendable to the CRDT notes idea. Researched across Automerge, Peritext, json-joy, Yjs, Apple Notes, RTF, DOCX, the JSON editor formats and SQLite; sixteen rulings, all taken on 2026-11-11 (no Markdown or DOCX; copy and paste with formatting in the first build), on {review:richdoc}. Depth on the Mac first, then the four other arms and eight bindings."
 
 [[menu]]
 title = '<b>The video editor itself</b>'
