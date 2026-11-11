@@ -26049,15 +26049,25 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
     }
 }
 
+/// Why the last kayaWindowPixels answered nil, for the step's sentence.
+@MainActor var kayaWindowPixelsWhy = ""
+
 @MainActor func kayaWindowPixels() -> KayaWindowPixels? {
     #if os(macOS)
         // A WINDOW OF DOCUMENTS is pictured by its front tab's window, the one
         // the reads' frames are in.
         let front = kayaActiveStrip()?.first.map { $0.tabGroup?.selectedWindow ?? $0 }
         guard let window = front ?? NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.sheetParent == nil }),
-            let content = window.contentView,
-            let cg = kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image
-        else { return nil }
+            let content = window.contentView
+        else {
+            kayaWindowPixelsWhy = "no visible window with content"
+            return nil
+        }
+        let shot = kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size))
+        guard let cg = shot.image else {
+            kayaWindowPixelsWhy = shot.why
+            return nil
+        }
         let appearance = window.effectiveAppearance
         func rgba(_ c: NSColor) -> [Double] {
             var out: [Double] = [0, 0, 0, 1]
@@ -26075,10 +26085,16 @@ func kayaFaintHover(_ sample: [Double], _ resting: [Double]) -> String? {
         let points = content.bounds.width
     #else
         guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-            .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else { return nil }
+            .flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) else {
+            kayaWindowPixelsWhy = "no key window"
+            return nil
+        }
         guard let cg = UIGraphicsImageRenderer(bounds: window.bounds).image(actions: { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
-        }).cgImage else { return nil }
+        }).cgImage else {
+            kayaWindowPixelsWhy = "the key window drew no image"
+            return nil
+        }
         let traits = window.traitCollection
         func rgba(_ c: UIColor) -> [Double] {
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 1
@@ -26358,7 +26374,7 @@ struct KayaSkinFrameHolder: View {
         return (nil, "<no laid-out frame>")
     }
     if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
-    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels: \(kayaWindowPixelsWhy)>") }
     guard let fill = shot.at(CGPoint(x: frame.maxX - 4, y: frame.midY)) else {
         return (nil, "<the probe falls outside the window: \(frame)>")
     }
@@ -26432,7 +26448,7 @@ struct KayaFillShape: Shape {
         return (nil, "<no laid-out frame>")
     }
     if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
-    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels: \(kayaWindowPixelsWhy)>") }
     let step = 1 / shot.scale
     guard let behind = shot.at(CGPoint(x: frame.minX + step / 2, y: frame.minY + step / 2)),
         let fill = shot.at(CGPoint(x: frame.maxX - 4, y: frame.midY))
@@ -26487,7 +26503,7 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
         return (nil, "<no laid-out frame>")
     }
     if let why = kayaSkinUnseen(node, frame) { return (nil, why) }
-    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels>") }
+    guard let shot = kayaWindowPixels() else { return (nil, "<no window pixels: \(kayaWindowPixelsWhy)>") }
     let x = frame.maxX - 4
     guard let last = shot.at(CGPoint(x: x, y: frame.maxY - 1 / shot.scale)),
         let below = shot.at(CGPoint(x: x, y: frame.maxY + 1))
@@ -26505,7 +26521,7 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
         return "<no laid-out frame>"
     }
     if let why = kayaSkinUnseen(node, frame) { return why }
-    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels: \(kayaWindowPixelsWhy)>" }
     let x = frame.maxX - 4
     guard let top = shot.at(CGPoint(x: x, y: frame.minY + 4)),
         let bottom = shot.at(CGPoint(x: x, y: frame.maxY - 4)),
@@ -26555,7 +26571,7 @@ func kayaInkIsLight(_ rgb: UInt32) -> Bool {
     #else
         guard let frame = kayaSkinFrame(node), frame.width > 8, frame.height > 8 else { return "<no laid-out frame>" }
         guard let window = kayaHarnessWindow() else { return "<no window>" }
-        guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+        guard let shot = kayaWindowPixels() else { return "<no window pixels: \(kayaWindowPixelsWhy)>" }
         let page = kayaScene.groupedGrounds.contains(node.id) ? shot.groupedGround : shot.ground
         let insets = window.safeAreaInsets
         let x = frame.maxX - 4
@@ -26660,7 +26676,7 @@ func kayaSystemBarWords() -> (String, String) {
         return "<no laid-out frame: \(frames.count) recorded \(frames); \(kayaAnchorState(node.id))>"
     }
     if let why = kayaSkinUnseen(node, frame) { return why }
-    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels: \(kayaWindowPixelsWhy)>" }
     // What the image sits on is read 4 units left of it at each probe's own
     // height (a table row's stripe, a card's fill, the window, a gradient
     // ground that changes with the height, docs/traps.md), and reads back
@@ -26696,7 +26712,7 @@ func kayaSystemBarWords() -> (String, String) {
         return "<no laid-out frame: \(frames.count) recorded \(frames)>"
     }
     if let why = kayaSkinUnseen(node, frame) { return why }
-    guard let shot = kayaWindowPixels() else { return "<no window pixels>" }
+    guard let shot = kayaWindowPixels() else { return "<no window pixels: \(kayaWindowPixelsWhy)>" }
     var ink: [Double]? = nil
     var best = -1.0
     let step = 1 / shot.scale

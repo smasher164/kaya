@@ -176,7 +176,7 @@ def native_table_findings(swift):
 # (label, opener, what the block must hold) -- and never MODEL
 READS = [
     ("the window's pixels", "func kayaWindowPixels() -> KayaWindowPixels? {",
-     ["kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size)).image", "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)",
+     ["kayaWindowServerImage(window, content, CGRect(origin: .zero, size: content.bounds.size))", "window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)",
       "rgba(.windowBackgroundColor)", "rgba(.systemBackground)",
       # docs/traps.md, the iOS tint read that resolved its colours light.
       "c.resolvedColor(with: traits)", "rgba(.secondaryLabel)", "rgba(.secondaryLabelColor)"]),
@@ -803,8 +803,8 @@ def run(g):
          r"crate::winui::ancestors_cut\(&fe, &root, rtl, \[x, y, x \+ w, y \+ h\]\)\?", "[x, y, x + w, y + h]",
          "WinUI's visible part walks every ancestor"),
         ("SwiftUI's shape read of a clipped row", SWIFT,
-         r"if let why = kayaSkinUnseen\(node, frame\) \{ return why \}\n(\s+)guard let shot = kayaWindowPixels\(\) else \{ return \"<no window pixels>\" \}\n(\s+)// What the image sits on",
-         r"guard let shot = kayaWindowPixels() else { return \"<no window pixels>\" }\n\2// What the image sits on",
+         r"if let why = kayaSkinUnseen\(node, frame\) \{ return why \}\n(\s+)guard let shot = kayaWindowPixels\(\) else \{ return \"<no window pixels: \\\(kayaWindowPixelsWhy\)>\" \}\n(\s+)// What the image sits on",
+         r"guard let shot = kayaWindowPixels() else { return \"<no window pixels: \\(kayaWindowPixelsWhy)>\" }\n\2// What the image sits on",
          "SwiftUI's ground, shape and tint readers refuse"),
         ("SwiftUI's visible part blind to its anchor's clip views", SWIFT,
          r"shown = shown\.intersection\(kayaAnchorClips\(view, probed\)\)", "_ = view",

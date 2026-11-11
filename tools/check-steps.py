@@ -3875,8 +3875,28 @@ if not mac_family_serial(
 if not mac_family_serial([["nav-rust-swiftui"]], "clipboard", "-"):
     selftest_fail("a mac roster with no clipboard leg passed")
 
-out = mac_family_serial(mac_lane.blocks(), "clipboard",
-                        "tools/lib/lanes/mac.py")
+# EVERY SCENE THAT TOUCHES THE SYSTEM CLIPBOARD, read off its own steps rather
+# than named here: richdoc's copy and paste ran pooled on the mac lane and its
+# legs read one another's boards (the matrix of 2026-11-11).
+CLIPBOARD_VERBS = re.compile(
+    r'^(clipboard_seed|expect_clipboard)\b|^menu_activate "Edit>(Copy|Cut|Paste)"'
+    r'|^shortcut "primary\+[cvx]"', re.M)
+
+
+def clipboard_scenes(scene_dir):
+    return sorted(p.stem for p in pathlib.Path(scene_dir).glob("*.steps")
+                  if CLIPBOARD_VERBS.search(p.read_text(encoding="utf-8")))
+
+
+touching = clipboard_scenes(ROOT / "tools/scenes")
+if "clipboard" not in touching or "richdoc" not in touching:
+    selftest_fail(f"the clipboard verbs read {touching}, missing clipboard or richdoc")
+if mac_family_serial([["richdoc-rust-swiftui", "richtext-rust-swiftui"]], "richdoc", "-") == []:
+    selftest_fail("a pooled richdoc leg passed")
+out = []
+for scene in touching:
+    if any(leg.startswith(f"{scene}-") for block in mac_lane.blocks() for leg in block):
+        out += mac_family_serial(mac_lane.blocks(), scene, "tools/lib/lanes/mac.py")
 if out:
     print("check-steps: the mac lane's clipboard legs must run in "
           "blocks of their own (docs/clipboard-plan.md §0d — one "
@@ -3911,6 +3931,12 @@ if not win_clipboard_serial([["nav_rust"]], "-"):
     selftest_fail("a win roster with no clipboard leg passed")
 
 out = win_clipboard_serial(win_lane.ORDER, "tools/lib/lanes/win.py")
+for scene in touching:
+    for block in win_lane.ORDER:
+        for leg in block:
+            if leg.startswith(f"{scene}_") and list(block) != [leg]:
+                out.append(f'tools/lib/lanes/win.py: leg "{leg}" touches the clipboard and '
+                           f"shares a block with {len(block) - 1} other leg(s)")
 if out:
     print("check-steps: the win lane's clipboard legs must run in "
           "blocks of their own (docs/clipboard-plan.md §0d — one "

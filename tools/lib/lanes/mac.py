@@ -404,8 +404,6 @@ ORDER = [
     ("richlabel", ("rust", "python", "js", "go", "csharp", "java", "swift",
                    "ocaml", "haskell")),
     ("notes", ("rust",)),
-    ("richdoc", ("rust", "python", "js", "go", "csharp", "java", "swift",
-                 "ocaml", "haskell")),
     # THE RICH ROWS (docs/rich-text-plan.md §19): a rich textarea per stamped
     # row, its document a field. This lane carries every binding's template
     # sugar; the other four stay rust-only while richtext does.
@@ -486,6 +484,27 @@ ORDER = [
     ("clipboard", ("java",)),
     ("drain",),
     ("clipboard", ("js",)),
+    ("drain",),
+    # THE RICH DOCUMENT COPIES AND PASTES (docs/rich-document-plan.md §7), so
+    # each of its legs is alone between drains as clipboard's are
+    # (check-steps derives the set from the scenes' own verbs).
+    ("richdoc", ("rust",)),
+    ("drain",),
+    ("richdoc", ("python",)),
+    ("drain",),
+    ("richdoc", ("js",)),
+    ("drain",),
+    ("richdoc", ("go",)),
+    ("drain",),
+    ("richdoc", ("csharp",)),
+    ("drain",),
+    ("richdoc", ("java",)),
+    ("drain",),
+    ("richdoc", ("swift",)),
+    ("drain",),
+    ("richdoc", ("ocaml",)),
+    ("drain",),
+    ("richdoc", ("haskell",)),
     ("drain",),
     # EACH UNDO LEG ALONE BETWEEN DRAINS: the type verb delivers real
     # keystrokes.
